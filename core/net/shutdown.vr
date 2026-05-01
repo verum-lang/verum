@@ -3,62 +3,72 @@
 // =============================================================================
 // Layer: 5 (Network)
 // Dependencies: core.signal, core.async, core.net.tcp, core.net.unix,
-//               core.time, core.sync
+//  core.time, core.sync
 // Spec: internal/specs/net-framework.md §7.8
 // =============================================================================
 //
+
 // Graceful shutdown for HTTP servers, proxies, and any accept-loop-based
 // service. Three concerns handled:
 //
+
 // - **Connection tracking** (`ConnectionGuard`): RAII handle that
-//   increments an AtomicU64 on acquire and decrements on drop. The
-//   GracefulShutdown owner waits on the counter reaching zero.
+//  increments an AtomicU64 on acquire and decrements on drop. The
+//  GracefulShutdown owner waits on the counter reaching zero.
 //
+
 // - **Drain semantics** (`GracefulShutdown`): combines a cancellation
-//   token (for accept-loop stop + in-flight cancellation) with a wait-
-//   for-zero on the active-connection counter. `shutdown(timeout)`
-//   kicks the signal AND waits — either returns Ok once drained or
-//   Err(DrainTimeout) when the deadline expires.
+//  token (for accept-loop stop + in-flight cancellation) with a wait-
+//  for-zero on the active-connection counter. `shutdown(timeout)`
+//  kicks the signal AND waits — either returns Ok once drained or
+//  Err(DrainTimeout) when the deadline expires.
 //
+
 // - **FD handoff** (`listener_from_raw_fd`): adopt an fd passed down
-//   from a supervisor (systemd socket-activation, or a zero-downtime
-//   restart where the old process hands its listening socket to the
-//   new process over AF_UNIX SCM_RIGHTS).
+//  from a supervisor (systemd socket-activation, or a zero-downtime
+//  restart where the old process hands its listening socket to the
+//  new process over AF_UNIX SCM_RIGHTS).
 //
+
 // # Minimal example — HTTP server
 //
+
 // ```verum
 // mount core.net.shutdown.*;
 // mount core.signal.*;
 // mount core.time.duration.{Duration};
 //
+
 // async fn serve(listener: TcpListener) {
-//     let shutdown = GracefulShutdown.new();
-//     let token = shutdown.token();
+//  let shutdown = GracefulShutdown.new();
+//  let token = shutdown.token();
 //
-//     // Listen for signals in the background
-//     spawn_detached(async move {
-//         shutdown_signals().await.next().await;
-//         shutdown.initiate();
-//     });
+
+//  // Listen for signals in the background
+//  spawn_detached(async move {
+//  shutdown_signals().await.next().await;
+//  shutdown.initiate();
+//  });
 //
-//     // Accept loop — each task holds a ConnectionGuard
-//     loop {
-//         match listener.accept_cancellable(&token).await {
-//             Err(_) => break,           // cancelled
-//             Ok(Err(e)) => continue,    // transient accept error
-//             Ok(Ok((stream, _))) => {
-//                 let guard = shutdown.track();
-//                 spawn_detached(async move {
-//                     serve_one(stream, &token).await;
-//                     drop(guard);
-//                 });
-//             }
-//         }
-//     }
+
+//  // Accept loop — each task holds a ConnectionGuard
+//  loop {
+//  match listener.accept_cancellable(&token).await {
+//  Err(_) => break, // cancelled
+//  Ok(Err(e)) => continue, // transient accept error
+//  Ok(Ok((stream, _))) => {
+//  let guard = shutdown.track();
+//  spawn_detached(async move {
+//  serve_one(stream, &token).await;
+//  drop(guard);
+//  });
+//  }
+//  }
+//  }
 //
-//     // Drain — stop accepting new work, wait for in-flight
-//     let _ = shutdown.wait_drained(Duration.from_secs(30)).await;
+
+//  // Drain — stop accepting new work, wait for in-flight
+//  let _ = shutdown.wait_drained(Duration.from_secs(30)).await;
 // }
 // ```
 // =============================================================================
@@ -190,6 +200,7 @@ implement GracefulShutdown {
     /// Block-await until in-flight reaches zero, or `timeout` elapses.
     /// Returns Err(DrainTimeout{remaining}) if the deadline is hit.
     ///
+
     /// Implementation: poll the counter at 10 ms intervals plus an
     /// immediate fast-path check. Good enough for the normal drain
     /// timeout (many seconds); a zero-allocation alternative would
@@ -223,10 +234,12 @@ implement GracefulShutdown {
 // FD handoff — adopt a listener from a caller-provided fd
 // =============================================================================
 //
+
 // Used by:
 // - systemd socket activation (LISTEN_FDS environment protocol)
 // - zero-downtime restart (parent sends listener fd over AF_UNIX SCM_RIGHTS)
 //
+
 // The caller is responsible for sourcing the fd; this helper only wraps
 // it in a TcpListener / UnixListener. Ownership transfers — the fd is
 // closed when the listener is dropped.
@@ -243,6 +256,7 @@ public fn unix_listener_from_raw_fd(fd: FileDesc) -> core.net.unix.UnixListener 
 // LISTEN_FDS — systemd socket-activation protocol
 // =============================================================================
 //
+
 // systemd sets LISTEN_FDS=<n> and LISTEN_PID=<my-pid> before exec.
 // Passed fds start at fd 3 and are in the order configured in the .socket
 // unit.

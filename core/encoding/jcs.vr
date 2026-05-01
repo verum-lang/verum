@@ -5,6 +5,7 @@
 // Dependencies: core, core.collections, core.encoding.json
 // =============================================================================
 //
+
 // RFC 8785 — the deterministic JSON serialisation used by JSON Web
 // Signature-on-JSON (JWS/JSON Signature), W3C Verifiable
 // Credentials (VCs), DIDs, Matrix room events, and every
@@ -12,44 +13,55 @@
 // verifier to produce byte-identical input regardless of map-key
 // insertion order.
 //
+
 // # Rules (RFC 8785)
 //
-//   * Object keys sorted by UTF-16 code-unit order (§3.2.3).
-//     For ASCII keys this is equivalent to byte-lexicographic.
-//   * No whitespace or indentation between tokens (§3.2.4).
-//   * Numbers serialised per the IEEE 754 JSON-compatible
-//     RFC 8259 / ES2017 shortest-form (§3.2.2.2).
-//   * Strings escape only control chars + `"` + `\` (§3.2.1).
-//   * `null`, `true`, `false` emitted verbatim.
+
+//  * Object keys sorted by UTF-16 code-unit order (§3.2.3).
+//  For ASCII keys this is equivalent to byte-lexicographic.
+//  * No whitespace or indentation between tokens (§3.2.4).
+//  * Numbers serialised per the IEEE 754 JSON-compatible
+//  RFC 8259 / ES2017 shortest-form (§3.2.2.2).
+//  * Strings escape only control chars + `"` + `\` (§3.2.1).
+//  * `null`, `true`, `false` emitted verbatim.
 //
+
 // # API
 //
+
 // ```
 // // Canonicalise an already-parsed JsonValue.
 // let canonical: Text = jcs.canonicalize_value(&value);
 //
+
 // // Parse + canonicalise in one pass.
 // let canonical: Text = jcs.canonicalize_str(&json_text)?;
 //
+
 // // Sign via the canonical form.
 // let digest = sha256(canonical.as_bytes());
 // ```
 //
+
 // # Difference from JSON.stringify
 //
+
 // `encoding.json.stringify` emits compact JSON but does NOT
 // sort map keys (insertion order preserved). `jcs.canonicalize_*`
 // enforces the sorted-keys contract required by signing.
 //
+
 // # Limitations
 //
-//   * ECMAScript number serialisation uses ECMA-404 §6.3.1.5
-//     "ToString(Number)" — we implement the RFC 8259 subset
-//     (finite doubles only; NaN / Inf become null-equivalent
-//     errors on the caller because JSON doesn't represent them).
-//   * RFC 8785 §3.2.2.1 requires integer-valued floats like `1.0`
-//     to serialise as `1` — we honour this.
+
+//  * ECMAScript number serialisation uses ECMA-404 §6.3.1.5
+//  "ToString(Number)" — we implement the RFC 8259 subset
+//  (finite doubles only; NaN / Inf become null-equivalent
+//  errors on the caller because JSON doesn't represent them).
+//  * RFC 8785 §3.2.2.1 requires integer-valued floats like `1.0`
+//  to serialise as `1` — we honour this.
 //
+
 // =============================================================================
 
 module core.encoding.jcs;
@@ -281,11 +293,13 @@ fn nibble_hex(n: Byte) -> Byte {
 // UTF-16-ordered key sort
 // =============================================================================
 //
+
 // RFC 8785 §3.2.3 specifies UTF-16 code-unit comparison. For
 // ASCII-only keys this reduces to byte-lex, but astral-plane
 // characters (U+10000+) need surrogate-pair expansion. We decode
 // each key to an on-demand UTF-16 code-unit sequence.
 //
+
 // =============================================================================
 
 fn sort_keys_utf16(keys: &mut List<Text>) {

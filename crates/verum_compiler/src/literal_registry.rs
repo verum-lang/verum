@@ -1,5 +1,6 @@
 //! Registry for custom tagged literal handlers
 //!
+
 //! Tagged and Compile-Time Literal Protocols:
 //! Tagged text literals (§1.4.4) use `tag#"content"` syntax for compile-time
 //! parsing and validation. Tags are registered via @tagged_literal attribute on
@@ -9,6 +10,7 @@
 //! @interpolation_handler, which receive template strings and expression lists,
 //! returning injection-safe parameterized output (e.g., `sql"SELECT * WHERE id = {id}"`).
 //!
+
 //! This module implements the Revolutionary Literal System v3.0, providing:
 //! - Tagged literal registration via @tagged_literal attribute
 //! - Compile-time parsing and validation
@@ -44,14 +46,17 @@ fn convert_span(ast_span: Span, source_file: Option<&SourceFile>) -> verum_diagn
 
 /// Registry for custom tagged literal handlers
 ///
+
 /// # Thread Safety
 /// This registry is thread-safe and can be shared across multiple threads
 /// during compilation.
 ///
+
 /// # Example
 /// ```ignore
 /// use verum_compiler::literal_registry::LiteralRegistry;
 ///
+
 /// let mut registry = LiteralRegistry::new();
 /// registry.register_builtin_handlers();
 /// ```
@@ -64,16 +69,18 @@ pub struct LiteralRegistry {
 
 /// Handler for a specific tagged literal type
 ///
+
 /// # Example
 /// ```ignore
 /// use verum_compiler::literal_registry::TaggedLiteralHandler;
 /// use verum_common::Text;
 ///
+
 /// let handler = TaggedLiteralHandler {
-///     tag: Text::from("rx"),
-///     handler_fn: Text::from("core.regex.parse_regex"),
-///     compile_time: true,
-///     runtime: false,
+///  tag: Text::from("rx"),
+///  handler_fn: Text::from("core.regex.parse_regex"),
+///  compile_time: true,
+///  runtime: false,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -140,11 +147,11 @@ pub enum ParsedLiteral {
     /// auto-escaped via `core.shell.escape.ShellEscape::shell_quote`.
     ShellCmd {
         /// Sequence of (kind, payload) pairs where:
-        ///   * kind = 0 → literal text (payload is the bytes)
-        ///   * kind = 1 → interpolation expression source (payload to be
-        ///                re-parsed by lowering)
-        ///   * kind = 2 → unsafe interpolation (`$unsafe{...}`) — payload
-        ///                bypasses ShellEscape, requires `unsafe` block
+        ///  * kind = 0 → literal text (payload is the bytes)
+        ///  * kind = 1 → interpolation expression source (payload to be
+        ///  re-parsed by lowering)
+        ///  * kind = 2 → unsafe interpolation (`$unsafe{...}`) — payload
+        ///  bypasses ShellEscape, requires `unsafe` block
         parts: List<(u8, Text)>,
         /// Original source for diagnostics.
         source: Text,
@@ -162,6 +169,7 @@ impl LiteralRegistry {
 
     /// Register a tagged literal handler via @tagged_literal attribute
     ///
+
     /// # Errors
     /// Returns an error if a handler with the same tag is already registered
     pub fn register_handler(&self, handler: TaggedLiteralHandler) -> std::result::Result<(), Text> {
@@ -205,16 +213,19 @@ impl LiteralRegistry {
 
     /// Parse tagged literal at compile-time
     ///
+
     /// Tagged text literals use `tag#"content"` syntax. The registry looks up the
     /// handler for the given tag, invokes it at compile-time, and returns a typed
     /// ParsedLiteral value. If no handler is registered, emits a diagnostic error.
     ///
+
     /// # Arguments
     /// - `tag`: The literal tag (e.g., "rx", "d", "sql")
     /// - `content`: The literal content
     /// - `span`: Source location for error reporting
     /// - `source_file`: Optional source file for accurate span conversion
     ///
+
     /// # Returns
     /// Parsed literal on success, or diagnostic on failure
     pub fn parse_literal(
@@ -331,14 +342,16 @@ impl LiteralRegistry {
 
     /// Parse a shell tagged literal `sh#"..."` into segments.
     ///
+
     /// The literal body is split into:
-    ///   * literal text segments
-    ///   * `${expr}` interpolations — each becomes a "kind=1" part holding
-    ///     the raw expression text. Lowering re-parses the expression and
-    ///     wraps it with `ShellEscape::shell_quote(...)`.
-    ///   * `$unsafe{expr}` interpolations — kind=2 parts, bypass auto-escape
-    ///     (caller must wrap call site in `unsafe { ... }`).
+    ///  * literal text segments
+    ///  * `${expr}` interpolations — each becomes a "kind=1" part holding
+    ///  the raw expression text. Lowering re-parses the expression and
+    ///  wraps it with `ShellEscape::shell_quote(...)`.
+    ///  * `$unsafe{expr}` interpolations — kind=2 parts, bypass auto-escape
+    ///  (caller must wrap call site in `unsafe { ... }`).
     ///
+
     /// At compile time we also run a structural sanity check (balanced
     /// quotes after stripping interpolations); the parser already flagged
     /// gross violations via `validate_format_tag`, but we re-run here so
@@ -392,10 +405,12 @@ impl LiteralRegistry {
 
     /// Register all built-in handlers
     ///
+
     /// Compile-time literal protocols: each tag maps to a meta function that parses
     /// the literal content and returns a typed value. User-defined tags are registered
     /// via @tagged_literal attribute; these built-ins are pre-registered at startup.
     ///
+
     /// Registers handlers for 11 built-in tagged literal types:
     /// - d#, date#, datetime# - DateTime
     /// - duration#, dur# - Duration
@@ -708,11 +723,13 @@ impl LiteralRegistry {
 
 /// Read characters from `bytes` until the matching closing `}` is found.
 ///
+
 /// Tracks brace nesting AND respects string literals (single, double, triple)
 /// inside the expression, so payloads like `${"}"}`, `${' }'}` and
 /// `${"""raw"""}` round-trip correctly. Backslash inside a "..." string
 /// escapes the next character; '...' strings have no escapes.
 ///
+
 /// Returns the consumed expression text (without the trailing `}`) and
 /// the number of bytes advanced.
 fn read_balanced_brace(bytes: &[u8]) -> (String, usize) {

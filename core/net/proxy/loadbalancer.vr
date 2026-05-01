@@ -2,24 +2,29 @@
 // core/net/proxy/loadbalancer.vr — Request distribution strategies
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §9.3
+// Spec: internal/specs/net-framework.md §9.3
 // =============================================================================
 //
+
 // Strategies for picking one upstream out of N. Phase-2 ships the three
 // most-useful policies in production:
 //
-//   * RoundRobin          — trivial, fair under uniform load.
-//   * Random              — surprisingly effective under skewed load;
-//                           no coordination cost.
-//   * WeightedLeastConn   — per-upstream weight × current in-flight.
-//                           Mimics Envoy/HAProxy default.
+
+//  * RoundRobin — trivial, fair under uniform load.
+//  * Random — surprisingly effective under skewed load;
+//  no coordination cost.
+//  * WeightedLeastConn — per-upstream weight × current in-flight.
+//  Mimics Envoy/HAProxy default.
 //
+
 // Maglev / power-of-two-choices variants arrive in phase 3 together
 // with the consistent-hash machinery required for cache locality.
 //
+
 // Every policy returns `None` if zero upstreams are healthy; callers
 // (typically `proxy_handler`) turn that into `WeftError.Overloaded`.
 //
+
 // =============================================================================
 
 module core.net.proxy.loadbalancer;

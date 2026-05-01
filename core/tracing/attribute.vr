@@ -67,6 +67,7 @@ public type AttributeKind is
 // AttributeSet — key/value list with insertion-order preservation
 // =============================================================================
 //
+
 // Ordered linear scan is fine up to ~32 entries (the OpenTelemetry default
 // limit per span). Callers that need large counts can use a separate Map.
 

@@ -14,8 +14,10 @@
 )]
 // Tests for affine type checking
 //
+
 // Type system extensions: advanced features beyond core HM inference
 //
+
 // These tests verify that affine types are properly tracked and
 // usage violations are detected at compile time.
 #![allow(unexpected_cfgs)]
@@ -44,13 +46,14 @@ fn test_affine_type_single_use_ok() {
     // type affine Handle is { fd: Int }
     // fn use_handle(h: Handle) -> Int { h.fd }
     // let handle = Handle { fd: 42 };
-    // let result = use_handle(handle);  // OK - used once
+    // let result = use_handle(handle); // OK - used once
 }
 
 #[test]
 fn test_affine_type_zero_uses_ok() {
     // Affine types allow zero uses (value dropped with cleanup)
     //
+
     // Example (pseudo-code):
     // type affine Handle is { fd: Int }
     // let handle = Handle { fd: 42 };
@@ -300,16 +303,19 @@ mod integration {
     fn test_affine_double_use_error() {
         // This would be implemented once the full type checker supports affine tracking
         //
+
         // let code = r#"
-        //     type affine Handle is { fd: Int }
+        //  type affine Handle is { fd: Int }
         //
-        //     fn use_twice(h: Handle) -> Int {
-        //         let x = h.fd;  // First use
-        //         let y = h.fd;  // ERROR: Second use
-        //         x + y
-        //     }
+
+        //  fn use_twice(h: Handle) -> Int {
+        //  let x = h.fd; // First use
+        //  let y = h.fd; // ERROR: Second use
+        //  x + y
+        //  }
         // "#;
         //
+
         // let err = type_check(code).unwrap_err();
         // assert!(matches!(err, TypeError::AffineViolation { .. }));
     }
@@ -317,15 +323,18 @@ mod integration {
     #[test]
     fn test_affine_moved_value() {
         // let code = r#"
-        //     type affine Handle is { fd: Int }
+        //  type affine Handle is { fd: Int }
         //
-        //     fn consume(h: Handle) -> Int { h.fd }
+
+        //  fn consume(h: Handle) -> Int { h.fd }
         //
-        //     let handle = Handle { fd: 42 };
-        //     let x = consume(handle);  // handle moved
-        //     let y = consume(handle);  // ERROR: handle already moved
+
+        //  let handle = Handle { fd: 42 };
+        //  let x = consume(handle); // handle moved
+        //  let y = consume(handle); // ERROR: handle already moved
         // "#;
         //
+
         // let err = type_check(code).unwrap_err();
         // assert!(matches!(err, TypeError::MovedValueUsed { .. }));
     }
@@ -333,14 +342,16 @@ mod integration {
     #[test]
     fn test_linear_not_used() {
         // let code = r#"
-        //     type linear MustUse is { value: Int }
+        //  type linear MustUse is { value: Int }
         //
-        //     fn test() {
-        //         let x = MustUse { value: 42 };
-        //         // ERROR: linear value not used
-        //     }
+
+        //  fn test() {
+        //  let x = MustUse { value: 42 };
+        //  // ERROR: linear value not used
+        //  }
         // "#;
         //
+
         // let err = type_check(code).unwrap_err();
         // assert!(matches!(err, TypeError::LinearViolation { .. }));
     }

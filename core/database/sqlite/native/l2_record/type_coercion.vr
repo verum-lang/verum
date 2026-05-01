@@ -6,25 +6,30 @@ module core.database.sqlite.native.l2_record.type_coercion;
 // Layer: 2
 // Spec: sqlite-native.md §9.3, sqlite.org/datatype3.html §3.2
 //
+
 // When a non-STRICT table receives a value whose storage class doesn't
 // match the column's affinity, SQLite applies a specific coercion
 // before storage. The rules are tier-ordered by column affinity:
 //
-//   * Integer → try int; fallback real if non-int; fallback text/blob
-//   * Real    → if value is int, store as int; else real; else text/blob
-//   * Text    → value is stringified (NULL unchanged)
-//   * Blob    → no coercion; value stored as-is
-//   * Numeric → promote text "looks_int" → int, "looks_real" → real,
-//               else leave as text
+
+//  * Integer → try int; fallback real if non-int; fallback text/blob
+//  * Real → if value is int, store as int; else real; else text/blob
+//  * Text → value is stringified (NULL unchanged)
+//  * Blob → no coercion; value stored as-is
+//  * Numeric → promote text "looks_int" → int, "looks_real" → real,
+//  else leave as text
 //
+
 // This module provides:
 //
-//   1. Classifier helpers: `looks_int` / `looks_real` for text lexical
-//      tests (matching SQLite's lexer rules).
-//   2. `ValueClass`: one of {Null, Int64, Real, Text, Blob} — a compact
-//      runtime representation of the storage class.
-//   3. `coerce(Value, Affinity) → Value` pure function.
+
+//  1. Classifier helpers: `looks_int` / `looks_real` for text lexical
+//  tests (matching SQLite's lexer rules).
+//  2. `ValueClass`: one of {Null, Int64, Real, Text, Blob} — a compact
+//  runtime representation of the storage class.
+//  3. `coerce(Value, Affinity) → Value` pure function.
 //
+
 // The `Value` type is kept minimal here to avoid circular deps with
 // the VDBE register type. Once L4 lands we'll adapt the VDBE register
 // onto this.
@@ -160,9 +165,11 @@ public fn looks_real(s: &Text) -> Bool {
 /// Apply SQLite's affinity-driven coercion to `v` for a column of
 /// `col_affinity`. Pure — returns a new CoercionSqliteApiValue.
 ///
+
 /// NULL is always passed through unchanged (SQLite's "NULL is
 /// everywhere valid" invariant — STRICT mode rejects this separately).
 ///
+
 /// Integer / Real → pure numeric conversion happens at parse time
 /// when the source is TEXT. When the source is already numeric, the
 /// cross-class promotion rules apply (Real→Int iff the float is

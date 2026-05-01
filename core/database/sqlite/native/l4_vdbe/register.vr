@@ -6,6 +6,7 @@ module core.database.sqlite.native.l4_vdbe.register;
 // Layer: 4
 // Spec: sqlite-native.md §11.1
 //
+
 // A VDBE register holds one SQLite value. The tag is observable at
 // runtime via `register_kind` (used by the `Column` opcode for dynamic
 // `sqlite3_column_type` queries). The value tags are identical to
@@ -50,11 +51,12 @@ public fn register_kind(r: &Register) -> RegisterKind {
 /// "Truthy" test — mirrors SQLite's `sqlite3VdbeIntValue`-style check
 /// used by the `If`/`IfNot` opcodes. Matches:
 ///
-///   * RNull       → false
-///   * RInt(0) / RReal(0.0) → false, otherwise true
-///   * RText("")   → false, otherwise true
-///   * RBlob(b)    → b.len() > 0
-///   * RRowId(0)   → false, else true (rowids are always valid positive)
+
+///  * RNull → false
+///  * RInt(0) / RReal(0.0) → false, otherwise true
+///  * RText("") → false, otherwise true
+///  * RBlob(b) → b.len() > 0
+///  * RRowId(0) → false, else true (rowids are always valid positive)
 public fn register_is_truthy(r: &Register) -> Bool {
     match r {
         RNull     => false,

@@ -1,14 +1,17 @@
 //! End-to-end integration tests for `verum doc-render`.
 //!
+
 //! Spawns the actual `verum` binary against tempdir-rooted fixtures
 //! and validates the chain:
 //!
-//!   `verum doc-render {render,graph,check-refs}` (clap) →
-//!     `commands::doc_render::run_*` →
-//!       walks .vr files →
-//!       `verum_verification::doc_render::DefaultDocRenderer` →
-//!         Markdown / LaTeX / HTML / DOT / JSON
+
+//!  `verum doc-render {render,graph,check-refs}` (clap) →
+//!  `commands::doc_render::run_*` →
+//!  walks .vr files →
+//!  `verum_verification::doc_render::DefaultDocRenderer` →
+//!  Markdown / LaTeX / HTML / DOT / JSON
 //!
+
 //! Together with the 22 trait-level tests in
 //! `verum_verification::doc_render::tests` and the 8 handler tests in
 //! `commands::doc_render::tests`, this proves the auto-paper pipeline

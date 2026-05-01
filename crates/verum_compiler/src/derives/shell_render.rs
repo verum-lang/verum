@@ -1,25 +1,29 @@
 //! ShellRender derive macro.
 //!
+
 //! Generates `implement <Type> { fn render(&self) -> Text { ... } }` for
 //! record types whose fields carry `@flag("...")`, `@positional` or no
 //! attribute (default: `--<kebab-name> <value>`).
 //!
+
 //! Generated body shape:
 //!
-//!     fn render(&self) -> Text {
-//!         let mut out = "".into();
-//!         out.push_str(<flag-prefix>);
-//!         out.push_str(Escaper.posix(&self.<field>).as_str());
-//!         ...
-//!         out
-//!     }
+
+//!  fn render(&self) -> Text {
+//!  let mut out = "".into();
+//!  out.push_str(<flag-prefix>);
+//!  out.push_str(Escaper.posix(&self.<field>).as_str());
+//!  ...
+//!  out
+//!  }
 //!
+
 //! Field-type awareness (List<T> as repeat-flag, Maybe<T> as if-let, Bool
 //! flag-only-when-true) requires control-flow shapes (For / IfLet / If
 //! with IfCondition) that this derive doesn't yet emit; those refinements
-//! are picked up at the lowering phase that follows.  The current body is
+//! are picked up at the lowering phase that follows. The current body is
 //! correct for fields whose value implements `ShellEscape` and whose
-//! semantics map to "flag value" emission.  The hand-written
+//! semantics map to "flag value" emission. The hand-written
 //! `core/shell/dsl/{git,docker,kubectl}.vr` impls cover the richer shapes.
 
 use super::common::{DeriveContext, FieldInfo};

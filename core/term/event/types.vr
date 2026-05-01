@@ -5,9 +5,11 @@
 // Dependencies: keys.vr
 // =============================================================================
 //
+
 // Complete event type system for terminal input. All terminal input is
 // parsed into one of these structured event types by the InputParser.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.1
 // =============================================================================
 

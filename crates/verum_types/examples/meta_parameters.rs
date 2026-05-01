@@ -1,9 +1,11 @@
 //! Example usage of Meta Parameters in Verum Type System
 //!
+
 //! Meta system: unified compile-time computation via "meta fn" and meta parameters.
 //! All compile-time evaluation (const eval, tagged literals, derives) goes through this single system.
 //! Verum base types: Bool, Int, Float, Text, Unit, plus compound types (Array, Tuple, Record, Function) and Tensor<T, Shape> with compile-time shape parameters
 //!
+
 //! This example demonstrates how meta parameters work in Verum's type system.
 //! Meta parameters replace const generics with a unified meta-system.
 

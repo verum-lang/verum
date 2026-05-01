@@ -14,8 +14,10 @@
 )]
 // Comprehensive Tests for 5 Refinement Binding Rules
 //
+
 // Five refinement binding rules: (1) Inline T{pred} with implicit "it", (2) Lambda-style "where |x| pred", (3) Sigma-type "x: T where P(x)", (4) Named predicate "where pred_name", (5) Bare "where pred" (deprecated) — Five Binding Rules
 //
+
 // This test suite comprehensively tests all 5 binding rules for refinement types:
 // 1. **Inline Refinement** (`Int{> 0}`) - implicit 'it' binding
 // 2. **Lambda-style** (`Int where |x| x > 0`) - explicit variable binding
@@ -23,6 +25,7 @@
 // 4. **Named Predicate** (`Int where is_positive`) - predicate reference
 // 5. **Bare where** (`Int where it > 0`) - deprecated but supported
 //
+
 // For each rule, we test:
 // - Basic functionality
 // - Field access patterns

@@ -1,62 +1,74 @@
 //! Factorisation systems on (∞,1)-categories — V0 algorithmic
 //! kernel rule (HTT 5.2.8).
 //!
+
 //! ## What this delivers
 //!
+
 //! A **factorisation system** on an ∞-category `C` is an orthogonal
 //! pair `(L, R)` of classes of morphisms such that:
 //!
-//!   1. **Orthogonality** (HTT 5.2.8.5): every `l ∈ L` is *left
-//!      orthogonal* to every `r ∈ R`, i.e. for every commuting square
-//!      `l ⊥ r` there is a *unique* (up to iso) lift.
-//!   2. **Factorisation** (HTT 5.2.8.4): every morphism `f : x → y`
-//!      factors as `f = r ∘ l` with `l ∈ L` and `r ∈ R`, unique up
-//!      to canonical iso.
-//!   3. **Closure properties** (HTT 5.2.8.6): both `L` and `R` are
-//!      closed under composition + retracts; `L` under cobase change;
-//!      `R` under base change.
+
+//!  1. **Orthogonality** (HTT 5.2.8.5): every `l ∈ L` is *left
+//!  orthogonal* to every `r ∈ R`, i.e. for every commuting square
+//!  `l ⊥ r` there is a *unique* (up to iso) lift.
+//!  2. **Factorisation** (HTT 5.2.8.4): every morphism `f : x → y`
+//!  factors as `f = r ∘ l` with `l ∈ L` and `r ∈ R`, unique up
+//!  to canonical iso.
+//!  3. **Closure properties** (HTT 5.2.8.6): both `L` and `R` are
+//!  closed under composition + retracts; `L` under cobase change;
+//!  `R` under base change.
 //!
+
 //! Common examples:
 //!
-//!   * `(epi, mono)` — surjection / injection (HTT 5.2.8.4).
-//!   * `(local equivalence, locally constant)` — the localisation
-//!     factorisation (HTT 5.2.7.5).
-//!   * `(n-connected, n-truncated)` — the n-truncation factorisation
-//!     (HTT 5.2.8.16).
+
+//!  * `(epi, mono)` — surjection / injection (HTT 5.2.8.4).
+//!  * `(local equivalence, locally constant)` — the localisation
+//!  factorisation (HTT 5.2.7.5).
+//!  * `(n-connected, n-truncated)` — the n-truncation factorisation
+//!  (HTT 5.2.8.16).
 //!
+
 //! Pre-this-module factorisation systems are admitted via the
 //! host-stdlib axioms `msfs_epi_mono_factorisation` and
 //! `msfs_n_truncation_factorisation`.
 //!
+
 //! ## V0 algorithmic surface
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   1. [`FactorisationSystem`] — the `(L, R)` data with closure
-//!      witnesses (HTT 5.2.8.6).
-//!   2. [`Factorisation`] — concrete `f = r ∘ l` decomposition.
-//!   3. [`is_orthogonal`] — decidable predicate on `(L, R)`.
-//!   4. [`factorise`] — algorithmic builder that produces the
-//!      `(l, r)` pair given a morphism `f`.
-//!   5. [`build_epi_mono_factorisation`] — HTT 5.2.8.4 specialised
-//!      constructor.
-//!   6. [`build_n_truncation_factorisation`] — HTT 5.2.8.16 with
-//!      bridge to [`crate::truncation`].
+
+//!  1. [`FactorisationSystem`] — the `(L, R)` data with closure
+//!  witnesses (HTT 5.2.8.6).
+//!  2. [`Factorisation`] — concrete `f = r ∘ l` decomposition.
+//!  3. [`is_orthogonal`] — decidable predicate on `(L, R)`.
+//!  4. [`factorise`] — algorithmic builder that produces the
+//!  `(l, r)` pair given a morphism `f`.
+//!  5. [`build_epi_mono_factorisation`] — HTT 5.2.8.4 specialised
+//!  constructor.
+//!  6. [`build_n_truncation_factorisation`] — HTT 5.2.8.16 with
+//!  bridge to [`crate::truncation`].
 //!
-//! V1 promotion: explicit lifting cells with full pentagonal
-//! coherence; the V0 surface ships the structural skeleton + flag
+
+//! Future work: explicit lifting cells with full pentagonal
+//! coherence; the current surface ships the structural skeleton + flag
 //! witnesses.
 //!
+
 //! ## What this UNBLOCKS in MSFS
 //!
-//!   - **§6 β-part Step 5** — currently admits via
-//!     `msfs_epi_mono_factorisation` framework axiom.  Promotion:
-//!     invoke [`build_epi_mono_factorisation`] directly.
-//!   - **§9 Theorem 9.3 Step 4** — n-truncation factorisation of
-//!     the canonical 2-classifier; admits via `msfs_n_truncation_factorisation`.
-//!     Promotion: invoke [`build_n_truncation_factorisation`].
-//!   - **§7 OC/AC duality** — the Galois duality is a localisation
-//!     factorisation; promotion via [`build_localisation_factorisation`].
+
+//!  - **§6 β-part Step 5** — currently admits via
+//!  `msfs_epi_mono_factorisation` framework axiom. Promotion:
+//!  invoke [`build_epi_mono_factorisation`] directly.
+//!  - **§9 Theorem 9.3 Step 4** — n-truncation factorisation of
+//!  the canonical 2-classifier; admits via `msfs_n_truncation_factorisation`.
+//!  Promotion: invoke [`build_n_truncation_factorisation`].
+//!  - **§7 OC/AC duality** — the Galois duality is a localisation
+//!  factorisation; promotion via [`build_localisation_factorisation`].
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -125,7 +137,7 @@ pub struct Factorisation {
 // =============================================================================
 
 /// Decide whether the data `(L, R)` constitutes an orthogonal pair
-/// per HTT 5.2.8.5.  V0 surface: returns the witness flag stored on
+/// per HTT 5.2.8.5. current surface: returns the witness flag stored on
 /// the factorisation system.
 pub fn is_orthogonal(fs: &FactorisationSystem) -> bool {
     fs.is_orthogonal
@@ -136,7 +148,7 @@ pub fn is_orthogonal(fs: &FactorisationSystem) -> bool {
 // =============================================================================
 
 /// Build the factorisation of a morphism `f : x → y` through a
-/// factorisation system.  V0 surface: produces the `(l, r)` pair
+/// factorisation system. current surface: produces the `(l, r)` pair
 /// with synthesised intermediate-object name.
 pub fn factorise(
     fs: &FactorisationSystem,
@@ -233,7 +245,7 @@ pub fn factorisation_uniqueness(f: &Factorisation) -> bool {
 }
 
 /// HTT 5.2.8.6 (closure properties): both classes `L` and `R` are
-/// closed under composition.  V0 surface: returns the witness flag.
+/// closed under composition. current surface: returns the witness flag.
 pub fn closure_under_composition(fs: &FactorisationSystem) -> bool {
     fs.closure_witnesses_hold
 }

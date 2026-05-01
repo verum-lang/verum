@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The compiled-in version is <major>.<minor>.<patch>, encoded in
 // sqlite3.h as SQLITE_VERSION_NUMBER = 1_000_000 * M + 1_000 * m + p.
 // =============================================================================
@@ -40,10 +41,10 @@ public fn version_text(v: &LibVersion) -> Text {
 fn push_int(dst: &mut Text, n: Int) {
     if n == 0 { dst.push_byte(0x30 as u8); return; }
     if n < 0 { dst.push_byte(0x2D as u8); }
-    // UInt64 magnitude — Int.MIN-safe.  The previous version
+    // UInt64 magnitude — Int.MIN-safe. The previous version
     // used `n = 0 - n` which overflows for Int.MIN, then did
     // iterative-position division on the still-negative value
-    // producing garbage.  Rewritten to the canonical
+    // producing garbage. Rewritten to the canonical
     // build-digits-then-emit pattern; share the structure with
     // every other Int formatter in core/.
     let mut mag: UInt64 = if n < 0 {

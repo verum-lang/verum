@@ -1,17 +1,21 @@
 //! Module-level language-profile boundary enforcement.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 7). Validates that
 //! imports respect language-profile boundaries:
 //!
-//!   * **Application** profile can only import from Application modules.
-//!   * **Systems** profile can import from Systems and Application modules.
-//!   * **Research** profile can import from any module.
+
+//!  * **Application** profile can only import from Application modules.
+//!  * **Systems** profile can import from Systems and Application modules.
+//!  * **Research** profile can import from any module.
 //!
+
 //! Profile is read from a module's `@profile(...)` attribute (either
 //! at module level or on a `module` declaration); the default for
 //! modules with no annotation is `Application` (most restrictive,
 //! safe assumption).
 //!
+
 //! `type_to_text` lives here too because it's the canonical
 //! AST-type → human-readable text renderer used by both the
 //! profile-boundary checker and the protocol-coherence cluster
@@ -194,6 +198,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Convert an AST type to its canonical text representation.
     ///
+
     /// Used by both the profile-boundary checker and the
     /// protocol-coherence cluster.
     pub(super) fn type_to_text(&self, ty: &verum_ast::Type) -> Text {

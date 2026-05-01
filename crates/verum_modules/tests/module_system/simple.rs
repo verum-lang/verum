@@ -1,7 +1,9 @@
 //! Simple two-file import tests.
 //!
+
 //! Tests basic module loading and import resolution across two files.
 //!
+
 //! Tests module structure (file system mapping), visibility system, and
 //! basic import resolution (single imports, multiple items, glob imports).
 

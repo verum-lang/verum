@@ -1,122 +1,142 @@
 //! Flow-Sensitive Control Flow Analysis for @must_handle Annotation
 //!
+
 //! Error handling: Result<T, E> and Maybe<T> types, try (?) operator with automatic From conversion, error propagation — Section 2.6
 //!
+
 //! This module implements compile-time enforcement that Result<T, E> values with
 //! @must_handle error types are explicitly handled before being dropped.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
-//! │                   Control Flow Analysis                         │
-//! │                                                                 │
-//! │  1. CFG Construction     ────────────────────────────────────► │
-//! │     - Parse AST into basic blocks                              │
-//! │     - Identify control flow splits (if, match, loop)           │
-//! │     - Build predecessor/successor relationships                │
-//! │                                                                 │
-//! │  2. Result Tracking      ────────────────────────────────────► │
-//! │     - Detect Result<T, E> bindings where E is @must_handle     │
-//! │     - Track state (Unhandled, Handled, Checked) per variable   │
-//! │                                                                 │
-//! │  3. Dataflow Analysis    ────────────────────────────────────► │
-//! │     - Forward propagation of ResultState through CFG           │
-//! │     - Transfer functions for ?, unwrap(), match, is_err()      │
-//! │     - Join points: merge states from multiple branches         │
-//! │                                                                 │
-//! │  4. Drop Point Checking  ────────────────────────────────────► │
-//! │     - Verify all Results are Handled before scope exit         │
-//! │     - Generate E0317 error if Unhandled Result dropped         │
+//! │ Control Flow Analysis │
+//! │ │
+//! │ 1. CFG Construction ────────────────────────────────────► │
+//! │ - Parse AST into basic blocks │
+//! │ - Identify control flow splits (if, match, loop) │
+//! │ - Build predecessor/successor relationships │
+//! │ │
+//! │ 2. Result Tracking ────────────────────────────────────► │
+//! │ - Detect Result<T, E> bindings where E is @must_handle │
+//! │ - Track state (Unhandled, Handled, Checked) per variable │
+//! │ │
+//! │ 3. Dataflow Analysis ────────────────────────────────────► │
+//! │ - Forward propagation of ResultState through CFG │
+//! │ - Transfer functions for ?, unwrap(), match, is_err() │
+//! │ - Join points: merge states from multiple branches │
+//! │ │
+//! │ 4. Drop Point Checking ────────────────────────────────────► │
+//! │ - Verify all Results are Handled before scope exit │
+//! │ - Generate E0317 error if Unhandled Result dropped │
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Example
 //!
+
 //! ```verum
 //! @must_handle
 //! type CriticalError is | ConnectionLost | DataCorruption;
 //!
+
 //! fn risky() -> Result<Data, CriticalError> { ... }
 //!
+
 //! // ❌ ERROR: Result not handled
 //! fn bad() {
-//!     let result = risky();  // Unhandled
-//!     // Drop point: E0317 - unused Result that must be used
+//!  let result = risky(); // Unhandled
+//!  // Drop point: E0317 - unused Result that must be used
 //! }
 //!
+
 //! // ✅ OK: Result handled with ?
 //! fn good1() -> Result<(), CriticalError> {
-//!     let data = risky()?;  // Handled via propagation
-//!     Ok(())
+//!  let data = risky()?; // Handled via propagation
+//!  Ok(())
 //! }
 //!
+
 //! // ✅ OK: Result handled with match
 //! fn good2() {
-//!     match risky() {
-//!         Ok(data) => { /* use data */ },
-//!         Err(e) => { /* handle error */ },
-//!     }  // Handled via pattern matching
+//!  match risky() {
+//!  Ok(data) => { /* use data */ },
+//!  Err(e) => { /* handle error */ },
+//!  } // Handled via pattern matching
 //! }
 //!
+
 //! // ✅ OK: Result checked before drop
 //! fn good3() {
-//!     let result = risky();
-//!     if result.is_err() {
-//!         // Error checked, safe to drop
-//!     }
+//!  let result = risky();
+//!  if result.is_err() {
+//!  // Error checked, safe to drop
+//!  }
 //! }
 //! ```
 //!
+
 //! # Control Flow Graph (CFG)
 //!
+
 //! The CFG represents program structure as basic blocks with edges:
 //!
+
 //! ```text
-//!     ┌────────────┐
-//!     │   Entry    │
-//!     └──────┬─────┘
-//!            │
-//!     ┌──────▼──────────┐
-//!     │  let x = f()?   │  ← Basic Block
-//!     └──────┬──────────┘
-//!            │
-//!     ┌──────▼──────────┐
-//!     │  if condition   │  ← Branch point
-//!     └───┬─────────┬───┘
-//!         │         │
-//!    ┌────▼───┐ ┌──▼────┐
-//!    │ Then   │ │ Else  │
-//!    └────┬───┘ └──┬────┘
-//!         │        │
-//!         └───┬────┘
-//!          ┌──▼───┐
-//!          │ Join │  ← Merge point
-//!          └──────┘
+//!  ┌────────────┐
+//!  │ Entry │
+//!  └──────┬─────┘
+//!  │
+//!  ┌──────▼──────────┐
+//!  │ let x = f()? │ ← Basic Block
+//!  └──────┬──────────┘
+//!  │
+//!  ┌──────▼──────────┐
+//!  │ if condition │ ← Branch point
+//!  └───┬─────────┬───┘
+//!  │ │
+//!  ┌────▼───┐ ┌──▼────┐
+//!  │ Then │ │ Else │
+//!  └────┬───┘ └──┬────┘
+//!  │ │
+//!  └───┬────┘
+//!  ┌──▼───┐
+//!  │ Join │ ← Merge point
+//!  └──────┘
 //! ```
 //!
+
 //! # State Tracking
 //!
+
 //! Each Result variable transitions through states:
 //!
+
 //! ```text
 //! Unhandled ──[?, unwrap, match]──► Handled
-//!     │
-//!     └────[.is_err() check]──────► Checked ──[drop]──► ✅ OK
-//!     │
-//!     └────[drop without check]───────────────────────► ❌ E0317
+//!  │
+//!  └────[.is_err() check]──────► Checked ──[drop]──► ✅ OK
+//!  │
+//!  └────[drop without check]───────────────────────► ❌ E0317
 //! ```
 //!
+
 //! # Join Point Semantics
 //!
+
 //! At control flow merge points, states are joined:
 //!
+
 //! ```text
-//! Handled  ∧ Handled  = Handled   ✅
-//! Handled  ∧ Checked  = Handled   ✅
-//! Checked  ∧ Checked  = Checked   ✅
-//! Handled  ∧ Unhandled = Unhandled ❌  (at least one branch didn't handle)
-//! Checked  ∧ Unhandled = Unhandled ❌
+//! Handled ∧ Handled = Handled ✅
+//! Handled ∧ Checked = Handled ✅
+//! Checked ∧ Checked = Checked ✅
+//! Handled ∧ Unhandled = Unhandled ❌ (at least one branch didn't handle)
+//! Checked ∧ Unhandled = Unhandled ❌
 //! ```
 
 use crate::TypeError;
@@ -169,12 +189,13 @@ pub enum ResultState {
 impl ResultState {
     /// Join two states at a control flow merge point
     ///
+
     /// ```text
-    /// Handled  ∧ Handled  = Handled
-    /// Handled  ∧ Checked  = Handled
-    /// Checked  ∧ Checked  = Checked
-    /// Handled  ∧ Unhandled = Unhandled (conservative)
-    /// Checked  ∧ Unhandled = Unhandled (conservative)
+    /// Handled ∧ Handled = Handled
+    /// Handled ∧ Checked = Handled
+    /// Checked ∧ Checked = Checked
+    /// Handled ∧ Unhandled = Unhandled (conservative)
+    /// Checked ∧ Unhandled = Unhandled (conservative)
     /// Unhandled ∧ Unhandled = Unhandled
     /// ```
     pub fn join(self, other: ResultState) -> ResultState {
@@ -485,6 +506,7 @@ impl FlowSensitiveChecker {
             // we don't have full type information. Control flow analysis focuses
             // on error type handling semantics, not the actual type.
             //
+
             // For @must_handle checking, only the error_type_name matters:
             // - We track whether the error path is explicitly handled
             // - The ok type (T in Result<T, E>) is irrelevant for this analysis

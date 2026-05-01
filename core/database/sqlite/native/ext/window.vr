@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.3, §19.1
 //
+
 // Window functions are stateful aggregators with frame-aware
 // observation: they accept rows in frame-walk order, can also be
 // asked to step BACKWARDS when the frame edge moves left, and
 // expose the current value at any time.
 //
+
 // `WindowFn` extends `AggregateFn` with `step_back` + `value` so
 // the SAME state type powers both an aggregate-style FINAL call and
 // the per-row VALUE materialisation needed for window queries.

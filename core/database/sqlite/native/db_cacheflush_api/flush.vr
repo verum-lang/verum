@@ -61,6 +61,6 @@ public fn is_ready(c: &PreCheck) -> Bool {
     match c { PcReady => true, _ => false }
 }
 
-// Whether this operation should affect WAL frame ordering.  Cache flush
+// Whether this operation should affect WAL frame ordering. Cache flush
 // only writes the in-memory dirty pages — does NOT checkpoint WAL.
 public fn touches_wal(_o: &CacheflushOutcome) -> Bool { false }

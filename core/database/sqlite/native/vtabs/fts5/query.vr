@@ -3,19 +3,22 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 — fts5/query/
 //
+
 // FTS5 MATCH grammar (subset we support):
 //
-//   query       ::= expr
-//   expr        ::= term
-//                 | '(' expr ')'
-//                 | expr 'AND' expr
-//                 | expr 'OR' expr
-//                 | 'NOT' expr
-//                 | expr 'NEAR' '(' N ')' expr
-//                 | '"' phrase '"'
-//   term        ::= IDENT
-//   phrase      ::= IDENT (' ' IDENT)*
+
+//  query ::= expr
+//  expr ::= term
+//  | '(' expr ')'
+//  | expr 'AND' expr
+//  | expr 'OR' expr
+//  | 'NOT' expr
+//  | expr 'NEAR' '(' N ')' expr
+//  | '"' phrase '"'
+//  term ::= IDENT
+//  phrase ::= IDENT (' ' IDENT)*
 //
+
 // The executor runs the AST against an `Index`, returning a
 // ranked list of `RowMatch` records (rowid + relevance score via BM25).
 // =============================================================================
@@ -414,11 +417,14 @@ fn near(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList, dist: Int) -> Ft
 // BM25 ranker
 // -----------------------------------------------------------------------------
 //
+
 // Classical BM25 formula:
 //
-//   IDF(t)   = log((N − df + 0.5) / (df + 0.5))
-//   score    = sum_t IDF(t) · (tf · (k1 + 1)) / (tf + k1 · (1 − b + b · |d| / avgdl))
+
+//  IDF(t) = log((N − df + 0.5) / (df + 0.5))
+//  score = sum_t IDF(t) · (tf · (k1 + 1)) / (tf + k1 · (1 − b + b · |d| / avgdl))
 //
+
 // With k1 = 1.2, b = 0.75 (SQLite defaults). We approximate |d| by
 // posting count for now — a future enhancement folds per-column
 // length into docstore.

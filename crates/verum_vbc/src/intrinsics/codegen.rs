@@ -1,21 +1,27 @@
 //! # Industrial-Grade Intrinsic Code Generation
 //!
+
 //! This module generates optimal VBC instruction sequences for intrinsics.
 //! The codegen strategy follows a three-tier approach:
 //!
+
 //! 1. **Direct Opcodes**: Single VBC instruction (zero overhead)
 //! 2. **Inline Sequences**: Pre-optimized instruction patterns (~2-5 cycles)
 //! 3. **Library Calls**: External function call (minimal overhead)
 //!
+
 //! ## Design Goals
 //!
+
 //! - **Zero Overhead**: Direct opcode intrinsics have no call overhead
 //! - **Optimal Patterns**: Inline sequences use register-optimal instruction order
 //! - **LLVM Transparency**: All patterns map cleanly to LLVM IR for optimization
 //! - **Interpreter Fast Path**: Hot intrinsics get dedicated dispatch handlers
 //!
+
 //! ## SIMD Intrinsics
 //!
+
 //! Platform-specific SIMD intrinsics for tensor operations:
 //! - x86: AVX2/AVX-512 via `x86.avx.*` intrinsics
 //! - ARM: NEON via `aarch64.neon.*` intrinsics
@@ -26,6 +32,7 @@ use super::registry::{CodegenStrategy, InlineSequenceId, Intrinsic};
 
 /// Intrinsic code generator.
 ///
+
 /// Generates optimal VBC instruction sequences for intrinsic calls.
 pub struct IntrinsicCodegen<'a> {
     /// Instructions emitted so far.
@@ -737,6 +744,7 @@ impl<'a> IntrinsicCodegen<'a> {
             // Automatic differentiation operations - zero-cost typed dispatch via MlExtended
             // These use MlSubOpcode for proper autodiff semantics.
             //
+
             // Operations with DirectOpcode strategy in registry emit directly:
             // - GradBegin → Opcode::GradBegin (0xEB)
             // - GradEnd → Opcode::GradEnd (0xEC)
@@ -744,6 +752,7 @@ impl<'a> IntrinsicCodegen<'a> {
             // - GradCheckpoint → Opcode::GradCheckpoint (0xED)
             // - GradAccumulate → Opcode::GradAccumulate (0xEE)
             //
+
             // Operations with InlineSequence strategy use MlSubOpcode:
             InlineSequenceId::GradBegin => self.emit_grad_begin(args),
             InlineSequenceId::GradEnd => self.emit_grad_end(args),
@@ -1002,10 +1011,11 @@ impl<'a> IntrinsicCodegen<'a> {
     }
 
     /// secure_zero: volatile memset(0) — survives every LLVM
-    /// optimisation pass.  Used to wipe key material before storage
+    /// optimisation pass. Used to wipe key material before storage
     /// leaves scope.
     ///
-    /// Args: `[dst, len]`.  Reuses the `MemIntrinsic` carrier with
+
+    /// Args: `[dst, len]`. Reuses the `MemIntrinsic` carrier with
     /// `kind = SecureZero`; the dispatch arms in
     /// `expressions.rs::emit_intrinsic_inline_sequence` route the
     /// distinct kind to FFI sub-opcode `0xA3` (`CSecureZero`),
@@ -1631,6 +1641,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// sys_madvise: Memory advise returning Result.
     ///
+
     /// Tier-0 stub: madvise is *advisory* — the kernel is free to
     /// ignore the hint, so a no-op interpreter implementation is
     /// semantically correct (we just don't pre-fault / drop pages).
@@ -1651,6 +1662,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// sys_getentropy: Get entropy returning Result.
     ///
+
     /// Tier-0 stub: same shape as `sys_madvise` — interpreter
     /// returns Unit without referencing buffer arguments. AOT
     /// lowering replaces with the real `arc4random_buf` call on
@@ -1667,6 +1679,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// drop_in_place: Run destructor for value at pointer.
     ///
+
     /// This calls the Drop implementation for the type at the given pointer.
     fn emit_drop_in_place(&mut self, args: &[Reg]) -> Option<Reg> {
         if args.is_empty() {
@@ -1704,6 +1717,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// uninit: Create uninitialized memory for a type.
     ///
+
     /// Returns a register containing an undefined value.
     /// The caller must ensure the value is properly initialized before use.
     fn emit_uninit(&mut self, _args: &[Reg]) -> Option<Reg> {
@@ -1722,6 +1736,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// zeroed: Create zeroed memory for a type.
     ///
+
     /// Returns a register containing all-zeros representation.
     fn emit_zeroed(&mut self, _args: &[Reg]) -> Option<Reg> {
         let result = self.alloc_temp();
@@ -1737,6 +1752,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// alloc: Allocate heap memory.
     ///
+
     /// Args: [size, align]
     /// Returns pointer to allocated memory.
     fn emit_alloc(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -1759,6 +1775,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// alloc_zeroed: Allocate zeroed heap memory.
     ///
+
     /// Args: [size, align]
     /// Returns pointer to zeroed allocated memory.
     fn emit_alloc_zeroed(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -1781,6 +1798,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// dealloc: Deallocate heap memory.
     ///
+
     /// Args: [ptr, size, align]
     /// Returns nothing.
     fn emit_dealloc(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -1800,6 +1818,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// realloc: Reallocate heap memory.
     ///
+
     /// Args: [ptr, old_size, new_size, align]
     /// Returns pointer to reallocated memory.
     fn emit_realloc(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -1823,6 +1842,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// swap: Swap two values in place.
     ///
+
     /// Args: [a, b]
     /// Returns nothing (values are swapped via pointers).
     fn emit_swap(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -1841,6 +1861,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// replace: Replace value and return old.
     ///
+
     /// Args: [dest, src]
     /// Returns old value.
     fn emit_replace(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -1862,9 +1883,11 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Helper for MathExtended instruction emission.
     ///
+
     /// Emits a MathExtended instruction with the given sub-opcode and arguments.
     /// This replaces the old string-based MathCall with zero-cost typed dispatch.
     ///
+
     /// # Performance
     /// - Interpreter: ~2ns dispatch via Rust match
     /// - AOT/LLVM: Zero-cost - direct LLVM intrinsic
@@ -1880,9 +1903,11 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Helper for SimdExtended instruction emission.
     ///
+
     /// Emits a SimdExtended instruction with the given sub-opcode and arguments.
     /// This replaces the old string-based LibraryCall with zero-cost typed dispatch.
     ///
+
     /// # Performance
     /// - Interpreter: ~2ns dispatch via Rust match
     /// - AOT/LLVM: Zero-cost - direct SIMD intrinsic
@@ -1899,6 +1924,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Helper for CharExtended instruction emission.
     ///
+
     /// Emits a CharExtended instruction with the given sub-opcode and arguments.
     /// ASCII operations are inline (~2ns), Unicode uses runtime lookup.
     fn emit_char_extended(&mut self, sub_op: crate::instruction::CharSubOpcode, args: &[Reg]) -> Option<Reg> {
@@ -1913,6 +1939,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Helper for CbgrExtended instruction emission.
     ///
+
     /// Emits a CbgrExtended instruction with the given sub-opcode and arguments.
     /// Provides memory safety validation with ~15ns overhead.
     fn emit_cbgr_extended(&mut self, sub_op: crate::instruction::CbgrSubOpcode, args: &[Reg]) -> Option<Reg> {
@@ -1927,13 +1954,16 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Helper for TextExtended instruction emission.
     ///
+
     /// Emits a TextExtended instruction with the given sub-opcode and arguments.
     /// Provides zero-cost text operations with ~2ns dispatch overhead.
     ///
+
     /// # Performance
     /// - Old (LibraryCall): ~15ns dispatch overhead
     /// - New (TextExtended): ~2ns dispatch overhead
     ///
+
     /// # Example
     /// ```ignore
     /// emit_text_extended(TextSubOpcode::ParseInt, &[text_reg])
@@ -1951,6 +1981,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Helper for LogExtended instruction emission.
     ///
+
     /// Emits a LogExtended instruction with the given sub-opcode and arguments.
     fn emit_log_extended(&mut self, sub_op: crate::instruction::LogSubOpcode, args: &[Reg]) -> Option<Reg> {
         let result = self.alloc_temp();
@@ -1964,9 +1995,11 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Helper for TensorExtended instruction emission.
     ///
+
     /// Emits a TensorExtended instruction with the given sub-opcode and arguments.
     /// This provides zero-cost tensor operations with ~3ns dispatch overhead.
     ///
+
     /// # Performance
     /// - Interpreter: ~3ns dispatch via Rust match
     /// - AOT/LLVM: linalg/tensor dialect operations
@@ -1982,6 +2015,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Helper for TensorExtSubOpcode instruction emission.
     ///
+
     /// Emits a TensorExtSubOpcode instruction for extended tensor operations
     /// that overflow the 256 sub-opcode limit.
     fn emit_tensor_ext_extended(&mut self, sub_op: crate::instruction::TensorExtSubOpcode, args: &[Reg]) -> Option<Reg> {
@@ -1996,13 +2030,16 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Helper for MlSubOpcode instruction emission.
     ///
+
     /// Emits an MlExtended (0xFD) instruction with the given sub-opcode.
     /// Used for gradient/autodiff operations and ML-specific functionality.
     ///
+
     /// # Performance
     /// - Interpreter: ~2ns dispatch via Rust match
     /// - AOT: Zero-cost - direct LLVM intrinsic or runtime call
     ///
+
     /// # Example
     /// ```ignore
     /// emit_ml_extended(MlSubOpcode::JvpBegin, &[primals, tangents])
@@ -2020,13 +2057,16 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Helper for MetaReflect instruction emission.
     ///
+
     /// Emits a MetaReflect instruction with the given sub-opcode and arguments.
     /// Provides zero-cost type introspection operations.
     ///
+
     /// # Performance
     /// - Interpreter: ~2ns dispatch via Rust match
     /// - AOT: Constant-folded when type is statically known
     ///
+
     /// # Example
     /// ```ignore
     /// emit_meta_reflect(MetaReflectOp::TypeId, &[value])
@@ -2048,6 +2088,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emit GradBegin direct opcode.
     ///
+
     /// Emits `Opcode::GradBegin` (0xEB) for starting a gradient scope.
     /// When registry specifies DirectOpcode strategy, this is handled there.
     /// This fallback handles InlineSequence path.
@@ -2063,6 +2104,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emit GradEnd direct opcode.
     ///
+
     /// Emits `Opcode::GradEnd` (0xEC) for ending a gradient scope.
     fn emit_grad_end(&mut self, args: &[Reg]) -> Option<Reg> {
         let result = self.alloc_temp();
@@ -2076,6 +2118,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emit GradStop direct opcode.
     ///
+
     /// Emits `Opcode::GradStop` (0xEF) for detaching a tensor from gradient computation.
     fn emit_grad_stop(&mut self, args: &[Reg]) -> Option<Reg> {
         if args.is_empty() {
@@ -2092,6 +2135,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emit GradCheckpoint direct opcode.
     ///
+
     /// Emits `Opcode::GradCheckpoint` (0xED) for activation checkpointing.
     fn emit_grad_checkpoint(&mut self, args: &[Reg]) -> Option<Reg> {
         let result = self.alloc_temp();
@@ -2105,6 +2149,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emit GradAccumulate direct opcode.
     ///
+
     /// Emits `Opcode::GradAccumulate` (0xEE) for gradient accumulation.
     fn emit_grad_accumulate(&mut self, args: &[Reg]) -> Option<Reg> {
         if args.len() < 2 {
@@ -2302,6 +2347,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Saturating add.
     ///
+
     /// Uses ArithExtended with SaturatingAdd sub-opcode for zero-cost dispatch.
     /// Result is clamped to MAX on overflow, MIN on underflow.
     fn emit_saturating_add(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -2314,6 +2360,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Saturating subtract.
     ///
+
     /// Uses ArithExtended with SaturatingSub sub-opcode for zero-cost dispatch.
     /// Result is clamped to MIN on underflow, MAX on overflow.
     fn emit_saturating_sub(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -2326,6 +2373,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Sign-extend integer to wider type.
     ///
+
     /// Uses ArithExtended with SextI sub-opcode for zero-cost dispatch.
     /// Maps to LLVM `sext` instruction in AOT compilation.
     fn emit_sext(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -2338,6 +2386,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Zero-extend integer to wider type.
     ///
+
     /// Uses ArithExtended with ZextI sub-opcode for zero-cost dispatch.
     /// Maps to LLVM `zext` instruction in AOT compilation.
     fn emit_zext(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -2350,6 +2399,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Extend float precision (f32 -> f64).
     ///
+
     /// Uses ArithExtended with FpextF sub-opcode for zero-cost dispatch.
     /// Maps to LLVM `fpext float to double` instruction.
     fn emit_fpext(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -2362,6 +2412,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Truncate float precision (f64 -> f32).
     ///
+
     /// Uses ArithExtended with FptruncF sub-opcode for zero-cost dispatch.
     /// Maps to LLVM `fptrunc double to float` instruction.
     fn emit_fptrunc(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -2420,6 +2471,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Check if float is infinite.
     ///
+
     /// Uses MathExtended with IsInfF64/IsInfF32 sub-opcode for zero-cost dispatch.
     /// Maps to llvm.is.fpclass.f64 in LLVM lowering.
     fn emit_is_inf(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -2429,6 +2481,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Check if float is finite.
     ///
+
     /// Uses MathExtended with IsFiniteF64/IsFiniteF32 sub-opcode for zero-cost dispatch.
     /// Maps to llvm.is.fpclass.f64 in LLVM lowering.
     fn emit_is_finite(&mut self, args: &[Reg]) -> Option<Reg> {
@@ -2439,6 +2492,7 @@ impl<'a> IntrinsicCodegen<'a> {
     /// Emit slice length extraction (extracts len from fat pointer).
     /// Emit slice length extraction using zero-cost CbgrExtended dispatch.
     ///
+
     /// Uses CbgrSubOpcode::SliceLen for ~2ns overhead instead of library call.
     fn emit_slice_len(&mut self, args: &[Reg]) -> Option<Reg> {
         self.emit_cbgr_extended(CbgrSubOpcode::SliceLen, args)
@@ -2446,6 +2500,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emit slice pointer extraction using zero-cost CbgrExtended dispatch.
     ///
+
     /// Uses CbgrSubOpcode::Unslice for ~2ns overhead instead of library call.
     fn emit_slice_as_ptr(&mut self, args: &[Reg]) -> Option<Reg> {
         self.emit_cbgr_extended(CbgrSubOpcode::Unslice, args)
@@ -2822,6 +2877,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emit tensor ext extended opcode (using TensorExtSubOpcode).
     ///
+
     /// This emits TensorExtExtended instructions with proper sub-opcode dispatch,
     /// providing ~2ns zero-cost dispatch instead of ~15ns library call overhead.
     fn emit_tensor_ext_extended_opcode(
@@ -2862,6 +2918,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emit math extended opcode for transcendental/special math operations.
     ///
+
     /// This uses the MathExtended opcode (0x29) with a sub-opcode byte for
     /// zero-cost dispatch of 72+ mathematical functions.
     fn emit_math_extended_opcode(
@@ -2899,7 +2956,7 @@ pub enum MemIntrinsicKind {
     Memset,
     /// Volatile memset(0) — survives LLVM optimisation passes.
     /// Used for cryptographic-zeroise of secret material before
-    /// scope exit.  See `internal/specs/tls-quic-security-audit.md`
+    /// scope exit. See `internal/specs/tls-quic-security-audit.md`
     /// §2 Action #2.
     SecureZero,
 }
@@ -2957,9 +3014,11 @@ pub enum TimeIntrinsicKind {
 
 /// Extended instruction variants for intrinsics.
 ///
+
 /// These extend the base VBC Instruction enum with intrinsic-specific variants.
 /// The interpreter and MLIR lowering handle these specially.
 ///
+
 /// Note: Named `IntrinsicInstruction` to avoid conflict with `crate::instruction::Instruction`.
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
@@ -3010,14 +3069,17 @@ pub enum IntrinsicInstruction {
     RotateOp { dst: Reg, src: Reg, amount: Reg, direction: RotateDirection },
     /// Math Extended instruction with sub-opcode for transcendental/special math functions.
     ///
+
     /// Uses the MathExtended (0x29) opcode with sub-opcodes from MathSubOpcode.
     /// Maps directly to LLVM intrinsics (llvm.sin.f64, llvm.sqrt.f64, etc.)
     /// and MLIR math dialect ops (math.sin, math.sqrt, etc.).
     ///
+
     /// # Performance
     /// - Interpreter: ~2ns dispatch via Rust match
     /// - AOT: Zero-cost - direct LLVM intrinsic or libm call
     ///
+
     /// # Example
     /// ```ignore
     /// MathExtended { sub_op: MathSubOpcode::SinF64, dst: r0, args: vec![r1] }
@@ -3056,14 +3118,17 @@ pub enum IntrinsicInstruction {
     GpuExtended { sub_op: crate::instruction::GpuSubOpcode, dst: Reg, args: Vec<Reg> },
     /// SIMD Extended instruction with sub-opcode for vector operations.
     ///
+
     /// Maps to SimdExtended (0x2A) opcode with SimdSubOpcode dispatch.
     /// Provides ~2ns zero-cost dispatch in interpreter, zero overhead in AOT.
     ///
+
     /// # Platform Targets
     /// - x86: AVX2/AVX-512 intrinsics
     /// - ARM: NEON intrinsics
     /// - MLIR: vector dialect
     ///
+
     /// # Example
     /// ```ignore
     /// SimdExtended { sub_op: SimdSubOpcode::Add, dst: r0, args: vec![r1, r2] }
@@ -3074,9 +3139,11 @@ pub enum IntrinsicInstruction {
     SimdExtended { sub_op: crate::instruction::SimdSubOpcode, dst: Reg, args: Vec<Reg> },
     /// Character Extended instruction with sub-opcode for character operations.
     ///
+
     /// Maps to CharExtended (0x2B) opcode with CharSubOpcode dispatch.
     /// ASCII operations are inline (~2ns), Unicode operations use runtime lookup.
     ///
+
     /// # Example
     /// ```ignore
     /// CharExtended { sub_op: CharSubOpcode::IsAlphabetic, dst: r0, args: vec![r1] }
@@ -3085,9 +3152,11 @@ pub enum IntrinsicInstruction {
     CharExtended { sub_op: crate::instruction::CharSubOpcode, dst: Reg, args: Vec<Reg> },
     /// CBGR Extended instruction with sub-opcode for memory safety operations.
     ///
+
     /// Maps to CbgrExtended (0x78) opcode with CbgrSubOpcode dispatch.
     /// Provides memory safety validation with ~15ns overhead.
     ///
+
     /// # Example
     /// ```ignore
     /// CbgrExtended { sub_op: CbgrSubOpcode::Validate, dst: r0, args: vec![r1] }
@@ -3096,8 +3165,10 @@ pub enum IntrinsicInstruction {
     CbgrExtended { sub_op: crate::instruction::CbgrSubOpcode, dst: Reg, args: Vec<Reg> },
     /// Log Extended instruction with sub-opcode for logging operations.
     ///
+
     /// Maps to LogExtended (0xBE) opcode with LogSubOpcode dispatch.
     ///
+
     /// # Example
     /// ```ignore
     /// LogExtended { sub_op: LogSubOpcode::Debug, dst: r0, args: vec![r1] }
@@ -3106,9 +3177,11 @@ pub enum IntrinsicInstruction {
     LogExtended { sub_op: crate::instruction::LogSubOpcode, dst: Reg, args: Vec<Reg> },
     /// ML Extended instruction with sub-opcode for ML/gradient operations.
     ///
+
     /// Maps to MlExtended (0xFD) opcode with MlSubOpcode dispatch.
     /// Provides zero-cost gradient operations for autodiff.
     ///
+
     /// # Example
     /// ```ignore
     /// MlExtended { sub_op: MlSubOpcode::JvpBegin, dst: r0, args: vec![r1, r2] }
@@ -3117,8 +3190,10 @@ pub enum IntrinsicInstruction {
     MlExtended { sub_op: crate::instruction::MlSubOpcode, dst: Reg, args: Vec<Reg> },
     /// Tensor Extended Extended instruction for operations that overflow the 256 sub-opcode limit.
     ///
+
     /// Uses a two-byte encoding: [0xFC] [0x00] [ext_opcode:u8] [operands...]
     ///
+
     /// # Example
     /// ```ignore
     /// TensorExtExtended { sub_op: TensorExtSubOpcode::ContiguousView, dst: r0, args: vec![r1] }
@@ -3127,13 +3202,16 @@ pub enum IntrinsicInstruction {
     TensorExtExtended { sub_op: crate::instruction::TensorExtSubOpcode, dst: Reg, args: Vec<Reg> },
     /// Meta-reflection instruction for type introspection.
     ///
+
     /// Maps to MetaReflect (0xBB) opcode with MetaReflectOp dispatch.
     /// Provides zero-cost type introspection operations.
     ///
+
     /// # Performance
     /// - Interpreter: ~2ns dispatch via Rust match
     /// - AOT: Constant-folded when type is statically known
     ///
+
     /// # Example
     /// ```ignore
     /// MetaReflect { sub_op: MetaReflectOp::TypeId, dst: r0, args: vec![r1] }
@@ -3142,13 +3220,16 @@ pub enum IntrinsicInstruction {
     MetaReflect { sub_op: crate::instruction::MetaReflectOp, dst: Reg, args: Vec<Reg> },
     /// Text Extended instruction for text parsing and conversion operations.
     ///
+
     /// Maps to TextExtended (0x79) opcode with TextSubOpcode dispatch.
     /// Provides zero-cost text operations replacing string-based library calls.
     ///
+
     /// # Performance
     /// - Old (LibraryCall): ~15ns dispatch overhead
     /// - New (TextExtended): ~2ns dispatch overhead
     ///
+
     /// # Example
     /// ```ignore
     /// TextExtended { sub_op: TextSubOpcode::ParseInt, dst: r0, args: vec![r1] }

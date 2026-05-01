@@ -5,10 +5,12 @@
 // Dependencies: core, io/protocols, sys/{darwin,linux}/syscall
 // =============================================================================
 //
+
 // Provides high-level API for spawning child processes, capturing output,
 // and waiting for completion. Critical for self-hosting compiler (invoking
 // linker, assembler, and the compiler itself).
 //
+
 // =============================================================================
 
 module core.io.process;
@@ -531,9 +533,11 @@ fn close_fd(fd: Int) {
 // Windows Implementation — Native Win32 API
 // =============================================================================
 //
+
 // Uses CreateProcessA + CreatePipe for process spawning with I/O redirection.
 // No C runtime dependency — direct kernel32.dll calls.
 //
+
 // Architecture:
 // - Build command line string from program + args (quoting as needed)
 // - Create pipes for stdout/stderr capture (inheritable write ends)
@@ -541,6 +545,7 @@ fn close_fd(fd: Int) {
 // - Read from pipe read-ends until EOF
 // - WaitForSingleObject + GetExitCodeProcess for exit status
 //
+
 // Performance:
 // - CreateProcessA: ~2ms (includes process/address space creation)
 // - Pipe throughput: limited by 4KB default buffer, adequate for most use cases
@@ -745,6 +750,7 @@ fn __process_kill_raw_impl(handle_raw: Int, sig: Int) -> Int {
 
 /// Build a Windows command line string from program and arguments.
 ///
+
 /// Follows the Windows command-line argument quoting convention:
 /// - Arguments containing spaces, tabs, or double quotes are enclosed in double quotes
 /// - Backslashes before double quotes are escaped

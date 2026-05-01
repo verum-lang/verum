@@ -57,9 +57,11 @@ implement SpanExporter for NoopExporter {
 // StdoutExporter — human-readable text per span (dev / debugging)
 // =============================================================================
 //
+
 // Format is line-oriented, one line per span:
-//   [trace_id:span_id] name kind status duration attrs...
+//  [trace_id:span_id] name kind status duration attrs...
 //
+
 // A Mutex serialises writes to stdout to avoid interleaving partial
 // spans under concurrent export.
 

@@ -17,6 +17,7 @@ pub(super) const EPOCH_WINDOW_SIZE: u16 = 0x7FFF;
 
 /// Encodes a register-based reference with CBGR generation tracking.
 ///
+
 /// The encoded value is always negative, distinguishing it from regular integer values.
 #[inline(always)]
 pub(super) fn encode_cbgr_ref(abs_index: u32, generation: u32) -> i64 {
@@ -25,6 +26,7 @@ pub(super) fn encode_cbgr_ref(abs_index: u32, generation: u32) -> i64 {
 
 /// Encodes a mutable register-based reference with CBGR generation tracking.
 ///
+
 /// Sets bit 31 in the lower 32 bits to mark the reference as mutable.
 #[inline(always)]
 pub(super) fn encode_cbgr_ref_mut(abs_index: u32, generation: u32) -> i64 {
@@ -62,10 +64,12 @@ pub(super) fn strip_cbgr_ref_mutability(encoded: i64) -> i64 {
 
 /// Checks if a Value is a CBGR register-based reference.
 ///
+
 /// CBGR refs are encoded as negative Int values with generation >= 1.
 /// Since generation >= 1, the encoded value is always < -(1 << 32),
 /// which avoids false positives on regular small negative integers.
 ///
+
 /// Uses `is_inline_int()` rather than `is_int()` because CBGR refs always
 /// fit in the 48-bit inline range. Boxed ints (e.g., i64::MIN) must not
 /// be misidentified as CBGR references.
@@ -76,9 +80,11 @@ pub(super) fn is_cbgr_ref(val: &Value) -> bool {
 
 /// Validates CBGR generation and epoch for a register-based reference.
 ///
+
 /// Returns `Ok(())` if the reference is valid, or `Err(Panic)` if
 /// use-after-free is detected (generation or epoch mismatch).
 ///
+
 /// The epoch check prevents the ABA problem where generation wraps around
 /// to a previously-used value after 2^32 allocations.
 #[inline(always)]
@@ -118,15 +124,18 @@ pub(super) fn validate_cbgr_generation(
 
 /// Validates epoch using window comparison to handle 16-bit truncation.
 ///
+
 /// The 64-bit global epoch is truncated to 16-bit when stored in references
 /// (ThinRef, FatRef). This creates a potential ABA problem where the epoch
 /// wraps every 65536 operations.
 ///
+
 /// Window validation solves this by checking if the reference epoch is within
 /// a valid window of the current epoch. References are considered valid if:
 /// 1. The truncated epochs match exactly, OR
 /// 2. The reference epoch is within the valid window (accounting for wraparound)
 ///
+
 /// The window size is configurable but defaults to 32768 (half of 16-bit range),
 /// allowing references to remain valid for ~32K epoch advances.
 #[inline(always)]

@@ -1,19 +1,22 @@
 //! Deserialize derive macro implementation
 //!
+
 //! Generates `implement Deserialize for Type { fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> }`
 //!
+
 //! For record types: deserializes fields by name with validation. For sum types:
 //! reads variant tag and deserializes the matching payload. Supports @rename("..."),
 //! @default, and @skip attributes. Generates proper error diagnostics for missing
 //! or invalid fields.
 //!
+
 //! Generated code pattern for structs:
 //! ```verum
 //! implement Deserialize for MyStruct {
-//!     fn deserialize<D: Deserializer>(deserializer: D) -> Result<Self, D::Error> {
-//!         const FIELDS: &[&str] = &["field1", "field2", ...];
-//!         deserializer.deserialize_struct("MyStruct", FIELDS, MyStructVisitor)
-//!     }
+//!  fn deserialize<D: Deserializer>(deserializer: D) -> Result<Self, D::Error> {
+//!  const FIELDS: &[&str] = &["field1", "field2", ...];
+//!  deserializer.deserialize_struct("MyStruct", FIELDS, MyStructVisitor)
+//!  }
 //! }
 //! ```
 
@@ -66,33 +69,39 @@ impl DeriveMacro for DeriveDeserialize {
 impl DeriveDeserialize {
     /// Generate deserialize body for struct types
     ///
+
     /// Generates code like:
     /// ```verum
     /// const FIELDS: &[&str] = &["field1", "field2"];
     ///
+
     /// struct __Visitor;
     /// impl Visitor for __Visitor {
-    ///     type Value = TypeName;
+    ///  type Value = TypeName;
     ///
-    ///     fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
-    ///         let mut field1: Option<Type1> = None;
-    ///         let mut field2: Option<Type2> = None;
+
+    ///  fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+    ///  let mut field1: Option<Type1> = None;
+    ///  let mut field2: Option<Type2> = None;
     ///
-    ///         while let Some(key) = map.next_key::<&str>()? {
-    ///             match key {
-    ///                 "field1" => field1 = Some(map.next_value()?),
-    ///                 "field2" => field2 = Some(map.next_value()?),
-    ///                 _ => { let _: IgnoredAny = map.next_value()?; }
-    ///             }
-    ///         }
+
+    ///  while let Some(key) = map.next_key::<&str>()? {
+    ///  match key {
+    ///  "field1" => field1 = Some(map.next_value()?),
+    ///  "field2" => field2 = Some(map.next_value()?),
+    ///  _ => { let _: IgnoredAny = map.next_value()?; }
+    ///  }
+    ///  }
     ///
-    ///         Ok(TypeName {
-    ///             field1: field1.ok_or_else(|| Error::missing_field("field1"))?,
-    ///             field2: field2.ok_or_else(|| Error::missing_field("field2"))?,
-    ///         })
-    ///     }
+
+    ///  Ok(TypeName {
+    ///  field1: field1.ok_or_else(|| Error::missing_field("field1"))?,
+    ///  field2: field2.ok_or_else(|| Error::missing_field("field2"))?,
+    ///  })
+    ///  }
     /// }
     ///
+
     /// deserializer.deserialize_struct("TypeName", FIELDS, __Visitor)
     /// ```
     fn generate_struct_deserialize(
@@ -227,22 +236,26 @@ impl DeriveDeserialize {
 
         // Generate a complete visitor-based deserialization pattern:
         //
+
         // struct __Visitor;
         //
+
         // impl Visitor for __Visitor {
-        //     type Value = TypeName;
+        //  type Value = TypeName;
         //
-        //     fn expecting(&self, f: &mut Formatter) -> fmt::Result {
-        //         write!(f, "struct {}", type_name)
-        //     }
+
+        //  fn expecting(&self, f: &mut Formatter) -> fmt::Result {
+        //  write!(f, "struct {}", type_name)
+        //  }
         //
-        //     fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        //         // field variable declarations already in stmts
-        //         while let Some(key) = map.next_key::<&str>()? {
-        //             match key { ... }
-        //         }
-        //         // struct construction is ok_call
-        //     }
+
+        //  fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        //  // field variable declarations already in stmts
+        //  while let Some(key) = map.next_key::<&str>()? {
+        //  match key { ... }
+        //  }
+        //  // struct construction is ok_call
+        //  }
         // }
 
         // Generate the while loop for field matching:
@@ -358,11 +371,11 @@ impl DeriveDeserialize {
 
         // Build an if-let inside a loop to simulate while-let:
         // loop {
-        //     if let Some(__key) = __map.next_key()? {
-        //         match __key { ... }
-        //     } else {
-        //         break;
-        //     }
+        //  if let Some(__key) = __map.next_key()? {
+        //  match __key { ... }
+        //  } else {
+        //  break;
+        //  }
         // }
         let if_let_condition = Expr::new(
             ExprKind::If {
@@ -518,6 +531,7 @@ impl DeriveDeserialize {
 
     /// Generate deserialize body for enum types
     ///
+
     /// Generates code like:
     /// ```verum
     /// const VARIANTS: &[&str] = &["Unit", "Tuple", "Struct"];

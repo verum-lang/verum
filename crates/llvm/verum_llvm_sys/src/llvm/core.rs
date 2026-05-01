@@ -50,10 +50,12 @@ unsafe extern "C" {
     /// Return a unique id given the name of an enum attribute, or 0 if no attribute
     /// by that name exists.
     ///
+
     /// See <http://llvm.org/docs/LangRef.html#parameter-attributes>
     /// and <http://llvm.org/docs/LangRef.html#function-attributes>
     /// for the list of available attributes.
     ///
+
     /// Note that attribute names and IDs are not subject to the same stability
     /// guarantees as this API.
     pub fn LLVMGetEnumAttributeKindForName(
@@ -72,6 +74,7 @@ unsafe extern "C" {
     pub fn LLVMGetEnumAttributeKind(A: LLVMAttributeRef) -> ::libc::c_uint;
     /// Get the value of an enum attribute.
     ///
+
     /// Returns 0 if none exists.
     pub fn LLVMGetEnumAttributeValue(A: LLVMAttributeRef) -> u64;
 
@@ -86,6 +89,7 @@ unsafe extern "C" {
 
     /// Create a ConstantRange attribute.
     ///
+
     /// LoweWords and UpperWords need to be NumBits divided by 64 rounded
     /// up elements long.
     pub fn LLVMCreateConstantRangeAttribute(
@@ -134,6 +138,7 @@ unsafe extern "C" {
 
     /// [Soon to be deprecated](https://llvm.org/docs/RemoveDIsDebugInfo.html#c-api-changes).
     ///
+
     /// Returns true if the module is in the new debug info mode which uses
     /// non-instruction debug records instead of debug intrinsics for variable
     /// location tracking.
@@ -141,11 +146,13 @@ unsafe extern "C" {
 
     /// [Soon to be deprecated](https://llvm.org/docs/RemoveDIsDebugInfo.html#c-api-changes).
     ///
+
     /// Convert module into desired debug info format.
     pub fn LLVMSetIsNewDbgInfoFormat(M: LLVMModuleRef, UseNewFormat: LLVMBool);
 
     /// Get the identifier of a module.
     ///
+
     /// `Len` is written to contains the length of the returned string.
     pub fn LLVMGetModuleIdentifier(
         M: LLVMModuleRef,
@@ -153,6 +160,7 @@ unsafe extern "C" {
     ) -> *const ::libc::c_char;
     /// Set the identifier of a module.
     ///
+
     /// `Len` is the length of the string pointed to by `Ident`.
     pub fn LLVMSetModuleIdentifier(
         M: LLVMModuleRef,
@@ -162,6 +170,7 @@ unsafe extern "C" {
 
     /// Obtain the module's original source file name.
     ///
+
     /// Len holds the length of the returned string, returns the original source file name of M.
     pub fn LLVMGetSourceFileName(
         M: LLVMModuleRef,
@@ -185,7 +194,7 @@ unsafe extern "C" {
     pub fn LLVMGetTarget(M: LLVMModuleRef) -> *const ::libc::c_char;
     pub fn LLVMSetTarget(M: LLVMModuleRef, Triple: *const ::libc::c_char);
 
-    /// Returns the module flags as an array of flag-key-value triples.  The caller is responsible for freeing this array by calling LLVMDisposeModuleFlagsMetadata.
+    /// Returns the module flags as an array of flag-key-value triples. The caller is responsible for freeing this array by calling LLVMDisposeModuleFlagsMetadata.
     pub fn LLVMCopyModuleFlagsMetadata(
         M: LLVMModuleRef,
         Len: *mut ::libc::size_t,
@@ -276,6 +285,7 @@ unsafe extern "C" {
 
     /// Get the function type of the inline assembly snippet.
     ///
+
     /// This is the same type that was passed into LLVMGetInlineAsm originally.
     pub fn LLVMGetInlineAsmFunctionType(InlineAsmVal: LLVMValueRef) -> LLVMTypeRef;
 
@@ -341,6 +351,7 @@ unsafe extern "C" {
     pub fn LLVMGetNamedFunction(M: LLVMModuleRef, Name: *const ::libc::c_char) -> LLVMValueRef;
     /// Obtain a Function value from a Module by its name.
     ///
+
     /// The returned value corresponds to a Function value.
     pub fn LLVMGetNamedFunctionWithLength(
         M: LLVMModuleRef,
@@ -430,6 +441,7 @@ unsafe extern "C" {
     pub fn LLVMGetStructElementTypes(StructTy: LLVMTypeRef, Dest: *mut LLVMTypeRef);
     /// Get the type of the element at the given index in a structure.
     ///
+
     /// Added in LLVM 3.7.
     pub fn LLVMStructGetTypeAtIndex(StructTy: LLVMTypeRef, i: ::libc::c_uint) -> LLVMTypeRef;
     /// Determine whether a structure is packed.
@@ -450,6 +462,7 @@ unsafe extern "C" {
     pub fn LLVMArrayType(ElementType: LLVMTypeRef, ElementCount: ::libc::c_uint) -> LLVMTypeRef;
     /// Create a fixed size array type that refers to a specific type.
     ///
+
     /// The created type will exist in the context that its element type
     /// exists in.
     pub fn LLVMArrayType2(ElementType: LLVMTypeRef, ElementCount: u64) -> LLVMTypeRef;
@@ -460,11 +473,13 @@ unsafe extern "C" {
     pub fn LLVMGetArrayLength(ArrayTy: LLVMTypeRef) -> ::libc::c_uint;
     /// Obtain the length of an array type.
     ///
+
     /// This only works on types that represent arrays.
     pub fn LLVMGetArrayLength2(ArrayTy: LLVMTypeRef) -> u64;
     pub fn LLVMPointerType(ElementType: LLVMTypeRef, AddressSpace: ::libc::c_uint) -> LLVMTypeRef;
     /// Determine whether a pointer is opaque.
     ///
+
     /// True if this is an instance of an opaque PointerType.
     pub fn LLVMPointerTypeIsOpaque(Ty: LLVMTypeRef) -> LLVMBool;
     /// Create an opaque pointer type in a context.
@@ -475,6 +490,7 @@ unsafe extern "C" {
     /// Create a vector type that contains a defined type and has a scalable
     /// number of elements.
     ///
+
     /// The created type will exist in the context that its element type
     /// exists in.
     pub fn LLVMScalableVectorType(
@@ -566,6 +582,7 @@ unsafe extern "C" {
 
     /// Return a string representation of the DbgRecord.
     ///
+
     /// Use LLVMDisposeMessage to free the string.
     pub fn LLVMPrintDbgRecordToString(Record: LLVMDbgRecordRef) -> *mut ::libc::c_char;
     pub fn LLVMReplaceAllUsesWith(OldVal: LLVMValueRef, NewVal: LLVMValueRef);
@@ -658,6 +675,7 @@ unsafe extern "C" {
     pub fn LLVMGetAsString(C: LLVMValueRef, Length: *mut ::libc::size_t) -> *const ::libc::c_char;
     /// Get the raw, underlying bytes of the given constant data sequential.
     ///
+
     /// This is the same as LLVMGetAsString except it works for all constant data
     /// sequentials, not just i8 arrays.
     pub fn LLVMGetRawDataValues(c: LLVMValueRef, SizeInBytes: usize) -> *const ::libc::c_char;
@@ -689,6 +707,7 @@ unsafe extern "C" {
     ) -> LLVMValueRef;
     /// Create a ConstantDataArray from raw values.
     ///
+
     /// ElementTy must be one of i8, i16, i32, i64, half, bfloat, float, or double.
     /// Data points to a contiguous buffer of raw values in the host endianness. The
     /// element count is inferred from the element type and the data size in bytes.
@@ -750,6 +769,7 @@ unsafe extern "C" {
     ) -> LLVMValueRef;
     /// Creates a constant GetElementPtr expression.
     ///
+
     /// Similar to LLVMConstGEP2, but allows specifying the no-wrap flags.
     pub fn LLVMConstGEPWithNoWrapFlags(
         Ty: LLVMTypeRef,
@@ -870,6 +890,7 @@ unsafe extern "C" {
     // Core->Values->Constants->Global Aliases
     /// Obtain a GlobalAlias value from a Module by its name.
     ///
+
     /// The returned value corresponds to a llvm::GlobalAlias value.
     pub fn LLVMGetNamedGlobalAlias(
         M: LLVMModuleRef,
@@ -882,10 +903,12 @@ unsafe extern "C" {
     pub fn LLVMGetLastGlobalAlias(M: LLVMModuleRef) -> LLVMValueRef;
     /// Advance a GlobalAlias iterator to the next GlobalAlias.
     ///
+
     /// Returns NULL if the iterator was already at the end and there are no more global aliases.
     pub fn LLVMGetNextGlobalAlias(GA: LLVMValueRef) -> LLVMValueRef;
     /// Decrement a GlobalAlias iterator to the previous GlobalAlias.
     ///
+
     /// Returns NULL if the iterator was already at the beginning and there are no previous global aliases.
     pub fn LLVMGetPreviousGlobalAlias(GA: LLVMValueRef) -> LLVMValueRef;
     /// Retrieve the target value of an alias.
@@ -907,10 +930,12 @@ unsafe extern "C" {
     pub fn LLVMHasPersonalityFn(Fn: LLVMValueRef) -> LLVMBool;
     /// Obtain the personality function attached to the function.
     ///
+
     /// Added in LLVM 3.7.
     pub fn LLVMGetPersonalityFn(Fn: LLVMValueRef) -> LLVMValueRef;
     /// Set the personality function attached to the function.
     ///
+
     /// Added in LLVM 3.7.
     pub fn LLVMSetPersonalityFn(Fn: LLVMValueRef, PersonalityFn: LLVMValueRef);
     /// Obtain the intrinsic ID number which matches the given function name.
@@ -958,6 +983,7 @@ unsafe extern "C" {
 
     /// Gets the prefix data associated with a function.
     ///
+
     /// Only valid on functions, and only if LLVMHasPrefixData returns true.
     pub fn LLVMGetPrefixData(Fn: LLVMValueRef) -> LLVMValueRef;
 
@@ -969,6 +995,7 @@ unsafe extern "C" {
 
     /// Gets the prologue data associated with a function.
     ///
+
     /// Only valid on functions, and only if LLVMHasPrologueData returns true.
     pub fn LLVMGetPrologueData(Fn: LLVMValueRef) -> LLVMValueRef;
 
@@ -1047,6 +1074,7 @@ unsafe extern "C" {
 
     /// Create a new operand bundle.
     ///
+
     /// Every invocation should be paired with LLVMDisposeOperandBundle() or memory
     /// will be leaked.
     pub fn LLVMCreateOperandBundle(
@@ -1058,12 +1086,14 @@ unsafe extern "C" {
 
     /// Destroy an operand bundle.
     ///
+
     /// This must be called for every created operand bundle or memory will be
     /// leaked.
     pub fn LLVMDisposeOperandBundle(Bundle: LLVMOperandBundleRef);
 
     /// Obtain the tag of an operand bundle as a string.
     ///
+
     /// @param Bundle Operand bundle to obtain tag of.
     /// @param Len Out parameter which holds the length of the returned string.
     /// @return The tag name of Bundle.
@@ -1144,6 +1174,7 @@ unsafe extern "C" {
     pub fn LLVMValueAsMetadata(Val: LLVMValueRef) -> LLVMMetadataRef;
     /// Obtain the underlying string from a MDString value.
     ///
+
     /// `Len` is written to contain the length of the returned string.
     pub fn LLVMGetMDString(V: LLVMValueRef, Len: *mut ::libc::c_uint) -> *const ::libc::c_char;
     pub fn LLVMGetMDNodeNumOperands(V: LLVMValueRef) -> ::libc::c_uint;
@@ -1232,10 +1263,12 @@ unsafe extern "C" {
     pub fn LLVMGetICmpPredicate(Inst: LLVMValueRef) -> LLVMIntPredicate;
     /// Get whether or not an icmp instruction has the samesign flag.
     ///
+
     /// This is only valid for instructions that correspond to `llvm::ICmpInst`.
     pub fn LLVMGetICmpSameSign(Inst: LLVMValueRef) -> LLVMBool;
     /// Set the samesign flag on an icmp instruction.
     ///
+
     /// This is only valid for instructions that correspond to `llvm::ICmpInst`.
     pub fn LLVMSetICmpSameSign(Inst: LLVMValueRef, SameSign: LLVMBool);
     pub fn LLVMGetFCmpPredicate(Inst: LLVMValueRef) -> LLVMRealPredicate;
@@ -1244,13 +1277,16 @@ unsafe extern "C" {
 
     /// Obtain the first debug record attached to an instruction.
     ///
+
     /// Use LLVMGetNextDbgRecord() and LLVMGetPreviousDbgRecord() to traverse the
     /// sequence of DbgRecords.
     ///
+
     /// Return the first DbgRecord attached to Inst or NULL if there are none.
     pub fn LLVMGetFirstDbgRecord(Inst: LLVMValueRef) -> LLVMDbgRecordRef;
     /// Obtain the last debug record attached to an instruction.
     ///
+
     /// Return the last DbgRecord attached to Inst or NULL if there are none.
     pub fn LLVMGetLastDbgRecord(Inst: LLVMValueRef) -> LLVMDbgRecordRef;
     /// Obtain the next DbgRecord in the sequence or NULL if there are no more.
@@ -1261,6 +1297,7 @@ unsafe extern "C" {
     // Instructions->Call Sites and Invocations
     // Obtain the argument count for a call instruction.
     //
+
     // The provided value should be either a CallInst, InvokeInst or FuncletPadInst.
     pub fn LLVMGetNumArgOperands(Instr: LLVMValueRef) -> ::libc::c_uint;
     pub fn LLVMSetInstructionCallConv(Instr: LLVMValueRef, CC: ::libc::c_uint);
@@ -1305,14 +1342,17 @@ unsafe extern "C" {
     pub fn LLVMGetCalledFunctionType(C: LLVMValueRef) -> LLVMTypeRef;
     /// Get a pointer to the function invoked by this instruction.
     ///
+
     /// The provided value should be a CallInst or InvokeInst.
     pub fn LLVMGetCalledValue(Instr: LLVMValueRef) -> LLVMValueRef;
     /// Get the number of operand bundles attached to this instruction.
     ///
+
     /// Only works with CallInst and InvokeInst instructions.
     pub fn LLVMGetNumOperandBundles(C: LLVMValueRef) -> ::libc::c_uint;
     /// Get the operand bundle attached to this instruction at the given index.
     ///
+
     /// Use LLVMDisposeOperandBundle to free the operand bundle. This only works
     /// on CallInst and InvokeInst instructions.
     pub fn LLVMGetOperandBundleAtIndex(
@@ -1523,7 +1563,7 @@ unsafe extern "C" {
     /// Set location information used by debugging information.
     pub fn LLVMSetCurrentDebugLocation2(Builder: LLVMBuilderRef, Loc: LLVMMetadataRef);
     /// Attempts to set the debug location for the given instruction using the
-    /// current debug location for the given builder.  If the builder has no current
+    /// current debug location for the given builder. If the builder has no current
     /// debug location, this function is a no-op.
     #[deprecated(
         since = "140.0.0",
@@ -1676,6 +1716,7 @@ unsafe extern "C" {
 
     /// Obtain the basic blocks acting as handlers for a catchswitch instruction.
     ///
+
     /// The Handlers parameter should point to a pre-allocated array of LLVMBasicBlockRefs at least LLVMGetNumHandlers() large. On return, the first LLVMGetNumHandlers() entries in the array will be populated with LLVMBasicBlockRef instances.
     pub fn LLVMGetHandlers(CatchSwitch: LLVMValueRef, Handlers: *mut LLVMBasicBlockRef);
 
@@ -1688,6 +1729,7 @@ unsafe extern "C" {
 
     /// Get the parent catchswitch instruction of a catchpad instruction.
     ///
+
     /// This only works on llvm::CatchPadInst instructions.
     pub fn LLVMGetParentCatchSwitch(CatchPad: LLVMValueRef) -> LLVMValueRef;
 
@@ -1895,26 +1937,31 @@ unsafe extern "C" {
 
     /// Gets if the instruction has the non-negative flag set.
     ///
+
     /// Only valid for zext instructions.
     pub fn LLVMGetNNeg(NonNegInst: LLVMValueRef) -> LLVMBool;
 
     /// Sets the non-negative flag for the instruction.
     ///
+
     /// Only valid for zext instructions.
     pub fn LLVMSetNNeg(NonNegInst: LLVMValueRef, IsNonNeg: LLVMBool);
 
     /// Get the flags for which fast-math-style optimizations are allowed for this value.
     ///
+
     /// Only valid on floating point instructions.
     pub fn LLVMGetFastMathFlags(FPMathInst: LLVMValueRef) -> LLVMFastMathFlags;
 
     /// Sets the flags for which fast-math-style optimizations are allowed for this value.
     ///
+
     /// Only valid on floating point instructions.
     pub fn LLVMSetFastMathFlags(FPMathInst: LLVMValueRef, FMF: LLVMFastMathFlags);
 
     /// Check if a given value can potentially have fast math flags.
     ///
+
     /// Will return true for floating point arithmetic instructions, and for select,
     /// phi, and call instructions whose type is a floating point type, or a vector
     /// or array thereof. See <https://llvm.org/docs/LangRef.html#fast-math-flags>
@@ -1922,11 +1969,13 @@ unsafe extern "C" {
 
     /// Gets whether the instruction has the disjoint flag set.
     ///
+
     /// Only valid for or instructions.
     pub fn LLVMGetIsDisjoint(Inst: LLVMValueRef) -> LLVMBool;
 
     /// Sets the disjoint flag for the instruction.
     ///
+
     /// Only valid for or instructions.
     pub fn LLVMSetIsDisjoint(Inst: LLVMValueRef, IsDisjoint: LLVMBool);
 
@@ -2006,6 +2055,7 @@ unsafe extern "C" {
     ) -> LLVMValueRef;
     /// Creates a GetElementPtr instruction.
     ///
+
     /// Similar to LLVMBuildGEP2, but allows specifying the no-wrap flags.
     pub fn LLVMBuildGEPWithNoWrapFlags(
         B: LLVMBuilderRef,

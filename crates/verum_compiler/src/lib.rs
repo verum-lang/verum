@@ -59,28 +59,36 @@
 #![allow(clippy::unused_enumerate_index)]
 //! Verum Compiler Driver Library
 //!
+
 //! Complete implementation of the VBC-first compilation pipeline as specified in
 //! Multi-pass compilation pipeline with VBC-first architecture (Source → VBC → Execution).
 //!
+
 //! ## VBC-First Architecture
 //!
+
 //! The Verum compiler uses a **VBC-first** (Verum Bytecode first) architecture where
 //! all execution tiers share the same intermediate representation:
 //!
+
 //! ```text
 //! Source → TypedAST → VBC Bytecode → { Interpreter (Tier 0) | AOT (Tier 1) }
 //! ```
 //!
+
 //! This enables:
 //! - Unified IR for all execution modes
 //! - Fast development iteration via interpreter
 //! - Seamless tier promotion at runtime
 //! - Consistent semantics across tiers
 //!
+
 //! ## Pipeline Phases
 //!
+
 //! ### Common Frontend (Source → TypedAST)
 //!
+
 //! - **Phase 0**: stdlib Preparation & Entry Point Detection
 //! - **Phase 1**: Lexical Analysis & Parsing (verum_fast_parser)
 //! - **Phase 2**: Meta Registry & AST Registration
@@ -90,15 +98,19 @@
 //! - **Phase 4a**: Autodiff Compilation
 //! - **Phase 4b**: Context System Validation
 //!
+
 //! ### Backend (TypedAST → Execution)
 //!
+
 //! - **Phase 5**: VBC Code Generation (TypedAST → VBC bytecode)
 //! - **Phase 6**: VBC Monomorphization (Generic specialization)
 //! - **Phase 7**: Execution (Interpreter Tier 0 | AOT Tier 1 via LLVM)
 //! - **Phase 7.5**: Final Linking (for AOT)
 //!
+
 //! ## Key Features
 //!
+
 //! - **CBGR Profiling**: Track and report CBGR overhead (<15ns per check)
 //! - **SMT Verification**: Contract verification with Z3/CVC5
 //! - **Two-Tier Execution (v2.1)**: Interpreter (Tier 0), AOT (Tier 1) with graceful fallback
@@ -106,57 +118,73 @@
 //! - **Rich Diagnostics**: Colorized errors with source snippets
 //! - **Profile System**: Application/Systems/Research progressive complexity
 //!
+
 //! ## Performance Targets
 //!
+
 //! - Compilation: > 50K LOC/sec
 //! - Type checking: < 100ms/10K LOC
 //! - CBGR overhead: < 15ns per check
 //! - Check elimination: 50-90% (typical)
 //!
+
 //! ## Note on MIR Infrastructure
 //!
+
 //! The `phases::mir_lowering` module contains an experimental MIR (Mid-level IR)
 //! implementation used for:
 //! - SMT-based verification (`phases::verification_phase`)
 //! - Advanced optimization passes (`phases::optimization`)
 //! - CBGR analysis integration (`passes::cbgr_integration`)
 //!
+
 //! MIR is NOT part of the main compilation pipeline; it exists for verification
 //! and analysis purposes only. The actual compilation path goes directly from
 //! TypedAST to VBC bytecode.
 //!
+
 //! # Example Usage
 //!
+
 //! ## Compiling User Code
 //!
+
 //! ```ignore
 //! use verum_compiler::{Session, CompilerOptions, CompilationPipeline};
 //! use std::path::PathBuf;
 //!
+
 //! let options = CompilerOptions {
-//!     input: PathBuf::from("main.vr"),
-//!     output: PathBuf::from("main"),
-//!     ..Default::default()
+//!  input: PathBuf::from("main.vr"),
+//!  output: PathBuf::from("main"),
+//!  ..Default::default()
 //! };
 //!
+
 //! let mut session = Session::new(options);
 //! let mut pipeline = CompilationPipeline::new(&mut session);
 //!
+
 //! // Compile source string
 //! pipeline.compile_string("fn main() { print(\"Hello!\"); }")?;
 //! ```
 //!
+
 //! ## Compiling stdlib (Bootstrap Mode)
 //!
+
 //! ```ignore
 //! use verum_compiler::{Session, CompilationPipeline, CoreConfig};
 //!
+
 //! let config = CoreConfig::new("stdlib")
-//!     .with_output("target/stdlib.vbca");
+//!  .with_output("target/stdlib.vbca");
 //!
+
 //! let mut session = Session::default();
 //! let mut pipeline = CompilationPipeline::new_core(&mut session, config);
 //!
+
 //! let result = pipeline.compile_core()?;
 //! println!("Compiled {} modules", result.modules_compiled);
 //! ```

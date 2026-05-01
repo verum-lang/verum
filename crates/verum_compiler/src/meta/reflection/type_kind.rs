@@ -1,5 +1,6 @@
 //! Type classification for compile-time reflection
 //!
+
 //! Provides type kind enumeration matching core/meta/reflection.vr TypeKind.
 
 use verum_ast::MetaValue;
@@ -7,6 +8,7 @@ use verum_common::Text;
 
 /// Type classification matching stdlib TypeKind
 ///
+
 /// Provides complete type classification for compile-time reflection.
 /// Matches: core/meta/reflection.vr TypeKind
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

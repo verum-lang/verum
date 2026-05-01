@@ -1,7 +1,9 @@
 //! Demonstration of multi-snippet error rendering
 //!
+
 //! Run with: `cargo run --package verum_diagnostics --example multi_snippet_demo`
 //!
+
 //! This example shows off the beautiful error messages that Verum produces,
 //! including multi-file errors, primary/secondary labels, and visual correlation.
 

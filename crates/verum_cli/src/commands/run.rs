@@ -1,11 +1,14 @@
 //! Run command - builds and executes the project
 //!
+
 //! # Two-Tier Architecture
 //!
+
 //! The execution tiers are:
 //! - Tier 0: VBC Interpreter (direct VBC execution, full diagnostics)
 //! - Tier 1: AOT compilation via LLVM (native executable)
 //!
+
 //! Use `verum run --tier 1` or `--tier aot` for native execution.
 
 use std::path::PathBuf;
@@ -34,9 +37,9 @@ pub fn execute(
     crate::feature_overrides::apply_global(&mut manifest)?;
 
     // Tier resolution priority:
-    //   1. Explicit CLI tier (from --tier/--interp/--aot via run_with_tier)
-    //   2. [codegen].tier from verum.toml (new unified config system)
-    //   3. [profile.dev/release].tier (legacy per-profile config)
+    //  1. Explicit CLI tier (from --tier/--interp/--aot via run_with_tier)
+    //  2. [codegen].tier from verum.toml (new unified config system)
+    //  3. [profile.dev/release].tier (legacy per-profile config)
     let compilation_tier = if let Some(t) = tier {
         CompilationTier::from_u8(t)
             .ok_or_else(|| CliError::InvalidArgument(format!("Invalid tier {}. Must be 0-1", t)))?
@@ -70,6 +73,7 @@ pub fn execute(
 
     // Execute based on compilation tier.
     //
+
     // Tier 0 (interpreter) skips the AOT build entirely and routes
     // through the canonical `CompilationPipeline::run_interpreter`
     // path so it applies the same safety_gate / type_check /
@@ -79,6 +83,7 @@ pub fn execute(
     // `verum run` divergent from `verum build` (and from vtest,
     // which already uses the canonical path).
     //
+
     // Tier 1 (AOT) builds first then exec's the binary.
     match compilation_tier {
         CompilationTier::Interpreter => {
@@ -123,18 +128,20 @@ pub fn execute(
 
 /// Run VBC interpreted (Tier 0).
 ///
+
 /// Routes through the canonical `CompilationPipeline::run_interpreter`,
 /// which applies the same load_stdlib_modules / load_project_modules /
 /// safety_gate / type_check / dependency_analysis / verify (if SMT) /
 /// cbgr_analysis / phase_interpret_with_args sequence that
 /// `verum build` and `vtest` already share.
 ///
+
 /// **History**: this function previously rebuilt `VbcCodegen` +
 /// `Interpreter` in place from a manually-merged AST, bypassing
-/// every static-analysis phase.  That made `verum run --tier 0`
+/// every static-analysis phase. That made `verum run --tier 0`
 /// divergent from `verum build` (no safety_gate / type_check /
 /// cbgr_analysis) and divergent from `vtest` (which has used the
-/// canonical pipeline since #178).  Consolidated 2026-04-27
+/// canonical pipeline since #178). Consolidated 2026-04-27
 /// (task #35) so the three entry points all hit the same code
 /// path — fixes in the pipeline reach every consumer immediately.
 fn run_vbc_interpreted(
@@ -147,7 +154,7 @@ fn run_vbc_interpreted(
     use verum_compiler::pipeline::CompilationPipeline;
     use verum_compiler::session::Session;
 
-    // Resolve entry point.  Prefer src/main.vr (cog convention),
+    // Resolve entry point. Prefer src/main.vr (cog convention),
     // fall back to a top-level main.vr for script-style projects.
     let main_file = {
         let primary = manifest_dir.join("src").join("main.vr");

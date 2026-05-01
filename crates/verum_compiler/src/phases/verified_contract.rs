@@ -1,5 +1,6 @@
 //! Verified contract representation for Phase 3a → Phase 4 handoff
 //!
+
 //! This module defines the data structures for passing verified contracts
 //! from the Contract Verification phase to the Semantic Analysis phase.
 
@@ -98,6 +99,7 @@ impl VerifiedContract {
 
 /// Registry of verified contracts for semantic analysis
 ///
+
 /// Optimized with HashMap for O(1) lookup by function/type name.
 #[derive(Debug, Clone, Default)]
 pub struct VerifiedContractRegistry {

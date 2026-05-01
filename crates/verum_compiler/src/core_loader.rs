@@ -2,15 +2,18 @@
 // the unified cog dependency system instead of special-case stdlib loading.
 //! Stdlib metadata loader from VBC archives.
 //!
+
 //! This module provides functionality to load stdlib type metadata from
 //! pre-compiled VBC archives (stdlib.vbca). This enables the type checker
 //! to use stdlib types without parsing .vr files.
 //!
+
 //! Architecture:
 //! ```text
 //! stdlib.vbca ─── VbcArchive ─── CoreMetadata ─── TypeChecker
 //! ```
 //!
+
 //! VBC-first pipeline: Source → VBC bytecode → Interpreter (Tier 0) or LLVM AOT (Tier 1).
 //! Stdlib bootstrap: loads pre-compiled core/ modules from embedded .vbca archive.
 
@@ -64,6 +67,7 @@ impl From<std::io::Error> for CoreLoadError {
 
 /// Load stdlib metadata from a VBC archive file.
 ///
+
 /// This function reads the archive, loads all modules, and converts
 /// type information to `CoreMetadata` format.
 pub fn load_core_metadata(path: impl AsRef<Path>) -> Result<CoreMetadata, CoreLoadError> {
@@ -73,6 +77,7 @@ pub fn load_core_metadata(path: impl AsRef<Path>) -> Result<CoreMetadata, CoreLo
 
 /// Load stdlib metadata from embedded bytes (e.g., from `include_bytes!`).
 ///
+
 /// This is the preferred method when stdlib.vbca is embedded in the binary.
 pub fn load_core_metadata_from_bytes(bytes: &[u8]) -> Result<CoreMetadata, CoreLoadError> {
     let archive = load_archive_from_bytes(bytes)?;
@@ -90,6 +95,7 @@ pub fn load_archive(path: impl AsRef<Path>) -> Result<VbcArchive, CoreLoadError>
 
 /// Load a VBC archive from in-memory bytes.
 ///
+
 /// This is useful when stdlib.vbca is embedded in the binary.
 pub fn load_archive_from_bytes(bytes: &[u8]) -> Result<VbcArchive, CoreLoadError> {
     // Wrap in Cursor for Seek support
@@ -100,6 +106,7 @@ pub fn load_archive_from_bytes(bytes: &[u8]) -> Result<VbcArchive, CoreLoadError
 
 /// Convert a VBC archive to CoreMetadata.
 ///
+
 /// This is the main conversion function that extracts type information
 /// from VBC format and converts it to the format expected by TypeChecker.
 pub fn convert_archive_to_metadata(

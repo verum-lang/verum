@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `StmtCursor` wraps a notional PreparedStatement-id with a Step
 // loop. The host installs a `step_fn` closure that calls into the
 // L4 interpreter; the cursor turns that into iterator-shaped Verum
 // surface (next_row → Maybe<()>, drained, etc.).
 //
+
 // Pure-data — the actual L4 dispatch lives in l4_vdbe + l6_session.
 // =============================================================================
 

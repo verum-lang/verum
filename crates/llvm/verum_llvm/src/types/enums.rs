@@ -113,8 +113,10 @@ enum_type_set! {
 impl<'ctx> BasicMetadataTypeEnum<'ctx> {
     /// Create [`BasicMetadataTypeEnum`] from [`LLVMTypeRef`].
     ///
+
     /// # Safety
     ///
+
     /// Undefined behavior if the referenced type cannot be represented as [`BasicMetadataTypeEnum`],
     /// or the underlying pointer is null.
     pub unsafe fn new(type_: LLVMTypeRef) -> Self {
@@ -238,6 +240,7 @@ impl<'ctx> BasicMetadataTypeEnum<'ctx> {
 impl<'ctx> AnyTypeEnum<'ctx> {
     /// Create `AnyTypeEnum` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't part of `AnyTypeEnum`
     pub unsafe fn new(type_: LLVMTypeRef) -> Self {
@@ -410,6 +413,7 @@ impl<'ctx> AnyTypeEnum<'ctx> {
 impl<'ctx> BasicTypeEnum<'ctx> {
     /// Create `BasicTypeEnum` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't part of basic type enum.
     pub unsafe fn new(type_: LLVMTypeRef) -> Self {
@@ -527,11 +531,13 @@ impl<'ctx> BasicTypeEnum<'ctx> {
 
     /// Creates a constant `BasicValueZero`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::BasicType;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type().as_basic_type_enum();
     /// let f32_zero = f32_type.const_zero();

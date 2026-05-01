@@ -1,38 +1,47 @@
 //! Verification Profiler - Tracks SMT verification performance and provides diagnostics.
 //!
+
 //! Architecture: Each function with @verify(proof) contracts is profiled individually.
 //! ProfileEntry records: function name, file location, verification time, SMT solver used,
 //! logic (QF_LIA, QF_NRA, etc.), query count, detected bottleneck, and recommendations.
 //! Reports sort by time descending, flagging functions exceeding 5s as slow verifications.
 //! Cache statistics track hits/misses for incremental compilation speedup.
 //!
+
 //! Tracks verification performance, detects bottlenecks, and provides actionable
 //! recommendations for optimizing SMT verification.
 //!
+
 //! # Features
 //!
+
 //! - **Per-function profiling**: Track verification time, SMT solver, logic, query count
 //! - **Bottleneck detection**: Identify array reasoning, quantifiers, nonlinear arithmetic
 //! - **Actionable recommendations**: Suggest specific optimizations (hints, runtime checks, splits)
 //! - **Cache transparency**: Show cache hits/misses and time saved
 //! - **Budget enforcement**: Fail builds if verification exceeds time budget
 //!
+
 //! # Example Usage
 //!
+
 //! ```rust,no_run
 //! use verum_compiler::verification_profiler::VerificationProfiler;
 //! use std::time::Duration;
 //!
+
 //! let mut profiler = VerificationProfiler::new();
 //!
+
 //! // Profile function verification
 //! // let result = profiler.profile_function(
-//! //     "my_function",
-//! //     location,
-//! //     VerifyMode::Proof,
-//! //     &mut verifier,
+//! // "my_function",
+//! // location,
+//! // VerifyMode::Proof,
+//! // &mut verifier,
 //! // )?;
 //!
+
 //! // Generate and print report
 //! profiler.print_report();
 //! ```
@@ -192,6 +201,7 @@ impl VerificationProfiler {
 
     /// Wall-clock elapsed time since this profiler started.
     ///
+
     /// Distinct from `total_verification_time()` (which sums per-entry
     /// active verification spans): this captures the full wall-clock
     /// duration including idle gaps between verifications, useful for
@@ -202,6 +212,7 @@ impl VerificationProfiler {
 
     /// Profile a single function verification
     ///
+
     /// This wraps the actual verification with timing and analysis.
     /// After verification completes, it analyzes bottlenecks and generates recommendations.
     pub fn profile_function<F>(
@@ -292,6 +303,7 @@ impl VerificationProfiler {
 
     /// Record a verification result from an external verification call
     ///
+
     /// This is used when the verification is done outside of profile_function
     /// (e.g., when borrow conflicts prevent using the closure-based approach)
     pub fn record_result(
@@ -474,6 +486,7 @@ impl VerificationProfiler {
 
     /// Generate full verification report
     ///
+
     /// Sorts entries by verification time descending, filters slow verifications
     /// above the configurable threshold, and computes summary statistics including
     /// optimization potential (sum of the slowest 80% of verification times).
@@ -538,6 +551,7 @@ impl VerificationProfiler {
 
     /// Generate global recommendations based on overall verification patterns.
     ///
+
     /// Analyzes cache hit rates, slow function counts, total entry volume,
     /// logic distribution, and timing patterns to produce actionable advice.
     pub fn generate_global_recommendations(&self) -> List<Text> {
@@ -610,6 +624,7 @@ impl VerificationProfiler {
 
     /// Print report to terminal with colored output (spec format Section 1.3)
     ///
+
     /// Uses Unicode box-drawing characters for tree structure and the `colored`
     /// crate for ANSI terminal colors. The slow-verification threshold is
     /// configurable via `set_threshold()`.
@@ -805,6 +820,7 @@ impl VerificationProfiler {
 
     /// Export report as a JSON string for CI/CD integration.
     ///
+
     /// Returns a pretty-printed JSON string containing all report data:
     /// slow verifications, cache statistics, summary metrics, and recommendations.
     pub fn export_json(&self) -> String {
@@ -915,6 +931,7 @@ impl std::fmt::Display for SmtSolver {
 
 /// Infer SMT logic from verification cost metadata
 ///
+
 /// This function analyzes the complexity, category, and number of checks
 /// to determine the most likely SMT logic used for the verification.
 fn infer_smt_logic(cost: &VerificationCost) -> SmtLogic {

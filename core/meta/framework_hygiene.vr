@@ -2,56 +2,67 @@
 // core.meta.framework_hygiene — compile-time discipline for @framework + @enact
 // =============================================================================
 //
+
 // VVA-Quality meta-programming layer. Uses Verum's compile-time meta
 // infrastructure (`core.meta.attribute` + `core.meta.span`) to enforce
 // architectural cleanliness on the `@framework(name, citation)` and
 // `@enact(epsilon = "...")` declarations that ship across
 // `core.math.frameworks.*` + user-side framework packages.
 //
+
 // The discipline lives at the *meta* layer rather than as ad-hoc lint
 // rules — this gives it three structural advantages:
 //
-//   1. *Discoverability* — IDE tools see the meta-fns and can surface
-//      violations as inline diagnostics during typing.
+
+//  1. *Discoverability* — IDE tools see the meta-fns and can surface
+//  violations as inline diagnostics during typing.
 //
-//   2. *Composition with @verify* — meta-fn outputs `Diagnostics`
-//      values that the verification ladder gates downstream phases on
-//      (e.g. `@verify(certified)` requires hygiene clean).
+
+//  2. *Composition with @verify* — meta-fn outputs `Diagnostics`
+//  values that the verification ladder gates downstream phases on
+//  (e.g. `@verify(certified)` requires hygiene clean).
 //
-//   3. *Foundation-neutral enforcement* — the rules apply uniformly
-//      across all corpora that ship `@framework` declarations: the
-//      meta layer doesn't bake in any specific corpus's naming
-//      conventions, only the structural rules.
+
+//  3. *Foundation-neutral enforcement* — the rules apply uniformly
+//  across all corpora that ship `@framework` declarations: the
+//  meta layer doesn't bake in any specific corpus's naming
+//  conventions, only the structural rules.
 //
-// Three rules currently enforced (V0):
+
+// Three rules currently enforced :
 //
-//   • R1 (foundation-neutral names) — public axiom names must NOT
-//     embed corpus brand identifiers (`diakrisis_*`, `actic_*`,
-//     `msfs_*`, `uhm_*`). The @framework annotation carries the
-//     corpus name; the public axiom name describes the structural
-//     content. Pattern matched lurie_htt.vr / petz_classification.vr.
+
+//  • R1 (foundation-neutral names) — public axiom names must NOT
+//  embed corpus brand identifiers (`diakrisis_*`, `actic_*`,
+//  `msfs_*`, `uhm_*`). The @framework annotation carries the
+//  corpus name; the public axiom name describes the structural
+//  content. Pattern matched lurie_htt.vr / petz_classification.vr.
 //
-//   • R2 (ε-coordinate canonicalisable) — every `@enact(epsilon = …)`
-//     must canonicalise via `EnactAttr.canonicalise` (8 primitive
-//     names OR ordinal coordinate string). Other strings get rejected
-//     at parse time; this rule catches the ones that slipped through
-//     during a refactor.
+
+//  • R2 (ε-coordinate canonicalisable) — every `@enact(epsilon = …)`
+//  must canonicalise via `EnactAttr.canonicalise` (8 primitive
+//  names OR ordinal coordinate string). Other strings get rejected
+//  at parse time; this rule catches the ones that slipped through
+//  during a refactor.
 //
-//   • R3 (meta-classifier uniqueness) — at most one framework may
-//     play the meta-classifier role per module-tree. The
-//     meta-classifier is identified structurally: it ships ≥ 5
-//     foundational axioms describing the (Fw, ν, τ) coordinate
-//     system. Per VVA §10.4.1 architectural relationship, two
-//     meta-classifiers in one corpus would create a coordinate-system
-//     conflict.
+
+//  • R3 (meta-classifier uniqueness) — at most one framework may
+//  play the meta-classifier role per module-tree. The
+//  meta-classifier is identified structurally: it ships ≥ 5
+//  foundational axioms describing the (Fw, ν, τ) coordinate
+//  system. Per VVA §10.4.1 architectural relationship, two
+//  meta-classifiers in one corpus would create a coordinate-system
+//  conflict.
 //
-// V1 will add three more rules:
-//   • R4 — ν = e ∘ ε (Corollary 5.10) cross-check
-//   • R5 — citation field non-empty + Unicode-clean
-//   • R6 — universe-level annotation matches stack_model expectation
+
+// Future work will add three more rules:
+//  • R4 — ν = e ∘ ε (Corollary 5.10) cross-check
+//  • R5 — citation field non-empty + Unicode-clean
+//  • R6 — universe-level annotation matches stack_model expectation
 //
-// V2 will surface the @meta fns as `@meta fn` declarations once the
-// meta-execution surface lands per VVA §11.5; this V0 ships them as
+
+// Future work will surface the @meta fns as `@meta fn` declarations once the
+// meta-execution surface lands per VVA §11.5; this ships them as
 // regular stdlib helpers callable from tactic scripts.
 // =============================================================================
 
@@ -170,7 +181,7 @@ public fn validate_epsilon_canonicalisable(
     let mut i: Int = 0;
     let mut all_admissible: Bool = true;
     while i < s.len() as Int {
-        // Per-byte check would go here; this V0 uses a simpler
+        // Per-byte check would go here; this uses a simpler
         // structural test (the AST canonicaliser is the source of
         // truth and emits its own diagnostic on rejection).
         i = i + 1;
@@ -247,6 +258,7 @@ public fn validate_meta_classifier_uniqueness(
 /// list of hygiene diagnostics; an empty list means the batch is
 /// hygiene-clean.
 ///
+
 /// Designed so the verification phase can call it once per module
 /// and gate downstream phases on the (severity == Error)-free
 /// result.

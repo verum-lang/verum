@@ -5,10 +5,12 @@
 // Spec: internal/specs/database.md §5.5
 // =============================================================================
 //
+
 // Vendor-neutral retry. The policy uses full-jitter exponential backoff
 // (AWS's recommended algorithm — strictly better tail latency than
 // equal-jitter on contended writes per Marc Brooker's analysis).
 //
+
 // `run_with_retry` is a combinator over a closure that produces a
 // fresh transaction body on each attempt. It is NOT a `for` loop the
 // adapter writes inside — handlers compose it themselves so they can

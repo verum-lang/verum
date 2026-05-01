@@ -5,39 +5,48 @@
 // Dependencies: core, core.net.tls13.{cipher_suite, keyschedule}
 // =============================================================================
 //
+
 // RFC 8446 §4.2.10: when a client resumes via a PSK with non-zero
 // max_early_data_size it MAY send application data encrypted under
 // `client_early_traffic_secret` BEFORE the server's handshake
 // response arrives. The server accepts or rejects the offer via
 // the `early_data` extension in EncryptedExtensions.
 //
+
 // Key derivation (RFC 8446 §7.1):
 //
-//   client_early_traffic_secret =
-//       Derive-Secret(early_secret, "c e traffic", ClientHello)
-//   early_exporter_master_secret =
-//       Derive-Secret(early_secret, "e exp master", ClientHello)
+
+//  client_early_traffic_secret =
+//  Derive-Secret(early_secret, "c e traffic", ClientHello)
+//  early_exporter_master_secret =
+//  Derive-Secret(early_secret, "e exp master", ClientHello)
 //
+
 // Per-direction AEAD keys + IV then derive via
 // `TrafficSecret.derive_keys` (already in `keyschedule.schedule`).
 //
+
 // # Replay-protection discipline (RFC 8446 §8)
 //
+
 // 0-RTT data is replay-able — a network adversary can retransmit the
 // encrypted early-data records. Servers MUST enforce at least ONE of:
 //
-//   (a) Single-use tickets — each `psk_identity` is burned on first
-//       use.
-//   (b) Bloom-filter dedup — record (psk_id, ClientHello hash) pairs
-//       within a sliding time window.
-//   (c) Application-level idempotency — forward early data only to
-//       safe-to-replay verbs (HTTP GET / OPTIONS, no mutations).
+
+//  (a) Single-use tickets — each `psk_identity` is burned on first
+//  use.
+//  (b) Bloom-filter dedup — record (psk_id, ClientHello hash) pairs
+//  within a sliding time window.
+//  (c) Application-level idempotency — forward early data only to
+//  safe-to-replay verbs (HTTP GET / OPTIONS, no mutations).
 //
+
 // v0.1 servers enable 0-RTT opt-in via max_early_data_size on
 // ticket issuance; replay-protection lives in the Phase 8 anti-
 // replay module. Safe default: servers may refuse 0-RTT by setting
 // max_early_data_size = 0.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.early_data;

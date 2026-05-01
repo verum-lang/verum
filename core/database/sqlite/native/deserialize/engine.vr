@@ -3,9 +3,11 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `SerializeEngine.serialize()` walks the page-cache (or any source
 // of (page_no, page_bytes) tuples) and emits a `DbImage`.
 //
+
 // `DeserializeEngine.deserialize(image, flags)` returns a result
 // describing what action the host VFS should take to mount the
 // image as the database.

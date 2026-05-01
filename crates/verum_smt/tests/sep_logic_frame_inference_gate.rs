@@ -4,6 +4,7 @@
 //! inference" with default `true`, but no code path consulted
 //! it — `infer_frame` always ran the full algorithm regardless.
 //!
+
 //! Callers that only need entailment validity (without the
 //! residual-frame computation) can disable this for ~30%
 //! reduction in encoder work on large heaps. The wiring makes

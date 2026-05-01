@@ -1,26 +1,33 @@
 //! Type Reflection Intrinsics (Tier 1 - Requires MetaTypes)
 //!
+
 //! Provides compile-time type introspection functions that access the type registry.
 //! All functions require the `MetaTypes` context since they query type information.
 //!
+
 //! ## Basic Type Introspection
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `type_name(T)` | `(Type) -> Text` | Get type name |
 //! | `type_id(T)` | `(Type) -> UInt` | Get unique type identifier |
 //! | `type_of(expr)` | `(Expr) -> Type` | Get type of expression |
 //!
+
 //! ## Structure Introspection
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `fields_of(T)` | `(Type) -> List<FieldInfo>` | Get struct fields |
 //! | `field_access(T, name)` | `(Type, Text) -> Maybe<FieldInfo>` | Get specific field |
 //! | `variants_of(T)` | `(Type) -> List<VariantInfo>` | Get enum variants |
 //!
+
 //! ## Type Kind Checks
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `is_struct(T)` | `(Type) -> Bool` | Check if record type |
@@ -28,8 +35,10 @@
 //! | `is_tuple(T)` | `(Type) -> Bool` | Check if tuple type |
 //! | `kind_of(T)` | `(Type) -> TypeKind` | Get type kind |
 //!
+
 //! ## Protocol Checks
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `implements(T, P)` | `(Type, Protocol) -> Bool` | Check protocol implementation |
@@ -37,10 +46,13 @@
 //! | `is_send(T)` | `(Type) -> Bool` | Check if Send |
 //! | `is_sync(T)` | `(Type) -> Bool` | Check if Sync |
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 1**: All functions require `using [MetaTypes]` context.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -80,6 +92,7 @@ fn segment_name_str(segment: &PathSegment) -> Option<&str> {
 
 /// Register reflection builtins with context requirements
 ///
+
 /// All reflection functions require MetaTypes context since they access
 /// type information from the type registry.
 pub fn register_builtins(map: &mut BuiltinRegistry) {

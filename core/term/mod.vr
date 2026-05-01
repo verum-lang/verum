@@ -5,8 +5,10 @@
 // Dependencies: core.sys, core.io, core.text, core.collections, core.sync, core.time
 // =============================================================================
 //
+
 // 7-layer architecture from raw termios to full TUI application framework:
 //
+
 // Layer 6: Application Framework (App, Screen, Router, CommandPalette)
 // Layer 5: Widget Library (Paragraph, Table, List, Tabs, Input, etc.)
 // Layer 4: Layout Engine (Rect, Constraint, Flex, Grid)
@@ -15,9 +17,11 @@
 // Layer 1: Event System (Event, KeyEvent, MouseEvent, EventStream)
 // Layer 0: Terminal I/O (RawTerminal, Termios, EscapeWriter, Capabilities)
 //
+
 // Each layer exports protocols consumed by the layer above.
 // Each layer is fully self-contained — use Layer 0 without Layer 6.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md
 // =============================================================================
 

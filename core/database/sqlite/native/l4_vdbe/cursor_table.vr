@@ -6,6 +6,7 @@ module core.database.sqlite.native.l4_vdbe.cursor_table;
 // Layer: 4
 // Spec: sqlite-native.md §11.3
 //
+
 // Each VDBE program declares its cursors at build time (via
 // `VdbeProgram.declare_cursor`) and the interpreter opens real
 // L3 BtreeCursors lazily when it encounters an `OpenRead` / `OpenWrite`
@@ -13,13 +14,16 @@ module core.database.sqlite.native.l4_vdbe.cursor_table;
 // slot array the interpreter consults on every cursor-bound opcode
 // (`Column`, `Next`, `SeekGE`, …).
 //
+
 // Ownership:
 //
-//   * The program owns the cursor *declarations* (metadata — root
-//     page, n_cols, kind).
-//   * The interpreter owns the cursor *instances* — live L3
-//     BtreeCursors, ephemeral in-memory B-trees, sorter state.
+
+//  * The program owns the cursor *declarations* (metadata — root
+//  page, n_cols, kind).
+//  * The interpreter owns the cursor *instances* — live L3
+//  BtreeCursors, ephemeral in-memory B-trees, sorter state.
 //
+
 // Cursor slots are typed via a small sum so the interpreter can
 // dispatch without looking up the declaration again. Ephemeral and
 // sorter slots lazily construct their backing store on first use.
@@ -76,7 +80,7 @@ public type CursorSlot is {
 
 /// Three-way compare of two registers. Returns -1 / 0 / 1.
 /// Rules follow SQLite's type-affinity rough order:
-///   NULL  < numeric < text < blob
+///  NULL < numeric < text < blob
 /// Within numeric, ints and reals compare via Float64 widening.
 fn cmp_register(a: &Register, b: &Register) -> Int {
     // Dispatch on both tags.

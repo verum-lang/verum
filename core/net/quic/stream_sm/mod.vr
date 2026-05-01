@@ -5,21 +5,25 @@
 // Spec: internal/specs/tls-quic.md §7, §12 Phase 4
 // =============================================================================
 //
+
 // Per-direction stream state machines + the connection-level flow-
 // control accountant. Module named `stream_sm` (not `stream`) to
 // avoid colliding with the existing intrinsic-backed
 // `core.net.quic.stream` wrapper during the co-existence phase.
 //
+
 // # Module layout
 //
+
 // ```
 // core.net.quic.stream_sm
-// ├── mod.vr            ← this file (re-exports)
-// ├── send.vr           — RFC 9000 §3.1 sender state machine
-// ├── recv.vr           — RFC 9000 §3.2 receiver state machine
-// └── flow_control.vr   — RFC 9000 §4 connection FC + stream-count FC
+// ├── mod.vr ← this file (re-exports)
+// ├── send.vr — RFC 9000 §3.1 sender state machine
+// ├── recv.vr — RFC 9000 §3.2 receiver state machine
+// └── flow_control.vr — RFC 9000 §4 connection FC + stream-count FC
 // ```
 //
+
 // =============================================================================
 
 module core.net.quic.stream_sm;

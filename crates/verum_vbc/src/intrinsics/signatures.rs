@@ -1,12 +1,16 @@
 //! # Intrinsic Type Signatures
 //!
+
 //! This module provides type signature validation for intrinsic functions,
 //! including support for generic intrinsics with protocol bounds.
 //!
+
 //! ## Protocol Bounds
 //!
+
 //! Protocol bounds constrain generic type parameters:
 //!
+
 //! | Protocol | Types | Description |
 //! |----------|-------|-------------|
 //! | `Atomic` | U8, U16, U32, U64, Int, Bool, *const T, *mut T | Atomic operations |
@@ -15,8 +19,10 @@
 //! | `UnsignedInteger` | U8-U64, USize | Unsigned arithmetic |
 //! | `FloatingPoint` | F32, F64 | Floating-point math |
 //!
+
 //! ## Example
 //!
+
 //! ```ignore
 //! // Generic atomic intrinsic with protocol bound
 //! @intrinsic("atomic_load")
@@ -28,6 +34,7 @@ use std::sync::LazyLock;
 
 /// Protocol bounds for generic type parameters.
 ///
+
 /// These constrain which types can be used with generic intrinsics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProtocolBound {
@@ -394,6 +401,7 @@ impl IntrinsicSignature {
 
     /// Validate arguments against this signature.
     ///
+
     /// `arg_types` are the actual argument types as strings.
     /// `type_args` are the explicit type arguments provided at the call site.
     pub fn validate_args(

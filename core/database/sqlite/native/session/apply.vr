@@ -3,26 +3,30 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (CDC) — sqlite3changeset_apply
 //
+
 // `ApplyEngine` walks a `ChangeSet` and, for each `Change`, calls
 // the target storage to perform the matching INSERT / UPDATE /
 // DELETE. When the target diverges (row already exists for INSERT,
 // row missing for DELETE / UPDATE, OLD value mismatch on UPDATE),
 // the engine consults a `ConflictResolver` for the next step.
 //
+
 // SQLite's six conflict reasons map onto our `Conflict`:
 //
-//   * `CfDataMismatch`     — UPDATE / DELETE with a non-matching OLD row
-//   * `CfNotFound`         — UPDATE / DELETE with no matching row
-//   * `CfConflict`         — INSERT against existing PK
-//   * `CfConstraint`       — would violate FK / NOT NULL / CHECK
-//   * `CfForeignKey`       — FK violation specifically
-//   * `CfReplaceFailed`    — REPLACE-policy retry was rejected
+
+//  * `CfDataMismatch` — UPDATE / DELETE with a non-matching OLD row
+//  * `CfNotFound` — UPDATE / DELETE with no matching row
+//  * `CfConflict` — INSERT against existing PK
+//  * `CfConstraint` — would violate FK / NOT NULL / CHECK
+//  * `CfForeignKey` — FK violation specifically
+//  * `CfReplaceFailed` — REPLACE-policy retry was rejected
 //
+
 // The resolver returns one of:
-//   * `CrSkip`             — drop this change, continue
-//   * `CrReplace`          — replace existing row (DELETE + INSERT)
-//   * `CrAbort`            — stop the entire apply, roll back
-//   * `CrOmit`             — silently skip without bumping any counter
+//  * `CrSkip` — drop this change, continue
+//  * `CrReplace` — replace existing row (DELETE + INSERT)
+//  * `CrAbort` — stop the entire apply, roll back
+//  * `CrOmit` — silently skip without bumping any counter
 // =============================================================================
 
 module core.database.sqlite.native.session.apply;
@@ -157,27 +161,31 @@ public fn apply_engine() -> ApplyEngine { ApplyEngine { unit: true } }
 
 /// One-shot apply of a changeset against a synthetic target.
 ///
+
 /// Two callbacks compose the storage adapter:
 ///
-///   * `target_check(change) -> Maybe<Conflict>` — returns
-///     `Some(conflict)` when the change diverges from the
-///     target's current state; `None` to indicate "apply cleanly".
-///   * `target_apply(change) -> Bool` — actually persists the
-///     change.  Returns `true` on success, `false` on a
-///     storage-level rejection (the engine then surfaces this as
-///     `CfReplaceFailed`).  Called for both fresh applies and
-///     `CrReplace` resolutions.
+
+///  * `target_check(change) -> Maybe<Conflict>` — returns
+///  `Some(conflict)` when the change diverges from the
+///  target's current state; `None` to indicate "apply cleanly".
+///  * `target_apply(change) -> Bool` — actually persists the
+///  change. Returns `true` on success, `false` on a
+///  storage-level rejection (the engine then surfaces this as
+///  `CfReplaceFailed`). Called for both fresh applies and
+///  `CrReplace` resolutions.
 ///
+
 /// Pre-fix `apply` only had `target_check` — it identified
 /// conflicts but never persisted any change, leaving the
-/// "applied" counter incremented while storage saw nothing.  Now
+/// "applied" counter incremented while storage saw nothing. Now
 /// the storage adapter receives both probes; production callers
 /// pass `Connection.set_rows_at`-shaped closures, tests pass
 /// in-memory mock probes.
 ///
+
 /// This indirection keeps the engine independent of any concrete
 /// storage impl — tests and production code share the same
-/// dispatch.  The companion `apply_to_connection` (in
+/// dispatch. The companion `apply_to_connection` (in
 /// `l7_api/session_apply.vr`, follow-up) wires both callbacks to
 /// a real `Connection`.
 pub fn apply(

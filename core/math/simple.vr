@@ -3,32 +3,39 @@
 // =============================================================================
 // Layer: API (Progressive Disclosure Level 1)
 //
+
 // This module provides a simplified interface for Verum's scientific computing
 // stack. It's designed for:
 // - Quick prototyping and experimentation
 // - Educational use and beginners
 // - Scripts where brevity matters more than type precision
 //
+
 // # Design Philosophy
 //
+
 // - Minimal generics: Most functions work with Float by default
 // - Sensible defaults: Contexts are auto-provided when possible
 // - Convenience over control: Trade some performance for ease of use
 // - Familiar syntax: Similar to NumPy/PyTorch simple APIs
 //
+
 // # Usage
 //
+
 // ```verum
 // mount core.math.simple.*;
 //
+
 // fn main() {
-//     let x = randn(&[1024, 512]);    // Random tensor
-//     let y = zeros(&[512, 256]);     // Zero tensor
-//     let z = matmul(&x, &y);         // Matrix multiply
-//     print(f"Result shape: {z.shape()}");
+//  let x = randn(&[1024, 512]); // Random tensor
+//  let y = zeros(&[512, 256]); // Zero tensor
+//  let z = matmul(&x, &y); // Matrix multiply
+//  print(f"Result shape: {z.shape()}");
 // }
 // ```
 //
+
 // Spec: docs/architecture/math-spec.md Section 6 - Progressive API Disclosure
 // =============================================================================
 
@@ -87,9 +94,10 @@ public type Tensor32 is DynTensor<Float32>;
 
 // Create a tensor filled with zeros
 //
+
 // # Example
 // ```verum
-// let x = zeros(&[3, 4]);  // 3x4 Float tensor
+// let x = zeros(&[3, 4]); // 3x4 Float tensor
 // ```
 public fn zeros(shape: &[USize]) -> SimpleTensor {
     tensor_zeros(shape)
@@ -107,6 +115,7 @@ public fn full(shape: &[USize], value: Float) -> SimpleTensor {
 
 // Create a tensor with random normal values (mean=0, std=1)
 //
+
 // Uses default Random context (seeded from thread-local RNG)
 public fn randn(shape: &[USize]) -> SimpleTensor using [Random] {
     tensor_randn(shape)
@@ -119,9 +128,10 @@ public fn rand(shape: &[USize]) -> SimpleTensor using [Random] {
 
 // Create a 1D tensor with values from start to end (exclusive)
 //
+
 // # Example
 // ```verum
-// let x = arange(0, 10, 1);  // [0, 1, 2, ..., 9]
+// let x = arange(0, 10, 1); // [0, 1, 2, ..., 9]
 // ```
 public fn arange(start: Float, end: Float, step: Float) -> SimpleTensor {
     tensor_arange(start, end, step)
@@ -129,9 +139,10 @@ public fn arange(start: Float, end: Float, step: Float) -> SimpleTensor {
 
 // Create a 1D tensor with n linearly spaced values
 //
+
 // # Example
 // ```verum
-// let x = linspace(0.0, 1.0, 11);  // [0.0, 0.1, ..., 1.0]
+// let x = linspace(0.0, 1.0, 11); // [0.0, 0.1, ..., 1.0]
 // ```
 public fn linspace(start: Float, end: Float, n: USize) -> SimpleTensor {
     tensor_linspace(start, end, n)
@@ -144,6 +155,7 @@ public fn eye(n: USize) -> SimpleTensor {
 
 // Create a tensor from a list of values
 //
+
 // # Example
 // ```verum
 // let x = tensor(&[1.0, 2.0, 3.0]);
@@ -159,9 +171,10 @@ public fn tensor(values: &[Float]) -> SimpleTensor {
 
 // Matrix multiplication
 //
+
 // # Example
 // ```verum
-// let c = matmul(&a, &b);  // [M, K] @ [K, N] -> [M, N]
+// let c = matmul(&a, &b); // [M, K] @ [K, N] -> [M, N]
 // ```
 public fn matmul(a: &SimpleTensor, b: &SimpleTensor) -> SimpleTensor {
     tensor_matmul(a, b)
@@ -174,9 +187,10 @@ public fn transpose(a: &SimpleTensor) -> SimpleTensor {
 
 // Reshape tensor to new shape (-1 for inferred dimension)
 //
+
 // # Example
 // ```verum
-// let y = reshape(&x, &[2, -1]);  // Auto-infer second dim
+// let y = reshape(&x, &[2, -1]); // Auto-infer second dim
 // ```
 public fn reshape(a: &SimpleTensor, shape: &[ISize]) -> SimpleTensor {
     // Convert shape with possible -1 to actual sizes
@@ -230,9 +244,10 @@ public fn stack(tensors: &[&SimpleTensor], dim: ISize) -> SimpleTensor {
 
 // Sum all elements or along a dimension
 //
+
 // # Example
 // ```verum
-// let total = sum(&x);           // Sum all elements
+// let total = sum(&x); // Sum all elements
 // let row_sums = sum_dim(&x, 1); // Sum along axis 1
 // ```
 public fn sum(a: &SimpleTensor) -> Float {
@@ -270,6 +285,7 @@ public fn min(a: &SimpleTensor) -> Float {
 
 // Softmax along the last dimension
 //
+
 // # Example
 // ```verum
 // let probs = softmax(&logits);
@@ -289,12 +305,13 @@ public fn softmax_dim(a: &SimpleTensor, dim: ISize) -> SimpleTensor {
 
 // Quick training for simple models
 //
+
 // # Example
 // ```verum
 // let model = Sequential([
-//     Linear.new(784, 256, true),
-//     fn(x) { relu(&x) },
-//     Linear.new(256, 10, true),
+//  Linear.new(784, 256, true),
+//  fn(x) { relu(&x) },
+//  Linear.new(256, 10, true),
 // ]);
 // train(&mut model, &train_loader, 10);
 // ```
@@ -357,6 +374,7 @@ public fn evaluate<M: Module<SimpleTensor, SimpleTensor>>(
 
 // Create a linear layer with bias
 //
+
 // # Example
 // ```verum
 // let layer = linear(784, 256);
@@ -433,12 +451,13 @@ public type Module<In, Out> is protocol {
 
 // Sequential model container
 //
+
 // # Example
 // ```verum
 // let model = Sequential.from(&[
-//     linear(784, 256),
-//     fn(x) { relu(&x) },
-//     linear(256, 10),
+//  linear(784, 256),
+//  fn(x) { relu(&x) },
+//  linear(256, 10),
 // ]);
 // ```
 public type Sequential is {
@@ -471,10 +490,11 @@ implement Module<SimpleTensor, SimpleTensor> for Sequential {
 
 // Print tensor information
 //
+
 // # Example
 // ```verum
 // let x = randn(&[3, 4]);
-// info(&x);  // SimpleTensor[3, 4] dtype=F64 device=CPU mean=0.12 std=0.98
+// info(&x); // SimpleTensor[3, 4] dtype=F64 device=CPU mean=0.12 std=0.98
 // ```
 public fn info(a: &SimpleTensor) {
     let shape_str = a.shape().iter()

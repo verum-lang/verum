@@ -3,12 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.4
 //
+
 // `generate_series(start, stop[, step])` produces one row per integer
 // in `[start, stop]` advancing by `step` (default 1). Used as a
 // table-valued function:
 //
-//   SELECT value FROM generate_series(1, 5);
+
+//  SELECT value FROM generate_series(1, 5);
 //
+
 // Pure-Verum state machine: emit rows on demand, no allocation up
 // front. Mirrors SQLite's series.c implementation.
 // =============================================================================

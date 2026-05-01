@@ -1,20 +1,23 @@
 //! Red-team Round 1 §5.1 — Z3 timeout fail-closed soundness invariant.
 //!
+
 //! When Z3 cannot decide a refinement obligation within the configured
 //! timeout, every consumer in the verifier translates `SatResult::Unknown`
 //! into a verification failure (Err / `keep-runtime-check`). This test
 //! programmatically constructs a Z3-hard formula (nonlinear arithmetic
 //! over unbounded Ints) plus a pathologically tiny timeout and asserts:
 //!
-//!   1. Z3 returns `SatResult::Unknown` (not Sat/Unsat).
-//!   2. The reason hints at timeout / incompleteness, not "decided".
-//!   3. The canonical Verum translation pattern (`SatResult::Unknown ->
-//!      Err`) is applied — this is the property all 9 audit sites in
-//!      `vcs/red-team/round-1-architecture.md §5.1` jointly enforce.
+
+//!  1. Z3 returns `SatResult::Unknown` (not Sat/Unsat).
+//!  2. The reason hints at timeout / incompleteness, not "decided".
+//!  3. The canonical Verum translation pattern (`SatResult::Unknown ->
+//!  Err`) is applied — this is the property all 9 audit sites in
+//!  `vcs/red-team/round-1-architecture.md §5.1` jointly enforce.
 //!
+
 //! Companion guardrails:
-//!   - `vcs/specs/L0-critical/verification/z3_timeout_fail_closed.vr`
-//!   - `vcs/specs/L1-core/refinement/smt/proof_timeout.vr`
+//!  - `vcs/specs/L0-critical/verification/z3_timeout_fail_closed.vr`
+//!  - `vcs/specs/L1-core/refinement/smt/proof_timeout.vr`
 
 use z3::ast::Int;
 use z3::{Config, SatResult, Solver};
@@ -35,8 +38,8 @@ fn z3_returns_unknown_on_pathological_timeout() {
 
         // Nonlinear integer arithmetic — Z3's NRA tactic is incomplete
         // here. Specifically: ∃ a, b, c, d ∈ Int.
-        //   a > 1e9, b > 1e9, c > 1e9, d > 1e9
-        //   a^3 * b^2 == c^3 * d^2 + 1
+        //  a > 1e9, b > 1e9, c > 1e9, d > 1e9
+        //  a^3 * b^2 == c^3 * d^2 + 1
         // Provably consistent for some witness, but Z3 cannot find
         // the witness (or refute it) in 1ms.
         let a = Int::new_const("a");

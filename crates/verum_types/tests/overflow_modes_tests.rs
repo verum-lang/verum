@@ -14,8 +14,10 @@
 )]
 // Comprehensive tests for integer overflow modes
 //
+
 // Integer type hierarchy: all fixed-size integers (i8..i128, u8..u128) are refinement types of Int with range predicates — .3
 //
+
 // Tests all three overflow modes (checked, wrapping, saturating) for
 // all 12 integer types with all 9 arithmetic operations.
 

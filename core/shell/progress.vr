@@ -5,19 +5,23 @@
 // Dependencies: core, io.stdio, time, async.timer, term.style (for ANSI)
 // =============================================================================
 //
+
 // Two interactive feedback widgets:
 //
-//   * `Progress` — bar with a known total, advance() increments and
-//     repaints. Optional rate / ETA computation.
-//   * `Spinner` — indeterminate animation for tasks of unknown duration.
-//     Auto-ticks via a background async task; `Drop` stops the animation
-//     and clears the line.
+
+//  * `Progress` — bar with a known total, advance() increments and
+//  repaints. Optional rate / ETA computation.
+//  * `Spinner` — indeterminate animation for tasks of unknown duration.
+//  Auto-ticks via a background async task; `Drop` stops the animation
+//  and clears the line.
 //
+
 // Both widgets write directly to stdout using ANSI escape sequences for
 // cursor control (carriage return + clear-line). On non-TTY stdout they
 // degrade to printing one status line per advance — still usable in
 // log files.
 //
+
 // =============================================================================
 
 module progress;

@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // A handle carries a connection-local id, schema name, and the WAL
 // watermark (frame count) captured at sqlite3_snapshot_get time.
 // =============================================================================

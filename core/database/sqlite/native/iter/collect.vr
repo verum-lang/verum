@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API (convenience layer)
 //
+
 // Two helpers wrapped around `StmtCursor` for common cases:
 //
-//   * `count_rows`  — drive the cursor to completion + return row count
-//   * `take_first`  — pull the first row id (or None if no rows)
+
+//  * `count_rows` — drive the cursor to completion + return row count
+//  * `take_first` — pull the first row id (or None if no rows)
 // =============================================================================
 
 module core.database.sqlite.native.iter.collect;

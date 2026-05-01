@@ -14,18 +14,20 @@
 )]
 //! Proof Validator Tests
 //!
+
 //! Comprehensive tests for the proof validation implementations including:
 //! - SMT re-checking (recheck_with_smt)
 //! - Witness type validation (validate_witness_type)
 //! - Type normalization (normalize_types)
 //!
+
 //! Implements validation of the formal proof system (Verum 2.0+ planned):
 //! - Proof terms are first-class values via Curry-Howard correspondence
 //! - Core rules: Axiom, Assumption, ModusPonens, Rewrite, Induction, Lambda, Cases
 //! - SMT integration: proofs can be discharged to Z3 (SMT-LIB2 format)
 //! - Proof certificates exportable to Dedukti, Coq, Lean, Metamath
 //! - Tactics: simp (simplify), ring (normalize ring exprs), omega (linear arith),
-//!   blast (tableau prover), auto (proof search with hints database)
+//!  blast (tableau prover), auto (proof search with hints database)
 
 use verum_ast::literal::{IntLit, Literal, LiteralKind};
 use verum_ast::span::Span;

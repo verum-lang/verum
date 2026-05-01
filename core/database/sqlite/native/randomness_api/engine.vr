@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The actual byte generation lives in `prng/`; this engine only
 // records request counts + the "seeded" flag so embedders can verify
 // the PRNG isn't used before being reseeded after fork / snapshot /
@@ -34,7 +35,7 @@ public fn new_engine() -> RandomnessEngine {
 }
 
 implement RandomnessEngine {
-    /// Drive one request.  Returns the actual byte-count that will be
+    /// Drive one request. Returns the actual byte-count that will be
     /// produced / consumed (0 for noop, size for fill, reseed-len for
     /// reseed).
     pub fn drive(&mut self, req: &RandomnessRequest) -> Int {

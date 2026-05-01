@@ -1,24 +1,27 @@
 //! Fuzz-target orchestration for `[test].fuzzing = true` (#299).
 //!
+
 //! When the manifest enables `[test].fuzzing`, the `verum test`
 //! command runs not only the @test / @property suite but also each
-//! cargo-fuzz target discovered under `fuzz/` directories.  This
+//! cargo-fuzz target discovered under `fuzz/` directories. This
 //! module owns:
 //!
-//!   1. Discovery — walk the workspace for `fuzz/Cargo.toml` (at
-//!      project root) and `crates/*/fuzz/Cargo.toml` (per-crate
-//!      fuzz harnesses), parse each TOML for `[[bin]]` entries,
-//!      and produce a flat `Vec<FuzzTarget>`.
-//!   2. Invocation — call `cargo fuzz run <target> -- \
-//!      -max_total_time=<N>` for each target.  Failures surface
-//!      as crash artifacts under `fuzz/artifacts/<target>/`; we
-//!      enumerate any pre-existing artifacts before the run and
-//!      after, and treat *new* artifacts as the failure signal.
-//!   3. Reporting — aggregate per-target outcomes into a
-//!      `FuzzReport` with crash artifacts attached.
+
+//!  1. Discovery — walk the workspace for `fuzz/Cargo.toml` (at
+//!  project root) and `crates/*/fuzz/Cargo.toml` (per-crate
+//!  fuzz harnesses), parse each TOML for `[[bin]]` entries,
+//!  and produce a flat `Vec<FuzzTarget>`.
+//!  2. Invocation — call `cargo fuzz run <target> -- \
+//!  -max_total_time=<N>` for each target. Failures surface
+//!  as crash artifacts under `fuzz/artifacts/<target>/`; we
+//!  enumerate any pre-existing artifacts before the run and
+//!  after, and treat *new* artifacts as the failure signal.
+//!  3. Reporting — aggregate per-target outcomes into a
+//!  `FuzzReport` with crash artifacts attached.
 //!
+
 //! Cargo-fuzz toolchain dependency: requires `cargo-fuzz`
-//! installed (`cargo install cargo-fuzz`).  When the binary is
+//! installed (`cargo install cargo-fuzz`). When the binary is
 //! absent the runner emits a single hint line and returns an
 //! empty `FuzzReport` — fuzzing is best-effort observability
 //! rather than a hard CI gate, so a missing toolchain
@@ -31,7 +34,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 /// One cargo-fuzz binary target discovered under a `fuzz/`
-/// directory.  Tracks the host crate (the parent directory of
+/// directory. Tracks the host crate (the parent directory of
 /// `fuzz/`) so reports can pinpoint where each target lives, and
 /// the artifacts directory so post-run inspection knows where to
 /// look for crash files.
@@ -53,10 +56,10 @@ pub struct FuzzReport {
     /// Number of targets discovered (whether or not they were
     /// successfully exercised).
     pub discovered: usize,
-    /// Per-target outcome.  Empty when cargo-fuzz isn't installed.
+    /// Per-target outcome. Empty when cargo-fuzz isn't installed.
     pub outcomes: Vec<FuzzOutcome>,
     /// Single-line hint message when the toolchain is missing or
-    /// the discovery walk produces no targets.  Empty otherwise.
+    /// the discovery walk produces no targets. Empty otherwise.
     pub hint: Option<String>,
 }
 
@@ -68,7 +71,7 @@ pub struct FuzzOutcome {
     pub duration: Duration,
     pub status: FuzzStatus,
     /// New crash artifacts that landed during this run (filename
-    /// only, not full path).  Empty on a clean run.
+    /// only, not full path). Empty on a clean run.
     pub new_crash_artifacts: Vec<String>,
 }
 
@@ -81,12 +84,12 @@ pub enum FuzzStatus {
     /// usually means the harness failed to compile.
     HarnessError(String),
     /// Cargo-fuzz timed out before completing the configured
-    /// duration.  Treated as a soft failure — the run produced no
+    /// duration. Treated as a soft failure — the run produced no
     /// artifacts but didn't get to assert clean either.
     Timeout,
 }
 
-/// Locate `cargo-fuzz`.  Returns true when the binary is on PATH.
+/// Locate `cargo-fuzz`. Returns true when the binary is on PATH.
 pub fn cargo_fuzz_available() -> bool {
     Command::new("cargo")
         .args(["fuzz", "--version"])
@@ -98,12 +101,14 @@ pub fn cargo_fuzz_available() -> bool {
 }
 
 /// Walk the workspace for `fuzz/Cargo.toml` files and enumerate
-/// their `[[bin]]` targets.  Discovery roots:
+/// their `[[bin]]` targets. Discovery roots:
 ///
-///   * `<workspace_root>/fuzz/Cargo.toml`
-///   * `<workspace_root>/crates/<name>/fuzz/Cargo.toml`
-///   * `<workspace_root>/<arbitrary>/fuzz/Cargo.toml` (one level)
+
+///  * `<workspace_root>/fuzz/Cargo.toml`
+///  * `<workspace_root>/crates/<name>/fuzz/Cargo.toml`
+///  * `<workspace_root>/<arbitrary>/fuzz/Cargo.toml` (one level)
 ///
+
 /// Returns an empty list when nothing matches.
 pub fn discover_targets(workspace_root: &Path) -> Vec<FuzzTarget> {
     let mut out = Vec::new();
@@ -136,7 +141,7 @@ pub fn discover_targets(workspace_root: &Path) -> Vec<FuzzTarget> {
 }
 
 /// Parse a `fuzz/Cargo.toml` to extract `[[bin]] name = "..."`
-/// entries.  Returns the names in source order.  Tolerant of
+/// entries. Returns the names in source order. Tolerant of
 /// missing/malformed files (returns an empty list) — the test
 /// runner shouldn't error just because a fuzz manifest is bad.
 fn parse_cargo_fuzz_bins(cargo_toml: &Path) -> Vec<String> {
@@ -149,7 +154,7 @@ fn parse_cargo_fuzz_bins(cargo_toml: &Path) -> Vec<String> {
 
 /// Extract `[[bin]] name = "..."` from a Cargo.toml string.
 /// Pin-tested separately so fuzz discovery doesn't need a
-/// real-file fixture.  Hand-rolled minimal parser — pulling in
+/// real-file fixture. Hand-rolled minimal parser — pulling in
 /// the `toml` crate just for `[[bin]]` enumeration would bloat
 /// the CLI binary without adding value, since we only need the
 /// `name` field of each `[[bin]]` table.
@@ -182,7 +187,7 @@ fn parse_bin_entries_from_toml(text: &str) -> Vec<String> {
 }
 
 /// Snapshot the current set of crash artifacts under the
-/// target's artifacts directory.  Used to compute the diff after
+/// target's artifacts directory. Used to compute the diff after
 /// the fuzz run completes — only *newly created* files count as
 /// crashes, since a stale artifact from a previous run shouldn't
 /// fail the current invocation.
@@ -199,8 +204,8 @@ fn snapshot_artifacts(dir: &Path) -> BTreeSet<String> {
 }
 
 /// Run `cargo fuzz run <target> -- -max_total_time=<secs>` for a
-/// single target.  Returns a `FuzzOutcome` with status reflecting
-/// crash-artifact diff + cargo-fuzz exit status.  This is a
+/// single target. Returns a `FuzzOutcome` with status reflecting
+/// crash-artifact diff + cargo-fuzz exit status. This is a
 /// blocking operation — the caller is responsible for
 /// orchestrating concurrency (e.g., serial execution to avoid
 /// fighting over a single CPU).
@@ -259,9 +264,9 @@ fn truncate_stderr(stderr: &str) -> String {
     }
 }
 
-/// Top-level entry point for the test runner.  Discovers
+/// Top-level entry point for the test runner. Discovers
 /// targets, runs each one with the configured budget, returns a
-/// `FuzzReport` aggregating outcomes.  Caller decides whether
+/// `FuzzReport` aggregating outcomes. Caller decides whether
 /// any crash artifact aborts the test run.
 pub fn run(workspace_root: &Path, per_target_budget: Duration) -> FuzzReport {
     let mut report = FuzzReport::default();
@@ -450,7 +455,7 @@ name = "fuzz_demo_b"
         // We can't easily mock cargo_fuzz_available() inside one
         // process, but we can verify the FuzzReport shape: when
         // the helper returns false, the report carries a hint and
-        // no outcomes.  In CI with cargo-fuzz absent this is the
+        // no outcomes. In CI with cargo-fuzz absent this is the
         // realistic path — pin the public surface (`FuzzReport`
         // fields are accessible) so the orchestrator can branch
         // cleanly.

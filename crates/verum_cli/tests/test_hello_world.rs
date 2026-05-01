@@ -15,6 +15,7 @@
 // End-to-end test for a complete Hello World program
 // Tests parsing, type checking, compilation, and execution
 //
+
 // NOTE: Updated to use verum_compiler (the unified compiler) instead of
 // the old verum_cli::compiler module.
 

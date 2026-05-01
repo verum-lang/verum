@@ -3,10 +3,13 @@
 // =============================================================================
 // Layer: 9 (Agent Systems)
 //
+
 // LLM integration, inference optimizations, and intelligent agent frameworks.
 //
+
 // # Architecture
 //
+
 // - Tokenization: BPE, SentencePiece tokenizers
 // - KV Cache: Efficient attention key-value storage
 // - Speculative Decoding: Draft model acceleration
@@ -14,13 +17,16 @@
 // - Agent Framework: Tool use, ReAct, memory stores
 // - Inference Optimizations: Quantization, Flash Attention, PagedAttention
 //
+
 // # Performance
 //
+
 // - Flash Attention: O(n) memory instead of O(n²)
 // - PagedAttention: Up to 4x memory efficiency for serving
 // - Speculative Decoding: 2-3x speedup with 70-90% acceptance rate
 // - INT8/INT4 Quantization: 2-4x memory reduction
 //
+
 // Spec: docs/architecture/math-spec.md#45-48
 // =============================================================================
 
@@ -120,12 +126,14 @@ implement Tokenizer for SentencePieceTokenizer {
 
 // Attention Key-Value Store for autoregressive text generation
 //
+
 // ## What This Stores
 // In transformer models, each layer computes Key and Value projections.
 // During generation, we cache these to avoid recomputing for all previous tokens:
 // - Without cache: O(seq_len²) compute per new token
 // - With cache: O(seq_len) compute per new token
 //
+
 // ## Memory Layout
 // - key_cache[layer][batch, num_heads, seq_len, head_dim]
 // - value_cache[layer][batch, num_heads, seq_len, head_dim]
@@ -202,16 +210,19 @@ implement KVCache {
 
 // Memory-Efficient Paged Attention Store for serving multiple concurrent requests
 //
+
 // ## Why Paged?
 // Standard KVCache allocates contiguous memory per request, leading to:
 // - Fragmentation when requests have varying sequence lengths
 // - Memory waste from pre-allocation to max_seq_len
 //
+
 // PagedKVCache uses fixed-size blocks like OS virtual memory:
 // - Each block holds `block_size` tokens of KV data
 // - Blocks allocated on demand as sequence grows
 // - Multiple requests can share physical memory blocks
 //
+
 // ## Memory Savings
 // - Up to 4x memory efficiency for high-throughput serving
 // - Enables continuous batching without memory bubbles

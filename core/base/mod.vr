@@ -5,14 +5,17 @@
 // The foundational layer of the Verum standard library.
 // Dependencies: mem/ (native CBGR allocator), sys/ (platform layer)
 //
+
 // As of V-LLSI migration, this module no longer depends on verum_bootstrap FFI.
 // All memory operations use the native CBGR allocator (mem/allocator.vr).
 // =============================================================================
 
 // Core module - provides fundamental types and protocols.
 //
+
 // # Submodules
 //
+
 // - `ordering` - Ordering enum for comparisons
 // - `maybe` - Maybe<T> optional type
 // - `result` - Result<T, E> error handling
@@ -22,8 +25,10 @@
 // - `iterator` - Iterator protocol and adapters
 // - `panic` - Panic, assert, and control flow
 //
+
 // # Prelude
 //
+
 // The most commonly used items are re-exported at module level:
 // - Types: `Maybe`, `Result`, `Ordering`, `Heap`, `Shared`
 // - Constructors: `None`, `Some`, `Ok`, `Err`, `Less`, `Equal`, `Greater`

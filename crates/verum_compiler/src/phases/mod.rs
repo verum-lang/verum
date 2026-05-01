@@ -1,12 +1,16 @@
 //! Compilation Pipeline Phases
 //!
+
 //! This module implements all phases of the Verum compilation pipeline
 //! Multi-pass compilation phases: parsing, meta registry, macro expansion,
 //!
+
 //! ## VBC-First Pipeline (Target Architecture)
 //!
+
 //! ### Common Pipeline (Source → TypedAST)
 //!
+
 //! - **Phase 1**: Lexical Analysis & Parsing
 //! - **Phase 2**: Meta Registry & AST Registration
 //! - **Phase 3**: Macro Expansion & Literal Processing
@@ -14,29 +18,37 @@
 //! - **Phase 4**: Semantic Analysis (Type Inference, CBGR Tier Analysis)
 //! - **Phase 4b**: Context System Validation
 //!
+
 //! ### Backend Pipeline (TypedAST → Execution)
 //!
+
 //! - **Phase 5**: VBC Code Generation (TypedAST → VBC bytecode)
 //! - **Phase 6**: VBC Monomorphization (Generic specialization)
 //! - **Phase 7**: VBC Execution (Interpreter Tier 0 | AOT Tier 1)
 //! - **Phase 7.5**: Final Linking (for AOT)
 //!
+
 //! ## Legacy MIR Pipeline (Deprecated - for verification only)
 //!
+
 //! MIR infrastructure exists only for:
 //! - SMT-based verification
 //! - CBGR analysis
 //! - Advanced optimization passes
 //!
+
 //! **NOT** used in main compilation path.
 //!
+
 //! ## Key Features
 //!
+
 //! - VBC-first: All tiers share the same VBC intermediate representation
 //! - CBGR tier analysis determines reference safety levels
 //! - Context system requires explicit 'using' declarations
 //! - Persistent monomorphization cache for fast recompilation
 //!
+
 //! Multi-pass compilation pipeline: Parse → Meta Registry → Macro Expansion →
 //! Contract Verification → Semantic Analysis → HIR → MIR → Optimization → Codegen.
 //! VBC-first execution: Source → VBC → Interpreter (Tier 0) or LLVM AOT (Tier 1).
@@ -129,6 +141,7 @@ pub trait CompilationPhase: Send + Sync {
 
 /// Input for a compilation phase
 ///
+
 /// Note: Session reference is managed separately by the pipeline
 /// to avoid lifetime issues with Clone. Access to Session for span conversion
 /// should be provided via the compilation phase implementation.
@@ -141,15 +154,17 @@ pub struct PhaseInput {
     pub context: PhaseContext,
 }
 
-/// **Pipeline track** for a [`PhaseData`] payload.  Verum has two
+/// **Pipeline track** for a [`PhaseData`] payload. Verum has two
 /// parallel paths through the compilation pipeline:
 ///
-///   - **Compilation track** (TypedAST → VBC): the canonical
-///     execution path.  HIR / VBC are this track's IRs.
-///   - **Verification track** (TypedAST → MIR → SMT / CBGR): the
-///     sidecar IR path used for verification, optimization, and
-///     CBGR bounds elimination.  MIR / OptimizedMir live here.
+
+///  - **Compilation track** (TypedAST → VBC): the canonical
+///  execution path. HIR / VBC are this track's IRs.
+///  - **Verification track** (TypedAST → MIR → SMT / CBGR): the
+///  sidecar IR path used for verification, optimization, and
+///  CBGR bounds elimination. MIR / OptimizedMir live here.
 ///
+
 /// `PhaseData::pipeline_track()` classifies any phase data by its
 /// track so consumers (audit gates, diagnostics, dependency
 /// analysis) can route uniformly.
@@ -174,7 +189,7 @@ impl PipelineTrack {
     }
 }
 
-/// Payload-free **discriminator** for [`PhaseData`].  Surfaces the
+/// Payload-free **discriminator** for [`PhaseData`]. Surfaces the
 /// 7 variants as a single typed enum for audit gates and
 /// diagnostics that classify phase data by IR shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -209,7 +224,7 @@ impl PhaseDataKind {
         }
     }
 
-    /// Which pipeline track this kind belongs to.  See [`PipelineTrack`].
+    /// Which pipeline track this kind belongs to. See [`PipelineTrack`].
     pub fn track(self) -> PipelineTrack {
         match self {
             PhaseDataKind::SourceFiles
@@ -241,14 +256,17 @@ pub enum PhaseData {
 
     /// Mid-level IR (Phase 6) — verification-track sidecar.
     ///
+
     /// **NOT in the main TypedAST → VBC compilation path.** MIR is
     /// produced and consumed only by:
     ///
-    ///   - `phases::optimization` — optimization passes.
-    ///   - `phases::verification_phase` — SMT-based verification.
-    ///   - `passes::cbgr_integration` — CBGR bounds elimination.
+
+    ///  - `phases::optimization` — optimization passes.
+    ///  - `phases::verification_phase` — SMT-based verification.
+    ///  - `passes::cbgr_integration` — CBGR bounds elimination.
     ///
-    /// The compilation pipeline goes TypedAST → VBC directly.  See
+
+    /// The compilation pipeline goes TypedAST → VBC directly. See
     /// [`PipelineTrack`] for the architectural classification.
     Mir(List<mir_lowering::MirModule>),
 
@@ -258,6 +276,7 @@ pub enum PhaseData {
 
     /// VBC bytecode modules (VBC-first pipeline)
     ///
+
     /// This variant is used when compiling directly to VBC bytecode
     /// instead of going through MIR. All tier analysis happens before
     /// VBC generation, and the bytecode includes tier-aware instructions.
@@ -280,24 +299,24 @@ impl PhaseData {
         }
     }
 
-    /// Pipeline track this phase data belongs to.  Frontend (Source /
+    /// Pipeline track this phase data belongs to. Frontend (Source /
     /// AST), Compilation (HIR / VBC), or Verification (MIR /
-    /// OptimizedMir).  Routes the architectural separation between
+    /// OptimizedMir). Routes the architectural separation between
     /// the main compilation pipeline and the verification sidecar.
     pub fn track(&self) -> PipelineTrack {
         self.kind().track()
     }
 
     /// Whether this phase data lives on the main compilation path
-    /// (TypedAST → VBC).  False for MIR / OptimizedMir which are
+    /// (TypedAST → VBC). False for MIR / OptimizedMir which are
     /// verification-track sidecar IRs.
     pub fn is_compilation_track(&self) -> bool {
         matches!(self.track(), PipelineTrack::Compilation)
     }
 
     /// Whether this phase data lives on the verification track
-    /// (MIR / OptimizedMir for SMT / optimization / CBGR).  False
-    /// for the compilation track.  An audit assertion that an
+    /// (MIR / OptimizedMir for SMT / optimization / CBGR). False
+    /// for the compilation track. An audit assertion that an
     /// optimization pass receives only `Mir` / `OptimizedMir` data
     /// can call `assert!(input.data.is_verification_track())`.
     pub fn is_verification_track(&self) -> bool {
@@ -309,7 +328,7 @@ impl PhaseData {
         matches!(self.track(), PipelineTrack::Frontend)
     }
 
-    /// Whether this is one of the MIR-based variants.  Convenience
+    /// Whether this is one of the MIR-based variants. Convenience
     /// for verification-track guards.
     pub fn is_mir_based(&self) -> bool {
         matches!(self.kind(), PhaseDataKind::Mir | PhaseDataKind::OptimizedMir)
@@ -318,6 +337,7 @@ impl PhaseData {
 
 /// VBC module data with tier analysis results.
 ///
+
 /// Produced by the VBC codegen phase after tier analysis.
 #[derive(Debug, Clone)]
 pub struct VbcModuleData {
@@ -356,9 +376,11 @@ pub struct VerificationResults {
 
 /// High-level intermediate representation (HIR) module.
 ///
+
 /// HIR is the typed AST representation produced by Phase 4 (Semantic Analysis).
 /// It contains all type information, resolved names, and validated contracts.
 ///
+
 /// Phase 4: Semantic analysis with bidirectional type checking, refinement
 /// subsumption (syntactic + SMT), reference validation, context resolution.
 #[derive(Debug, Clone)]
@@ -607,10 +629,12 @@ pub enum LanguageProfile {
 
 /// Execution tier for Verum compilation.
 ///
+
 /// Verum uses a two-tier model:
 /// - Interpreter: VBC bytecode execution for development/debugging
 /// - Aot: Native code via LLVM for production
 ///
+
 /// Note: JIT infrastructure (in verum_codegen/src/mlir/jit/) is preserved
 /// as an internal implementation detail of the AOT pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -720,6 +744,7 @@ impl PhaseMetrics {
 
     /// Convert to PhasePerformanceMetrics for compilation profiling
     ///
+
     /// This is used to integrate phase metrics into the overall compilation
     /// profiling report. Percentages will be calculated by the report.
     pub fn to_performance_metrics(&self) -> crate::compilation_metrics::PhasePerformanceMetrics {
@@ -744,31 +769,41 @@ impl PhaseMetrics {
 
 /// Convert a verum_ast::Span to a verum_diagnostics::Span (LineColSpan).
 ///
+
 /// This function provides proper span conversion using the Session's source file
 /// cache. It performs efficient O(log n) lookup via binary search on line starts.
 ///
+
 /// # Performance
 ///
+
 /// - Conversion time: < 1ms (typically ~100ns)
 /// - Binary search on cached line start positions
 /// - Graceful fallback for missing source files or synthetic spans
 ///
+
 /// # Arguments
 ///
+
 /// * `ast_span` - The byte-offset span from AST
 /// * `session_opt` - Optional reference to the compilation session for source lookup
 ///
+
 /// # Returns
 ///
+
 /// A LineColSpan with 1-indexed line/column numbers for diagnostic display.
 /// Returns placeholder if session is None or source file not found.
 ///
+
 /// # Examples
 ///
+
 /// ```ignore
 /// use crate::session::Session;
 /// use verum_ast::Span;
 ///
+
 /// let session = Session::new(options);
 /// let file_id = session.load_file(Path::new("test.vr"))?;
 /// let ast_span = Span::new(0, 10, file_id);
@@ -791,15 +826,19 @@ pub fn ast_span_to_diagnostic_span(
 
 /// Convert a TypeError to a Diagnostic with proper source location information.
 ///
+
 /// This function uses the session to convert AST byte-offset spans to
 /// line/column diagnostic spans, enabling file:line:column error reporting.
 ///
+
 /// # Examples
 ///
+
 /// ```ignore
 /// use crate::session::Session;
 /// use verum_types::TypeError;
 ///
+
 /// let session = Session::new(options);
 /// let type_error: TypeError = /* ... */;
 /// let diagnostic = type_error_to_diagnostic(&type_error, Some(&session));

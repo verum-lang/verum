@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md PRAGMA incremental_vacuum
 //
+
 // Releases up to N pages from the freelist back to the OS without
 // rebuilding the file. Only meaningful when `auto_vacuum=INCREMENTAL`
 // is the database mode (otherwise the freelist isn't maintained).
 //
+
 // `IncrementalSession` is the state carrier for one trim operation.
 // Caller seeds it with the freelist (`seed_freelist`), then calls
 // `release_next()` until the requested page count is met OR the

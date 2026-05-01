@@ -1,7 +1,8 @@
 // FTS5 offsets() result builder.
 //
+
 // Output format (per match): "<col> <term> <byte-off> <byte-size>".
-// Multiple matches are space-joined.  Empty matches return "".
+// Multiple matches are space-joined. Empty matches return "".
 
 module core.database.sqlite.native.fts5_offsets_fn_api.aux;
 

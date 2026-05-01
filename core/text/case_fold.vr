@@ -6,19 +6,23 @@ module core.text.case_fold;
 // Layer: 2 (text)
 // Spec: internal/specs/sqlite-native.md §3.3 + §9.5
 //
+
 // SQLite's built-in `NOCASE` collation is documented as ASCII-only:
 //
-//     The built-in NOCASE collation differs from C's strcasecmp() only
-//     in that it uses the 26 upper-case characters of ASCII for folding.
-//     Case folding is NOT applied to Unicode characters outside of the
-//     ASCII range.  ICU-backed full Unicode folding is opt-in via the
-//     ICU extension cog.
+
+//  The built-in NOCASE collation differs from C's strcasecmp() only
+//  in that it uses the 26 upper-case characters of ASCII for folding.
+//  Case folding is NOT applied to Unicode characters outside of the
+//  ASCII range. ICU-backed full Unicode folding is opt-in via the
+//  ICU extension cog.
 //
+
 // This module exposes the ASCII-subset folding used by that collation,
 // plus comparison helpers for use outside collation (e.g., PRAGMA
 // `case_sensitive_like`, SQL functions `lower`/`upper` when `LIKE` is
 // configured to match ASCII-case-insensitively).
 //
+
 // v1 policy: ASCII-only, documented limitation; v2 plans to pull full
 // Unicode case-fold tables (CaseFolding.txt, status=C+S+T) via
 // `cog.verum.collation-icu`.
@@ -67,6 +71,7 @@ public fn fold_text_ascii(s: &Text) -> Text {
 /// lowercasing. Used directly as the comparator for SQLite's NOCASE
 /// collation. Matches C `strcasecmp` semantics on the ASCII subset.
 ///
+
 /// Byte-by-byte comparison with on-the-fly folding — zero
 /// allocation. The previous implementation called
 /// `to_ascii_lowercase()` on both inputs before comparing, paying

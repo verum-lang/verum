@@ -4,14 +4,17 @@
 // Version: 0.1.0
 // =============================================================================
 //
+
 // # Attributes
 //
+
 // Attributes in Verum use the `@` prefix and provide metadata for:
 // - Derive macros: `@derive(Clone, Debug)`
 // - Conditional compilation: `@cfg(target_os = "linux")`
 // - Compiler hints: `@inline`, `@cold`, `@repr(C)`
 // - Custom attributes: `@my_attribute(arg1, arg2)`
 //
+
 // =============================================================================
 
 module meta.attribute;
@@ -26,6 +29,7 @@ mount meta.token.{TokenStream};
 
 /// Attribute representation
 ///
+
 /// Attributes can appear on:
 /// - Type definitions
 /// - Functions
@@ -35,13 +39,15 @@ mount meta.token.{TokenStream};
 /// - Modules
 /// - Items
 ///
+
 /// ## Syntax Forms
 ///
+
 /// ```verum
-/// @name                           // Simple attribute
-/// @name(args)                     // With arguments
-/// @name = value                   // With value
-/// @name(key = value, ...)         // Named arguments
+/// @name // Simple attribute
+/// @name(args) // With arguments
+/// @name = value // With value
+/// @name(key = value, ...) // Named arguments
 /// ```
 public type Attribute is {
     /// Attribute name (without @)
@@ -161,6 +167,7 @@ implement Attribute {
 
     /// Get single string value
     ///
+
     /// For `@attr("value")` or `@attr = "value"`
     public fn as_string(&self) -> Maybe<Text> {
         self.first_arg().and_then(|a| a.as_string())
@@ -178,6 +185,7 @@ implement Attribute {
 
     /// Get list of identifiers
     ///
+
     /// For `@attr(A, B, C)`
     public fn as_ident_list(&self) -> List<Text> {
         self.args.iter()
@@ -187,6 +195,7 @@ implement Attribute {
 
     /// Parse attribute as key-value pairs
     ///
+
     /// For `@attr(key1 = "value1", key2 = 42)`
     public fn as_key_values(&self) -> List<(Text, MetaAttributeValue)> {
         self.args.iter()
@@ -413,6 +422,7 @@ implement MetaAttributeValue {
 
 /// Conditional compilation predicate
 ///
+
 /// Represents the condition in `@cfg(...)` attributes.
 @repr(UInt8)
 public type CfgPredicate is

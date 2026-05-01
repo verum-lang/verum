@@ -73,17 +73,17 @@ impl CogManager {
         // Persistence wiring — closes the in-memory-only audit gap
         // documented in `enterprise.rs:213`. Three operations on
         // startup:
-        //   1. `load_audit_log(path)` — restore the on-disk audit
-        //      history so the in-memory log carries entries from
-        //      prior CogManager invocations.
-        //   2. `evict_older_than(retention_days)` — rotate stale
-        //      entries past the configured retention window.
-        //      `retention_days = 0` is a sentinel meaning "never
-        //      evict" (preserves entries indefinitely).
-        //   3. The atomic-rename `save_audit_log` (also called by
-        //      every state-changing operation in this module) keeps
-        //      the on-disk file in sync with in-memory state across
-        //      crashes and concurrent invocations.
+        //  1. `load_audit_log(path)` — restore the on-disk audit
+        //  history so the in-memory log carries entries from
+        //  prior CogManager invocations.
+        //  2. `evict_older_than(retention_days)` — rotate stale
+        //  entries past the configured retention window.
+        //  `retention_days = 0` is a sentinel meaning "never
+        //  evict" (preserves entries indefinitely).
+        //  3. The atomic-rename `save_audit_log` (also called by
+        //  every state-changing operation in this module) keeps
+        //  the on-disk file in sync with in-memory state across
+        //  crashes and concurrent invocations.
         if let Some(ref log_file) = audit_log_file {
             // Best-effort load — a corrupt audit file shouldn't
             // block the cog manager from starting up. Surface the
@@ -124,6 +124,7 @@ impl CogManager {
     /// install/update/remove/publish/yank operation so a crash
     /// doesn't lose audit history.
     ///
+
     /// Failures are logged via `tracing::warn!` — they don't
     /// propagate as `CliError` because audit persistence is a
     /// best-effort cross-cut, not a load-bearing primary
@@ -728,6 +729,7 @@ impl CogManager {
 
     /// Check git status for uncommitted changes
     ///
+
     /// Returns an error if there are uncommitted changes in the working directory.
     /// This prevents publishing cogs with local modifications.
     fn check_git_status(&self) -> Result<()> {

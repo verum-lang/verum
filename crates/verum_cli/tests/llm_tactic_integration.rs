@@ -358,8 +358,8 @@ fn task_77_kernel_recheck_is_unbypassable() {
     ];
     for raw in &bogus_sequences {
         // Skip the "intro foo bar..." case as the V0 checker accepts
-        // it (head keyword `intro` is canonical).  The real kernel
-        // (V1) will reject the bogus argument list; for V0 we only
+        // it (head keyword `intro` is canonical). The real kernel
+        // will reject the bogus argument list; for V0 we only
         // pin the unambiguous-garbage cases.
         if raw.starts_with("intro ") {
             continue;

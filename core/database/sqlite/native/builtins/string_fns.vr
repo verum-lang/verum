@@ -4,23 +4,26 @@
 // Layer: 4 (callable from interpreter)
 // Spec: sqlite-native.md §15.1 (String section)
 //
+
 // Pure-Verum reference implementations. Every function takes and
 // returns `Register` (the VDBE value tag), so it can be wired
 // straight into a future catalogue-dispatch loop in the interpreter.
 //
+
 // SQLite semantics notes:
 //
-//   * NULL propagation — almost every function returns NULL on a
-//     NULL operand (the exceptions are CONCAT_WS, COALESCE, IFNULL,
-//     NULLIF, IIF, COUNT — none of which live in this file).
-//   * String length is **byte length**, not codepoint length, unless
-//     the function name carries `_chars` (we don't expose that yet).
-//   * SUBSTR is 1-indexed; index 0 is treated as 1; negative indices
-//     count from the end (where -1 is the last byte).
-//   * LIKE pattern: '%' = any sequence, '_' = any one byte. ESCAPE
-//     supported via the optional 3rd argument (KLike arity 2..3).
-//   * GLOB pattern: '*' = any sequence, '?' = any one byte, '[abc]'
-//     character classes, '[^abc]' negation. Case-sensitive.
+
+//  * NULL propagation — almost every function returns NULL on a
+//  NULL operand (the exceptions are CONCAT_WS, COALESCE, IFNULL,
+//  NULLIF, IIF, COUNT — none of which live in this file).
+//  * String length is **byte length**, not codepoint length, unless
+//  the function name carries `_chars` (we don't expose that yet).
+//  * SUBSTR is 1-indexed; index 0 is treated as 1; negative indices
+//  count from the end (where -1 is the last byte).
+//  * LIKE pattern: '%' = any sequence, '_' = any one byte. ESCAPE
+//  supported via the optional 3rd argument (KLike arity 2..3).
+//  * GLOB pattern: '*' = any sequence, '?' = any one byte, '[abc]'
+//  character classes, '[^abc]' negation. Case-sensitive.
 // =============================================================================
 
 module core.database.sqlite.native.builtins.string_fns;
@@ -174,8 +177,8 @@ public fn rtrim(v: &Register) -> Register {
 }
 
 /// 2-arg `TRIM(s, chars)` — strip any byte in `chars` (a SET, not a
-/// substring) from both ends.  Returns `NULL` when either argument
-/// is `NULL` or non-text.  Empty `chars` is a no-op.
+/// substring) from both ends. Returns `NULL` when either argument
+/// is `NULL` or non-text. Empty `chars` is a no-op.
 public fn trim2(v: &Register, chars: &Register) -> Register {
     match v {
         RText(s) => match chars {
@@ -537,6 +540,7 @@ fn int_to_text(x: Int64) -> Text {
 // QUOTE(X) — SQL-quoted literal representation
 // -----------------------------------------------------------------------------
 //
+
 // SQLite spec: QUOTE produces a string suitable for embedding back
 // into SQL. For text, single-quote with internal '' escaping; for
 // blob, the X'...' form; for NULL, the bareword "NULL".
@@ -588,16 +592,17 @@ public fn sql_quote(v: &Register) -> Register {
 /// Float64 → Text using the runtime's `float_to_text` intrinsic
 /// (which uses Ryu / shortest-round-trip formatting under the hood).
 ///
+
 /// SQLite's behaviour for special values:
-///   * NaN  → empty text (SQLite stores NULL for NaN; the caller
-///            here only sees a Float64 so we emit "NaN" and let
-///            higher layers handle the conversion to NULL).
-///   * +Inf → "Inf"
-///   * -Inf → "-Inf"
-///   * Otherwise — shortest decimal that round-trips back to the
-///     same Float64.  This matches SQLite's
-///     `sqlite3_value_text(real)` which prints with
-///     `%!.20g` precision (shortest-round-trip in practice).
+///  * NaN → empty text (SQLite stores NULL for NaN; the caller
+///  here only sees a Float64 so we emit "NaN" and let
+///  higher layers handle the conversion to NULL).
+///  * +Inf → "Inf"
+///  * -Inf → "-Inf"
+///  * Otherwise — shortest decimal that round-trips back to the
+///  same Float64. This matches SQLite's
+///  `sqlite3_value_text(real)` which prints with
+///  `%!.20g` precision (shortest-round-trip in practice).
 fn real_to_text(x: Float64) -> Text {
     float_to_text(x)
 }

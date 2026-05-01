@@ -14,6 +14,7 @@
 )]
 // Comprehensive test suite for tensor shape verification
 //
+
 // Tests cover:
 // - Static shape checking
 // - Dynamic shape inference with meta parameters
@@ -23,6 +24,7 @@
 // - Concatenation
 // - Error cases
 //
+
 // Tensor Shape Verification:
 // Uses meta parameters for compile-time dimension tracking and SMT-based
 // verification for shape compatibility proofs. Key operations:

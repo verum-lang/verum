@@ -1,5 +1,6 @@
 //! Performance benchmarks for points-to analysis
 //!
+
 //! Validates that Andersen-style points-to analysis meets performance targets:
 //! - O(n³) worst-case complexity
 //! - O(n) to O(n²) typical complexity

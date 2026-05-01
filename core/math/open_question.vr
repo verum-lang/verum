@@ -2,21 +2,26 @@
 // MSFS open-question registry — typed closure-status carrier
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §12 — Open Questions Q1–Q5.
 //
+
 // MSFS §12 explicitly registers 5 open questions; 4 of them (Q1, Q3,
 // Q4, Q5) are closed in the Diakrisis extension corpus, leaving Q2 as
 // the standing open question. Pre-M0.H this state was encoded only as
 // docstring text in `theorems/msfs/12_consequences/diagnostics_and_open_q.vr`
 // — `verum audit` had no structured way to enumerate them.
 //
+
 // This module introduces:
 //
-//   • `OpenQuestionStatus` — sum type tagging closed-in-X / open / closed-by-LP.
-//   • `OpenQuestion` carrier protocol exposing the typed closure status,
-//     question identifier, and (when closed) the closing-reference.
-//   • `OPEN`-marker witness functions for each closure variant.
+
+//  • `OpenQuestionStatus` — sum type tagging closed-in-X / open / closed-by-LP.
+//  • `OpenQuestion` carrier protocol exposing the typed closure status,
+//  question identifier, and (when closed) the closing-reference.
+//  • `OPEN`-marker witness functions for each closure variant.
 //
+
 // Downstream `theorems/msfs/12_consequences/` rewrites each Q-axiom
 // from `() -> Bool ensures true` to `(q: &OpenQuestion) -> Bool requires
 // q.identifier().eq("Q<N>") ensures q.is_closed() == <expected>`. A
@@ -33,13 +38,14 @@ module core.math.open_question;
 /// Status of an MSFS open question. Each variant tags how the question
 /// stands at the canonical-primitive layer:
 ///
-///   * `OqClosed { closing_reference }` — closed by an external corpus
-///     theorem (e.g., "Diakrisis 103.T-106.T" closes Q1).
-///   * `OqOpen` — genuinely open, no known closure.
-///   * `OqClosedByLP { lp_witness }` — closed *conditionally* by a
-///     locally-presentable model construction (V3 #181-blocked at the
-///     kernel level pending τ-witness — recorded as a structurally
-///     softer closure state).
+
+///  * `OqClosed { closing_reference }` — closed by an external corpus
+///  theorem (e.g., "Diakrisis 103.T-106.T" closes Q1).
+///  * `OqOpen` — genuinely open, no known closure.
+///  * `OqClosedByLP { lp_witness }` — closed *conditionally* by a
+///  locally-presentable model construction (V3 #181-blocked at the
+///  kernel level pending τ-witness — recorded as a structurally
+///  softer closure state).
 public type OpenQuestionStatus is
     | OqClosed { closing_reference: Text }
     | OqOpen
@@ -101,7 +107,7 @@ public pure fn open_question_is_open_status(s: OpenQuestionStatus) -> Bool {
 /// **MSFS open-question soundness invariant (@theorem).** A status
 /// is either-closed-or-open, exhaustively. The proof body inspects
 /// the sum-type's three variants and discharges each via the pure
-/// projection's match-arm definition. Pre-V3 kernel match-exhaustiveness
+/// projection's match-arm definition. Previously, kernel match-exhaustiveness
 /// reasoning is currently axiom-anchored — the @theorem cites the
 /// dichotomy-anchor axiom rather than performing kernel-level case-
 /// split (which T0.1 / V3 will mechanise).
@@ -129,6 +135,7 @@ public axiom open_question_status_dichotomy_anchor(s: OpenQuestionStatus) -> Boo
 // Concrete OpenQuestion instances — MSFS Q1-Q5 reference registry (M3.C)
 // =============================================================================
 //
+
 // Five typed witnesses corresponding to MSFS preprint §12 Q1-Q5
 // open questions. Q1, Q3, Q4, Q5 are closed in the Diakrisis
 // extension corpus with explicit closing-reference text; Q2 remains

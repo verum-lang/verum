@@ -1,13 +1,16 @@
 //! Module System Integration Tests
 //!
+
 //! Tests the integration of verum_modules ModuleLoader with the compiler pipeline.
 //!
+
 //! Test Coverage:
 //! - Two-file project compilation
 //! - Module discovery from filesystem
 //! - Import resolution across files
 //! - Directory-based modules (mod.vr)
 //!
+
 //! Module system: hierarchical namespaces mapped to filesystem. Rules:
 //! - lib.vr or main.vr is the crate root
 //! - foo.vr defines module foo; foo/bar.vr defines module foo.bar

@@ -15,11 +15,14 @@
 )]
 // SMT Integration Tests for Refinement Type Subsumption
 //
+
 // Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1 - Refinement Types
 //
+
 // These tests verify that the Z3 SMT solver is correctly integrated
 // and can verify refinement type subsumption via implication checking.
 //
+
 // ## Test Coverage
 // - Basic comparison subsumption (x > 10 => x > 0)
 // - Invalid subsumption (x > 0 NOT=> x > 10)

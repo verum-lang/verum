@@ -1,11 +1,14 @@
 #![allow(unexpected_cfgs)]
 //! Verum Language Server Protocol (LSP) Library
 //!
+
 //! This crate provides a Language Server Protocol implementation for the Verum language.
 //! It can be used as a library or run as a standalone server binary.
 //!
+
 //! # Features
 //!
+
 //! - **Diagnostics**: Real-time syntax and type error reporting
 //! - **Completion**: Context-aware code completion
 //! - **Hover**: Type information and documentation
@@ -13,19 +16,23 @@
 //! - **Refactoring**: Rename symbols, extract functions
 //! - **Formatting**: Code formatting according to style guidelines
 //!
+
 //! # Example
 //!
+
 //! ```rust,no_run
 //! use verum_lsp::backend::Backend;
 //! use tower_lsp::{LspService, Server};
 //!
+
 //! #[tokio::main]
 //! async fn main() {
-//!     let stdin = tokio::io::stdin();
-//!     let stdout = tokio::io::stdout();
+//!  let stdin = tokio::io::stdin();
+//!  let stdout = tokio::io::stdout();
 //!
-//!     let (service, socket) = LspService::new(|client| Backend::new(client));
-//!     Server::new(stdin, stdout, socket).serve(service).await;
+
+//!  let (service, socket) = LspService::new(|client| Backend::new(client));
+//!  Server::new(stdin, stdout, socket).serve(service).await;
 //! }
 //! ```
 

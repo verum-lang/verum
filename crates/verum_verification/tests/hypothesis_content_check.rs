@@ -2,10 +2,12 @@
 //! hypothesis at `h{id}` actually has the claimed proposition, not
 //! just that the user-supplied `formula` happens to match `expected`.
 //!
+
 //! Pre-fix the validator checked only:
 //! 1. `formula == expected` (user-provided formula matches the claim)
 //! 2. Hypothesis name `h{id}` exists in scope
 //!
+
 //! It DID NOT check that `h{id}` carries `formula` as its actual
 //! content. So a hypothesis `h0 : P` could be re-labeled by the user
 //! as `Hypothesis { id: 0, formula: Q }` whenever `Q == expected`

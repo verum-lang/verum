@@ -3,6 +3,7 @@
 // =============================================================================
 // Layer: 3 (Analysis)
 //
+
 // Provides numerical methods for calculus and analysis:
 // - Numerical differentiation (finite differences, gradients, Jacobians)
 // - Numerical integration (Newton-Cotes, Gaussian quadrature, adaptive)
@@ -10,11 +11,14 @@
 // - Root finding (bisection, Newton-Raphson, secant)
 // - Optimization (gradient descent, Newton's method)
 //
+
 // # Design Philosophy
 //
+
 // Functions accept closures for the target function, allowing flexibility
 // while maintaining type safety through protocols.
 //
+
 // Spec: docs/architecture/math-spec.md Section 10-12
 // =============================================================================
 

@@ -15,6 +15,7 @@
 )]
 // Comprehensive tests for Verum v6.0-BALANCED specification compliance.
 //
+
 // Tests keyword classification (~41 keywords: 3 reserved + contextual),
 // literal parsing (numeric, text, interpolated, tagged, contract, hex color),
 // operator precedence, and delimiter handling per the Verum lexical grammar.

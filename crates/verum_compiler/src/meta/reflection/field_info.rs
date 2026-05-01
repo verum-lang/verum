@@ -1,5 +1,6 @@
 //! Field information for compile-time reflection
 //!
+
 //! Provides detailed field metadata for struct types, matching core/meta/reflection.vr FieldInfo.
 
 use verum_ast::{ty::Type, MetaValue};
@@ -9,6 +10,7 @@ use super::type_kind::{TypeKind, Visibility};
 
 /// Rich field information for compile-time reflection
 ///
+
 /// Used by `fields_of` to provide detailed field metadata.
 /// Matches: core/meta/reflection.vr FieldInfo
 #[derive(Debug, Clone, PartialEq)]
@@ -118,6 +120,7 @@ impl FieldInfo {
 
 /// Information about a field's memory layout
 ///
+
 /// Matches: core/meta/reflection.vr FieldOffset
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldOffset {

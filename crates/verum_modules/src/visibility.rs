@@ -1,5 +1,6 @@
 //! Visibility checking for module items.
 //!
+
 //! Implements the five-level visibility system:
 //! - Private (default): accessible only within the current module
 //! - Public: accessible from any module in any crate
@@ -7,6 +8,7 @@
 //! - public(super): accessible only to the immediate parent module
 //! - public(in path): accessible within the specified module subtree
 //!
+
 //! Visibility is checked after name resolution. The algorithm traverses
 //! the module hierarchy to determine access based on the modifier.
 
@@ -35,17 +37,19 @@ impl VisibilityChecker {
 
     /// Check if an item is visible from another module.
     ///
+
     /// Implements the visibility algorithm from Section 5.2.8 of the spec:
     ///
+
     /// ```text
     /// fn is_visible(item: Item, from_module: Module) -> bool {
-    ///     match item.visibility {
-    ///         Private => from_module == item.module,
-    ///         Public => true,
-    ///         PublicCrate => same_crate(item.module, from_module),
-    ///         PublicSuper => from_module.is_parent_of(item.module),
-    ///         PublicIn(path) => from_module.is_descendant_of(path) || from_module == path,
-    ///     }
+    ///  match item.visibility {
+    ///  Private => from_module == item.module,
+    ///  Public => true,
+    ///  PublicCrate => same_crate(item.module, from_module),
+    ///  PublicSuper => from_module.is_parent_of(item.module),
+    ///  PublicIn(path) => from_module.is_descendant_of(path) || from_module == path,
+    ///  }
     /// }
     /// ```
     pub fn is_visible(
@@ -69,6 +73,7 @@ impl VisibilityChecker {
                 // public(super): visible ONLY to the immediate parent module.
                 // "Parent-public visibility means visible to parent module"
                 //
+
                 // This check ensures from_module is the IMMEDIATE parent of item_module,
                 // NOT any ancestor. For example:
                 // - item in `database.connection` with public(super) is visible ONLY from `database`

@@ -1,5 +1,6 @@
 //! Pretty-printing and rendering of diagnostics with colors and source context.
 //!
+
 //! This module provides beautiful, Rust-like error rendering with:
 //! - Color-coded output
 //! - Source code snippets with line numbers
@@ -473,6 +474,7 @@ impl Renderer {
 
     /// Render the gutter (line numbers and decorations).
     ///
+
     /// Honours `config.show_line_numbers`: when `false`, the
     /// line-number column is replaced with a single space so the
     /// pipe alignment stays consistent. Useful for terminals
@@ -883,7 +885,7 @@ mod tests {
         let renderer = Renderer::new(cfg);
         let mut output = Text::new();
         renderer.render_gutter(&mut output, 4, Some(42), GutterStyle::Line);
-        // Width-4 padding instead of "  42" → four spaces
+        // Width-4 padding instead of " 42" → four spaces
         // followed by " │ ".
         assert_eq!(output.as_str(), "     │ ");
 

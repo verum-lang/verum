@@ -5,48 +5,59 @@
 // Dependencies: core, core.collections.map
 // =============================================================================
 //
+
 // Byte-keyed trie — prefix tree for exact-match, prefix-match,
 // and longest-match lookups. Used by:
 //
-//   * URL routers (path dispatch: `/users/:id` under an exact-
-//     segment tree).
-//   * DNS suffix matching (`*.example.com`).
-//   * IP-address longest-prefix match (FIB-style).
-//   * Autocomplete / typeahead search.
-//   * CLI subcommand dispatch.
-//   * Dictionary / spell-check lookups.
+
+//  * URL routers (path dispatch: `/users/:id` under an exact-
+//  segment tree).
+//  * DNS suffix matching (`*.example.com`).
+//  * IP-address longest-prefix match (FIB-style).
+//  * Autocomplete / typeahead search.
+//  * CLI subcommand dispatch.
+//  * Dictionary / spell-check lookups.
 //
+
 // Keys are byte slices so the trie works equally well for ASCII
 // URL paths, UTF-8 text, and arbitrary binary data.
 //
+
 // # API
 //
+
 // ```
 // let mut t: Trie<UserId> = Trie.new();
 // t.insert(b"/users/alice", user_a);
-// t.insert(b"/users/bob",   user_b);
+// t.insert(b"/users/bob", user_b);
 //
+
 // // Exact match.
 // match t.get(b"/users/alice") { Some(u) => ..., None => ... }
 //
+
 // // Longest prefix — useful for wildcard dispatch.
 // match t.longest_prefix(b"/users/alice/profile") {
-//     Some((matched_prefix_bytes, user)) => ...,
-//     None => ...,
+//  Some((matched_prefix_bytes, user)) => ...,
+//  None => ...,
 // }
 //
+
 // // Enumerate everything under a prefix.
 // let hits: List<(List<Byte>, UserId)> = t.entries_with_prefix(b"/users/");
 // ```
 //
+
 // # Internals
 //
+
 // Children keyed by `Map<Byte, Box>` — simple, O(1) per-level
 // lookup with ~16 B per branch, works at any character-set size.
 // A follow-up "radix" variant that collapses single-child chains
 // will cut the memory footprint further for sparse inputs
 // (DNS suffix / URL-path workloads).
 //
+
 // =============================================================================
 
 module core.collections.trie;
@@ -147,6 +158,7 @@ implement<V: Clone> Trie<V> {
     /// Longest prefix of `key` that exists as a stored entry.
     /// Returns the matched prefix bytes + its stored value.
     ///
+
     /// Canonical use case: IP FIB / URL-router default-route
     /// dispatch.
     public fn longest_prefix(&self, key: &[Byte]) -> Maybe<(List<Byte>, V)> {

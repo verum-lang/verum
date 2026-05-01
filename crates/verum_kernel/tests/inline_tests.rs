@@ -477,6 +477,7 @@ fn universe_inhabits_successor() {
 
 /// Polymorphic identity: `λ (A : Type) (x : A). x : (A : Type) → A → A`.
 ///
+
 /// This is the canonical smoke test for Π-introduction + App-elim
 /// with capture-avoiding substitution. `infer` must return the
 /// exact Π-type (not a shape-head abstraction) so App can destructure.
@@ -508,7 +509,7 @@ fn polymorphic_identity_types_correctly() {
     ));
 }
 
-/// `(λ (x : Unit). x) tt : Unit`  — App + beta-style substitution.
+/// `(λ (x : Unit). x) tt : Unit` — App + beta-style substitution.
 #[test]
 fn application_of_identity_substitutes_argument() {
     let ax = AxiomRegistry::new();
@@ -583,7 +584,7 @@ fn application_with_type_mismatch_rejects() {
             citation: Text::from("unit-introduction"),
         },
     };
-    // (λ (x : Nat). x) tt  — tt is Unit, not Nat → must error.
+    // (λ (x : Nat). x) tt — tt is Unit, not Nat → must error.
     let applied = CoreTerm::App(Heap::new(id_nat), Heap::new(tt));
     let err = infer(&Context::new(), &applied, &reg).unwrap_err();
     assert!(matches!(err, KernelError::TypeMismatch { .. }));
@@ -683,12 +684,14 @@ fn verify_full_rejects_mismatched_type() {
 
 /// M-VVA Sub-2.3 (definitional_eq lifting, 2026-04-28).
 ///
+
 /// Pin the new behaviour: `verify_full` accepts a term whose inferred
 /// type is β-equivalent (but not structurally identical) to the
 /// expected type. Pre-fix this would have been rejected by
 /// `structural_eq`; post-fix the kernel's β-/ι-/δ-aware
 /// `definitional_eq_with_axioms` accepts the conversion.
 ///
+
 /// Construction: an identity lambda over Unit → Unit. We compare
 /// against an expected Π-type whose codomain is `(λT. T) Unit` —
 /// a β-redex that normalises to `Unit` but is NOT structurally equal
@@ -988,6 +991,7 @@ fn glue_rejects_non_universe_carrier() {
 
 /// `elim e motive cases : motive e` — shape-level Elim rule.
 ///
+
 /// Elim now requires motive's TYPE be a Π and scrutinee's type to match the Π's
 /// domain. Result remains the syntactic `App(motive, scrutinee)`
 /// (β-reduction is downstream's job; returning the codomain would
@@ -1445,7 +1449,7 @@ fn b222_strict_loader_admits_clean_axiom() {
 
 #[test]
 fn b222_strict_loader_report_has_v8_buckets() {
-    // Default LoadAxiomsReport must expose the new 
+    // Default LoadAxiomsReport must expose the new
     // buckets — even when empty.
     let report = LoadAxiomsReport::default();
     assert!(report.subsingleton_violations.is_empty());
@@ -1579,7 +1583,7 @@ fn cubical_hcomp_id_when_empty_system_reduces_to_base() {
 #[test]
 fn cubical_hcomp_id_when_phi_top_with_lambda_walls_applies_to_i1() {
     // catalogue rule `hcomp-id-when-φ-equals-1`:
-    // `hcomp {φ = ⊤} u a ↪ u i1 1=1`.  When walls is a lambda we
+    // `hcomp {φ = ⊤} u a ↪ u i1 1=1`. When walls is a lambda we
     // β-reduce on the spot.
     let walls = CoreTerm::Lam {
         binder: Text::from("i"),
@@ -1694,7 +1698,7 @@ fn cubical_glue_on_false_face_reduces_to_carrier() {
 #[test]
 fn cubical_glue_on_true_face_reduces_to_fiber() {
     // catalogue rule `glue-on-true-face`:
-    // `Glue A {⊤} T e ↪ T 1=1`.  T is neutral (Var), so we
+    // `Glue A {⊤} T e ↪ T 1=1`. T is neutral (Var), so we
     // expect the fibre returned as-is.
     let g = CoreTerm::Glue {
         carrier: Heap::new(var("A")),

@@ -1,5 +1,6 @@
 //! K-Coord-Cite kernel-rule integration tests ().
 //!
+
 //! Per item 2: a theorem at coordinate (Fw, ν, τ)
 //! may cite an axiom at coordinate (Fw', ν', τ') only when
 //! ν' ≤ ν (lex on OrdinalDepth). Higher-tier citations are

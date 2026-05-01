@@ -14,12 +14,13 @@
 )]
 //! Integration tests for VBC -> LLVM IR code generation (CPU path).
 //!
+
 //! These tests verify the VBC -> LLVM lowering pipeline:
-//!   1. Basic LLVM IR emission
-//!   2. Type codegen (Int, Float, Bool, Text, etc.)
-//!   3. Control flow codegen (if/match/loop)
-//!   4. Function codegen (signatures, closures, generics)
-//!   5. CBGR reference codegen (ThinRef/FatRef)
+//!  1. Basic LLVM IR emission
+//!  2. Type codegen (Int, Float, Bool, Text, etc.)
+//!  3. Control flow codegen (if/match/loop)
+//!  4. Function codegen (signatures, closures, generics)
+//!  5. CBGR reference codegen (ThinRef/FatRef)
 
 use verum_codegen::llvm::{
     VbcToLlvmLowering, LoweringConfig, LoweringStats,

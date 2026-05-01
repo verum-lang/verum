@@ -3,16 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md §17
 //
+
 // sqlite_master schema (verbatim from C-SQLite):
 //
-//   CREATE TABLE sqlite_master (
-//       type     TEXT,        -- 'table' / 'index' / 'view' / 'trigger'
-//       name     TEXT,        -- object name
-//       tbl_name TEXT,        -- table the object is associated with
-//       rootpage INTEGER,     -- root page in btree (0 for view/trigger)
-//       sql      TEXT         -- the CREATE statement
-//   );
+
+//  CREATE TABLE sqlite_master (
+//  type TEXT, -- 'table' / 'index' / 'view' / 'trigger'
+//  name TEXT, -- object name
+//  tbl_name TEXT, -- table the object is associated with
+//  rootpage INTEGER, -- root page in btree (0 for view/trigger)
+//  sql TEXT -- the CREATE statement
+//  );
 //
+
 // Every CREATE statement appends one row; every DROP removes it.
 // =============================================================================
 

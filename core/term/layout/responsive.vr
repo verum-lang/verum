@@ -5,10 +5,12 @@
 // Dependencies: rect.vr
 // =============================================================================
 //
+
 // Responsive breakpoint system for terminal UIs. Defines standard breakpoints
 // based on terminal width and provides helpers for breakpoint-conditional
 // layout selection.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 8
 // =============================================================================
 

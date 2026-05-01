@@ -39,7 +39,7 @@ implement HashTable {
         -1
     }
 
-    /// Inserts (or overwrites).  Returns the previous value or 0.
+    /// Inserts (or overwrites). Returns the previous value or 0.
     pub fn insert(&mut self, key: Text, value: Int64) -> Int64 {
         let idx = self.find(&key);
         if idx >= 0 {

@@ -28,7 +28,7 @@ public fn category_name(c: &OptionCategory) -> Text {
     }
 }
 
-/// Does this category ADD functionality to the build?  Used by
+/// Does this category ADD functionality to the build? Used by
 /// feature-level diff tooling.
 public fn is_additive(c: &OptionCategory) -> Bool {
     match c {

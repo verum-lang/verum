@@ -1,9 +1,11 @@
 //! Tree sinks that consume parser events to build syntax trees.
 //!
+
 //! Different sinks produce different representations from the same events:
 //! - `GreenTreeSink` builds green trees for the syntax infrastructure
 //! - `TextTreeSink` produces a text representation for debugging
 //!
+
 //! Tree Sinks consume parser events via the EventSink trait (start_node,
 //! finish_node, token, error) and produce different representations:
 //! - GreenTreeSink: builds immutable green trees for the syntax infrastructure

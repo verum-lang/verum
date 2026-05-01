@@ -2,17 +2,22 @@
 // poly_kinds.vr — Polymorphic Kinds
 // =============================================================================
 //
+
 // Layer: Standard Library / Types
 //
+
 // Surface for `verum_types.poly_kinds`. Kind-level Hindley-Milner:
 // kind variables, kind constructors (→, Type, Constraint), kind
 // unification.
 //
+
 // Practical use: heterogeneous containers, levitated functor
 // combinators, type-class hierarchies parameterised by kind.
 //
+
 // ## Storage model
 //
+
 // Substitutions are stored as `Map<Text, Kind>` keyed by kind-
 // variable name. Lookup is O(1) amortised — the natural operation
 // during recursive unification of arrow-shaped kinds where every
@@ -20,10 +25,12 @@
 // previous `List<KindBinding>` storage made every lookup O(n) and
 // turned `kind_compose` into O(n + m²) for n+m bindings.
 //
+
 // `free_vars` returns `Set<Text>` directly — callers needing a
 // dedup-free view of the kind-vars in scope no longer have to
 // re-scan the result list themselves.
 //
+
 // =============================================================================
 
 module core.types.poly_kinds;
@@ -101,6 +108,7 @@ public type KindUnifyResult is
 
 /// Apply a substitution to a kind, recursively.
 ///
+
 /// `kind_apply([α↦Type, β↦α], KArrow(α, β))` walks the structure,
 /// rewriting every `KVar` whose name has a binding. Idempotent
 /// once the substitution itself is in normal form.
@@ -124,6 +132,7 @@ public fn kind_apply(s: &KindSubst, k: Kind) -> Kind {
 /// Returns a substitution `s` such that `kind_apply(s, k) ==
 /// kind_apply(s2, kind_apply(s1, k))` for every k.
 ///
+
 /// Semantics: post-application of s2 to s1's range, then add s2's
 /// own bindings for any keys s1 doesn't cover (s1 wins on shared
 /// keys). Complexity: O(|s1| + |s2|) — Map iteration + insertion;
@@ -153,17 +162,18 @@ public fn kind_compose(s1: &KindSubst, s2: &KindSubst) -> KindSubst {
 /// identical, or `KindError` on a structural mismatch / occurs-
 /// check failure.
 ///
+
 /// ```text
-///     KType ~ KType                  ↦ ok, ∅
-///     KConstraint ~ KConstraint      ↦ ok, ∅
-///     KArrow(d1, c1) ~ KArrow(d2, c2)
-///                                    ↦ unify(d1, d2) then
-///                                      unify(s(c1), s(c2)) ∘ s
-///     KVar(α) ~ k  (where k is not KVar α)
-///                                    ↦ if α ∈ FV(k) then occurs-check fail
-///                                       else { α ↦ k }
-///     k ~ KVar(α)                    ↦ symmetric to the above
-///     otherwise                      ↦ structural mismatch
+///  KType ~ KType ↦ ok, ∅
+///  KConstraint ~ KConstraint ↦ ok, ∅
+///  KArrow(d1, c1) ~ KArrow(d2, c2)
+///  ↦ unify(d1, d2) then
+///  unify(s(c1), s(c2)) ∘ s
+///  KVar(α) ~ k (where k is not KVar α)
+///  ↦ if α ∈ FV(k) then occurs-check fail
+///  else { α ↦ k }
+///  k ~ KVar(α) ↦ symmetric to the above
+///  otherwise ↦ structural mismatch
 /// ```
 public fn kind_unify(a: Kind, b: Kind) -> KindUnifyResult {
     match (a, b) {
@@ -275,6 +285,7 @@ public fn kind_arity(k: Kind) -> Int {
 /// unify with the next argument; on success the result is the
 /// codomain (under the unifying substitution).
 ///
+
 /// Returns `KindOk { bindings: ∅ }` when `args` is empty (the
 /// kind is already the result), or `KindError` when the kind has
 /// fewer arrows than args (over-application) or when any pairwise

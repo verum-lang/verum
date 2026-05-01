@@ -1,32 +1,38 @@
 //! PermissionRouter warm-path microbench (#12 / P3.2).
 //!
+
 //! Verifies the architectural ≤2ns claim documented in
 //! `interpreter/permission.rs`: a repeated request for the same
 //! `(scope, target_id)` pair must hit the one-entry warm-path
 //! cache with a single equality compare + branch.
 //!
+
 //! ## What we measure
 //!
-//! * `warm_path_allow_all`     — no policy, every check is a
-//!   trivial `last == request` compare. The lower bound on
-//!   what the gating system can ever cost.
-//! * `warm_path_with_policy`   — policy installed, cache hits
-//!   on every iteration. Same warm-path budget — the policy
-//!   closure is never invoked.
+
+//! * `warm_path_allow_all` — no policy, every check is a
+//!  trivial `last == request` compare. The lower bound on
+//!  what the gating system can ever cost.
+//! * `warm_path_with_policy` — policy installed, cache hits
+//!  on every iteration. Same warm-path budget — the policy
+//!  closure is never invoked.
 //! * `cold_then_warm_per_pair` — alternating two distinct
-//!   targets so `last` thrashes; the backing HashMap takes
-//!   over and shows the +HashMap-probe overhead.
-//! * `policy_cold_path`        — clear cache between every
-//!   call, forcing the policy callback every time. This is
-//!   the upper bound — represents pathological patterns that
-//!   never benefit from caching.
+//!  targets so `last` thrashes; the backing HashMap takes
+//!  over and shows the +HashMap-probe overhead.
+//! * `policy_cold_path` — clear cache between every
+//!  call, forcing the policy callback every time. This is
+//!  the upper bound — represents pathological patterns that
+//!  never benefit from caching.
 //!
+
 //! The interesting comparison is `warm_path_allow_all` vs
 //! `cold_then_warm_per_pair`: the gap is what the warm-path
 //! cache buys you when callers don't thrash.
 //!
+
 //! Run with:
 //!
+
 //! ```text
 //! cargo bench -p verum_vbc --bench permission_router_bench
 //! ```

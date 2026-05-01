@@ -1,5 +1,6 @@
 //! Nine-strategy `@verify(...)` ladder semantics.
 //!
+
 //! Verifies that every strategy in the verification ladder parses to a
 //! distinct `VerifyStrategy` variant, is ranked in monotone-lift order,
 //! carries the Diakrisis ν-invariant ordinal, and dispatches through

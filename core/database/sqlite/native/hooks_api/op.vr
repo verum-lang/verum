@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // update_hook fires with op ∈ {INSERT, UPDATE, DELETE}; preupdate_hook
 // additionally exposes PREUPDATE_* codes for the row-id slots.
 //
+
 // Integer constants match sqlite3.h:
-//   SQLITE_INSERT = 18
-//   SQLITE_UPDATE = 23
-//   SQLITE_DELETE = 9
+//  SQLITE_INSERT = 18
+//  SQLITE_UPDATE = 23
+//  SQLITE_DELETE = 9
 // =============================================================================
 
 module core.database.sqlite.native.hooks_api.op;

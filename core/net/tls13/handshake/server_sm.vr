@@ -4,30 +4,36 @@
 // Layer: 5 (Network — TLS 1.3 core)
 // =============================================================================
 //
+
 // Mirror of client_sm.vr with roles swapped.
 //
+
 // Transition diagram (RFC 8446 §4.1.1 server role):
 //
-//   Start
-//    └── recv ClientHello ──▶ (HRR path OR) send ServerHello →
-//                              send EncryptedExtensions →
-//                              [send CertificateRequest (optional)] →
-//                              send Certificate →
-//                              send CertificateVerify →
-//                              send Finished →
-//                              WaitFinished (client Finished)
-//                                    └── recv Finished ──▶ Connected
+
+//  Start
+//  └── recv ClientHello ──▶ (HRR path OR) send ServerHello →
+//  send EncryptedExtensions →
+//  [send CertificateRequest (optional)] →
+//  send Certificate →
+//  send CertificateVerify →
+//  send Finished →
+//  WaitFinished (client Finished)
+//  └── recv Finished ──▶ Connected
 //
+
 // Only the server-side signature operations require a private key
 // (signing CertificateVerify). Everything else (transcript,
 // key schedule, Finished MAC verification) mirrors the client side.
 //
+
 // Dynamic dispatch for the CertificateVerify signer keeps the server
 // SM crypto-backend-agnostic: caller supplies a closure taking the
 // 64-byte-pad || context-string || 0x00 || transcript-hash buffer and
 // returns the raw signature bytes (e.g. from a HSM, workload-identity
 // SPIFFE SVID, or in-process core.security.ecc.ed25519.Ed25519.sign).
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.server_sm;
@@ -66,6 +72,7 @@ mount core.security.ecc.p256.{P256};
 /// Callback that signs the CertificateVerify input. Returns
 /// raw signature bytes suitable for CertificateVerify.signature.
 ///
+
 /// The caller (e.g. HSM-backed signer, workload identity) picks the
 /// concrete SignatureScheme matching the cert; returns Err to abort
 /// the handshake.
@@ -319,13 +326,14 @@ fn on_client_finished(
             }
 
             // RFC 8446 §7.1 Figure 12 transcript boundaries:
-            //   c/s_application_traffic_secret_0 = Derive-Secret(master,
-            //       "c ap traffic" / "s ap traffic", ClientHello..server Finished)
-            //   exporter_master                  = Derive-Secret(master,
-            //       "exp master",   ClientHello..server Finished)
-            //   resumption_master                = Derive-Secret(master,
-            //       "res master",   ClientHello..client Finished)
+            //  c/s_application_traffic_secret_0 = Derive-Secret(master,
+            //  "c ap traffic" / "s ap traffic", ClientHello..server Finished)
+            //  exporter_master = Derive-Secret(master,
+            //  "exp master", ClientHello..server Finished)
+            //  resumption_master = Derive-Secret(master,
+            //  "res master", ClientHello..client Finished)
             //
+
             // The snapshot MUST be captured BEFORE appending client
             // Finished for the three first derivations, and AFTER for
             // resumption_master. Using the wrong snapshot produced

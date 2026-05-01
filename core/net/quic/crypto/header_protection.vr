@@ -4,26 +4,31 @@
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
+
 // RFC 9001 §5.4:
 //
-//   sample = ciphertext[4..20]              (16 bytes from the PN + payload)
-//   mask   = AES-ECB(hp_key, sample)        when AEAD = AES-128/256-GCM
-//         or ChaCha20(hp_key, counter = sample[0..4]_le, nonce = sample[4..16],
-//                     0)                    when AEAD = ChaCha20-Poly1305
+
+//  sample = ciphertext[4..20] (16 bytes from the PN + payload)
+//  mask = AES-ECB(hp_key, sample) when AEAD = AES-128/256-GCM
+//  or ChaCha20(hp_key, counter = sample[0..4]_le, nonce = sample[4..16],
+//  0) when AEAD = ChaCha20-Poly1305
 //
-//   // Apply to packet header:
-//   if long_header:
-//       header[0] ^= mask[0] & 0x0F       // lowest 4 bits (reserved + PN-len)
-//   else:
-//       header[0] ^= mask[0] & 0x1F       // lowest 5 bits (reserved + spin + KP + PN-len)
-//   header[pn_offset .. pn_offset + pn_len] XOR mask[1..pn_len+1]
+
+//  // Apply to packet header:
+//  if long_header:
+//  header[0] ^= mask[0] & 0x0F // lowest 4 bits (reserved + PN-len)
+//  else:
+//  header[0] ^= mask[0] & 0x1F // lowest 5 bits (reserved + spin + KP + PN-len)
+//  header[pn_offset .. pn_offset + pn_len] XOR mask[1..pn_len+1]
 //
+
 // The HP key length matches the AEAD key length:
-//   AES-128-GCM → 16-byte HP key, AES-ECB over 16-byte sample.
-//   AES-256-GCM → 32-byte HP key, AES-ECB over 16-byte sample.
-//   ChaCha20-Poly1305 → 32-byte HP key, ChaCha20 block produces 64
-//     bytes of which the first 5 are the mask.
+//  AES-128-GCM → 16-byte HP key, AES-ECB over 16-byte sample.
+//  AES-256-GCM → 32-byte HP key, AES-ECB over 16-byte sample.
+//  ChaCha20-Poly1305 → 32-byte HP key, ChaCha20 block produces 64
+//  bytes of which the first 5 are the mask.
 //
+
 // =============================================================================
 
 module core.net.quic.crypto.header_protection;
@@ -89,6 +94,7 @@ public fn compute_hp_mask(hp: &HpKey, sample: &[Byte; 16]) -> HpMask {
 /// short (1-RTT) headers; the mask for the first byte clamps to 4
 /// vs 5 low bits respectively.
 ///
+
 /// `header` points at the outgoing packet header bytes in place;
 /// `pn_offset` is the offset of the first packet-number byte;
 /// `pn_len` is the packet-number length in bytes (1..=4).

@@ -1,60 +1,73 @@
 //! Non-Lexical Lifetimes (NLL) Analysis
 //!
+
 //! This module implements Rust-style Non-Lexical Lifetimes for Verum, enabling
 //! more precise borrow checking based on actual variable liveness rather than
 //! lexical scope. This is the state-of-the-art approach to borrow checking.
 //!
+
 //! # Key Concepts
 //!
+
 //! ## Non-Lexical Regions
 //!
+
 //! Unlike lexical lifetimes that end at scope boundaries, NLL regions are
 //! based on actual liveness - a borrow is active only while it's actually
 //! used:
 //!
+
 //! ```text
 //! fn example() {
-//!     let mut x = 5;
-//!     let r = &x;      // Borrow starts here
-//!     println!("{}", r);  // Last use of r
-//!     // Borrow ends here (NLL) vs. end of scope (lexical)
-//!     x = 10;          // Now allowed with NLL!
+//!  let mut x = 5;
+//!  let r = &x; // Borrow starts here
+//!  println!("{}", r); // Last use of r
+//!  // Borrow ends here (NLL) vs. end of scope (lexical)
+//!  x = 10; // Now allowed with NLL!
 //! }
 //! ```
 //!
+
 //! ## Two-Phase Borrows
 //!
+
 //! Enables patterns like `vec.push(vec.len())` where the mutable borrow
 //! is "reserved" but not activated until needed:
 //!
+
 //! ```text
 //! Phase 1 (Reservation): &mut vec is reserved but inactive
 //! Phase 2 (Activation): vec.len() can use &vec
 //! Phase 3 (Use): push activates the mutable borrow
 //! ```
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! CFG → NllAnalyzer → NllAnalysisResult
-//!                          │
-//!                          ▼
-//!           ┌───────────────────────────────────┐
-//!           │ Map<RefId, NllRegion>             │
-//!           │ LivenessInfo                      │
-//!           │ BorrowSet                         │
-//!           │ List<NllViolation>                │
-//!           └───────────────────────────────────┘
+//!  │
+//!  ▼
+//!  ┌───────────────────────────────────┐
+//!  │ Map<RefId, NllRegion> │
+//!  │ LivenessInfo │
+//!  │ BorrowSet │
+//!  │ List<NllViolation> │
+//!  └───────────────────────────────────┘
 //! ```
 //!
+
 //! # Algorithm Overview
 //!
+
 //! 1. **Liveness Analysis**: Compute live ranges for all variables
 //! 2. **Region Inference**: Create minimal regions based on liveness
 //! 3. **Constraint Generation**: Generate subset constraints
 //! 4. **Constraint Solving**: Fixed-point iteration
 //! 5. **Violation Detection**: Check for conflicts
 //!
+
 //! Spec: Based on Rust RFC 2094 (Non-Lexical Lifetimes)
 
 use crate::analysis::{BlockId, ControlFlowGraph, RefId, Span};
@@ -342,6 +355,7 @@ impl BorrowSet {
 
     /// Check for conflicting borrows (ignoring liveness).
     ///
+
     /// This is the legacy method that doesn't consider release points.
     /// Prefer `has_conflict_at` for liveness-aware conflict checking.
     #[must_use]
@@ -353,9 +367,11 @@ impl BorrowSet {
 
     /// Check for conflicting borrows at a specific point (liveness-aware).
     ///
+
     /// This is the liveness-based conflict checker. A conflict only exists
     /// if the existing borrow is still live at the given point.
     ///
+
     /// Liveness-based borrow release: borrows are released at the point of last
     /// use of the assigned_place (the variable holding the reference), not at
     /// lexical scope end. This enables earlier re-access of the borrowed place.
@@ -399,10 +415,12 @@ pub struct BorrowData {
     pub two_phase: bool,
     /// Point where borrow is released (liveness-based).
     ///
+
     /// This is the key field for liveness-based borrow release.
     /// Instead of releasing at scope end, the borrow is released at
     /// the last use point, enabling earlier access to the borrowed place.
     ///
+
     /// Liveness-based borrow release: borrows are released at the point of last
     /// use of the assigned_place (the variable holding the reference), not at
     /// lexical scope end. This enables earlier re-access of the borrowed place.
@@ -427,11 +445,13 @@ impl BorrowData {
 
     /// Check if this borrow has been released at or before the given point.
     ///
+
     /// This is the key method for liveness-based borrow release checking.
     /// A borrow is considered released if:
     /// 1. It has a release_point, AND
     /// 2. The given point is at or after the release_point
     ///
+
     /// Liveness-based borrow release: borrows are released at the point of last
     /// use of the assigned_place (the variable holding the reference), not at
     /// lexical scope end. This enables earlier re-access of the borrowed place.
@@ -451,6 +471,7 @@ impl BorrowData {
 
     /// Check if this borrow is live at the given point.
     ///
+
     /// A borrow is live if:
     /// 1. It has been created (reserve_point <= point)
     /// 2. It has not been released yet (!is_released_at(point))
@@ -773,28 +794,31 @@ impl NllAnalyzer {
 
     /// Perform NLL analysis.
     ///
+
     /// Honours every `NllConfig` gate:
     ///
+
     /// * `two_phase_borrows` (default `true`) — when `true`, the
-    ///   constraint generator marks borrows as two-phase eligible,
-    ///   allowing reservation+activation patterns that the strict
-    ///   single-phase form would reject. When `false`, every
-    ///   borrow is single-phase. Surfaced via the result so the
-    ///   diagnostic builder names the gate explicitly when a
-    ///   single-phase rejection could have been a two-phase
-    ///   acceptance.
+    ///  constraint generator marks borrows as two-phase eligible,
+    ///  allowing reservation+activation patterns that the strict
+    ///  single-phase form would reject. When `false`, every
+    ///  borrow is single-phase. Surfaced via the result so the
+    ///  diagnostic builder names the gate explicitly when a
+    ///  single-phase rejection could have been a two-phase
+    ///  acceptance.
     /// * `polonius_mode` (default `false`) — when `true`, the
-    ///   analysis result is tagged for the Polonius-style consumer
-    ///   surface (`polonius_analysis.rs`). The NLL analyzer
-    ///   itself doesn't run a different algorithm; the tag tells
-    ///   downstream Polonius origin-tracking that NLL has
-    ///   pre-approved an embedder-driven escalation.
+    ///  analysis result is tagged for the Polonius-style consumer
+    ///  surface (`polonius_analysis.rs`). The NLL analyzer
+    ///  itself doesn't run a different algorithm; the tag tells
+    ///  downstream Polonius origin-tracking that NLL has
+    ///  pre-approved an embedder-driven escalation.
     /// * `max_iterations` — already honoured by the liveness +
-    ///   constraint loops (lines 802 and 946).
+    ///  constraint loops (lines 802 and 946).
     /// * `detailed_diagnostics` (default `true`) — flows into the
-    ///   `NllAnalysisResult.detailed_diagnostics` field via the
-    ///   `detailed_diagnostics()` accessor for diagnostic builders.
+    ///  `NllAnalysisResult.detailed_diagnostics` field via the
+    ///  `detailed_diagnostics()` accessor for diagnostic builders.
     ///
+
     /// Before this wire-up three of the four gates were inert.
     #[must_use]
     pub fn analyze(mut self) -> NllAnalysisResult {
@@ -944,13 +968,16 @@ impl NllAnalyzer {
 
     /// Compute release points for all borrows based on liveness analysis.
     ///
+
     /// This is the core of liveness-based borrow release. For each borrow,
     /// we determine the point at which it can be released (the last use of
     /// the assigned_place, i.e., the variable holding the reference).
     ///
+
     /// After this point, the borrowed place can be accessed again without
     /// conflict, even before the lexical scope ends.
     ///
+
     /// Liveness-based borrow release: borrows are released at the point of last
     /// use of the assigned_place (the variable holding the reference), not at
     /// lexical scope end. This enables earlier re-access of the borrowed place.
@@ -1054,10 +1081,12 @@ impl NllAnalyzer {
 
     /// Check for borrow checking violations using liveness-based release.
     ///
+
     /// This is the core of NLL borrow checking with liveness-based release.
     /// A conflict only exists if there is a point where BOTH borrows are live.
     /// If borrow1 is released before borrow2 starts, there is no conflict.
     ///
+
     /// Liveness-based borrow release: borrows are released at the point of last
     /// use of the assigned_place (the variable holding the reference), not at
     /// lexical scope end. This enables earlier re-access of the borrowed place.
@@ -1517,10 +1546,12 @@ mod tests {
     fn test_liveness_based_no_false_conflict() {
         // This test verifies the core liveness-based borrow release scenario:
         //
-        // let first = read_first(&data);  // borrow starts at stmt 0
+
+        // let first = read_first(&data); // borrow starts at stmt 0
         // // first last use at stmt 1
-        // modify_data(&mut data);         // at stmt 2 - should NOT conflict!
+        // modify_data(&mut data); // at stmt 2 - should NOT conflict!
         //
+
         // Liveness-based borrow release: release at last use, not scope end
 
         let mut borrows = BorrowSet::new();
@@ -1551,9 +1582,10 @@ mod tests {
     fn test_liveness_based_real_conflict() {
         // This test verifies that true conflicts are still detected:
         //
-        // let first = read_first(&data);  // borrow at stmt 0
-        // modify_data(&mut data);         // at stmt 1 - SHOULD conflict!
-        // println!("{}", first);          // first used at stmt 2
+
+        // let first = read_first(&data); // borrow at stmt 0
+        // modify_data(&mut data); // at stmt 1 - SHOULD conflict!
+        // println!("{}", first); // first used at stmt 2
 
         let mut borrows = BorrowSet::new();
 

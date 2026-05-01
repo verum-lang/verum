@@ -3,17 +3,20 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.4
 //
+
 // A differential test runs the same SQL on two implementations and
 // checks they agree. Implementations are abstracted as `SqlOracle`
 // — both `c-sqlite-binary` (subprocess) and `verum-sqlite-binary`
 // (in-proc) implement it.
 //
+
 // Three modes of comparison:
 //
-//   * `RowsetEquality`  — exact row-set match (column count, values,
-//                         NULL handling)
-//   * `RowsetSorted`    — sorted by every column (when ORDER BY absent)
-//   * `ErrorEquivalence` — both error or both ok with same shape
+
+//  * `RowsetEquality` — exact row-set match (column count, values,
+//  NULL handling)
+//  * `RowsetSorted` — sorted by every column (when ORDER BY absent)
+//  * `ErrorEquivalence` — both error or both ok with same shape
 // =============================================================================
 
 module core.database.sqlite.native.testing.differential;

@@ -5,25 +5,30 @@
 // Dependencies: core, core.net.{addr, udp}
 // =============================================================================
 //
+
 // QUIC runs over UDP. For testability + determinism we abstract the
 // concrete socket behind a `UdpTransport` protocol that `ConnectionPump`
 // consumes. Two impls ship:
 //
-//   * `RealUdpTransport` — production; wraps `core.net.udp.UdpSocket`
-//     with recv_batch / send (when the batch I/O extensions land);
-//     falls back to single-datagram recv/send on platforms without
-//     GSO/GRO.
+
+//  * `RealUdpTransport` — production; wraps `core.net.udp.UdpSocket`
+//  with recv_batch / send (when the batch I/O extensions land);
+//  falls back to single-datagram recv/send on platforms without
+//  GSO/GRO.
 //
-//   * `SimUdpTransport` — deterministic in-memory transport that
-//     feeds scripted datagrams through the pump for byte-exact unit
-//     tests + DST-style recovery testing. Paired peer connections
-//     talk to each other without touching the kernel.
+
+//  * `SimUdpTransport` — deterministic in-memory transport that
+//  feeds scripted datagrams through the pump for byte-exact unit
+//  tests + DST-style recovery testing. Paired peer connections
+//  talk to each other without touching the kernel.
 //
+
 // The protocol is intentionally minimal — send, recv, local_addr —
 // so custom transports (mock fuzzing harness, kernel-bypass DPDK
 // binding, offloaded NIC-assisted I/O, etc.) can drop in without
 // changing the pump.
 //
+
 // =============================================================================
 
 module core.net.quic.transport.abstraction;
@@ -230,10 +235,12 @@ implement UdpTransport for RealUdpTransport {
 // SimUdpTransport — deterministic in-memory transport for tests
 // =============================================================================
 //
+
 // Used by differential/DST tests: two pumps talk through a paired
 // SimUdpTransport via a shared `SimNetwork`. Loss / reorder / delay
 // knobs live on the network; individual transports are thin.
 //
+
 // =============================================================================
 
 public type SimUdpTransport is {

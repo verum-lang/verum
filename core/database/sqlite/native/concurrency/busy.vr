@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §20.4
 //
+
 // `BusyPolicy` is a protocol that decides whether to retry on
 // SQLITE_BUSY. Three implementations ship out of the box:
 //
-//   * `NoRetry`         — first BUSY → DbError.Busy
-//   * `ConstantRetry`   — bounded number of retries with constant
-//                         per-retry sleep
-//   * `ExponentialRetry`— bounded retries with exponential backoff
-//                         and configurable jitter cap
+
+//  * `NoRetry` — first BUSY → DbError.Busy
+//  * `ConstantRetry` — bounded number of retries with constant
+//  per-retry sleep
+//  * `ExponentialRetry`— bounded retries with exponential backoff
+//  and configurable jitter cap
 //
+
 // Custom policies plug in via the same protocol — extension authors
 // can implement a token-bucket or deadline-driven policy without
 // touching the runtime.
@@ -73,6 +76,7 @@ implement BusyPolicy for ConstantRetry {
 // ExponentialRetry
 // -----------------------------------------------------------------------------
 //
+
 // Sleep grows as `base * 2^attempt`, capped at `max_sleep_ns`. With
 // `jitter_ns > 0` the deterministic plan is randomised within
 // [-jitter_ns, +jitter_ns]; for DST-friendly behaviour the caller
@@ -118,6 +122,7 @@ implement BusyPolicy for ExponentialRetry {
 // Deadline policy adapter
 // -----------------------------------------------------------------------------
 //
+
 // Wraps any inner BusyPolicy with a wall-clock deadline. If the
 // deadline elapses, the wrapper returns RdGiveUp regardless of what
 // the inner policy says.

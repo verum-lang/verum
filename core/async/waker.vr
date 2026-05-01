@@ -5,9 +5,11 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Waker is used to wake up tasks when progress can be made.
 // Context provides the waker to futures during polling.
 //
+
 // =============================================================================
 
 module core.async.waker;
@@ -200,6 +202,7 @@ static NOOP_WAKER: Waker = Waker {
 // Create a context with noop waker.
 // Useful for testing futures synchronously.
 //
+
 // SOUNDNESS: returns a Context whose `&Waker` points at the
 // module-static NOOP_WAKER, not at a stack-local. The earlier
 // implementation captured a local `let waker = noop_waker()` and

@@ -1,21 +1,27 @@
 //! MIR (Mid-level IR) Infrastructure for Verification and Analysis
 //!
+
 //! **IMPORTANT: This module is NOT part of the main compilation pipeline.**
 //!
+
 //! The actual Verum compilation uses a VBC-first architecture (v2.1):
 //! ```text
 //! Source → TypedAST → VBC Bytecode → { Interpreter (Tier 0) | AOT (Tier 1) }
 //! ```
 //!
+
 //! MIR exists for specialized analysis and verification purposes only:
 //! - SMT-based contract verification (`phases::verification_phase`)
 //! - Advanced optimization analysis (`phases::optimization`)
 //! - CBGR bounds elimination (`passes::cbgr_integration`)
 //!
+
 //! For the main compilation path, see `phases::vbc_codegen`.
 //!
+
 //! ## MIR Properties
 //!
+
 //! - Control Flow Graph (CFG) representation
 //! - Static Single Assignment (SSA) form
 //! - Explicit CBGR checks inserted
@@ -25,30 +31,38 @@
 //! - Pattern matching lowered to decisions
 //! - **ThinRef vs FatRef selection** (two-tier reference system)
 //!
+
 //! ## Two-Tier Reference System
 //!
+
 //! Memory model and CBGR: three-tier references (&T ~15ns, &checked T 0ns, &unsafe T 0ns).
 //!
+
 //! **ThinRef (`&T`)**: 16-byte pointer (8-byte ptr + CBGR metadata)
 //! - Used for: Most references, default choice
 //! - Overhead: ~15ns per access (CBGR check)
 //! - Size: 16 bytes (pointer + generation + epoch/caps)
 //!
+
 //! **FatRef (`&checked T`)**: 24-byte fat pointer
 //! - Used for: Array slices, dynamic bounds checking, trait objects
 //! - Overhead: ~2-3ns per access (inline bounds check)
 //! - Size: 24 bytes (pointer + metadata + length/vtable)
 //!
+
 //! Selection happens during MIR lowering based on:
 //! 1. Type of reference (array slice -> FatRef, other -> ThinRef)
 //! 2. Escape analysis results (NoEscape -> can eliminate checks)
 //! 3. Optimization level
 //!
+
 //! ## Future Integration
 //!
+
 //! MIR may be integrated into the verification pipeline as an optional
 //! analysis pass for functions with contracts (`requires`/`ensures`).
 //!
+
 //! Phase 5: HIR to MIR lowering. Creates control flow graph (CFG), inserts
 //! safety checks (CBGR, bounds, overflow), tracks unsafe regions.
 
@@ -1120,10 +1134,12 @@ impl LoweringContext {
 
     /// Convert AST Span to diagnostic LineColSpan
     ///
+
     /// Note: Full line/column conversion requires access to the source file
     /// which is managed at the Session level. This method provides a best-effort
     /// conversion using available information from the span.
     ///
+
     /// For accurate line/column information, diagnostics should be created at
     /// a higher level where Session is available, or the span should be stored
     /// and converted later via Session::convert_span().
@@ -1332,6 +1348,7 @@ impl LoweringContext {
 
     /// Convert a const evaluation result to a MIR constant
     ///
+
     /// Used by meta block evaluation to embed compile-time computed values
     /// directly into MIR as constants.
     fn const_value_to_mir_constant(&self, value: &ConstValue) -> MirConstant {
@@ -1392,6 +1409,7 @@ impl LoweringContext {
 
     /// Convert an AST literal to a MIR constant
     ///
+
     /// Handles all literal kinds defined in verum_ast::literal::LiteralKind,
     /// producing appropriate MIR constants for code generation.
     fn lower_literal_to_constant(&self, lit: &verum_ast::literal::Literal) -> MirConstant {
@@ -1627,13 +1645,16 @@ impl LoweringContext {
 
     /// Resolve field index from type information
     ///
+
     /// Queries the type of the local variable from type_cache, then looks up
     /// the field name in the struct definition to get its index.
     ///
+
     /// # Arguments
     /// * `local` - The local variable whose type contains the field
     /// * `field_name` - The name of the field to resolve
     ///
+
     /// # Returns
     /// The zero-based index of the field in the struct layout, or 0 if not found
     /// (with a diagnostic error logged).
@@ -1704,12 +1725,15 @@ impl LoweringContext {
 
     /// Resolve variant discriminant from type information
     ///
+
     /// Parses a variant path (e.g., `Result::Ok` or `Option::Some`) and looks up
     /// the discriminant value for the variant in the enum definition.
     ///
+
     /// # Arguments
     /// * `variant_path` - The AST path to the enum variant (e.g., `Result::Ok`)
     ///
+
     /// # Returns
     /// The discriminant value for the variant (usually the zero-based index), or 0
     /// if not found (with a diagnostic error logged).
@@ -1920,6 +1944,7 @@ impl LoweringContext {
 impl LoweringContext {
     /// Lower an expression - main entry point for expression lowering
     ///
+
     /// Uses iterative approaches for deeply nested structures to prevent stack overflow.
     /// Relies on RUST_MIN_STACK environment variable for stack size requirements.
     fn lower_expr(
@@ -2136,6 +2161,7 @@ impl LoweringContext {
     /// Fully iterative if expression lowering to handle deeply nested control flow
     /// Uses explicit continuation-passing to avoid stack overflow on deeply nested if/else chains
     ///
+
     /// This function unrolls nested if/else chains into a flat loop, preventing stack overflow
     /// regardless of nesting depth.
     fn lower_if_iterative(
@@ -2813,16 +2839,19 @@ impl LoweringContext {
             ExprKind::Async(body) => {
                 // Async blocks are lowered to a generator state machine that implements Future.
                 //
+
                 // The async block body is wrapped in a generator closure that:
                 // 1. Has suspension points at each await
                 // 2. Stores local variables in the generator state
                 // 3. Returns Poll::Ready(value) on completion
                 //
+
                 // State machine structure:
                 // - State 0: Initial (before first suspension)
                 // - State N: Resumed after await point N
                 // - State COMPLETE: Finished (returns Poll::Ready)
                 //
+
                 // The generated MIR creates:
                 // 1. A state storage local for tracking resume point
                 // 2. Switch on state to resume at correct point
@@ -3726,10 +3755,12 @@ impl LoweringContext {
                 // Stream comprehension: [| x * 2 for x in iter if x > 0 |]
                 // Lower to: create generator that yields values lazily
                 //
+
                 // Unlike list comprehension which collects all values eagerly,
                 // stream comprehension creates a generator that yields values on demand.
                 // This enables lazy evaluation and infinite streams.
                 //
+
                 // The generator structure:
                 // 1. State machine tracking current position in iteration
                 // 2. Yield points for each element produced
@@ -4694,14 +4725,17 @@ impl LoweringContext {
                 // meta { ... }
                 // Compile-time execution block - evaluated during compilation
                 //
+
                 // Meta system: compile-time computation via meta fn / @derive / @tagged_literal.
                 //
+
                 // Meta blocks are evaluated at compile time, enabling:
                 // 1. Compile-time arithmetic and type computation
                 // 2. Generic parameter evaluation
                 // 3. Const-if elimination (dead code removal)
                 // 4. Build-time configuration
                 //
+
                 // Strategy:
                 // 1. Try to evaluate the block's trailing expression at compile time
                 // 2. If successful, embed result as constant in MIR
@@ -4843,9 +4877,11 @@ impl LoweringContext {
                 // Macro should be expanded before MIR lowering
                 // If we reach here, there was a failure in macro expansion phase
                 //
+
                 // This is a compilation error - macros must be fully expanded
                 // during the macro expansion phase before MIR lowering.
                 //
+
                 // Possible causes:
                 // 1. Unknown/undefined macro
                 // 2. Macro expansion phase was skipped
@@ -5085,12 +5121,14 @@ impl LoweringContext {
             // Throw expression - wraps error in Result::Err and returns
             // throw: wraps value in Err and returns from the current function.
             //
+
             // For functions with `throws(E)` clause, `throw e` is lowered to:
-            //   1. Evaluate the thrown expression
-            //   2. Run deferred cleanups (error path cleanup)
-            //   3. Wrap in Result::Err variant
-            //   4. Return from function
+            //  1. Evaluate the thrown expression
+            //  2. Run deferred cleanups (error path cleanup)
+            //  3. Wrap in Result::Err variant
+            //  4. Return from function
             //
+
             // This allows proper integration with the Result-based error handling
             // system while supporting typed throws declarations.
             ExprKind::Throw(inner) => {
@@ -5154,13 +5192,15 @@ impl LoweringContext {
             // Select expression - races multiple async operations
             // Syntax: generator/async generator expression lowering.
             //
+
             // Lowering strategy:
-            //   1. Create futures for all arms (evaluate future expressions)
-            //   2. Create a polling loop that checks each future
-            //   3. When any future completes, bind pattern and execute body
-            //   4. Cancel (drop) all other futures
-            //   5. Handle default/else arm if no futures are ready
+            //  1. Create futures for all arms (evaluate future expressions)
+            //  2. Create a polling loop that checks each future
+            //  3. When any future completes, bind pattern and execute body
+            //  4. Cancel (drop) all other futures
+            //  5. Handle default/else arm if no futures are ready
             //
+
             // The select compiles to a state machine with polling semantics.
             // For biased select, arms are checked in order (earlier = higher priority).
             // For fair select, implementation may randomize or round-robin.
@@ -5371,18 +5411,22 @@ impl LoweringContext {
             // Is expression - pattern test (value is Pattern / value !is Pattern)
             // Spec: grammar/verum.ebnf - is_expr production
             //
+
             // The `is` expression tests if a value matches a pattern and returns Bool.
             // If `negated` is true, it's the `!is` operator which inverts the result.
             //
+
             // Example: `x is Some(y)` returns true if x matches Some variant
             // Example: `x !is None` returns true if x does NOT match None
             //
+
             // Lowering strategy:
-            //   1. Evaluate the expression to test
-            //   2. Use pattern matching logic to generate match check code
-            //   3. The result is a boolean indicating match success
-            //   4. If negated, invert the boolean result
+            //  1. Evaluate the expression to test
+            //  2. Use pattern matching logic to generate match check code
+            //  3. The result is a boolean indicating match success
+            //  4. If negated, invert the boolean result
             //
+
             // This uses the same pattern matching infrastructure as `match` but
             // doesn't bind any variables (we only care about match success).
             ExprKind::Is { expr: inner, pattern, negated } => {
@@ -5484,6 +5528,7 @@ impl LoweringContext {
                 // Nursery creates a structured concurrency scope.
                 // All spawned tasks must complete before the scope exits.
                 //
+
                 // MIR lowering maps nursery semantics to existing MIR constructs:
                 // 1. Call runtime::nursery_create with options to get a handle
                 // 2. Enter a new scope for the body
@@ -5734,11 +5779,13 @@ impl LoweringContext {
             ExprKind::StreamLiteral(stream_lit) => {
                 // Stream literals create lazy iterators/generators
                 //
-                // stream[1, 2, 3]     -> finite iterator over elements
+
+                // stream[1, 2, 3] -> finite iterator over elements
                 // stream[1, 2, 3, ...] -> cycling infinite iterator
-                // stream[0..100]     -> lazy range iterator [0, 100)
-                // stream[0..]        -> infinite range from 0
+                // stream[0..100] -> lazy range iterator [0, 100)
+                // stream[0..] -> infinite range from 0
                 //
+
                 // Stream literals: syntax sugar for creating stream values.
                 use verum_ast::expr::StreamLiteralKind;
 
@@ -6180,6 +6227,7 @@ impl LoweringContext {
 
     /// Lower assignment operators
     ///
+
     /// Handles both simple assignment (=) and compound assignments (+=, -=, etc.).
     /// Uses expr_to_place_mut to properly evaluate complex index expressions in
     /// assignment targets like `arr[i + 1] = value`.
@@ -6269,19 +6317,23 @@ impl LoweringContext {
 
     /// Convert expression to place with complex index evaluation support
     ///
+
     /// This version can evaluate complex index expressions that aren't simple variables.
     /// It modifies the MIR builder state by potentially creating temporaries and emitting
     /// statements to evaluate the index expression.
     ///
+
     /// # Arguments
     /// * `expr` - The expression to convert to a place
     /// * `current_block` - The current basic block being built
     ///
+
     /// # Returns
     /// A tuple of (Place, BlockId) where:
     /// - Place: The resulting place expression
     /// - BlockId: The potentially new current block after evaluation
     ///
+
     /// # Examples
     /// ```ignore
     /// // arr[i] where i is a variable -> simple lookup
@@ -6851,10 +6903,10 @@ impl LoweringContext {
         // For loops are lowered to:
         // let mut iter = iter_expr.into_iter();
         // loop {
-        //     match iter.next() {
-        //         Some(pattern) => body,
-        //         None => break,
-        //     }
+        //  match iter.next() {
+        //  Some(pattern) => body,
+        //  None => break,
+        //  }
         // }
 
         // Create iterator
@@ -6938,21 +6990,24 @@ impl LoweringContext {
 
     /// Lower `for await` loop (async iteration)
     ///
+
     /// Grammar: `for_await_loop = 'for' , 'await' , pattern , 'in' , expression , { loop_annotation } , block_expr`
     ///
+
     /// For await loops iterate over AsyncIterator types. They are lowered to:
     /// ```text
-    /// let mut iter = async_iterable.into_async_iter();  // or assume already AsyncIterator
+    /// let mut iter = async_iterable.into_async_iter(); // or assume already AsyncIterator
     /// loop {
-    ///     let next_future = iter.next();
-    ///     let next_result = next_future.await;         // suspension point
-    ///     match next_result {
-    ///         Some(value) => { bind pattern to value; body }
-    ///         None => break
-    ///     }
+    ///  let next_future = iter.next();
+    ///  let next_result = next_future.await; // suspension point
+    ///  match next_result {
+    ///  Some(value) => { bind pattern to value; body }
+    ///  None => break
+    ///  }
     /// }
     /// ```
     ///
+
     /// This generates a state machine that:
     /// 1. Creates the async iterator from the iterable expression
     /// 2. Enters a loop that calls next() and awaits the result
@@ -6968,6 +7023,7 @@ impl LoweringContext {
     ) -> Result<BlockId, Diagnostic> {
         // Step 1: Lower the async iterable expression and create the async iterator
         //
+
         // We assume the async_iterable is already an AsyncIterator or implements IntoAsyncIterator.
         // In a full implementation, we would call .into_async_iter(), but for MIR purposes
         // we treat the iterable as the iterator directly (type checking ensures correctness).
@@ -6976,15 +7032,16 @@ impl LoweringContext {
 
         // Step 2: Create CFG blocks for the async iteration state machine
         //
+
         // Block layout:
-        //   init_block -> header_block: Start calling next()
-        //   header_block -> call_next_block: Call iter.next()
-        //   call_next_block -> await_block: Await the future
-        //   await_block -> resume_block: Resume after await
-        //   resume_block -> match_block: Check Some/None
-        //   match_block -> body_block (Some) or exit_block (None)
-        //   body_block -> header_block: Loop back
-        //   exit_block: Loop exit, continue to next code
+        //  init_block -> header_block: Start calling next()
+        //  header_block -> call_next_block: Call iter.next()
+        //  call_next_block -> await_block: Await the future
+        //  await_block -> resume_block: Resume after await
+        //  resume_block -> match_block: Check Some/None
+        //  match_block -> body_block (Some) or exit_block (None)
+        //  body_block -> header_block: Loop back
+        //  exit_block: Loop exit, continue to next code
         let header_block = self.new_block();
         let call_next_block = self.new_block();
         let await_resume_block = self.new_block();
@@ -6998,6 +7055,7 @@ impl LoweringContext {
 
         // Step 3: In header block, call iter.next() to get a Future<Maybe<Item>>
         //
+
         // The next() method returns a future that we need to await.
         let next_future_temp = self.new_temp(MirType::Infer);
 
@@ -7019,6 +7077,7 @@ impl LoweringContext {
 
         // Step 4: Await the future to get the actual Maybe<Item> result
         //
+
         // This is the suspension point where the async function yields control.
         // When the future completes, execution resumes at await_resume_block with
         // the result written to next_result_temp.
@@ -7041,9 +7100,10 @@ impl LoweringContext {
 
         // Step 5: Match on the result - Some(value) continues, None exits
         //
+
         // The Maybe<T> type has:
-        //   - Variant 0: Some(T) - contains the next item
-        //   - Variant 1: None - iterator exhausted
+        //  - Variant 0: Some(T) - contains the next item
+        //  - Variant 1: None - iterator exhausted
         let discrim_temp = self.new_temp(MirType::Int);
         self.push_statement(
             match_block,
@@ -7065,6 +7125,7 @@ impl LoweringContext {
 
         // Step 6: Set up loop context for break/continue handling
         //
+
         // For async iteration:
         // - break: jumps to exit_block (with optional value handling)
         // - continue: jumps to header_block to start next iteration
@@ -7077,6 +7138,7 @@ impl LoweringContext {
 
         // Step 7: Enter body scope and bind the pattern
         //
+
         // Extract the value from Some(value) and bind it to the pattern.
         // The value is at: next_result_temp.downcast(0).field(0)
         self.push_scope();
@@ -7091,6 +7153,7 @@ impl LoweringContext {
 
         // Step 8: Lower the loop body
         //
+
         // Use iterative lowering to avoid stack overflow on deeply nested bodies.
         let body_exit = self.lower_block_iterative(body, body_block, dest.clone())?;
 
@@ -7103,12 +7166,14 @@ impl LoweringContext {
 
         // Step 11: Set up unwind block for async cleanup
         //
+
         // If an error occurs during iteration (including in the await),
         // we need to properly unwind.
         self.set_terminator(unwind_block, Terminator::Resume);
 
         // Step 12: For await loops return unit (like regular for loops)
         //
+
         // The loop itself doesn't produce a value; any values are produced
         // through side effects in the body.
         self.push_statement(
@@ -7990,14 +8055,16 @@ impl LoweringContext {
             PatternKind::Active { name, params, bindings } => {
                 // Active pattern: call the pattern function and branch on its result.
                 //
+
                 // Total patterns (e.g., Even()) return Bool:
-                //   call active_pattern_fn(source, params...) -> Bool
-                //   result = call_result
+                //  call active_pattern_fn(source, params...) -> Bool
+                //  result = call_result
                 //
+
                 // Partial/extraction patterns (e.g., ParseInt(n)) return Maybe<T>:
-                //   call active_pattern_fn(source, params...) -> Maybe<T>
-                //   if Some(val): bind val to bindings, result = true
-                //   if None: result = false
+                //  call active_pattern_fn(source, params...) -> Maybe<T>
+                //  if Some(val): bind val to bindings, result = true
+                //  if None: result = false
 
                 let result = self.new_temp(MirType::Bool);
 
@@ -8179,11 +8246,13 @@ impl LoweringContext {
                 // TypeTest pattern: `x is Type` - runtime type check with binding
                 // Spec: Type test patterns narrow unknown/any types at runtime
                 //
+
                 // Strategy:
                 // 1. Perform runtime type check against test_type
                 // 2. If successful, cast source to test_type and bind to variable
                 // 3. Return boolean indicating match success
                 //
+
                 // The MIR uses a discriminant check against the type tag, similar
                 // to how variant patterns work. For concrete types, we generate
                 // a type ID comparison based on the type name string.
@@ -8253,10 +8322,12 @@ impl LoweringContext {
                 // Stream pattern: stream[first, second, ...rest]
                 // Matches elements from an iterator/generator and optionally binds the rest.
                 //
+
                 // For pattern binding:
                 // 1. Consume head elements from iterator and bind to pattern variables
                 // 2. If rest is specified, bind remaining iterator to rest variable
                 //
+
                 // Stream pattern matching: destructuring stream values in match arms.
 
                 let result = self.new_temp(MirType::Bool);
@@ -8335,6 +8406,7 @@ impl LoweringContext {
                 // Guard pattern: (pattern if guard_expr)
                 // Spec: Rust RFC 3637 - Guard Patterns
                 //
+
                 // Strategy:
                 // 1. Lower the inner pattern binding
                 // 2. Evaluate the guard expression
@@ -8375,9 +8447,11 @@ impl LoweringContext {
 
     /// Lower compound destructuring assignment: `(a, b) += (da, db)`
     ///
+
     /// Unlike simple destructuring assignment which binds new variables,
     /// compound destructuring updates existing variables in place.
     ///
+
     /// For `(a, b) += (da, db)`:
     /// 1. Load current values of a and b
     /// 2. Get corresponding elements from the RHS
@@ -8439,6 +8513,7 @@ impl LoweringContext {
 
     /// Lower a single element of compound destructuring
     ///
+
     /// For an identifier `a` with RHS value `da` and operation `+`:
     /// 1. Load current value of `a`
     /// 2. Compute `a + da`
@@ -8537,10 +8612,12 @@ impl LoweringContext {
 
     /// Lower pattern test for `is` expressions - tests match without creating bindings
     ///
+
     /// This is used by `x is Pattern` and `x !is Pattern` expressions to test
     /// whether a value matches a pattern, returning a boolean result without
     /// actually binding any pattern variables to scope.
     ///
+
     /// Unlike `lower_pattern_binding`, this function:
     /// - Does NOT create variable bindings for identifiers
     /// - Returns a boolean indicating match success
@@ -8926,6 +9003,7 @@ impl LoweringContext {
 
     /// Get discriminant value from pattern (for match lowering)
     ///
+
     /// Resolves the discriminant value for various pattern types:
     /// - Literals: Direct integer value or boolean (0/1)
     /// - Variants: Looks up discriminant from type registry
@@ -9407,6 +9485,7 @@ impl CompilationPhase for MirLoweringPhase {
         // - Function inlining (O2+)
         // - SIMD vectorization (O3)
         //
+
         // This happens on the full internal MirModule structure with functions, locals,
         // and SSA form, enabling sophisticated interprocedural analysis.
         // ============================================================================

@@ -3,9 +3,10 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// Each slot is (kind × Registration).  install() swaps the old
+
+// Each slot is (kind × Registration). install() swaps the old
 // registration out, returning its handle (matches sqlite3_commit_hook
-// "returns previous pArg" semantics).  clear() installs the empty
+// "returns previous pArg" semantics). clear() installs the empty
 // handle and returns the previous.
 // =============================================================================
 
@@ -40,7 +41,7 @@ public fn new_engine() -> HooksEngine {
 }
 
 implement HooksEngine {
-    /// Install `reg` into the slot indicated by its kind.  Returns the
+    /// Install `reg` into the slot indicated by its kind. Returns the
     /// previous handle (0 if nothing was installed).
     pub fn install(&mut self, reg: Registration) -> Int64 {
         match &reg.kind {

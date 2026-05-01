@@ -1,5 +1,6 @@
 //! VBC compression support.
 //!
+
 //! This module provides compression and decompression for VBC sections
 //! using zstd (default) or lz4 algorithms. Compression is optional and
 //! controlled by the `compression` feature flag.
@@ -71,6 +72,7 @@ impl CompressionOptions {
 
 /// Compress data using the specified algorithm.
 ///
+
 /// Returns `None` if compression is disabled or if the data is smaller than
 /// the minimum threshold. Returns `Some((compressed_data, algorithm))` on success.
 #[cfg(feature = "compression")]
@@ -107,6 +109,7 @@ pub fn compress(_data: &[u8], _options: &CompressionOptions) -> VbcResult<Option
 
 /// Decompress data using the specified algorithm.
 ///
+
 /// # Arguments
 /// * `data` - The compressed data
 /// * `algorithm` - The algorithm used for compression

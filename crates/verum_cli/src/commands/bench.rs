@@ -1,23 +1,29 @@
 //! Benchmark command — discover and execute `@bench` functions with
 //! time-budget–driven sampling and industry-standard statistics.
 //!
+
 //! # Tiers
 //!
+
 //! Matches the `verum run` / `verum test` convention:
 //!
-//! | Tier         | How a sample is taken                                           |
+
+//! | Tier | How a sample is taken |
 //! |--------------|-----------------------------------------------------------------|
-//! | Interpreter  | In-process: compile to VBC once, call `execute_function`        |
-//! |              | in a Rust loop with `Instant::now()`. No process overhead.      |
-//! | AOT (native) | Synthesise a driver `.vr` per `@bench` fn (original + appended  |
-//! |              | `fn main() { bench_fn(); }`), compile, spawn binary; each run   |
-//! |              | is a sample. Use when you need realistic native timings.        |
+//! | Interpreter | In-process: compile to VBC once, call `execute_function` |
+//! | | in a Rust loop with `Instant::now()`. No process overhead. |
+//! | AOT (native) | Synthesise a driver `.vr` per `@bench` fn (original + appended |
+//! | | `fn main() { bench_fn(); }`), compile, spawn binary; each run |
+//! | | is a sample. Use when you need realistic native timings. |
 //!
+
 //! Default: **AOT** (consistent with `verum run` / `verum test`; use
 //! `--interp` or `--tier interpret` for the in-process path).
 //!
+
 //! # Sampling
 //!
+
 //! Following Criterion / hyperfine conventions, the harness runs a
 //! warm-up phase (`--warm-up-time`, default 3 s) and a measurement
 //! phase (`--measurement-time`, default 5 s). Within the measurement
@@ -26,17 +32,21 @@
 //! benches still terminate near the budget. Fixed iteration count is
 //! available via `--sample-size`.
 //!
+
 //! # Statistics
 //!
+
 //! * Mean, median, stddev, min, max, MAD (median absolute deviation).
 //! * Tukey IQR fences (1.5×IQR) for outlier classification — reported
-//!   but not silently dropped; slow outliers are usually legitimate
-//!   signal (GC, scheduler, thermals) that the reader should see.
+//!  but not silently dropped; slow outliers are usually legitimate
+//!  signal (GC, scheduler, thermals) that the reader should see.
 //! * Bootstrap 95 % CI for the median (1 000 resamples) gives an
-//!   honest uncertainty band around the headline number.
+//!  honest uncertainty band around the headline number.
 //!
+
 //! # Output
 //!
+
 //! `--format table` (default), `--format json`, `--format csv`,
 //! `--format markdown`. JSON output is stable across releases so CI
 //! can diff against baselines without scraping.
@@ -64,6 +74,7 @@ use walkdir::WalkDir;
 
 /// CLI-facing options for `verum bench`.
 ///
+
 /// Passed from `main.rs` after tier resolution — the command itself
 /// never looks at the raw `--interp` / `--aot` flags, which keeps the
 /// tier precedence identical across `run` / `test` / `bench`.
@@ -297,10 +308,12 @@ fn discover_benchmarks(filter: Option<&Text>) -> Result<Vec<BenchFunc>> {
 
 /// Extract bench functions from a single file. Accepts:
 ///
+
 /// * `@bench` on its own line, followed by `[visibility] fn NAME(`
 /// * `@bench(group)` likewise; `group` is captured for reporting
 /// * `[visibility] fn bench_NAME(` (legacy naming-convention form)
 ///
+
 /// Valid visibility prefixes: `public`, `pub`, `private`, none.
 fn scan_file_for_benches(
     path: &Path,
@@ -799,6 +812,7 @@ fn median_absolute_deviation(xs: &[f64], med: f64) -> f64 {
 
 /// Percentile bootstrap 95 % CI for the median.
 ///
+
 /// Draws `iters` resamples with replacement, computes the median of
 /// each, returns the 2.5 / 97.5 percentiles of the resulting
 /// distribution. No external deps; uses `rand` which is already in
@@ -1008,6 +1022,7 @@ fn load_baseline(name: &str) -> Option<Baseline> {
 
 /// Side-by-side comparison with significance check.
 ///
+
 /// A change is flagged only when the point estimate (median) moved by
 /// more than `noise_threshold_pct` AND the CI95 ranges don't overlap
 /// (simple but robust "are they distinguishable" test).

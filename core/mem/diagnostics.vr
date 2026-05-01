@@ -5,31 +5,37 @@
 // Dependencies: mem/header, mem/capability
 // =============================================================================
 //
+
 // The diagnostics module exposes structural views of CBGR-managed memory
 // for post-mortem dumps, runtime monitoring, and (eventually) live
 // debugger / observer integrations such as JFR / tokio-console / Erlang
-// :observer.  It deliberately surfaces NO mutation: every type here is a
+// :observer. It deliberately surfaces NO mutation: every type here is a
 // snapshot, captured under Acquire-ordered atomic loads so observed
 // values are consistent with respect to the happens-before that includes
 // the most recent generation/epoch/refcount writer.
 //
+
 // # Anti-goals
 //
+
 // - No reflection / type-erasure escape hatch that would break CBGR.
-//   `MemHeaderView` summarises numerically (generation, size, type_id) but
-//   does NOT yield a raw `&unsafe T` pointer.
-// - No global mutable state.  Diagnostic handles are scoped values that
-//   the caller drops when done.
-// - Zero overhead when not subscribed.  All readers are inlinable and
-//   the module is feature-gated via `@cfg(feature = "diagnostics")`
-//   for builds that want to strip it (e.g. embedded targets).
+//  `MemHeaderView` summarises numerically (generation, size, type_id) but
+//  does NOT yield a raw `&unsafe T` pointer.
+// - No global mutable state. Diagnostic handles are scoped values that
+//  the caller drops when done.
+// - Zero overhead when not subscribed. All readers are inlinable and
+//  the module is feature-gated via `@cfg(feature = "diagnostics")`
+//  for builds that want to strip it (e.g. embedded targets).
 //
+
 // # Placement in the runtime
 //
+
 // This module sits below the user-facing `core.diagnostics` (TODO,
 // future PR), which will compose `mem.diagnostics`, `async.diagnostics`,
 // and tracing/metrics into a single observability surface.
 //
+
 // Spec: docs/architecture/observability.md (TODO)
 // =============================================================================
 
@@ -45,41 +51,42 @@ mount super.capability.{
 // MemHeaderView — snapshot of an AllocationHeader's fields
 // =============================================================================
 
-/// Read-only snapshot of an `AllocationHeader`'s fields.  Independent
+/// Read-only snapshot of an `AllocationHeader`'s fields. Independent
 /// of generic type T so it can be stored in heterogeneous diagnostic
 /// containers (e.g. a global allocation index keyed by user-pointer
 /// address).
 ///
+
 /// All fields are captured atomically under Acquire ordering — see
 /// `from_header` for the exact memory-ordering contract.
 public type MemHeaderView is {
-    /// Generation counter at observation time.  Used by CBGR to detect
+    /// Generation counter at observation time. Used by CBGR to detect
     /// use-after-free; observers can tag log entries with this value to
     /// reconstruct the lifetime ordering of references in a panic dump.
     generation:   UInt32,
 
-    /// Epoch counter at observation time.  Lower 16 bits of
+    /// Epoch counter at observation time. Lower 16 bits of
     /// `epoch_and_caps`; advances on generation wraparound.
     epoch:        UInt16,
 
-    /// Capability mask (upper 16 bits of `epoch_and_caps`).  Bit set
+    /// Capability mask (upper 16 bits of `epoch_and_caps`). Bit set
     /// iff the corresponding capability is currently granted.
     capabilities: UInt16,
 
     /// Allocation payload size in bytes (excluding the 32-byte header).
     size:         UInt32,
 
-    /// Required alignment for the payload.  Always a power of two.
+    /// Required alignment for the payload. Always a power of two.
     alignment:    UInt32,
 
-    /// Runtime type identifier.  Used by debug builds to symbolicate
+    /// Runtime type identifier. Used by debug builds to symbolicate
     /// allocations in dumps; production builds may compress to 0.
     type_id:      UInt32,
 
     /// Allocation-state flag bitmap (FLAG_PINNED, FLAG_LEAKED, …).
     flags:        UInt32,
 
-    /// Outstanding reference count.  Counts owners, not borrowed
+    /// Outstanding reference count. Counts owners, not borrowed
     /// references — borrows do not modify this field.
     ref_count:    UInt32,
 };
@@ -87,8 +94,10 @@ public type MemHeaderView is {
 implement MemHeaderView {
     /// Capture a snapshot of a header.
     ///
+
     /// # Memory ordering
     ///
+
     /// `generation` and `epoch` are read via the existing
     /// `load_generation_epoch_fast` (Acquire on generation, Relaxed
     /// on epoch — generation's fence subsumes epoch's adjacency).
@@ -97,10 +106,11 @@ implement MemHeaderView {
     /// concurrently mutated and direct field reads where it is not
     /// (size / alignment / type_id are write-once at construction).
     ///
+
     /// The snapshot is therefore consistent with-respect-to a
     /// happens-before that includes the most recent
     /// `increment_generation` / `try_revoke` / `attenuate_capabilities`
-    /// /  `increment_ref_count` writer.  Two callers observing the
+    /// / `increment_ref_count` writer. Two callers observing the
     /// same allocation under contention may see different snapshots,
     /// which is the correct semantic for monitoring (the snapshot
     /// reflects the moment-of-observation state, not a single
@@ -120,13 +130,15 @@ implement MemHeaderView {
     }
 
     /// Capture a snapshot starting from a user-data pointer (the
-    /// pointer stored in ThinRef / FatRef).  Walks back to the
+    /// pointer stored in ThinRef / FatRef). Walks back to the
     /// AllocationHeader at offset -HEADER_SIZE.
     ///
+
     /// # Safety
     ///
+
     /// `ptr` MUST be a CBGR-managed user pointer (i.e. produced by
-    /// the heap allocator).  Calling this on a non-CBGR pointer
+    /// the heap allocator). Calling this on a non-CBGR pointer
     /// dereferences arbitrary memory at offset -32.
     public unsafe fn from_user_ptr(ptr: &unsafe Byte) -> MemHeaderView {
         let header = AllocationHeader.from_user_ptr(ptr);
@@ -193,12 +205,14 @@ implement Debug for MemHeaderView {
 // =============================================================================
 
 /// Capture a MemHeaderView snapshot of the allocation backing the given
-/// user-data pointer.  Returns `None` if `ptr` is null.
+/// user-data pointer. Returns `None` if `ptr` is null.
 ///
+
 /// # Safety
 ///
+
 /// `ptr` MUST be a CBGR-managed pointer (produced by the heap
-/// allocator) when non-null.  This function is the recommended entry
+/// allocator) when non-null. This function is the recommended entry
 /// point for panic handlers and debug-print helpers because it
 /// short-circuits on null without dereferencing.
 public unsafe fn header_view_of(ptr: &unsafe Byte) -> Maybe<MemHeaderView> {
@@ -208,16 +222,18 @@ public unsafe fn header_view_of(ptr: &unsafe Byte) -> Maybe<MemHeaderView> {
     Some(MemHeaderView.from_user_ptr(ptr))
 }
 
-/// Format a MemHeaderView as a panic-context block.  Two-space indented
+/// Format a MemHeaderView as a panic-context block. Two-space indented
 /// so it composes naturally with multi-line panic messages:
 ///
-///   panic(f"use-after-free at {ptr}\n{format_panic_context(view)}");
+
+///  panic(f"use-after-free at {ptr}\n{format_panic_context(view)}");
 ///
+
 /// The block is single-allocation: callers in OOM scenarios should
 /// prefer `Display` (single-line) over this function.
 implement MemHeaderView {
-    /// Format as a panic-context block.  Two-space indented so it
-    /// composes naturally with multi-line panic messages.  Single
+    /// Format as a panic-context block. Two-space indented so it
+    /// composes naturally with multi-line panic messages. Single
     /// allocation per call so callers in OOM scenarios should prefer
     /// `Display` (single-line) when possible.
     public fn format_panic_context(&self) -> Text {
@@ -239,44 +255,52 @@ implement MemHeaderView {
 /// Snapshot the set of CBGR-managed allocations currently live in the
 /// process as a List of `MemHeaderView` records.
 ///
+
 /// # Status: format-stable boundary; producer-side wiring deferred
 ///
+
 /// CBGR allocations currently live in per-thread `LocalHeap` instances
 /// (see `core/mem/heap.vr`) plus the cross-thread free path in
-/// `MemSegment` slots.  There is no global allocation index — by
+/// `MemSegment` slots. There is no global allocation index — by
 /// design, because maintaining one would 30-50× the allocation hot-
 /// path cost (~0.93 ns CBGR check + global mutex acquire = ~30 ns).
 ///
+
 /// The `live_allocations()` boundary ships today returning an empty
 /// List so observer code can call it safely; when the global-index
 /// sidecar (gated under `@cfg(feature = "cbgr_audit")`) lands, this
 /// function will return real entries without changing the call-site
-/// API.  Tracked in #202.
+/// API. Tracked in #202.
 ///
+
 /// # Format-stable contract
 ///
+
 /// - Returns `List<MemHeaderView>` (re-exported via `core.diagnostics`).
 /// - Order is unspecified — observers MUST NOT rely on ordering.
 /// - Best-effort point-in-time view; an allocation that frees during
-///   the snapshot may appear with stale capabilities/refcount.
+///  the snapshot may appear with stale capabilities/refcount.
 /// - Empty list does NOT mean "no live allocations" — until the
-///   sidecar lands, it means "enumeration is not yet wired".
+///  sidecar lands, it means "enumeration is not yet wired".
 ///
+
 /// # Performance (when sidecar lands)
 ///
+
 /// O(live_allocations) MemHeaderView clones + 1 mutex acquire on the
-/// allocation index.  Not on the alloc/free hot path; observers call
+/// allocation index. Not on the alloc/free hot path; observers call
 /// this from monitoring dashboards or panic post-mortem dumps.
 public fn live_allocations() -> List<MemHeaderView> {
-    // Empty stub: no global allocation index exists yet.  Observers
+    // Empty stub: no global allocation index exists yet. Observers
     // calling this today get a graceful empty-result; when the
     // sidecar producer is wired, this body changes without API churn.
     List.new()
 }
 
 /// Total number of CBGR-managed allocations currently live, when the
-/// global-index sidecar is wired.  Returns `0` until then.
+/// global-index sidecar is wired. Returns `0` until then.
 ///
+
 /// Symmetric counterpart to `cap_event_count()` for the cap_audit
 /// ring — observers monitoring memory pressure or leak tests can
 /// poll this value across time-windows.
@@ -288,52 +312,56 @@ public fn live_allocation_count() -> Int {
 // CallFrame — single frame in a symbolicated call stack
 // =============================================================================
 
-/// One frame of a symbolicated call stack.  Captured at panic time
+/// One frame of a symbolicated call stack. Captured at panic time
 /// or via `current_call_stack()` for forensic post-mortem dumps.
 ///
+
 /// All fields are by-value so the frame can cross thread boundaries
 /// safely (no borrowed references into the live stack).
 ///
+
 /// # Symbolication tiers
 ///
+
 /// - Tier-1 AOT: `function` / `file` / `line` / `column` resolved
-///   via DWARF (or PDB on Windows) symbol tables embedded in the
-///   binary.  `instruction_pointer` is the raw return address.
+///  via DWARF (or PDB on Windows) symbol tables embedded in the
+///  binary. `instruction_pointer` is the raw return address.
 /// - Tier-0 interpreter: `function` / `line` resolved from the VBC
-///   debug-info section per-frame; `file` / `column` recovered from
-///   the source-map index produced by the codegen.
-///   `instruction_pointer` is the VBC instruction offset of the
-///   call site.
+///  debug-info section per-frame; `file` / `column` recovered from
+///  the source-map index produced by the codegen.
+///  `instruction_pointer` is the VBC instruction offset of the
+///  call site.
 ///
+
 /// When symbolication is unavailable for a frame, observers see the
 /// raw integer fields (`instruction_pointer != 0`, `function ==
-/// ""`).  This lets call-stack rendering survive stripped binaries
+/// ""`). This lets call-stack rendering survive stripped binaries
 /// instead of returning empty.
 public type CallFrame is {
     /// Function name (mangled or human-readable depending on
-    /// symbolication source).  Empty when symbolication failed.
+    /// symbolication source). Empty when symbolication failed.
     function: Text,
 
-    /// Source file path.  Empty when source-map lookup failed.
+    /// Source file path. Empty when source-map lookup failed.
     file: Text,
 
-    /// Source line (1-indexed).  `0` when unknown.
+    /// Source line (1-indexed). `0` when unknown.
     line: Int,
 
-    /// Source column (1-indexed).  `0` when unknown.
+    /// Source column (1-indexed). `0` when unknown.
     column: Int,
 
     /// Raw instruction-pointer (Tier-1 return address) or VBC
-    /// instruction offset (Tier-0).  Always non-zero for a real
+    /// instruction offset (Tier-0). Always non-zero for a real
     /// frame; observers can correlate frames with raw addresses
     /// when symbolication is partial.
     instruction_pointer: UInt64,
 };
 
 implement CallFrame {
-    /// Construct an unsymbolicated frame from a raw IP.  Used by
+    /// Construct an unsymbolicated frame from a raw IP. Used by
     /// frame walkers that captured the IP but couldn't resolve
-    /// symbols.  Callers should not synthesise frames with
+    /// symbols. Callers should not synthesise frames with
     /// `instruction_pointer == 0` — that's reserved as the
     /// "no frame" sentinel.
     public fn from_ip(ip: UInt64) -> CallFrame {
@@ -346,7 +374,7 @@ implement CallFrame {
         }
     }
 
-    /// Construct a fully-symbolicated frame.  Used when DWARF / VBC
+    /// Construct a fully-symbolicated frame. Used when DWARF / VBC
     /// debug-info lookup succeeded and the frame walker has all
     /// fields available.
     public fn new(
@@ -365,7 +393,7 @@ implement CallFrame {
         }
     }
 
-    /// True iff the frame has a resolved function name.  Useful for
+    /// True iff the frame has a resolved function name. Useful for
     /// stack-trace renderers that fall back to raw addresses when
     /// symbols are unavailable.
     @inline
@@ -376,7 +404,7 @@ implement CallFrame {
 
 implement Display for CallFrame {
     /// Single-line summary suitable for log lines and stack-trace
-    /// output.  Formats as `function (file:line:column)` when
+    /// output. Formats as `function (file:line:column)` when
     /// symbolicated, or `<unsymbolicated 0xIP>` when not.
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         if self.is_symbolicated() {
@@ -402,31 +430,36 @@ implement Debug for CallFrame {
 
 /// Capture a symbolicated call stack from the current frame upward.
 ///
+
 /// `skip` is the number of frames to skip from the top of the stack
-/// (caller frames closest to this function).  Pass `0` to capture
+/// (caller frames closest to this function). Pass `0` to capture
 /// the full stack including the call to `current_call_stack` itself;
 /// pass `1` to skip the call frame and start from the caller.
 ///
+
 /// # Status: format-stable boundary; producer-side wiring deferred
 ///
+
 /// The boundary ships today returning an empty List so observer
-/// code can call it safely.  Producer-side requires:
-///   - Tier-1 AOT: DWARF symbol resolution (addr2line crate)
-///   - Tier-0 interpreter: VBC frame walk via interpreter call stack
+/// code can call it safely. Producer-side requires:
+///  - Tier-1 AOT: DWARF symbol resolution (addr2line crate)
+///  - Tier-0 interpreter: VBC frame walk via interpreter call stack
 /// Tracked in #202.
 ///
+
 /// # Format-stable contract
 ///
+
 /// - Returns `List<CallFrame>` in stack order (innermost first —
-///   matches the caller's expected reading order: "what was happening
-///   at the moment of capture, then what called that").
+///  matches the caller's expected reading order: "what was happening
+///  at the moment of capture, then what called that").
 /// - May return fewer frames than the actual stack depth when the
-///   walker hits an unwinding boundary (ABI mismatch, FFI frame, etc.).
+///  walker hits an unwinding boundary (ABI mismatch, FFI frame, etc.).
 /// - Empty list does NOT mean "no stack" — until producer-side wiring
-///   lands, it means "frame walking is not yet supported".
+///  lands, it means "frame walking is not yet supported".
 public fn current_call_stack(_skip: Int) -> List<CallFrame> {
     // Empty stub: the frame walker is not yet wired into either
-    // tier.  Observer code can call this today and graceful-degrade;
+    // tier. Observer code can call this today and graceful-degrade;
     // when DWARF (Tier-1) and VBC frame walking (Tier-0) land, this
     // body changes without API churn.
     List.new()

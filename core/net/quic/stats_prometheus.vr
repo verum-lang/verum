@@ -5,28 +5,35 @@
 // Dependencies: core, core.collections, core.net.quic.stats
 // =============================================================================
 //
+
 // Render `QuicStats` / `EndpointStats` as Prometheus text-exposition
 // format (OpenMetrics §3, backward-compat with classic Prom /metrics).
 //
+
 // # Output shape
 //
-//   # HELP verum_quic_datagrams_sent_total ...
-//   # TYPE verum_quic_datagrams_sent_total counter
-//   verum_quic_datagrams_sent_total{conn="42"} 1739
-//   verum_quic_datagrams_recv_total{conn="42"} 1654
-//   ...
+
+//  # HELP verum_quic_datagrams_sent_total ...
+//  # TYPE verum_quic_datagrams_sent_total counter
+//  verum_quic_datagrams_sent_total{conn="42"} 1739
+//  verum_quic_datagrams_recv_total{conn="42"} 1654
+//  ...
 //
+
 // Callers pipe the resulting Text into the HTTP /metrics endpoint
 // handler. No allocation inside the hot path — one final `Text.from`
 // concatenation builds the full payload.
 //
+
 // # Design
 //
-//   * One stable label (`conn`) identifies the owning connection.
-//   * `counter` for monotonic totals; `gauge` for cwnd/RTT/etc.
-//   * Endpoint-level metrics use the `verum_quic_endpoint_*` prefix
-//     without the conn label — they aggregate across connections.
+
+//  * One stable label (`conn`) identifies the owning connection.
+//  * `counter` for monotonic totals; `gauge` for cwnd/RTT/etc.
+//  * Endpoint-level metrics use the `verum_quic_endpoint_*` prefix
+//  without the conn label — they aggregate across connections.
 //
+
 // =============================================================================
 
 module core.net.quic.stats_prometheus;

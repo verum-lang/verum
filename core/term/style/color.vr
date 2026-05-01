@@ -4,6 +4,7 @@
 // Color sum type supporting Reset, Base16, Ansi256, True Color (Rgb), and HSL.
 // Includes CIELAB-based perceptual distance for accurate downscaling.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6.1
 // =============================================================================
 

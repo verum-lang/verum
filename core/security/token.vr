@@ -3,37 +3,43 @@
 // =============================================================================
 // Layer: 3 (Security)
 // Dependencies: core, core.encoding.{base64, hex},
-//               core.security.util.{rng, constant_time}
+//  core.security.util.{rng, constant_time}
 // =============================================================================
 //
+
 // The user-level "generate a random session / CSRF / password-reset
 // / API key / share-link token" primitive. Every web application
 // needs it; without a shared helper every codebase reinvents
 // OWASP's guidance (usually incorrectly — truncating too short, or
 // using `rand.Intn` on the wrong distribution).
 //
+
 // # Forms
 //
-//   * URL-safe base64 (RFC 4648 §5) — the OWASP-recommended
-//     default. 22 chars ≈ 128 bits of entropy.
-//   * Hex — double the length but friendlier in logs.
-//   * Numeric — digit-only, for OTP-style challenges.
-//   * Raw bytes — caller encodes however they need.
+
+//  * URL-safe base64 (RFC 4648 §5) — the OWASP-recommended
+//  default. 22 chars ≈ 128 bits of entropy.
+//  * Hex — double the length but friendlier in logs.
+//  * Numeric — digit-only, for OTP-style challenges.
+//  * Raw bytes — caller encodes however they need.
 //
+
 // # Security posture
 //
-//   * Every constructor funnels through `fill_secure` (CSPRNG).
-//     No weak-PRNG fallback; callers that want deterministic
-//     testing should inject their own bytes and treat the
-//     generator as opaque.
-//   * `constant_time_compare` matches stored tokens without
-//     timing leakage.
-//   * Minimum entropy guard — `MIN_TOKEN_BYTES = 16` (128 bits,
-//     the NIST SP 800-63B Level 1 baseline). Smaller values are
-//     clamped up; callers that explicitly want a shorter token
-//     (e.g. 6-digit OTP) use `generate_numeric` which doesn't
-//     promise 128-bit entropy.
+
+//  * Every constructor funnels through `fill_secure` (CSPRNG).
+//  No weak-PRNG fallback; callers that want deterministic
+//  testing should inject their own bytes and treat the
+//  generator as opaque.
+//  * `constant_time_compare` matches stored tokens without
+//  timing leakage.
+//  * Minimum entropy guard — `MIN_TOKEN_BYTES = 16` (128 bits,
+//  the NIST SP 800-63B Level 1 baseline). Smaller values are
+//  clamped up; callers that explicitly want a shorter token
+//  (e.g. 6-digit OTP) use `generate_numeric` which doesn't
+//  promise 128-bit entropy.
 //
+
 // =============================================================================
 
 module core.security.token;
@@ -96,6 +102,7 @@ public fn generate_hex(len_bytes: Int) -> Text {
 /// alphabet). Commonly used for email/SMS verification codes —
 /// typical lengths are 6–10 digits.
 ///
+
 /// Uniformly distributed via rejection sampling over a 32-bit
 /// range so there's no modulo-bias.
 public fn generate_numeric(digits: Int) -> Text {

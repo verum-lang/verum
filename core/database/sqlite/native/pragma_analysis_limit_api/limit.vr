@@ -24,7 +24,7 @@ public fn is_no_limit(l: &AnalysisLimit) -> Bool {
 public fn has_cap(l: &AnalysisLimit) -> Bool { !is_no_limit(l) }
 
 // Suggested defaults per SQLite recommendation:
-//   PRAGMA analysis_limit = 1000 is a good starting point for big tables.
+//  PRAGMA analysis_limit = 1000 is a good starting point for big tables.
 public fn recommended_default() -> Int64 { 1000 as Int64 }
 
 public fn is_reasonable(l: &AnalysisLimit) -> Bool {

@@ -1,5 +1,6 @@
 //! VBC error types.
 //!
+
 //! This module defines all error types used throughout the VBC crate,
 //! covering format parsing, validation, serialization, and interpretation.
 
@@ -230,7 +231,7 @@ pub enum VbcError {
     },
 
     /// Multiple validation errors collected during a single
-    /// validator pass.  The `Display` impl renders an aggregate
+    /// validator pass. The `Display` impl renders an aggregate
     /// header followed by each individual error on its own indented
     /// line — much more useful than `"validation failed with N
     /// errors"` for a developer running `verum_vbc::validate` on a
@@ -291,18 +292,21 @@ pub enum VbcError {
 
 /// Renders the body of `VbcError::MultipleErrors` for `Display`.
 ///
+
 /// Produces the form:
 ///
+
 /// ```text
 /// validation failed with 3 errors:
-///   1. invalid function reference: FunctionId(99)
-///   2. register r10 out of bounds (max: 4) in fn#0@0x0
-///   3. invalid type reference: TypeId(9999)
+///  1. invalid function reference: FunctionId(99)
+///  2. register r10 out of bounds (max: 4) in fn#0@0x0
+///  3. invalid type reference: TypeId(9999)
 /// ```
 ///
+
 /// Indented per-error lines mean any caller that prints the error
 /// gets the full forensic detail without needing to walk the inner
-/// `Vec<VbcError>` manually.  Used by the validator and by
+/// `Vec<VbcError>` manually. Used by the validator and by
 /// `Interpreter::try_new_validated` (which renders `VbcError` into
 /// `InterpreterError::ValidationFailed.reason`).
 fn render_multiple_errors(errs: &[VbcError]) -> String {
@@ -390,7 +394,7 @@ mod tests {
             rendered,
         );
 
-        // Each inner error appears on its own indented line.  Pin
+        // Each inner error appears on its own indented line. Pin
         // the rendering format used by the validator + by
         // `Interpreter::try_new_validated`'s
         // `ValidationFailed.reason` — a regression to the bare
@@ -423,7 +427,7 @@ mod tests {
     #[test]
     fn multiple_errors_with_empty_list_renders_zero_count() {
         // Edge case: validator collected zero errors but the result
-        // type required a `MultipleErrors` carrier.  This shouldn't
+        // type required a `MultipleErrors` carrier. This shouldn't
         // happen in practice (single-error path takes the
         // `errors.pop()` branch), but the renderer must remain
         // total — never panic on `.len() == 0`.

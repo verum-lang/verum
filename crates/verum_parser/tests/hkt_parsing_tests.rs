@@ -14,8 +14,10 @@
 )]
 //! Higher-Kinded Type (HKT) Parsing Tests
 //!
+
 //! Tests that HKT syntax is properly parsed in protocols, type parameters, and constraints.
 //!
+
 //! Tests for higher-kinded type parsing: type constructors with kind parameters
 //! Grammar: grammar/verum.ebnf lines 543-546
 

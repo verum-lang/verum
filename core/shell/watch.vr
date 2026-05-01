@@ -5,22 +5,27 @@
 // Dependencies: shell.{glob, jobs, result}, async.{channel, cancellation, timer}, io.fs
 // =============================================================================
 //
+
 // Reactive filesystem monitoring. Two implementation strategies:
 //
-//   1. Polling (default) — periodic mtime/size scan over a glob set. Works
-//      anywhere, no platform dependencies. Latency = poll interval.
-//   2. Native (Linux inotify / macOS FSEvents / Windows
-//      ReadDirectoryChangesW) — sub-millisecond latency, lower CPU cost.
-//      Currently a stub; the polling backend is functionally complete.
+
+//  1. Polling (default) — periodic mtime/size scan over a glob set. Works
+//  anywhere, no platform dependencies. Latency = poll interval.
+//  2. Native (Linux inotify / macOS FSEvents / Windows
+//  ReadDirectoryChangesW) — sub-millisecond latency, lower CPU cost.
+//  Currently a stub; the polling backend is functionally complete.
 //
+
 // API:
-//   watch(pattern)   → Receiver<WatchEvent>
-//   WatchEvent       sum: Created / Modified / Deleted / Renamed
+//  watch(pattern) → Receiver<WatchEvent>
+//  WatchEvent sum: Created / Modified / Deleted / Renamed
 //
+
 // The returned `LineStream`-like handle ties the underlying scanner task to
 // a `CancellationTokenSource`, so dropping the receiver / calling `kill()`
 // cleanly stops the scanner.
 //
+
 // =============================================================================
 
 module watch;

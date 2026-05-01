@@ -8,12 +8,14 @@ module sys.windows.time;
 // Platform: Windows (x86_64)
 // =============================================================================
 //
+
 // This module provides time-related types and functions for Windows:
 // - WindowsDuration: Represents a span of time
 // - WindowsInstant: Represents a point in monotonic time
 // - High-precision timing using QueryPerformanceCounter
 // - System time access
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.5
 // =============================================================================
 
@@ -284,6 +286,7 @@ public fn monotonic_micros() -> UInt64 {
 
 /// Get monotonic time in milliseconds (using GetTickCount64).
 ///
+
 /// This is faster but less precise than monotonic_nanos.
 public fn monotonic_millis() -> UInt64 {
     GetTickCount64()
@@ -368,6 +371,7 @@ public fn sleep_ms(ms: UInt64) {
 
 /// Sleep for microseconds.
 ///
+
 /// Note: Windows Sleep has 1ms minimum resolution.
 /// For sub-millisecond delays, this uses busy-wait.
 public fn sleep_us(us: UInt64) {
@@ -398,6 +402,7 @@ public fn sleep_until(deadline: WindowsInstant) {
 
 /// Measure elapsed time for a closure.
 ///
+
 /// Returns (result, duration).
 public fn time_it<T>(f: fn() -> T) -> (T, WindowsDuration) {
     let start = WindowsInstant.now();
@@ -486,6 +491,7 @@ implement WindowsStopwatch {
 
     /// Get a lap time (elapsed since last lap or start).
     ///
+
     /// Does not reset the stopwatch.
     public fn lap(&mut self) -> WindowsDuration {
         let elapsed = self.elapsed();
@@ -506,6 +512,7 @@ implement WindowsStopwatch {
 
 /// High-resolution performance counter.
 ///
+
 /// Uses QueryPerformanceCounter which is the fastest monotonic
 /// time source on Windows.
 public type WindowsPerfCounter is (UInt64);
@@ -597,6 +604,7 @@ implement WindowsDeadlineTimer {
 
     /// Get remaining time until deadline.
     ///
+
     /// Returns None if no deadline or deadline has passed.
     public fn remaining(&self) -> Maybe<WindowsDuration> {
         if !self.has_deadline {
@@ -630,6 +638,7 @@ implement WindowsDeadlineTimer {
 
     /// Get remaining milliseconds for use with WaitForSingleObject etc.
     ///
+
     /// Returns INFINITE if no deadline.
     public fn remaining_ms(&self) -> UInt32 {
         if !self.has_deadline {

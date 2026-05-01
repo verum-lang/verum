@@ -1,20 +1,25 @@
 //! End-to-end integration tests for `verum cache-closure`.
 //!
+
 //! Spawns the actual `verum` binary and validates the chain:
 //!
-//!   `verum cache-closure {stat,list,get,clear,decide}` (clap) →
-//!     `commands::cache_closure::run_*` →
-//!       `verum_verification::closure_cache::FilesystemCacheStore` →
-//!         per-theorem JSON record on disk
+
+//!  `verum cache-closure {stat,list,get,clear,decide}` (clap) →
+//!  `commands::cache_closure::run_*` →
+//!  `verum_verification::closure_cache::FilesystemCacheStore` →
+//!  per-theorem JSON record on disk
 //!
+
 //! Together with the 26 trait-level tests in
 //! `verum_verification::closure_cache::tests` and the 14 handler
 //! unit tests in `commands::cache_closure::tests`, this proves the
 //! `IncrementalCacheStore` trait surface is consumable from a shell
 //! — closing the integration gap #79 was opened to address.
 //!
+
 //! ## Test fixture pattern
 //!
+
 //! Every test points the cache at a tempdir via `--root <dir>`, so
 //! the test never touches the developer's actual `target/.verum_cache/`.
 
@@ -26,7 +31,7 @@ fn verum_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_verum"))
 }
 
-/// Open a fresh tempdir for use as the cache root.  The TempDir
+/// Open a fresh tempdir for use as the cache root. The TempDir
 /// must be kept alive for the test's duration.
 fn fresh_root() -> (TempDir, String) {
     let t = TempDir::new().expect("tempdir");
@@ -371,8 +376,8 @@ fn cache_decide_rejects_unknown_format() {
 #[test]
 fn cache_stat_entries_matches_list_count_after_decides() {
     // Run several decide commands → each produces a Recheck verdict
-    // with no_cache_entry (cache stays empty).  stat.entries must
-    // remain at 0; list.count likewise.  This pins the contract
+    // with no_cache_entry (cache stays empty). stat.entries must
+    // remain at 0; list.count likewise. This pins the contract
     // that `decide` is a *probe* — it never writes.
     let (_t, root) = fresh_root();
     for thm in ["thm.a", "thm.b", "thm.c"] {

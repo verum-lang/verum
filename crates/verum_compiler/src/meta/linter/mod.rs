@@ -1,16 +1,20 @@
 //! Meta Linter - Static Analysis for Meta Function Safety
 //!
+
 //! This module implements the Meta Linter, which automatically detects unsafe patterns
 //! in meta functions and enforces safety annotations.
 //!
+
 //! The Meta Linter provides static analysis for safety in compile-time code.
 //! It detects unsafe patterns and requires explicit @safe/@unsafe annotations.
 //! Meta functions marked @safe are verified to have no unsafe patterns.
 //! Functions with detected unsafe patterns are auto-marked @unsafe and generate
 //! warnings at usage sites.
 //!
+
 //! ## Detected Unsafe Patterns
 //!
+
 //! The linter automatically detects these unsafe patterns:
 //! 1. String concatenation with external input (injection risk)
 //! 2. Direct format! with user input (no escaping)
@@ -20,13 +24,17 @@
 //! 6. Unbounded loops
 //! 7. Hidden I/O operations
 //!
+
 //! ## Safety Annotations
 //!
+
 //! - `@safe`: Explicitly marks meta function as safe (linter verifies)
 //! - `@unsafe`: Explicitly marks meta function as potentially unsafe
 //!
+
 //! ## Module Structure
 //!
+
 //! - `patterns` - UnsafePatternKind definitions
 //! - `results` - LintResult, LintWarning, LintError
 //! - `config` - LinterConfig
@@ -86,6 +94,7 @@ impl MetaLinter {
 
     /// Lint a meta function declaration
     ///
+
     /// Returns a LintResult indicating whether the function is safe
     /// and any detected issues.
     pub fn lint_function(&self, func: &FunctionDecl) -> LintResult {
@@ -111,9 +120,9 @@ impl MetaLinter {
             self.analyze_body_with_context(body, &mut result, &mut ctx);
         }
 
-        // Check for recursion after analyzing the body.  Gated on
+        // Check for recursion after analyzing the body. Gated on
         // `check_performance` — the flag was previously inert (set
-        // but never read), so disabling it had no effect.  Now
+        // but never read), so disabling it had no effect. Now
         // `permissive()` and other configurations that opt out of
         // performance lints actually skip the recursion warning,
         // matching the documented contract.
@@ -121,7 +130,7 @@ impl MetaLinter {
             self.safety
                 .check_unbounded_recursion(&ctx, func.span, &mut result);
 
-            // Cyclomatic complexity check.  `max_cyclomatic_complexity`
+            // Cyclomatic complexity check. `max_cyclomatic_complexity`
             // was a config field with no readers — `lint_function`
             // never invoked `calculate_complexity` against it, so the
             // documented contract was a no-op regardless of value.
@@ -320,7 +329,7 @@ impl MetaLinter {
                 self.safety
                     .check_unwrap_expect(method_name, expr.span, result);
 
-                // Check for non-deterministic methods.  Gated on
+                // Check for non-deterministic methods. Gated on
                 // `check_determinism` — the flag was previously
                 // inert; now `permissive()` (which sets
                 // `check_determinism = false`) actually skips the

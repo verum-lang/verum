@@ -286,7 +286,7 @@ a forward-ref failure.  The language already supports the pattern.
 
 ---
 
-## §8. Architectural: handler signature doesn't track failure modes — **DESIGNED, DEFERRED**
+## §8. Architectural: handler signature doesn't track failure modes — **FIXED**
 
 ### Attack
 A handler returns `Result<Response, WeftError>`.  But the
@@ -296,31 +296,42 @@ know whether a 500 is "the handler claimed Internal" or "Verum's
 runtime panicked through the future".  Observability suffers;
 incident triage takes longer.
 
-### Fundamental fix — associated `Error` type on `Handler`
+### Fundamental fix — associated `Error` type on `Handler` (LANDED)
+`core/net/weft/handler.vr` ships:
 ```verum
 public type Handler is protocol {
-    type Error: IntoResponse;
+    type Error: IntoResponse = WeftError;
     async fn handle(&self, req: WeftRequest) -> Result<Response, Self.Error>;
-}
+};
 ```
-Currently every `implement Handler for X` returns the closed
-`WeftError` sum.  Promoting `Error` to an associated type lets
-middleware type-route: e.g.
-`RetryLayer<H> where H::Error: RetryClassify` only wraps handlers
-whose error converts to a retry classification.  Verum's
-existing computational properties (`Async | IO | Fallible<E> |
-Mutates`) are inferred from the body and become observable
-through this signature surface — a handler that declares
-`Fallible<DatabaseError>` is statically routable to a
+The associated `Error` type carries an `IntoResponse` bound — the
+framework can always render a reply, so any user-defined override
+is sound by construction.  The default `= WeftError` means every
+existing `implement Handler for X` site (16 across router, rpc,
+adaptive, timeout, spiffe, health, wasm_filter, zero_rtt_gate,
+metrics, tracing, backpressure × 5, handler.vr) inherits the
+framework's closed sum unchanged — zero migration cost.
+
+Domain handlers can now opt into richer per-handler typing
+(`type Error = MyDomainError;` where `MyDomainError: IntoResponse`),
+unlocking middleware that type-routes: e.g.
+`RetryLayer<H> where H::Error: RetryClassify` statically reaches
+only handlers whose error converts to a retry classification.
+Verum's existing computational properties (`Async | IO |
+Fallible<E> | Mutates`) are inferred from the body and become
+observable through this signature surface — a handler that
+declares `Fallible<DatabaseError>` is statically routable to a
 DB-recovery middleware.
 
-### Status — DEFERRED
-This is a multi-file refactor: every `implement Handler for X`
-site in `core/net/weft/**` (router, rpc, adaptive, timeout,
-spiffe, health, wasm_filter, zero_rtt_gate, metrics, tracing,
-backpressure × 5, handler.vr default impls) gains an explicit
-`type Error = WeftError;` clause.  Mechanical, but ~20 sites
-plus migration of every test/example.  Scoped as follow-up.
+### Verification
+`verum check core/net/weft/{handler,router,backpressure,health,
+rpc,adaptive,timeout,spiffe,wasm_filter,zero_rtt_gate,metrics,
+tracing}.vr` — 0 errors caused by this change across all sites.
+The single pre-existing E101 (`HttpRequest` mount-rename
+resolution gap) in `handler.vr:90` is unrelated and predates this
+work — confirmed by stash-and-recheck.  Default associated types
+on protocols verified working via probe at
+`/tmp/protocol_default_probe.vr`.
 
 ---
 

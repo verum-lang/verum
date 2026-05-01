@@ -3,18 +3,21 @@
 // =============================================================================
 // Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_protocol.html
 //
+
 // MySQL packet:
-//   +--------- 3-byte LE length (counts payload only) ----------+
-//   +--------- 1-byte sequence number (per-command counter) ----+
-//   +--------- length bytes of payload --------------------------+
+//  +--------- 3-byte LE length (counts payload only) ----------+
+//  +--------- 1-byte sequence number (per-command counter) ----+
+//  +--------- length bytes of payload --------------------------+
 //
+
 // LengthEncoded integer (LEI):
-//   0x00..=0xFA  → single byte, value as-is
-//   0xFB         → NULL marker (in row data)
-//   0xFC <2-byte LE>   → 2-byte unsigned
-//   0xFD <3-byte LE>   → 3-byte unsigned
-//   0xFE <8-byte LE>   → 8-byte unsigned
+//  0x00..=0xFA → single byte, value as-is
+//  0xFB → NULL marker (in row data)
+//  0xFC <2-byte LE> → 2-byte unsigned
+//  0xFD <3-byte LE> → 3-byte unsigned
+//  0xFE <8-byte LE> → 8-byte unsigned
 //
+
 // LengthEncoded string: LEI prefix + that many raw bytes.
 // NULL-terminated string: bytes until 0x00.
 // Fixed-length string / fixed-length integer: caller-known length.

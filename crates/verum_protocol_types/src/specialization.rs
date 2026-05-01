@@ -1,28 +1,34 @@
 //! Specialization Lattice Type Definitions
 //!
+
 //! Specialization Lattice for Protocol Implementations:
 //! Allows more specific implementations to override more general ones using
 //! `@specialize` attribute. Lattice precedence (most specific wins):
 //! 1. Concrete type (e.g., List<Int>)
 //! 2. Partially specialized (e.g., List<T> where T: Copy)
 //! 3. Generic (e.g., List<T>)
-//!    Soundness rules: specialized methods must have same return types as defaults.
-//!    Coherence: mutual exclusion via negative bounds (e.g., `T: Send + !Sync`).
-//!    The actual verification logic is in verum_smt.
+//!  Soundness rules: specialized methods must have same return types as defaults.
+//!  Coherence: mutual exclusion via negative bounds (e.g., `T: Send + !Sync`).
+//!  The actual verification logic is in verum_smt.
 //!
+
 //! # Specialization Overview
 //!
+
 //! Specialization enables optimization through more specific implementations:
 //!
+
 //! ```verum
 //! // General implementation
 //! impl Display for List<T> where T: Display { ... }
 //!
+
 //! // Specialized for Text (more efficient)
 //! @specialize
 //! impl Display for List<Text> { ... }
 //! ```
 //!
+
 //! The lattice ensures:
 //! - Unique most-specific implementation for each type
 //! - No ambiguous overlaps
@@ -39,6 +45,7 @@ use crate::protocol_base::{ProtocolBound, Type};
 
 /// Specialization metadata attached to protocol implementations
 ///
+
 /// Metadata for a specialized protocol implementation. Tracks whether this impl
 /// is marked `@specialize`, which default impl it overrides, its precedence level
 /// in the specialization lattice, and the conditions under which it applies
@@ -82,6 +89,7 @@ pub enum SpecializationCondition {
 
 /// The specialization lattice for a protocol
 ///
+
 /// Tracks all implementations and their specificity relationships.
 #[derive(Debug, Clone)]
 pub struct SpecializationLattice {
@@ -213,6 +221,7 @@ pub struct SpecializationStats {
 
 /// Specificity ordering between implementations
 ///
+
 /// Determines which implementation is more specific than another.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpecificityOrdering {

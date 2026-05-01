@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for parser error recovery.
 //!
+
 //! These tests verify that the parser can:
 //! 1. Recover from errors and continue parsing
 //! 2. Report multiple errors in a single pass

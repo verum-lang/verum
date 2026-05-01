@@ -17,6 +17,7 @@ use std::fmt::{self, Display};
 /// Value returned by [`Context::get_kind_id()`](crate::context::Context::get_kind_id)
 /// for the first input string that isn't known.
 ///
+
 /// LLVM 21 has 42 pre-defined metadata kinds.
 pub const FIRST_CUSTOM_METADATA_KIND_ID: u32 = 42;
 
@@ -28,8 +29,10 @@ pub struct MetadataValue<'ctx> {
 impl<'ctx> MetadataValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and of type metadata.
     pub unsafe fn new(value: LLVMValueRef) -> Self {
         assert!(!value.is_null());

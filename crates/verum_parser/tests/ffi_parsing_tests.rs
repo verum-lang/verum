@@ -14,6 +14,7 @@
 )]
 // FFI Boundary Declaration Parsing Tests
 //
+
 // Tests for parsing FFI boundary declarations according to Verum specification.
 // Tests for FFI boundary declarations: C ABI bindings, contracts, memory effects
 

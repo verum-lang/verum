@@ -39,7 +39,7 @@ public fn produces_rows(k: &ColumnStmtKind) -> Bool {
     }
 }
 
-// EXPLAIN-specific column count.  See `stmt_isexplain_api` for the
+// EXPLAIN-specific column count. See `stmt_isexplain_api` for the
 // result-shape constants — replicate here for self-containment.
 public fn explain_column_count() -> Int { 8 }
 public fn explain_query_plan_column_count() -> Int { 4 }

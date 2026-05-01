@@ -9,8 +9,10 @@ use super::bytecode_io::*;
 
 /// SimdExtended (0x2A) - Platform-agnostic SIMD operations.
 ///
+
 /// Format: `[0x2A] [sub_opcode:u8] [operands...]`
 ///
+
 /// Sub-opcode categories:
 /// - 0x00-0x0F: Vector Creation (Splat, Extract, Insert, FromScalars)
 /// - 0x10-0x1F: Arithmetic (Add, Sub, Mul, Div, Neg, Abs, Sqrt, Fma, Min, Max)
@@ -22,6 +24,7 @@ use super::bytecode_io::*;
 /// - 0x80-0x8F: Mask Operations (MaskAll, MaskNone, MaskAny)
 /// - 0x90-0x9F: Type Conversion (Cast, Convert*)
 ///
+
 /// Note: SIMD operations require platform-specific support. The interpreter
 /// implements scalar fallbacks; AOT compilation uses LLVM vector intrinsics.
 pub(in super::super) fn handle_simd_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {

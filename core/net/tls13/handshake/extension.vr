@@ -4,36 +4,42 @@
 // Layer: 5 (Network — TLS 1.3 core)
 // =============================================================================
 //
+
 // RFC 8446 §4.2:
 //
-//   Extension ::= struct {
-//       ExtensionType extension_type;
-//       opaque extension_data<0..2^16-1>;
-//   }
+
+//  Extension ::= struct {
+//  ExtensionType extension_type;
+//  opaque extension_data<0..2^16-1>;
+//  }
 //
+
 // Warp supports the TLS 1.3 MUST / SHOULD extensions plus the most
 // common optional ones seen in the WebPKI ecosystem:
 //
-//   * server_name                   (0, RFC 6066)
-//   * supported_groups              (10)
-//   * signature_algorithms          (13)
-//   * application_layer_protocol_negotiation (16, RFC 7301)
-//   * supported_versions            (43)
-//   * key_share                     (51)
-//   * pre_shared_key                (41)     — resumption (v1.1)
-//   * psk_key_exchange_modes        (45)     — resumption (v1.1)
-//   * early_data                    (42)     — 0-RTT (v1.1)
-//   * signature_algorithms_cert     (50)
-//   * quic_transport_parameters     (57, RFC 9001)
-//   * cookie                        (44, RFC 8446 §4.2.2)
-//   * status_request                (5, RFC 6066 OCSP)
-//   * record_size_limit             (28, RFC 8449)
-//   * certificate_authorities       (47)
+
+//  * server_name (0, RFC 6066)
+//  * supported_groups (10)
+//  * signature_algorithms (13)
+//  * application_layer_protocol_negotiation (16, RFC 7301)
+//  * supported_versions (43)
+//  * key_share (51)
+//  * pre_shared_key (41) — resumption (v1.1)
+//  * psk_key_exchange_modes (45) — resumption (v1.1)
+//  * early_data (42) — 0-RTT (v1.1)
+//  * signature_algorithms_cert (50)
+//  * quic_transport_parameters (57, RFC 9001)
+//  * cookie (44, RFC 8446 §4.2.2)
+//  * status_request (5, RFC 6066 OCSP)
+//  * record_size_limit (28, RFC 8449)
+//  * certificate_authorities (47)
 //
+
 // Unknown extensions preserved as `Unknown(type, data)` for pass-
 // through (grease, future) — RFC 8446 §4.2 requires parsers to ignore
 // unknown extensions but not fail the handshake.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.extension;
@@ -319,8 +325,8 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
         Extension.StatusRequestExt => {
             put_u16(out, EXT_STATUS_REQUEST);
             // Minimal CertificateStatusRequest per RFC 6066 §8:
-            //   status_type = ocsp(1); responder_id_list<0..2^16-1>=[];
-            //   request_extensions<0..2^16-1>=[]
+            //  status_type = ocsp(1); responder_id_list<0..2^16-1>=[];
+            //  request_extensions<0..2^16-1>=[]
             vec_u16(out, |b| {
                 put_u8(b, 1_u8);
                 put_u16(b, 0_u16);

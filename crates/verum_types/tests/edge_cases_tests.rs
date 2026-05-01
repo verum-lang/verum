@@ -14,9 +14,11 @@
 )]
 //! Edge Case Tests for Type System
 //!
+
 //! Comprehensive edge case testing to reach 95%+ coverage.
 //! Coverage target: 92% → 95%
 //!
+
 //! Test categories:
 //! - Complex type inference edge cases
 //! - Unification corner cases
@@ -24,6 +26,7 @@
 //! - Cyclic type detection
 //! - Subtyping boundaries
 //!
+
 //! Note: Many advanced features tested here (GATs, higher-kinded types, etc.)
 //! are not yet fully implemented. Tests are kept as documentation of
 //! intended behavior and will be enabled as features are completed.

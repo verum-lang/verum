@@ -1,11 +1,14 @@
 //! M-EXPORT V2 integration test — drive the full
 //!
-//!   .vr source → fast-parser → AST → extract_core_proof_term →
-//!   verum_codegen::proof_export::<format>::lower_term
+
+//!  .vr source → fast-parser → AST → extract_core_proof_term →
+//!  verum_codegen::proof_export::<format>::lower_term
 //!
+
 //! pipeline on a synthetic Term-shaped proof body and verify the
 //! lowered term lands in the per-target output instead of `:= sorry`.
 //!
+
 //! The parser places `proof { <expr> }` into
 //! `ProofBody::Term(expr)` whenever the first token of the proof
 //! body isn't a tactic keyword, so a body like `proof { trivial_lemma }`

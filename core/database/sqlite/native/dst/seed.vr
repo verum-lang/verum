@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.5 (DST)
 //
+
 // `DstSeed` wraps a 4-word xoshiro256** state. Every DST harness
 // is constructed from a single `Int64` seed; the same seed always
 // produces the same op sequence + fault sequence.

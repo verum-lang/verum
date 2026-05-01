@@ -1,36 +1,43 @@
 //! Tensor runtime support for the VBC interpreter.
 //!
+
 //! This module provides the runtime representation and operations for tensors,
 //! enabling ML/AI workloads in the Verum VBC interpreter.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
-//! │                         TENSOR REPRESENTATION                           │
+//! │ TENSOR REPRESENTATION │
 //! ├─────────────────────────────────────────────────────────────────────────┤
-//! │                                                                         │
-//! │  TensorValue (stack) ──► TensorHandle ──► TensorData (heap)            │
-//! │                                                                         │
-//! │  ┌──────────────────┐   ┌──────────────────┐   ┌───────────────────┐   │
-//! │  │ Value (NaN-boxed)│   │ TensorHandle     │   │ TensorData        │   │
-//! │  │ TAG_POINTER ─────┼──►│ dtype: DType     │   │ data: *mut u8     │   │
-//! │  └──────────────────┘   │ ndim: u8         │   │ capacity: usize   │   │
-//! │                         │ shape: [usize;8] │   │ refcount: u32     │   │
-//! │                         │ strides: [...]   │   │ device: DeviceId  │   │
-//! │                         │ data: *TensorData│   └───────────────────┘   │
-//! │                         │ flags: TensorFlags│                          │
-//! │                         └──────────────────┘                           │
+//! │ │
+//! │ TensorValue (stack) ──► TensorHandle ──► TensorData (heap) │
+//! │ │
+//! │ ┌──────────────────┐ ┌──────────────────┐ ┌───────────────────┐ │
+//! │ │ Value (NaN-boxed)│ │ TensorHandle │ │ TensorData │ │
+//! │ │ TAG_POINTER ─────┼──►│ dtype: DType │ │ data: *mut u8 │ │
+//! │ └──────────────────┘ │ ndim: u8 │ │ capacity: usize │ │
+//! │ │ shape: [usize;8] │ │ refcount: u32 │ │
+//! │ │ strides: [...] │ │ device: DeviceId │ │
+//! │ │ data: *TensorData│ └───────────────────┘ │
+//! │ │ flags: TensorFlags│ │
+//! │ └──────────────────┘ │
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Memory Layout
 //!
+
 //! Tensors use row-major (C-style) layout by default. The strides are computed
 //! automatically from the shape.
 //!
+
 //! # Thread Safety
 //!
+
 //! TensorData uses atomic reference counting for safe sharing across async tasks.
 //! Mutation requires exclusive access (enforced at runtime).
 
@@ -219,6 +226,7 @@ bitflags::bitflags! {
 
 /// Raw tensor data storage (heap-allocated, reference-counted).
 ///
+
 /// Supports both CPU and GPU storage with automatic host/device synchronization.
 pub struct TensorData {
     /// Pointer to raw data (host or device memory).
@@ -426,6 +434,7 @@ pub const MAX_DIMS: usize = 8;
 
 /// Tensor handle containing metadata and pointer to data.
 ///
+
 /// This structure is designed to fit in 128 bytes for cache efficiency.
 #[repr(C)]
 pub struct TensorHandle {
@@ -510,14 +519,17 @@ impl TensorHandle {
 
     /// Creates a tensor with the given shape, dtype, and device.
     ///
+
     /// This is the device-aware version of `zeros`. It respects the
     /// ComputeDevice context when allocating tensor storage.
     ///
+
     /// # Arguments
     /// * `shape` - The dimensions of the tensor
     /// * `dtype` - The element data type
     /// * `device` - The device ID (0 = CPU, 0x1000+ = GPU)
     ///
+
     /// # Returns
     /// `Some(TensorHandle)` on success, `None` if allocation fails or
     /// the device is not available.
@@ -562,6 +574,7 @@ impl TensorHandle {
 
     /// Creates a tensor filled with a constant value on a specific device.
     ///
+
     /// # Arguments
     /// * `shape` - The dimensions of the tensor
     /// * `dtype` - The element data type
@@ -582,8 +595,10 @@ impl TensorHandle {
 
     /// Creates a tensor from raw data.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure the data is valid and has the correct size.
     pub unsafe fn from_raw(
         shape: &[usize],
@@ -717,14 +732,14 @@ impl TensorHandle {
                     let p = ptr as *mut f32;
                     let v = value as f32;
                     for i in 0..self.numel {
-                        *p.add(i * 2) = v;     // real part
+                        *p.add(i * 2) = v; // real part
                         *p.add(i * 2 + 1) = 0.0; // imag part
                     }
                 }
                 DType::Complex128 => {
                     let p = ptr as *mut f64;
                     for i in 0..self.numel {
-                        *p.add(i * 2) = value;   // real part
+                        *p.add(i * 2) = value; // real part
                         *p.add(i * 2 + 1) = 0.0; // imag part
                     }
                 }
@@ -746,8 +761,10 @@ impl TensorHandle {
 
     /// Returns a pointer to element at the given indices.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure indices are valid.
     /// Supports negative strides for reverse iteration (e.g., flip operations).
     pub unsafe fn get_ptr(&self, indices: &[usize]) -> Option<*const u8> {
@@ -855,6 +872,7 @@ impl TensorHandle {
 
     /// Returns raw pointer to F32 data (const).
     ///
+
     /// Returns null if no data or wrong dtype.
     #[inline]
     pub fn data_ptr_f32(&self) -> *const f32 {
@@ -868,6 +886,7 @@ impl TensorHandle {
 
     /// Returns raw pointer to F32 data (mutable).
     ///
+
     /// Returns null if no data or wrong dtype.
     #[inline]
     pub fn data_ptr_f32_mut(&mut self) -> *mut f32 {
@@ -1079,6 +1098,7 @@ impl TensorHandle {
 
     /// Returns raw pointer to F16 data as raw u16 bits (const).
     ///
+
     /// F16 (IEEE 754 binary16) stores 16-bit half-precision floats.
     /// Use f16_to_f32 and f32_to_f16 for conversions.
     #[inline]
@@ -1104,6 +1124,7 @@ impl TensorHandle {
 
     /// Returns raw pointer to BF16 data as raw u16 bits (const).
     ///
+
     /// BF16 (Brain float16) stores 16-bit floats with same exponent range as f32.
     /// Use bf16_to_f32 and f32_to_bf16 for conversions.
     #[inline]
@@ -1129,6 +1150,7 @@ impl TensorHandle {
 
     /// Returns raw pointer to Complex64 data as f32 pairs (const).
     ///
+
     /// Complex64 is stored as interleaved pairs of f32: [re0, im0, re1, im1, ...]
     /// Each complex number uses 8 bytes (2 × f32).
     #[inline]
@@ -1154,6 +1176,7 @@ impl TensorHandle {
 
     /// Returns raw pointer to Complex128 data as f64 pairs (const).
     ///
+
     /// Complex128 is stored as interleaved pairs of f64: [re0, im0, re1, im1, ...]
     /// Each complex number uses 16 bytes (2 × f64).
     #[inline]
@@ -1223,10 +1246,12 @@ impl fmt::Debug for TensorHandle {
 
 /// Performs element-wise binary operation with broadcasting and type promotion.
 ///
+
 /// Type promotion follows NumPy conventions:
 /// - Bool → Integer → Float → Complex
 /// - Smaller types promote to larger within category
 ///
+
 /// Uses SIMD-accelerated scalar broadcasting when one operand has numel=1.
 pub fn tensor_binop(
     lhs: &TensorHandle,
@@ -1564,12 +1589,14 @@ pub fn tensor_reduce(
 
 /// Performs reduction operation over multiple axes specified by a bitmask.
 ///
+
 /// The `axes_mask` is a bitmask where bit `i` indicates that axis `i` should be reduced.
 /// - axes_mask = 0: Full reduction (all axes → scalar)
 /// - axes_mask = 0b001: Reduce axis 0 only
 /// - axes_mask = 0b011: Reduce axes 0 and 1
 /// - axes_mask = u64::MAX: Full reduction
 ///
+
 /// Axes are reduced in descending order to preserve index validity during sequential reduction.
 pub fn tensor_reduce_axes(
     src: &TensorHandle,
@@ -1611,6 +1638,7 @@ pub fn tensor_reduce_axes(
 
 /// Axis-specific F32 reduction with stride.
 ///
+
 /// # Safety
 /// - `src` must point to valid memory with at least `n * stride` elements
 /// - All accessed indices must be within bounds
@@ -1728,6 +1756,7 @@ unsafe fn reduce_axis_f32(src: *const f32, n: usize, stride: isize, op: TensorRe
 
 /// Axis-specific F64 reduction with stride.
 ///
+
 /// # Safety
 /// - `src` must point to valid memory with at least `n * stride` elements
 /// - All accessed indices must be within bounds
@@ -2391,6 +2420,7 @@ pub fn tensor_concat(tensors: &[&TensorHandle], axis: usize) -> Option<TensorHan
 
 /// Computes softmax along an axis (default: last axis).
 ///
+
 /// Uses GPU acceleration on macOS with Metal for large tensors.
 pub fn tensor_softmax(src: &TensorHandle, axis: Option<i32>) -> Option<TensorHandle> {
     // Use kernel dispatch layer for automatic GPU/CPU selection
@@ -2634,6 +2664,7 @@ pub fn tensor_from_slice(data: &[f64], shape: &[usize], dtype: DType) -> Option<
 
 /// Creates a Complex64 tensor from pairs of (real, imag) values.
 ///
+
 /// Each pair of values in data represents one complex number: [re0, im0, re1, im1, ...]
 /// The shape refers to the number of complex elements, not the underlying floats.
 pub fn tensor_from_complex64_slice(data: &[f32], shape: &[usize]) -> Option<TensorHandle> {
@@ -2659,6 +2690,7 @@ pub fn tensor_from_complex64_slice(data: &[f32], shape: &[usize]) -> Option<Tens
 
 /// Creates a Complex128 tensor from pairs of (real, imag) values.
 ///
+
 /// Each pair of values in data represents one complex number: [re0, im0, re1, im1, ...]
 /// The shape refers to the number of complex elements, not the underlying doubles.
 pub fn tensor_from_complex128_slice(data: &[f64], shape: &[usize]) -> Option<TensorHandle> {
@@ -2684,6 +2716,7 @@ pub fn tensor_from_complex128_slice(data: &[f64], shape: &[usize]) -> Option<Ten
 
 /// Creates an F16 tensor from f32 values (which are converted to F16).
 ///
+
 /// The values are first converted from f32 to F16 format.
 pub fn tensor_from_f16_slice(data: &[f32], shape: &[usize]) -> Option<TensorHandle> {
     use crate::interpreter::kernel::cpu::f32_to_f16;
@@ -2709,6 +2742,7 @@ pub fn tensor_from_f16_slice(data: &[f32], shape: &[usize]) -> Option<TensorHand
 
 /// Creates a BF16 tensor from f32 values (which are converted to BF16).
 ///
+
 /// The values are first converted from f32 to BF16 format.
 pub fn tensor_from_bf16_slice(data: &[f32], shape: &[usize]) -> Option<TensorHandle> {
     use crate::interpreter::kernel::cpu::f32_to_bf16;
@@ -2971,8 +3005,10 @@ pub fn tensor_broadcast(src: &TensorHandle, new_shape: &[usize]) -> Option<Tenso
 
 /// Helper to copy with broadcasting.
 ///
+
 /// # Safety
 ///
+
 /// - `src` must be valid for reads of `src_shape.iter().product()` elements
 /// - `dst` must be valid for writes of `dst_shape.iter().product()` elements
 /// - src_strides must correspond to src_shape dimensions
@@ -3263,9 +3299,11 @@ pub fn tensor_lerp(a: &TensorHandle, b: &TensorHandle, t: f64) -> Option<TensorH
 
 /// Layer normalization across the last axis.
 ///
+
 /// For input of shape [*, N], normalizes across N:
 /// output = (input - mean) / sqrt(var + eps) * gamma + beta
 ///
+
 /// Uses GPU acceleration on macOS with Metal for large F32 2D tensors.
 pub fn tensor_layer_norm(
     input: &TensorHandle,
@@ -3409,6 +3447,7 @@ pub fn tensor_layer_norm_cpu(
 
 /// Batch normalization (typically for [N, C, H, W] tensors).
 ///
+
 /// Normalizes across N, H, W for each channel C.
 pub fn tensor_batch_norm(
     input: &TensorHandle,           // [N, C, H, W] or [N, C]
@@ -3529,6 +3568,7 @@ pub fn tensor_batch_norm(
 
 /// RMS normalization (used in modern LLMs like Grok, LLaMA).
 ///
+
 /// For input of shape [*, N], normalizes using RMS:
 /// output = input / sqrt(mean(x^2) + eps) * gamma
 pub fn tensor_rms_norm(
@@ -3638,6 +3678,7 @@ pub fn tensor_rms_norm(
 
 /// Dot product of two tensors.
 ///
+
 /// For 1D tensors: returns scalar (sum of element-wise products)
 /// For 2D tensors: matrix multiplication
 /// For higher dims: sum over last axis of a and second-to-last of b
@@ -3695,6 +3736,7 @@ pub fn tensor_dot(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
 
 /// Outer product of two tensors.
 ///
+
 /// For vectors a[n] and b[m], returns a[n, m] where result[i,j] = a[i] * b[j]
 pub fn tensor_outer(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     // Both must be 1D
@@ -3741,6 +3783,7 @@ pub fn tensor_outer(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> 
 
 /// Batched matrix multiplication.
 ///
+
 /// For tensors a[..., m, k] and b[..., k, n], returns [..., m, n]
 /// Batch dimensions are broadcast.
 pub fn tensor_batch_matmul(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
@@ -3857,6 +3900,7 @@ pub fn tensor_batch_matmul(a: &TensorHandle, b: &TensorHandle) -> Option<TensorH
 
 /// Top-K values and indices.
 ///
+
 /// Returns (values, indices) for the k largest elements along the specified axis.
 pub fn tensor_topk(
     src: &TensorHandle,
@@ -4091,6 +4135,7 @@ pub enum PoolOp {
 
 /// 2D pooling operation.
 ///
+
 /// Input: [N, C, H, W]
 /// Output: [N, C, H_out, W_out]
 pub fn tensor_pool2d(
@@ -4230,6 +4275,7 @@ pub fn tensor_pool2d(
 
 /// 2D convolution.
 ///
+
 /// Input: [N, C_in, H, W]
 /// Kernel: [C_out, C_in/groups, kH, kW]
 /// Bias: [C_out] (optional)
@@ -4441,6 +4487,7 @@ pub enum CompareOp {
 
 /// Element-wise comparison.
 ///
+
 /// Returns a boolean tensor with the comparison result.
 pub fn tensor_cmp(
     a: &TensorHandle,
@@ -4614,6 +4661,7 @@ fn broadcast_index(out_idx: usize, out_shape: &[usize], src_shape: &[usize]) -> 
 
 /// Masked fill operation.
 ///
+
 /// Fills elements where mask is true with the given value.
 pub fn tensor_masked_fill(
     src: &TensorHandle,
@@ -4680,6 +4728,7 @@ pub fn tensor_masked_fill(
 
 /// Index selection along an axis.
 ///
+
 /// Selects elements from src at the given indices along the specified axis.
 pub fn tensor_index_select(
     src: &TensorHandle,
@@ -4773,6 +4822,7 @@ pub fn tensor_index_select(
 
 /// Scatter operation.
 ///
+
 /// Scatters values into dst at indices along the specified axis.
 pub fn tensor_scatter(
     dst: &mut TensorHandle,
@@ -4864,6 +4914,7 @@ pub fn tensor_scatter(
 
 /// Find argmin along axis.
 ///
+
 /// Returns the index and value of the minimum element.
 /// If axis is None, flattens the tensor and finds global minimum.
 pub fn tensor_argmin(src: &TensorHandle, _axis: Option<i32>) -> Option<(usize, f64)> {
@@ -4926,6 +4977,7 @@ pub fn tensor_argmin(src: &TensorHandle, _axis: Option<i32>) -> Option<(usize, f
 
 /// Permute tensor axes.
 ///
+
 /// Reorders the axes of the tensor according to the given permutation.
 /// For example, permute([0,1,2], [2,0,1]) swaps to [2,0,1] order.
 pub fn tensor_permute(src: &TensorHandle, axes: &[usize]) -> Option<TensorHandle> {
@@ -5001,6 +5053,7 @@ pub fn tensor_permute(src: &TensorHandle, axes: &[usize]) -> Option<TensorHandle
 
 /// Compute matrix determinant.
 ///
+
 /// Uses LU decomposition to compute the determinant.
 /// Only works on 2D square matrices.
 pub fn tensor_det(src: &TensorHandle) -> Option<f64> {
@@ -5080,6 +5133,7 @@ pub fn tensor_det(src: &TensorHandle) -> Option<f64> {
 
 /// Compute matrix trace.
 ///
+
 /// Returns the sum of diagonal elements.
 pub fn tensor_trace(src: &TensorHandle) -> Option<f64> {
     if src.ndim != 2 {
@@ -5130,17 +5184,19 @@ pub fn tensor_trace(src: &TensorHandle) -> Option<f64> {
 
 /// Compute tensor/matrix norm.
 ///
+
 /// For vectors:
-///   - ord = 0: L0 norm (count non-zero)
-///   - ord = 1: L1 norm (sum of absolute values)
-///   - ord = 2: L2 norm (Euclidean norm)
-///   - ord = -1: L-inf norm (max absolute value)
+///  - ord = 0: L0 norm (count non-zero)
+///  - ord = 1: L1 norm (sum of absolute values)
+///  - ord = 2: L2 norm (Euclidean norm)
+///  - ord = -1: L-inf norm (max absolute value)
 ///
+
 /// For matrices:
-///   - ord = 0: Frobenius norm
-///   - ord = 1: max column sum
-///   - ord = 2: spectral norm (largest singular value) - approximated
-///   - ord = -1: max row sum
+///  - ord = 0: Frobenius norm
+///  - ord = 1: max column sum
+///  - ord = 2: spectral norm (largest singular value) - approximated
+///  - ord = -1: max row sum
 pub fn tensor_norm(src: &TensorHandle, ord: i8) -> Option<f64> {
     if src.numel == 0 {
         return Some(0.0);
@@ -5224,10 +5280,11 @@ pub fn tensor_norm(src: &TensorHandle, ord: i8) -> Option<f64> {
 
 /// Unsqueeze: insert a dimension of size 1 at the specified position.
 ///
+
 /// Inverse of squeeze. dim can be negative for counting from the end.
 /// Example: tensor of shape [3, 4] with dim=0 → [1, 3, 4]
-///          tensor of shape [3, 4] with dim=1 → [3, 1, 4]
-///          tensor of shape [3, 4] with dim=-1 → [3, 4, 1]
+///  tensor of shape [3, 4] with dim=1 → [3, 1, 4]
+///  tensor of shape [3, 4] with dim=-1 → [3, 4, 1]
 pub fn tensor_unsqueeze(src: &TensorHandle, dim: i32) -> Option<TensorHandle> {
     if src.ndim >= 8 {
         return None; // Max dimensions reached
@@ -5258,6 +5315,7 @@ pub fn tensor_unsqueeze(src: &TensorHandle, dim: i32) -> Option<TensorHandle> {
 
 /// Split a tensor into multiple tensors along an axis.
 ///
+
 /// Returns a vector of tensors. Each tensor has the same dtype as input.
 /// If the tensor cannot be evenly split, the last chunk will be smaller.
 pub fn tensor_split(src: &TensorHandle, num_or_sizes: &[usize], axis: usize) -> Option<Vec<TensorHandle>> {
@@ -5317,6 +5375,7 @@ pub fn tensor_split(src: &TensorHandle, num_or_sizes: &[usize], axis: usize) -> 
 
 /// Split a tensor at a specific position along an axis.
 ///
+
 /// Returns a tuple of two tensors: (left, right)
 /// where left has indices [0, pos) and right has [pos, size)
 pub fn tensor_split_at(src: &TensorHandle, pos: usize, axis: usize) -> Option<(TensorHandle, TensorHandle)> {
@@ -5356,6 +5415,7 @@ pub fn tensor_split_at(src: &TensorHandle, pos: usize, axis: usize) -> Option<(T
 
 /// Gather elements along an axis using indices.
 ///
+
 /// output[i][j][k] = input[index[i][j][k]][j][k] (for axis=0)
 pub fn tensor_gather(src: &TensorHandle, indices: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     use super::kernel::cpu::{gather_f32_scalar, gather_f64_scalar};
@@ -5369,6 +5429,7 @@ pub fn tensor_gather(src: &TensorHandle, indices: &TensorHandle, axis: i8) -> Op
 
 /// Repeat tensor along each dimension.
 ///
+
 /// repeats[i] specifies how many times to repeat along dimension i.
 /// Example: tensor [2, 3] with repeats [2, 3] → [4, 9]
 pub fn tensor_repeat(src: &TensorHandle, repeats: &[usize]) -> Option<TensorHandle> {
@@ -5487,6 +5548,7 @@ pub fn tensor_repeat(src: &TensorHandle, repeats: &[usize]) -> Option<TensorHand
 
 /// Select elements from tensor where mask is true.
 ///
+
 /// Returns a 1D tensor containing all elements where mask is true.
 /// mask must be a Bool tensor with the same shape as src.
 pub fn tensor_masked_select(src: &TensorHandle, mask: &TensorHandle) -> Option<TensorHandle> {
@@ -5594,6 +5656,7 @@ pub fn tensor_masked_select(src: &TensorHandle, mask: &TensorHandle) -> Option<T
 
 /// Find indices of non-zero elements.
 ///
+
 /// Returns a 2D tensor of shape [num_nonzero, ndim] containing the indices.
 /// For 1D tensors, returns shape [num_nonzero, 1].
 pub fn tensor_nonzero(src: &TensorHandle) -> Option<TensorHandle> {
@@ -5730,6 +5793,7 @@ pub fn tensor_nonzero(src: &TensorHandle) -> Option<TensorHandle> {
 
 /// Create one-hot encoding tensor.
 ///
+
 /// indices: 1D tensor of integer indices [batch_size]
 /// num_classes: number of classes (output dimension)
 /// Returns: 2D tensor of shape [batch_size, num_classes]
@@ -5787,6 +5851,7 @@ pub fn tensor_one_hot(indices: &TensorHandle, num_classes: usize) -> Option<Tens
 
 /// Leaky ReLU activation function.
 ///
+
 /// For each element: if x >= 0, output x; otherwise output alpha * x.
 pub fn tensor_leaky_relu(src: &TensorHandle, alpha: f64) -> Option<TensorHandle> {
     let shape = &src.shape[..src.ndim as usize];
@@ -5828,6 +5893,7 @@ pub fn tensor_leaky_relu(src: &TensorHandle, alpha: f64) -> Option<TensorHandle>
 
 /// Flip tensor along specified axes.
 ///
+
 /// Reverses the order of elements along each specified axis.
 pub fn tensor_flip(src: &TensorHandle, axes: &[usize]) -> Option<TensorHandle> {
     let shape = &src.shape[..src.ndim as usize];
@@ -5960,6 +6026,7 @@ pub fn tensor_flip(src: &TensorHandle, axes: &[usize]) -> Option<TensorHandle> {
 
 /// Roll tensor along axis by a shift amount.
 ///
+
 /// Elements that roll beyond the last position are re-introduced at the first.
 #[allow(clippy::needless_range_loop)]
 pub fn tensor_roll(src: &TensorHandle, shift: i32, axis: usize) -> Option<TensorHandle> {
@@ -6100,6 +6167,7 @@ pub fn tensor_roll(src: &TensorHandle, shift: i32, axis: usize) -> Option<Tensor
 
 /// Logical NOT operation on a boolean tensor.
 ///
+
 /// Returns a tensor with each element negated.
 pub fn tensor_logical_not(src: &TensorHandle) -> Option<TensorHandle> {
     if src.dtype != DType::Bool {
@@ -6128,6 +6196,7 @@ pub fn tensor_logical_not(src: &TensorHandle) -> Option<TensorHandle> {
 
 /// Logical AND operation on two boolean tensors.
 ///
+
 /// Supports broadcasting. Both inputs must be Bool dtype.
 pub fn tensor_logical_and(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::Bool || b.dtype != DType::Bool {
@@ -6165,6 +6234,7 @@ pub fn tensor_logical_and(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHa
 
 /// Logical OR operation on two boolean tensors.
 ///
+
 /// Supports broadcasting. Both inputs must be Bool dtype.
 pub fn tensor_logical_or(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::Bool || b.dtype != DType::Bool {
@@ -6202,6 +6272,7 @@ pub fn tensor_logical_or(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHan
 
 /// Logical XOR operation on two boolean tensors.
 ///
+
 /// Supports broadcasting. Both inputs must be Bool dtype.
 pub fn tensor_logical_xor(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::Bool || b.dtype != DType::Bool {
@@ -6239,6 +6310,7 @@ pub fn tensor_logical_xor(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHa
 
 /// Check if all elements in a boolean tensor are true.
 ///
+
 /// Returns true if all elements are non-zero.
 pub fn tensor_all(src: &TensorHandle) -> Option<bool> {
     if src.dtype != DType::Bool {
@@ -6263,6 +6335,7 @@ pub fn tensor_all(src: &TensorHandle) -> Option<bool> {
 
 /// Check if any element in a boolean tensor is true.
 ///
+
 /// Returns true if at least one element is non-zero.
 pub fn tensor_any(src: &TensorHandle) -> Option<bool> {
     if src.dtype != DType::Bool {
@@ -6307,6 +6380,7 @@ pub fn tensor_from_bools(data: &[bool], shape: &[usize]) -> Option<TensorHandle>
 
 /// Convert a comparison result to boolean values.
 ///
+
 /// Returns a Vec<bool> containing the comparison results.
 pub fn tensor_to_bools(src: &TensorHandle) -> Option<Vec<bool>> {
     if src.dtype != DType::Bool {
@@ -6334,11 +6408,14 @@ pub fn tensor_to_bools(src: &TensorHandle) -> Option<Vec<bool>> {
 
 /// Flash Attention CPU implementation.
 ///
+
 /// Computes scaled dot-product attention:
-///   output = softmax(Q @ K^T / scale) @ V
+///  output = softmax(Q @ K^T / scale) @ V
 ///
+
 /// With optional causal masking to prevent attending to future positions.
 ///
+
 /// # Arguments
 /// * `query` - Query tensor [batch, num_heads, seq_len, head_dim]
 /// * `key` - Key tensor [batch, num_heads, seq_len, head_dim]
@@ -6346,6 +6423,7 @@ pub fn tensor_to_bools(src: &TensorHandle) -> Option<Vec<bool>> {
 /// * `scale` - Scaling factor (typically 1/sqrt(head_dim))
 /// * `causal` - Whether to apply causal mask
 ///
+
 /// # Returns
 /// Output tensor [batch, num_heads, seq_len, head_dim]
 pub fn flash_attention_cpu(

@@ -14,6 +14,7 @@
 )]
 // Unit tests for contract.rs
 //
+
 // Migrated from src/contract.rs to comply with CLAUDE.md test organization.
 
 use verum_smt::contract::*;

@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for the Verum proof and verification system.
 //!
+
 //! Tests cover grammar sections 2.19.1-2.19.9:
 //! - Theorem declarations (basic, generic, with requires/ensures)
 //! - Lemma declarations
@@ -1070,6 +1071,7 @@ fn test_rank2_fn_type_as_parameter() {
 // Proof-block `let` with type annotation (regression for stdlib monad-law
 // theorems in core/action/monads/{pure, state, probability, …}.vr).
 //
+
 // Pre-fix the proof_step parser only accepted untyped `let pattern = expr`
 // inside `proof { ... }` blocks. The `:` of `let X: T = expr` triggered an
 // "unexpected `:`, expected operator `=`" cascade. The standard let_stmt
@@ -1166,6 +1168,7 @@ fn proof_block_let_literal_as_type_fails() {
 // monad-law theorems whose proof tail is a bare equality / logical
 // expression — `bound == direct`, `lhs.value == rhs.value && …`, etc.).
 //
+
 // Pre-fix the Ident-arm of `parse_proof_step` consumed the leading
 // path as a Named tactic and then the proof-step loop failed at the
 // trailing binop, surfacing as "expected proof step" warnings in the

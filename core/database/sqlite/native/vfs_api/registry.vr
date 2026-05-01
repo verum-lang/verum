@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // SQLite stores VFS registrations as a singly-linked list; the head
 // is returned when sqlite3_vfs_find(NULL) is called.
 // =============================================================================
@@ -18,7 +19,7 @@ mount core.database.sqlite.native.vfs_api.entry.{
 
 public type VfsApiRegistry is {
     entries: List<VfsEntry>,
-    /// 0 ⇒ no default installed.  Otherwise it's the handle of the
+    /// 0 ⇒ no default installed. Otherwise it's the handle of the
     /// entry at the head of the chain.
     default_handle: Int64,
 }

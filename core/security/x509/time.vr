@@ -5,6 +5,7 @@
 // Dependencies: core, encoding.der (Time type), time.instant
 // =============================================================================
 //
+
 // X.509 encodes validity as two points: notBefore and notAfter. Both are
 // CHOICE { UTCTime, GeneralizedTime } per RFC 5280 §4.1.2.5 — UTCTime for
 // years ≤ 2049, GeneralizedTime for years ≥ 2050. `core.encoding.der`
@@ -12,14 +13,17 @@
 // minute, second }` struct; this module wraps with the validity-specific
 // API X.509 verify paths actually use:
 //
-//   * total ordering
-//   * comparison against `Instant` (current time)
-//   * construction from Unix epoch seconds (for test vectors)
+
+//  * total ordering
+//  * comparison against `Instant` (current time)
+//  * construction from Unix epoch seconds (for test vectors)
 //
+
 // RFC 5280 bans leap seconds + fractional seconds + non-UTC time zones,
 // so our Time is always UTC on an integer second boundary — equality on
 // the 6-tuple is exact.
 //
+
 // =============================================================================
 
 module core.security.x509.time;
@@ -66,11 +70,13 @@ public fn time_ge(a: &Time, b: &Time) -> Bool  { time_cmp(a, b) >= 0 }
 // Unix epoch conversion
 // =============================================================================
 //
+
 // Verum's core.time.instant.Instant is a monotonic clock — not wall-time.
 // For X.509 we need wall-time (year/month/day in UTC), which we pull
 // from Verum's realtime clock surface `core.time.instant.now_utc` (returns
 // a `(secs, nanos)` tuple since Unix epoch).
 //
+
 // The civil-calendar arithmetic below follows Howard Hinnant's algorithm
 // ("days_from_civil" / "civil_from_days"), using proleptic Gregorian
 // calendar. Leap year rule: year % 4 == 0 && (year % 100 != 0 || year % 400 == 0).

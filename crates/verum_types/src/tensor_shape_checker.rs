@@ -1,7 +1,9 @@
 //! Tensor Shape Checker
 //!
+
 //! SIMD and tensor system: unified Tensor<T, Shape> type with compile-time shape validation, SIMD acceleration (SSE/AVX/NEON), auto-differentiation — Tensor Type System
 //!
+
 //! This module provides comprehensive tensor shape validation including:
 //! - Shape inference and validation for binary/ternary operations
 //! - Broadcasting compatibility checking (NumPy-style)
@@ -10,8 +12,10 @@
 //! - Reshape validation
 //! - Transpose shape computation
 //!
+
 //! # Performance
 //!
+
 //! All operations are compile-time with 0ns runtime overhead.
 
 use verum_ast::span::Span;
@@ -87,6 +91,7 @@ fn format_type_name(ty: &Type) -> String {
 
 /// Tensor shape checker for type validation
 ///
+
 /// Provides compile-time shape validation for tensor operations following
 /// NumPy broadcasting rules and standard linear algebra conventions.
 pub struct TensorShapeChecker {
@@ -177,6 +182,7 @@ impl TensorShapeChecker {
 
     /// Check if two shapes are broadcast-compatible (NumPy rules)
     ///
+
     /// Broadcasting rules:
     /// 1. If shapes have different lengths, prepend 1s to the shorter shape
     /// 2. Dimensions are compatible if they are equal OR one of them is 1
@@ -277,6 +283,7 @@ impl TensorShapeChecker {
 
     /// Check binary operation shape and return result type
     ///
+
     /// Supports element-wise operations: add, sub, mul, div, pow, etc.
     /// Comparison operations (eq, ne, lt, le, gt, ge) return Bool element type.
     pub fn check_binary_op_shape(
@@ -317,6 +324,7 @@ impl TensorShapeChecker {
 
     /// Check matrix multiplication shape
     ///
+
     /// For matrices A[m, k] @ B[k, n] -> C[m, n]
     /// Also supports batched matmul with broadcasting on batch dimensions
     pub fn check_matmul_shape(&self, a: &Type, b: &Type) -> Result<Vec<usize>, TensorShapeError> {
@@ -368,6 +376,7 @@ impl TensorShapeChecker {
 
     /// Check reduce operation and return result type
     ///
+
     /// Supports: sum, prod, mean, max, min, any, all, argmax, argmin
     pub fn check_reduce_op(
         &self,
@@ -410,6 +419,7 @@ impl TensorShapeChecker {
 
     /// Check reshape operation
     ///
+
     /// The new shape must have the same total element count as the original
     pub fn check_reshape(
         &self,
@@ -440,6 +450,7 @@ impl TensorShapeChecker {
 
     /// Check transpose operation
     ///
+
     /// For 2D: swaps dimensions
     /// For nD: reverses all dimensions
     pub fn check_transpose(&self, tensor: &Type) -> Result<Type, TensorShapeError> {
@@ -523,6 +534,7 @@ impl TensorShapeChecker {
 
     /// Check select/where operation: select(mask, a, b)
     ///
+
     /// mask must be boolean tensor, a and b must have matching element types
     pub fn check_select_op(
         &self,

@@ -1,27 +1,33 @@
 //! AST-driven lint engine for `verum lint`.
 //!
+
 //! This module is the foundation for Phases B/C of the lint roadmap
 //! (`docs/testing/lint-configuration-design.md`): every refinement /
 //! capability / context / CBGR / verification / naming /
 //! architecture rule discussed there is implemented as a `LintPass`
 //! plugged into this engine.
 //!
+
 //! # Why AST-driven
 //!
+
 //! The text-scan engine in `lint.rs` is fast and pragmatic but
 //! cannot distinguish a `TODO` in a comment from one in a string
 //! literal, can't find an unused `mount` after rename, and can't
 //! reason about refinement-type bounds. The lint passes here run on
 //! the parsed `verum_ast::Module` and can:
 //!
+
 //! * see attributes attached to a declaration as structured data,
 //! * walk into refinement predicates via `TypeKind::Refined`,
 //! * resolve which `mount X.Y.Z` paths are actually used by name,
 //! * inspect every CBGR reference qualifier (`&`, `&checked`, `&unsafe`),
 //! * inspect `using [Logger, Database]` context lists.
 //!
+
 //! # Design — reuse, not reinvent
 //!
+
 //! `verum_ast` already ships a production-grade `Visitor` trait with
 //! a default-walking implementation for every AST node. Lint passes
 //! implement that trait directly — there is no parallel walker to
@@ -29,6 +35,7 @@
 //! visit-methods relevant to its concern and pushes diagnostics into
 //! a shared `Vec<LintIssue>`.
 //!
+
 //! The dispatch loop is a single `for pass in PASSES { pass.check(ctx) }`
 //! — composability without any plugin loader.
 
@@ -48,6 +55,7 @@ use super::lint::{LintCategory, LintConfig, LintIssue, LintLevel};
 
 /// Per-file context passed to every lint pass.
 ///
+
 /// Holds the parsed `Module`, the source text (for span resolution
 /// and snippet extraction), the file path (for diagnostic output),
 /// and the active config (so passes that need thresholds —
@@ -227,15 +235,19 @@ pub fn span_to_line_col(source: &str, byte_offset: u32) -> (usize, usize) {
 // Pass: redundant-refinement
 // ===================================================================
 //
+
 // Flags refinement predicates that always evaluate to `true` (or are
 // trivially tautological in their integer bounds), e.g.:
 //
-//   type Foo is Int{ true }
-//   type Bar is Text{ it.len() >= 0 }       // always true
+
+//  type Foo is Int{ true }
+//  type Bar is Text{ it.len() >= 0 } // always true
 //
+
 // These add nothing over the unrefined base type and signal a
 // design slip. Verum-unique — text-scan can't see the predicate AST.
 //
+
 // ===================================================================
 
 struct RedundantRefinementPass;
@@ -297,13 +309,17 @@ fn is_trivial_refinement(e: &verum_ast::Expr) -> bool {
 // Pass: empty-refinement-bound
 // ===================================================================
 //
+
 // Detects refinement bounds that produce an empty value set:
 //
-//   type Foo is Int{ it > 100 && it < 50 }
+
+//  type Foo is Int{ it > 100 && it < 50 }
 //
+
 // Such a type can never be inhabited; declaring it is almost
 // certainly a copy-paste error.
 //
+
 // ===================================================================
 
 struct EmptyRefinementBoundPass;
@@ -461,24 +477,29 @@ pub fn attrs_contain(attrs: &[Attribute], name: &str) -> bool {
 // Pass: naming-convention
 // ===================================================================
 //
+
 // Per-construct casing enforcement, configured via `[lint.naming]`:
 //
-//     [lint.naming]
-//     fn        = "snake_case"
-//     type      = "PascalCase"
-//     const     = "SCREAMING_SNAKE_CASE"
-//     variant   = "PascalCase"
+
+//  [lint.naming]
+//  fn = "snake_case"
+//  type = "PascalCase"
+//  const = "SCREAMING_SNAKE_CASE"
+//  variant = "PascalCase"
 //
-//     [lint.naming.exempt]
-//     fn   = ["__init", "drop_impl"]
-//     type = ["I32", "F64"]
+
+//  [lint.naming.exempt]
+//  fn = ["__init", "drop_impl"]
+//  type = ["I32", "F64"]
 //
+
 // Fires per declaration whose identifier doesn't match the
 // corresponding convention. Convention names are validated at
 // config-load time — typos surface at `verum lint --validate-config`.
 // Defaults match Verum's documented style guide
 // (`docs/guides/style-guide.md`).
 //
+
 // ===================================================================
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -696,20 +717,24 @@ impl LintPass for NamingConventionPass {
 // In-source suppression: @allow / @deny / @warn(rule, reason = "...")
 // ===================================================================
 //
+
 // Verum-idiomatic call-site control over lint severity. Three
 // attribute names — `@allow`, `@deny`, `@warn` — accept a string-
 // literal rule name plus an optional `reason = "..."` named arg.
 //
-//     @allow("unused-import", reason = "re-export for derive")
-//     @deny("todo-in-code")
-//     @warn("deprecated-syntax")
+
+//  @allow("unused-import", reason = "re-export for derive")
+//  @deny("todo-in-code")
+//  @warn("deprecated-syntax")
 //
+
 // Why string literals: kebab-case rule names (`unused-import`,
 // `cbgr-hotspot`) cannot parse as Verum identifiers — `unused-import`
 // would parse as `unused - import` (subtraction). Strings are also
 // what `[lint.severity]` keys look like, keeping the in-source
 // surface and the manifest surface in lockstep.
 //
+
 // ===================================================================
 
 /// What an in-source attribute does to the severity of a rule
@@ -766,10 +791,12 @@ pub fn collect_suppressions(module: &Module, source: &str) -> Vec<SuppressionSco
 /// Apply suppressions to a list of issues. Allow → drop, Deny →
 /// raise to Error, Warn → demote/promote to Warning.
 ///
+
 /// An issue is matched to a suppression iff the issue's `line` is
 /// inside the suppression's [line_start, line_end] inclusive range
 /// AND the suppression's `rule` matches the issue's rule name.
 ///
+
 /// Multiple matching suppressions: most-specific (smallest line span)
 /// wins.
 pub fn apply_suppressions(
@@ -881,19 +908,23 @@ fn item_attributes(item: &verum_ast::Item) -> &[Attribute] {
 // Phase C.1: Refinement-policy enforcement
 // ===================================================================
 //
+
 // Three passes that police how a project uses Verum's refinement-type
 // system. Configured via the synthetic rule key
 // `refinement-policy` populated from the `[lint.refinement_policy]`
 // manifest block:
 //
-//     [lint.refinement_policy]
-//     public_api_must_refine_int      = true
-//     require_verify_on_refined_fn    = true
-//     disallow_redundant_refinements  = true
+
+//  [lint.refinement_policy]
+//  public_api_must_refine_int = true
+//  require_verify_on_refined_fn = true
+//  disallow_redundant_refinements = true
 //
+
 // Each policy is a separate rule so users can dial them independently
 // via `[lint.severity]` or `@allow / @deny / @warn`.
 //
+
 // ===================================================================
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -952,6 +983,7 @@ fn is_public_fn(func: &FunctionDecl) -> bool {
 // usage constraint — every caller can pass any value, and any bug is
 // only caught at runtime.
 //
+
 // Fires when `[lint.refinement_policy].public_api_must_refine_int`
 // (or `.public_api_must_refine_text`) is true. Off by default;
 // projects opt in by flipping the flag.
@@ -1178,25 +1210,31 @@ impl LintPass for PublicMustHaveVerifyPass {
 // Phase C.3: Context-policy enforcement (`using [...]`)
 // ===================================================================
 //
+
 // Per-module `using [...]` policy. Configured via the synthetic rule
 // key `context-policy` populated from `[lint.context_policy.modules]`:
 //
-//     [lint.context_policy.modules]
-//     "core.*"        = { forbid    = ["Database", "Logger", "Clock"] }
-//     "core.math.*"   = { forbid_all = true }
-//     "app.handlers"  = { allow     = ["Database", "Logger"] }
+
+//  [lint.context_policy.modules]
+//  "core.*" = { forbid = ["Database", "Logger", "Clock"] }
+//  "core.math.*" = { forbid_all = true }
+//  "app.handlers" = { allow = ["Database", "Logger"] }
 //
+
 // The pass walks every function's `using [...]` requirement list,
 // resolves the most-specific applicable rule for the current file's
 // module path, and fires when:
 //
-//   - `forbid_all = true` and the function uses any context, OR
-//   - `forbid = […]` contains the requested context, OR
-//   - `allow  = […]` is set and the requested context is NOT in it.
+
+//  - `forbid_all = true` and the function uses any context, OR
+//  - `forbid = […]` contains the requested context, OR
+//  - `allow = […]` is set and the requested context is NOT in it.
 //
+
 // "Most-specific applicable rule": longer pattern wins
 // ("core.math.*" beats "core.*"). Exact path match beats any glob.
 //
+
 // ===================================================================
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -1220,11 +1258,12 @@ struct ContextRule {
 /// strips the `.vr` extension. Robust against absolute paths — finds
 /// the *last* `src/` segment when present.
 ///
+
 /// Examples:
-///   `core/math/linalg.vr`       → `core.math.linalg`
-///   `src/foo/bar.vr`            → `foo.bar`
-///   `/abs/path/to/src/lib.vr`   → `lib`
-///   `tests/integration.vr`      → `tests.integration`
+///  `core/math/linalg.vr` → `core.math.linalg`
+///  `src/foo/bar.vr` → `foo.bar`
+///  `/abs/path/to/src/lib.vr` → `lib`
+///  `tests/integration.vr` → `tests.integration`
 fn module_path_for_file(file: &Path) -> String {
     let s = file.to_string_lossy();
     // Strip the build directory if it appears in the path — but only
@@ -1243,16 +1282,18 @@ fn module_path_for_file(file: &Path) -> String {
 
 /// Glob match for module paths. Pattern semantics:
 ///
-///   - `*` at the end of a segment matches that whole segment.
-///   - `*` as a sole segment matches any one segment.
-///   - `**` matches zero or more segments (greedy).
-///   - Exact match otherwise.
+
+///  - `*` at the end of a segment matches that whole segment.
+///  - `*` as a sole segment matches any one segment.
+///  - `**` matches zero or more segments (greedy).
+///  - Exact match otherwise.
 ///
+
 /// Examples:
-///   pattern "core"          ↔ "core"                     ✓ exact
-///   pattern "core.*"        ↔ "core.foo", "core.foo.bar" ✓
-///   pattern "core.math.*"   ↔ "core.math.linalg"         ✓
-///   pattern "core.math.*"   ↔ "core.parser"              ✗
+///  pattern "core" ↔ "core" ✓ exact
+///  pattern "core.*" ↔ "core.foo", "core.foo.bar" ✓
+///  pattern "core.math.*" ↔ "core.math.linalg" ✓
+///  pattern "core.math.*" ↔ "core.parser" ✗
 fn glob_module_match(pattern: &str, path: &str) -> bool {
     if pattern == path {
         return true;
@@ -1371,24 +1412,29 @@ fn path_segments_to_string(p: &verum_ast::Path) -> String {
 // Phase B.4: Architecture-layering enforcement
 // ===================================================================
 //
+
 // Module-import constraints turned into compile-time errors. Configured
 // via `[lint.architecture.layers]` (allow-list per layer) and
 // `[lint.architecture.bans]` (explicit deny pairs):
 //
-//   [lint.architecture.layers]
-//   core    = { allow_imports = ["core", "std"] }
-//   domain  = { allow_imports = ["core", "std", "domain"] }
-//   adapter = { allow_imports = ["core", "std", "domain", "adapter"] }
+
+//  [lint.architecture.layers]
+//  core = { allow_imports = ["core", "std"] }
+//  domain = { allow_imports = ["core", "std", "domain"] }
+//  adapter = { allow_imports = ["core", "std", "domain", "adapter"] }
 //
-//   [lint.architecture.bans]
-//   "app.ui"      = ["app.persistence", "app.network"]
-//   "core.crypto" = ["core.testing"]
+
+//  [lint.architecture.bans]
+//  "app.ui" = ["app.persistence", "app.network"]
+//  "core.crypto" = ["core.testing"]
 //
+
 // Resolution: each file's module path picks the most-specific layer
 // by prefix match. Every `mount X.Y.Z` in that file is then checked
 // against the layer's `allow_imports` (whitelist) plus any explicit
 // ban entry. Both checks must pass; either can fire the rule.
 //
+
 // ===================================================================
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -1563,28 +1609,35 @@ impl LintPass for ArchitectureViolationPass {
 // Phase C.4: CBGR-budget enforcement
 // ===================================================================
 //
+
 // Per-module `max_check_ns` budget for managed CBGR references.
 // Configured via `[lint.cbgr_budgets]`:
 //
-//     [lint.cbgr_budgets]
-//     default_check_ns = 15
+
+//  [lint.cbgr_budgets]
+//  default_check_ns = 15
 //
-//     [lint.cbgr_budgets.modules]
-//     "app.handlers.*" = { max_check_ns = 30 }
-//     "core.runtime.*" = { max_check_ns = 0  }    # 0 = managed refs forbidden
+
+//  [lint.cbgr_budgets.modules]
+//  "app.handlers.*" = { max_check_ns = 30 }
+//  "core.runtime.*" = { max_check_ns = 0 } # 0 = managed refs forbidden
 //
+
 // The pass walks every `UnOp::Ref` / `UnOp::RefMut` (Tier-0, ~15ns
 // per deref) in the module's expressions and compares against the
 // budget for the current module path. Today's enforcement is static:
 //
-//   max_check_ns = 0      → every managed ref is reported
-//   max_check_ns < 15     → every managed ref is reported (budget
-//                            < the cheapest single check)
-//   max_check_ns >= 15    → silent (within static estimate)
+
+//  max_check_ns = 0 → every managed ref is reported
+//  max_check_ns < 15 → every managed ref is reported (budget
+//  < the cheapest single check)
+//  max_check_ns >= 15 → silent (within static estimate)
 //
+
 // Profile-driven enforcement (compare measured runtime cost from
 // `target/profile/last.json` against the budget) is Stage 3.
 //
+
 // ===================================================================
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -1790,20 +1843,25 @@ impl LintPass for CbgrBudgetExceededPass {
 // Phase C.6: Style ceilings + Phase C.5: documentation policy
 // ===================================================================
 //
+
 // Configured via `[lint.style]` and `[lint.documentation]`:
 //
-//     [lint.style]
-//     max_line_length          = 100
-//     max_fn_lines             = 80
-//     max_fn_params            = 5
-//     max_match_arms           = 12
+
+//  [lint.style]
+//  max_line_length = 100
+//  max_fn_lines = 80
+//  max_fn_params = 5
+//  max_match_arms = 12
 //
-//     [lint.documentation]
-//     public_must_have_doc     = true
+
+//  [lint.documentation]
+//  public_must_have_doc = true
 //
+
 // Each ceiling is its own LintPass so users can dial them
 // individually via `[lint.severity]` / `@allow / @deny / @warn`.
 //
+
 // ===================================================================
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -2039,6 +2097,7 @@ impl LintPass for MaxMatchArmsPass {
 
 // ── public-must-have-doc ───────────────────────────────────────────
 //
+
 // Phase C.5 documentation policy. Configured via
 // [lint.documentation].public_must_have_doc. A public fn/type/const
 // without a doc comment fires the rule. Detection: scan the source
@@ -2139,23 +2198,28 @@ impl LintPass for PublicMustHaveDocPass {
 // Phase C.2: Capability-policy enforcement
 // ===================================================================
 //
+
 // Configured via `[lint.capability_policy]`:
 //
-//   [lint.capability_policy]
-//   require_cap_for_unsafe = true
-//   require_cap_for_ffi    = true
+
+//  [lint.capability_policy]
+//  require_cap_for_unsafe = true
+//  require_cap_for_ffi = true
 //
+
 // `unsafe-without-capability` (warn, safety):
-//   Function declares `unsafe { ... }` blocks but doesn't carry a
-//   `@cap(...)` attribute documenting WHY this unsafe is permitted.
-//   Verum's capability system is designed to make every safety-
-//   relaxation explicit at the type level; this rule turns that
-//   convention into a static check.
+//  Function declares `unsafe { ... }` blocks but doesn't carry a
+//  `@cap(...)` attribute documenting WHY this unsafe is permitted.
+//  Verum's capability system is designed to make every safety-
+//  relaxation explicit at the type level; this rule turns that
+//  convention into a static check.
 //
+
 // `ffi-without-capability` (warn, safety):
-//   Same idea for FFI declarations — extern blocks and FFI-bound
-//   functions should declare `@cap(name = "ffi.libfoo", ...)`.
+//  Same idea for FFI declarations — extern blocks and FFI-bound
+//  functions should declare `@cap(name = "ffi.libfoo", ...)`.
 //
+
 // ===================================================================
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -2304,24 +2368,28 @@ impl LintPass for FfiWithoutCapabilityPass {
 // Phase D: Custom AST-pattern rules
 // ===================================================================
 //
+
 // User-authored rules from [[lint.custom]] entries with an
 // `ast_match` field (Phase D supersedes the regex-only Phase A.1
 // `pattern` field — both still parse, projects can mix). Each
 // matcher kind walks the AST looking for one specific shape:
 //
-//   kind = "method_call"  + method = "unwrap"
-//                              → fires on any `.unwrap(...)` call
-//   kind = "call"         + path   = "core.unsafe.from_raw"
-//                              → fires on `core.unsafe.from_raw(...)`
-//   kind = "attribute"    + name   = "deprecated"
-//                              → fires on any item with @deprecated
-//   kind = "unsafe_block"
-//                              → fires on every `unsafe { … }`
+
+//  kind = "method_call" + method = "unwrap"
+//  → fires on any `.unwrap(...)` call
+//  kind = "call" + path = "core.unsafe.from_raw"
+//  → fires on `core.unsafe.from_raw(...)`
+//  kind = "attribute" + name = "deprecated"
+//  → fires on any item with @deprecated
+//  kind = "unsafe_block"
+//  → fires on every `unsafe { … }`
 //
+
 // Each user rule is identified by its `name` field and emits issues
 // under that name — so the same severity_map / @allow / per-file
 // override / preset flow that built-in rules use applies uniformly.
 //
+
 // ===================================================================
 
 struct CustomAstRulesPass;
@@ -2587,6 +2655,7 @@ fn module_name_for_path(path: &Path) -> Option<String> {
 
 // ── circular-import ─────────────────────────────────────────────────
 //
+
 // Walk the mount graph; report any cycle. A cycle on a corpus is
 // almost always a layering mistake — the linter calls it out at
 // error severity so it cannot ship.
@@ -2694,6 +2763,7 @@ fn cycle_dfs(
 
 // ── orphan-module ───────────────────────────────────────────────────
 //
+
 // Files no other corpus file mounts. `main.vr` and `lib.vr` are
 // project entry points and never count as orphaned.
 
@@ -2774,6 +2844,7 @@ impl CrossFilePass for OrphanModulePass {
 
 // ── unused-public ───────────────────────────────────────────────────
 //
+
 // Public symbol whose name appears in no other file's source. This
 // is a heuristic — qualified renames and reflective use are out of
 // scope — so it's off by default; opt in via [lint.severity] or
@@ -2900,6 +2971,7 @@ fn is_ident_byte(b: u8) -> bool {
 
 // ── unused-private ──────────────────────────────────────────────────
 //
+
 // Non-public symbol with no callers in its OWN file. Complements
 // `unused-public`; together they cover dead code on both sides of
 // the visibility boundary. Because the rule is purely intra-file
@@ -2982,6 +3054,7 @@ impl CrossFilePass for UnusedPrivatePass {
 
 // ── dead-module ─────────────────────────────────────────────────────
 //
+
 // A file isn't reached from any entry point (`main.vr` / `lib.vr` /
 // `mod.vr`) along the mount graph. Differs from `orphan-module` in
 // two ways: orphan-module is "no one mounts it"; dead-module is
@@ -3075,6 +3148,7 @@ impl CrossFilePass for DeadModulePass {
 
 // ── inconsistent-public-doc ─────────────────────────────────────────
 //
+
 // A module exports K public symbols, M of them have `///` doc
 // comments. The rule fires when 0 < M < K — the inconsistency
 // case. All-or-nothing is left alone (a deliberate choice — some
@@ -3168,6 +3242,7 @@ impl CrossFilePass for InconsistentPublicDocPass {
 
 // ── mount-cycle-via-stdlib ──────────────────────────────────────────
 //
+
 // A user-corpus file mounts a stdlib module which (transitively)
 // re-mounts the user file. The existing `circular-import` rule only
 // catches cycles entirely within the user corpus; this catches the
@@ -3233,6 +3308,7 @@ impl CrossFilePass for MountCycleViaStdlibPass {
 
 // ── pub-exports-unsafe ──────────────────────────────────────────────
 //
+
 // A public symbol's signature mentions `&unsafe` or `unsafe fn`.
 // Catches unintentional unsafe surface leakage at the project's
 // public API boundary. The signature check is text-level on the

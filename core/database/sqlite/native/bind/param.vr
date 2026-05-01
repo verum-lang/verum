@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `TypedParam` matches the union of every value the user can hand to
 // sqlite3_bind_*. SQLite's storage classes are NULL/INTEGER/REAL/TEXT/
 // BLOB; we add `ZeroBlob(n)` so the `sqlite3_bind_zeroblob(stmt, idx, n)`

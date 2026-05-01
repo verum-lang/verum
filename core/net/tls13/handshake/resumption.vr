@@ -3,47 +3,54 @@
 // =============================================================================
 // Layer: 5 (Network — TLS 1.3 core)
 // Dependencies: core, core.time, core.security.{aead, util.rng},
-//               core.net.tls13.{cipher_suite, keyschedule}
+//  core.net.tls13.{cipher_suite, keyschedule}
 // =============================================================================
 //
+
 // RFC 8446 §4.6.1 — NewSessionTicket:
 //
-//   struct {
-//       uint32 ticket_lifetime;
-//       uint32 ticket_age_add;
-//       opaque ticket_nonce<0..255>;
-//       opaque ticket<1..2^16-1>;
-//       Extension extensions<0..2^16-2>;
-//   } NewSessionTicket;
+
+//  struct {
+//  uint32 ticket_lifetime;
+//  uint32 ticket_age_add;
+//  opaque ticket_nonce<0..255>;
+//  opaque ticket<1..2^16-1>;
+//  Extension extensions<0..2^16-2>;
+//  } NewSessionTicket;
 //
+
 // Resumption flow:
 //
-//   1. Server chooses a STEK (Session Ticket Encryption Key) — a
-//      long-lived symmetric key stored server-side only.
-//   2. On handshake success, server packages
-//      (cipher_suite, resumption_secret, max_early_data_size,
-//       issued_at) as plaintext, encrypts under the STEK via
-//      AEAD_AES_128_GCM, and ships as `ticket` in NewSessionTicket.
-//   3. Client stores { ticket, ticket_age_add, ticket_lifetime,
-//      psk_identity=ticket, resumption_secret, cipher_suite,
-//      created_at, max_early_data_size } — the `ClientSession`.
-//   4. Future connect: client sends CH with pre_shared_key listing
-//      ticket as identity + HMAC binder over the truncated CH; if
-//      max_early_data_size > 0 and app offers early data, client
-//      also sends 0-RTT application data encrypted under
-//      client_early_traffic_secret.
-//   5. Server decrypts ticket under STEK → validates obfuscated
-//      age is within ticket_lifetime → selects ticket → replies
-//      with ServerHello carrying selected_identity index.
+
+//  1. Server chooses a STEK (Session Ticket Encryption Key) — a
+//  long-lived symmetric key stored server-side only.
+//  2. On handshake success, server packages
+//  (cipher_suite, resumption_secret, max_early_data_size,
+//  issued_at) as plaintext, encrypts under the STEK via
+//  AEAD_AES_128_GCM, and ships as `ticket` in NewSessionTicket.
+//  3. Client stores { ticket, ticket_age_add, ticket_lifetime,
+//  psk_identity=ticket, resumption_secret, cipher_suite,
+//  created_at, max_early_data_size } — the `ClientSession`.
+//  4. Future connect: client sends CH with pre_shared_key listing
+//  ticket as identity + HMAC binder over the truncated CH; if
+//  max_early_data_size > 0 and app offers early data, client
+//  also sends 0-RTT application data encrypted under
+//  client_early_traffic_secret.
+//  5. Server decrypts ticket under STEK → validates obfuscated
+//  age is within ticket_lifetime → selects ticket → replies
+//  with ServerHello carrying selected_identity index.
 //
+
 // # Scope — v0.1
 //
-//   Single ticket per session (resumption_master-based, not
-//   full-session-resumption). No 0-RTT *replay* protection yet
-//   (bloom filter of seen PSK-ID + CH hash lands in Phase 8); in
-//   v0.1 servers may choose to disable 0-RTT by emitting
-//   max_early_data_size=0 unconditionally.
+
+//  Single ticket per session (resumption_master-based, not
+//  full-session-resumption). No 0-RTT *replay* protection yet
+//  (bloom filter of seen PSK-ID + CH hash lands in Phase 8); in
+//  v0.1 servers may choose to disable 0-RTT by emitting
+//  max_early_data_size=0 unconditionally.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.resumption;
@@ -105,8 +112,8 @@ implement ClientSession {
     }
 
     /// Derive the resumption PSK per RFC 8446 §4.6.1 formula:
-    ///   PSK = HKDF-Expand-Label(resumption_master,
-    ///                           "resumption", ticket_nonce, Hash.length)
+    ///  PSK = HKDF-Expand-Label(resumption_master,
+    ///  "resumption", ticket_nonce, Hash.length)
     public fn derive_psk(&self) -> Result<List<Byte>, HkdfError> {
         let hash = self.cipher_suite.hash_kind();
         let out_len = match hash {
@@ -182,14 +189,17 @@ public type ServerTicketPlaintext is {
 // Encryption envelope
 // =============================================================================
 //
+
 // Wire format:
-//   key_id            (8 bytes)
-//   nonce             (12 bytes)
-//   ciphertext || tag (ptlen + 16 bytes, AES-128-GCM)
+//  key_id (8 bytes)
+//  nonce (12 bytes)
+//  ciphertext || tag (ptlen + 16 bytes, AES-128-GCM)
 //
+
 // AAD = key_id (binds ciphertext to the specific STEK — prevents
 // cross-key reuse).
 //
+
 // =============================================================================
 
 public type TicketError is
@@ -200,7 +210,7 @@ public type TicketError is
     | Expired
     | HkdfFailure;
 
-// Display + Debug + Eq for TicketError.  SealFailure /
+// Display + Debug + Eq for TicketError. SealFailure /
 // OpenFailure / HkdfFailure surface no detail — TLS 1.3
 // session-ticket AEAD opens MUST be value-blind (RFC 8446
 // §4.6.1) to avoid an oracle for STEK material.
@@ -310,23 +320,26 @@ public fn decrypt_ticket(
 // Plaintext encode/decode — versioned wire-level layout
 // =============================================================================
 //
-//   version             u8 (always 2)
-//   cipher_suite        u16
-//   resumption_len      u16
-//   resumption_secret   bytes
-//   nonce_len           u8
-//   ticket_nonce        bytes   (NEW at v2 — see §4.6.1 correctness)
-//   max_early_data_size u32
-//   issued_at_unix      u64
-//   alpn_len            u8
-//   alpn                bytes
+
+//  version u8 (always 2)
+//  cipher_suite u16
+//  resumption_len u16
+//  resumption_secret bytes
+//  nonce_len u8
+//  ticket_nonce bytes (NEW at v2 — see §4.6.1 correctness)
+//  max_early_data_size u32
+//  issued_at_unix u64
+//  alpn_len u8
+//  alpn bytes
 //
+
 // The wire-format version was bumped 1 → 2 when the `ticket_nonce`
 // field was added. Decoder accepts v1 tickets (empty nonce) for
 // backward compatibility during rollout but will not resume a v1
 // ticket correctly — affected clients must re-issue tickets after
 // a server upgrade.
 //
+
 // =============================================================================
 
 fn encode_plaintext(pt: &ServerTicketPlaintext) -> List<Byte> {
@@ -509,6 +522,7 @@ fn text_eq(a: &Text, b: &Text) -> Bool { a.as_bytes() == b.as_bytes() }
 /// is responsible for associating the session with its authority
 /// (`ClientSessionStore.insert(authority, session)`).
 ///
+
 /// The `resumption_master` is the 32- or 48-byte secret produced at
 /// the end of the key schedule
 /// (`MasterSecret.resumption_master(transcript_hash_at_client_finished)`).

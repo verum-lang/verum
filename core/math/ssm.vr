@@ -3,12 +3,15 @@
 // =============================================================================
 // Layer: 8 (State Space Models - SSM/Mamba)
 //
+
 // State Space Models provide an alternative to Transformers with linear-time
 // sequence modeling O(L) vs O(L²) for attention. Mamba achieves 5x higher
 // throughput than Transformers while matching quality on language modeling.
 //
+
 // # Architecture
 //
+
 // - StateSpaceKernel: Core SSM with HiPPO initialization
 // - S4Layer: Structured State Space with efficient FFT convolution
 // - MambaBlock: Selective SSM with input-dependent dynamics
@@ -16,12 +19,15 @@
 // - JambaLayer: Hybrid Mamba-Transformer architecture
 // - MoE: Mixture of Experts for sparse activation
 //
+
 // # Key Innovations
 //
+
 // 1. Selection mechanism: B, C, Δ are functions of input (Mamba)
 // 2. Hardware-aware algorithm: parallel associative scan O(L) vs O(L²)
 // 3. Linear-time complexity for long sequences
 //
+
 // Spec: docs/architecture/math-spec.md#38
 // =============================================================================
 

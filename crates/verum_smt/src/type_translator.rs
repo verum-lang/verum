@@ -1,66 +1,79 @@
 //! Translation from verum_types::Type to Z3 expressions.
 //!
+
 //! # History
 //!
+
 //! Previously disabled because of the `verum_types ↔ verum_smt` cycle. The
 //! cycle was broken in d95c4362 (2026-04-24); this module was re-enabled and
 //! rewritten against the current `Type` enum (bare variants, no `TypeKind`
 //! indirection).
 //!
+
 //! This module handles conversion of the type checker's internal type representation
 //! (verum_types::ty::Type) to Z3, particularly for dependent types and formal verification.
 //!
+
 //! ## Dependent Type Encoding Strategy
 //!
+
 //! ### Pi Types (Dependent Functions)
 //! Encoded as uninterpreted functions or Z3 lambda terms:
 //! - Simple case: `(x: A) -> B` where B doesn't depend on x → function sort A -> B
 //! - Dependent case: `(x: A) -> B(x)` → use Z3 quantifiers with function application
 //!
+
 //! ### Sigma Types (Dependent Pairs)
 //! Encoded as Z3 datatypes with projections:
 //! ```smt2
 //! (declare-datatype Sigma ((mk-sigma (fst A) (snd B))))
 //! ```
 //!
+
 //! ### Equality Types (Propositional Equality)
 //! Encoded as Z3 equality constraints:
 //! - `Eq<A, x, y>` → `(assert (= x y))` where x, y : A
 //! - Reflexivity encoded as `(assert (= x x))`
 //!
+
 //! ### Universe/Prop
 //! - Universe: Encoded as uninterpreted sort or Z3 Bool sort (for Prop)
 //! - Prop: Encoded as Bool sort with proof irrelevance axioms
 //!
+
 //! ### Inductive Types
 //! Encoded as Z3 algebraic datatypes using `DatatypeBuilder`:
 //! ```text
 //! // inductive Nat { zero, succ(Nat) }
 //! DatatypeBuilder::new("Nat")
-//!     .variant("zero", vec![])
-//!     .variant("succ", vec![("pred", DatatypeAccessor::datatype("Nat"))])
-//!     .finish()
+//!  .variant("zero", vec![])
+//!  .variant("succ", vec![("pred", DatatypeAccessor::datatype("Nat"))])
+//!  .finish()
 //! ```
 //!
+
 //! ### Coinductive Types
 //! Encoded using coalgebraic interpretation:
 //! - Destructors become uninterpreted functions
 //! - Productivity constraints enforced via Z3 fixedpoint engine
 //!
+
 //! ### Higher Inductive Types
 //! Encoded with quotient constraints:
 //! - Point constructors → regular datatype constructors
 //! - Path constructors → Z3 equality axioms
 //!
+
 //! ### Quantified Types (QTT)
 //! Track quantities in solver state:
 //! - 0 (erased): No Z3 encoding (compile-time only)
 //! - 1 (linear): Enforce single-use via uniqueness constraints
 //! - ω (unrestricted): Normal encoding
 //!
+
 //! ## Reference
 //! - Dependent types: Pi types as universally quantified, Sigma types as existentially
-//!   quantified, equality types via Z3 equality, universe levels as sort constraints
+//!  quantified, equality types via Z3 equality, universe levels as sort constraints
 //! - experiments/z3.rs/ for Z3 API patterns
 
 use verum_common::{List, Map, Text};
@@ -88,8 +101,10 @@ pub enum TypeTranslationError {
 
 /// Translator for verum_types::Type to Z3
 ///
+
 /// Handles dependent types, inductive types, and formal proof terms.
 ///
+
 /// Z3 0.19+ stores Context in thread-local storage, so no explicit context
 /// reference is held — sorts are bound to the current thread's context at
 /// creation time.
@@ -215,17 +230,20 @@ impl TypeTranslator {
             Type::Variant(variants) => {
                 // Encode as Z3 datatypes with one constructor per variant.
                 // A variant `A | B(T) | C { x: U, y: V }` becomes:
-                //   (declare-datatype Anon
-                //     ((A) (B (B_arg0 T)) (C (C_arg0 U) (C_arg1 V))))
+                //  (declare-datatype Anon
+                //  ((A) (B (B_arg0 T)) (C (C_arg0 U) (C_arg1 V))))
                 //
+
                 // Each constructor's payload is translated recursively.
                 // Payload-less variants get a 0-ary constructor.
                 //
+
                 // Naming: the datatype is keyed by the stable
                 // concatenation of variant names (e.g. `Variant_A_B_C`)
                 // so the cache deduplicates structurally-identical
                 // variant types across translation calls.
                 //
+
                 // Previous impl returned a single `uninterpreted
                 // VariantType` sort for every `Type::Variant`, which
                 // made every variant observationally equal under SMT
@@ -690,6 +708,7 @@ impl TypeTranslator {
             EqTerm::App { func, args } => {
                 // Function application - create uninterpreted function and apply it
                 //
+
                 // For function applications f(x, y, ...):
                 // 1. Get or create an uninterpreted function declaration for f
                 // 2. Translate all arguments to Z3 expressions
@@ -807,6 +826,7 @@ impl TypeTranslator {
 
     /// Create destructor function declarations for coinductive types
     ///
+
     /// Each destructor becomes an uninterpreted function from the coinductive
     /// type to its result type. For example, for a Stream<A> with destructors
     /// `head: A` and `tail: Stream<A>`:

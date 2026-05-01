@@ -1,64 +1,74 @@
 //! Incremental Compilation Support for JIT.
 //!
+
 //! Provides intelligent caching and incremental recompilation to minimize
 //! compilation time for unchanged code.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
-//! │                     Incremental Compilation Pipeline                         │
+//! │ Incremental Compilation Pipeline │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //!
-//!   Source Code (AST)
-//!         │
-//!         ▼
-//! ┌─────────────────┐    ┌─────────────────┐
-//! │  Content Hash   │───▶│   Cache Check   │
-//! │  (blake3)       │    │                 │
-//! └─────────────────┘    └────────┬────────┘
-//!                                 │
-//!                    ┌────────────┼────────────┐
-//!                    │            │            │
-//!              Cache Hit     Cache Miss   Partial Hit
-//!                    │            │            │
-//!                    ▼            ▼            ▼
-//!            ┌───────────┐ ┌───────────┐ ┌───────────┐
-//!            │  Reuse    │ │  Compile  │ │  Delta    │
-//!            │  Cached   │ │  Full     │ │  Compile  │
-//!            └───────────┘ └───────────┘ └───────────┘
-//!                    │            │            │
-//!                    └────────────┼────────────┘
-//!                                 ▼
-//!                        ┌───────────────┐
-//!                        │  Update Cache │
-//!                        │  & Deps       │
-//!                        └───────────────┘
+
+//!  Source Code (AST)
+//!  │
+//!  ▼
+//! ┌─────────────────┐ ┌─────────────────┐
+//! │ Content Hash │───▶│ Cache Check │
+//! │ (blake3) │ │ │
+//! └─────────────────┘ └────────┬────────┘
+//!  │
+//!  ┌────────────┼────────────┐
+//!  │ │ │
+//!  Cache Hit Cache Miss Partial Hit
+//!  │ │ │
+//!  ▼ ▼ ▼
+//!  ┌───────────┐ ┌───────────┐ ┌───────────┐
+//!  │ Reuse │ │ Compile │ │ Delta │
+//!  │ Cached │ │ Full │ │ Compile │
+//!  └───────────┘ └───────────┘ └───────────┘
+//!  │ │ │
+//!  └────────────┼────────────┘
+//!  ▼
+//!  ┌───────────────┐
+//!  │ Update Cache │
+//!  │ & Deps │
+//!  └───────────────┘
 //! ```
 //!
+
 //! # Features
 //!
+
 //! - Content-based hashing for accurate change detection
 //! - Dependency tracking between modules
 //! - Intelligent invalidation
 //! - Persistent cache across sessions
 //! - Compression for cache storage
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use crate::mlir::jit::{IncrementalCache, CacheConfig};
 //!
+
 //! let cache = IncrementalCache::new(CacheConfig::default());
 //!
+
 //! // Check if compilation is needed
 //! if let Some(cached) = cache.get(&module_hash)? {
-//!     // Use cached compilation
-//!     engine.load_cached(cached)?;
+//!  // Use cached compilation
+//!  engine.load_cached(cached)?;
 //! } else {
-//!     // Compile and cache
-//!     let compiled = engine.compile(&module)?;
-//!     cache.put(&module_hash, &compiled)?;
+//!  // Compile and cache
+//!  let compiled = engine.compile(&module)?;
+//!  cache.put(&module_hash, &compiled)?;
 //! }
 //! ```
 

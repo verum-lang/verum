@@ -3,13 +3,16 @@
 // =============================================================================
 // Layer: 0 (Foundation)
 //
+
 // Provides arithmetic operations with explicit overflow handling:
 // - Checked: Returns Maybe<T>, None on overflow
 // - Saturating: Clamps to min/max on overflow
 // - Wrapping: Wraps around (modular arithmetic)
 //
+
 // All operations map to LLVM intrinsics for optimal code generation.
 //
+
 // Spec: docs/architecture/math-spec.md Section 1.4
 // =============================================================================
 
@@ -478,10 +481,11 @@ implement<T> CheckedResult<T> {
 
 /// Enables the `?` operator on CheckedResult values.
 ///
+
 /// ```verum
 /// fn add_and_mul(a: Int64, b: Int64, c: Int64) -> CheckedResult<Int64> {
-///     let sum = checked_add(a, b)?;
-///     checked_mul(sum, c)
+///  let sum = checked_add(a, b)?;
+///  checked_mul(sum, c)
 /// }
 /// ```
 implement<T> Try for CheckedResult<T> {

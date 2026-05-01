@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The VFS returns SQLITE_OK, SQLITE_NOTFOUND (opcode not recognised),
-// or another error code.  SQLITE_NOTFOUND is NOT an error — it's how
+// or another error code. SQLITE_NOTFOUND is NOT an error — it's how
 // chains cascade through the VFS stack.
 // =============================================================================
 

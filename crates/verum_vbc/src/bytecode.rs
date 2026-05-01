@@ -1,21 +1,27 @@
 //! Instruction bytecode encoding and decoding.
 //!
+
 //! This module provides functions to encode [`Instruction`] values to binary bytecode
 //! and decode them back. The encoding is designed for:
 //!
+
 //! - **Compactness**: Common operations use fewer bytes
 //! - **Determinism**: Same instruction always produces same bytes
 //! - **Roundtrip safety**: `decode(encode(instr)) == instr`
 //!
+
 //! # Encoding Format
 //!
+
 //! Each instruction is encoded as:
 //! ```text
 //! [opcode:u8] [operands...]
 //! ```
 //!
+
 //! ## Operand Encoding
 //!
+
 //! | Type | Encoding |
 //! |------|----------|
 //! | `Reg` | 1-2 bytes (r0-127 = 1 byte, r128+ = 2 bytes) |
@@ -30,17 +36,21 @@
 //! | `Option<T>` | 1 byte flag + optional value |
 //! | `Enum` | 1 byte discriminant |
 //!
+
 //! # Examples
 //!
+
 //! ```ignore
 //! use verum_vbc::bytecode::{encode_instruction, decode_instruction};
 //! use verum_vbc::instruction::{Instruction, Reg};
 //!
+
 //! // Encode an instruction
 //! let instr = Instruction::Mov { dst: Reg(0), src: Reg(1) };
 //! let mut bytes = Vec::new();
 //! encode_instruction(&instr, &mut bytes);
 //!
+
 //! // Decode it back
 //! let mut offset = 0;
 //! let decoded = decode_instruction(&bytes, &mut offset).unwrap();
@@ -73,6 +83,7 @@ use crate::types::{CbgrTier, ContextRef, Mutability, TypeId, TypeParamId, TypeRe
 
 /// Encodes an instruction to bytecode.
 ///
+
 /// Appends the encoded bytes to `output` and returns the number of bytes written.
 pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
     let start_len = output.len();
@@ -1948,6 +1959,7 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             // we emit a no-op. The AOT path handles this via LLVM IR (see
             // verum_codegen::llvm::instruction.rs).
             //
+
             // We still emit a CtxGet so the bytecode remains well-formed,
             // using register 0 as a throwaway destination.
             output.push(Opcode::CtxGet.to_byte());
@@ -2156,7 +2168,7 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
 
         // #146 Phase 3 — typed variant under Extended sub-op 0x01.
         // Wire format: [0x1F][0x01][reg:dst][varint:type_id]
-        // [varint:tag][varint:field_count].  Performance-critical:
+        // [varint:tag][varint:field_count]. Performance-critical:
         // varint encoding keeps the typical 6-byte footprint
         // (1 + 1 + 2 (reg) + 1 (type_id) + 1 (tag) + 1 (field_count))
         // for small ids — only 1 byte over MakeVariant.
@@ -2614,6 +2626,7 @@ fn encode_optional_reg(reg: Option<Reg>, output: &mut Vec<u8>) {
 
 /// Encodes a TypeRef.
 ///
+
 /// Encoding format matches the actual TypeRef enum variants:
 /// - 0x00: Concrete(TypeId)
 /// - 0x01: Generic(TypeParamId)
@@ -2712,6 +2725,7 @@ fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
 
 /// Decodes an instruction from bytecode.
 ///
+
 /// Updates `offset` to point past the decoded instruction.
 pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruction> {
     let opcode_byte = decode_u8(data, offset)?;
@@ -4774,7 +4788,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // Generic Extended Operations (#167 Part A)
         // ====================================================================
         Opcode::Extended => {
-            // Sub-op byte selects the extended-instruction kind.  For
+            // Sub-op byte selects the extended-instruction kind. For
             // typed sub-ops (MakeVariantTyped, …) we decode the
             // operands into the dedicated `Instruction::*` variant so
             // the validator + disassembler get a structural view.
@@ -5033,6 +5047,7 @@ fn decode_optional_reg(data: &[u8], offset: &mut usize) -> VbcResult<Option<Reg>
 
 /// Decodes a TypeRef.
 ///
+
 /// Matches the encoding in encode_type_ref:
 /// - 0x00: Concrete(TypeId)
 /// - 0x01: Generic(TypeParamId)
@@ -5354,10 +5369,12 @@ pub fn instruction_size(instr: &Instruction) -> usize {
 
 /// Converts instruction-level jump offsets to byte-level offsets.
 ///
+
 /// The codegen produces instructions with jump offsets in terms of instruction
 /// indices, but the interpreter expects byte offsets. This function converts
 /// all jump offsets to byte offsets.
 ///
+
 /// This uses an iterative approach because changing jump offsets can change
 /// instruction sizes (varints), which in turn affects other offsets.
 pub fn fixup_jump_offsets(instructions: &mut [Instruction]) {
@@ -5472,6 +5489,7 @@ pub fn fixup_jump_offsets(instructions: &mut [Instruction]) {
 
 /// Encodes instructions with proper jump offset fixup.
 ///
+
 /// This is the preferred way to encode instructions as it handles
 /// the conversion from instruction-level to byte-level jump offsets.
 pub fn encode_instructions_with_fixup(instructions: &[Instruction], output: &mut Vec<u8>) -> usize {
@@ -7491,7 +7509,7 @@ mod tests {
 
     #[test]
     fn test_extended_opcode_byte_value() {
-        // Pin the opcode byte assignment.  The reserved IntArith1F slot
+        // Pin the opcode byte assignment. The reserved IntArith1F slot
         // (0x1F) was repurposed for the general-purpose Extended scheme.
         assert_eq!(Opcode::Extended.to_byte(), 0x1F);
         assert_eq!(Opcode::Extended.mnemonic(), "EXTENDED");
@@ -7512,7 +7530,7 @@ mod tests {
     fn test_extended_unknown_subop_roundtrip() {
         // Future sub-ops (e.g. 0x01 = MakeVariantTyped, #146 Phase 3)
         // round-trip through the generic Instruction::Extended carrier
-        // even before they have a dedicated typed variant.  The decoder
+        // even before they have a dedicated typed variant. The decoder
         // intentionally returns operands=vec![] because operand bytes
         // are consumed by the sub-op-specific handler at execution time.
         let instr = Instruction::Extended {
@@ -7545,11 +7563,13 @@ mod tests {
     // ============================================================
     // #146 Phase 3a — MakeVariantTyped round-trip pin tests
     //
+
     // The typed variant lives in the secondary opcode space at
-    // sub-op `0x01`.  Wire format:
-    //   `[0x1F (Extended)][0x01 (sub-op)][reg:dst][varint:type_id]
-    //    [varint:tag][varint:field_count]`
+    // sub-op `0x01`. Wire format:
+    //  `[0x1F (Extended)][0x01 (sub-op)][reg:dst][varint:type_id]
+    //  [varint:tag][varint:field_count]`
     //
+
     // Encoder writes the typed fields out; decoder recognises the
     // sub-op and reconstructs `Instruction::MakeVariantTyped` (so
     // disassembler + validator see a structural view).
@@ -7557,7 +7577,7 @@ mod tests {
 
     #[test]
     fn test_make_variant_typed_subop_byte_value() {
-        // Pin the wire-protocol byte for sub-op 0x01.  A refactor
+        // Pin the wire-protocol byte for sub-op 0x01. A refactor
         // that re-numbers extended sub-ops without keeping
         // `MakeVariantTyped = 0x01` would break every previously-
         // emitted .vbc archive that contains typed variant
@@ -7577,7 +7597,7 @@ mod tests {
     fn test_make_variant_typed_roundtrip_small_ids() {
         // Common case: small type_id / tag / field_count fit in
         // 1-byte varints each, giving a tight 6-byte encoding:
-        //   [0x1F][0x01][reg-2-bytes][varint-1][varint-1][varint-1]
+        //  [0x1F][0x01][reg-2-bytes][varint-1][varint-1][varint-1]
         let instr = Instruction::MakeVariantTyped {
             dst: Reg::new(7),
             type_id: 42,
@@ -7600,7 +7620,7 @@ mod tests {
     fn test_make_variant_typed_roundtrip_large_ids() {
         // Large-id case: type_id near u32 max stresses the
         // multi-byte varint path; round-trip must preserve all
-        // 32 bits of every operand.  Catches subtle truncation
+        // 32 bits of every operand. Catches subtle truncation
         // bugs (e.g. accidentally narrowing through `u16` mid-pipe).
         let instr = Instruction::MakeVariantTyped {
             dst: Reg::new(255),
@@ -7620,7 +7640,7 @@ mod tests {
     fn test_make_variant_typed_roundtrip_zero_fields() {
         // Nullary variant case (field_count = 0): every payload
         // slot pre-allocation cost is gone; the heap object still
-        // carries the (type_id, tag) pair.  Common shape for
+        // carries the (type_id, tag) pair. Common shape for
         // unit-only constructors like `None`, `Nil`, `Empty`.
         let instr = Instruction::MakeVariantTyped {
             dst: Reg::new(0),
@@ -7639,7 +7659,7 @@ mod tests {
     #[test]
     fn test_make_variant_typed_distinct_from_untyped() {
         // Pin the wire-format separation: MakeVariant (0x86) and
-        // MakeVariantTyped (0x1F + 0x01) are distinct opcodes.  A
+        // MakeVariantTyped (0x1F + 0x01) are distinct opcodes. A
         // refactor that accidentally aliased them would silently
         // turn typed-variant emissions into the legacy untyped
         // form (with the synthetic `0x8000+tag` sentinel TypeId),

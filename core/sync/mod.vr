@@ -5,8 +5,10 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // This module provides thread-safe synchronization primitives:
 //
+
 // - atomic.vr: Atomic types (AtomicInt, AtomicBool, AtomicPtr)
 // - mutex.vr: Mutex<T> for mutual exclusion
 // - rwlock.vr: RwLock<T> for read-write locking
@@ -15,6 +17,7 @@
 // - once.vr: Once for one-time initialization
 // - barrier.vr: Barrier for thread synchronization
 //
+
 // =============================================================================
 
 module sync;

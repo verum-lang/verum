@@ -2,16 +2,18 @@
 // changes/counter.vr — per-connection row-change counters
 // =============================================================================
 // Spec: SQLite C API — sqlite3_changes / sqlite3_total_changes /
-//                    sqlite3_last_insert_rowid and their 64-bit variants.
+//  sqlite3_last_insert_rowid and their 64-bit variants.
 //
+
 // Counters are always stored as Int64 internally; the 32-bit accessors
 // in `engine` truncate.
 //
-//   * `statement_changes` — changes from the most recent INSERT/UPDATE/
-//                           DELETE statement completed on this connection
-//   * `total_changes`     — cumulative since the connection was opened
-//   * `last_insert_rowid` — rowid of the most recent successful INSERT
-//                           into a rowid table
+
+//  * `statement_changes` — changes from the most recent INSERT/UPDATE/
+//  DELETE statement completed on this connection
+//  * `total_changes` — cumulative since the connection was opened
+//  * `last_insert_rowid` — rowid of the most recent successful INSERT
+//  into a rowid table
 // =============================================================================
 
 module core.database.sqlite.native.changes.counter;

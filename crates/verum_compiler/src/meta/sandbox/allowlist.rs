@@ -1,8 +1,10 @@
 //! Allowlist Registry for Meta Sandbox
 //!
+
 //! Defines allowlists and blocklists for functions in meta context.
 //! Organizes 95+ function names by category.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

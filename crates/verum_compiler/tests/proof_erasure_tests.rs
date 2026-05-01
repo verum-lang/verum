@@ -16,27 +16,31 @@
 
 //! Proof erasure regression tests.
 //!
+
 //! Proofs are a purely compile-time phenomenon in Verum. Theorem, Lemma,
 //! Corollary, Axiom, and Tactic declarations must be verified by the
 //! `proof_verification` phase and then **completely erased** before VBC
 //! codegen so that the runtime carries zero proof-term overhead.
 //!
+
 //! These tests guarantee:
 //!
+
 //! 1. All 5 proof item kinds parse, type-check, and do not reach VBC codegen.
 //! 2. Compilation succeeds end-to-end even when proof items are interleaved
-//!    with runtime functions.
+//!  with runtime functions.
 //! 3. Removing a proof item does not change the compiled VBC module footprint
-//!    for runtime functions (regression guard).
+//!  for runtime functions (regression guard).
 //!
+
 //! Related code:
 //! - `crates/verum_vbc/src/codegen/mod.rs:3233` — explicit skip of all 5
-//!   proof item kinds in `register_top_level_item`.
+//!  proof item kinds in `register_top_level_item`.
 //! - `crates/verum_compiler/src/phases/proof_verification.rs` — the phase
-//!   that verifies proofs before they are erased.
+//!  that verifies proofs before they are erased.
 //! - `crates/verum_ast/src/decl.rs:90-105` — `ItemKind::Theorem`,
-//!   `ItemKind::Lemma`, `ItemKind::Corollary`, `ItemKind::Axiom`,
-//!   `ItemKind::Tactic`.
+//!  `ItemKind::Lemma`, `ItemKind::Corollary`, `ItemKind::Axiom`,
+//!  `ItemKind::Tactic`.
 
 use std::io::Write;
 use std::path::PathBuf;

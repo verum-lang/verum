@@ -5,24 +5,29 @@
 // Dependencies: async/task, async/poll
 // =============================================================================
 //
+
 // This module exposes structural views of the async runtime — task identities,
 // lifecycle states, and last-poll provenance — for post-mortem dumps,
 // debugger / observer integrations, and live monitoring dashboards.
 //
+
 // Companion to `core.mem.diagnostics` (CBGR allocation introspection).
 // Together they form the substrate of the user-facing
 // `core.diagnostics` umbrella module mandated by the production-ready
 // directive.
 //
+
 // # Anti-goals (mirroring core.mem.diagnostics)
 //
-// - No mutation surface.  Snapshots are read-only.
+
+// - No mutation surface. Snapshots are read-only.
 // - No reflection escape that would bypass async cancellation.
-//   `TaskInfo` summarises identity + state, not the task's continuation.
+//  `TaskInfo` summarises identity + state, not the task's continuation.
 // - Zero overhead when not subscribed: every method here is inlinable,
-//   and the module is feature-gated via `@cfg(feature = "diagnostics")`
-//   for builds that strip it (embedded targets).
+//  and the module is feature-gated via `@cfg(feature = "diagnostics")`
+//  for builds that strip it (embedded targets).
 //
+
 // Spec: docs/architecture/observability.md (TODO)
 // =============================================================================
 
@@ -36,17 +41,19 @@ mount super.task.TaskId;
 // =============================================================================
 
 /// Coarse-grained lifecycle state of a task, independent of its
-/// concrete output type T.  Shape:
+/// concrete output type T. Shape:
 ///
-///   Pending   — spawned but not yet polled
-///   Running   — currently executing on an executor
-///   Parked    — yielded to the executor (Pending Poll), waiting on a Waker
-///   Completed — finished with a value (caller already joined or handle dropped)
-///   Cancelled — explicitly cancelled, never produced a value
-///   Failed    — panicked during execution; reason carried in `last_error`
+
+///  Pending — spawned but not yet polled
+///  Running — currently executing on an executor
+///  Parked — yielded to the executor (Pending Poll), waiting on a Waker
+///  Completed — finished with a value (caller already joined or handle dropped)
+///  Cancelled — explicitly cancelled, never produced a value
+///  Failed — panicked during execution; reason carried in `last_error`
 ///
+
 /// The internal `TaskState<T>` (in `core/async/task.vr`) is generic over
-/// the output type and includes the value in `Completed(T)`.  Surface
+/// the output type and includes the value in `Completed(T)`. Surface
 /// projection drops the value so the type can be used by heterogeneous
 /// snapshot containers (e.g. a global task table indexed by TaskId).
 public type TaskLifecycleState is
@@ -102,7 +109,7 @@ implement Eq for TaskLifecycleState {
 // TaskInfo — snapshot of a single live task
 // =============================================================================
 
-/// Snapshot of a task's identity + state at observation time.  Does
+/// Snapshot of a task's identity + state at observation time. Does
 /// NOT capture the task's continuation, future, or any user data —
 /// the snapshot is a strict pass-through of metadata so it can cross
 /// thread / executor boundaries safely.
@@ -110,27 +117,27 @@ public type TaskInfo is {
     /// Stable identity (atomic-counter allocated at spawn).
     id: TaskId,
 
-    /// Coarse lifecycle state at observation time.  See
+    /// Coarse lifecycle state at observation time. See
     /// `TaskLifecycleState` for the meaning of each variant.
     state: TaskLifecycleState,
 
-    /// Task name, when supplied at spawn time.  Empty when no name
-    /// was provided.  Useful for debugger UI grouping
+    /// Task name, when supplied at spawn time. Empty when no name
+    /// was provided. Useful for debugger UI grouping
     /// ("postgres-pool worker #3" vs raw `TaskId(42)`).
     name: Text,
 
-    /// Number of times the task has been polled.  Used by
+    /// Number of times the task has been polled. Used by
     /// monitoring dashboards to flag stuck-on-Pending tasks (high
     /// poll count + still Pending = livelocked or busy-waiting
     /// without progress).
     poll_count: Int,
 
-    /// Last error message when `state == Failed`.  Empty otherwise.
+    /// Last error message when `state == Failed`. Empty otherwise.
     last_error: Text,
 };
 
 implement TaskInfo {
-    /// Construct a snapshot from raw metadata.  The async runtime
+    /// Construct a snapshot from raw metadata. The async runtime
     /// owns the source of truth (per-task atomic counters); this
     /// constructor is the format-stable boundary callers code
     /// against.
@@ -151,7 +158,7 @@ implement TaskInfo {
     }
 
     /// True iff the task is in a terminal state (Completed, Cancelled,
-    /// Failed).  Monitors use this to prune snapshots before
+    /// Failed). Monitors use this to prune snapshots before
     /// rendering.
     public fn is_terminal(&self) -> Bool {
         match self.state {
@@ -160,8 +167,8 @@ implement TaskInfo {
         }
     }
 
-    /// Format as a panic-context block.  Two-space indented so it
-    /// composes with multi-line panic messages.  Single allocation
+    /// Format as a panic-context block. Two-space indented so it
+    /// composes with multi-line panic messages. Single allocation
     /// per call so OOM-path callers should prefer Display.
     public fn format_panic_context(&self) -> Text {
         let mut out: Text = "  Async task at panic site:\n".clone();

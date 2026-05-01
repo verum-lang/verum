@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 (FTS5 segment merging)
 //
+
 // LSM-tree style. The policy decides: at this moment, given the
 // segment counts at each level, what compaction action should the
 // background merger take? Three actions:
 //
-//   * `MaIdle`           — no-op
-//   * `MaCompactLevel(level)` — merge all segments at `level` into ONE
-//                                segment at the next level up
-//   * `MaFlushBuffer`    — buffer crossed the flush threshold
+
+//  * `MaIdle` — no-op
+//  * `MaCompactLevel(level)` — merge all segments at `level` into ONE
+//  segment at the next level up
+//  * `MaFlushBuffer` — buffer crossed the flush threshold
 //
+
 // The merger itself (which actually rewrites segment files) is the
 // host's job; this module only emits the policy decisions.
 // =============================================================================

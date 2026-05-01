@@ -1,11 +1,14 @@
 //! Generator Integration Tests
 //!
+
 //! Comprehensive tests for the VBC interpreter generator state machine.
 //!
+
 //! Generator state machine: fn* functions compile to a state enum with Yield/Return transitions.
 //! Each yield point becomes a state; local variables are saved/restored on suspend/resume.
 //! Generators implement the Iterator protocol (has_next/next) for for-in loop integration.
 //!
+
 //! These tests verify:
 //! - Generator creation and lifecycle
 //! - Yield suspension and resumption
@@ -524,22 +527,26 @@ fn test_fibonacci_generator() {
 // Iterator Protocol Opcode Tests
 // =============================================================================
 //
+
 // These tests verify the new GenCreate, GenNext, and GenHasNext opcodes that
 // implement the Iterator protocol for generators.
 //
+
 // Generator-Iterator protocol bridge: generators auto-implement Iterator via state machine
 
 #[test]
 fn test_gen_create_opcode() {
     // Test GenCreate opcode creates a generator value
     //
+
     // Bytecode program:
-    //   r0 = gen_create(func_id=1)  // Create generator from function 1
-    //   ret r0
+    //  r0 = gen_create(func_id=1) // Create generator from function 1
+    //  ret r0
     //
+
     // Function 1:
-    //   yield 42
-    //   ret 0
+    //  yield 42
+    //  ret 0
     let main_bytecode = encode_instructions(&[
         Instruction::GenCreate { dst: Reg(0), func_id: 1, args: RegRange { start: Reg(0), count: 0 } },
         Instruction::Ret { value: Reg(0) },
@@ -586,10 +593,11 @@ fn test_gen_create_opcode() {
 fn test_gen_has_next_opcode() {
     // Test GenHasNext opcode checks generator status
     //
+
     // Bytecode program:
-    //   r0 = gen_create(func_id=1)
-    //   r1 = gen_has_next(r0)  // Should be true (Created)
-    //   ret r1
+    //  r0 = gen_create(func_id=1)
+    //  r1 = gen_has_next(r0) // Should be true (Created)
+    //  ret r1
     let main_bytecode = encode_instructions(&[
         Instruction::GenCreate { dst: Reg(0), func_id: 1, args: RegRange { start: Reg(0), count: 0 } },
         Instruction::GenHasNext { dst: Reg(1), generator: Reg(0) },
@@ -635,10 +643,11 @@ fn test_gen_has_next_opcode() {
 fn test_gen_has_next_type_error() {
     // Test GenHasNext with non-generator value returns error
     //
+
     // Bytecode program:
-    //   r0 = 42  // Not a generator
-    //   r1 = gen_has_next(r0)  // Should fail
-    //   ret r1
+    //  r0 = 42 // Not a generator
+    //  r1 = gen_has_next(r0) // Should fail
+    //  ret r1
     let bytecode = encode_instructions(&[
         Instruction::LoadSmallI { dst: Reg(0), value: 42 },
         Instruction::GenHasNext { dst: Reg(1), generator: Reg(0) },

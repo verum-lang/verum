@@ -5,12 +5,15 @@
 // Dependencies: types.vr, parser.vr, source.vr, core.term.raw
 // =============================================================================
 //
+
 // EventStream provides a high-level interface for reading terminal events.
 // - poll(timeout): non-blocking poll with timeout, returns Maybe<Event>
 // - read(): blocking read, returns IoResult<Event>
 //
+
 // AsyncEventStream wraps EventStream for async iteration via async for.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.3
 // =============================================================================
 
@@ -32,15 +35,16 @@ mount core.sys.FileDesc;
 /// Synchronous terminal event stream.
 /// Wraps an InputParser and reads from a terminal file descriptor.
 ///
+
 /// Usage:
-///   let mut stream = EventStream.new(FileDesc(0));
-///   loop {
-///       match stream.poll(Duration.from_millis(100)) {
-///           Some(Event.Key(ke)) if ke.is_ctrl_c() => break,
-///           Some(event) => handle(event),
-///           None => { /* timeout, do other work */ }
-///       }
-///   }
+///  let mut stream = EventStream.new(FileDesc(0));
+///  loop {
+///  match stream.poll(Duration.from_millis(100)) {
+///  Some(Event.Key(ke)) if ke.is_ctrl_c() => break,
+///  Some(event) => handle(event),
+///  None => { /* timeout, do other work */ }
+///  }
+///  }
 public type EventStream is {
     parser: InputParser,
     fd: FileDesc,
@@ -127,15 +131,16 @@ implement EventStream {
 
 /// Async event stream for use with Verum async/await and select.
 ///
+
 /// Usage:
-///   let mut stream = AsyncEventStream.new(FileDesc(0));
-///   async for event in &mut stream {
-///       match event {
-///           Event.Key(ke) => handle_key(ke),
-///           Event.Mouse(me) => handle_mouse(me),
-///           _ => {}
-///       }
-///   }
+///  let mut stream = AsyncEventStream.new(FileDesc(0));
+///  async for event in &mut stream {
+///  match event {
+///  Event.Key(ke) => handle_key(ke),
+///  Event.Mouse(me) => handle_mouse(me),
+///  _ => {}
+///  }
+///  }
 public type AsyncEventStream is {
     inner: EventStream,
 };

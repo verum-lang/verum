@@ -1,51 +1,60 @@
-//! Limits and colimits in (∞,1)-categories — V0 algorithmic kernel
+//! Limits and colimits in (∞,1)-categories — algorithmic kernel
 //! rule (HTT 1.2.13 + HTT 5.5.3 + HTT 4.4).
 //!
+
 //! ## What this delivers
 //!
+
 //! The (∞,1)-categorical theory of limits and colimits is the
 //! load-bearing layer of higher-categorical existence proofs:
 //!
-//!   * **Limits** (HTT 1.2.13.4): the limit `lim_I D` of a diagram
-//!     `D : I → C` is the terminal cone over `D`.
-//!   * **Colimits** (HTT 1.2.13.4 dual): `colim_I D` is the initial
-//!     cocone under `D`.
-//!   * **Pointwise computation in PSh(C)** (HTT 5.1.2.3): limits
-//!     and colimits in `PSh(C)` are computed pointwise, i.e.
-//!     `(lim D)(x) = lim_i D(i)(x)`.
-//!   * **Cocompleteness of presheaf categories** (HTT 5.5.3.5):
-//!     `PSh(C)` admits all small limits and colimits.
+
+//!  * **Limits** (HTT 1.2.13.4): the limit `lim_I D` of a diagram
+//!  `D : I → C` is the terminal cone over `D`.
+//!  * **Colimits** (HTT 1.2.13.4 dual): `colim_I D` is the initial
+//!  cocone under `D`.
+//!  * **Pointwise computation in PSh(C)** (HTT 5.1.2.3): limits
+//!  and colimits in `PSh(C)` are computed pointwise, i.e.
+//!  `(lim D)(x) = lim_i D(i)(x)`.
+//!  * **Cocompleteness of presheaf categories** (HTT 5.5.3.5):
+//!  `PSh(C)` admits all small limits and colimits.
 //!
+
 //! ## V0 algorithmic surface
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   1. [`LimitDiagram`] / [`ColimitDiagram`] — diagram input data
-//!      with shape (the indexing category) + per-vertex object data.
-//!   2. [`Limit`] / [`Colimit`] — output structures with apex and
-//!      universal-cone witnesses.
-//!   3. [`presheaf_admits_limits`] / [`presheaf_admits_colimits`] —
-//!      decision predicates per HTT 5.5.3.5.
-//!   4. [`compute_limit_in_psh`] / [`compute_colimit_in_psh`] —
-//!      algorithmic builders that produce the (co)limit object name
-//!      via pointwise computation (HTT 5.1.2.3).
-//!   5. Specialised constructors:
-//!      * [`build_pullback`] / [`build_pushout`] — square (co)limits.
-//!      * [`build_equaliser`] / [`build_coequaliser`] — parallel-pair.
-//!      * [`build_terminal`] / [`build_initial`] — empty diagrams.
+
+//!  1. [`LimitDiagram`] / [`ColimitDiagram`] — diagram input data
+//!  with shape (the indexing category) + per-vertex object data.
+//!  2. [`Limit`] / [`Colimit`] — output structures with apex and
+//!  universal-cone witnesses.
+//!  3. [`presheaf_admits_limits`] / [`presheaf_admits_colimits`] —
+//!  decision predicates per HTT 5.5.3.5.
+//!  4. [`compute_limit_in_psh`] / [`compute_colimit_in_psh`] —
+//!  algorithmic builders that produce the (co)limit object name
+//!  via pointwise computation (HTT 5.1.2.3).
+//!  5. Specialised constructors:
+//!  * [`build_pullback`] / [`build_pushout`] — square (co)limits.
+//!  * [`build_equaliser`] / [`build_coequaliser`] — parallel-pair.
+//!  * [`build_terminal`] / [`build_initial`] — empty diagrams.
 //!
-//! V1 promotion: explicit universal-cone natural transformations
+
+//! Future work: explicit universal-cone natural transformations
 //! with full pentagonal coherence cells.
 //!
+
 //! ## What this UNBLOCKS in MSFS
 //!
-//!   - **Definition 3.3 closure** under (co)limits — currently
-//!     admits via `msfs_s_s_closed_under_colimits` framework axiom.
-//!     Promotion: invoke [`compute_colimit_in_psh`] directly.
-//!   - **Lemma 3.4** — internal (co)limit constructions inside the
-//!     Grothendieck total category.
-//!   - **Theorem 9.3** — pullback construction for the canonical
-//!     classifier 2-stack.
+
+//!  - **Definition 3.3 closure** under (co)limits — currently
+//!  admits via `msfs_s_s_closed_under_colimits` framework axiom.
+//!  Promotion: invoke [`compute_colimit_in_psh`] directly.
+//!  - **Lemma 3.4** — internal (co)limit constructions inside the
+//!  Grothendieck total category.
+//!  - **Theorem 9.3** — pullback construction for the canonical
+//!  classifier 2-stack.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -126,7 +135,7 @@ impl LimitDiagram {
 }
 
 /// A colimit diagram — same shape as `LimitDiagram` but tagged as
-/// the input to a colimit (initial-cocone) construction.  V0 unifies
+/// the input to a colimit (initial-cocone) construction. V0 unifies
 /// the data layout with `LimitDiagram` since they share I → C input.
 pub type ColimitDiagram = LimitDiagram;
 
@@ -145,7 +154,7 @@ pub struct Limit {
     pub shape: LimitShape,
     /// The target ∞-category in which the limit lives.
     pub target_category: InfinityCategory,
-    /// Witness flag: the universal-property cone exists.  Always
+    /// Witness flag: the universal-property cone exists. Always
     /// true for `Some(_)` outputs of the algorithmic builders.
     pub has_universal_cone: bool,
 }
@@ -171,9 +180,10 @@ pub struct Colimit {
 // =============================================================================
 
 /// HTT 5.5.3.5: every presheaf ∞-category `PSh(C)` admits all small
-/// limits.  Decidable predicate — returns true for every shape.
+/// limits. Decidable predicate — returns true for every shape.
 ///
-/// V0 surface: structurally always true for presheaf categories,
+
+/// current surface: structurally always true for presheaf categories,
 /// since they are presentable and presentability implies
 /// completeness (HTT 5.5.0.1 + HTT 5.5.2.4).
 pub fn presheaf_admits_limits(_c: &InfinityCategory, _shape: LimitShape) -> bool {
@@ -182,7 +192,7 @@ pub fn presheaf_admits_limits(_c: &InfinityCategory, _shape: LimitShape) -> bool
 }
 
 /// HTT 5.5.3.5 dual: every presheaf ∞-category `PSh(C)` admits all
-/// small colimits.  Decidable predicate.
+/// small colimits. Decidable predicate.
 pub fn presheaf_admits_colimits(_c: &InfinityCategory, _shape: LimitShape) -> bool {
     true
 }
@@ -194,11 +204,13 @@ pub fn presheaf_admits_colimits(_c: &InfinityCategory, _shape: LimitShape) -> bo
 /// Compute the limit of a diagram in `PSh(C)` per HTT 5.1.2.3
 /// (pointwise computation): `(lim D)(x) = lim_i D(i)(x)`.
 ///
+
 /// **Preconditions** (kernel-checked):
-///   1. The diagram is non-empty (has at least one vertex)
-///      OR is the empty diagram (which produces the terminal object).
-///   2. The target category is a presheaf category.
+///  1. The diagram is non-empty (has at least one vertex)
+///  OR is the empty diagram (which produces the terminal object).
+///  2. The target category is a presheaf category.
 ///
+
 /// Returns `None` if preconditions fail.
 pub fn compute_limit_in_psh(diagram: &LimitDiagram) -> Option<Limit> {
     if diagram.vertices.is_empty() && diagram.shape != LimitShape::Terminal {
@@ -238,7 +250,7 @@ pub fn compute_colimit_in_psh(diagram: &ColimitDiagram) -> Option<Colimit> {
 // =============================================================================
 
 /// Build the terminal object in `PSh(C)` (the limit of the empty
-/// diagram).  HTT 1.2.12.4: terminal objects always exist in
+/// diagram). HTT 1.2.12.4: terminal objects always exist in
 /// presheaf categories.
 pub fn build_terminal(c: &InfinityCategory) -> Limit {
     Limit {
@@ -356,7 +368,7 @@ pub fn build_coequaliser(
 // Universal-property witnesses
 // =============================================================================
 
-/// Verify that a limit's universal-property cone exists.  V0 surface:
+/// Verify that a limit's universal-property cone exists. current surface:
 /// returns the witness flag stored on the limit.
 pub fn limit_universal_property(lim: &Limit) -> bool {
     lim.has_universal_cone
@@ -377,7 +389,7 @@ pub fn presheaf_is_bicomplete(c: &InfinityCategory) -> bool {
 
 /// Promotion: any limit/colimit existing at level 1 promotes to all
 /// higher levels in PSh(C) (per HTT 5.5.3 stability under
-/// truncation).  V0 surface: returns the limit at the promoted level
+/// truncation). current surface: returns the limit at the promoted level
 /// when the source-level is at least 1.
 pub fn promote_limit_to_level(lim: &Limit, level: Ordinal) -> Option<Limit> {
     if level.lt(&Ordinal::Finite(1)) {

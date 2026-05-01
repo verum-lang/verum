@@ -7,24 +7,28 @@ module core.database.sqlite.native.l3_btree;
 // Dependencies: l1_pager, l2_record, core/collections
 // =============================================================================
 //
+
 // The B-tree layer turns byte-addressable pages into structured
 // ordered key/value storage. SQLite uses separate trees for tables
 // (rowid → payload) and indexes (key → rowid), each with its own cell
 // encoding; page_layout.vr handles the shared outer shape.
 //
+
 // Shipped modules:
 //
-//   * `page_layout` — page header (leaf 8B / interior 12B), cell-pointer
-//                      array, cell parsing for all 4 kinds, overflow
-//                      page pointers, local-payload budget math.
-//   * `btree`        — `Btree<K, V>`, construction, generic search.
-//   * `cursor`       — `affine BtreeCursor` with seek/next/prev.
+
+//  * `page_layout` — page header (leaf 8B / interior 12B), cell-pointer
+//  array, cell parsing for all 4 kinds, overflow
+//  page pointers, local-payload budget math.
+//  * `btree` — `Btree<K, V>`, construction, generic search.
+//  * `cursor` — `affine BtreeCursor` with seek/next/prev.
 //
+
 // Not yet shipped (tracked in separate tasks):
-//   * balance.vr (split / merge / rotate) — L3.4
-//   * overflow.vr (chain I/O) — L3.5
-//   * integrity.vr (PRAGMA integrity_check) — L3.6
-//   * without_rowid.vr specialisation — L3.7
+//  * balance.vr (split / merge / rotate) — L3.4
+//  * overflow.vr (chain I/O) — L3.5
+//  * integrity.vr (PRAGMA integrity_check) — L3.6
+//  * without_rowid.vr specialisation — L3.7
 // =============================================================================
 
 public module page_layout;

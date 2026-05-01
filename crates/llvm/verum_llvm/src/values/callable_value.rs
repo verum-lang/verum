@@ -103,15 +103,19 @@ impl<'ctx> CallableValueEnum<'ctx> {
 
 /// A value that can be called with the [`build_call`] instruction.
 ///
+
 /// In practice, the `F : Into<CallableValue<'ctx>>` bound of [`build_call`] means it is
 /// possible to pass a [`FunctionValue`] to [`build_call`] directly. It will be implicitly converted
 /// into a `CallableValue`.
 ///
+
 /// [`build_call`]: crate::builder::Builder::build_call
 ///
+
 /// ```no_run
 /// use verum_llvm::context::Context;
 ///
+
 /// // A simple function which calls itself:
 /// let context = Context::create();
 /// let module = context.create_module("ret");
@@ -122,23 +126,29 @@ impl<'ctx> CallableValueEnum<'ctx> {
 /// let entry = context.append_basic_block(fn_value, "entry");
 /// let i32_arg = fn_value.get_first_param().unwrap();
 ///
+
 /// builder.position_at_end(entry);
 ///
+
 /// let ret_val = builder.build_call(fn_value, &[i32_arg.into()], "call").unwrap()
-///     .try_as_basic_value()
-///     .unwrap_basic();
+///  .try_as_basic_value()
+///  .unwrap_basic();
 ///
+
 /// builder.build_return(Some(&ret_val)).unwrap();
 /// ```
 ///
+
 /// A [`PointerValue`] cannot be implicitly converted to a `CallableValue` because the pointer may
 /// point to a non-function value. Instead we can use [`TryFrom`] to handle this failure case explicitly.
 ///
+
 /// ```no_run
 /// use std::convert::TryFrom;
 /// use verum_llvm::context::Context;
 /// use verum_llvm::values::CallableValue;
 ///
+
 /// // A simple function which calls itself:
 /// let context = Context::create();
 /// let module = context.create_module("ret");
@@ -149,19 +159,24 @@ impl<'ctx> CallableValueEnum<'ctx> {
 /// let entry = context.append_basic_block(fn_value, "entry");
 /// let i32_arg = fn_value.get_first_param().unwrap();
 ///
+
 /// builder.position_at_end(entry);
 ///
+
 /// // take a pointer to the function value
 /// let fn_pointer_value = fn_value.as_global_value().as_pointer_value();
 ///
+
 /// // convert that pointer value into a callable value
 /// // explicitly handling the failure case (here with `unwrap`)
 /// let callable_value = CallableValue::try_from(fn_pointer_value).unwrap();
 ///
+
 /// let ret_val = builder.build_call(callable_value, &[i32_arg.into()], "call").unwrap()
-///     .try_as_basic_value()
-///     .unwrap_basic();
+///  .try_as_basic_value()
+///  .unwrap_basic();
 ///
+
 /// builder.build_return(Some(&ret_val)).unwrap();
 /// ```
 #[derive(Debug)]

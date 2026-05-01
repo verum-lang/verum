@@ -1,12 +1,14 @@
 // Shared OWL 2 graph + walker .
 //
+
 // Consumed by:
-//   - `commands::audit::audit_owl2_classify_with_format` (F5) — graph
-//     audit producing the classification report.
-//   - `commands::export` (B5) — OWL 2 Functional Syntax emitter that
-//     reads the same graph + emits a Pellet/HermiT-compatible
-//     `.ofn` file.
+//  - `commands::audit::audit_owl2_classify_with_format` (F5) — graph
+//  audit producing the classification report.
+//  - `commands::export` (B5) — OWL 2 Functional Syntax emitter that
+//  reads the same graph + emits a Pellet/HermiT-compatible
+//  `.ofn` file.
 //
+
 // Single source of truth for the `Owl2*Attr` → `Owl2Graph` projection.
 // Both consumers run the same project walk and receive the same
 // canonical graph; deterministic ordering (BTreeMap / BTreeSet) keeps

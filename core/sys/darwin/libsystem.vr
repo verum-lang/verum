@@ -9,14 +9,18 @@ mount core.base.coercion.{IntCoercible};
 // Platform: macOS (x86_64, arm64)
 // =============================================================================
 //
+
 // CRITICAL: macOS DOES NOT support stable syscalls.
 // All system operations MUST go through libSystem.B.dylib.
 //
+
 // Apple explicitly states that syscall numbers are private implementation
 // details and may change between OS versions without notice.
 //
+
 // This module provides FFI bindings to libSystem for stable system access.
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -46,6 +50,7 @@ extern {
 
     /// Close file descriptor.
     ///
+
     /// C signature: `int close(int fd)`. Both parameter and return are
     /// `int` (i32). Declaring `fd: Int` (=i64) at the FFI boundary breaks
     /// LLVM verification — the IR `call i32 @close(i64 %fd)` clashes with
@@ -207,8 +212,8 @@ extern {
 
     /// Register/poll events.
     /// C: `int kevent(int kq, const struct kevent *changelist, int nchanges,
-    ///                struct kevent *eventlist, int nevents,
-    ///                const struct timespec *timeout);`
+    ///  struct kevent *eventlist, int nevents,
+    ///  const struct timespec *timeout);`
     /// All count parameters and return value are POSIX `int` (Int32).
     public fn kevent(
         kq: Int32,
@@ -590,7 +595,7 @@ extern {
     fn mach_thread_self() -> MachPort;
 
     /// Allocate VM. C: `kern_return_t vm_allocate(vm_map_t target_task,
-    ///   vm_address_t *address, vm_size_t size, int flags);`
+    ///  vm_address_t *address, vm_size_t size, int flags);`
     /// `kern_return_t` and `flags` are `int` (Int32); `vm_address_t` and
     /// `vm_size_t` are pointer-width (Int on 64-bit Darwin).
     fn vm_allocate(
@@ -1015,26 +1020,29 @@ public const VM_FLAGS_RANDOM_ADDR: Int = 0x0008;
 
 /// Get the last error number.
 ///
-/// `__error()` returns `int *` (pointer to TLS errno slot).  Verum-side
+
+/// `__error()` returns `int *` (pointer to TLS errno slot). Verum-side
 /// declared as `&mut Int32` to match the C type precisely.
 ///
-/// The deref `*__error()` is the load-bearing read.  VBC's `Deref`
+
+/// The deref `*__error()` is the load-bearing read. VBC's `Deref`
 /// instruction currently reads `sizeof(Value)=8` bytes regardless of
 /// the pointee type, so the 4-byte i32 errno slot leaks 4 bytes of
 /// adjacent TLS bookkeeping into the upper half (live evidence at
 /// `errno = 0x7E04ED1B 3000002F` — low 32 = real errno, high 32 =
-/// constant TLS leak).  Tracked under task #26 (typed deref opcodes:
-/// `DerefI8`/`DerefI16`/`DerefI32`/…).  Until that architectural fix
+/// constant TLS leak). Tracked under task #26 (typed deref opcodes:
+/// `DerefI8`/`DerefI16`/`DerefI32`/…). Until that architectural fix
 /// lands, mask the leaked high bytes here.
 ///
+
 /// errno values are always non-negative on POSIX (1..255 in practice),
-/// so a 32-bit zero-extending mask is the correct projection.  When
+/// so a 32-bit zero-extending mask is the correct projection. When
 /// the typed-deref work lands the mask becomes redundant — the
 /// `&mut Int32` reference will read exactly four bytes by design.
 public fn errno() -> Int {
     unsafe {
         // BUG-#26 workaround: mask the upper 32 bits leaked by the
-        // Value-sized Deref read.  errno is always non-negative, so
+        // Value-sized Deref read. errno is always non-negative, so
         // zero-extension via the mask is the correct semantics.
         (*__error() as Int) & 0xFFFFFFFF
     }
@@ -1042,7 +1050,8 @@ public fn errno() -> Int {
 
 /// Set the error number.
 ///
-/// Writes the i32 errno slot via `*__error() = err as Int32`.  The
+
+/// Writes the i32 errno slot via `*__error() = err as Int32`. The
 /// `DerefMut` write side is not affected by the read-side
 /// 8-vs-4-byte bug — `Int32` truncation happens before the write.
 public fn set_errno(err: Int) {
@@ -1051,14 +1060,16 @@ public fn set_errno(err: Int) {
 
 /// Copy a UTF-8 path into a 4096-byte stack buffer and NUL-terminate.
 ///
+
 /// VBC interpreter recursion side-step: `path_buf[..len].copy_from_slice
 /// (&path[..len])` triggers a depth-16384 stack overflow in the
 /// Tier-0 interpreter (proven by bisect at
 /// `internal/diag/sqlite-real/probe_slice.vr` — manual byte copy
-/// works, slice-indexed `copy_from_slice` does not).  Manual loop
+/// works, slice-indexed `copy_from_slice` does not). Manual loop
 /// here so every `safe_*` path-taking syscall wrapper can run
 /// real-file workloads under the interpreter.
 ///
+
 /// Returns the byte count copied (≤ 4095; slot at `len` holds NUL).
 fn copy_path_nul(path_buf: &mut [Byte; 4096], path: &[Byte]) -> Int {
     let len = path.len().min(4095);
@@ -1131,7 +1142,7 @@ public fn safe_pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int,
     }
 }
 
-/// Raw-pointer pread — caller-owned buffer.  Mirrors safe_open_raw;
+/// Raw-pointer pread — caller-owned buffer. Mirrors safe_open_raw;
 /// bypasses `&mut [Byte]` parameter coercion (RUNTIME-3-DEEPER).
 /// Caller passes the buffer's first byte and explicit byte count.
 public fn safe_pread_raw(fd: FileDesc, buf: &unsafe Byte, count: Int, offset: Int) -> Result<Int, OSError> {
@@ -1376,14 +1387,15 @@ public fn safe_clock_gettime(clock_id: Int) -> Result<DarwinTimespec, OSError> {
 
 /// Open file by raw NUL-terminated `&Byte` pointer.
 ///
+
 /// This is the lowest-level path: the caller has already copied the
 /// path into its own NUL-terminated buffer and hands us a `&Byte`
-/// pointing at byte zero of that buffer.  Used when the interpreter
+/// pointing at byte zero of that buffer. Used when the interpreter
 /// path-via-`&[Byte]` argument coercion recurses to depth 16384 —
 /// the slice-typed parameter triggers a slice-on-array dispatch
 /// chain that is broken in the Tier-0 interpreter (proven by bisect
 /// at `internal/diag/sqlite-real/probe_safe_open_empty.vr`: even an
-/// empty-list argument overflows).  Sidestep: pass a raw `&Byte`
+/// empty-list argument overflows). Sidestep: pass a raw `&Byte`
 /// instead.
 public fn safe_open_raw(path: &Byte, flags: Int, mode: Int) -> Result<FileDesc, OSError> {
     let result = unsafe { open(path, flags, mode) };
@@ -1395,8 +1407,8 @@ public fn safe_open_raw(path: &Byte, flags: Int, mode: Int) -> Result<FileDesc, 
     }
 }
 
-/// Open file (safe wrapper).  Slice-taking façade — most callers
-/// today.  When the Tier-0 interpreter's slice-argument coercion is
+/// Open file (safe wrapper). Slice-taking façade — most callers
+/// today. When the Tier-0 interpreter's slice-argument coercion is
 /// fixed this body becomes the canonical path; until then,
 /// `safe_open_raw` is the path that actually runs end-to-end.
 public fn safe_open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
@@ -1516,6 +1528,7 @@ public const R_OK: Int = 4;
 
 /// Probe path accessibility via libSystem `access(2)`.
 ///
+
 /// `mode` is a bitwise-OR of `F_OK | R_OK | W_OK | X_OK`. Returns
 /// `Ok(true)` on success, `Ok(false)` for EACCES/ENOENT/ENOTDIR/EROFS,
 /// `Err(...)` for everything else.
@@ -1577,7 +1590,7 @@ public fn safe_unlink(path: &[Byte]) -> Result<(), OSError> {
     }
 }
 
-/// Raw-pointer unlink — caller-owned NUL-terminated buffer.  Mirrors
+/// Raw-pointer unlink — caller-owned NUL-terminated buffer. Mirrors
 /// safe_open_raw; bypasses `&[Byte]` parameter coercion under the
 /// Tier-0 interpreter (RUNTIME-3-DEEPER sidestep).
 public fn safe_unlink_raw(path: &Byte) -> Result<(), OSError> {
@@ -1697,6 +1710,7 @@ public fn safe_chdir(path: &[Byte]) -> Result<(), OSError> {
 
 /// Get environment variable value
 ///
+
 /// Returns None if the variable is not set.
 public fn safe_getenv(name: &[Byte]) -> Maybe<Text> {
     // Manual byte-copy loop sidesteps the RUNTIME-3-DEEPER
@@ -1729,6 +1743,7 @@ public fn safe_getenv(name: &[Byte]) -> Maybe<Text> {
 
 /// Set environment variable
 ///
+
 /// If overwrite is true, replaces existing value. If false, does nothing if variable exists.
 public fn safe_setenv(name: &[Byte], value: &[Byte], overwrite: Bool) -> Result<(), OSError> {
     // Manual byte-copy loops sidestep RUNTIME-3-DEEPER (#104).
@@ -1791,6 +1806,7 @@ public fn args_count() -> Int {
 
 /// Get a command line argument by index
 ///
+
 /// Returns None if index is out of bounds.
 public fn args_get(index: Int) -> Maybe<Text> {
     let argc = args_count();
@@ -1935,6 +1951,7 @@ public fn safe_sendto(
 
 /// Receive data with source address (safe wrapper).
 ///
+
 /// `addr_len` is `socklen_t *` (UInt32 on Darwin). T0.4.2 Phase 4
 /// migrated the wrapper signature to match the underlying `recvfrom_ffi`
 /// extern declaration; previously the wrapper took `&mut Int` and the
@@ -1987,6 +2004,7 @@ public fn safe_setsockopt_int(fd: FileDesc, level: Int, optname: Int, value: Int
 
 /// Get a socket option (safe wrapper).
 ///
+
 /// `optlen` is `socklen_t *` (UInt32 on Darwin) — T0.4.2 Phase 4 wrapper
 /// migration to match `getsockopt`'s `&mut UInt32` extern declaration.
 public fn safe_getsockopt(
@@ -2030,6 +2048,7 @@ public fn safe_shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
 
 /// Get local socket address (safe wrapper).
 ///
+
 /// `addr_len` is `socklen_t *` (UInt32 on Darwin) — T0.4.2 Phase 4
 /// wrapper migration to match the `getsockname` extern declaration.
 public fn safe_getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32) -> Result<(), OSError> {
@@ -2155,6 +2174,7 @@ public type DarwinIpMreq is {
 
 /// Join an IPv4 multicast group
 ///
+
 /// multiaddr: multicast group address (network byte order)
 /// interface: local interface address (network byte order), 0 = default
 public fn safe_join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {

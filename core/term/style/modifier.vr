@@ -5,6 +5,7 @@
 // bitfield. Supports composition via set operations (union, intersection,
 // difference).
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6.2
 // =============================================================================
 
@@ -17,13 +18,14 @@ module modifier;
 /// StyleModifier is a compact bitfield representing text rendering attributes.
 /// Multiple modifiers can be combined via union: `StyleModifier.BOLD.union(StyleModifier.ITALIC)`.
 ///
+
 /// Each constant corresponds to an SGR escape code:
-///   BOLD       -> SGR 1     DIM          -> SGR 2
-///   ITALIC     -> SGR 3     UNDERLINED   -> SGR 4
-///   SLOW_BLINK -> SGR 5     RAPID_BLINK  -> SGR 6
-///   REVERSED   -> SGR 7     HIDDEN       -> SGR 8
-///   CROSSED_OUT -> SGR 9    OVERLINED    -> SGR 53
-///   DOUBLE_UNDERLINED -> SGR 21          CURLY_UNDERLINED -> SGR 4:3
+///  BOLD -> SGR 1 DIM -> SGR 2
+///  ITALIC -> SGR 3 UNDERLINED -> SGR 4
+///  SLOW_BLINK -> SGR 5 RAPID_BLINK -> SGR 6
+///  REVERSED -> SGR 7 HIDDEN -> SGR 8
+///  CROSSED_OUT -> SGR 9 OVERLINED -> SGR 53
+///  DOUBLE_UNDERLINED -> SGR 21 CURLY_UNDERLINED -> SGR 4:3
 public type StyleModifier is {
     bits: UInt16,
 };

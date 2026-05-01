@@ -1,21 +1,23 @@
 //! LSP refinement validation extensions
 //!
+
 //! This module implements the custom LSP methods for refinement validation:
 //! - `verum/validateRefinement`: Validate refinement at cursor position
 //! - `verum/promoteToChecked`: Promote &T to &checked T with escape analysis proof
 //! - `verum/inferRefinement`: Infer tightest refinement from usage
 //!
+
 //! LSP Refinement Validation Protocol Extensions:
 //! Three custom LSP methods extend the standard protocol:
 //! 1. `verum/validateRefinement` - validates refinement type at cursor position,
-//!    integrates with SMT solver for real-time feedback (<100ms latency),
-//!    returns diagnostics with concrete counterexamples showing violating values
+//!  integrates with SMT solver for real-time feedback (<100ms latency),
+//!  returns diagnostics with concrete counterexamples showing violating values
 //! 2. `verum/promoteToChecked` - promotes &T to &checked T with escape analysis
-//!    proof, generates TextEdits and optional proof comments
+//!  proof, generates TextEdits and optional proof comments
 //! 3. `verum/inferRefinement` - infers tightest refinement from usage patterns,
-//!    returns inferred type with confidence level and suggested edits
-//!    Quick fixes provide 6 categories: runtime check wrapping, inline refinement,
-//!    sigma type conversion, runtime assertion, weaken refinement, promote to &checked.
+//!  returns inferred type with confidence level and suggested edits
+//!  Quick fixes provide 6 categories: runtime check wrapping, inline refinement,
+//!  sigma type conversion, runtime assertion, weaken refinement, promote to &checked.
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -554,6 +556,7 @@ impl RefinementValidator {
 
     /// Production validation implementation with full SMT integration
     ///
+
     /// This implementation provides:
     /// - Full span-based position lookup to find refinement at cursor
     /// - Proper AST traversal to collect context for verification
@@ -1104,6 +1107,7 @@ impl RefinementValidator {
 
     /// Find all refinement types in module
     ///
+
     /// Searches through the entire module AST to find refinement types in:
     /// - Function parameters
     /// - Function return types
@@ -1496,6 +1500,7 @@ impl RefinementValidator {
 
     /// Promote &T to &checked T with escape analysis proof
     ///
+
     /// This performs full escape analysis to determine if a reference can be
     /// safely promoted to a checked reference (zero-cost, compiler-verified).
     pub async fn promote_to_checked(
@@ -1976,6 +1981,7 @@ impl RefinementValidator {
 
     /// Infer tightest refinement from usage
     ///
+
     /// This analyzes all usages of a symbol to infer the tightest possible
     /// refinement type that would satisfy all constraints at usage sites.
     pub async fn infer_refinement(
@@ -2440,6 +2446,7 @@ impl Default for RefinementValidator {
 
 /// SMT-based refinement checking
 ///
+
 /// Integrates with verum_smt to verify refinement types using Z3 solver.
 pub struct SmtRefinementChecker {
     verifier: SmtRefinementVerifier,
@@ -2508,6 +2515,7 @@ pub fn position_to_string(pos: Position) -> String {
 
 /// Parse refinement type from text
 ///
+
 /// Uses the verum_parser to properly parse refinement type syntax like:
 /// - `Int{> 0}` - integer greater than zero
 /// - `Text{len(it) > 0}` - non-empty text
@@ -3430,6 +3438,7 @@ mod tests {
         // `extract_counterexample` produced traces of unbounded
         // length, so the user-visible cap was a lie.
         //
+
         // Now that `extract_counterexample` clamps via
         // `List::truncate(max)`, this test asserts the contract
         // by going through `apply_config` so the config-write

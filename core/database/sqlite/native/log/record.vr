@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_log(errcode, fmt, …).
 //
+
 // We pre-render `fmt` into `message` before the record hits the sink
 // so sinks don't have to understand printf formatting.
 // =============================================================================

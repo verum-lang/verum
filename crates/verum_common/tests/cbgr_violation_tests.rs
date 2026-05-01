@@ -1,5 +1,6 @@
 //! Tests for CbgrViolationKind and CbgrViolation types.
 //!
+
 //! Tests for the CBGR (Capability-Based Generation References) violation system.
 //! CbgrViolationKind is the single source of truth for all memory safety violations
 //! across all execution tiers. FFI error codes are in the 0x1001-0x1008 range.

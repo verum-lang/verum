@@ -3,15 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md §17.1
 //
+
 // CREATE TRIGGER name
-//     BEFORE | AFTER | INSTEAD OF
-//     INSERT | UPDATE [OF col1, col2, ...] | DELETE
-//     ON table
-//     [FOR EACH ROW]
-//     [WHEN condition]
+//  BEFORE | AFTER | INSTEAD OF
+//  INSERT | UPDATE [OF col1, col2, ...] | DELETE
+//  ON table
+//  [FOR EACH ROW]
+//  [WHEN condition]
 // BEGIN
-//     statement1;
-//     statement2;
+//  statement1;
+//  statement2;
 // END;
 // =============================================================================
 

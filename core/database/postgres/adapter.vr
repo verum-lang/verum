@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: internal/specs/database.md §6.1
 //
+
 // Vendor-side identity layer over the wire / auth / connection stack.
 // Mirrors the shape of `core.database.sqlite.adapter` so portable
 // code can wire either back-end through the same Spindle entry-point.

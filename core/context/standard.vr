@@ -5,46 +5,54 @@
 // Spec: docs/detailed/16-context-system.md
 // =============================================================================
 //
+
 // Defines the standard context types that form the foundation of Verum's
 // dependency injection system. These contexts represent common cross-cutting
 // concerns that applications need.
 //
+
 // # Standard Contexts
 //
-// | Context    | Purpose                  | Typical Implementation       |
+
+// | Context | Purpose | Typical Implementation |
 // |------------|--------------------------|------------------------------|
-// | Logger     | Structured logging       | ConsoleLogger, FileLogger    |
-// | Database   | Database access           | PostgresPool, SqliteConn     |
-// | Auth       | Authentication/authz      | JwtAuth, SessionAuth         |
-// | Config     | Application configuration | EnvConfig, FileConfig        |
-// | Cache      | Caching layer             | MemoryCache, RedisCache      |
-// | Metrics    | Metrics collection        | PrometheusMetrics, StatsD    |
-// | Tracer     | Distributed tracing       | OpenTelemetryTracer          |
-// | Clock      | Time provider (testable)  | SystemClock, MockClock       |
-// | Random     | Random number generation  | SecureRandom, MockRandom     |
-// | FileSystem | File system operations    | OsFileSystem, MemoryFs       |
+// | Logger | Structured logging | ConsoleLogger, FileLogger |
+// | Database | Database access | PostgresPool, SqliteConn |
+// | Auth | Authentication/authz | JwtAuth, SessionAuth |
+// | Config | Application configuration | EnvConfig, FileConfig |
+// | Cache | Caching layer | MemoryCache, RedisCache |
+// | Metrics | Metrics collection | PrometheusMetrics, StatsD |
+// | Tracer | Distributed tracing | OpenTelemetryTracer |
+// | Clock | Time provider (testable) | SystemClock, MockClock |
+// | Random | Random number generation | SecureRandom, MockRandom |
+// | FileSystem | File system operations | OsFileSystem, MemoryFs |
 //
+
 // # Usage Pattern
 //
+
 // ```verum
 // // Declare what your function needs
 // fn handle_request(req: Request) -> Response using [Database, Logger, Auth] {
-//     let user = Auth.current_user()?;
-//     Logger.info(f"Request from {user.name}");
-//     let data = Database.query("SELECT * FROM items WHERE user_id = ?", [user.id])?;
-//     Response.json(data)
+//  let user = Auth.current_user()?;
+//  Logger.info(f"Request from {user.name}");
+//  let data = Database.query("SELECT * FROM items WHERE user_id = ?", [user.id])?;
+//  Response.json(data)
 // }
 //
+
 // // Provide at application boundary
 // fn main() {
-//     provide Logger = ConsoleLogger.new(ContextLogLevel.Info);
-//     provide Database = PostgresPool.connect("postgres://localhost/mydb");
-//     provide Auth = JwtAuth.new(secret: env.var("JWT_SECRET"));
+//  provide Logger = ConsoleLogger.new(ContextLogLevel.Info);
+//  provide Database = PostgresPool.connect("postgres://localhost/mydb");
+//  provide Auth = JwtAuth.new(secret: env.var("JWT_SECRET"));
 //
-//     serve(handle_request);
+
+//  serve(handle_request);
 // }
 // ```
 //
+
 // =============================================================================
 
 module context.standard;
@@ -141,14 +149,15 @@ public type ContextLogRecord is {
 
 /// Logger context for structured logging.
 ///
+
 /// # Example
 /// ```verum
 /// fn process(item: Item) using [Logger] {
-///     Logger.info(f"Processing item {item.id}");
-///     Logger.debug(f"Item details: {item}");
-///     if item.is_expired() {
-///         Logger.warn(f"Item {item.id} has expired");
-///     }
+///  Logger.info(f"Processing item {item.id}");
+///  Logger.debug(f"Item details: {item}");
+///  if item.is_expired() {
+///  Logger.warn(f"Item {item.id} has expired");
+///  }
 /// }
 /// ```
 public context Logger {
@@ -219,18 +228,20 @@ public type QueryResult is {
 
 /// Database context for data access.
 ///
+
 /// # Example
 /// ```verum
 /// fn get_user(id: Int) -> Maybe<User> using [Database] {
-///     let result = Database.query(
-///         "SELECT name, email FROM users WHERE id = ?",
-///         [id.to_string()],
-///     )?;
+///  let result = Database.query(
+///  "SELECT name, email FROM users WHERE id = ?",
+///  [id.to_string()],
+///  )?;
 ///
-///     result.rows.first().map(|row| User {
-///         name: row.get("name").unwrap_or(""),
-///         email: row.get("email").unwrap_or(""),
-///     })
+
+///  result.rows.first().map(|row| User {
+///  name: row.get("name").unwrap_or(""),
+///  email: row.get("email").unwrap_or(""),
+///  })
 /// }
 /// ```
 public context Database {
@@ -273,15 +284,16 @@ implement AuthUser {
 
 /// Authentication and authorization context.
 ///
+
 /// # Example
 /// ```verum
 /// fn admin_only() using [Auth] {
-///     let user = Auth.current_user()
-///         .ok_or("Not authenticated")?;
-///     if !Auth.has_permission("admin:write") {
-///         return Err("Forbidden");
-///     }
-///     // ... admin operation ...
+///  let user = Auth.current_user()
+///  .ok_or("Not authenticated")?;
+///  if !Auth.has_permission("admin:write") {
+///  return Err("Forbidden");
+///  }
+///  // ... admin operation ...
 /// }
 /// ```
 public context Auth {
@@ -304,17 +316,19 @@ public context Auth {
 
 /// Application configuration context.
 ///
+
 /// Provides access to configuration values from any source
 /// (environment variables, config files, remote config).
 ///
+
 /// # Example
 /// ```verum
 /// fn connect_db() using [Config] {
-///     let url = Config.get("database.url")
-///         .unwrap_or("postgres://localhost/default");
-///     let pool_size = Config.get_int("database.pool_size")
-///         .unwrap_or(10);
-///     // ...
+///  let url = Config.get("database.url")
+///  .unwrap_or("postgres://localhost/default");
+///  let pool_size = Config.get_int("database.pool_size")
+///  .unwrap_or(10);
+///  // ...
 /// }
 /// ```
 public context Config {
@@ -340,16 +354,17 @@ public context Config {
 
 /// Cache context for key-value caching.
 ///
+
 /// # Example
 /// ```verum
 /// fn get_user_profile(id: Int) -> Profile using [Cache, Database] {
-///     let key = f"user:{id}:profile";
-///     if let Some(cached) = Cache.get(key) {
-///         return cached.deserialize<Profile>();
-///     }
-///     let profile = Database.query(...)?;
-///     Cache.set(key, profile.serialize(), Duration.mins(5));
-///     profile
+///  let key = f"user:{id}:profile";
+///  if let Some(cached) = Cache.get(key) {
+///  return cached.deserialize<Profile>();
+///  }
+///  let profile = Database.query(...)?;
+///  Cache.set(key, profile.serialize(), Duration.mins(5));
+///  profile
 /// }
 /// ```
 public context Cache {
@@ -375,19 +390,23 @@ public context Cache {
 
 /// Metrics context for application instrumentation.
 ///
+
 /// # Example
 /// ```verum
 /// fn handle_request(req: Request) -> Response using [Metrics] {
-///     let start = Instant.now();
-///     Metrics.increment("http.requests.total");
+///  let start = Instant.now();
+///  Metrics.increment("http.requests.total");
 ///
-///     let response = process_request(req);
+
+///  let response = process_request(req);
 ///
-///     let elapsed = start.elapsed();
-///     Metrics.histogram("http.request.duration_ms", elapsed.as_millis() as Float);
-///     Metrics.increment(f"http.responses.{response.status.code}");
+
+///  let elapsed = start.elapsed();
+///  Metrics.histogram("http.request.duration_ms", elapsed.as_millis() as Float);
+///  Metrics.increment(f"http.responses.{response.status.code}");
 ///
-///     response
+
+///  response
 /// }
 /// ```
 public context Metrics {
@@ -411,6 +430,7 @@ public context Metrics {
 // Tracer Context
 // =============================================================================
 //
+
 // DI interface for distributed tracing. The concrete implementation
 // lives in `core.tracing` (OpenTelemetry-compatible: SpanContext +
 // Sampler + SpanProcessor + SpanExporter + W3C Trace Context
@@ -418,19 +438,22 @@ public context Metrics {
 // mock `Tracer`; production code installs a provider that delegates
 // to `core.tracing.get_tracer(...)`.
 //
+
 // The `Span` type is the one from `core.tracing.span`; there is no
 // parallel definition here.
 
 /// Distributed tracing context.
 ///
+
 /// # Example
 /// ```verum
 /// fn process_order(order: Order) using [Tracer, Database] {
-///     let span = Tracer.start_span("process_order");
-///     defer Tracer.end_span(span);
+///  let span = Tracer.start_span("process_order");
+///  defer Tracer.end_span(span);
 ///
-///     Tracer.add_attribute("order.id", order.id.to_string());
-///     // ...
+
+///  Tracer.add_attribute("order.id", order.id.to_string());
+///  // ...
 /// }
 /// ```
 public context Tracer {
@@ -457,16 +480,19 @@ public context Tracer {
 
 /// Clock context providing testable time operations.
 ///
+
 /// In production, delegates to the system clock. In tests, can be
 /// replaced with a mock clock for deterministic time behavior.
 ///
+
 /// # Example
 /// ```verum
 /// fn is_expired(token: Token) -> Bool using [Clock] {
-///     let now = Clock.now();
-///     now > token.expires_at
+///  let now = Clock.now();
+///  now > token.expires_at
 /// }
 ///
+
 /// // In tests:
 /// provide Clock = MockClock.at(SystemTime.from_timestamp(1000));
 /// assert(is_expired(token_expiring_at_500));
@@ -488,14 +514,16 @@ public context Clock {
 
 /// Random number generation context.
 ///
+
 /// In production, uses a cryptographically secure random source.
 /// In tests, can be replaced with a seeded deterministic generator.
 ///
+
 /// # Example
 /// ```verum
 /// fn generate_token() -> Text using [Random] {
-///     let bytes = Random.bytes(32);
-///     hex_encode(bytes)
+///  let bytes = Random.bytes(32);
+///  hex_encode(bytes)
 /// }
 /// ```
 public context Random {
@@ -521,14 +549,16 @@ public context Random {
 
 /// File system context for testable file operations.
 ///
+
 /// In production, delegates to the OS file system. In tests, can be
 /// replaced with an in-memory file system.
 ///
+
 /// # Example
 /// ```verum
 /// fn read_config() -> Config using [FileSystem] {
-///     let content = FileSystem.read_text("config.toml")?;
-///     parse_toml(content)
+///  let content = FileSystem.read_text("config.toml")?;
+///  parse_toml(content)
 /// }
 /// ```
 public context FileSystem {
@@ -632,24 +662,30 @@ implement Display for AuthUser {
 
 /// Common context group for web applications.
 ///
+
 /// ```verum
 /// using WebContext = [Logger, Database, Auth, Config, Cache, Metrics];
 ///
+
 /// fn handle(req: Request) -> Response using [WebContext] { ... }
 /// ```
 
 /// Common context group for background workers.
 ///
+
 /// ```verum
 /// using WorkerContext = [Logger, Database, Config, Metrics];
 ///
+
 /// fn process_job(job: Job) using [WorkerContext] { ... }
 /// ```
 
 /// Common context group for testing.
 ///
+
 /// ```verum
 /// using TestContext = [Logger, Clock, Random, FileSystem];
 ///
+
 /// fn test_something() using [TestContext] { ... }
 /// ```

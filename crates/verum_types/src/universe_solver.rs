@@ -1,37 +1,47 @@
 //! Phase A.2: Universe Constraint Solver
 //!
+
 //! Solves universe level constraints for dependent type checking.
 //! The core solver lives in [`context::UniverseContext`]; this module
 //! provides the public API and convenience wrappers.
 //!
+
 //! ## Universe Hierarchy
 //!
+
 //! ```text
 //! Type₀ : Type₁ : Type₂ : ...
 //! ```
 //!
+
 //! Every type has a universe level. The hierarchy prevents Girard's
 //! paradox: `Type : Type` is rejected; instead `Type₀ : Type₁`.
 //!
+
 //! ## Constraint Language
 //!
-//! - `u ≤ v`         — cumulativity
-//! - `u < v`         — strict ordering
-//! - `u = v`         — equality
+
+//! - `u ≤ v` — cumulativity
+//! - `u < v` — strict ordering
+//! - `u = v` — equality
 //! - `w = max(u, v)` — join
-//! - `v = u + 1`     — successor
+//! - `v = u + 1` — successor
 //!
+
 //! ## Algorithm
 //!
+
 //! Iterative constraint propagation over a union-find-like
 //! substitution map:
 //!
+
 //! 1. Propagate equality (unification)
 //! 2. Propagate successor (`v = u + 1`)
 //! 3. Propagate max (`w = max(u, v)`)
 //! 4. Propagate ordering (`u ≤ v`, `u < v`)
 //! 5. Assign concrete levels to unconstrained variables
 //!
+
 //! Convergence is guaranteed by monotonicity: each propagation step
 //! either binds a variable or does nothing. The algorithm terminates
 //! in at most O(n²) steps where n is the number of constraints.
@@ -44,6 +54,7 @@ use verum_common::Text;
 /// Solve a set of universe constraints, returning the solved
 /// substitution or an error describing the unsatisfiable constraint.
 ///
+
 /// This is the top-level entry point for universe constraint solving
 /// in the type-checking pipeline.
 pub fn solve_universe_constraints(

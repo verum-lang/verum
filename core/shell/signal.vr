@@ -5,18 +5,22 @@
 // Dependencies: core, sys.signal
 // =============================================================================
 //
+
 // Thin script-friendly wrappers around `core.sys.signal`. Provides:
 //
-//   * `trap(signal, handler)` — install a handler that fires on the signal
-//   * `with_trap(signal, handler, body)` — scoped: handler installed for
-//     the duration of `body` then restored
-//   * `on_interrupt(handler)` — alias for `trap(Signal.Int, ...)`, the
-//     most common pattern in CLI scripts
-//   * `cleanup_on_exit(handler)` — runs `handler` on SIGINT, SIGTERM, SIGHUP
+
+//  * `trap(signal, handler)` — install a handler that fires on the signal
+//  * `with_trap(signal, handler, body)` — scoped: handler installed for
+//  the duration of `body` then restored
+//  * `on_interrupt(handler)` — alias for `trap(Signal.Int, ...)`, the
+//  most common pattern in CLI scripts
+//  * `cleanup_on_exit(handler)` — runs `handler` on SIGINT, SIGTERM, SIGHUP
 //
+
 // All the heavy lifting (sigaction registration, trampoline) lives in
 // `core.sys.signal`. This module is purely sugar over `on_signal`.
 //
+
 // =============================================================================
 
 module signal;
@@ -91,6 +95,7 @@ public fn with_signal_ignored<T>(sig: Signal, body: fn() -> T) -> T {
 // SignalGuard — RAII handle that restores on Drop
 // =============================================================================
 //
+
 // Useful when the handler has a non-trivial scope that would be awkward to
 // express via `with_trap`. The guard is `@must_consume` to ensure callers
 // don't forget to release.

@@ -1,5 +1,6 @@
 //! End-to-end cache contract tests for `verum lint`.
 //!
+
 //! Each test runs the binary against a generated fixture project,
 //! observing the `target/lint-cache/` directory between runs to
 //! verify the cache is created, reused, and invalidated correctly.

@@ -5,48 +5,58 @@ module core.database.sqlite.native.l7_api.blob;
 // =============================================================================
 // Layer: 7 — public API.
 // Spec: sqlite-native.md §13.5; SQLite C API:
-//        sqlite3_blob_open / _read / _write / _bytes / _reopen / _close.
+//  sqlite3_blob_open / _read / _write / _bytes / _reopen / _close.
 //
+
 // Use case: read or write a BLOB column WITHOUT materialising the
-// entire payload into memory.  Useful for large binaries — images,
+// entire payload into memory. Useful for large binaries — images,
 // audio, ML weights, file blobs persisted in SQLite via the typed
 // columnar surface.
 //
+
 // Design.
 //
+
 // The bookkeeping layer is `core.database.sqlite.native.incrblob.engine`
 // — a per-connection table of `BlobHandle` records with stable
-// `handle_id`s.  This module hosts the high-level surface that:
+// `handle_id`s. This module hosts the high-level surface that:
 //
-//   1. Resolves (schema, table, column, rowid) to a concrete row +
-//      column slot via the schema cache + table store.
-//   2. Captures the cell's current byte size so `bytes()` is O(1).
-//   3. Drives the four operational primitives (read / write / reopen
-//      / close) by mutating the underlying RBlob register in the
-//      connection's table store.
+
+//  1. Resolves (schema, table, column, rowid) to a concrete row +
+//  column slot via the schema cache + table store.
+//  2. Captures the cell's current byte size so `bytes()` is O(1).
+//  3. Drives the four operational primitives (read / write / reopen
+//  / close) by mutating the underlying RBlob register in the
+//  connection's table store.
 //
+
 // Constraints.
 //
-//   * Only RBlob and RText columns are addressable — RInt / RReal
-//     reject with `BeNotABlob`.  RText is treated as its UTF-8 byte
-//     view for read; write on RText reinterprets the new bytes as
-//     blob storage (the cell becomes RBlob after a successful write —
-//     SQLite's behaviour).
+
+//  * Only RBlob and RText columns are addressable — RInt / RReal
+//  reject with `BeNotABlob`. RText is treated as its UTF-8 byte
+//  view for read; write on RText reinterprets the new bytes as
+//  blob storage (the cell becomes RBlob after a successful write —
+//  SQLite's behaviour).
 //
-//   * Write extends the BLOB only up to the original byte_size that
-//     the handle was opened with — matches SQLite, which forbids
-//     resizing through an open handle.  Use `zeroblob(N)` + UPDATE +
-//     re-open to grow.
+
+//  * Write extends the BLOB only up to the original byte_size that
+//  the handle was opened with — matches SQLite, which forbids
+//  resizing through an open handle. Use `zeroblob(N)` + UPDATE +
+//  re-open to grow.
 //
-//   * Cross-row reuse is via `blob_reopen(handle_id, new_rowid)` —
-//     same column, different row.  Faster than close + open because
-//     the bookkeeping slot is reused.
+
+//  * Cross-row reuse is via `blob_reopen(handle_id, new_rowid)` —
+//  same column, different row. Faster than close + open because
+//  the bookkeeping slot is reused.
 //
+
 // Affine.
 //
+
 // `BlobReader` / `BlobWriter` aren't separate affine values in this
 // implementation — the handle is identified by `Int64 handle_id` and
-// the engine refuses operations after `close`.  This matches SQLite C
+// the engine refuses operations after `close`. This matches SQLite C
 // API semantics and avoids the protocol-level complexity of an
 // affine handle holding `&mut Database`.
 // =============================================================================
@@ -76,7 +86,7 @@ mount core.database.sqlite.native.l7_api.database.{
 // row_index, col_index, byte_size) tuple
 // -----------------------------------------------------------------------------
 
-/// Located cell coordinates.  All fields needed to read or write the
+/// Located cell coordinates. All fields needed to read or write the
 /// BLOB without re-traversing the schema.
 type BlobLocation is {
     root_page: Int,
@@ -157,7 +167,7 @@ fn resolve_location(
 // -----------------------------------------------------------------------------
 
 /// Open an incremental BLOB handle on `(schema, table, column, rowid)`.
-/// Returns the engine-assigned `handle_id`.  Pass it back to every
+/// Returns the engine-assigned `handle_id`. Pass it back to every
 /// subsequent `blob_*` call.
 pub fn blob_open(
     db: &mut Database,
@@ -177,12 +187,12 @@ pub fn blob_open(
         schema.clone(), table.clone(), column.clone(),
         rowid, mode, loc.byte_size,
     );
-    // Stash the resolved coordinates alongside the handle.  We hold
+    // Stash the resolved coordinates alongside the handle. We hold
     // them in a side-table inside the engine so subsequent read /
-    // write don't have to re-traverse the schema.  v1 keeps this
+    // write don't have to re-traverse the schema. v1 keeps this
     // simple by embedding the lookup in the get_row/set_row path
     // below — re-resolving each call is O(table-count + column-count)
-    // which is fine for typical schemas.  A future commit can cache
+    // which is fine for typical schemas. A future commit can cache
     // the BlobLocation in the BlobHandle if it becomes a hot path.
     let _ = loc;
     Ok(id)
@@ -198,7 +208,7 @@ pub fn blob_bytes(db: &Database, handle_id: Int64) -> Result<Int, SqliteApiDbErr
     }
 }
 
-/// Read `length` bytes starting at `offset`.  Bounds-checked against
+/// Read `length` bytes starting at `offset`. Bounds-checked against
 /// the size captured at open; out-of-range reads return `DbBindRange`.
 pub fn blob_read(
     db: &Database,
@@ -249,8 +259,8 @@ pub fn blob_read(
     Ok(bytes)
 }
 
-/// Write `data` into the BLOB starting at `offset`.  Cannot grow the
-/// BLOB beyond its original size at open — matches SQLite.  Returns
+/// Write `data` into the BLOB starting at `offset`. Cannot grow the
+/// BLOB beyond its original size at open — matches SQLite. Returns
 /// `DbReadonly` if the handle was opened read-only.
 pub fn blob_write(
     db: &mut Database,
@@ -318,8 +328,8 @@ pub fn blob_write(
     Ok(())
 }
 
-/// Reopen the handle on a different rowid.  Faster than close + open
-/// because the engine slot is reused.  The new row must lie in the
+/// Reopen the handle on a different rowid. Faster than close + open
+/// because the engine slot is reused. The new row must lie in the
 /// same (schema, table, column) — switching column requires a fresh
 /// `blob_open`.
 pub fn blob_reopen(
@@ -342,8 +352,8 @@ pub fn blob_reopen(
     }
 }
 
-/// Close the handle.  Subsequent operations on `handle_id` return
-/// `DbCannotOpen`.  Closing an already-closed handle is a no-op.
+/// Close the handle. Subsequent operations on `handle_id` return
+/// `DbCannotOpen`. Closing an already-closed handle is a no-op.
 pub fn blob_close(db: &mut Database, handle_id: Int64) -> Result<(), SqliteApiDbError> {
     let engine = db.conn_mut_for_blob().blob_engine_mut();
     let _ = engine.close(handle_id);
@@ -356,7 +366,7 @@ pub fn blob_close(db: &mut Database, handle_id: Int64) -> Result<(), SqliteApiDb
 
 /// Pull (schema, table, column, rowid) from the engine without
 /// dragging the BlobHandle struct definition into this module's
-/// public surface.  Returns None if the handle isn't open.
+/// public surface. Returns None if the handle isn't open.
 fn engine_handle(
     engine: &core.database.sqlite.native.incrblob.engine.BlobEngine,
     handle_id: Int64,

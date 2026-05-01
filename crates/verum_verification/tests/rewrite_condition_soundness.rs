@@ -1,19 +1,23 @@
 //! Soundness regression: a conditional rewrite rule must NOT silently
 //! pass when its condition is unverifiable.
 //!
+
 //! Pre-fix `validate_rewrite_rule_application` discharged conditions
 //! with:
 //!
-//!     for condition in &rule.conditions {
-//!         let instantiated_cond = self.apply_bindings(condition, &bindings);
-//!         // For now, we trust the condition is satisfied
-//!         let _ = instantiated_cond;
-//!     }
+
+//!  for condition in &rule.conditions {
+//!  let instantiated_cond = self.apply_bindings(condition, &bindings);
+//!  // For now, we trust the condition is satisfied
+//!  let _ = instantiated_cond;
+//!  }
 //!
+
 //! That made conditional rewrites unsound: a malformed proof could
 //! apply `safe_div(a, b) → a/b` (conditioned on `b ≠ 0`) without ever
 //! demonstrating that `b ≠ 0` actually holds.
 //!
+
 //! Post-fix the validator only accepts a rewrite when each condition
 //! is one of: literal `true`, reflexive equality, a registered axiom,
 //! or a hypothesis currently in scope.

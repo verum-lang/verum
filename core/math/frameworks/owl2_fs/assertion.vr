@@ -2,15 +2,18 @@
 // owl2_fs.assertion — Shkotin 2019 Table 10 (Assertions)
 // =============================================================================
 //
+
 // §2.3.6 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 7 axioms
 // asserting facts about specific Individuals — the ABox of an OWL 2
 // ontology.
 //
+
 // V2 status (#134, 2026-04-25): all 7 ABox axioms now ship verbatim
 // W3C OWL 2 DS §5.6 / §5.10 / §5.11 bodies. Earlier `ensures true`
 // placeholders are replaced with classical Boolean propositions over
 // the `Interpretation` carrier protocol from `types.vr`.
 //
+
 // Pattern for the rest of the C7 V2 conveyor (class_axiom, class_expr,
 // data_property_axiom, data_range, object_property_axiom, key,
 // datatype_definition, count): mirror the shape used here — take the
@@ -34,8 +37,9 @@ mount core.math.frameworks.owl2_fs.types.{
 /// Individuals"): under interpretation I every pair of the listed
 /// individuals denotes the same element of ΔᴵO.
 ///
+
 /// The full Shkotin Table 10 entry is the n-ary fold over pairs;
-/// V2 ships the binary core — `SameIndividual(a, b)` — and leaves
+/// ships the binary core — `SameIndividual(a, b)` — and leaves
 /// the n-ary fold to a higher-level helper.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: SameIndividual")
 public axiom SameIndividual<I: Interpretation>(
@@ -59,7 +63,7 @@ public axiom DifferentIndividuals<I: Interpretation>(
 // ─── §5.7 Class assertion ──────────────────────────────────────────
 
 /// `ClassAssertion(CE, a)` (W3C OWL 2 DS §5.7): under I, `a` is a
-/// member of class CE. ⟦ClassAssertion(CE, a)⟧^I  iff  a^I ∈ ⟦CE⟧^I.
+/// member of class CE. ⟦ClassAssertion(CE, a)⟧^I iff a^I ∈ ⟦CE⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: ClassAssertion")
 public axiom ClassAssertion<I: Interpretation, CE: ClassExpression>(
     interp: I,
@@ -72,7 +76,7 @@ public axiom ClassAssertion<I: Interpretation, CE: ClassExpression>(
 
 /// `ObjectPropertyAssertion(OPE, a, b)` (W3C OWL 2 DS §5.8.1):
 /// under I, the pair `(a, b)` is in the OPE relation.
-/// ⟦OPA(OPE, a, b)⟧^I  iff  (a^I, b^I) ∈ ⟦OPE⟧^I.
+/// ⟦OPA(OPE, a, b)⟧^I iff (a^I, b^I) ∈ ⟦OPE⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: ObjectPropertyAssertion")
 public axiom ObjectPropertyAssertion<I: Interpretation, P: ObjectPropertyExpression>(
     interp: I,
@@ -84,10 +88,12 @@ public axiom ObjectPropertyAssertion<I: Interpretation, P: ObjectPropertyExpress
 
 // Semantics — W3C OWL 2 DS §5.8.2 (verbatim):
 //
-//   ⟦NegativeObjectPropertyAssertion(OPE, a, b)⟧^I = true
-//      iff
-//   (a^I, b^I) ∉ ⟦OPE⟧^I
+
+//  ⟦NegativeObjectPropertyAssertion(OPE, a, b)⟧^I = true
+//  iff
+//  (a^I, b^I) ∉ ⟦OPE⟧^I
 //
+
 // V2 NOTE (Shkotin email confirmation 2026-04-25): the semantics is
 // classical negation pure-and-simple. There is NO OWA carve-out in
 // §5.8 — anonymous individuals get distinct denotations under the
@@ -110,7 +116,7 @@ public axiom NegativeObjectPropertyAssertion<I: Interpretation, P: ObjectPropert
 
 /// `DataPropertyAssertion(DPE, a, lt)` (W3C OWL 2 DS §5.9.1):
 /// under I, the pair `(a, lt)` is in the DPE relation.
-/// ⟦DPA(DPE, a, lt)⟧^I  iff  (a^I, lt^I) ∈ ⟦DPE⟧^I.
+/// ⟦DPA(DPE, a, lt)⟧^I iff (a^I, lt^I) ∈ ⟦DPE⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.6 Table 10: DataPropertyAssertion")
 public axiom DataPropertyAssertion<I: Interpretation, D: DataPropertyExpression>(
     interp: I,

@@ -4,13 +4,16 @@
 //! suggestions for a typed [`ProofFailureKind`] without depending on
 //! the Rust API.
 //!
+
 //! ## Why this is the integration that #74 was missing
 //!
+
 //! Prior to this command the `RepairEngine` trait surface was
 //! unit-tested but had no production CLI consumer. The diagnostic
 //! emission flow surfaced `KernelError` / `CheckerError` variants
 //! directly, with no path to ranked structured repair suggestions.
 //!
+
 //! This command provides the **transport-layer integration**: given
 //! a typed failure description (kind + structured fields) it emits
 //! the ranked V0 catalogue from
@@ -18,25 +21,30 @@
 //! The verify-pipeline → ProofFailureKind projection (the V1 step)
 //! can then call into this same engine without re-plumbing.
 //!
+
 //! Same architectural pattern as proof-draft and verify-ladder:
 //! single trait boundary, reference V0 impl, future adapters
 //! (LLM-repair, MSFS-corpus-aware) plug in via `CompositeRepairEngine`
 //! without touching the command handler.
 //!
+
 //! ## Usage
 //!
+
 //! ```text
 //! verum proof-repair --kind unbound-name --field name=foo_lemma
 //! verum proof-repair --kind refine-depth \
-//!     --field refined_type=CategoricalLevel \
-//!     --field predicate_depth=ω·2 \
-//!     --max 3 --format json
+//!  --field refined_type=CategoricalLevel \
+//!  --field predicate_depth=ω·2 \
+//!  --max 3 --format json
 //! ```
 //!
+
 //! ## Output formats
 //!
-//!   * `plain` — human-readable ranked list with rationale + doc-link.
-//!   * `json`  — LSP-friendly structured payload.
+
+//!  * `plain` — human-readable ranked list with rationale + doc-link.
+//!  * `json` — LSP-friendly structured payload.
 
 use crate::error::{CliError, Result};
 use std::collections::HashMap;
@@ -45,7 +53,7 @@ use verum_diagnostics::proof_repair::{
     DefaultRepairEngine, ProofFailureKind, RepairApplicability, RepairEngine,
 };
 
-/// Run the proof-repair command.  Returns `Ok(())` on success;
+/// Run the proof-repair command. Returns `Ok(())` on success;
 /// errors propagate up the CLI dispatcher.
 pub fn run_proof_repair(
     kind: &str,

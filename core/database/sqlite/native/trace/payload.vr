@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (sqlite3_trace_v2)
 //
+
 // `TracePayload` is the typed counterpart to SQLite's `(p, x)` arg
 // pair: each event variant carries the data the C API would expose
 // to the callback.

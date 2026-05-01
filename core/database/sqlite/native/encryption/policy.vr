@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §23 (security)
 //
+
 // Decides which pages get encrypted. Three policies:
 //
-//   * `EpEncryptAll`     — every page (header included)
-//   * `EpUserPagesOnly`  — pages 2.. (skips the SQLite header on
-//                          page 1 so external tools can detect the
-//                          format without needing the key)
-//   * `EpNone`           — no encryption (disable cipher hook)
+
+//  * `EpEncryptAll` — every page (header included)
+//  * `EpUserPagesOnly` — pages 2.. (skips the SQLite header on
+//  page 1 so external tools can detect the
+//  format without needing the key)
+//  * `EpNone` — no encryption (disable cipher hook)
 // =============================================================================
 
 module core.database.sqlite.native.encryption.policy;

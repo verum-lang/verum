@@ -5,18 +5,20 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 12
 // =============================================================================
 //
+
 // The application runtime provides:
-//   * A pure Model → Update → View loop (Elm Architecture).
-//   * Integration with the native async runtime (core.async) for Commands.
-//   * Subscription support: external message sources (timers, streams).
-//   * Structured concurrency: all spawned tasks are wrapped in a cancellation
-//     scope that terminates cleanly on Quit.
-//   * Lock-free message channel (core.async.channel) for async→main handoff.
-//   * Frame-budget capped event polling (~60 FPS default).
+//  * A pure Model → Update → View loop (Elm Architecture).
+//  * Integration with the native async runtime (core.async) for Commands.
+//  * Subscription support: external message sources (timers, streams).
+//  * Structured concurrency: all spawned tasks are wrapped in a cancellation
+//  scope that terminates cleanly on Quit.
+//  * Lock-free message channel (core.async.channel) for async→main handoff.
+//  * Frame-budget capped event polling (~60 FPS default).
 //
+
 // Public entry points:
-//   * `run(model)` — synchronous entry (block_on the async runtime).
-//   * `run_async(model)` — async entry, for integration with user futures.
+//  * `run(model)` — synchronous entry (block_on the async runtime).
+//  * `run_async(model)` — async entry, for integration with user futures.
 // =============================================================================
 module app;
 
@@ -54,6 +56,7 @@ public type AppMessage<Msg> is
 
 /// Core of the Elm Architecture. Every TUI application implements this.
 ///
+
 /// The default methods cover most applications; only `update` and `view` are
 /// mandatory. `init`, `handle_event`, `subscriptions`, and `on_quit` have sane
 /// defaults.
@@ -94,6 +97,7 @@ public type Model is protocol {
 
 /// Run a TUI application. Blocks on the async runtime internally.
 ///
+
 /// This is the recommended entry point for `main` functions. If you need to
 /// integrate with other futures, use `run_async` instead.
 public fn run<M: Model>(model: M) -> IoResult<()> {
@@ -102,6 +106,7 @@ public fn run<M: Model>(model: M) -> IoResult<()> {
 
 /// Async entry point. Returns a future that drives the Elm loop.
 ///
+
 /// Compose with user futures via `select`, `join`, or structured concurrency.
 public async fn run_async<M: Model>(mut model: M) -> IoResult<()> {
     // ----- terminal init ----------------------------------------------------

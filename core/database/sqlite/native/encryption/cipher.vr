@@ -3,21 +3,26 @@
 // =============================================================================
 // Spec: sqlite-native.md §23 (security)
 //
+
 // `PageCipher` is the per-page encrypt / decrypt boundary the pager
 // invokes for every disk I/O. Three built-in impls:
 //
-//   * `NullCipher`     — passthrough; used for testing + when an
-//                         encryption-enabled binary opens a plaintext db
-//   * `AesGcmCipher`   — AES-256-GCM with per-page nonce; backed by
-//                         core.security.aead.aes_gcm.Aes256Gcm
-//   * `Chacha20Cipher` — ChaCha20-Poly1305 backed by
-//                         core.security.aead.chacha20_poly1305
+
+//  * `NullCipher` — passthrough; used for testing + when an
+//  encryption-enabled binary opens a plaintext db
+//  * `AesGcmCipher` — AES-256-GCM with per-page nonce; backed by
+//  core.security.aead.aes_gcm.Aes256Gcm
+//  * `Chacha20Cipher` — ChaCha20-Poly1305 backed by
+//  core.security.aead.chacha20_poly1305
 //
+
 // All three are surfaced via the same protocol so the pager can
 // switch them at startup without recompiling.
 //
+
 // # Per-page nonce derivation
 //
+
 // The 12-byte nonce is derived deterministically from `page_no`:
 // the low 4 bytes encode the page number little-endian, the upper 8
 // bytes are zero. Safe so long as the same (key, page_no) is never
@@ -30,17 +35,23 @@
 // core/security/aead/aes_gcm.vr explains the keystream-reuse
 // catastrophe in detail.
 //
+
 // # Wire format
 //
+
 // Each encrypted page is laid out as:
 //
-//     [ nonce (12 bytes) || ciphertext (N bytes) || tag (16 bytes) ]
+
+//  [ nonce (12 bytes) || ciphertext (N bytes) || tag (16 bytes) ]
 //
+
 // where N is the plaintext length. `overhead_bytes()` reports
 // `nonce_len + tag_len`. Callers size the page accordingly.
 //
+
 // # Authenticity
 //
+
 // `decrypt` returns `CeAuthFailure` on tag-verification failure and
 // does NOT expose any plaintext (the underlying AEAD verifies tag
 // before producing output). A wrong key, tampered ciphertext, or
@@ -68,7 +79,7 @@ public type CipherError is
     | CeMalformedPage
     | CeUnsupported(Text);
 
-// Display + Debug + Eq for CipherError.  WrongKey + AuthFailure
+// Display + Debug + Eq for CipherError. WrongKey + AuthFailure
 // surface no detail — page-level encrypted databases use AEAD
 // authentication (commonly AES-GCM); leaking which check failed
 // (key vs MAC vs nonce) creates the same oracle-attack surface

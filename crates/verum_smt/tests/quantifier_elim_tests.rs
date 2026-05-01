@@ -98,7 +98,7 @@ fn test_eliminate_existential_simple() {
     let ctx = create_context();
     let mut eliminator = QuantifierEliminator::new();
 
-    // ∃x. (x > 0 ∧ y = x + 1)  =>  y > 1
+    // ∃x. (x > 0 ∧ y = x + 1) => y > 1
     let x = Int::new_const("x");
     let y = Int::new_const("y");
 
@@ -128,7 +128,7 @@ fn test_eliminate_existential_linear_arithmetic() {
     let ctx = create_context();
     let mut eliminator = QuantifierEliminator::new();
 
-    // ∃x. (x ≥ 0 ∧ y = 2x + 3)  =>  y ≥ 3 ∧ y is odd
+    // ∃x. (x ≥ 0 ∧ y = 2x + 3) => y ≥ 3 ∧ y is odd
     let x = Int::new_const("x");
     let y = Int::new_const("y");
 
@@ -154,7 +154,7 @@ fn test_eliminate_multiple_variables() {
     let ctx = create_context();
     let mut eliminator = QuantifierEliminator::new();
 
-    // ∃x,y. (x > 0 ∧ y > 0 ∧ z = x + y)  =>  z > 0
+    // ∃x,y. (x > 0 ∧ y > 0 ∧ z = x + y) => z > 0
     let x = Int::new_const("x");
     let y = Int::new_const("y");
     let z = Int::new_const("z");
@@ -640,7 +640,7 @@ fn test_qe_integration_refinement_types() {
 
     // Simulate refinement type verification
     // type Positive = Int{> 0}
-    // Check: ∃x. Positive(x) ∧ y = x + 1  =>  y > 1
+    // Check: ∃x. Positive(x) ∧ y = x + 1 => y > 1
 
     let x = Int::new_const("x");
     let y = Int::new_const("y");

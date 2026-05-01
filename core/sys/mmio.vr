@@ -2,6 +2,7 @@ module sys.mmio;
 
 /// Verum Standard Library: Memory-Mapped I/O
 ///
+
 /// This module provides type-safe memory-mapped I/O (MMIO) abstractions for
 /// systems programming. Unlike C's simple `volatile` or Rust's external crates,
 /// Verum MMIO provides:
@@ -10,8 +11,10 @@ module sys.mmio;
 /// - Memory barrier integration for hardware protocols
 /// - Zero-cost abstractions (all operations inline)
 ///
+
 /// # Core Concepts
 ///
+
 /// ## Volatile Pointer Type
 /// The `*volatile T` pointer type is used for MMIO addresses. Unlike regular
 /// pointers, volatile pointers:
@@ -19,6 +22,7 @@ module sys.mmio;
 /// - Prevent reordering with respect to other volatile operations
 /// - Compile to single memory access instructions
 ///
+
 /// ## Access Modes
 /// Hardware registers often have specific access requirements:
 /// - ReadOnly: Can only be read (status registers)
@@ -27,22 +31,26 @@ module sys.mmio;
 /// - WriteOneToClear: Write 1 to clear bits (interrupt status)
 /// - WriteOneToSet: Write 1 to set bits (interrupt enable)
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Define a peripheral register block
 /// type UartRegisters is RegisterBlock<0x4001_0000> {
-///     data: MmioRegister<UInt8, ReadWrite>,
-///     status: MmioRegister<UInt8, ReadOnly>,
-///     control: MmioRegister<UInt8, ReadWrite>,
+///  data: MmioRegister<UInt8, ReadWrite>,
+///  status: MmioRegister<UInt8, ReadOnly>,
+///  control: MmioRegister<UInt8, ReadWrite>,
 /// };
 ///
+
 /// // Access registers
 /// let uart = UartRegisters.instance();
 /// let status = uart.status.read();
 /// uart.data.write(0x55);
 /// ```
 ///
+
 /// Implementation Reference: docs/architecture/low-level-features.md Section 3
 
 // =============================================================================
@@ -51,6 +59,7 @@ module sys.mmio;
 
 /// MmioRegister access mode - determines allowed operations.
 ///
+
 /// Access modes are phantom types (unit types) used as compile-time
 /// type parameters to enforce correct usage patterns at the type level.
 /// Each mode is a distinct type, enabling the type system to select
@@ -83,6 +92,7 @@ public type AccessMode is ReadOnly | WriteOnly | ReadWrite | ReadWriteOnce | Wri
 
 /// Read from volatile memory location.
 ///
+
 /// This is the primitive operation for MMIO reads. It:
 /// - Prevents load elimination
 /// - Emits a single memory read instruction
@@ -93,6 +103,7 @@ public fn volatile_load<T: Copy>(ptr: *volatile T) -> T;
 
 /// Write to volatile memory location.
 ///
+
 /// This is the primitive operation for MMIO writes. It:
 /// - Prevents store elimination
 /// - Emits a single memory write instruction
@@ -103,6 +114,7 @@ public fn volatile_store<T: Copy>(ptr: *volatile mut T, value: T);
 
 /// Read with acquire semantics.
 ///
+
 /// Ensures all subsequent reads and writes happen after this read.
 /// Use for acquiring locks or reading synchronization flags.
 @inline(always)
@@ -111,6 +123,7 @@ public fn volatile_load_acquire<T: Copy>(ptr: *volatile T) -> T;
 
 /// Write with release semantics.
 ///
+
 /// Ensures all previous reads and writes happen before this write.
 /// Use for releasing locks or signaling completion.
 @inline(always)
@@ -131,6 +144,7 @@ public type BarrierKind is
 
 /// Insert a memory barrier.
 ///
+
 /// Use barriers to enforce ordering between memory operations:
 /// - Compiler: Prevents compiler reordering, no CPU fence
 /// - Acquire: Ensures loads before are visible before loads/stores after
@@ -169,10 +183,12 @@ public fn isb();
 
 /// Type-safe register wrapper.
 ///
+
 /// Wraps a volatile pointer with access mode enforcement. The MODE
 /// parameter is a compile-time (meta) type that determines which
 /// operations are available.
 ///
+
 /// # Type Parameters
 /// - `T`: The data type of the register (must be Copy)
 /// - `MODE`: Access mode (ReadOnly, WriteOnly, ReadWrite, etc.)
@@ -183,6 +199,7 @@ public type MmioRegister<T: Copy, MODE> is {
 
 /// Create a register at a fixed address.
 ///
+
 /// This is a compile-time operation that creates a register wrapper
 /// for a known hardware address.
 implement<T: Copy, MODE> MmioRegister<T, MODE> {
@@ -262,9 +279,11 @@ implement<T: Copy> MmioRegister<T, ReadWrite> {
 
     /// Modify the register using a function.
     ///
+
     /// Reads the current value, applies the function, and writes back.
     /// NOT atomic - use with critical section if needed.
     ///
+
     /// Use `fn(T) -> T` as the parameter type rather than `F: Fn(T) -> T`
     /// — the type checker doesn't yet resolve closure-protocol bounds at the
     /// method-lookup stage, which previously hid this method behind a
@@ -346,6 +365,7 @@ implement MmioRegister<UInt32, WriteOneToSet> {
 
 /// Protocol for register blocks (peripheral register structures).
 ///
+
 /// A register block is a group of related registers at contiguous
 /// addresses, typically representing a hardware peripheral.
 public type RegisterBlock is protocol {
@@ -358,15 +378,17 @@ public type RegisterBlock is protocol {
 
 /// Macro-like attribute for defining register blocks.
 ///
+
 /// ```verum
 /// @register_block(0x4001_0000)
 /// type UartRegisters is {
-///     @offset(0x00) data: MmioRegister<UInt8, ReadWrite>,
-///     @offset(0x04) status: MmioRegister<UInt8, ReadOnly>,
-///     @offset(0x08) control: MmioRegister<UInt8, ReadWrite>,
+///  @offset(0x00) data: MmioRegister<UInt8, ReadWrite>,
+///  @offset(0x04) status: MmioRegister<UInt8, ReadOnly>,
+///  @offset(0x08) control: MmioRegister<UInt8, ReadWrite>,
 /// };
 /// ```
 ///
+
 /// The compiler generates:
 /// - Correct field offsets matching hardware layout
 /// - Singleton accessor at BASE_ADDRESS
@@ -385,6 +407,7 @@ public type MemoryRegion is {
 
 /// Memory region flags (bitfield).
 ///
+
 /// Usage: `MemoryFlags.READ | MemoryFlags.WRITE`
 public type MemoryFlags is (UInt32);
 
@@ -420,11 +443,13 @@ implement MemoryRegion {
 
 /// Ghost state for formal verification of register protocols.
 ///
+
 /// These types are erased at runtime but enable SMT verification
 /// of correct register access sequences.
 
 /// Verified register with ghost state tracking.
 ///
+
 /// Use @verify(formal) to enable SMT verification of register protocols.
 @verify(formal)
 public type VerifiedRegister<T: Copy, MODE> is {
@@ -452,24 +477,26 @@ implement<T: Copy> VerifiedRegister<T, WriteOnly> {
 
 /// Access linker-defined symbols for memory layout.
 ///
+
 /// ```verum
 /// // Declare linker symbols
 /// @link_symbol
 /// extern {
-///     static __text_start: USize;
-///     static __text_end: USize;
-///     static __data_start: USize;
-///     static __data_end: USize;
-///     static __bss_start: USize;
-///     static __bss_end: USize;
+///  static __text_start: USize;
+///  static __text_end: USize;
+///  static __data_start: USize;
+///  static __data_end: USize;
+///  static __bss_start: USize;
+///  static __bss_end: USize;
 /// }
 ///
+
 /// // Use in code
 /// fn text_region() -> MemoryRegion {
-///     MemoryRegion {
-///         start: &__text_start as *const _,
-///         size: &__text_end - &__text_start,
-///         flags: MemoryFlags.READ | MemoryFlags.EXEC,
-///     }
+///  MemoryRegion {
+///  start: &__text_start as *const _,
+///  size: &__text_end - &__text_start,
+///  flags: MemoryFlags.READ | MemoryFlags.EXEC,
+///  }
 /// }
 /// ```

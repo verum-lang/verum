@@ -14,12 +14,14 @@
 )]
 //! Comprehensive test suite for FFI constraint translation
 //!
+
 //! This test suite validates the SMT translation of FFI boundary contracts
 //! per the FFI boundary contract specification. FFI boundaries are compile-time
 //! specifications (not types) with 7 mandatory components: signature (@extern("C")),
 //! preconditions (requires), postconditions (ensures), memory effects, thread safety,
 //! error protocol, and ownership semantics. Only C ABI is supported.
 //!
+
 //! Test coverage:
 //! - 10 tests for precondition encoding
 //! - 10 tests for postcondition encoding

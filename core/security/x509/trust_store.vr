@@ -5,35 +5,41 @@
 // Dependencies: core, sys.*, x509.{certificate, name}
 // =============================================================================
 //
+
 // A TrustStore is a collection of anchor certificates — CAs the
 // validator is willing to treat as chain roots. Three shapes:
 //
-//   1. TrustStore.system()    — platform-native loader (Linux / macOS /
-//      Windows). Falls back to bundled Mozilla NSS root store when the
-//      platform store is unavailable or empty (CI sandboxes, minimal
-//      containers).
-//   2. TrustStore.from_der(ders)   — explicit anchors supplied by the
-//      application (private CAs, development roots).
-//   3. TrustStore.empty() + .add() — incremental construction.
+
+//  1. TrustStore.system() — platform-native loader (Linux / macOS /
+//  Windows). Falls back to bundled Mozilla NSS root store when the
+//  platform store is unavailable or empty (CI sandboxes, minimal
+//  containers).
+//  2. TrustStore.from_der(ders) — explicit anchors supplied by the
+//  application (private CAs, development roots).
+//  3. TrustStore.empty() + .add() — incremental construction.
 //
+
 // # Platform backends
 //
-// | OS       | Source                                               |
+
+// | OS | Source |
 // |----------|------------------------------------------------------|
-// | Linux    | /etc/ssl/certs/ca-certificates.crt (Debian/Ubuntu)   |
-// |          | /etc/pki/tls/certs/ca-bundle.crt (RHEL/Fedora)       |
-// |          | fallback: bundled Mozilla NSS root store             |
-// | macOS    | SecTrustCopyAnchorCertificates via CoreFoundation    |
-// |          | fallback: bundled Mozilla NSS root store             |
-// | Windows  | CertEnumCertificatesInStore("ROOT")                  |
-// |          | fallback: bundled Mozilla NSS root store             |
+// | Linux | /etc/ssl/certs/ca-certificates.crt (Debian/Ubuntu) |
+// | | /etc/pki/tls/certs/ca-bundle.crt (RHEL/Fedora) |
+// | | fallback: bundled Mozilla NSS root store |
+// | macOS | SecTrustCopyAnchorCertificates via CoreFoundation |
+// | | fallback: bundled Mozilla NSS root store |
+// | Windows | CertEnumCertificatesInStore("ROOT") |
+// | | fallback: bundled Mozilla NSS root store |
 //
+
 // v0.1 landing: Linux PEM bundle path + bundled fallback as a sealed
 // `BUNDLED_MOZILLA_NSS` byte blob in a sibling module
 // (`trust_store_mozilla.vr`). macOS / Windows backends land in Phase 1
 // follow-up (blocked only on FFI binding boilerplate; the dispatch
 // structure is ready).
 //
+
 // =============================================================================
 
 module core.security.x509.trust_store;
@@ -210,6 +216,7 @@ fn read_file_to_text(path: &Text) -> Result<Text, TrustError> {
 // Bundled Mozilla NSS root store — fallback
 // =============================================================================
 //
+
 // The bundled blob lives in `trust_store_mozilla.vr` as a constant
 // byte array + per-cert offset table (Phase 1 step 7 follow-up
 // auto-generates from Mozilla's `certdata.txt` snapshot). Until then
@@ -226,6 +233,7 @@ fn load_bundled_mozilla() -> Result<TrustStore, TrustError> {
 // PEM-bundle parsing — delegates to `core.encoding.pem`
 // =============================================================================
 //
+
 // The historical inline parser here called `core.encoding.base64.decode_bytes`
 // — a function that never existed. Lenient-skip codegen swallowed the
 // missing-symbol error and `parse_pem_bundle` consequently returned an
@@ -236,6 +244,7 @@ fn load_bundled_mozilla() -> Result<TrustStore, TrustError> {
 // any-cert-accepted in any code path that didn't strictly validate the
 // store size.
 //
+
 // Delegate to `core.encoding.pem` (size-capped per #203, RFC 7468) and
 // filter for the `CERTIFICATE` label — the only block kind a trust store
 // has any business consuming.

@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for array index analysis
 //!
+
 //! Tests cover all aspects of symbolic index tracking, range inference,
 //! and integration with field-sensitive escape analysis.
 

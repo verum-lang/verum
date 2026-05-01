@@ -1,44 +1,57 @@
 //! Array Theory Integration for Memory Model Verification
 //!
+
 //! This module provides comprehensive Z3 Array theory integration for verifying
 //! memory safety properties in Verum programs. It supports:
 //!
+
 //! - **Memory region modeling**: Arrays as address -> value mappings
 //! - **Invariant verification**: Check that memory invariants are preserved across updates
 //! - **Invariant synthesis**: Generate stability properties for array modifications
 //! - **Frame conditions**: Verify that unmodified regions remain unchanged
 //!
+
 //! ## Architecture
 //!
+
 //! The module integrates with the CBGR (Coarse-grained Borrow and Region) system
 //! to verify memory safety at the SMT level. Arrays model memory regions with:
 //!
+
 //! - Domain: Integer addresses (or bitvectors for bounded memory)
 //! - Range: Values stored at each address
 //!
+
 //! ## Z3 Array Operations
 //!
+
 //! Uses the Z3 Array theory (QF_AUFLIA logic):
 //! - `Array::new_const(name, domain, range)` - Create symbolic array
 //! - `Array::const_array(domain, val)` - Constant array (all same value)
 //! - `array.select(index)` - Read value at index
 //! - `array.store(index, value)` - Write value at index (functional update)
 //!
+
 //! ## Example
 //!
+
 //! ```rust,ignore
 //! use verum_smt::array_model::{ArrayModel, ArrayUpdate};
 //! use z3::ast::{Bool, Int};
 //!
+
 //! let mut model = ArrayModel::new();
 //!
+
 //! // Create array representing memory region
 //! model.declare_array("heap", ArraySort::IntToInt);
 //!
+
 //! // Verify invariant preservation after update
 //! let update = ArrayUpdate::store("heap", Int::from_i64(42), Int::from_i64(100));
 //! let invariant = model.array("heap").select(&Int::from_i64(0)).eq(&Int::from_i64(0));
 //!
+
 //! let preserved = model.verify_invariant_preservation(&invariant, &[update])?;
 //! assert!(preserved);
 //! ```
@@ -127,6 +140,7 @@ impl ArrayUpdate {
 
 /// Memory model using Z3 arrays
 ///
+
 /// Manages a collection of named arrays representing memory regions,
 /// and provides methods for verification of memory invariants.
 pub struct ArrayModel {
@@ -178,6 +192,7 @@ impl ArrayModel {
 
     /// Declare a new array in the model
     ///
+
     /// Creates a symbolic array with the specified name and sort.
     pub fn declare_array(&mut self, name: &str, sort: ArraySort) -> &Array {
         let domain = sort.domain_sort();
@@ -239,28 +254,37 @@ impl ArrayModel {
 
     /// Verify that an invariant is preserved after a sequence of array updates.
     ///
+
     /// This method checks whether the given invariant holds after applying
     /// all specified updates to the arrays. Uses SMT solving to verify:
     ///
+
     /// ```text
     /// invariant(arr) && updates => invariant(arr')
     /// ```
     ///
+
     /// where `arr'` is the array after applying all updates.
     ///
+
     /// # Arguments
     ///
+
     /// * `invariant` - Boolean constraint that should hold on the arrays
     /// * `updates` - Sequence of array updates to apply
     ///
+
     /// # Returns
     ///
+
     /// * `Ok(true)` - Invariant is preserved after all updates
     /// * `Ok(false)` - Invariant may be violated (counterexample exists)
     /// * `Err(SMTError)` - Verification failed (timeout, unsupported, etc.)
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// // Verify that updating arr[5] doesn't affect arr[0]
     /// let invariant = arr.select(&Int::from_i64(0))._eq(&original_val);
@@ -369,6 +393,7 @@ impl ArrayModel {
 
     /// Create a frame condition asserting unchanged regions
     ///
+
     /// Generates: forall i. (i != idx1 && i != idx2 && ...) => arr'[i] = arr[i]
     fn create_frame_condition(
         &self,
@@ -425,29 +450,38 @@ impl ArrayModel {
 
     /// Synthesize array invariants based on pre-state and modified indices.
     ///
+
     /// This method generates stability properties that describe which parts
     /// of the array remain unchanged after modifications:
     ///
+
     /// ```text
     /// forall i. (i < modified_index) => arr[i] = old_arr[i]
     /// forall i. (i > modified_index) => arr[i] = old_arr[i]
     /// ```
     ///
+
     /// # Arguments
     ///
+
     /// * `pre_state` - The array model before modifications
     /// * `modified_indices` - Expressions representing indices that were modified
     ///
+
     /// # Returns
     ///
+
     /// A list of synthesized invariants as Z3 Bool expressions.
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// let modified = vec![Int::from_i64(5).into()];
     /// let invariants = ArrayModel::synthesize_array_invariants(&pre_model, &modified);
     ///
+
     /// // Generates:
     /// // - forall i. i < 5 => arr[i] = old_arr[i]
     /// // - forall i. i > 5 => arr[i] = old_arr[i]
@@ -556,6 +590,7 @@ impl ArrayModel {
 
     /// Verify bounds checking for array access
     ///
+
     /// Generates: 0 <= index && index < size
     pub fn verify_bounds(&self, index: &Int, size: &Int) -> Bool {
         let zero = Int::from_i64(0);
@@ -566,6 +601,7 @@ impl ArrayModel {
 
     /// Create an array equality constraint
     ///
+
     /// Generates: forall i. arr1[i] = arr2[i]
     pub fn array_equality(&self, arr1: &Array, arr2: &Array) -> Bool {
         Self::create_full_equality_invariant(arr1, arr2)
@@ -573,6 +609,7 @@ impl ArrayModel {
 
     /// Create a conditional update constraint
     ///
+
     /// Generates: forall i. (cond(i) ? new[i] : old[i]) for the result array
     pub fn conditional_update<F>(&self, old_array: &Array, condition: F) -> Array
     where
@@ -620,6 +657,7 @@ impl Default for ArrayModel {
 
 /// Memory region representation using arrays
 ///
+
 /// Provides a higher-level abstraction for modeling heap memory regions
 /// with support for allocation, deallocation, and access tracking.
 pub struct MemoryRegion {
@@ -708,6 +746,7 @@ impl MemoryRegion {
 
     /// Create validity constraint for a reference
     ///
+
     /// A reference is valid if:
     /// 1. The address is allocated
     /// 2. The generation matches the current generation

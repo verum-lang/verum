@@ -1,25 +1,33 @@
 //! Parser integration for incremental parsing.
 //!
+
 //! This module provides the parser-side implementation that works with
 //! `verum_syntax::incremental` to enable efficient incremental reparsing.
 //!
+
 //! # Integration Points
 //!
+
 //! 1. **ReparseContext dispatch**: Routes reparsing to the correct grammar rule
 //! 2. **GreenNode construction**: Uses event-based parsing to build subtrees
 //! 3. **LSP integration**: Provides high-level API for document changes
 //!
+
 //! # Usage
 //!
+
 //! ```rust,ignore
 //! use verum_parser::incremental::IncrementalParserEngine;
 //! use verum_syntax::{TextEdit, TextRange};
 //!
+
 //! let mut engine = IncrementalParserEngine::new();
 //!
+
 //! // Initial parse
 //! let tree = engine.parse_full("fn foo() { }");
 //!
+
 //! // Incremental update
 //! let edit = TextEdit::replace(TextRange::new(3, 6), "bar");
 //! let new_tree = engine.apply_edit(&tree, &edit, "fn foo() { }");
@@ -41,6 +49,7 @@ use crate::syntax_bridge::{EventBasedParser, EventBasedParse};
 
 /// Incremental parsing engine integrated with the Verum parser.
 ///
+
 /// This provides the high-level API for incremental parsing, combining:
 /// - Tree manipulation from `verum_syntax::IncrementalEngine`
 /// - Parsing logic from `EventBasedParser`
@@ -113,6 +122,7 @@ impl IncrementalParserEngine {
 
     /// Record an edit without immediately applying it.
     ///
+
     /// This is useful for batching edits in rapid succession.
     pub fn record_edit(&mut self, edit: TextEdit) {
         self.change_tracker.record_edit(edit);
@@ -273,6 +283,7 @@ impl Default for IncrementalParserEngine {
 
 /// A document with incremental parsing support for LSP integration.
 ///
+
 /// This provides a complete document management solution with:
 /// - Incremental parsing on edits
 /// - Version tracking
@@ -386,6 +397,7 @@ pub struct BenchmarkResult {
 
 /// Benchmark incremental parsing vs full parsing.
 ///
+
 /// Returns detailed statistics about the performance of both approaches.
 pub fn benchmark_incremental_vs_full(
     source: &str,

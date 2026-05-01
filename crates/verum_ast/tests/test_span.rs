@@ -14,6 +14,7 @@
 )]
 //! Tests for span tracking and source location.
 //!
+
 //! This module ensures that spans correctly track source locations,
 //! can be merged, and provide accurate position information.
 

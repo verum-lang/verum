@@ -2,40 +2,47 @@
 //! tactics from `verum_kernel::tactics_industrial` into the SMT
 //! tactic dispatcher's call site.
 //!
+
 //! ## What this delivers
 //!
+
 //! The kernel's industrial tactics (`tactic_lia`, `tactic_decide`,
 //! `tactic_induction`, `tactic_congruence`, `tactic_eauto`) are
 //! deterministic decision procedures that close certain subgoal
-//! shapes in milliseconds without needing Z3.  This module exposes
+//! shapes in milliseconds without needing Z3. This module exposes
 //! them as a fast-path callable from the existing SMT tactic
 //! dispatcher (`tactics.rs`) — when the dispatcher selects e.g.
 //! `TacticKind::LIA`, it tries the industrial fast-path first; on
 //! a `Closed` outcome it returns immediately, on `Open` it falls
 //! through to Z3's tactic.
 //!
+
 //! ## Integration contract
 //!
+
 //! [`try_industrial_fast_path`] takes a tactic-kind name + a parsed
 //! argument bundle (already routed through the kernel's typed
 //! tactic surface) and returns:
 //!
-//!   * `Some(closed_witness)` — the kernel decided the goal; the
-//!     witness should be packaged as an SMT certificate so the
-//!     Z3 dispatch can be skipped.
-//!   * `None` — fall through to Z3.
+
+//!  * `Some(closed_witness)` — the kernel decided the goal; the
+//!  witness should be packaged as an SMT certificate so the
+//!  Z3 dispatch can be skipped.
+//!  * `None` — fall through to Z3.
 //!
+
 //! ## What this UNBLOCKS
 //!
-//!   - `apply lia` / `apply decide` / `apply induction` /
-//!     `apply congruence` / `apply eauto` in MSFS proof bodies
-//!     can now route through deterministic kernel tactics for the
-//!     decidable subset, leaving Z3 for the genuinely-undecidable
-//!     residue.
-//!   - The dispatcher's CPU/latency budget shifts from "always Z3"
-//!     to "Z3 only when industrial fails" — a measurable
-//!     compile-time win on proof scripts dominated by trivial
-//!     constraints.
+
+//!  - `apply lia` / `apply decide` / `apply induction` /
+//!  `apply congruence` / `apply eauto` in MSFS proof bodies
+//!  can now route through deterministic kernel tactics for the
+//!  decidable subset, leaving Z3 for the genuinely-undecidable
+//!  residue.
+//!  - The dispatcher's CPU/latency budget shifts from "always Z3"
+//!  to "Z3 only when industrial fails" — a measurable
+//!  compile-time win on proof scripts dominated by trivial
+//!  constraints.
 
 use verum_common::Text;
 use verum_kernel::tactics_industrial::{
@@ -44,7 +51,7 @@ use verum_kernel::tactics_industrial::{
     tactic_induction, tactic_lia,
 };
 
-/// Kind of tactic the fast-path dispatcher recognises.  Mirrors the
+/// Kind of tactic the fast-path dispatcher recognises. Mirrors the
 /// names used in `apply X` in proof bodies — the dispatcher routes
 /// via this enum rather than parsing a string per call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,7 +80,7 @@ impl IndustrialTactic {
         }
     }
 
-    /// Parse a tactic name from the proof DSL.  Returns `None` for
+    /// Parse a tactic name from the proof DSL. Returns `None` for
     /// names not handled by the industrial fast-path.
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
@@ -87,7 +94,7 @@ impl IndustrialTactic {
     }
 }
 
-/// Argument bundle passed through to the fast-path.  The shape is
+/// Argument bundle passed through to the fast-path. The shape is
 /// tactic-specific and the caller is responsible for parsing the
 /// proof-DSL form into one of these variants.
 #[derive(Debug, Clone)]
@@ -115,7 +122,7 @@ pub enum IndustrialArgs {
     },
 }
 
-/// The closing witness emitted by the fast-path.  When `Some(_)`,
+/// The closing witness emitted by the fast-path. When `Some(_)`,
 /// the SMT dispatcher should skip Z3 and instead encode the witness
 /// as an `SmtCertificate` (V1 wiring; V0 returns the raw witness
 /// for re-checking).
@@ -127,7 +134,7 @@ pub struct FastPathClosure {
     pub witness: Text,
 }
 
-/// Try to close the goal via the industrial fast-path.  Returns
+/// Try to close the goal via the industrial fast-path. Returns
 /// `Some(FastPathClosure)` when the kernel's decision procedure
 /// returns `Closed`; returns `None` otherwise (caller falls through
 /// to Z3).
@@ -181,9 +188,9 @@ pub fn try_industrial_fast_path(
     }
 }
 
-/// Lookup-by-name dispatch.  Returns `Some(FastPathClosure)` when
+/// Lookup-by-name dispatch. Returns `Some(FastPathClosure)` when
 /// `name` matches a fast-path tactic AND the kernel decides the
-/// goal.  Used by the proof-DSL resolver as a single entry point.
+/// goal. Used by the proof-DSL resolver as a single entry point.
 pub fn dispatch_by_name(
     name: &str,
     args: IndustrialArgs,

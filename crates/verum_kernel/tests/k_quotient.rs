@@ -1,14 +1,15 @@
 //! K-Quot-Form / K-Quot-Intro / K-Quot-Elim integration tests for
 //! quotient types.
 //!
+
 //! Quotient types `T / ~` collapse equivalence classes of T into
 //! single elements. The kernel checks:
-//!   • K-Quot-Form: `Quotient(T, ~)` is a type when T is a type
-//!     and ~ is well-typed; result inhabits T's universe.
-//!   • K-Quot-Intro: `[t]_~ : Quotient(T, ~)` when t : T.
-//!   • K-Quot-Elim: `quot_elim(q, motive, case)` typed as
-//!     `motive(q)` when q : Quotient(T, ~), motive well-typed,
-//!     case well-typed (respect-of-equivalence is V2 deferred).
+//!  • K-Quot-Form: `Quotient(T, ~)` is a type when T is a type
+//!  and ~ is well-typed; result inhabits T's universe.
+//!  • K-Quot-Intro: `[t]_~ : Quotient(T, ~)` when t : T.
+//!  • K-Quot-Elim: `quot_elim(q, motive, case)` typed as
+//!  `motive(q)` when q : Quotient(T, ~), motive well-typed,
+//!  case well-typed (respect-of-equivalence is V2 deferred).
 //! Plus the β-rule: `quot_elim([t]_~, m, case) ↦ case(t)` via
 //! the normaliser.
 

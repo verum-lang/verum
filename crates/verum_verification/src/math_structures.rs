@@ -1,14 +1,18 @@
 //! Mathematical Structures Library for Verum
 //!
+
 //! Implements comprehensive mathematical structures for formal verification
 //! for the Verum formal proof system (planned for version 2.0+).
 //!
+
 //! Mathematical structures provide the algebraic, analytic, and categorical
 //! foundations for formal verification. Each structure defines a carrier set,
 //! operations, and governing axioms that can be checked by the proof system.
 //!
+
 //! ## Features
 //!
+
 //! - **Abstract Algebra**: Groups, Rings, Fields, Modules, Vector Spaces
 //! - **Analysis**: Complete ordered fields, limits, continuity
 //! - **Category Theory**: Categories, Functors, Natural Transformations
@@ -16,15 +20,19 @@
 //! - **Topology**: Topological spaces, continuous functions, compactness
 //! - **Standard Lemma Database**: Automated lemma lookup for proof search
 //!
+
 //! ## Integration
 //!
+
 //! This module integrates with:
 //! - `verum_smt::proof_search` for automated proof tactics
 //! - `verum_smt::algebra` for algebraic structure verification
 //! - `verum_types` for type-level mathematical properties
 //!
+
 //! ## Performance Targets
 //!
+
 //! - Structure verification: < 100ms per axiom
 //! - Lemma lookup: < 1ms
 //! - Theorem proving: < 5s for standard theorems
@@ -38,9 +46,11 @@ use crate::tactic_evaluation::{Goal, Hypothesis, ProofState, TacticEvaluator, Ta
 
 /// Mathematical structure with operations and axioms
 ///
+
 /// Represents any mathematical structure (group, ring, field, etc.)
 /// with its carrier set, operations, and governing axioms.
 ///
+
 /// A mathematical structure with carrier set, operations, and axioms.
 /// Examples: Group (op, id, inv with assoc/left_id/left_inv axioms),
 /// Ring (add, mul with distributivity), Field (ring + multiplicative inverse).
@@ -99,6 +109,7 @@ pub struct MathOperation {
 
 /// Mathematical axiom
 ///
+
 /// A named axiom (e.g., "associativity", "left_identity") with a formula
 /// expressed over the structure's operations and carrier set.
 #[derive(Debug, Clone)]
@@ -162,6 +173,7 @@ pub enum ProofMethod {
 
 /// Group structure builder
 ///
+
 /// Builds a Group structure: (G, op, id, inv) with axioms for associativity,
 /// left identity (op(id, a) = a), and left inverse (op(inv(a), a) = id).
 /// Optionally abelian (adds commutativity: op(a, b) = op(b, a)).
@@ -190,6 +202,7 @@ impl GroupBuilder {
 
     /// Build the group structure
     ///
+
     /// Creates a group with operations (op, id, inv) and axioms
     /// (associativity, identity, inverse).
     pub fn build(self) -> MathStructure {
@@ -567,6 +580,7 @@ impl GroupBuilder {
 
 /// Subgroup structure
 ///
+
 /// Subgroup: subset of a group that is closed under op, contains id, and
 /// contains inv(a) for every element a. Verified by checking closure,
 /// identity membership, and inverse membership axioms.
@@ -590,6 +604,7 @@ pub struct Subgroup {
 
 /// Homomorphism between algebraic structures
 ///
+
 /// Structure-preserving map f: G -> H where f(op_G(a, b)) = op_H(f(a), f(b)).
 #[derive(Debug, Clone)]
 pub struct Homomorphism {
@@ -609,6 +624,7 @@ pub struct Homomorphism {
 
 /// Ring structure
 ///
+
 /// A ring has two operations (addition and multiplication) where:
 /// - (R, +) is an abelian group
 /// - (R, *) is a monoid
@@ -713,6 +729,7 @@ impl Ring {
 
 /// Field structure
 ///
+
 /// A field is a commutative ring where every non-zero element has
 /// a multiplicative inverse.
 #[derive(Debug, Clone)]
@@ -747,6 +764,7 @@ impl Field {
 
 /// Vector space over a field
 ///
+
 /// Vector space over a field: requires vector addition forming an abelian group
 /// (associativity, commutativity, zero element, additive inverse) and scalar
 /// multiplication axioms (compatibility, identity, distributivity over vectors
@@ -830,6 +848,7 @@ impl VectorSpace {
 
 /// Complete ordered field (e.g., real numbers)
 ///
+
 /// Complete ordered field (e.g., real numbers): an ordered field satisfying the
 /// completeness axiom: every nonempty bounded-above subset has a supremum.
 /// Formally: forall S: Set<R>. bounded_above(S) & S != empty -> exists sup. is_supremum(S, sup)
@@ -875,6 +894,7 @@ impl CompleteOrderedField {
 
 /// Limit definition
 ///
+
 /// Epsilon-delta limit definition: limit(f, a, L) iff
 /// forall eps > 0. exists delta > 0. forall x. 0 < |x - a| < delta -> |f(x) - L| < eps
 #[derive(Debug, Clone)]
@@ -894,6 +914,7 @@ pub struct LimitDefinition {
 
 /// Continuity definition
 ///
+
 /// Continuity: f is continuous at a iff limit(f, a, f(a)) holds.
 #[derive(Debug, Clone)]
 pub struct ContinuityDefinition {
@@ -908,6 +929,7 @@ pub struct ContinuityDefinition {
 
 /// Category structure
 ///
+
 /// Category: objects, morphisms, identity morphisms, and composition satisfying
 /// left identity (id_B . f = f), right identity (f . id_A = f), and
 /// associativity (h . (g . f) = (h . g) . f).
@@ -983,6 +1005,7 @@ impl Category {
 
 /// Functor between categories
 ///
+
 /// Functor between categories: maps objects and morphisms while preserving
 /// identity (F(id_A) = id_{F(A)}) and composition (F(g . f) = F(g) . F(f)).
 #[derive(Debug, Clone)]
@@ -1033,6 +1056,7 @@ impl Functor {
 
 /// Natural transformation between functors
 ///
+
 /// Natural transformation between functors F and G: a family of morphisms
 /// eta_A: F(A) -> G(A) for each object A, satisfying the naturality condition:
 /// for all f: A -> B, G(f) . eta_A = eta_B . F(f).
@@ -1076,6 +1100,7 @@ impl NaturalTransformation {
 
 /// Prime number predicates and theorems
 ///
+
 /// Number theory: primality (n > 1 and only divisible by 1 and n), divisibility,
 /// GCD, and standard theorems: infinitude of primes, fundamental theorem of
 /// arithmetic (unique prime factorization), Euler's theorem (a^phi(n) = 1 mod n
@@ -1158,6 +1183,7 @@ impl Default for NumberTheory {
 
 /// Topological space
 ///
+
 /// Topological space: carrier set with open sets satisfying axioms:
 /// empty set and full set are open, arbitrary unions are open,
 /// finite intersections are open.
@@ -1210,6 +1236,7 @@ impl TopologicalSpace {
 
 /// Continuous function definition
 ///
+
 /// Continuous function: f: X -> Y is continuous iff for all U in Y.open_sets,
 /// f^{-1}(U) is in X.open_sets (preimage of every open set is open).
 #[derive(Debug, Clone)]
@@ -1229,6 +1256,7 @@ pub struct ContinuousFunction {
 
 /// Compactness definition
 ///
+
 /// Compactness: K is compact iff every open cover has a finite subcover.
 /// Formally: forall cover. (all U in cover are open) & K subset union(cover) ->
 /// exists finite subcover subset cover with K subset union(subcover).
@@ -1248,6 +1276,7 @@ pub struct CompactnessDefinition {
 
 /// Standard lemma database for automated proof search
 ///
+
 /// This database contains common lemmas for each mathematical structure,
 /// organized for efficient retrieval during proof automation.
 #[derive(Debug, Clone)]
@@ -1626,18 +1655,22 @@ fn create_const_expr(name: &str) -> Expr {
 
 /// Create a simple axiom from a name and description
 ///
+
 /// Parses the description string to extract the axiom formula.
 /// The description should be in a simplified mathematical notation:
 ///
+
 /// - `forall a, b, c: op(op(a, b), c) = op(a, op(b, c))` - associativity
 /// - `forall a: op(id, a) = a` - left identity
 /// - `forall a: op(inv(a), a) = id` - left inverse
 /// - `forall a, b: op(a, b) = op(b, a)` - commutativity
 ///
+
 /// # Arguments
 /// * `name` - The axiom name (e.g., "assoc", "left_id")
 /// * `description` - A textual description of the axiom
 ///
+
 /// # Returns
 /// A properly constructed Axiom with parsed formula and quantified variables
 fn create_axiom(name: &str, description: &str) -> Axiom {
@@ -1664,6 +1697,7 @@ fn create_axiom(name: &str, description: &str) -> Axiom {
 
 /// Parse axiom description into formula and quantified variables
 ///
+
 /// Handles common axiom patterns:
 /// - Associativity: op(op(a,b),c) = op(a,op(b,c))
 /// - Identity: op(id,a) = a or op(a,id) = a

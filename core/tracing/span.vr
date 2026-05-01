@@ -149,11 +149,12 @@ implement SpanData {
 // Span — mutable handle the instrumenter uses
 // =============================================================================
 //
+
 // Invariants:
 // - Mutation after `end()` is silently ignored (idempotent semantics).
 // - Internal Mutex serialises attribute / event / link mutation;
-//   a single-writer fast path would require a separate non-blocking
-//   design — acceptable trade-off given attribute count ≤ 128 per span.
+//  a single-writer fast path would require a separate non-blocking
+//  design — acceptable trade-off given attribute count ≤ 128 per span.
 
 public const SPAN_EVENT_LIMIT: Int = 128;
 public const SPAN_LINK_LIMIT: Int = 128;

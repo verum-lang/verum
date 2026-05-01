@@ -1,10 +1,12 @@
 //! Benchmarks for Field-Sensitive Heap Tracking
 //!
+
 //! Benchmarks for CBGR field-sensitive heap tracking. Tracks which struct
 //! fields are stored to heap vs stack for independent per-field CBGR tier
 //! decisions. Validates O(fields * heap_stores) performance target and
 //! <100ms for 10K LOC analysis.
 //!
+
 //! **Benchmark Coverage**: 5+ comprehensive scenarios
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};

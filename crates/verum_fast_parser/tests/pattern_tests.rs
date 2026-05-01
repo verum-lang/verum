@@ -14,6 +14,7 @@
 )]
 // Tests for pattern parsing
 //
+
 // Tests for pattern syntax: literals, bindings, tuples, records, variants, guards, etc.
 // This module tests parsing of all Verum pattern forms including:
 // - Literal patterns

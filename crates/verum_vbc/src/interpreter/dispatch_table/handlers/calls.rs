@@ -1,5 +1,6 @@
 //! Call operation handlers for VBC interpreter dispatch.
 //!
+
 //! Handles: Call (0x5B), CallR (0x5F), CallG (0x80), CallV (0x81),
 //! CallC (0x82), CallClosure (0x5E), TailCall (0x5C), NewClosure (0x8A)
 
@@ -18,6 +19,7 @@ use super::bytecode_io::*;
 
 /// Call function: `dst = fn(args...)`
 ///
+
 /// Format: `[0x5B] [dst:reg] [func_id:varint] [args:reg_range]`
 pub(in super::super) fn handle_call(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -48,10 +50,10 @@ pub(in super::super) fn handle_call(state: &mut InterpreterState) -> Interpreter
     // Specific Verum function names (currently: `sh_check`, `sh`) are
     // intercepted at the call boundary and dispatched to a Rust-native
     // implementation that uses `std::process::Command` directly,
-    // bypassing the libSystem FFI chain.  This is the canonical Tier-0
+    // bypassing the libSystem FFI chain. This is the canonical Tier-0
     // architecture for "complex syscall sequence" surfaces — interpret
     // high-level intrinsics in Rust; reserve FFI dispatch for genuinely-
-    // foreign cases.  See `shell_runtime.rs` for the full rationale and
+    // foreign cases. See `shell_runtime.rs` for the full rationale and
     // the marshaling contract.
     {
         let caller_base = state.reg_base();
@@ -167,6 +169,7 @@ pub(in super::super) fn handle_call(state: &mut InterpreterState) -> Interpreter
 
 /// CallR (0x5F) - Indirect call via register.
 ///
+
 /// The function address is stored in a register rather than being a constant.
 pub(in super::super) fn handle_call_indirect(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -218,6 +221,7 @@ pub(in super::super) fn handle_call_indirect(state: &mut InterpreterState) -> In
 
 /// CallG (0x80) - Generic function call with type parameters.
 ///
+
 /// Encoding: opcode + dst:reg + func_id:varint + type_args:reg_vec + args:reg_range
 /// type_args is encoded as varint(count) + reg * count (must consume all type arg registers).
 pub(in super::super) fn handle_call_generic(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -281,6 +285,7 @@ pub(in super::super) fn handle_call_generic(state: &mut InterpreterState) -> Int
 
 /// CallV (0x81) - Virtual dispatch call.
 ///
+
 /// Performs vtable-based method dispatch on the receiver's runtime type.
 /// The vtable_slot encodes protocol index (upper 16 bits) and method index (lower 16 bits).
 pub(in super::super) fn handle_call_virtual(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -426,6 +431,7 @@ fn get_builtin_type_id(val: Value) -> TypeId {
 
 /// CallC (0x82) - Inline cached call.
 ///
+
 /// Uses a cache slot to speed up repeated calls to the same target.
 pub(in super::super) fn handle_call_cached(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -550,6 +556,7 @@ pub(in super::super) fn handle_call_closure(state: &mut InterpreterState) -> Int
 
 /// Tail call: reuses current stack frame
 ///
+
 /// Format: `[0x5C] [func_id:varint] [args:reg_range]`
 pub(in super::super) fn handle_tail_call_op(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let func_id = FunctionId(read_varint(state)? as u32);
@@ -644,9 +651,11 @@ pub(in super::super) fn handle_new_closure(state: &mut InterpreterState) -> Inte
 /// declared with @intrinsic("llvm.xxx") that have no bytecode body
 /// (bytecode_length == 0).
 ///
+
 /// Returns `Ok(Some(result))` if the intrinsic was handled, `Ok(None)` if not
 /// recognized (caller should fall through to normal call path).
 ///
+
 /// Covers:
 /// - F64/F32 math functions (sqrt, sin, cos, tan, exp, log, pow, etc.)
 /// - Rounding functions (floor, ceil, round, trunc)
@@ -690,7 +699,7 @@ fn try_dispatch_intrinsic_by_name(
 
     // Normalize function name: strip common prefixes and qualifications
     // e.g., "math.sqrt" -> "sqrt", "elementary.sqrt" -> "sqrt",
-    //        "llvm.sqrt.f64" -> handled directly
+    //  "llvm.sqrt.f64" -> handled directly
     let name = func_name.as_str();
 
     // Match against known intrinsic function names.
@@ -1357,12 +1366,13 @@ fn try_dispatch_intrinsic_by_name(
         // to host allocation instead so `Shared::new`, `Map`, `List`
         // allocations work without requiring FFI.
         //
+
         // Semantics we implement:
-        //   mmap(addr=0, len, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON,
-        //        fd=-1, off=0)  returns  ptr   (NOT -1/MAP_FAILED).
-        //   mmap with fd != -1 or unexpected flags is passed through as -1
-        //   (mapped-file case is out of scope for the interpreter — the
-        //    AOT path owns that).
+        //  mmap(addr=0, len, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON,
+        //  fd=-1, off=0) returns ptr (NOT -1/MAP_FAILED).
+        //  mmap with fd != -1 or unexpected flags is passed through as -1
+        //  (mapped-file case is out of scope for the interpreter — the
+        //  AOT path owns that).
         "mmap" | "mmap_ffi" => {
             let fd = get_i64_arg(state, 4);
             let len = get_i64_arg(state, 1) as usize;

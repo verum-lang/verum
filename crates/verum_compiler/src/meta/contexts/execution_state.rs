@@ -1,15 +1,19 @@
 //! Execution State Sub-Context
 //!
+
 //! Manages variable bindings, call stack, and recursion tracking during
 //! meta function execution.
 //!
+
 //! ## Responsibility
 //!
+
 //! - Variable bindings (name -> MetaValue)
 //! - Call stack for debugging and recursion detection
 //! - Recursion depth tracking
 //! - Unique identifier generation
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -42,6 +46,7 @@ impl CallFrame {
 
 /// Execution state for meta functions
 ///
+
 /// Tracks variable bindings, call stack, and execution metadata during
 /// compile-time evaluation.
 #[derive(Debug, Clone)]

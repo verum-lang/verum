@@ -4,23 +4,28 @@
 // Layer: 5 (Network — HTTP/3)
 // =============================================================================
 //
+
 // RFC 9114 §4.3: An HTTP/3 request is a QUIC bidirectional stream
 // carrying:
 //
-//   HEADERS frame (request pseudo-headers + regular headers)
-//   [zero or more DATA frames]
-//   [optional trailers HEADERS frame]
-//   stream FIN marker
+
+//  HEADERS frame (request pseudo-headers + regular headers)
+//  [zero or more DATA frames]
+//  [optional trailers HEADERS frame]
+//  stream FIN marker
 //
+
 // and a response with the same shape. Pseudo-headers (":method",
 // ":scheme", ":authority", ":path" for request; ":status" for
 // response) MUST come first per §4.3.1; regular headers follow.
 //
+
 // We keep name+value pairs in order — HTTP specifies case-
 // insensitive names but QPACK emission preserves case, so
 // normalise only during comparison. Helper accessors (`method()`,
 // `path()`, `status()`) do case-insensitive lookup.
 //
+
 // =============================================================================
 
 module core.net.h3.request;

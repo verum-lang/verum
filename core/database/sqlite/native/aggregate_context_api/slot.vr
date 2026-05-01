@@ -4,7 +4,7 @@ module core.database.sqlite.native.aggregate_context_api.slot;
 
 mount base.{Bool, Int64, Text};
 
-// Per-aggregate slot.  In SQLite this is opaque; here we model the user-
+// Per-aggregate slot. In SQLite this is opaque; here we model the user-
 // visible state.
 public type AggSlot is {
     allocated: Bool,
@@ -37,7 +37,7 @@ public fn returned_non_null(o: &AggregateContextOutcome) -> Bool {
 
 public type CallResult is { slot: AggSlot, outcome: AggregateContextOutcome };
 
-// Step the slot one call.  `simulate_oom` lets tests inject allocator failure.
+// Step the slot one call. `simulate_oom` lets tests inject allocator failure.
 public fn call(mut s: AggSlot, n: Int, simulate_oom: Bool) -> CallResult {
     if n <= 0 {
         if s.allocated { return CallResult { slot: s, outcome: OkPtr }; }
@@ -60,7 +60,7 @@ public fn is_first_call(s: &AggSlot) -> Bool { !s.allocated }
 // Diagnostics helper: was the slot ever observed to OOM?
 public fn ever_oomed(s: &AggSlot) -> Bool { s.nomem }
 
-// Reset on stmt finalize / sqlite3_reset_auto_extension etc.  Engine releases
+// Reset on stmt finalize / sqlite3_reset_auto_extension etc. Engine releases
 // the allocation; the slot returns to empty.
 public fn release(_s: AggSlot) -> AggSlot {
     empty_slot()

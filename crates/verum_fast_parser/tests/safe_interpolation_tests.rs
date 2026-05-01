@@ -14,8 +14,10 @@
 )]
 //! Tests for safe interpolated strings parsing.
 //!
+
 //! Tests for safe interpolated string parsing: sql"{}", html"{}", json"{}", url"{}"
 //!
+
 //! Safe interpolated strings provide compile-time safety for different domains:
 //! - sql"..." - SQL-safe parameterization
 //! - html"..." - HTML auto-escaping

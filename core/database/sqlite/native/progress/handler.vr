@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // A progress handler is triple (name, interval_ops, decision) where
-// the decision is a pure function over the current op-count.  The
+// the decision is a pure function over the current op-count. The
 // catalogue keeps it callback-free — the runtime instantiates it with
 // a closure stored elsewhere.
 // =============================================================================

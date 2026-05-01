@@ -44,7 +44,7 @@ public fn is_anchored_current(b: &FrameBound) -> Bool {
 
 // A frame [start, end] must satisfy: start <= end in the induced total order.
 // Pre-parse rule (SQLite raises "frame starting offset must be non-negative"):
-//   offsets in PRECEDING/FOLLOWING must be non-negative.
+//  offsets in PRECEDING/FOLLOWING must be non-negative.
 public fn offset_is_valid(b: &FrameBound) -> Bool {
     match b {
         FbPreceding(n) => n >= 0 as Int64,
@@ -54,7 +54,7 @@ public fn offset_is_valid(b: &FrameBound) -> Bool {
 }
 
 // Ordering index used for validity checks — start must not exceed end.
-//   UnboundedPreceding < Preceding < CurrentRow < Following < UnboundedFollowing
+//  UnboundedPreceding < Preceding < CurrentRow < Following < UnboundedFollowing
 public fn ordering_index(b: &FrameBound) -> Int {
     match b {
         FbUnboundedPreceding => 0,

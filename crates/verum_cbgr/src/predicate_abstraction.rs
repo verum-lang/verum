@@ -1,64 +1,81 @@
 //! Production-Grade Predicate Abstraction for Path Merging
 //!
+
 //! This module implements predicate abstraction to prevent exponential path
 //! explosion in CBGR escape analysis. Path-sensitive analysis can suffer from
 //! exponential growth (2^n paths for n branches), and predicate abstraction
 //! merges similar paths while maintaining precision.
 //!
+
 //! # Overview
 //!
+
 //! Predicate abstraction is a technique for reducing the number of paths in
 //! path-sensitive analysis by merging paths with similar predicates. This
 //! maintains soundness (never misses true escapes) while avoiding exponential
 //! path explosion.
 //!
+
 //! # Abstraction Strategies
 //!
+
 //! 1. **Syntactic Similarity**: Merge predicates with similar structure
 //! 2. **Semantic Equivalence**: Use Z3 to check logical equivalence
 //! 3. **Subsumption**: Merge predicates where one implies the other
 //! 4. **Widening**: After N iterations, abstract to weaker predicates
 //!
+
 //! # Abstraction Levels
 //!
+
 //! - **Level 0**: Concrete (no abstraction, maximum precision)
 //! - **Level 1**: Syntactic normalization (canonical ordering, constant folding)
 //! - **Level 2**: Subsumption (merge implied predicates)
 //! - **Level 3**: Widening (abstract to weaker predicates)
 //! - **Level 4**: Top abstraction (fall back to path-insensitive)
 //!
+
 //! # Soundness Guarantee
 //!
+
 //! All abstractions are SOUND: they never eliminate feasible paths incorrectly.
 //! Abstractions use conservative over-approximation only. If in doubt, both
 //! paths are kept.
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_cbgr::analysis::{PathPredicate, PathCondition};
 //! use verum_cbgr::predicate_abstraction::{PredicateAbstractor, AbstractionConfig};
 //! use verum_common::List;
 //!
+
 //! // Create abstractor with default config
 //! let mut abstractor = PredicateAbstractor::new(AbstractionConfig::default());
 //!
+
 //! // Create similar paths that can be merged
 //! let path1 = PathCondition::with_predicate(PathPredicate::BlockTrue(1));
 //! let path2 = PathCondition::with_predicate(PathPredicate::BlockTrue(2));
 //! let path3 = PathCondition::with_predicate(PathPredicate::BlockTrue(3));
 //!
+
 //! let mut paths = List::new();
 //! paths.push(path1);
 //! paths.push(path2);
 //! paths.push(path3);
 //!
+
 //! // Merge similar paths (3 paths -> fewer abstract paths)
 //! let merged = abstractor.merge_similar_paths(paths);
 //! ```
 //!
+
 //! # Performance
 //!
+
 //! - Abstraction overhead: ~50-100ns per predicate
 //! - Cache hit rate: >90% for typical programs
 //! - Path reduction: 10-100x for complex CFGs
@@ -124,6 +141,7 @@ impl Default for AbstractionConfig {
 
 /// Abstract predicate representing an equivalence class of predicates
 ///
+
 /// An abstract predicate groups together multiple predicates that can be
 /// merged during abstraction. The canonical form represents the abstracted
 /// version, while the equivalence class contains all original predicates
@@ -202,6 +220,7 @@ impl AbstractPredicate {
 
     /// Canonicalize a predicate (Level 1: syntactic normalization)
     ///
+
     /// This performs:
     /// - Simplification (constant folding, identity elimination)
     /// - Canonical ordering (for commutative operators)
@@ -213,6 +232,7 @@ impl AbstractPredicate {
 
     /// Normalize predicate to canonical form
     ///
+
     /// Ensures that equivalent predicates have the same representation:
     /// - AND/OR arguments in sorted order
     /// - Double negation eliminated
@@ -327,6 +347,7 @@ impl AbstractPredicate {
 
 /// Main predicate abstraction engine
 ///
+
 /// This is the core component that performs predicate abstraction to merge
 /// similar paths and prevent exponential path explosion.
 pub struct PredicateAbstractor {
@@ -436,15 +457,20 @@ impl PredicateAbstractor {
 
     /// Merge similar paths to prevent explosion
     ///
+
     /// This is the main entry point for path merging. It groups paths by
     /// similarity and merges groups into abstract representatives.
     ///
+
     /// # Arguments
     ///
+
     /// * `paths` - List of path conditions to merge
     ///
+
     /// # Returns
     ///
+
     /// Reduced list of path conditions (with abstracted predicates)
     pub fn merge_similar_paths(&mut self, paths: List<PathCondition>) -> List<PathCondition> {
         let start = std::time::Instant::now();
@@ -477,13 +503,17 @@ impl PredicateAbstractor {
 
     /// Abstract a predicate to the given level
     ///
+
     /// # Arguments
     ///
+
     /// * `pred` - Predicate to abstract
     /// * `level` - Target abstraction level (0-4)
     ///
+
     /// # Returns
     ///
+
     /// Abstracted predicate at the specified level
     pub fn abstract_predicate(&mut self, pred: &PathPredicate, level: u32) -> PathPredicate {
         let start = std::time::Instant::now();
@@ -533,6 +563,7 @@ impl PredicateAbstractor {
 
     /// Check if two predicates are similar enough to merge
     ///
+
     /// Uses multiple strategies:
     /// 1. Structural hash similarity
     /// 2. Z3-based semantic equivalence (if enabled)
@@ -654,6 +685,7 @@ impl PredicateAbstractor {
 
     /// Level 2 abstraction: Subsumption
     ///
+
     /// If predicate is specific, abstract to more general form
     fn abstract_level2(&self, pred: &PathPredicate) -> PathPredicate {
         // First normalize
@@ -685,6 +717,7 @@ impl PredicateAbstractor {
 
     /// Level 3 abstraction: Widening
     ///
+
     /// After N iterations, widen to more abstract form. The
     /// `use_widening` config gate enables/disables the level-3
     /// widening behaviour entirely — when `false`, level-3 falls
@@ -741,6 +774,7 @@ impl PredicateAbstractor {
 
     /// Check if two predicates are structurally similar
     ///
+
     /// Structural similarity means they have the same shape but possibly
     /// different block IDs.
     fn structurally_similar(&self, p1: &PathPredicate, p2: &PathPredicate) -> bool {

@@ -2,42 +2,52 @@
 // core/net/weft/rpc.vr — Connect-compatible RPC skeleton
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §6.5 / §6.14
+// Spec: internal/specs/net-framework.md §6.5 / §6.14
 // =============================================================================
 //
+
 // Wire-compatible server-side Connect RPC skeleton (buf.build's
 // gRPC-over-HTTP protocol): `POST /package.Service/Method` with a
 // request body, response body, and a status surface that coalesces
 // into `HTTP status + error JSON` for failure.
 //
+
 // Connect is deliberately the first-class dialect rather than classic
 // gRPC — it works over HTTP/1.1 and HTTP/2 without sidecar proxies and
 // is wire-compatible with gRPC+gRPC-Web so existing clients work.
 //
+
 // Scope — Phase 3 skeleton:
 //
-//   * Unary (POST/response) only. Server-streaming / client-streaming
-//     / bidi require HTTP/2 stream multiplexing hooks (phase 4).
+
+//  * Unary (POST/response) only. Server-streaming / client-streaming
+//  / bidi require HTTP/2 stream multiplexing hooks (phase 4).
 //
-//   * Codec-agnostic. Handlers see raw `List<Byte>` in and out; users
-//     pick proto/json/etc. inside their implementation. A typed
-//     `Codec<T>` abstraction comes with the serde subsystem
-//     (follow-up).
+
+//  * Codec-agnostic. Handlers see raw `List<Byte>` in and out; users
+//  pick proto/json/etc. inside their implementation. A typed
+//  `Codec<T>` abstraction comes with the serde subsystem
+//  (follow-up).
 //
-//   * Trailers are emitted in the body envelope (Connect format)
-//     rather than HTTP/2 trailers; this makes the skeleton portable
-//     across HTTP/1.1 and HTTP/2 transports.
+
+//  * Trailers are emitted in the body envelope (Connect format)
+//  rather than HTTP/2 trailers; this makes the skeleton portable
+//  across HTTP/1.1 and HTTP/2 transports.
 //
+
 // Architectural invariants:
 //
-//   * Every RPC endpoint registers as a plain `Handler` on the
-//     existing `Router`. No parallel router / service registry.
-//     `Router.rpc_unary(path, handler)` is a thin facade.
+
+//  * Every RPC endpoint registers as a plain `Handler` on the
+//  existing `Router`. No parallel router / service registry.
+//  `Router.rpc_unary(path, handler)` is a thin facade.
 //
-//   * `RpcError` maps to gRPC status codes (RFC-equivalent) AND to
-//     HTTP status codes (Connect §Status). Both are surfaced on the
-//     response so gRPC-Web and Connect clients read coherently.
+
+//  * `RpcError` maps to gRPC status codes (RFC-equivalent) AND to
+//  HTTP status codes (Connect §Status). Both are surfaced on the
+//  response so gRPC-Web and Connect clients read coherently.
 //
+
 // =============================================================================
 
 module core.net.weft.rpc;
@@ -195,7 +205,7 @@ implement RpcError {
     }
 
     /// Render as the Connect error envelope:
-    ///     { "code": "<status.name>", "message": "<text>", "details": [...] }
+    ///  { "code": "<status.name>", "message": "<text>", "details": [...] }
     public fn to_json_envelope(&self) -> Text {
         let details = match &self.details_json {
             Some(d) => f",\"details\":{d}",
@@ -277,6 +287,7 @@ public type RpcMeta is {
 /// User-implemented unary RPC endpoint. One instance per route; the
 /// Router wraps it to produce a standard `Handler`.
 ///
+
 /// Codec choice lives inside the handler: inspect `meta.content_type`
 /// (`application/proto` / `application/json` / `application/connect+json`)
 /// and pick the matching decoder.

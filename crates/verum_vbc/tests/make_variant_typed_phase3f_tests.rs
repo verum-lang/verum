@@ -1,24 +1,28 @@
 //! #146 Phase 3f — bytecode determinism + cross-tier consistency
 //! tests for the `MakeVariantTyped` instruction.
 //!
+
 //! Two contracts:
 //!
+
 //! 1. **Bytecode determinism**: encoding the same
-//!    `Instruction::MakeVariantTyped` IR variant twice produces
-//!    bit-identical bytes across compilations. Catches subtle
-//!    non-determinism (HashMap iteration order, allocation-
-//!    address-based ids, time-of-day reads) that would surface
-//!    later as caching-cache-invalidation churn.
+//!  `Instruction::MakeVariantTyped` IR variant twice produces
+//!  bit-identical bytes across compilations. Catches subtle
+//!  non-determinism (HashMap iteration order, allocation-
+//!  address-based ids, time-of-day reads) that would surface
+//!  later as caching-cache-invalidation churn.
 //!
+
 //! 2. **Cross-tier consistency**: the Tier-0 interpreter
-//!    (`handle_extended → MakeVariantTyped → alloc_variant_into_
-//!    with_type_id`) and the Tier-1 AOT path (LLVM lowering at
-//!    `instruction.rs::Instruction::MakeVariantTyped` →
-//!    `runtime.lower_make_variant`) produce observationally-
-//!    indistinguishable variant heap objects.  Checked here at
-//!    the bytecode + decode level (the AOT path's IR-emission is
-//!    pinned by `verum_codegen` test suites).
+//!  (`handle_extended → MakeVariantTyped → alloc_variant_into_
+//!  with_type_id`) and the Tier-1 AOT path (LLVM lowering at
+//!  `instruction.rs::Instruction::MakeVariantTyped` →
+//!  `runtime.lower_make_variant`) produce observationally-
+//!  indistinguishable variant heap objects. Checked here at
+//!  the bytecode + decode level (the AOT path's IR-emission is
+//!  pinned by `verum_codegen` test suites).
 //!
+
 //! See `verum_vbc::interpreter::dispatch_table::handlers::extended`
 //! and `verum_codegen::llvm::instruction::Instruction::MakeVariantTyped`
 //! for the validation + lowering counterparts.
@@ -27,7 +31,7 @@ use verum_vbc::bytecode::{decode_instruction, encode_instruction};
 use verum_vbc::instruction::{ExtendedSubOpcode, Instruction, Opcode, Reg};
 
 /// Pin: re-encoding the same IR variant produces bit-identical
-/// bytes.  Different invocations of `encode_instruction` MUST NOT
+/// bytes. Different invocations of `encode_instruction` MUST NOT
 /// emit different byte sequences for the same input — varint
 /// encoding is deterministic, the wire-prefix is constant, and
 /// no allocation-address-based ids leak into the output.
@@ -101,6 +105,7 @@ fn make_variant_typed_roundtrip_preserves_all_operands() {
 /// instructions produce DIFFERENT wire-format bytes — the wire
 /// prefix is the discriminator (0x86 vs 0x1F+0x01).
 ///
+
 /// A regression that aliased the two opcodes (e.g. accidentally
 /// re-using `MakeVariant`'s primary opcode for the typed path)
 /// would silently turn typed-variant emissions into the legacy
@@ -157,7 +162,7 @@ fn make_variant_typed_encoding_is_compact() {
     );
 
     // Worst case — pin the upper bound so a switch from varint
-    // to fixed-width gets caught.  `Reg::MAX = 16383` (14-bit
+    // to fixed-width gets caught. `Reg::MAX = 16383` (14-bit
     // register index space); the worst-case operand widths are
     // u32::MAX for the three varint fields.
     let instr_max = Instruction::MakeVariantTyped {

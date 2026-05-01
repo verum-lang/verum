@@ -5,8 +5,10 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // IP addresses and socket addresses for network operations.
 //
+
 // =============================================================================
 
 module core.net.addr;
@@ -20,6 +22,7 @@ mount core.io.protocols.{IoErrorKind};
 
 /// An IPv4 address (e.g., 192.168.1.1).
 ///
+
 /// IPv4 addresses are 32-bit addresses, typically written as four
 /// decimal numbers separated by dots (dotted-decimal notation).
 public type Ipv4Addr is {
@@ -30,6 +33,7 @@ public type Ipv4Addr is {
 implement Ipv4Addr {
     /// Create a new IPv4 address from four octets.
     ///
+
     /// # Example
     /// ```verum
     /// let addr = Ipv4Addr.new(192, 168, 1, 1);
@@ -70,6 +74,7 @@ implement Ipv4Addr {
 
     /// Check if this is a private address.
     ///
+
     /// Private ranges: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
     public fn is_private(&self) -> Bool {
         let (a, b, _, _) = self.octets;
@@ -106,6 +111,7 @@ implement Ipv4Addr {
 
     /// Parse from string.
     ///
+
     /// # Example
     /// ```verum
     /// let addr = Ipv4Addr.parse("192.168.1.1")?;
@@ -215,6 +221,7 @@ implement Display for Ipv4Addr {
 
 /// An IPv6 address (e.g., .1 || 2001:db8.1).
 ///
+
 /// IPv6 addresses are 128-bit addresses, typically written as eight
 /// groups of four hexadecimal digits.
 public type Ipv6Addr is {
@@ -288,6 +295,7 @@ implement Ipv6Addr {
 
     /// Parse an IPv6 address from string.
     ///
+
     /// Supports:
     /// - Full notation: 2001:0db8:85a3:0000:0000:8a2e:0370:7334
     /// - Compressed: 2001:db8.8a2e:370:7334 (. = consecutive zeros)
@@ -295,10 +303,11 @@ implement Ipv6Addr {
     /// - Unspecified: .
     /// - IPv4-mapped: .ffff:192.168.1.1
     ///
+
     /// # Example
     /// ```verum
-    /// let addr = Ipv6Addr.parse(".1")?;          // Localhost
-    /// let addr = Ipv6Addr.parse("2001:db8.1")?;  // Compressed
+    /// let addr = Ipv6Addr.parse(".1")?; // Localhost
+    /// let addr = Ipv6Addr.parse("2001:db8.1")?; // Compressed
     /// ```
     public fn parse(s: &Text) -> Result<Ipv6Addr, AddrParseError> {
         // Handle empty string
@@ -669,6 +678,7 @@ public type SocketAddr is
 implement SocketAddr {
     /// Create an IPv4 socket address.
     ///
+
     /// `SocketAddr.V4(...)` rather than the bare `V4(...)`: the latter
     /// hits a VBC codegen path that miscompiles the nested record
     /// argument when both `SocketAddrV4` and `SocketAddr` live in the
@@ -825,6 +835,7 @@ implement Display for SocketAddr {
 
 /// Protocol for types that can be converted to socket addresses.
 ///
+
 /// `Iter` is the iterator the impl produces (typically `OnceIter` for
 /// a single address, `List` for hostname-DNS expansion). The bound
 /// `Iterator<Item = SocketAddr>` would be the proper way to express
@@ -839,6 +850,7 @@ public type ToSocketAddrs is protocol {
 
 // Implementations for common types.
 //
+
 // `Iter = List<SocketAddr>` rather than `OnceIter<SocketAddr>`: the
 // other two impls in this module (`(&Text, Int)`, `Text`) already
 // return `List<SocketAddr>`, and using a single Iter type across
@@ -868,7 +880,7 @@ implement ToSocketAddrs for (&Text, Int) {
         if let Ok(ip) = Ipv6Addr.parse(host) {
             return Ok(List.of(SocketAddr.new_v6(ip, port)));
         }
-        // DNS resolution for hostnames.  Failures map to
+        // DNS resolution for hostnames. Failures map to
         // `IoErrorKind.NotFound` (the host isn't in DNS) so
         // downstream `match err.kind` handles the case
         // identically to a missing-file path-not-found.

@@ -14,9 +14,11 @@
 )]
 // Comprehensive tests for field access on imported record types
 //
+
 // Record types: "type T is { field: Type, ... }" with named fields, structural matching
 // Name resolution: deterministic lookup through module hierarchy, import resolution, re-exports — .1 - Cross-Module Type Resolution
 //
+
 // This test suite validates:
 // 1. Simple field access on imported record types
 // 2. Nested field access on imported records

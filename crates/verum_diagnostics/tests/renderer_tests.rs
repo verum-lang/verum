@@ -14,6 +14,7 @@
 )]
 // Unit tests for renderer.rs
 //
+
 // Migrated from src/renderer.rs to comply with CLAUDE.md test organization.
 
 use verum_diagnostics::{

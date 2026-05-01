@@ -14,9 +14,11 @@
 )]
 //! Integration tests for end-to-end AST construction
 //!
+
 //! These tests verify that complex AST structures can be built correctly
 //! and that all components work together properly.
 //!
+
 //! Comprehensive tests for statement AST nodes.
 
 use verum_ast::decl::*;
@@ -380,7 +382,7 @@ fn test_affine_type_declaration() {
 #[test]
 fn test_context_declaration() {
     // context Database {
-    //     fn query(sql: Text) -> Result<Rows>
+    //  fn query(sql: Text) -> Result<Rows>
     // }
     let span = test_span();
 

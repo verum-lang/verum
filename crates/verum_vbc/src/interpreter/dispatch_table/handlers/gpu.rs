@@ -15,6 +15,7 @@ use super::bytecode_io::*;
 
 /// Handler for GpuExtended opcode (0xF8).
 ///
+
 /// This dispatches to GPU operations based on the GpuSubOpcode byte.
 /// Most operations return stubs since the interpreter uses CPU fallbacks.
 pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -295,12 +296,12 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let size = state.get_reg(size_reg).as_i64() as usize;
             let alloc_size = if size == 0 { 1 } else { size };
             // Layout-construction failure means the requested size
-            // exceeds isize::MAX once aligned.  The previous
+            // exceeds isize::MAX once aligned. The previous
             // `unwrap_or(Layout::new::<u8>())` fallback silently
             // downgraded to a 1-byte allocation while leaving the
             // caller believing they got `alloc_size` bytes — a heap
             // overflow waiting to happen the first time the caller
-            // wrote past byte 0.  Treat as null pointer (allocation
+            // wrote past byte 0. Treat as null pointer (allocation
             // failure), matching the standard malloc-fail contract.
             let layout = match std::alloc::Layout::from_size_align(alloc_size, 8) {
                 Ok(l) => l,
@@ -346,11 +347,12 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let ptr_addr = ptr as usize;
             // Look up the allocation size and deallocate properly.
             //
+
             // Layout-construction failure on the dealloc path is
             // architecturally impossible — `allocated_buffers` only
             // contains `alloc_size` values that successfully
             // constructed a layout above, so the matching call here
-            // cannot fail.  If it ever does, leak the allocation
+            // cannot fail. If it ever does, leak the allocation
             // rather than dealloc with a wrong (1-byte) layout —
             // dealloc with mismatched layout is undefined behaviour
             // in std::alloc; the leak is strictly the safer
@@ -565,11 +567,13 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
         // Kernel Launch - CPU Fallback with Thread Model Simulation
         // ================================================================
         //
+
         // GPU kernel launch executes the kernel function for every thread
         // in the grid. Threads execute sequentially on the CPU, with each
         // thread having access to its identity (threadIdx, blockIdx) via
         // the gpu_thread_ctx field in InterpreterState.
         //
+
         // Shared memory is allocated per-block and shared across threads.
         // __syncthreads() is a no-op since threads execute in order.
         Some(GpuSubOpcode::Launch) | Some(GpuSubOpcode::LaunchCooperative) => {
@@ -1072,6 +1076,7 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
 /// Handler for GpuSync opcode (0xF9).
 /// Synchronizes a GPU stream. No-op in interpreter (everything is synchronous).
 ///
+
 /// Format: `stream:reg`
 pub(in super::super) fn handle_gpu_sync(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let _stream = read_reg(state)?;
@@ -1082,6 +1087,7 @@ pub(in super::super) fn handle_gpu_sync(state: &mut InterpreterState) -> Interpr
 /// Handler for GpuMemcpy opcode (0xFA).
 /// GPU memory copy with direction. Falls back to CPU memcpy in interpreter.
 ///
+
 /// Format: `dst:reg, src:reg, direction:u8`
 pub(in super::super) fn handle_gpu_memcpy(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst_reg = read_reg(state)?;
@@ -1097,6 +1103,7 @@ pub(in super::super) fn handle_gpu_memcpy(state: &mut InterpreterState) -> Inter
 /// Handler for GpuAlloc opcode (0xFB).
 /// GPU memory allocation. Falls back to CPU heap allocation in interpreter.
 ///
+
 /// Format: `dst:reg, size:reg, device:reg`
 pub(in super::super) fn handle_gpu_alloc(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -1106,7 +1113,7 @@ pub(in super::super) fn handle_gpu_alloc(state: &mut InterpreterState) -> Interp
     let size = state.get_reg(size_reg).as_i64() as usize;
     let alloc_size = if size == 0 { 1 } else { size };
     // Layout-construction failure means the requested size exceeds
-    // isize::MAX once aligned.  Treat as null pointer (allocation
+    // isize::MAX once aligned. Treat as null pointer (allocation
     // failure) — never silently downgrade to a 1-byte layout, since
     // that would lie about the size to the caller and produce a
     // heap overflow on the first write.

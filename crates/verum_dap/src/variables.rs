@@ -1,5 +1,6 @@
 //! Variable inspection for the DAP server.
 //!
+
 //! Reads VBC registers and formats values for display in the IDE debugger.
 
 use verum_vbc::interpreter::{CallFrame, InterpreterState};
@@ -10,10 +11,11 @@ use crate::types::Variable;
 
 /// A variables reference handle.
 ///
+
 /// The DAP protocol uses `variablesReference` integers to identify variable containers.
 /// We encode frame index and scope type into a single i64:
-///   - Bits 0..31: frame index
-///   - Bits 32..33: scope kind (0 = locals, 1 = arguments)
+///  - Bits 0..31: frame index
+///  - Bits 32..33: scope kind (0 = locals, 1 = arguments)
 pub fn encode_variables_reference(frame_index: i64, scope_kind: i64) -> i64 {
     (scope_kind << 32) | (frame_index & 0xFFFF_FFFF)
 }
@@ -27,6 +29,7 @@ pub fn decode_variables_reference(reference: i64) -> (i64, i64) {
 
 /// Reads variables for a given stack frame from the interpreter state.
 ///
+
 /// Uses `FunctionDescriptor.debug_variables` to map register indices to names.
 pub fn read_frame_variables(
     state: &InterpreterState,

@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 — fts5/segment.vr
 //
+
 // A `Fts5VtabSegment` is an immutable sorted set of `(term, posting_list)`
 // pairs, plus a small bloom filter to skip segments that don't
 // contain a queried term.
 //
+
 // Segments are produced by:
-//   * `from_tokens(rowid, column, tokens)` — build a segment from
-//     one document's token stream
-//   * `merge(s1, s2)` — k-way merge two sorted segments
+//  * `from_tokens(rowid, column, tokens)` — build a segment from
+//  one document's token stream
+//  * `merge(s1, s2)` — k-way merge two sorted segments
 //
+
 // Fts5SegmentPosting lists store `(rowid, column, position)` tuples sorted by
 // rowid then position so AND/NEAR queries can intersect them in
 // linear time.

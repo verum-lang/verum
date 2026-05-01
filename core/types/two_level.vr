@@ -2,12 +2,15 @@
 // two_level.vr — Two-Level Type Theory (2LTT)
 // =============================================================================
 //
+
 // Layer: Standard Library / Types
 //
+
 // Surface for `verum_types.two_level`. Voevodsky/ACK stratification
 // of universes into fibrant (HoTT/cubical) and strict
 // (UIP-holding, decidable equality) layers.
 //
+
 // =============================================================================
 
 module core.types.two_level;
@@ -106,7 +109,7 @@ implement Copy for Layer {}
 implement Display for Layer {
     /// Renders the layer name in the standard 2LTT notation.
     /// `Fibrant` → `fibrant` (carries identity types via paths)
-    /// `Strict`  → `strict`  (UIP, decidable equality)
+    /// `Strict` → `strict` (UIP, decidable equality)
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             Layer.Fibrant => f.write_str("fibrant"),

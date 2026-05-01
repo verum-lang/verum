@@ -4,9 +4,11 @@
 // Layer: Stdlib (1)
 // Dependencies: Memory allocator
 //
+
 // String operations that require memory allocation.
 // For allocation-free byte operations, use memory.vr slice intrinsics.
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 
@@ -18,6 +20,7 @@ module core.intrinsics.runtime.text;
 
 /// Create Text from a static string literal.
 ///
+
 /// Requires: Text type (allocation)
 @intrinsic("text_from_static")
 @inline(always)
@@ -25,6 +28,7 @@ public fn text_from_static(s: &'static str) -> Text;
 
 /// Get byte length of Text.
 ///
+
 /// Returns the number of bytes in the UTF-8 encoding (not the character count).
 @intrinsic("text_byte_len")
 @inline(always)
@@ -36,12 +40,14 @@ public fn text_byte_len(text: &Text) -> Int;
 
 /// Parse integer from text.
 ///
+
 /// Requires: Text type
 @intrinsic("text_parse_int")
 public fn text_parse_int(text: &Text) -> Maybe<Int>;
 
 /// Parse float from text.
 ///
+
 /// Requires: Text type
 @intrinsic("text_parse_float")
 public fn text_parse_float(text: &Text) -> Maybe<Float>;
@@ -52,12 +58,14 @@ public fn text_parse_float(text: &Text) -> Maybe<Float>;
 
 /// Convert integer to text.
 ///
+
 /// Requires: Text allocation
 @intrinsic("int_to_text")
 public fn int_to_text(n: Int) -> Text;
 
 /// Convert float to text.
 ///
+
 /// Requires: Text allocation
 @intrinsic("float_to_text")
 public fn float_to_text(f: Float) -> Text;
@@ -139,6 +147,7 @@ public fn char_general_category(ch: Char) -> Int;
 
 /// Get debug escape sequence for character.
 ///
+
 /// Requires: Text allocation
 @intrinsic("char_escape_debug")
 public fn char_escape_debug(ch: Char) -> Text;
@@ -149,6 +158,7 @@ public fn char_escape_debug(ch: Char) -> Text;
 
 /// Trigger a panic with Text message.
 ///
+
 /// Note: For no-alloc environments, use core.panic.panic(&[Byte]) instead.
 /// Requires: Text allocation
 @intrinsic("panic")
@@ -156,6 +166,7 @@ public fn panic(message: &Text) -> !;
 
 /// Debug assertion with Text message.
 ///
+
 /// Note: For no-alloc environments, use core.panic.debug_assert instead.
 /// Requires: Text allocation
 @intrinsic("debug_assert")

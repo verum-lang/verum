@@ -1,12 +1,15 @@
 //! Lightweight module-path index over the embedded stdlib.
 //!
+
 //! Bridges `embedded_stdlib::StdlibArchive` (file-relative-path keyed)
 //! to the compiler's module-path namespace (`core.shell.exec` etc.).
 //! Provides O(1) lookups in both directions and a single sorted listing
 //! for deterministic enumeration.
 //!
+
 //! # Why a separate index
 //!
+
 //! The archive stores raw `.vr` source bytes keyed by relative file path
 //! (e.g. `"shell/exec.vr"`). Almost every consumer in the compiler thinks
 //! in module-path terms (`"core.shell.exec"`). Doing the conversion
@@ -14,23 +17,29 @@
 //! and makes future changes (e.g. a different file→module mapping for
 //! generated VBC modules) costly.
 //!
+
 //! The index is the single place that owns the convention:
 //!
-//!   `core/shell/exec.vr`     → `core.shell.exec`
-//!   `core/shell/mod.vr`      → `core.shell`
-//!   `core/database/sqlite/native/l7_api/database.vr`
-//!                            → `core.database.sqlite.native.l7_api.database`
+
+//!  `core/shell/exec.vr` → `core.shell.exec`
+//!  `core/shell/mod.vr` → `core.shell`
+//!  `core/database/sqlite/native/l7_api/database.vr`
+//!  → `core.database.sqlite.native.l7_api.database`
 //!
+
 //! # Performance contract
 //!
+
 //! - `module_to_file()` / `file_to_module()`: O(1) HashMap lookup
 //! - `all_modules()`: returns a borrow of a pre-sorted Vec
 //! - First call: ~2ms for archive decompress (shared with `embedded_stdlib`)
 //! - Memory: ~250 KB extra (two small HashMaps + one Vec, sharing the
-//!           archive's String storage by clone)
+//!  archive's String storage by clone)
 //!
+
 //! # Threading
 //!
+
 //! The index lives in a `OnceLock`; the first reader builds it, all
 //! subsequent readers see the populated value. No mutation after build.
 
@@ -121,16 +130,19 @@ impl StdlibModuleIndex {
 
 /// Convert a stdlib file-relative path to its canonical module path.
 ///
+
 /// Examples:
 ///
+
 /// ```text
-/// "base/maybe.vr"               → "core.base.maybe"
-/// "shell/exec.vr"               → "core.shell.exec"
-/// "shell/mod.vr"                → "core.shell"
+/// "base/maybe.vr" → "core.base.maybe"
+/// "shell/exec.vr" → "core.shell.exec"
+/// "shell/mod.vr" → "core.shell"
 /// "database/sqlite/native/l7_api/database.vr"
-///                               → "core.database.sqlite.native.l7_api.database"
+///  → "core.database.sqlite.native.l7_api.database"
 /// ```
 ///
+
 /// This function is the single source of truth for the file→module
 /// mapping. The same convention is implemented inline in
 /// `pipeline.rs::load_stdlib_modules` (lines 3805-3829); both must stay

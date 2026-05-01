@@ -1,15 +1,19 @@
 //! Type Introspection Sub-Context
 //!
+
 //! Manages type definitions, protocol implementations, and type registry
 //! for compile-time type reflection.
 //!
+
 //! ## Responsibility
 //!
+
 //! - Type definitions (structs, enums, protocols)
 //! - Protocol implementation registry
 //! - Type metadata and attributes
 //! - Method resolution
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -36,6 +40,7 @@ pub struct TypeAttribute {
 
 /// Type introspection context
 ///
+
 /// Manages type definitions, protocol implementations, and provides
 /// type reflection capabilities for meta functions.
 #[derive(Debug, Clone, Default)]

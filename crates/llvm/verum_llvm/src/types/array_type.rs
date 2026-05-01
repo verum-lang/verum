@@ -20,6 +20,7 @@ pub struct ArrayType<'ctx> {
 impl<'ctx> ArrayType<'ctx> {
     /// Create `ArrayType` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't array type
     pub unsafe fn new(array_type: LLVMTypeRef) -> Self {
@@ -33,11 +34,14 @@ impl<'ctx> ArrayType<'ctx> {
     /// Gets the size of this `ArrayType`. Value may vary depending on the target architecture.
     /// Note: Behavior is undefined if the element type contains opaque structs (LLVM limitation).
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
@@ -49,19 +53,23 @@ impl<'ctx> ArrayType<'ctx> {
 
     /// Creates a `PointerType` with this `ArrayType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // This example is ignored because LLVM 21 uses opaque pointers
     /// // and get_element_type() no longer exists
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
     /// let i8_array_ptr_type = i8_array_type.ptr_type(AddressSpace::default());
     ///
+
     /// assert_eq!(i8_array_ptr_type.get_element_type().into_array_type(), i8_array_type);
     /// ```
     #[deprecated(note = "LLVM 21 uses opaque pointers. Use Context::ptr_type instead.")]
@@ -71,15 +79,19 @@ impl<'ctx> ArrayType<'ctx> {
 
     /// Gets a reference to the `Context` this `ArrayType` was created in.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
     ///
+
     /// assert_eq!(i8_array_type.get_context(), context);
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {
@@ -88,11 +100,14 @@ impl<'ctx> ArrayType<'ctx> {
 
     /// Creates a `FunctionType` with this `ArrayType` for its return type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
@@ -104,16 +119,20 @@ impl<'ctx> ArrayType<'ctx> {
 
     /// Creates an `ArrayType` with this `ArrayType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
     /// let i8_array_array_type = i8_array_type.array_type(3);
     ///
+
     /// assert_eq!(i8_array_array_type.len(), 3);
     /// assert_eq!(i8_array_array_type.get_element_type().into_array_type(), i8_array_type);
     /// ```
@@ -123,16 +142,19 @@ impl<'ctx> ArrayType<'ctx> {
 
     /// Creates a constant `ArrayValue` of `ArrayValue`s.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_array_type = f32_type.array_type(3);
     /// let f32_array_val = f32_array_type.const_zero();
     /// let f32_array_array = f32_array_type.const_array(&[f32_array_val, f32_array_val]);
     ///
+
     /// assert!(f32_array_array.is_const());
     /// ```
     pub fn const_array(self, values: &[ArrayValue<'ctx>]) -> ArrayValue<'ctx> {
@@ -141,11 +163,14 @@ impl<'ctx> ArrayType<'ctx> {
 
     /// Creates a constant zero value of this `ArrayType`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
@@ -157,15 +182,19 @@ impl<'ctx> ArrayType<'ctx> {
 
     /// Gets the length of this `ArrayType`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
     ///
+
     /// assert_eq!(i8_array_type.len(), 3);
     /// ```
     pub fn len(self) -> u32 {
@@ -184,15 +213,18 @@ impl<'ctx> ArrayType<'ctx> {
 
     /// Creates an undefined instance of a `ArrayType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
     /// let i8_array_undef = i8_array_type.get_undef();
     ///
+
     /// assert!(i8_array_undef.is_undef());
     /// ```
     pub fn get_undef(self) -> ArrayValue<'ctx> {
@@ -201,16 +233,19 @@ impl<'ctx> ArrayType<'ctx> {
 
     /// Creates a poison instance of a `ArrayType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::AnyValue;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
     /// let i8_array_poison = i8_array_type.get_poison();
     ///
+
     /// assert!(i8_array_poison.is_poison());
     /// ```
     pub fn get_poison(self) -> ArrayValue<'ctx> {
@@ -220,15 +255,19 @@ impl<'ctx> ArrayType<'ctx> {
     // SubType: ArrayType<BT> -> BT?
     /// Gets the element type of this `ArrayType`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
     ///
+
     /// assert_eq!(i8_array_type.get_element_type().into_int_type(), i8_type);
     /// ```
     pub fn get_element_type(self) -> BasicTypeEnum<'ctx> {

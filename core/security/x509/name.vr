@@ -5,6 +5,7 @@
 // Dependencies: core, encoding.der, x509.oid
 // =============================================================================
 //
+
 // Name ::= CHOICE { rdnSequence RDNSequence }
 // RDNSequence ::= SEQUENCE OF RelativeDistinguishedName
 // RelativeDistinguishedName ::= SET SIZE (1..MAX) OF AttributeTypeAndValue
@@ -12,33 +13,39 @@
 // AttributeType ::= OBJECT IDENTIFIER
 // AttributeValue ::= ANY
 //
+
 // DirectoryString ::= CHOICE {
-//   teletexString        TeletexString   (SIZE (1..MAX)),
-//   printableString      PrintableString (SIZE (1..MAX)),
-//   universalString      UniversalString (SIZE (1..MAX)),
-//   utf8String           UTF8String      (SIZE (1..MAX)),
-//   bmpString            BMPString       (SIZE (1..MAX))
+//  teletexString TeletexString (SIZE (1..MAX)),
+//  printableString PrintableString (SIZE (1..MAX)),
+//  universalString UniversalString (SIZE (1..MAX)),
+//  utf8String UTF8String (SIZE (1..MAX)),
+//  bmpString BMPString (SIZE (1..MAX))
 // }
 //
+
 // # Practical simplifications
 //
+
 // Real-world X.509 Names use a narrow slice of this universe:
 //
-//   * Each RDN is almost always a singleton SET — multi-valued RDNs
-//     exist but are rare (LDAPv3 §4.1). We parse the SET but do not
-//     treat multi-valued specially in matching.
-//   * `DirectoryString` values are overwhelmingly PrintableString /
-//     UTF8String in WebPKI. We keep `T.61String` as a fallback for
-//     legacy roots (Verisign, pre-2002 certs). We never emit
-//     UniversalString or BMPString but decode both lossy-to-UTF8.
-//   * The DN comparison rules in RFC 5280 §7.1 are byte-identity for
-//     verified chains (RFC 5280 §4.1.2.6 — "verified by byte-for-byte
-//     comparison"). Hostname matching happens in SAN, not CN.
+
+//  * Each RDN is almost always a singleton SET — multi-valued RDNs
+//  exist but are rare (LDAPv3 §4.1). We parse the SET but do not
+//  treat multi-valued specially in matching.
+//  * `DirectoryString` values are overwhelmingly PrintableString /
+//  UTF8String in WebPKI. We keep `T.61String` as a fallback for
+//  legacy roots (Verisign, pre-2002 certs). We never emit
+//  UniversalString or BMPString but decode both lossy-to-UTF8.
+//  * The DN comparison rules in RFC 5280 §7.1 are byte-identity for
+//  verified chains (RFC 5280 §4.1.2.6 — "verified by byte-for-byte
+//  comparison"). Hostname matching happens in SAN, not CN.
 //
+
 // This module therefore returns both a structured `DistinguishedName`
 // ADT (for human display / extension logic) AND the raw DER bytes of
 // the full RDNSequence (for byte-exact issuer/subject chain matching).
 //
+
 // =============================================================================
 
 module core.security.x509.name;
@@ -86,6 +93,7 @@ public type RelativeDistinguishedName is {
 
 /// A Distinguished Name — sequence of RDNs from root to leaf.
 ///
+
 /// `raw_der` is the byte-exact DER encoding of the full `Name` SEQUENCE
 /// including outer tag + length — this is what RFC 5280 §4.1.2.6 uses
 /// for issuer/subject chain matching. Storing it here avoids a
@@ -103,6 +111,7 @@ public type DistinguishedName is {
 /// at the outer SEQUENCE tag. Both the structured form and the byte-
 /// exact DER span are returned for downstream consumers.
 ///
+
 /// This parser does NOT verify the LDAP-style ordering of RDNs
 /// (no dedup across the whole Name). Subject/issuer matching in
 /// `chain.rs` uses `raw_der` byte-equality anyway per RFC 5280 §7.1.

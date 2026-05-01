@@ -3,20 +3,24 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling)
 //
+
 // `ReplicationRole` is the connection's replication identity:
 //
-//   * `Primary`   — accepts writes; emits WAL frames
-//   * `Replica`   — accepts reads; consumes WAL frames; cannot write
-//   * `Standby`   — passive — neither emits nor consumes;
-//                    promotion candidate
-//   * `Witness`   — quorum participant only; no data storage
+
+//  * `Primary` — accepts writes; emits WAL frames
+//  * `Replica` — accepts reads; consumes WAL frames; cannot write
+//  * `Standby` — passive — neither emits nor consumes;
+//  promotion candidate
+//  * `Witness` — quorum participant only; no data storage
 //
+
 // ReplicationRole transitions are protected by a `Promotion` state machine:
 //
-//   Primary  ↔  Standby
-//   Replica  →  Primary  (only via promotion)
-//   Standby  →  Primary | Replica
-//   Witness  →  no transitions
+
+//  Primary ↔ Standby
+//  Replica → Primary (only via promotion)
+//  Standby → Primary | Replica
+//  Witness → no transitions
 // =============================================================================
 
 module core.database.sqlite.native.replication.role;

@@ -5,39 +5,49 @@
 // Dependencies: core, core/simd/mod
 // =============================================================================
 //
+
 // Byte-level SIMD helpers for parsers (HTTP, JSON, CSV), serialisation
 // (base64, hex, CRC32), and string operations. Built on `Vec<UInt8, N>` —
 // compiles to SSE2/AVX2/AVX-512 on x86_64, NEON on aarch64, SWAR on
 // targets without SIMD.
 //
+
 // # Design
 //
+
 // Each primitive works in SIMD-width chunks (SSE2 default = 16 bytes, AVX2
 // = 32, AVX-512 = 64). A scalar tail-loop handles the remainder past the
 // last aligned SIMD boundary. `@multiversion` selects the optimal width
 // at startup based on runtime CPU-feature detection.
 //
+
 // # Status
 //
+
 // API is complete. Backend codegen for `@intrinsic("simd_*")` lowering
 // to LLVM `<N x T>` vector ops is in progress at the compiler level.
 // Until then, helpers fall back to scalar-equivalent implementations
 // via SWAR and a portable fallback path. Users see the same API shape
 // regardless of backend completeness.
 //
+
 // # Examples
 //
+
 // ```verum
 // // HTTP header terminator scan
 // let idx = simd_bytes.find_byte(request_buf, b'\r\n');
 //
+
 // // JSON structural-char find
 // let pos = simd_bytes.find_any_of(data, &[b'{', b'}', b'[', b']', b',', b':']);
 //
+
 // // UTF-8 validation
 // let ok = simd_bytes.is_valid_utf8(bytes);
 // ```
 //
+
 // =============================================================================
 
 module core.simd.bytes;
@@ -51,6 +61,7 @@ mount core.simd.mod.{Vec, Mask, Vec16b, Vec32b, Vec64b};
 /// Find the first occurrence of `needle` in `haystack`. Returns the byte
 /// index, or None if not found.
 ///
+
 /// Performance: O(N/W) where W = SIMD lane count (16/32/64).
 /// Lowers to `pcmpeqb` + `pmovmskb` on SSE2, `vpcmpeqb` + `vpmovmskb` on
 /// AVX2.
@@ -137,6 +148,7 @@ public fn find_header_terminator(haystack: &[Byte]) -> Maybe<Int> {
 /// Find the first occurrence of `needle` (substring) in `haystack`. Returns
 /// the byte index of the match start, or None.
 ///
+
 /// Implementation: two-way + SIMD block-scan for the first byte of needle,
 /// then compare-remaining on match. O(N) worst case, O(N/W) common case.
 public fn find_subslice(haystack: &[Byte], needle: &[Byte]) -> Maybe<Int> {

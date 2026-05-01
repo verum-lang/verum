@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §10.7
 //
+
 // Each variant matches a SQLite-CLI integrity_check output category;
 // the strings the CLI prints are the variant's `name()` rendering.
 // =============================================================================

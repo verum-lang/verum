@@ -1037,8 +1037,8 @@ async fn fetch_json(url: Text) -> Result<Value, Error> {
         .add_code(
             r#"// Example usage (uncomment to run)
 // async fn main() {
-//     let data = await fetch_json("https://api.example.com/data")
-//     print(data)
+//  let data = await fetch_json("https://api.example.com/data")
+//  print(data)
 // }"#,
         )
 }

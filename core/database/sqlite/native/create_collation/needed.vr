@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // When a schema references an unknown collation, the engine fires the
-// registered hook before raising an error.  The hook may register the
+// registered hook before raising an error. The hook may register the
 // collation on-the-fly; if it doesn't, the schema open fails.
 // =============================================================================
 

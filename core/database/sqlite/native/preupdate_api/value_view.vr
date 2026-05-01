@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// The catalogue handles index-bounds + op-gating logic.  Actual value
+
+// The catalogue handles index-bounds + op-gating logic. Actual value
 // storage is opaque here — the runtime feeds SqliteApiValue references.
 // =============================================================================
 
@@ -54,7 +55,7 @@ implement Eq for PreupdateValueError {
     }
 }
 
-/// Validate an `sqlite3_preupdate_old(i, &pVal)` request.  Returns
+/// Validate an `sqlite3_preupdate_old(i, &pVal)` request. Returns
 /// PveWrongOp if `op` has no old values (INSERT), PveOutOfRange if the
 /// column index is out of range, else Ok(()).
 public type ValidateResult is

@@ -2,52 +2,65 @@
 // kernel_v0 — Master soundness theorem (kernel_soundness)
 // =============================================================================
 //
+
 // **The bottom line theorem.**
 //
-//   For every well-typed Derivation `d` constructed by the 10 kernel
-//   rules in `rules/`, the term `term_of(d)` denotes a value of type
-//   `type_of(d)` in the categorical model.  Equivalently:
+
+//  For every well-typed Derivation `d` constructed by the 10 kernel
+//  rules in `rules/`, the term `term_of(d)` denotes a value of type
+//  `type_of(d)` in the categorical model. Equivalently:
 //
-//       Whatever the kernel accepts is sound by the model.
+
+//  Whatever the kernel accepts is sound by the model.
 //
+
 // **Trust-base size**
 //
+
 // Reading and auditing this directory PLUS:
-//   - core_term.vr       (~50 LOC, term language inductive)
-//   - context.vr         (~70 LOC, de Bruijn type stack)
-//   - judgment.vr        (~150 LOC, Judgment + 10-case Derivation
-//                         + DefinitionalEquality)
-//   - rules/k_*.vr       (10 files × ~80 LOC ≈ 800 LOC)
-//   - this file          (~100 LOC, master theorem)
+//  - core_term.vr (~50 LOC, term language inductive)
+//  - context.vr (~70 LOC, de Bruijn type stack)
+//  - judgment.vr (~150 LOC, Judgment + 10-case Derivation
+//  + DefinitionalEquality)
+//  - rules/k_*.vr (10 files × ~80 LOC ≈ 800 LOC)
+//  - this file (~100 LOC, master theorem)
 //
+
 // = ~1100 LOC Verum + ~100 LOC Rust shim that drives the kernel.
 //
+
 // **Architectural pattern: Milawa-style bootstrap**
 //
+
 // Each `k_*.vr` rule's soundness lemma carries a
 // `@kernel_discharge("kernel_<rule>_strict")` annotation that wires
-// the lemma to a dispatcher intrinsic in `verum_kernel`.  The
+// the lemma to a dispatcher intrinsic in `verum_kernel`. The
 // dispatcher knows:
 //
-//   - For PROVED lemmas (k_var, k_univ, k_fwax, k_pos): the lemma's
-//     proof body is structurally trivial; the dispatcher returns
-//     `LemmaStatus::Proved` immediately.
+
+//  - For PROVED lemmas (k_var, k_univ, k_fwax, k_pos): the lemma's
+//  proof body is structurally trivial; the dispatcher returns
+//  `LemmaStatus::Proved` immediately.
 //
-//   - For ADMITTED lemmas (k_pi_form, k_lam_intro, k_app_elim,
-//     k_beta, k_eta, k_sub): the lemma's proof body cites an IOU
-//     (substitution-lemma, Church-Rosser, funext, etc.); the
-//     dispatcher returns `LemmaStatus::Admitted { iou: <reason> }`.
+
+//  - For ADMITTED lemmas (k_pi_form, k_lam_intro, k_app_elim,
+//  k_beta, k_eta, k_sub): the lemma's proof body cites an IOU
+//  (substitution-lemma, Church-Rosser, funext, etc.); the
+//  dispatcher returns `LemmaStatus::Admitted { iou: <reason> }`.
 //
+
 // The aggregator `kernel_soundness` then composes them: it iterates
 // over every kernel rule, asks the dispatcher, and reports the
-// per-rule classification.  The audit bundle's
+// per-rule classification. The audit bundle's
 // `verum audit --soundness-iou` gate consumes this exact data.
 //
+
 // **Discharge contract**
 //
+
 // Phase-1 trust-base reduction (#155, #156): each ADMITTED rule's
 // IOU is discharged by importing a verified mathlib proof, after
-// which the dispatcher's status flips to `Proved`.  When all 10 are
+// which the dispatcher's status flips to `Proved`. When all 10 are
 // `Proved`, kernel_soundness is unconditionally true and the
 // audit bundle reports L4-load-bearing under ZFC + 2-inacc alone.
 // =============================================================================
@@ -71,19 +84,21 @@ mount super.rules.k_eta.{k_eta_sound};
 mount super.rules.k_sub.{k_sub_sound};
 
 /// **Per-rule soundness status** — what the dispatcher reports for
-/// each of the 10 kernel rules.  Mirrors
+/// each of the 10 kernel rules. Mirrors
 /// `verum_kernel::soundness::canonical_rules::LemmaStatus`.
 ///
+
 /// **Status progression** (lifecycle of an IOU):
 ///
-///   1. `Admitted { iou }`     — soundness conditional on a structural
-///                               lemma not yet linked to discharge.
-///   2. `DischargedByFramework`— a Verum-side stub theorem in
-///                               `kernel_v0/lemmas/` cites an upstream
-///                               vetted proof (mathlib4 / Coq stdlib /
-///                               ZFC-foundational).  L4-acceptable.
-///   3. `Proved`               — full constructive proof in Verum;
-///                               no external trust extension.
+
+///  1. `Admitted { iou }` — soundness conditional on a structural
+///  lemma not yet linked to discharge.
+///  2. `DischargedByFramework`— a Verum-side stub theorem in
+///  `kernel_v0/lemmas/` cites an upstream
+///  vetted proof (mathlib4 / Coq stdlib /
+///  ZFC-foundational). L4-acceptable.
+///  3. `Proved` — full constructive proof in Verum;
+///  no external trust extension.
 public type LemmaStatus is
     | Proved
     | Admitted { iou: Text }
@@ -106,33 +121,40 @@ public type RuleSoundnessRecord is {
 
 /// **Master soundness theorem (the kernel_v0 verdict).**
 ///
+
 /// **Statement.**
 ///
+
 /// For every Derivation `d` constructed by the 10 rules, we have
-///   `Γ ⊢ term_of(d) : type_of(d)`
+///  `Γ ⊢ term_of(d) : type_of(d)`
 /// in the denotational model — either UNCONDITIONALLY (when all
 /// admitted IOUs are discharged) or RELATIVE TO the listed IOUs.
 ///
+
 /// **Structure of the proof.**
 ///
+
 /// Case-split on the Derivation variant:
-///   - Var       → k_var_sound
-///   - Univ      → k_univ_sound
-///   - FwAx      → k_fwax_sound
-///   - Pos       → k_pos_sound
-///   - PiForm    → k_pi_form_sound       (admitted)
-///   - LamIntro  → k_lam_intro_sound     (admitted)
-///   - AppElim   → k_app_elim_sound      (admitted)
-///   - BetaConv  → k_beta_sound          (admitted)
-///   - EtaConv   → k_eta_sound           (admitted)
-///   - Sub       → k_sub_sound           (admitted)
+///  - Var → k_var_sound
+///  - Univ → k_univ_sound
+///  - FwAx → k_fwax_sound
+///  - Pos → k_pos_sound
+///  - PiForm → k_pi_form_sound (admitted)
+///  - LamIntro → k_lam_intro_sound (admitted)
+///  - AppElim → k_app_elim_sound (admitted)
+///  - BetaConv → k_beta_sound (admitted)
+///  - EtaConv → k_eta_sound (admitted)
+///  - Sub → k_sub_sound (admitted)
 ///
+
 /// Each per-rule lemma carries the same `requires d is Derivation.X`
 /// + `ensures true` shape; this aggregator dispatches on the variant
 /// and lifts the lemma's verdict.
 ///
+
 /// **Discharge level.**
 ///
+
 /// Phase-0 (current): 4 unconditional + 6 admitted-with-IOU.
 /// Phase-1: target — all 10 unconditional once IOUs are discharged.
 /// Phase-2: kernel-soundness becomes a self-applying theorem (#158
@@ -145,12 +167,12 @@ public theorem kernel_soundness(
 )
     ensures true  // Per-variant discharge — see proof and roster.
     proof {
-        // The aggregator's `ensures true` is trivially provable.  The
+        // The aggregator's `ensures true` is trivially provable. The
         // load-bearing per-variant case-split lives in the
         // `kernel_soundness_v0` bridge (see @kernel_discharge above)
         // and the [`soundness_roster`] table below — each entry
         // names the corresponding `k_*_sound` lemma + its discharge
-        // status (Proved vs Admitted-with-IOU).  `verum audit
+        // status (Proved vs Admitted-with-IOU). `verum audit
         // --soundness-iou` walks the roster and reports the live
         // discharge surface; the per-rule lemmas in `kernel_v0/
         // rules/k_*.vr` carry the actual structural proofs.
@@ -160,8 +182,9 @@ public theorem kernel_soundness(
 /// **The 10-rule audit roster** — what `verum audit --soundness-iou`
 /// walks to enumerate the kernel's trust extension.
 ///
+
 /// Each entry is the static record describing one rule's soundness
-/// status.  For PROVED rules the IOU is empty; for ADMITTED rules
+/// status. For PROVED rules the IOU is empty; for ADMITTED rules
 /// it cites the missing structural lemma.
 public fn soundness_roster() -> List<RuleSoundnessRecord> {
     let mut out = List.new();

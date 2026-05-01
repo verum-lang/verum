@@ -1,10 +1,13 @@
 //! Arithmetic Intrinsics (Tier 0 - Always Available)
 //!
+
 //! Pure arithmetic functions that operate only on input values without
 //! accessing any external state. These are always available in meta expressions.
 //!
+
 //! ## Functions
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `abs(x)` | `(Numeric) -> Numeric` | Absolute value |
@@ -21,10 +24,13 @@
 //! | `clamp(x, min, max)` | `(T, T, T) -> T` | Clamp value to range |
 //! | `pow(base, exp)` | `(Int, Int) -> Int` | Integer power |
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 0**: No context required - these are pure computation functions.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -39,6 +45,7 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register arithmetic builtins with context requirements
 ///
+
 /// All arithmetic functions are Tier 0 (always available) since they
 /// perform pure computation without accessing external state.
 pub fn register_builtins(map: &mut BuiltinRegistry) {

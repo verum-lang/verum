@@ -36,8 +36,10 @@ pub struct FunctionValue<'ctx> {
 impl<'ctx> FunctionValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and of type function.
     pub unsafe fn new(value: LLVMValueRef) -> Option<Self> {
         if value.is_null() || LLVMIsAFunction(value).is_null() {
@@ -259,12 +261,15 @@ impl<'ctx> FunctionValue<'ctx> {
 
     /// Adds an `Attribute` to a particular location in this `FunctionValue`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -273,6 +278,7 @@ impl<'ctx> FunctionValue<'ctx> {
     /// let string_attribute = context.create_string_attribute("my_key", "my_val");
     /// let enum_attribute = context.create_enum_attribute(1, 1);
     ///
+
     /// fn_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// fn_value.add_attribute(AttributeLoc::Return, enum_attribute);
     /// ```
@@ -282,12 +288,15 @@ impl<'ctx> FunctionValue<'ctx> {
 
     /// Counts the number of `Attribute`s belonging to the specified location in this `FunctionValue`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -296,9 +305,11 @@ impl<'ctx> FunctionValue<'ctx> {
     /// let string_attribute = context.create_string_attribute("my_key", "my_val");
     /// let enum_attribute = context.create_enum_attribute(1, 1);
     ///
+
     /// fn_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// fn_value.add_attribute(AttributeLoc::Return, enum_attribute);
     ///
+
     /// assert_eq!(fn_value.count_attributes(AttributeLoc::Return), 2);
     /// ```
     pub fn count_attributes(self, loc: AttributeLoc) -> u32 {
@@ -307,12 +318,15 @@ impl<'ctx> FunctionValue<'ctx> {
 
     /// Get all `Attribute`s belonging to the specified location in this `FunctionValue`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -321,9 +335,11 @@ impl<'ctx> FunctionValue<'ctx> {
     /// let string_attribute = context.create_string_attribute("my_key", "my_val");
     /// let enum_attribute = context.create_enum_attribute(1, 1);
     ///
+
     /// fn_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// fn_value.add_attribute(AttributeLoc::Return, enum_attribute);
     ///
+
     /// assert_eq!(fn_value.attributes(AttributeLoc::Return), vec![string_attribute, enum_attribute]);
     /// ```
     pub fn attributes(self, loc: AttributeLoc) -> Vec<Attribute> {
@@ -359,12 +375,15 @@ impl<'ctx> FunctionValue<'ctx> {
 
     /// Removes a string `Attribute` belonging to the specified location in this `FunctionValue`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -372,6 +391,7 @@ impl<'ctx> FunctionValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let string_attribute = context.create_string_attribute("my_key", "my_val");
     ///
+
     /// fn_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// fn_value.remove_string_attribute(AttributeLoc::Return, "my_key");
     /// ```
@@ -388,12 +408,15 @@ impl<'ctx> FunctionValue<'ctx> {
 
     /// Removes an enum `Attribute` belonging to the specified location in this `FunctionValue`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -401,6 +424,7 @@ impl<'ctx> FunctionValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let enum_attribute = context.create_enum_attribute(1, 1);
     ///
+
     /// fn_value.add_attribute(AttributeLoc::Return, enum_attribute);
     /// fn_value.remove_enum_attribute(AttributeLoc::Return, 1);
     /// ```
@@ -410,12 +434,15 @@ impl<'ctx> FunctionValue<'ctx> {
 
     /// Gets an enum `Attribute` belonging to the specified location in this `FunctionValue`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -423,8 +450,10 @@ impl<'ctx> FunctionValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let enum_attribute = context.create_enum_attribute(1, 1);
     ///
+
     /// fn_value.add_attribute(AttributeLoc::Return, enum_attribute);
     ///
+
     /// assert_eq!(fn_value.get_enum_attribute(AttributeLoc::Return, 1), Some(enum_attribute));
     /// ```
     // SubTypes: -> Option<Attribute<Enum>>
@@ -440,12 +469,15 @@ impl<'ctx> FunctionValue<'ctx> {
 
     /// Gets a string `Attribute` belonging to the specified location in this `FunctionValue`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -453,8 +485,10 @@ impl<'ctx> FunctionValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let string_attribute = context.create_string_attribute("my_key", "my_val");
     ///
+
     /// fn_value.add_attribute(AttributeLoc::Return, string_attribute);
     ///
+
     /// assert_eq!(fn_value.get_string_attribute(AttributeLoc::Return, "my_key"), Some(string_attribute));
     /// ```
     // SubTypes: -> Option<Attribute<String>>

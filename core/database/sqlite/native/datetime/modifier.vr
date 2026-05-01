@@ -3,23 +3,25 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.6 (date/time modifiers)
 //
+
 // Each `DatetimeModifier` shifts an `Instant`. Recognised modifier strings:
 //
-//   'now'                 — replace with current wall-clock instant
-//   '+N days'             — add N days
-//   '-N days'             — subtract N days
-//   '+N hours'            — add N hours
-//   '-N hours'            — subtract N hours
-//   '+N minutes'          — etc.
-//   '+N seconds'
-//   '+N months'           — calendar month add (with day clamping)
-//   '+N years'            — calendar year add (with leap-day clamping)
-//   'start of month'      — set day = 1, time = 00:00:00
-//   'start of year'       — set month = 1, day = 1, time = 00:00:00
-//   'start of day'        — set time = 00:00:00
-//   'weekday N'           — advance to the next weekday N (0=Sunday)
-//   'unixepoch'           — REAL value is interpreted as unix seconds
-//   'utc' / 'localtime'   — timezone shift (not modelled here)
+
+//  'now' — replace with current wall-clock instant
+//  '+N days' — add N days
+//  '-N days' — subtract N days
+//  '+N hours' — add N hours
+//  '-N hours' — subtract N hours
+//  '+N minutes' — etc.
+//  '+N seconds'
+//  '+N months' — calendar month add (with day clamping)
+//  '+N years' — calendar year add (with leap-day clamping)
+//  'start of month' — set day = 1, time = 00:00:00
+//  'start of year' — set month = 1, day = 1, time = 00:00:00
+//  'start of day' — set time = 00:00:00
+//  'weekday N' — advance to the next weekday N (0=Sunday)
+//  'unixepoch' — REAL value is interpreted as unix seconds
+//  'utc' / 'localtime' — timezone shift (not modelled here)
 // =============================================================================
 
 module core.database.sqlite.native.datetime.modifier;

@@ -1,5 +1,6 @@
 //! Build script for verum_mlir_macro
 //!
+
 //! Sets the LLVM_INCLUDE_DIRECTORY environment variable for the macro crate
 //! to find MLIR TableGen files.
 

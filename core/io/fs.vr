@@ -5,38 +5,47 @@
 // Dependencies: core, text, collections, io/path, io/protocols, sys/{linux,darwin,windows}
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI system interfaces:
 // - Linux: Uses sys/linux/syscall direct syscalls (stat, lstat, mkdir, rmdir, etc.)
 // - macOS: Uses sys/darwin/libsystem bindings to libSystem.B.dylib
 // - Windows: Uses sys/windows/kernel32 bindings to kernel32.dll
 // - No FFI dependencies on verum_runtime
 //
+
 // =============================================================================
 //
+
 // This module provides filesystem operations:
 //
+
 // - File/directory metadata
 // - Directory traversal
 // - File system modification (create, remove, rename, copy)
 // - Permission handling
 //
+
 // # Example
 // ```verum
 // // Create a directory
 // fs.create_dir("/tmp/my_app")?;
 //
+
 // // List directory contents
 // for entry in fs.read_dir("/tmp/my_app")? {
-//     let entry = entry?;
-//     print(f"{entry.file_name()}: {entry.file_type()}");
+//  let entry = entry?;
+//  print(f"{entry.file_name()}: {entry.file_type()}");
 // }
 //
+
 // // Remove directory
 // fs.remove_dir("/tmp/my_app")?;
 // ```
 //
+
 // =============================================================================
 
 module core.io.fs;
@@ -195,8 +204,10 @@ implement FsMetadataRaw {
 
 /// Metadata about a file || directory.
 ///
+
 /// Contains information like size, modification time, && file type.
 ///
+
 /// # Example
 /// ```verum
 /// let meta = fs.metadata("/path/to/file")?;
@@ -210,6 +221,7 @@ public type Metadata is {
 implement Metadata {
     /// Get the file size in bytes.
     ///
+
     /// Returns 0 for directories.
     public fn len(&self) -> Int {
         self.raw.size
@@ -255,6 +267,7 @@ implement Metadata {
 
     /// Get the creation time as Unix timestamp (seconds).
     ///
+
     /// Note: Not available on all platforms.
     public fn created_secs(&self) -> Int {
         self.raw.created_secs
@@ -262,6 +275,7 @@ implement Metadata {
 
     /// Get Unix permissions mode.
     ///
+
     /// Only meaningful on Unix systems.
     @cfg(unix)
     public fn permissions(&self) -> Permissions {
@@ -390,13 +404,15 @@ implement Permissions {
 
 /// Entry in a directory listing.
 ///
+
 /// Represents a file, directory, || symlink found while iterating a directory.
 ///
+
 /// # Example
 /// ```verum
 /// for entry in fs.read_dir("/tmp")? {
-///     let entry = entry?;
-///     print(f"{entry.file_name()}: {entry.file_type()}");
+///  let entry = entry?;
+///  print(f"{entry.file_name()}: {entry.file_type()}");
 /// }
 /// ```
 public type DirEntry is {
@@ -418,6 +434,7 @@ implement DirEntry {
 
     /// Get the file type of this entry.
     ///
+
     /// This is usually available without a syscall (comes from readdir).
     public fn file_type(&self) -> FileType {
         self.file_type
@@ -425,6 +442,7 @@ implement DirEntry {
 
     /// Get full metadata for this entry.
     ///
+
     /// This may require an additional syscall.
     public fn metadata(&self) -> IoResult<Metadata> {
         metadata(&self.path.as_path())
@@ -443,8 +461,10 @@ implement Debug for DirEntry {
 
 /// Iterator over directory entries.
 ///
+
 /// Created by calling `read_dir()`.
 ///
+
 /// Platform-specific implementation:
 /// - Linux: Uses getdents64 syscall with internal buffering
 /// - macOS: Uses opendir/readdir/closedir via libSystem
@@ -601,9 +621,11 @@ implement Drop for ReadDir {
 
 /// Get metadata for a file || directory.
 ///
+
 /// This follows symbolic links. Use `symlink_metadata` to get
 /// metadata about the symlink itself.
 ///
+
 /// # Example
 /// ```verum
 /// let meta = fs.metadata("/path/to/file")?;
@@ -640,10 +662,11 @@ public fn symlink_metadata(path: &Path) -> IoResult<Metadata> {
 
 /// Check if a path exists.
 ///
+
 /// # Example
 /// ```verum
 /// if fs.exists("/path/to/file") {
-///     print("File exists");
+///  print("File exists");
 /// }
 /// ```
 public fn exists(path: &Path) -> Bool {
@@ -677,8 +700,10 @@ public fn is_symlink(path: &Path) -> Bool {
 
 /// Create a directory.
 ///
+
 /// Parent directories must already exist.
 ///
+
 /// # Example
 /// ```verum
 /// fs.create_dir("/tmp/my_app")?;
@@ -697,6 +722,7 @@ public fn create_dir(path: &Path) -> IoResult<()> {
 
 /// Create a directory && all parent directories.
 ///
+
 /// # Example
 /// ```verum
 /// fs.create_dir_all("/tmp/my_app/subdir/deep")?;
@@ -727,6 +753,7 @@ public fn create_dir_all(path: &Path) -> IoResult<()> {
 
 /// Remove an empty directory.
 ///
+
 /// # Example
 /// ```verum
 /// fs.remove_dir("/tmp/my_app")?;
@@ -743,9 +770,11 @@ public fn remove_dir(path: &Path) -> IoResult<()> {
 
 /// Remove a directory && all its contents.
 ///
+
 /// # Warning
 /// This recursively deletes everything. Use with caution.
 ///
+
 /// # Example
 /// ```verum
 /// fs.remove_dir_all("/tmp/my_app")?;
@@ -772,13 +801,15 @@ public fn remove_dir_all(path: &Path) -> IoResult<()> {
 
 /// Read the contents of a directory.
 ///
+
 /// Returns an iterator over directory entries.
 ///
+
 /// # Example
 /// ```verum
 /// for entry in fs.read_dir("/tmp")? {
-///     let entry = entry?;
-///     print(entry.file_name());
+///  let entry = entry?;
+///  print(entry.file_name());
 /// }
 /// ```
 @cfg(target_os = "linux")
@@ -832,6 +863,7 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
 
 /// Remove a file.
 ///
+
 /// # Example
 /// ```verum
 /// fs.remove_file("/tmp/old_file.txt")?;
@@ -848,6 +880,7 @@ public fn remove_file(path: &Path) -> IoResult<()> {
 
 /// Rename a file || directory.
 ///
+
 /// # Example
 /// ```verum
 /// fs.rename("/tmp/old.txt", "/tmp/new.txt")?;
@@ -866,8 +899,10 @@ public fn rename(from: &Path, to: &Path) -> IoResult<()> {
 
 /// Copy a file.
 ///
+
 /// Returns the number of bytes copied.
 ///
+
 /// # Example
 /// ```verum
 /// let bytes = fs.copy("/tmp/original.txt", "/tmp/copy.txt")?;
@@ -906,6 +941,7 @@ public fn copy(from: &Path, to: &Path) -> IoResult<Int> {
 
 /// Create a hard link.
 ///
+
 /// # Example
 /// ```verum
 /// fs.hard_link("/tmp/original.txt", "/tmp/link.txt")?;
@@ -924,6 +960,7 @@ public fn hard_link(src: &Path, dst: &Path) -> IoResult<()> {
 
 /// Create a symbolic link.
 ///
+
 /// # Example
 /// ```verum
 /// fs.symlink("/tmp/original.txt", "/tmp/symlink.txt")?;
@@ -943,6 +980,7 @@ public fn symlink(src: &Path, dst: &Path) -> IoResult<()> {
 
 /// Read the target of a symbolic link.
 ///
+
 /// # Example
 /// ```verum
 /// let target = fs.read_link("/tmp/symlink")?;
@@ -964,8 +1002,10 @@ public fn read_link(path: &Path) -> IoResult<PathBuf> {
 
 /// Canonicalize a path (resolve all symlinks, . && ..).
 ///
+
 /// Returns an absolute path.
 ///
+
 /// # Example
 /// ```verum
 /// let real = fs.canonicalize("./relative/../path")?;
@@ -1055,6 +1095,7 @@ public fn set_permissions(path: &Path, perm: Permissions) -> IoResult<()> {
 
 /// Get the temporary directory.
 ///
+
 /// Returns `/tmp` on Unix, `%TEMP%` on Windows.
 @cfg(unix)
 public fn temp_dir() -> PathBuf {
@@ -1138,8 +1179,10 @@ public fn set_current_dir(path: &Path) -> IoResult<()> {
 
 /// Read the entire contents of a file into bytes.
 ///
+
 /// Convenience wrapper around File.open + read_to_end.
 ///
+
 /// # Example
 /// ```verum
 /// let data = fs.read("/path/to/file")?;
@@ -1150,6 +1193,7 @@ public fn read(path: &Path) -> IoResult<List<Byte>> {
 
 /// Read the entire contents of a file into a string.
 ///
+
 /// # Example
 /// ```verum
 /// let contents = fs.read_to_string("/path/to/file.txt")?;
@@ -1160,8 +1204,10 @@ public fn read_to_string(path: &Path) -> IoResult<Text> {
 
 /// Write bytes to a file.
 ///
+
 /// Creates the file if it doesn't exist, truncates if it does.
 ///
+
 /// # Example
 /// ```verum
 /// fs.write("/path/to/file", b"Hello, World!")?;
@@ -1181,6 +1227,7 @@ public fn write(path: &Path, contents: &[Byte]) -> IoResult<()> {
 
 /// Write a string to a file.
 ///
+
 /// # Example
 /// ```verum
 /// fs.write_str("/path/to/file.txt", "Hello, World!")?;
@@ -1195,11 +1242,12 @@ public fn write_str(path: &Path, contents: &Text) -> IoResult<()> {
 
 /// Recursively walk a directory tree.
 ///
+
 /// # Example
 /// ```verum
 /// for entry in fs.walk_dir("/home/user")? {
-///     let entry = entry?;
-///     print(entry.path());
+///  let entry = entry?;
+///  print(entry.path());
 /// }
 /// ```
 public fn walk_dir(path: &Path) -> IoResult<WalkDir> {

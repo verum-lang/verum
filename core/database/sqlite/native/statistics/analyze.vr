@@ -3,14 +3,17 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.2
 //
+
 // `AnalyzeEngine` walks the schema and emits sqlite_stat1 + sqlite_stat4
 // rows. Phase sequence:
 //
-//   AeInit → AeScanningTable(table) → AeFlushingStat1(table)
-//          → AeSamplingStat4(table) → AeFlushingStat4(table)
-//          → ... (next table)
-//          → AeDone
+
+//  AeInit → AeScanningTable(table) → AeFlushingStat1(table)
+//  → AeSamplingStat4(table) → AeFlushingStat4(table)
+//  → ... (next table)
+//  → AeDone
 //
+
 // On any per-table failure → `AeFailed(reason)`.
 // =============================================================================
 

@@ -5,37 +5,44 @@
 // Dependencies: core, core.async, core.net.quic.*
 // =============================================================================
 //
+
 // The ConnectionPump is the center of the pure-Verum transport: it
 // takes a bound UdpTransport + a QuicConnectionSm<S> and runs the
 // inbound/outbound/timer loop until the connection closes.
 //
+
 // Each pump tick:
 //
-//   1. **Drain inbound** — non-blocking `transport.recv` attempts;
-//      for each datagram:
-//        a. Walk coalesced QUIC packets (long header → short header
-//           transition marks the end).
-//        b. Route each packet through `rx.parse_{long,short}_packet`.
-//        c. Feed decrypted payload through `dispatch.dispatch_frames`.
-//        d. Forward CryptoChunks to `HandshakeDriver.on_crypto_chunk`.
-//        e. Update `PathManager.on_inbound_bytes`.
+
+//  1. **Drain inbound** — non-blocking `transport.recv` attempts;
+//  for each datagram:
+//  a. Walk coalesced QUIC packets (long header → short header
+//  transition marks the end).
+//  b. Route each packet through `rx.parse_{long,short}_packet`.
+//  c. Feed decrypted payload through `dispatch.dispatch_frames`.
+//  d. Forward CryptoChunks to `HandshakeDriver.on_crypto_chunk`.
+//  e. Update `PathManager.on_inbound_bytes`.
 //
-//   2. **Timer check** — `loss.timer_fires_at()` reached → `loss.on_timer`
-//      may emit a PROBE packet in the signalled PN space.
+
+//  2. **Timer check** — `loss.timer_fires_at()` reached → `loss.on_timer`
+//  may emit a PROBE packet in the signalled PN space.
 //
-//   3. **Drain outbound** — accumulate frames for each active PN space:
-//        a. CRYPTO frames from HandshakeDriver.take_outbound
-//        b. ACK frames from PnSpace.build_ack_frame when
-//           ack-eliciting packets are outstanding
-//        c. STREAM frames from app-level writes
-//        d. MAX_DATA / MAX_STREAM_DATA gate from flow_control heuristic
-//        Each batch is packed into a packet via `tx.build_{long,short}_packet`,
-//        HP-protected + AEAD-sealed, then UDP-sent via transport.
+
+//  3. **Drain outbound** — accumulate frames for each active PN space:
+//  a. CRYPTO frames from HandshakeDriver.take_outbound
+//  b. ACK frames from PnSpace.build_ack_frame when
+//  ack-eliciting packets are outstanding
+//  c. STREAM frames from app-level writes
+//  d. MAX_DATA / MAX_STREAM_DATA gate from flow_control heuristic
+//  Each batch is packed into a packet via `tx.build_{long,short}_packet`,
+//  HP-protected + AEAD-sealed, then UDP-sent via transport.
 //
-//   4. **Phase promotion** — when handshake_driver reports keys ready,
-//      extract the traffic secrets + call `QuicConnection.promote_*`
-//      + discard Initial/Handshake keys per RFC 9001 §4.9.
+
+//  4. **Phase promotion** — when handshake_driver reports keys ready,
+//  extract the traffic secrets + call `QuicConnection.promote_*`
+//  + discard Initial/Handshake keys per RFC 9001 §4.9.
 //
+
 // =============================================================================
 
 module core.net.quic.transport.pump;

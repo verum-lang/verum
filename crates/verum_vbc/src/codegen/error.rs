@@ -1,5 +1,6 @@
 //! VBC codegen error types.
 //!
+
 //! This module defines errors that can occur during AST-to-VBC compilation.
 
 use std::fmt;
@@ -194,6 +195,7 @@ impl CodegenError {
 
     /// Returns the undefined function name if this is an UndefinedFunction error.
     ///
+
     /// This is used for forward reference detection during stdlib compilation.
     /// Returns `Some(function_path)` if the error is `UndefinedFunction`, `None` otherwise.
     pub fn undefined_function_name(&self) -> Option<&str> {
@@ -205,25 +207,28 @@ impl CodegenError {
 
     /// Classifies this error into a "lenient skip" category.
     ///
+
     /// Used by `compile_item_lenient` and the stdlib hygiene baseline tests
     /// to distinguish:
     ///
+
     ///  * `BugClass` — error indicates a real codebase defect (an import
-    ///    gap, wrong arity, mismatched signature, missing trait impl).
-    ///    Surfacing path: warn-level trace today, hard error eventually
-    ///    (#166 close-out).
+    ///  gap, wrong arity, mismatched signature, missing trait impl).
+    ///  Surfacing path: warn-level trace today, hard error eventually
+    ///  (#166 close-out).
     ///  * `Irreducible` — error indicates the Tier-0 interpreter genuinely
-    ///    cannot compile the construct (FFI prototype, GPU shader,
-    ///    not-yet-implemented language feature).  Surfacing path: debug
-    ///    trace; baseline tests already exclude these by fixture choice.
+    ///  cannot compile the construct (FFI prototype, GPU shader,
+    ///  not-yet-implemented language feature). Surfacing path: debug
+    ///  trace; baseline tests already exclude these by fixture choice.
     ///
+
     /// The split is conservative: errors that *might* be either category
     /// (notably `Internal`) classify as `BugClass` so they stay loud.
     pub fn skip_class(&self) -> SkipClass {
         match &self.kind {
             // Genuine interpreter limitations — these fire when a function
             // body references an LLVM intrinsic, an unimplemented expression
-            // kind, or a feature stubbed out in the codegen path.  The
+            // kind, or a feature stubbed out in the codegen path. The
             // function is silently absent at runtime; users who call it
             // get a `FunctionNotFound` panic which is the expected and
             // documented contract.
@@ -232,21 +237,21 @@ impl CodegenError {
             | CodegenErrorKind::NotImplemented(_) => SkipClass::Irreducible,
 
             // Everything else is a real defect that should be fixed:
-            //   * UndefinedFunction / UndefinedVariable — import gap
-            //   * WrongArgumentCount / ArgumentTypeMismatch — caller / impl
-            //     drift
-            //   * TypeMismatch / TypeInference / InvalidTypeForOperation —
-            //     type system regression
-            //   * NonExhaustivePattern — coverage regression
-            //   * BreakOutsideLoop / ContinueOutsideLoop /
-            //     ReturnOutsideFunction — parser bug
-            //   * InvalidLiteral / InvalidBinaryOp / InvalidUnaryOp —
-            //     desugaring bug
-            //   * RegisterAllocationFailed / RegisterOverflow — codegen
-            //     resource exhaustion
-            //   * ImmutableAssignment / VariableAlreadyDefined / InvalidJumpTarget
-            //     — borrowck / lowering bug
-            //   * Internal — by definition a bug
+            //  * UndefinedFunction / UndefinedVariable — import gap
+            //  * WrongArgumentCount / ArgumentTypeMismatch — caller / impl
+            //  drift
+            //  * TypeMismatch / TypeInference / InvalidTypeForOperation —
+            //  type system regression
+            //  * NonExhaustivePattern — coverage regression
+            //  * BreakOutsideLoop / ContinueOutsideLoop /
+            //  ReturnOutsideFunction — parser bug
+            //  * InvalidLiteral / InvalidBinaryOp / InvalidUnaryOp —
+            //  desugaring bug
+            //  * RegisterAllocationFailed / RegisterOverflow — codegen
+            //  resource exhaustion
+            //  * ImmutableAssignment / VariableAlreadyDefined / InvalidJumpTarget
+            //  — borrowck / lowering bug
+            //  * Internal — by definition a bug
             _ => SkipClass::BugClass,
         }
     }
@@ -258,20 +263,20 @@ impl CodegenError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkipClass {
     /// The error indicates a real defect (import gap, arity mismatch,
-    /// type-system regression, codegen resource exhaustion).  Currently
+    /// type-system regression, codegen resource exhaustion). Currently
     /// surfaced as a warn-level trace; #166 closes by promoting these to
     /// hard errors.
     BugClass,
 
     /// The error indicates the Tier-0 interpreter cannot compile the
     /// construct (FFI prototype, unimplemented language feature, GPU
-    /// kernel).  Skipping is the documented contract: callers get a
+    /// kernel). Skipping is the documented contract: callers get a
     /// `FunctionNotFound` panic at runtime.
     Irreducible,
 }
 
 impl SkipClass {
-    /// Short label used in trace messages.  Stable for grep/regex
+    /// Short label used in trace messages. Stable for grep/regex
     /// scraping in CI logs.
     pub fn label(self) -> &'static str {
         match self {

@@ -1,6 +1,7 @@
 //! Integration tests for `verum audit --accessibility` (,
 //! A.Z.5 item 4 V2).
 //!
+
 //! Per item 4 + Diakrisis Axi-4: every `@enact(...)`
 //! marker in the project must carry an `@accessibility(λ)`
 //! annotation certifying the λ-accessibility bound the

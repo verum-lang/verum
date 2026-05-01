@@ -14,12 +14,14 @@
 )]
 //! Comprehensive module and mount system tests
 //!
+
 //! This test suite covers:
 //! 1. Mount statement parsing (simple, wildcard, group, aliased)
 //! 2. Module definition parsing (with and without body, visibility)
 //! 3. Path parsing (qualified names like std.collections.List)
 //! 4. Integration with verum_modules resolution
 //!
+
 //! Tests for module system syntax: module declarations, mount statements, visibility
 //! Module system: hierarchical modules, path resolution with dots (not ::), cog distribution
 

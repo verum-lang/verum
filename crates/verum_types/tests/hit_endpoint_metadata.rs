@@ -2,6 +2,7 @@
 //! `Foo(args) = from..to` syntax flow through to the type checker's
 //! `hit_path_constructors` side-channel registry.
 //!
+
 //! The lowering keeps `Type::Variant` as the primary representation for
 //! ordinary type checking; HIT-aware tactics (cubical, descent) then
 //! consult the side channel for path-constructor topology.
@@ -32,7 +33,7 @@ fn endpoint_expr(name: &str) -> Heap<Expr> {
 #[test]
 fn hit_variant_carries_endpoint_metadata_through_ast() {
     // Construct a HIT path-constructor variant directly:
-    //     | Seg() = Zero..One
+    //  | Seg() = Zero..One
     let from = endpoint_expr("Zero");
     let to = endpoint_expr("One");
 

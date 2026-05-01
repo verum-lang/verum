@@ -1,8 +1,10 @@
 //! YAML literal parser
 //!
+
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
+
 //! Parses and validates YAML literals:
 //! - yaml#"key: value"
 //! - yaml#"- item1\n- item2"
@@ -15,14 +17,17 @@ use crate::literal_registry::ParsedLiteral;
 
 /// Parse YAML literal at compile-time
 ///
+
 /// Semantic literal: `yaml#"..."` is compile-time validated YAML. Supports native
 /// YAML syntax including multiline strings (| and >), anchors, and aliases.
 /// Produces type YamlValue. Multiline form: `yaml#"""..."""`.
 ///
+
 /// # Arguments
 /// - `content`: The YAML string
 /// - `span`: Source location for error reporting
 ///
+
 /// # Returns
 /// Validated YAML on success
 pub fn parse_yaml(

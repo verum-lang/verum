@@ -1,41 +1,51 @@
 //! Quantitative Type Theory (QTT) usage analysis.
 //!
+
 //! In QTT every binding carries a `Quantity` describing how many
 //! times it may be used:
 //!
-//! | Quantity   | Meaning                                |
+
+//! | Quantity | Meaning |
 //! |------------|----------------------------------------|
-//! | `Zero`     | Erased — usable only at type level     |
-//! | `One`      | **Linear** — used exactly once at runtime |
-//! | `Omega`    | Unrestricted — used any number of times |
-//! | `AtMost(n)`| **Affine** — used ≤ n times              |
-//! | `Graded(n)`| Used at most n times (annotated)        |
+//! | `Zero` | Erased — usable only at type level |
+//! | `One` | **Linear** — used exactly once at runtime |
+//! | `Omega` | Unrestricted — used any number of times |
+//! | `AtMost(n)`| **Affine** — used ≤ n times |
+//! | `Graded(n)`| Used at most n times (annotated) |
 //!
+
 //! The `Quantity` type and its algebraic operations (`add`, `mul`,
 //! `allows`) live in `crate::ty::Quantity`. This module provides
 //! the **usage tracker** that walks an expression body, counts
 //! occurrences of each binding, and validates against the declared
 //! quantities.
 //!
+
 //! ## Branch semantics
 //!
+
 //! For control-flow nodes the usage count is the *maximum* across
 //! branches (worst-case execution path), not the sum:
 //!
+
 //! ```text
-//!     usage(if c then e1 else e2) = max(usage(e1), usage(e2))
-//!     usage(match s { p1 => e1; ... pn => en }) = max(usage(e1), ..., usage(en))
+//!  usage(if c then e1 else e2) = max(usage(e1), usage(e2))
+//!  usage(match s { p1 => e1; ... pn => en }) = max(usage(e1), ..., usage(en))
 //! ```
 //!
+
 //! Sequential composition (block, function call) sums:
 //!
+
 //! ```text
-//!     usage(e1; e2) = usage(e1) + usage(e2)
-//!     usage(f(e1, e2)) = usage(f) + usage(e1) + usage(e2)
+//!  usage(e1; e2) = usage(e1) + usage(e2)
+//!  usage(f(e1, e2)) = usage(f) + usage(e1) + usage(e2)
 //! ```
 //!
+
 //! ## Soundness
 //!
+
 //! For Linear (`One`) bindings, **both** branches of a conditional
 //! must use the binding exactly once — otherwise some execution
 //! path leaks the resource and another consumes it twice (when the
@@ -43,8 +53,10 @@
 //! that branch usages *agree* (same observed count) for any binding
 //! whose declared quantity is `One`.
 //!
+
 //! ## Integration status
 //!
+
 //! This module is the standalone analysis core. Wiring it into the
 //! type checker (which calls `check_function` after inference)
 //! is a separate integration step — keeping the analysis pure makes
@@ -255,6 +267,7 @@ pub fn check_binding(
 
 /// Validate a full usage map against a declaration map.
 ///
+
 /// `declarations` carries each binding's declared quantity;
 /// `observed` is the usage map produced by walking the function
 /// body. Returns the first violation found (deterministic by

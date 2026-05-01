@@ -1,98 +1,110 @@
 //! Debug symbols - `DebugInfoBuilder` interface
 //!
+
 //! # Example usage
 //!
+
 //! ## Setting up the module for holding debug info:
 //! ```ignore
 //! let context = Context::create();
 //! let module = context.create_module("bin");
 //!
+
 //! let debug_metadata_version = context.i32_type().const_int(3, false);
 //! module.add_basic_value_flag(
-//!     "Debug Info Version",
-//!     inkwell::module::FlagBehavior::Warning,
-//!     debug_metadata_version,
+//!  "Debug Info Version",
+//!  inkwell::module::FlagBehavior::Warning,
+//!  debug_metadata_version,
 //! );
 //! let builder = context.create_builder();
 //! let (dibuilder, compile_unit) = module.create_debug_info_builder(
-//!     true,
-//!     /* language */ inkwell::debug_info::DWARFSourceLanguage::C,
-//!     /* filename */ "source_file",
-//!     /* directory */ ".",
-//!     /* producer */ "my llvm compiler frontend",
-//!     /* is_optimized */ false,
-//!     /* compiler command line flags */ "",
-//!     /* runtime_ver */ 0,
-//!     /* split_name */ "",
-//!     /* kind */ inkwell::debug_info::DWARFEmissionKind::Full,
-//!     /* dwo_id */ 0,
-//!     /* split_debug_inling */ false,
-//!     /* debug_info_for_profiling */ false,
+//!  true,
+//!  /* language */ inkwell::debug_info::DWARFSourceLanguage::C,
+//!  /* filename */ "source_file",
+//!  /* directory */ ".",
+//!  /* producer */ "my llvm compiler frontend",
+//!  /* is_optimized */ false,
+//!  /* compiler command line flags */ "",
+//!  /* runtime_ver */ 0,
+//!  /* split_name */ "",
+//!  /* kind */ inkwell::debug_info::DWARFEmissionKind::Full,
+//!  /* dwo_id */ 0,
+//!  /* split_debug_inling */ false,
+//!  /* debug_info_for_profiling */ false,
 //! );
 //! ```
 //! ## Creating function debug info
 //! ```ignore
 //!  let ditype = dibuilder.create_basic_type(
-//!      "type_name",
-//!      0_u64,
-//!      0x00,
-//!      inkwell::debug_info::DIFlags::Public,
+//!  "type_name",
+//!  0_u64,
+//!  0x00,
+//!  inkwell::debug_info::DIFlags::Public,
 //!  ).unwrap();
 //!  let subroutine_type = dibuilder.create_subroutine_type(
-//!      compile_unit.get_file(),
-//!      /* return type */ Some(ditype.as_type()),
-//!      /* parameter types */ &[],
-//!      inkwell::debug_info::DIFlags::Public,
+//!  compile_unit.get_file(),
+//!  /* return type */ Some(ditype.as_type()),
+//!  /* parameter types */ &[],
+//!  inkwell::debug_info::DIFlags::Public,
 //!  );
 //!  let func_scope: DISubprogram<'_> = dibuilder.create_function(
-//!      /* scope */ compile_unit.as_debug_info_scope(),
-//!      /* func name */ "main",
-//!      /* linkage_name */ None,
-//!      /* file */ compile_unit.get_file(),
-//!      /* line_no */ 0,
-//!      /* DIType */ subroutine_type,
-//!      /* is_local_to_unit */ true,
-//!      /* is_definition */ true,
-//!      /* scope_line */ 0,
-//!      /* flags */ inkwell::debug_info::DIFlags::Public,
-//!      /* is_optimized */ false,
+//!  /* scope */ compile_unit.as_debug_info_scope(),
+//!  /* func name */ "main",
+//!  /* linkage_name */ None,
+//!  /* file */ compile_unit.get_file(),
+//!  /* line_no */ 0,
+//!  /* DIType */ subroutine_type,
+//!  /* is_local_to_unit */ true,
+//!  /* is_definition */ true,
+//!  /* scope_line */ 0,
+//!  /* flags */ inkwell::debug_info::DIFlags::Public,
+//!  /* is_optimized */ false,
 //!  );
 //! ```
 //! The `DISubprogram` value must be attached to the generated `FunctionValue`:
 //! ```ignore
 //! /* after creating function: */
-//!     let fn_val = module.add_function(fn_name_str, fn_type, None);
-//!     fn_val.set_subprogram(func_scope);
+//!  let fn_val = module.add_function(fn_name_str, fn_type, None);
+//!  fn_val.set_subprogram(func_scope);
 //! ```
 //!
+
 //! ## Setting debug locations
 //! ```ignore
 //! let lexical_block = dibuilder.create_lexical_block(
-//!         /* scope */ func_scope.as_debug_info_scope(),
-//!         /* file */ compile_unit.get_file(),
-//!         /* line_no */ 0,
-//!         /* column_no */ 0);
+//!  /* scope */ func_scope.as_debug_info_scope(),
+//!  /* file */ compile_unit.get_file(),
+//!  /* line_no */ 0,
+//!  /* column_no */ 0);
 //!
+
 //! let loc = dibuilder
-//!     .create_debug_location(&context, /* line */ 0, /* column */ 0,
-//!     /* current_scope */ lexical_block.as_debug_info_scope(),
-//!     /* inlined_at */ None);
+//!  .create_debug_location(&context, /* line */ 0, /* column */ 0,
+//!  /* current_scope */ lexical_block.as_debug_info_scope(),
+//!  /* inlined_at */ None);
 //! builder.set_current_debug_location(&context, loc);
 //!
+
 //! // Create global variable
 //! let gv = module.add_global(context.i64_type(), Some(inkwell::AddressSpace::Global), "gv");
 //!
+
 //!
+
 //! let const_v = di.create_constant_expression(10);
 //!
+
 //! let gv_debug = di.create_global_variable_expression(cu.get_file().as_debug_info_scope(), "gv", "", cu.get_file(), 1, ditype.as_type(), true, Some(const_v), None, 8);
 //!
+
 //! let meta_value: inkwell::values::BasicMetadataValueEnum = gv_debug.as_metadata_value(&context).into();
 //! let metadata = context.metadata_node(&[meta_value]);
 //! gv.set_metadata(metadata, 0);//dbg
 //!
+
 //! ```
 //!
+
 //! ## Finalize debug info
 //! Before any kind of code generation (including verification passes; they generate code and
 //! validate debug info), do:
@@ -243,6 +255,7 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
 
     /// A DICompileUnit provides an anchor for all debugging information generated during this instance of compilation.
     ///
+
     /// * `language` - Source programming language
     /// * `file` - File info
     /// * `producer` - Identify the producer of debugging information and code. Usually this is a compiler version string.
@@ -304,6 +317,7 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
 
     /// A DIFunction provides an anchor for all debugging information generated for the specified subprogram.
     ///
+
     /// * `scope` - Function scope.
     /// * `name` - Function name.
     /// * `linkage_name` - Mangled function name, if any.
@@ -312,8 +326,8 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
     /// * `ty` - Function type.
     /// * `is_local_to_unit` - True if this function is not externally visible.
     /// * `is_definition` - True if this is a function definition ("When isDefinition: false,
-    ///   subprograms describe a declaration in the type tree as opposed to a definition of a
-    ///   function").
+    ///  subprograms describe a declaration in the type tree as opposed to a definition of a
+    ///  function").
     /// * `scope_line` - Set to the beginning of the scope this starts
     /// * `flags` - E.g.: LLVMDIFlagLValueReference. These flags are used to emit dwarf attributes.
     /// * `is_optimized` - True if optimization is ON.
@@ -968,6 +982,7 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
 
     /// Construct a placeholders derived type to be used when building debug info with circular references.
     ///
+
     /// All placeholders must be replaced before calling finalize().
     pub unsafe fn create_placeholder_derived_type(&self, context: impl AsContextRef<'ctx>) -> DIDerivedType<'ctx> {
         let metadata_ref = LLVMTemporaryMDNode(context.as_ctx_ref(), std::ptr::null_mut(), 0);
@@ -979,6 +994,7 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
 
     /// Deletes a placeholder, replacing all uses of it with another derived type.
     ///
+
     /// # Safety:
     /// This and any other copies of this placeholder made by Copy or Clone
     /// become dangling pointers after calling this method.
@@ -993,6 +1009,7 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
     /// Construct any deferred debug info descriptors. May generate invalid metadata if debug info
     /// is incomplete. Module/function verification can then fail.
     ///
+
     /// Call before any kind of code generation (including verification). Can be called more than once.
     pub fn finalize(&self) {
         unsafe { LLVMDIBuilderFinalize(self.builder) };
@@ -1260,10 +1277,12 @@ impl DILexicalBlock<'_> {
 
 /// A debug location within the source code. Contains the following information:
 ///
+
 /// - line, column
 /// - scope
 /// - inlined at
 ///
+
 /// Created by `create_debug_location` of `DebugInfoBuilder` and consumed by
 /// `set_current_debug_location` of `Builder`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -1327,8 +1346,10 @@ impl<'ctx> DIGlobalVariableExpression<'ctx> {
 
 /// Specialized metadata node that contains a DWARF-like expression.
 ///
+
 /// # Remarks
 ///
+
 /// See also the [LLVM language reference](https://llvm.org/docs/LangRef.html#diexpression).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct DIExpression<'ctx> {
@@ -1395,12 +1416,15 @@ mod flags {
         const TYPE_PASS_BY_VALUE: Self;
         const TYPE_PASS_BY_REFERENCE: Self;
         //
+
         //const ENUM_CLASS: Self;
         const THUNK: Self;
         //const RESERVED_BIT4: Self;
         //
+
         //const BIGE_NDIAN: Self;
         //
+
         //const LITTLE_ENDIAN: Self;
         const INDIRECT_VIRTUAL_BASE: Self;
     }
@@ -1431,10 +1455,12 @@ mod flags {
         const TYPE_PASS_BY_VALUE: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagTypePassByValue;
         const TYPE_PASS_BY_REFERENCE: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagTypePassByReference;
         //
+
         //const ENUM_CLASS: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagEnumClass;
         const THUNK: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagThunk;
         //const BIG_ENDIAN: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagBigEndian;
         //
+
         //const LITTLE_ENDIAN: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagLittleEndian;
         const INDIRECT_VIRTUAL_BASE: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagIndirectVirtualBase;
     }

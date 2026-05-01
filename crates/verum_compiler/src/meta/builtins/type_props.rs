@@ -1,10 +1,13 @@
 //! Type Property Intrinsics (Tier 1 - Requires MetaTypes)
 //!
+
 //! Provides compile-time type property functions that access type layout information.
 //! All functions require the `MetaTypes` context since they query the type registry.
 //!
+
 //! ## Functions
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `size_of(T)` | `(Type) -> Int` | Get type size in bytes |
@@ -14,20 +17,25 @@
 //! | `type_min(T)` | `(Type) -> T` | Get minimum value for numeric type |
 //! | `type_max(T)` | `(Type) -> T` | Get maximum value for numeric type |
 //!
+
 //! ## Type Properties Syntax (Preferred)
 //!
+
 //! New code should use **Type Properties** syntax where available:
-//!   - `T.size` instead of `size_of(T)`
-//!   - `T.alignment` instead of `align_of(T)`
-//!   - `T.stride` instead of `stride_of(T)`
-//!   - `T.bits` instead of `type_bits(T)`
-//!   - `T.min` instead of `type_min(T)`
-//!   - `T.max` instead of `type_max(T)`
+//!  - `T.size` instead of `size_of(T)`
+//!  - `T.alignment` instead of `align_of(T)`
+//!  - `T.stride` instead of `stride_of(T)`
+//!  - `T.bits` instead of `type_bits(T)`
+//!  - `T.min` instead of `type_min(T)`
+//!  - `T.max` instead of `type_max(T)`
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 1**: All functions require `using [MetaTypes]` context.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -44,6 +52,7 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register type property builtins with context requirements
 ///
+
 /// All type property functions require MetaTypes context since they
 /// access type layout information from the type registry.
 pub fn register_builtins(map: &mut BuiltinRegistry) {
@@ -223,6 +232,7 @@ fn meta_type_max(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Const
 
 /// Try to fold a size-expression to a non-negative `u64`.
 ///
+
 /// Recognises bare integer literals and parenthesised wrappers around
 /// them — the two shapes a written-by-hand `[T; N]` size produces
 /// before const-evaluation runs. Anything else (named const, runtime

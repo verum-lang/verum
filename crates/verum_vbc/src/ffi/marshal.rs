@@ -1,10 +1,13 @@
 //! Type marshalling between Verum values and C types.
 //!
+
 //! This module handles the conversion of VBC `Value` types to/from
 //! raw C types for FFI calls.
 //!
+
 //! # Marshalling Rules
 //!
+
 //! | Verum Type | C Type | Notes |
 //! |------------|--------|-------|
 //! | Int | i8/i16/i32/i64 | Sign extension for smaller types |
@@ -64,6 +67,7 @@ impl std::error::Error for MarshalError {}
 
 /// Storage for a reference argument passed to FFI.
 ///
+
 /// When a Verum value (like an Int) needs to be passed by reference to FFI,
 /// we allocate temporary storage, store the value there, and pass the address.
 /// After the FFI call, for mutable references, we read back the value.
@@ -104,6 +108,7 @@ impl RefArgStorage {
 
 /// Information about a marshalled array buffer.
 ///
+
 /// When arrays are marshalled from VBC Values to C data, we track the buffer
 /// for cleanup and potential write-back of mutable references.
 #[derive(Debug, Clone)]
@@ -124,6 +129,7 @@ pub struct ArrayBufferInfo {
 
 /// Marshaller for converting between Verum values and C types.
 ///
+
 /// The marshaller handles all type conversions for FFI calls,
 /// including string allocation and lifetime management.
 pub struct Marshaller {
@@ -148,6 +154,7 @@ impl Marshaller {
 
     /// Clears all cached data.
     ///
+
     /// Call this after an FFI call completes to free cached strings and ref storage.
     pub fn clear_cache(&mut self) {
         self.string_cache.clear();
@@ -158,6 +165,7 @@ impl Marshaller {
 
     /// Tracks an array buffer for FFI marshalling.
     ///
+
     /// The buffer will be cleaned up when `cleanup_array_buffers` is called.
     pub fn track_array_buffer(&mut self, info: ArrayBufferInfo) {
         self.array_buffers.push(info);
@@ -165,11 +173,14 @@ impl Marshaller {
 
     /// Cleans up array buffers, optionally writing back mutable ones.
     ///
+
     /// For mutable array references, this converts the C data back to VBC Values
     /// and writes them to the original array. All buffers are then freed.
     ///
+
     /// # Safety
     ///
+
     /// The array_ptr in each ArrayBufferInfo must still be valid, and the buffer
     /// must not have been freed previously.
     pub unsafe fn cleanup_array_buffers(&mut self) {
@@ -228,6 +239,7 @@ impl Marshaller {
 
     /// Converts a Verum Value to a raw C value, allocating temporary storage for references.
     ///
+
     /// For pointer arguments, this creates temporary storage for the value and returns
     /// the address of that storage. Use `write_back_reg` to indicate the register
     /// to write back to after the FFI call (for mutable references).
@@ -288,6 +300,7 @@ impl Marshaller {
 
     /// Converts a Verum Value to a raw C value.
     ///
+
     /// Returns the raw bytes that can be passed to libffi.
     pub fn value_to_c(&mut self, value: Value, target: CTypeRuntime) -> Result<u64, MarshalError> {
         // Handle void first

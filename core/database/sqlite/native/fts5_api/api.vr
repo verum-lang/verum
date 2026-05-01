@@ -3,15 +3,17 @@
 // =============================================================================
 // Spec: fts5.h
 //
-//   struct fts5_api {
-//     int iVersion;          /* 3 in current releases */
-//     int (*xCreateTokenizer)(...);
-//     int (*xFindTokenizer)(...);
-//     int (*xCreateFunction)(...);
-//     int (*xCreateTokenizer_v2)(...);      /* iVersion >= 3 */
-//     int (*xFindTokenizer_v2)(...);        /* iVersion >= 3 */
-//   };
+
+//  struct fts5_api {
+//  int iVersion; /* 3 in current releases */
+//  int (*xCreateTokenizer)(...);
+//  int (*xFindTokenizer)(...);
+//  int (*xCreateFunction)(...);
+//  int (*xCreateTokenizer_v2)(...); /* iVersion >= 3 */
+//  int (*xFindTokenizer_v2)(...); /* iVersion >= 3 */
+//  };
 //
+
 // The catalogue stores which slots the runtime has bound.
 // =============================================================================
 

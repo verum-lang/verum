@@ -1,10 +1,13 @@
 //! Collection Operation Intrinsics (Tier 0 - Always Available)
 //!
+
 //! Pure collection functions that operate only on input values without
 //! accessing any external state. These are always available in meta expressions.
 //!
+
 //! ## List Operations
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `list_len(list)` | `(List<T>) -> Int` | Get list length |
@@ -16,8 +19,10 @@
 //! | `list_concat(a, b)` | `(List<T>, List<T>) -> List<T>` | Concatenate lists |
 //! | `list_reverse(list)` | `(List<T>) -> List<T>` | Reverse list |
 //!
+
 //! ## Map Operations
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `map_new()` | `() -> Map<Text, T>` | Create empty map |
@@ -30,8 +35,10 @@
 //! | `map_values(map)` | `(Map<K, V>) -> List<V>` | Get all values |
 //! | `map_entries(map)` | `(Map<K, V>) -> List<(K, V)>` | Get all entries |
 //!
+
 //! ## Set Operations
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `set_new()` | `() -> Set<Text>` | Create empty set |
@@ -44,8 +51,10 @@
 //! | `set_intersection(a, b)` | `(Set<T>, Set<T>) -> Set<T>` | Set intersection |
 //! | `set_difference(a, b)` | `(Set<T>, Set<T>) -> Set<T>` | Set difference |
 //!
+
 //! ## Text Operations
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `text_concat(parts...)` | `(...Text) -> Text` | Concatenate text values |
@@ -60,10 +69,13 @@
 //! | `text_ends_with(text, suffix)` | `(Text, Text) -> Bool` | Check suffix |
 //! | `text_contains(text, substr)` | `(Text, Text) -> Bool` | Check substring |
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 0**: No context required - these are pure computation functions.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -79,6 +91,7 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register collection builtins with context requirements
 ///
+
 /// All collection functions are Tier 0 (always available) since they
 /// perform pure computation without accessing external state.
 pub fn register_builtins(map: &mut BuiltinRegistry) {

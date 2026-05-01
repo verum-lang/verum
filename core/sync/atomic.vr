@@ -5,8 +5,10 @@
 // Dependencies: core, sys/{linux,darwin,windows}/thread, core/intrinsics
 // =============================================================================
 //
+
 // # Industrial-Grade Intrinsic System
 //
+
 // This module uses typed atomic intrinsics from core/intrinsics:
 // - atomic_load_u8/UInt16/UInt32/UInt64(ptr, ordering) - Typed atomic loads
 // - atomic_store_u8/UInt16/UInt32/UInt64(ptr, value, ordering) - Typed atomic stores
@@ -14,15 +16,18 @@
 // - atomic_fetch_add_u32/UInt64(ptr, value, ordering) - Typed fetch-add
 // - atomic_fetch_sub_u32/UInt64(ptr, value, ordering) - Typed fetch-sub
 //
+
 // The @intrinsic("name") attribute establishes intrinsic identity at declaration
 // time. When these functions are called through imports, the codegen recognizes
 // them via FunctionInfo.intrinsic_name and routes to the intrinsic codegen path.
 //
+
 // Futex operations use platform-specific implementations:
 // - Linux: SYS_FUTEX syscall via sys/linux/thread.vr
 // - macOS: pthread_cond via sys/darwin/thread.vr
 // - Windows: WaitForSingleObject via sys/windows/thread.vr
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -112,6 +117,7 @@ fn ordering_to_u8(order: MemoryOrdering) -> UInt8 {
 
 // Memory fence with specified ordering.
 //
+
 // Uses native CPU fence instructions:
 // - x86_64: mfence (SeqCst), lfence (Acquire), sfence (Release)
 // - ARM64: dmb ish variants
@@ -335,8 +341,9 @@ implement AtomicU8 {
 
     // Swap value, returning old value.
     //
+
     // Direct `atomic_exchange_u8` intrinsic (registered
-    // compiler-side in task #34).  Earlier revision used a
+    // compiler-side in task #34). Earlier revision used a
     // u32-aligned CAS loop with byte-masking — same structural-
     // soundness hazard as `fetch_add` (see below), now closed.
     public fn swap(&self, val: Byte, order: MemoryOrdering) -> Byte {
@@ -346,8 +353,9 @@ implement AtomicU8 {
 
     // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
     //
+
     // Direct `atomic_cas_u8` intrinsic (registered compiler-side
-    // in task #34).  Earlier revision used a u32-aligned word-
+    // in task #34). Earlier revision used a u32-aligned word-
     // level CAS with byte masking — same structural-soundness
     // hazard as `fetch_add` (see below), now closed.
     public fn compare_exchange(
@@ -374,6 +382,7 @@ implement AtomicU8 {
 
     // Atomic fetch-add, returns old value.
     //
+
     // Direct `atomic_fetch_add_u8` intrinsic (registered
     // compiler-side in commit 1eb4ef63 / task #24). Earlier
     // revision used a u32-aligned CAS loop with byte-masking
@@ -381,7 +390,7 @@ implement AtomicU8 {
     // slower (3-5× under contention because of the CAS retry
     // chain) AND structurally unsound: the load_u32 reads 3
     // bytes that BELONG TO ADJACENT FIELDS in the enclosing
-    // struct.  Concurrent writes to those neighbour bytes by
+    // struct. Concurrent writes to those neighbour bytes by
     // other threads (perfectly legitimate operations on
     // unrelated atomics) caused our CAS to retry indefinitely
     // and could observe torn reads of the neighbour data.
@@ -392,6 +401,7 @@ implement AtomicU8 {
 
     // Atomic fetch-sub, returns old value.
     //
+
     // Direct `atomic_fetch_sub_u8` intrinsic — same rationale
     // as `fetch_add` above.
     public fn fetch_sub(&self, val: Byte, order: MemoryOrdering) -> Byte {
@@ -401,8 +411,9 @@ implement AtomicU8 {
 
     // Atomic fetch-or, returns old value.
     //
+
     // Direct `atomic_fetch_or_u8` intrinsic (registered
-    // compiler-side in task #34).  Earlier revision used a
+    // compiler-side in task #34). Earlier revision used a
     // u32-aligned CAS loop with byte-masking — same structural-
     // soundness hazard as `fetch_add` (the load_u32 reads 3
     // bytes belonging to adjacent fields, foreign writes to
@@ -415,6 +426,7 @@ implement AtomicU8 {
 
     // Atomic fetch-and, returns old value.
     //
+
     // Direct `atomic_fetch_and_u8` intrinsic — same rationale
     // as `fetch_or` above.
     public fn fetch_and(&self, val: Byte, order: MemoryOrdering) -> Byte {
@@ -424,6 +436,7 @@ implement AtomicU8 {
 
     // Atomic fetch-xor, returns old value.
     //
+
     // Direct `atomic_fetch_xor_u8` intrinsic — same rationale
     // as `fetch_or` above.
     public fn fetch_xor(&self, val: Byte, order: MemoryOrdering) -> Byte {
@@ -1123,10 +1136,12 @@ const FUTEX_LOCKED_CONTENDED: Int = 2;
 // This is more efficient than SpinLock under contention because threads
 // sleep instead of consuming CPU cycles.
 //
+
 // Performance:
 // - Uncontended: ~25ns (slightly slower than spinlock's ~10ns)
 // - Contended: ~1-10μs (much better than spinlock's CPU waste)
 //
+
 // Spec: docs/audit1.md Section 11.5
 public type FutexLock is {
     state: AtomicInt,

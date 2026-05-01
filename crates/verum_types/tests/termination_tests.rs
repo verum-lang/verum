@@ -14,6 +14,7 @@
 )]
 //! Tests for termination checking functionality
 //!
+
 //! These tests verify that the termination checker correctly identifies:
 //! - Structurally recursive functions
 //! - Non-terminating functions
@@ -134,7 +135,7 @@ fn test_simple_recursive_function() {
     let mut checker = TerminationChecker::new();
 
     // fn factorial(n: Int) -> Int {
-    //     factorial(n)  // Non-terminating: no decreasing argument
+    //  factorial(n) // Non-terminating: no decreasing argument
     // }
     let body_expr = call_expr("factorial", vec![path_expr("n")]);
 

@@ -2,6 +2,7 @@
 // Provides IDE integration with real-time type checking, CBGR cost hints,
 // refinement validation, and counterexample generation via SMT solver
 //
+
 // This module is a thin CLI wrapper that delegates to the verum_lsp crate for all LSP functionality.
 
 use crate::error::{CliError, Result};
@@ -23,12 +24,14 @@ use verum_lsp::refinement_validation::{
 /// `Pin<Box<dyn Future + Send>>`-returning wrapper around a `Backend::handle_*`
 /// async method.
 ///
+
 /// tower-lsp 0.20's `.custom_method` is bound by
 /// `for<'a> Method<&'a S, P, R>`, which in turn requires a single concrete
 /// `Fut: Future + Send` type. Passing an `async fn` method directly fails
 /// the HRTB because `async fn` returns `impl Future + 'a` whose concrete
 /// type varies with `&self`'s lifetime.
 ///
+
 /// Boxing the future erases it into a named type per lifetime
 /// (`Pin<Box<dyn Future + Send + 'a>>`) that satisfies both `Fn` and `Send`,
 /// so `.custom_method` accepts it. The `Send` bound is satisfied because
@@ -53,6 +56,7 @@ macro_rules! boxed_handler {
 /// Build an `LspService` with every custom `verum/*` JSON-RPC method wired
 /// into the router.
 ///
+
 /// tower-lsp's `LspService::new` only routes the standard LSP methods; any
 /// custom name is silently dropped unless registered with `.custom_method`.
 /// This helper is the single place that knows about Verum-specific requests
@@ -93,6 +97,7 @@ pub enum Transport {
 
 /// Execute LSP server command
 ///
+
 /// This function starts the Verum Language Server using the specified transport.
 /// It delegates all LSP protocol handling to the `verum_lsp` crate.
 pub fn execute(transport: Transport) -> Result<()> {
@@ -109,6 +114,7 @@ pub fn execute(transport: Transport) -> Result<()> {
     // observable effect because format_on_save is an editor-side
     // preference in standard LSP clients.
     //
+
     // Surface the values via tracing::debug! at command entry,
     // gated on any non-default value, so the request is audible
     // until manifest [lsp] → verum_lsp::LspConfig integration

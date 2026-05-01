@@ -5,25 +5,32 @@
 // Dependencies: core (protocols, maybe, iterator, memory)
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI memory operations:
 // - Uses core/memory.vr native intrinsics (memcpy, memset, memcmp_bytes)
 // - No FFI dependencies on verum_runtime
 //
+
 // =============================================================================
 //
+
 // Slices are views into contiguous memory. They do not own their data.
 //
-// - &[T]     - Immutable slice (fat pointer: ptr + len)
+
+// - &[T] - Immutable slice (fat pointer: ptr + len)
 // - &mut [T] - Mutable slice
 //
+
 // This module provides:
 // - Slice iteration
 // - Slice splitting and joining
 // - Searching and sorting
 // - Binary search
 //
+
 // =============================================================================
 
 module core.collections.slice;
@@ -126,6 +133,7 @@ implement<T> [T] {
 
     /// Iterate over elements.
     ///
+
     /// Returns a double-ended iterator that supports both forward and reverse iteration.
     fn iter(&self) -> SliceIter<T> {
         SliceIter.new(self)
@@ -520,9 +528,11 @@ implement<T> [T] {
 
     /// Returns the index of the partition point according to the given predicate.
     ///
+
     /// Assumes that the slice is partitioned: all elements for which the predicate
     /// returns true come before all elements for which it returns false.
     ///
+
     /// Returns the index of the first element for which the predicate returns false,
     /// or the length of the slice if the predicate returns true for all elements.
     fn partition_point(&self, predicate: fn(&T) -> Bool) -> Int {
@@ -621,6 +631,7 @@ implement<T> [T] {
 
     /// Mutable iterator.
     ///
+
     /// Returns a double-ended iterator that supports both forward and reverse iteration.
     fn iter_mut(&mut self) -> SliceIterMut<T> {
         SliceIterMut.new(self)
@@ -742,6 +753,7 @@ implement<T> [T] {
 
     /// Sort slice in ascending order (stable).
     ///
+
     /// Stability means equal elements maintain their relative order.
     /// Uses merge sort for O(n log n) guaranteed performance.
     fn sort(&mut self)
@@ -752,6 +764,7 @@ implement<T> [T] {
 
     /// Sort with custom comparator (stable, merge sort).
     ///
+
     /// Guarantees O(n log n) worst-case and preserves the relative
     /// order of equal elements.
     fn sort_by(&mut self, compare: fn(&T, &T) -> Ordering) {
@@ -878,6 +891,7 @@ implement<T> [T] {
 
     /// Sort slice in ascending order (unstable).
     ///
+
     /// May be faster than stable sort but does not preserve relative order
     /// of equal elements. Uses quicksort.
     fn sort_unstable(&mut self)
@@ -944,6 +958,7 @@ implement<T> [T] {
 
     /// Rearranges the slice so that the element at `index` is in its sorted position.
     ///
+
     /// All elements before `index` will be <= element at `index`.
     /// All elements after `index` will be >= element at `index`.
     /// Uses quickselect algorithm, O(n) average.
@@ -979,6 +994,7 @@ implement<T> [T] {
 
     /// Remove consecutive duplicate elements in-place.
     ///
+
     /// Returns the new logical length of the deduplicated prefix.
     /// Elements beyond the returned length are unspecified.
     fn dedup(&mut self) -> Int
@@ -989,6 +1005,7 @@ implement<T> [T] {
 
     /// Remove consecutive elements that are equal according to the predicate.
     ///
+
     /// Returns the new logical length of the deduplicated prefix.
     fn dedup_by(&mut self, same: fn(&T, &T) -> Bool) -> Int {
         let len = self.len();
@@ -1039,6 +1056,7 @@ implement<T> [T] {
 
     /// Split slice by predicate, yielding subslices between matching elements.
     ///
+
     /// The matching elements are not included in the yielded subslices.
     /// Adjacent matches yield empty slices between them.
     fn split<P: fn(&T) -> Bool>(&self, predicate: P) -> Split<T, P> {
@@ -1052,6 +1070,7 @@ implement<T> [T] {
 
     /// Split slice by predicate, including the matching element at the end of each subslice.
     ///
+
     /// The last subslice will contain any remaining elements even if they don't end with a match.
     fn split_inclusive<P: fn(&T) -> Bool>(&self, predicate: P) -> SplitInclusive<T, P> {
         SplitInclusive {
@@ -1064,6 +1083,7 @@ implement<T> [T] {
 
     /// Split slice at most `n` times by predicate.
     ///
+
     /// At most `n` subslices are returned. The last subslice contains
     /// the remainder of the slice after `n-1` splits.
     fn splitn<P: fn(&T) -> Bool>(&self, n: Int, predicate: P) -> SplitN<T, P> {
@@ -1078,6 +1098,7 @@ implement<T> [T] {
 
     /// Split slice by predicate in reverse order.
     ///
+
     /// Like `split`, but yields subslices from the end.
     fn rsplit<P: fn(&T) -> Bool>(&self, predicate: P) -> RSplit<T, P> {
         RSplit {
@@ -1090,6 +1111,7 @@ implement<T> [T] {
 
     /// Split slice at most `n` times by predicate, from the end.
     ///
+
     /// Like `splitn`, but splits from the right.
     fn rsplitn<P: fn(&T) -> Bool>(&self, n: Int, predicate: P) -> RSplitN<T, P> {
         RSplitN {
@@ -1108,6 +1130,7 @@ implement<T> [T] {
 
 /// Iterator over slice elements.
 ///
+
 /// Supports double-ended iteration via `next()` and `next_back()`.
 /// Spec: docs/audit1.md Section 13.2 (Slice reverse iter)
 public type SliceIter<T> is {
@@ -1224,6 +1247,7 @@ implement<T> IntoIterator for SliceEnumerate<T> {
 
 /// Mutable slice iterator.
 ///
+
 /// Supports double-ended iteration via `next()` and `next_back()`.
 public type SliceIterMut<T> is {
     slice: &mut [T],
@@ -1412,6 +1436,7 @@ implement<T> IntoIterator for Windows<T> {
 
 /// Iterator that splits a slice by a predicate.
 ///
+
 /// Created by the `split()` method on slices.
 public type Split<T, P> is {
     slice: &[T],
@@ -1468,6 +1493,7 @@ implement<T, P: fn(&T) -> Bool> IntoIterator for Split<T, P> {
 
 /// Iterator that splits a slice by a predicate, including the matching element.
 ///
+
 /// Created by the `split_inclusive()` method on slices.
 public type SplitInclusive<T, P> is {
     slice: &[T],
@@ -1529,6 +1555,7 @@ implement<T, P: fn(&T) -> Bool> IntoIterator for SplitInclusive<T, P> {
 
 /// Iterator that splits a slice at most N times by a predicate.
 ///
+
 /// Created by the `splitn()` method on slices.
 public type SplitN<T, P> is {
     slice: &[T],
@@ -1595,6 +1622,7 @@ implement<T, P: fn(&T) -> Bool> IntoIterator for SplitN<T, P> {
 
 /// Iterator that splits a slice by a predicate, from the end.
 ///
+
 /// Created by the `rsplit()` method on slices.
 public type RSplit<T, P> is {
     slice: &[T],
@@ -1650,6 +1678,7 @@ implement<T, P: fn(&T) -> Bool> IntoIterator for RSplit<T, P> {
 
 /// Iterator that splits a slice at most N times by a predicate, from the end.
 ///
+
 /// Created by the `rsplitn()` method on slices.
 public type RSplitN<T, P> is {
     slice: &[T],

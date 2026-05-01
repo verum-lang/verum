@@ -1,5 +1,6 @@
 // Comprehensive integration test suite for P0 module system features.
 //
+
 // Tests full compilation pipeline scenarios including:
 // - Multi-file projects with prelude
 // - Visibility enforcement across files
@@ -10,6 +11,7 @@
 // - Large-scale projects (50+ modules)
 // - Stress tests (1000 modules, 100 levels deep)
 //
+
 // Module system: hierarchical namespaces, filesystem-mapped, mount-based imports,
 // visibility control (public/private/crate-local), protocol coherence (orphan rules)
 
@@ -66,6 +68,7 @@ impl TestProject {
 
 /// Test 3-file project with prelude types used throughout.
 ///
+
 /// Prelude: core types (Int, Text, Bool, List, Map, Maybe, etc.) auto-imported
 #[test]
 fn test_three_file_project_with_prelude() {
@@ -121,6 +124,7 @@ public fn handle_request(req: Request) -> Response {
 
 /// Test multi-file with custom crate prelude.
 ///
+
 /// Custom crate prelude: crate can define its own prelude module for auto-imports
 #[test]
 fn test_multi_file_custom_prelude() {
@@ -163,6 +167,7 @@ public type User is {
 
 /// Test that prelude doesn't conflict with explicit imports.
 ///
+
 /// Prelude auto-imports yield to explicit imports without conflict
 #[test]
 fn test_prelude_no_conflict_explicit_imports() {
@@ -205,6 +210,7 @@ public fn create() -> List<Int> {
 
 /// Test prelude in deeply nested modules.
 ///
+
 /// Prelude auto-imports yield to explicit imports without conflict
 #[test]
 fn test_prelude_in_nested_modules() {
@@ -247,6 +253,7 @@ public fn deep_function() -> List<Maybe<Result<Int, Text>>> {
 
 /// Test @![no_implicit_prelude] in one module doesn't affect others.
 ///
+
 /// @![no_implicit_prelude] disables auto-imports per-module, not crate-wide
 #[test]
 fn test_prelude_opt_out_isolated() {
@@ -294,6 +301,7 @@ public fn create() -> List<Int> {
 
 /// Test that private types are not accessible across files.
 ///
+
 /// Visibility: items without `public` modifier are private to their module
 #[test]
 fn test_private_types_not_accessible_cross_file() {
@@ -340,6 +348,7 @@ public fn use_service() -> Service {
 
 /// Test public(crate) visibility across multiple files in same crate.
 ///
+
 /// public(crate): visible to any module within the same crate, not externally
 #[test]
 fn test_crate_public_across_files() {
@@ -391,6 +400,7 @@ public(crate) fn get_count(state: &SharedState) -> Int {
 
 /// Test public(super) visibility in file-based modules.
 ///
+
 /// public(super): visible only to the parent module
 #[test]
 fn test_public_super_file_modules() {
@@ -433,6 +443,7 @@ public(super) fn get_config() -> Config {
 
 /// Test visibility with re-exports.
 ///
+
 /// Re-exports: `public import internal.Type` makes internal items public at a new path
 #[test]
 fn test_visibility_with_reexports() {
@@ -474,6 +485,7 @@ public fn use_type() -> InternalType {
 
 /// Test field visibility enforcement across files.
 ///
+
 /// Struct field visibility: each field can have its own visibility modifier
 #[test]
 fn test_field_visibility_cross_file() {
@@ -520,7 +532,7 @@ import crate.models.Account;
 public fn process(acc: Account) {
     let id = acc.id;  // OK: public
     let bal = acc.balance;  // OK: public(crate)
-    // let key = acc.secret_key;  // ERROR: private
+    // let key = acc.secret_key; // ERROR: private
     let bal2 = acc.get_balance();  // OK: public method
 }
 "#,
@@ -536,6 +548,7 @@ public fn process(acc: Account) {
 
 /// Test deep qualified paths in full compilation.
 ///
+
 /// Module paths: absolute (crate.network.tcp), relative (self, super), qualified names
 #[test]
 fn test_deep_qualified_paths_compilation() {
@@ -594,6 +607,7 @@ public fn create_map() -> HashMap<Text, Int> {
 
 /// Test qualified paths with generic types.
 ///
+
 /// Renaming imports: `import mod.Error as ParseError` avoids name conflicts
 #[test]
 fn test_qualified_paths_generic_types() {
@@ -644,6 +658,7 @@ public fn create() -> Container<Item> {
 
 /// Test protocol implementation with qualified paths.
 ///
+
 /// Protocol coherence: orphan rule requires local protocol OR local type for impl
 #[test]
 fn test_protocol_impl_qualified_paths() {
@@ -694,6 +709,7 @@ implement Display for MyType {
 
 /// Test super and self paths in compilation.
 ///
+
 /// Module paths: absolute (crate.network.tcp), relative (self, super), qualified names
 #[test]
 fn test_super_self_paths_compilation() {
@@ -738,6 +754,7 @@ public fn use_sibling() -> TypeA {
 
 /// Test nested directory structure compilation.
 ///
+
 /// Filesystem mapping: foo/bar.vr -> module foo.bar, foo/mod.vr -> module foo
 #[test]
 fn test_nested_directory_compilation() {
@@ -796,6 +813,7 @@ public fn main() {
 
 /// Test 50-module project with complex dependencies.
 ///
+
 /// Scalability: module system must handle 50+ modules without degradation
 #[test]
 fn test_fifty_module_project() {
@@ -842,6 +860,7 @@ public type Type{} is {{
 
 /// Test project with circular dependencies (allowed for types).
 ///
+
 /// External crate imports: `import serde.{Serialize, Deserialize}`
 #[test]
 fn test_circular_dependencies() {
@@ -889,6 +908,7 @@ public type TypeB is {
 
 /// Test complex generic constraints across modules.
 ///
+
 /// Renaming imports: `import mod.Error as ParseError` avoids name conflicts, #4.1
 #[test]
 fn test_complex_generic_constraints() {
@@ -971,6 +991,7 @@ implement Display for MyType {
 
 /// Test deeply nested module hierarchy (10 levels).
 ///
+
 /// Filesystem mapping: foo/bar.vr -> module foo.bar, foo/mod.vr -> module foo
 #[test]
 fn test_deeply_nested_hierarchy() {
@@ -1016,6 +1037,7 @@ public fn use_deep() -> DeepType {
 
 /// Test project with many re-exports.
 ///
+
 /// Re-exports: `public import internal.Type` makes internal items public at a new path
 #[test]
 fn test_many_reexports() {
@@ -1073,6 +1095,7 @@ public fn use_all() -> (Type1, Type2, Type3, Type4, Type5) {
 
 /// Test compilation time for medium project (cold compile).
 ///
+
 /// Performance: compilation > 50K LOC/sec, type inference < 100ms/10K LOC
 #[test]
 fn test_compilation_time_medium_project() {
@@ -1119,6 +1142,7 @@ public fn create{}() -> Type{} {{
 
 /// Test memory usage with many types.
 ///
+
 /// Memory: module resolution should use < 5% overhead over source size
 #[test]
 fn test_memory_usage_many_types() {
@@ -1143,6 +1167,7 @@ fn test_memory_usage_many_types() {
 
 /// Test error recovery with multiple errors.
 ///
+
 /// Error recovery: collect multiple errors before aborting, provide actionable diagnostics
 #[test]
 fn test_error_recovery_multiple_errors() {
@@ -1183,6 +1208,7 @@ public type TypeB is {
 
 /// Test incremental compilation benefit.
 ///
+
 /// Incremental compilation: recompile only changed modules and their dependents
 #[test]
 fn test_incremental_compilation() {
@@ -1247,6 +1273,7 @@ public type TypeA is { value: Int, extra: Int }
 
 /// Stress test: 100 modules with dependencies.
 ///
+
 /// Scalability: 100+ modules with complex dependency graphs should compile efficiently
 #[test]
 fn test_stress_hundred_modules() {

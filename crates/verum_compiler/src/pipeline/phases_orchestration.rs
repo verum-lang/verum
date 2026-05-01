@@ -1,32 +1,35 @@
 //! Phase orchestration cluster (safety gate → typecheck → verify
 //! → context/send_sync/cbgr/ffi).
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 23). Houses eight
 //! phase orchestrator wrappers that drive the per-module
 //! compilation lifecycle. Each wrapper either delegates to a
 //! dedicated phase crate (`crate::phases::*`) or composes the
 //! sub-pass set itself.
 //!
+
 //! Surface:
 //!
-//!   * `phase_safety_gate` — Phase 2.9 `[safety]` feature gates
-//!     (unsafe blocks, `@ffi`, extern fn).
-//!   * `phase_stdlib_lints` — pure-AST stdlib hazard linter
-//!     (W05xx warning class).
-//!   * `phase_type_check` — Phase 3 type checking
-//!     (the largest single method at ~792 LOC; orchestrates
-//!     every sub-pass from name registration through method
-//!     dispatch).
-//!   * `phase_dependency_analysis` — Phase 3.5 target-profile
-//!     enforcement (no_std / no_alloc / embedded / cbgr_static_only).
-//!   * `phase_verify` — Phase 4 refinement + theorem
-//!     verification (Z3 + CVC5 portfolio).
-//!   * `phase_context_validation` — Phase 4c context-system
-//!     validation (negative constraints, provision checks).
-//!   * `phase_send_sync_validation` — Phase 4d Send/Sync
-//!     compile-time enforcement.
-//!   * `phase_ffi_validation` — Phase 5b FFI boundary
-//!     validation.
+
+//!  * `phase_safety_gate` — Phase 2.9 `[safety]` feature gates
+//!  (unsafe blocks, `@ffi`, extern fn).
+//!  * `phase_stdlib_lints` — pure-AST stdlib hazard linter
+//!  (W05xx warning class).
+//!  * `phase_type_check` — Phase 3 type checking
+//!  (the largest single method at ~792 LOC; orchestrates
+//!  every sub-pass from name registration through method
+//!  dispatch).
+//!  * `phase_dependency_analysis` — Phase 3.5 target-profile
+//!  enforcement (no_std / no_alloc / embedded / cbgr_static_only).
+//!  * `phase_verify` — Phase 4 refinement + theorem
+//!  verification (Z3 + CVC5 portfolio).
+//!  * `phase_context_validation` — Phase 4c context-system
+//!  validation (negative constraints, provision checks).
+//!  * `phase_send_sync_validation` — Phase 4d Send/Sync
+//!  compile-time enforcement.
+//!  * `phase_ffi_validation` — Phase 5b FFI boundary
+//!  validation.
 
 use std::time::Instant;
 
@@ -50,6 +53,7 @@ impl<'s> CompilationPipeline<'s> {
     /// Phase 2.9: Safety feature gates (unsafe blocks, unsafe fn,
     /// `@ffi` / extern fn, per `[safety]` in verum.toml).
     ///
+
     /// **Runs independently of verify_mode** so `--verify runtime`
     /// cannot silently bypass the gate. Invoked by BOTH the
     /// interpreter and AOT paths before type-checking. Emits a
@@ -88,6 +92,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Stdlib-hazard lint pass.
     ///
+
     /// Pure AST walk; runs before type checking so the user sees
     /// W05xx warnings even when the module has type errors that
     /// would stop the pipeline at `phase_type_check`. Findings
@@ -163,10 +168,10 @@ impl<'s> CompilationPipeline<'s> {
         // but register_builtins() is idempotent and ensures core intrinsics are available.
         checker.register_builtins();
 
-        // Apply `[protocols].coherence` from manifest.  Closes the
+        // Apply `[protocols].coherence` from manifest. Closes the
         // inert-defense pattern at session.rs:587 — pre-fix the CLI
         // build path bypassed the field entirely (it only flowed
-        // through `run_common_pipeline` from api.rs).  Now both
+        // through `run_common_pipeline` from api.rs). Now both
         // entry points consume the manifest value and gate
         // `register_impl`'s orphan-rule + overlap checks.
         {
@@ -188,9 +193,9 @@ impl<'s> CompilationPipeline<'s> {
         );
 
         // Apply `[protocols].generic_associated_types` from manifest.
-        // Closes #265.  Default false: a protocol declaring an
+        // Closes #265. Default false: a protocol declaring an
         // associated type with non-empty type_params (`type Item<T>`)
-        // is rejected at registration time.  Manifest validation
+        // is rejected at registration time. Manifest validation
         // enforces that this flag can be true only when
         // [protocols].associated_types is also true.
         checker.set_generic_associated_types_enabled(
@@ -223,6 +228,7 @@ impl<'s> CompilationPipeline<'s> {
         // Dependent type pipeline activation (Phase A.5 — surgical)
         // ==============================================================
         //
+
         // Historical note: before this hook was added, the entire SMT-
         // based dependent type verification path in `verum_types` and
         // `verum_smt/src/dependent.rs` was dormant code — fully
@@ -232,35 +238,43 @@ impl<'s> CompilationPipeline<'s> {
         // ran in isolated unit tests that called `enable_dependent_types`
         // explicitly. Production builds therefore silently bypassed it.
         //
+
         // This activation is deliberately **opportunistic**:
         //
-        //   - If the module contains ANY declaration that uses dependent-
-        //     type machinery (theorem / lemma / axiom / corollary /
-        //     tactic items, or refinement predicates on function
-        //     parameters / return types), we enable the checker's
-        //     dependent type subsystem so Pi, Sigma, Eq and universe
-        //     constraints are verified through SMT.
+
+        //  - If the module contains ANY declaration that uses dependent-
+        //  type machinery (theorem / lemma / axiom / corollary /
+        //  tactic items, or refinement predicates on function
+        //  parameters / return types), we enable the checker's
+        //  dependent type subsystem so Pi, Sigma, Eq and universe
+        //  constraints are verified through SMT.
         //
-        //   - Modules that do NOT use any of the above pay zero cost —
-        //     the subsystem remains disabled and compilation is
-        //     bit-identical to the pre-activation behaviour.
+
+        //  - Modules that do NOT use any of the above pay zero cost —
+        //  the subsystem remains disabled and compilation is
+        //  bit-identical to the pre-activation behaviour.
         //
+
         // This preserves backward compatibility with every existing
         // `.vr` source file while making dependent types available to
         // theorem-bearing modules without requiring any user flag.
         //
+
         // Detection criteria (keep in sync with proof_erasure in
         // `crates/verum_vbc/src/codegen/mod.rs:3232-3250`):
         //
-        //   - `ItemKind::Theorem | Lemma | Corollary | Axiom | Tactic`
-        //     always require dependent type checking (proof goals are
-        //     type-level propositions).
+
+        //  - `ItemKind::Theorem | Lemma | Corollary | Axiom | Tactic`
+        //  always require dependent type checking (proof goals are
+        //  type-level propositions).
         //
+
         // A future refinement may also scan for explicit Pi / Sigma /
         // refinement types in function signatures and enable the
         // subsystem only when needed; for now, "any proof item present"
         // is the conservative, opt-in trigger.
         //
+
         // Related: `crates/verum_types/src/infer.rs:3135`
         // (`enable_dependent_types`), `:3118` (`verify_dependent_type`),
         // `:4097` (`verify_dependent_type_constraint`), call sites at
@@ -394,6 +408,7 @@ impl<'s> CompilationPipeline<'s> {
                                         // with "undefined context" even though the
                                         // resolver accepted it.
                                         //
+
                                         // `register_stdlib_context_full` is idempotent
                                         // enough: a second registration overwrites
                                         // the declaration with the same content.
@@ -561,11 +576,13 @@ impl<'s> CompilationPipeline<'s> {
         // and implement block methods (List.push, Maybe.unwrap, etc.) available
         // for type checking user code.
         //
+
         // This is stdlib-agnostic: the compiler knows nothing about which types
         // or methods exist — it simply processes whatever .vr files were loaded.
         // ═══════════════════════════════════════════════════════════════════
         // Collect all stdlib modules (clone Arc handles to avoid borrow conflict).
         //
+
         // CRITICAL: Sort by key to ensure deterministic iteration order. self.modules is a
         // HashMap, so its natural iteration order is non-deterministic. When two modules
         // expose functions with the same short name (e.g. `core.base.memory::drop<T>` vs
@@ -573,6 +590,7 @@ impl<'s> CompilationPipeline<'s> {
         // ordering lets different signatures "win" the top-level binding on different
         // runs, causing flaky L2 test failures.
         //
+
         // Shallower (fewer-dot) module keys are prioritized so top-level stdlib functions
         // beat nested-module helpers when short names collide.
         let mut stdlib_entries: Vec<_> = self.modules.iter()
@@ -677,10 +695,12 @@ impl<'s> CompilationPipeline<'s> {
 
         // Two-pass type resolution for order-independent type definitions:
         //
+
         // This allows types to reference each other regardless of definition order:
-        //   type SearchRequest is { sort_by: SortOrder };  // SortOrder used before defined
-        //   type SortOrder is Relevance | Downloads;
+        //  type SearchRequest is { sort_by: SortOrder }; // SortOrder used before defined
+        //  type SortOrder is Relevance | Downloads;
         //
+
         // Pass 1a: Register all type names as placeholders
         // This makes all type names available for forward references
         checker.register_all_type_names(&module.items);
@@ -755,8 +775,8 @@ impl<'s> CompilationPipeline<'s> {
 
         // Pass 4: Register function signatures (enables forward references)
         // This allows functions to call other functions defined later in the file:
-        //   fn main() -> Int { fib(10) }  // fib is defined below
-        //   fn fib(n: Int) -> Int { ... }
+        //  fn main() -> Int { fib(10) } // fib is defined below
+        //  fn fib(n: Int) -> Int { ... }
         for item in &module.items {
             if let verum_ast::ItemKind::Function(func) = &item.kind {
                 if let Err(e) = checker.register_function_signature(func) {
@@ -791,6 +811,7 @@ impl<'s> CompilationPipeline<'s> {
         // define these contexts — they expect a test harness to provide them at runtime.
         // In lenient mode, undefined contexts are silently accepted.
         //
+
         // Detection: Check source for `// @test:` comment header (VCS convention)
         // or `@test` AST attribute on any item.
         let has_test_annotation = {
@@ -904,7 +925,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Drain coherence violations downgraded to warnings under
         // `[protocols].coherence = "lenient"`. Strict / unchecked
-        // modes leave this empty.  Surfacing as Warning-severity
+        // modes leave this empty. Surfacing as Warning-severity
         // diagnostics keeps the user informed without blocking the
         // build — closes the inert-defense pattern around the
         // manifest field by making lenient mode observable.
@@ -930,12 +951,15 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 3b: Dependency analysis for embedded constraints
     ///
+
     /// This phase validates that items are compatible with the target profile's
     /// constraints (no_alloc, no_std, embedded, cbgr_static_only, no_gpu).
     ///
+
     /// It runs after type checking to ensure all types are resolved before
     /// analyzing their dependency requirements.
     ///
+
     /// Validates items against target profile constraints (no_alloc, no_std, etc.).
     pub(super) fn phase_dependency_analysis(&self, module: &Module) -> Result<()> {
         use crate::phases::dependency_analysis::DependencyAnalyzer;
@@ -1086,6 +1110,7 @@ impl<'s> CompilationPipeline<'s> {
         // ───────────────────────────────────────────────────────────
         // Parallel per-function verification (#100, Z3 + CVC5).
         //
+
         // Both backends are constructed per call inside
         // `verify_function_refinements` (`SmtContext::with_config(…)`
         // + `SmtRefinementVerifier::with_mode(…)`), so each rayon
@@ -1093,11 +1118,13 @@ impl<'s> CompilationPipeline<'s> {
         // shared session-level `routing_stats` is `Arc<RoutingStats>`
         // with internally-atomic counters, safe to fan out.
         //
+
         // Counters and `CostTracker` are accumulated under a single
         // Mutex held only across the per-record append (microsecond-
         // scale) — ~zero contention versus the millisecond/second
         // SMT calls each worker spends.
         //
+
         // Opt-out: `VERUM_NO_PARALLEL_VERIFY=1` falls back to the
         // sequential loop. Useful for debugging non-deterministic
         // diagnostic ordering or pinning down a parallel-only
@@ -1279,7 +1306,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Auto-route proof certificates when manifest enables them (#285).
         // For each verified theorem/lemma/corollary, emit a stub
-        // certificate file in the manifest-selected format.  The
+        // certificate file in the manifest-selected format. The
         // stub carries the theorem statement with `Admitted.` /
         // `sorry` placeholder body — full proof-term reconstruction
         // is tracked as #285-Followup.
@@ -1291,7 +1318,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Emit proof-certificate files for every verified theorem-like
-    /// item in the module (#285).  Format and output directory come
+    /// item in the module (#285). Format and output directory come
     /// from `CompilerOptions.proof_certificate_format` /
     /// `proof_certificate_path`; defaults are Lean format and
     /// `target/audit-reports/proof-certificates/` directory.
@@ -1403,13 +1430,16 @@ impl<'s> CompilationPipeline<'s> {
     // verify_impl_axioms_for_module + find_protocol_decl extracted to
     // crate::pipeline::impl_axioms (#106 Phase 3 — pipeline.rs split).
     //
+
     // verify_theorem_proofs extracted to crate::pipeline::theorem_proofs
     // (#106 Phase 2 — pipeline.rs split).
     //
+
     // run_bounds_elimination_analysis + analyze_function_bounds_checks
     // + count_index_accesses + count_index_in_expr extracted to
     // crate::pipeline::bounds_stats (#106 Phase 1 — pipeline.rs split).
     //
+
     // verify_function_refinements + verify_return_refinement_smt +
     // verify_return_expr_smt + extract_return_values +
     // syntactic_check_refinement + extract_pattern_name +
@@ -1421,47 +1451,54 @@ impl<'s> CompilationPipeline<'s> {
     // get_module_profile_from_registry + type_to_text extracted to
     // crate::pipeline::profile_boundaries (#106 Phase 7).
     //
+
     // check_protocol_coherence + register_module_coherence_items
     // extracted to crate::pipeline::coherence (#106 Phase 6).
     //
+
     // extract_cfg_predicates / cfg_expr_to_predicate / expr_to_ident_string /
     // expr_to_string_literal extracted (and were previously duplicated) to
     // crate::cfg_eval — single source of truth (#106 Phase 5).
 
     // ==================== Phase 7: VBC Execution (Two-Tier Model v2.1) ====================
     //
+
     // This section handles the final execution step for VBC modules:
     // - Tier 0 (Interpreter): Direct VBC interpretation via `phase_interpret()`
     // - Tier 1 (AOT): VBC → LLVM IR → Native via `run_native_compilation()`
-    //                 VBC → MLIR → GPU binaries via `run_mlir_aot()` (for @device(GPU))
+    //  VBC → MLIR → GPU binaries via `run_mlir_aot()` (for @device(GPU))
     //
+
     // Architecture:
     // ```
     // Monomorphized VBC Module
-    //       │
-    //       ├─── Tier 0 ──► verum_vbc::interpreter::Interpreter
-    //       │                 • ~1ms startup, ~20ns/call
-    //       │                 • Full CBGR safety checks
-    //       │                 • Used for: dev, REPL, debugging
-    //       │
-    //       └─── Tier 1 ──► CPU: VbcToLlvmLowering → LLVM IR → Native
-    //                       GPU: VbcToMlirGpuLowering → MLIR → PTX/HSACO
-    //                         • ~1s startup, ~1ns/call
-    //                         • Proven-safe checks eliminated (0ns)
-    //                         • Used for: production builds
+    //  │
+    //  ├─── Tier 0 ──► verum_vbc::interpreter::Interpreter
+    //  │ • ~1ms startup, ~20ns/call
+    //  │ • Full CBGR safety checks
+    //  │ • Used for: dev, REPL, debugging
+    //  │
+    //  └─── Tier 1 ──► CPU: VbcToLlvmLowering → LLVM IR → Native
+    //  GPU: VbcToMlirGpuLowering → MLIR → PTX/HSACO
+    //  • ~1s startup, ~1ns/call
+    //  • Proven-safe checks eliminated (0ns)
+    //  • Used for: production builds
     // ```
     //
+
     // Performance Characteristics:
-    // | Tier        | Startup | Runtime    | Check Elimination |
+    // | Tier | Startup | Runtime | Check Elimination |
     // |-------------|---------|------------|-------------------|
-    // | Interpreter | ~1ms    | ~20ns/call | None (full CBGR)  |
-    // | AOT (CPU)   | ~1s     | ~1ns/call  | 50-90% typical    |
+    // | Interpreter | ~1ms | ~20ns/call | None (full CBGR) |
+    // | AOT (CPU) | ~1s | ~1ns/call | 50-90% typical |
     //
+
     // Two-tier execution: Interpreter (fast startup, full CBGR) and AOT (LLVM, 50-90% check elimination).
 
     /// Phase 4b: FFI Boundary Validation
     /// Phase 4c: Context System Validation
     ///
+
     /// Validates context usage: undeclared contexts, unprovided contexts,
     /// negative context violations (direct + transitive), and conflicts.
     /// Runs as warnings for now (errors would break existing code that
@@ -1522,6 +1559,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 4d: Send/Sync compile-time enforcement
     ///
+
     /// Validates that types crossing thread boundaries (spawn, Channel.send, Shared)
     /// satisfy Send/Sync bounds. Emits warnings (not errors) for now.
     pub(super) fn phase_send_sync_validation(&self, module: &Module) {
@@ -1538,6 +1576,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 4b: FFI Boundary Validation
     ///
+
     /// `extern {}` blocks: warn-only (stdlib compatibility).
     /// `ffi {}` blocks: strict errors (user-written contracts must be correct).
 

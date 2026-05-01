@@ -1,55 +1,65 @@
 //! CFG Constructor for CBGR Tier Analysis.
 //!
+
 //! This module converts AST functions to Control Flow Graphs (CFGs) for escape analysis.
 //! The resulting CFGs are used by `verum_cbgr::tier_analysis::TierAnalyzer` to determine
 //! optimal reference tiers (0, 1, or 2) for each reference operation.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! AST Module
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! CfgConstructor::from_module()
-//!     │
-//!     ├── For each function:
-//!     │   ├── Allocate entry/exit blocks
-//!     │   ├── Walk function body
-//!     │   ├── Create BasicBlocks for control flow
-//!     │   ├── Track DefSites for &/&mut expressions
-//!     │   └── Track UseeSites for dereference operations
-//!     │
-//!     ▼
+//!  │
+//!  ├── For each function:
+//!  │ ├── Allocate entry/exit blocks
+//!  │ ├── Walk function body
+//!  │ ├── Create BasicBlocks for control flow
+//!  │ ├── Track DefSites for &/&mut expressions
+//!  │ └── Track UseeSites for dereference operations
+//!  │
+//!  ▼
 //! ModuleCfg { functions: Map<FunctionId, ControlFlowGraph> }
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! TierAnalyzer::analyze() → TierAnalysisResult
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! TierContext::from_analysis_result()
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! VBC Codegen with tier-aware instructions
 //! ```
 //!
+
 //! # Reference Tracking
 //!
+
 //! The constructor tracks two types of sites:
 //!
+
 //! 1. **DefSites**: Where references are created
-//!    - `&expr` → DefSite(ref_id, span, is_stack_allocated=true)
-//!    - `&mut expr` → DefSite(ref_id, span, is_stack_allocated=true)
+//!  - `&expr` → DefSite(ref_id, span, is_stack_allocated=true)
+//!  - `&mut expr` → DefSite(ref_id, span, is_stack_allocated=true)
 //!
+
 //! 2. **UseeSites**: Where references are dereferenced
-//!    - `*expr` → UseeSite(ref_id, span, is_mutable=false)
-//!    - `*expr = value` → UseeSite(ref_id, span, is_mutable=true)
+//!  - `*expr` → UseeSite(ref_id, span, is_mutable=false)
+//!  - `*expr = value` → UseeSite(ref_id, span, is_mutable=true)
 //!
+
 //! # Span-based RefId Mapping
 //!
+
 //! The constructor maintains span→RefId mappings that are passed to TierAnalysisResult.
 //! This allows VBC codegen to look up tier decisions using expression spans, which
 //! matches how ExprId is computed during code generation.
 //!
+
 //! CFG construction: ExprId and RefId unified into single node identifiers
 //! for consistent dataflow analysis across expression and reference tracking.
 
@@ -98,6 +108,7 @@ pub struct FunctionCfg {
 
 /// Constructs Control Flow Graphs from AST modules for tier analysis.
 ///
+
 /// The constructor walks the AST and builds CFGs with DefSite/UseeSite tracking
 /// that can be passed to `TierAnalyzer` for escape analysis and tier determination.
 pub struct CfgConstructor {

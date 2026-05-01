@@ -5,33 +5,41 @@
 // Dependencies: core, async/poll, async/waker, async/future
 // =============================================================================
 //
+
 // A Stream is an asynchronous iterator. It produces a sequence of values
 // asynchronously, yielding control back to the executor between items.
 //
+
 // # Overview
 //
+
 // - Stream: Core protocol for async iteration
 // - StreamExt: Extension methods for stream combinators
 // - Combinators: map, filter, take, skip, chain, etc.
 // - Constructors: iter, stream_repeat, stream_once, stream_empty, stream_from_fn, stream_unfold
 // - Sinks: collect, fold, for_each
 //
+
 // # Example
 //
+
 // ```verum
 // // Create a stream from an iterator
 // let stream = iter([1, 2, 3, 4, 5]);
 //
+
 // // Use combinators
 // let doubled = stream
-//     .map(|x| x * 2)
-//     .filter(|x| *x > 4);
+//  .map(|x| x * 2)
+//  .filter(|x| *x > 4);
 //
+
 // // Collect results
 // let res: List<Int> = doubled.collect().await;
 // assert_eq(result, [4, 6, 8, 10]);
 // ```
 //
+
 // =============================================================================
 
 module stream;
@@ -48,22 +56,27 @@ mount .future.*;
 
 /// An asynchronous iterator that produces values over time.
 ///
+
 /// Stream is the async equivalent of Iterator. Each call to `poll_next`
 /// may return Pending, indicating that the next value is not yet available.
 ///
+
 /// # Contract
 ///
+
 /// - `poll_next` returns `Poll.Ready(Some(item))` for each available item
 /// - `poll_next` returns `Poll.Ready(None)` when the stream is exhausted
 /// - After returning `Poll.Ready(None)`, subsequent calls may panic
 /// - `poll_next` returns `Pending` when the next item is not ready
 ///
+
 public type Stream is protocol {
     /// The type of items yielded by this stream.
     type Item;
 
     /// Attempt to pull out the next value of this stream.
     ///
+
     /// Returns:
     /// - `Poll.Ready(Some(item))` if an item is available
     /// - `Poll.Ready(None)` if the stream is exhausted
@@ -72,6 +85,7 @@ public type Stream is protocol {
 
     /// Returns the bounds on the remaining length of the stream.
     ///
+
     /// Default implementation returns (0, None) indicating unknown bounds.
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         (0, None)
@@ -102,11 +116,13 @@ implement<S: Stream> IntoStream for S {
 
 /// Extension methods for Stream.
 ///
+
 /// All Streams automatically implement StreamExt, providing
 /// a rich set of combinators for stream manipulation.
 public type StreamExt is protocol extends Stream {
     /// Create a stream that yields the next value.
     ///
+
     /// This is useful for using streams in async contexts.
     fn next(&mut self) -> StreamNext<Self> {
         StreamNext { stream: self }
@@ -114,6 +130,7 @@ public type StreamExt is protocol extends Stream {
 
     /// Map each item to another value.
     ///
+
     /// # Example
     /// ```verum
     /// let stream = iter([1, 2, 3]).map(|x| x * 2);
@@ -125,10 +142,11 @@ public type StreamExt is protocol extends Stream {
 
     /// Map each item to a future, awaiting the result.
     ///
+
     /// # Example
     /// ```verum
     /// let stream = iter([1, 2, 3])
-    ///     .then(|x| async { x * 2 });
+    ///  .then(|x| async { x * 2 });
     /// ```
     fn then<Fut: Future, F: fn(Self.Item) -> Fut>(self, f: F) -> StreamThen<Self, F, Fut> {
         StreamThen {
@@ -140,6 +158,7 @@ public type StreamExt is protocol extends Stream {
 
     /// Filter items based on a predicate.
     ///
+
     /// # Example
     /// ```verum
     /// let stream = iter([1, 2, 3, 4]).filter(|x| *x % 2 == 0);
@@ -175,6 +194,7 @@ public type StreamExt is protocol extends Stream {
 
     /// Take at most n items.
     ///
+
     /// # Example
     /// ```verum
     /// let stream = iter([1, 2, 3, 4, 5]).take(3);
@@ -195,6 +215,7 @@ public type StreamExt is protocol extends Stream {
 
     /// Skip n items.
     ///
+
     /// # Example
     /// ```verum
     /// let stream = iter([1, 2, 3, 4, 5]).skip(2);
@@ -279,6 +300,7 @@ public type StreamExt is protocol extends Stream {
 
     /// Collect all items into a collection.
     ///
+
     /// # Example
     /// ```verum
     /// let items: List<Int> = iter([1, 2, 3]).collect().await;
@@ -292,11 +314,12 @@ public type StreamExt is protocol extends Stream {
 
     /// Fold the stream into a single value.
     ///
+
     /// # Example
     /// ```verum
     /// let sum = iter([1, 2, 3, 4])
-    ///     .fold(0, |acc, x| acc + x)
-    ///     .await;
+    ///  .fold(0, |acc, x| acc + x)
+    ///  .await;
     /// assert_eq(sum, 10);
     /// ```
     fn fold<B, F: fn(B, Self.Item) -> B>(self, init: B, f: F) -> StreamFold<Self, B, F> {
@@ -309,11 +332,12 @@ public type StreamExt is protocol extends Stream {
 
     /// Execute a closure on each item.
     ///
+
     /// # Example
     /// ```verum
     /// iter([1, 2, 3])
-    ///     .for_each(|x| println(f"{x}"))
-    ///     .await;
+    ///  .for_each(|x| println(f"{x}"))
+    ///  .await;
     /// ```
     fn for_each<F: fn(Self.Item)>(self, f: F) -> StreamForEach<Self, F> {
         StreamForEach { stream: self, f }
@@ -321,14 +345,16 @@ public type StreamExt is protocol extends Stream {
 
     /// Reduce the stream to a single value using a combining function.
     ///
+
     /// Like `fold`, but uses the first item as the initial accumulator.
     /// Returns `None` if the stream is empty.
     ///
+
     /// # Example
     /// ```verum
     /// let sum = iter([1, 2, 3, 4])
-    ///     .reduce(|acc, x| acc + x)
-    ///     .await;
+    ///  .reduce(|acc, x| acc + x)
+    ///  .await;
     /// assert_eq(sum, Some(10));
     /// ```
     fn reduce<F: fn(Self.Item, Self.Item) -> Self.Item>(self, f: F) -> StreamReduce<Self, F> {
@@ -424,20 +450,24 @@ public type StreamExt is protocol extends Stream {
 
     /// Buffer items with bounded capacity for backpressure control.
     ///
+
     /// Creates a buffered stream that stores up to `capacity` items.
     /// When the buffer is full, the underlying stream is not polled
     /// until space becomes available (consumer controls the rate).
     ///
+
     /// # Example
     /// ```verum
     /// let stream = fast_producer()
-    ///     .buffered(100);  // Max 100 items in buffer
+    ///  .buffered(100); // Max 100 items in buffer
     ///
+
     /// for await item in stream {
-    ///     slow_process(item).await;  // Consumer controls pace
+    ///  slow_process(item).await; // Consumer controls pace
     /// }
     /// ```
     ///
+
     /// # Backpressure Semantics
     /// - Producer is paused when buffer is full
     /// - Consumer pulls at its own pace
@@ -454,15 +484,18 @@ public type StreamExt is protocol extends Stream {
 
     /// Rate limit the stream to at most `count` items per `duration`.
     ///
+
     /// Throttles the output to prevent overwhelming downstream consumers.
     /// Uses a token bucket algorithm for smooth rate limiting.
     ///
+
     /// # Example
     /// ```verum
     /// let stream = events()
-    ///     .throttle(100, 1.seconds);  // Max 100 items per second
+    ///  .throttle(100, 1.seconds); // Max 100 items per second
     /// ```
     ///
+
     /// # Rate Limiting
     /// - Burst: Allows `count` items immediately if tokens available
     /// - Refill: Tokens replenish at `count / duration` rate
@@ -481,19 +514,23 @@ public type StreamExt is protocol extends Stream {
 
     /// Batch items into chunks of size `size`.
     ///
+
     /// Collects items into vectors of the specified size. The last
     /// chunk may have fewer items if the stream ends before filling.
     ///
+
     /// # Example
     /// ```verum
     /// let batches = stream
-    ///     .chunks(10);  // Process in batches of 10
+    ///  .chunks(10); // Process in batches of 10
     ///
+
     /// for await batch in batches {
-    ///     process_batch(batch).await;  // batch: List<Item>
+    ///  process_batch(batch).await; // batch: List<Item>
     /// }
     /// ```
     ///
+
     /// # Chunking Behavior
     /// - Yields `List<Item>` with exactly `size` items
     /// - Final chunk may be smaller (remaining items)
@@ -510,18 +547,22 @@ public type StreamExt is protocol extends Stream {
 
     /// Merge with another stream, yielding items from both with fair scheduling.
     ///
+
     /// Interleaves items from both streams using round-robin scheduling.
     /// Continues until both streams are exhausted.
     ///
+
     /// # Example
     /// ```verum
     /// let merged = stream_a.merge(stream_b);
     ///
+
     /// for await item in merged {
-    ///     // Items from both streams, fairly scheduled
+    ///  // Items from both streams, fairly scheduled
     /// }
     /// ```
     ///
+
     /// # Fair Scheduling
     /// - Alternates polling between streams
     /// - No starvation: both streams get equal opportunity
@@ -538,13 +579,15 @@ public type StreamExt is protocol extends Stream {
 
     /// Batch items into time-based windows.
     ///
+
     /// Collects items during each `duration` window, yielding batches
     /// at regular intervals regardless of item count.
     ///
+
     /// # Example
     /// ```verum
     /// let windows = events()
-    ///     .window(1.seconds);  // Yield batch every second
+    ///  .window(1.seconds); // Yield batch every second
     /// ```
     fn window(self, duration: Duration) -> WindowedStream<Self> {
         WindowedStream {
@@ -557,13 +600,15 @@ public type StreamExt is protocol extends Stream {
 
     /// Debounce the stream, yielding only after `duration` of silence.
     ///
+
     /// Useful for handling bursty input like key presses or mouse events.
     /// Only yields after no items have arrived for the specified duration.
     ///
+
     /// # Example
     /// ```verum
     /// let debounced = keypresses()
-    ///     .debounce(300.millis);  // Wait 300ms after last keypress
+    ///  .debounce(300.millis); // Wait 300ms after last keypress
     /// ```
     fn debounce(self, duration: Duration) -> DebouncedStream<Self> {
         DebouncedStream {
@@ -576,13 +621,15 @@ public type StreamExt is protocol extends Stream {
 
     /// Sample the stream at regular intervals.
     ///
+
     /// Yields only the most recent item at each interval.
     /// Drops items that arrive between samples.
     ///
+
     /// # Example
     /// ```verum
     /// let sampled = high_frequency_data()
-    ///     .sample(100.millis);  // Sample at 10 Hz
+    ///  .sample(100.millis); // Sample at 10 Hz
     /// ```
     fn sample(self, interval: Duration) -> SampledStream<Self> {
         SampledStream {
@@ -620,6 +667,7 @@ implement<S: Stream> Future for StreamNext<S> {
 
 /// Create a stream from a synchronous iterator.
 ///
+
 /// # Example
 /// ```verum
 /// let stream = iter([1, 2, 3].into_iter());
@@ -647,6 +695,7 @@ implement<I: Iterator> Stream for StreamIter<I> {
 
 /// Create a stream that yields a single value.
 ///
+
 /// # Example
 /// ```verum
 /// let stream = stream_once(42);
@@ -676,6 +725,7 @@ implement<T> Stream for StreamOnce<T> {
 
 /// Create a stream that yields a value from a future, once.
 ///
+
 /// # Example
 /// ```verum
 /// let stream = once_future(async { 42 });
@@ -711,6 +761,7 @@ implement<Fut: Future> Stream for OnceFuture<Fut> {
 
 /// Create an empty stream.
 ///
+
 /// # Example
 /// ```verum
 /// let stream: StreamEmpty<Int> = stream_empty();
@@ -737,6 +788,7 @@ implement<T> Stream for StreamEmpty<T> {
 
 /// Create a stream that repeats a value forever.
 ///
+
 /// # Example
 /// ```verum
 /// let stream = stream_repeat(1).take(3);
@@ -765,6 +817,7 @@ implement<T: Clone> Stream for StreamRepeat<T> {
 
 /// Create a stream that repeats a value n times.
 ///
+
 /// # Example
 /// ```verum
 /// let stream = stream_repeat_n(42, 3);
@@ -805,12 +858,13 @@ implement<T: Clone> Stream for StreamRepeatN<T> {
 
 /// Create a stream from a generating function.
 ///
+
 /// # Example
 /// ```verum
 /// let mut counter = 0;
 /// let stream = stream_from_fn(|| {
-///     counter = counter + 1;
-///     if counter <= 3 { Some(counter) } else { None }
+///  counter = counter + 1;
+///  if counter <= 3 { Some(counter) } else { None }
 /// });
 /// // Yields: 1, 2, 3
 /// ```
@@ -833,11 +887,12 @@ implement<T, F: fn() -> Maybe<T>> Stream for StreamFromFn<F> {
 
 /// Create a stream from an async generating function.
 ///
+
 /// # Example
 /// ```verum
 /// let stream = stream_poll_fn(|cx| {
-///     // Custom polling logic
-///     Poll.Ready(Some(42))
+///  // Custom polling logic
+///  Poll.Ready(Some(42))
 /// });
 /// ```
 public fn stream_poll_fn<T, F: fn(&mut Context) -> Poll<Maybe<T>>>(f: F) -> StreamPollFn<F> {
@@ -859,14 +914,15 @@ implement<T, F: fn(&mut Context) -> Poll<Maybe<T>>> Stream for StreamPollFn<F> {
 
 /// Create a stream through state-based unfolding.
 ///
+
 /// # Example
 /// ```verum
 /// let stream = stream_unfold(0, |state| async move {
-///     if state < 3 {
-///         Some((state, state + 1))  // (item, next_state)
-///     } else {
-///         None
-///     }
+///  if state < 3 {
+///  Some((state, state + 1)) // (item, next_state)
+///  } else {
+///  None
+///  }
 /// });
 /// // Yields: 0, 1, 2
 /// ```
@@ -918,6 +974,7 @@ implement<T, St, Fut: Future<Output = Maybe<(T, St)>>, F: fn(St) -> Fut> Stream 
 
 /// Create a stream that periodically yields at an interval.
 ///
+
 /// # Example
 /// ```verum
 /// let stream = interval(Duration.from_millis(100));
@@ -1529,6 +1586,7 @@ implement<S: Stream, F: fn(S.Item)> Future for StreamForEach<S, F> {
 
 /// Future that reduces the stream to a single value.
 ///
+
 /// Uses the first item as the initial accumulator. Returns None for empty streams.
 public type StreamReduce<S, F> is {
     stream: S,
@@ -1920,6 +1978,7 @@ implement<S: Stream, P: StreamProduct<S.Item>> Future for ProductStream<S, P> {
 
 /// Buffered stream with bounded capacity for backpressure control.
 ///
+
 /// The buffer fills up to `capacity` items. When full, the underlying stream
 /// is not polled until the consumer takes items from the buffer.
 public type BufferedStream<S: Stream> is {
@@ -1965,6 +2024,7 @@ implement<S: Stream> Stream for BufferedStream<S> {
 
 /// Throttled stream with token bucket rate limiting.
 ///
+
 /// Limits throughput to at most `count` items per `per` duration.
 /// Uses a token bucket algorithm for smooth rate limiting with burst support.
 public type ThrottledStream<S: Stream> is {
@@ -2008,17 +2068,18 @@ implement<S: Stream> Stream for ThrottledStream<S> {
                 Poll.Pending => Poll.Pending,
             }
         } else {
-            // Rate limited.  Compute the precise deadline at which
+            // Rate limited. Compute the precise deadline at which
             // the next integer token becomes available and park
-            // ourselves on the runtime's timer queue.  Closes
+            // ourselves on the runtime's timer queue. Closes
             // task #243 — pre-fix this branch did
             // `cx.waker().wake_by_ref()` which immediately re-armed
             // the task, so the runtime re-polled at every brief
             // sleep tick (~1ms cadence on the IO path,
             // ~100µs without I/O), burning wakeups while the token
-            // bucket was still empty.  With the timer queue the
+            // bucket was still empty. With the timer queue the
             // runtime parks for exactly the remaining duration.
             //
+
             // Fallback: if no runtime is in scope (e.g. synchronous
             // test polling) the historical wake_by_ref pattern is
             // preserved so existing call sites still progress.
@@ -2047,6 +2108,7 @@ implement<S: Stream> Stream for ThrottledStream<S> {
 
 /// Chunked stream that batches items into fixed-size chunks.
 ///
+
 /// Yields `List<Item>` with `size` items each. The final chunk
 /// may contain fewer items if the stream ends before filling.
 public type ChunkedStream<S: Stream> is {
@@ -2109,6 +2171,7 @@ implement<S: Stream> Stream for ChunkedStream<S> {
 
 /// Merged stream combining two streams with fair scheduling.
 ///
+
 /// Uses round-robin scheduling to poll both streams fairly.
 /// Completes only when BOTH streams are exhausted.
 public type MergedStream<S1: Stream, S2: Stream<Item = S1.Item>> is {
@@ -2175,6 +2238,7 @@ implement<S1: Stream, S2: Stream<Item = S1.Item>> Stream for MergedStream<S1, S2
 
 /// Time-windowed stream that batches items by duration.
 ///
+
 /// Collects all items during each `duration` window, then yields
 /// the batch at the end of each window.
 public type WindowedStream<S: Stream> is {
@@ -2237,6 +2301,7 @@ implement<S: Stream> Stream for WindowedStream<S> {
 
 /// Debounced stream that yields only after a period of silence.
 ///
+
 /// Useful for handling bursty input. Only yields after no items
 /// have arrived for the specified duration.
 public type DebouncedStream<S: Stream> is {
@@ -2288,6 +2353,7 @@ implement<S: Stream> Stream for DebouncedStream<S> {
 
 /// Sampled stream that yields items at regular intervals.
 ///
+
 /// Yields only the most recent item at each interval.
 /// Items arriving between samples are dropped.
 public type SampledStream<S: Stream> is {

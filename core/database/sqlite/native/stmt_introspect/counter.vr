@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3_stmt_status(stmt, op, resetFlag)    → value for op
-//   sqlite3_stmt_scanstatus_v2(stmt, idx, …)   → one scan-status row
+
+//  sqlite3_stmt_status(stmt, op, resetFlag) → value for op
+//  sqlite3_stmt_scanstatus_v2(stmt, idx, …) → one scan-status row
 //
-// The op ids match the SQLITE_STMTSTATUS_* constants.  `reset_flag`
+
+// The op ids match the SQLITE_STMTSTATUS_* constants. `reset_flag`
 // zeroes the counter after reading.
 // =============================================================================
 

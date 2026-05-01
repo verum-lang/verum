@@ -14,6 +14,7 @@
 )]
 //! Comprehensive pattern matching tests for Verum parser
 //!
+
 //! This test suite validates all pattern types from grammar/verum.ebnf:
 //! - literal_pattern, identifier_pattern, wildcard_pattern
 //! - tuple_pattern, array_pattern, slice_pattern

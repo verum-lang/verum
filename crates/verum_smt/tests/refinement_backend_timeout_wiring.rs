@@ -2,6 +2,7 @@
 //! forwards to the inner `SubsumptionChecker` and survives
 //! through to subsequent `check` / `verify_refinement` calls.
 //!
+
 //! Closes the inert-defense pattern around
 //! `RefinementConfig.timeout_ms`: previously the
 //! `SubsumptionChecker.smt_timeout_ms` field was frozen at

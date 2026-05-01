@@ -2,32 +2,38 @@
 // kernel_soundness.model — Verum-side inductive mirror of the kernel calculus
 // =============================================================================
 //
+
 // This module is the syntactic substrate that the kernel-soundness theorems
-// quantify over.  It MUST stay structurally faithful to the Rust-side
+// quantify over. It MUST stay structurally faithful to the Rust-side
 // `verum_kernel::CoreTerm` / `CoreType` / `UniverseLevel` enums in
 // `crates/verum_kernel/src/term.rs:31-419` — every variant on the Rust side
 // has exactly one mirror constructor here, and the field names match.
 //
+
 // **Why mirror in Verum at all?**
 //
-// The Rust enum is the *implementation* of the kernel.  The Verum mirror is
+
+// The Rust enum is the *implementation* of the kernel. The Verum mirror is
 // the *meta-theoretic object* that the soundness theorem talks about.
 // Stating "every term the kernel checks is well-typed" is meaningful only
-// when the term-level inductive type is itself in the corpus.  This module
+// when the term-level inductive type is itself in the corpus. This module
 // therefore holds the propositional view of the calculus that the
 // per-rule soundness lemmas in `theorems.vr` consume.
 //
+
 // **Faithfulness invariant.**
 //
+
 // The cross-export pipeline (`crates/verum_kernel_soundness_export/`)
 // walks this module and produces parallel `Inductive CoreTerm := …` blocks
-// in Coq + Lean.  If a variant drifts between Rust and Verum the export
+// in Coq + Lean. If a variant drifts between Rust and Verum the export
 // still type-checks (the foreign checker doesn't care that Rust exists),
 // but the soundness claim becomes meaningless because the meta-theory is
-// no longer about the actual kernel.  The audit gate
+// no longer about the actual kernel. The audit gate
 // `verum audit --kernel-soundness` checks the variant-name set agrees
 // between Rust and Verum and refuses to pass on drift.
 //
+
 // Source: `crates/verum_kernel/src/term.rs` schema-version v7 (#198).
 // =============================================================================
 
@@ -40,6 +46,7 @@ module core.verify.kernel_soundness.model;
 /// Universe-level expression — concrete, variable, successor, or a max
 /// of two sub-levels, plus the propositional universe `Prop`.
 ///
+
 /// Mirror of `verum_kernel::UniverseLevel` (term.rs:407-418).
 public type UniverseLevel is
     | Concrete { level: Int }
@@ -48,7 +55,7 @@ public type UniverseLevel is
     | Max { left: Heap<UniverseLevel>, right: Heap<UniverseLevel> }
     | Prop;
 
-/// Project: is this the propositional universe?  K-FwAx's side condition
+/// Project: is this the propositional universe? K-FwAx's side condition
 /// asks for axiom bodies to inhabit `Prop`; this is the canonical test.
 public pure fn universe_is_prop(u: UniverseLevel) -> Bool {
     match u {
@@ -70,7 +77,7 @@ public pure fn universe_concrete_level(u: UniverseLevel) -> Maybe<Int> {
 // FrameworkId — provenance for axioms (mirror of verum_kernel::FrameworkId)
 // =============================================================================
 
-/// Framework attribution for a `CoreTerm.Axiom`.  Every axiom records
+/// Framework attribution for a `CoreTerm.Axiom`. Every axiom records
 /// where it came from so `verum audit --framework-axioms` can enumerate
 /// the trusted base.
 public type FrameworkId is {
@@ -83,10 +90,11 @@ public type FrameworkId is {
 // =============================================================================
 
 /// The kernel's `SmtProof(SmtCertificate)` carries the full certificate
-/// payload.  At the meta-theoretic layer we only need to know that *some*
+/// payload. At the meta-theoretic layer we only need to know that *some*
 /// certificate exists and where it came from — the replay logic itself
 /// is at the Rust layer in `verum_kernel::replay_smt_cert`.
 ///
+
 /// `solver_tag` records which backend produced the cert ("z3", "cvc5",
 /// …); `formula_hash` is a content hash of the proven formula so two
 /// distinct proofs of the same fact can be deduplicated by upstream
@@ -102,20 +110,22 @@ public type SmtCertificateRef is {
 
 /// A term in Verum-Core, the explicit typed calculus the kernel checks.
 ///
+
 /// Variants are listed in the same order as `verum_kernel::CoreTerm`
-/// (term.rs:31-377) so a side-by-side review is mechanical.  Categories
+/// (term.rs:31-377) so a side-by-side review is mechanical. Categories
 /// (mirroring the `KernelRule` enum at proof_tree.rs:694-787):
 ///
-///   * **Structural-9**:        Var · Universe · Pi · Lam · App · Sigma ·
-///                              Pair · Fst · Snd
-///   * **Cubical-6**:           PathTy · PathOver · Refl · HComp · Transp ·
-///                              Glue
-///   * **Refinement-1**:        Refine
-///   * **Quotient-3**:          Quotient · QuotIntro · QuotElim
-///   * **Inductive-2**:         Inductive · Elim
-///   * **SMT/Axiom-2**:         SmtProof · Axiom
-///   * **Diakrisis-11**:        EpsilonOf · AlphaOf · ModalBox · ModalDiamond ·
-///                              ModalBigAnd · Shape · Flat · Sharp
+
+///  * **Structural-9**: Var · Universe · Pi · Lam · App · Sigma ·
+///  Pair · Fst · Snd
+///  * **Cubical-6**: PathTy · PathOver · Refl · HComp · Transp ·
+///  Glue
+///  * **Refinement-1**: Refine
+///  * **Quotient-3**: Quotient · QuotIntro · QuotElim
+///  * **Inductive-2**: Inductive · Elim
+///  * **SMT/Axiom-2**: SmtProof · Axiom
+///  * **Diakrisis-11**: EpsilonOf · AlphaOf · ModalBox · ModalDiamond ·
+///  ModalBigAnd · Shape · Flat · Sharp
 public type CoreTerm is
     // ---- Structural ---------------------------------------------------------
     | Var { name: Text }
@@ -228,11 +238,12 @@ public type CoreTerm is
 // CoreType — structural type heads (mirror of verum_kernel::CoreType)
 // =============================================================================
 
-/// A structural view of a type used by kernel diagnostics.  This is a
+/// A structural view of a type used by kernel diagnostics. This is a
 /// coarse projection from `CoreTerm` (when in `Universe` position) onto
 /// the constructor head, suitable for "expected Pi, got Int"-style
 /// reports without copying the underlying term.
 ///
+
 /// Mirror of `verum_kernel::CoreType` (term.rs:386-403).
 public type CoreType is
     | UniverseTy { level: UniverseLevel }
@@ -248,9 +259,9 @@ public type CoreType is
 // Project: term → type-head reduction
 // =============================================================================
 
-/// Map a fully-elaborated `CoreTerm` to its `CoreType` head.  This is a
+/// Map a fully-elaborated `CoreTerm` to its `CoreType` head. This is a
 /// pure structural projection — it doesn't compute, normalise, or
-/// inspect sub-terms.  Used by error reporting and by the K-Univ
+/// inspect sub-terms. Used by error reporting and by the K-Univ
 /// stratification check in `theorems.vr`.
 public pure fn core_term_head(t: CoreTerm) -> CoreType {
     match t {
@@ -270,21 +281,23 @@ public pure fn core_term_head(t: CoreTerm) -> CoreType {
 // Module-export tag: variant census
 // =============================================================================
 
-/// Total number of `CoreTerm` constructors.  Cross-export emitters use
+/// Total number of `CoreTerm` constructors. Cross-export emitters use
 /// this constant in a snapshot test that fails loudly when the Verum
 /// mirror gains or loses a constructor without the Rust side following
-/// (or vice versa).  Every increment requires touching `term.rs` AND
+/// (or vice versa). Every increment requires touching `term.rs` AND
 /// every per-rule lemma in `theorems.vr` — making the drift impossible
 /// to land silently.
 ///
+
 /// Categories: Structural 9 + Cubical 6 + Refinement 1 + Quotient 3 +
-///             Inductive 2 + SMT/Axiom 2 + Diakrisis-ε/α 2 +
-///             Modal-depth 3 + Schreiber 3 = 31.
+///  Inductive 2 + SMT/Axiom 2 + Diakrisis-ε/α 2 +
+///  Modal-depth 3 + Schreiber 3 = 31.
 public const CORE_TERM_VARIANT_COUNT: Int = 31;
 
-/// Total number of `CoreType` constructors.  Same drift-detection role
+/// Total number of `CoreType` constructors. Same drift-detection role
 /// as `CORE_TERM_VARIANT_COUNT`.
 ///
+
 /// Variants: UniverseTy + PiTy + SigmaTy + PathTyHead + RefineTy +
-///           GlueTy + InductiveTy + OtherTy = 8.
+///  GlueTy + InductiveTy + OtherTy = 8.
 public const CORE_TYPE_VARIANT_COUNT: Int = 8;

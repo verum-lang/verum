@@ -1,36 +1,43 @@
 //! Lock Ordering Verification for Deadlock Prevention
 //!
+
 //! This module implements compile-time verification of lock acquisition ordering
 //! to prevent deadlocks.
 //!
+
 //! # Design
 //!
+
 //! Lock ordering verification works by:
 //! 1. Collecting `@lock_level(level: N)` attributes from type definitions
 //! 2. Building a lock acquisition graph from code analysis
 //! 3. Verifying that all acquisitions follow the strict partial order (lower -> higher)
 //! 4. Detecting cycles which indicate potential deadlock scenarios
 //!
+
 //! # Algorithm
 //!
+
 //! The verification uses a dataflow-based approach:
 //! - Track which locks are held at each program point
 //! - When a new lock is acquired, verify level(new_lock) > max(level(held_locks))
 //! - Report violation if the ordering constraint is violated
 //!
+
 //! # Deadlock Prevention Strategies
 //!
+
 //! 1. **Lock Ordering (primary)**: All locks must be acquired in ascending level order.
-//!    `@lock_level(level: N)` annotates lock types. Acquiring level L while holding
-//!    level M where L <= M is a compile error.
+//!  `@lock_level(level: N)` annotates lock types. Acquiring level L while holding
+//!  level M where L <= M is a compile error.
 //! 2. **Lock Level Inference**: When no explicit levels, compiler infers ordering from
-//!    usage patterns across all code paths and detects inconsistencies.
+//!  usage patterns across all code paths and detects inconsistencies.
 //! 3. **Timeout-Based Acquisition**: For cases where ordering is impractical, use
-//!    `lock_timeout(duration)` with retry logic and backoff.
+//!  `lock_timeout(duration)` with retry logic and backoff.
 //! 4. **Static Deadlock Detection**: Compiler tracks lock acquisition patterns across
-//!    the entire codebase, building a lock-dependency graph and detecting cycles.
+//!  the entire codebase, building a lock-dependency graph and detecting cycles.
 //! 5. **Runtime Detection (dev mode)**: `@deadlock_detection(enabled: true, timeout: T)`
-//!    enables runtime monitoring that reports potential deadlocks with full traces.
+//!  enables runtime monitoring that reports potential deadlocks with full traces.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
@@ -444,27 +451,32 @@ impl LockOrderingVerifier {
     ) -> LockOrderingResult<()> {
         // Check if lock type is known.
         //
+
         // Three policy gates compose here:
         //
-        //   * `require_levels` (declaration-layer): the lock TYPE must
-        //     have a `@lock_level` annotation registered.  A type
-        //     without a level can't be ordered against anything else,
-        //     so under `require_levels = true` we surface the
-        //     declaration gap as `MissingLockLevel` — a directed error
-        //     that points the user at the unannotated type definition.
+
+        //  * `require_levels` (declaration-layer): the lock TYPE must
+        //  have a `@lock_level` annotation registered. A type
+        //  without a level can't be ordered against anything else,
+        //  so under `require_levels = true` we surface the
+        //  declaration gap as `MissingLockLevel` — a directed error
+        //  that points the user at the unannotated type definition.
         //
-        //   * `strict_mode` (use-layer): even when we don't require
-        //     declaration coverage globally, the use-site for an
-        //     unknown lock is still suspect — strict mode promotes the
-        //     skip-and-pass to `UnknownLock`.
+
+        //  * `strict_mode` (use-layer): even when we don't require
+        //  declaration coverage globally, the use-site for an
+        //  unknown lock is still suspect — strict mode promotes the
+        //  skip-and-pass to `UnknownLock`.
         //
-        //   * Default (lenient): unknown lock + neither flag set →
-        //     `Ok(())`, skip verification.  The caller has decided
-        //     the analysis is best-effort and missing annotations
-        //     don't gate compilation.
+
+        //  * Default (lenient): unknown lock + neither flag set →
+        //  `Ok(())`, skip verification. The caller has decided
+        //  the analysis is best-effort and missing annotations
+        //  don't gate compilation.
         //
+
         // Pre-fix `require_levels` was an inert config field — the
-        // verifier never read it.  This wiring closes the same
+        // verifier never read it. This wiring closes the same
         // architectural anti-pattern documented for the bytecode
         // validator + content/dependency hash + validate_on_extract:
         // a public field claims a security/safety contract that no
@@ -647,6 +659,7 @@ mod tests {
     // -------------------------------------------------------------------------
     // require_levels gate — pin the three-gate policy on unknown locks.
     //
+
     // Pre-fix the field was inert; this test asserts each gate's distinct
     // outcome on the same input (an unregistered lock type at use-site).
     // -------------------------------------------------------------------------

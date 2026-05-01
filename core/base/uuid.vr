@@ -5,24 +5,28 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Generates and manipulates RFC 4122 / RFC 9562 UUIDs.
 // Supports the two most commonly useful versions:
-//   * v4 — random (122 bits of entropy; uses the system CSPRNG)
-//   * v7 — time-ordered (48-bit unix-ms timestamp + 74 random bits)
+//  * v4 — random (122 bits of entropy; uses the system CSPRNG)
+//  * v7 — time-ordered (48-bit unix-ms timestamp + 74 random bits)
 //
+
 // UUID v7 is strongly preferred for database primary keys: the time-
 // ordered prefix gives you locality (B-tree inserts don't fragment),
 // while 74 bits of random data is still well beyond any realistic
 // collision probability.
 //
+
 // Canonical textual form: 8-4-4-4-12 lowercase hex with dashes,
-//   e.g. "550e8400-e29b-41d4-a716-446655440000".
+//  e.g. "550e8400-e29b-41d4-a716-446655440000".
 //
+
 // Example:
-//   let id = Uuid.new_v4();
-//   let text = id.to_text();
-//   let round = Uuid.parse(&text)?;
-//   assert(id == round);
+//  let id = Uuid.new_v4();
+//  let text = id.to_text();
+//  let round = Uuid.parse(&text)?;
+//  assert(id == round);
 // =============================================================================
 
 module core.base.uuid;
@@ -62,6 +66,7 @@ implement Eq for UuidError {
 // External primitives supplied by the runtime. The stdlib does not
 // implement time or entropy itself — those come from the platform.
 //
+
 // Pre-fix bug: `core.time.instant.unix_millis()` does not exist —
 // `core.time.instant` exposes a monotonic-clock `Instant` API, not
 // a wall-clock unix-ms helper. Lenient codegen silently no-op'd
@@ -92,11 +97,13 @@ fn random_bytes(buf: &mut [Byte]) {
 implement Uuid {
     // Generate a version-4 (random) UUID.
     //
+
     // Layout per RFC 9562 §5.4:
-    //   * 122 random bits
-    //   * 4 bits of version field = 0b0100
-    //   * 2 bits of variant field = 0b10
+    //  * 122 random bits
+    //  * 4 bits of version field = 0b0100
+    //  * 2 bits of variant field = 0b10
     //
+
     // Total: 128 bits, 122 of which are CSPRNG output.
     public fn new_v4() -> Uuid {
         let mut buf: [Byte; 16] = [0_u8; 16];
@@ -111,13 +118,15 @@ implement Uuid {
 
     // Generate a version-7 (time-ordered) UUID.
     //
+
     // Layout per RFC 9562 §5.7:
-    //   * 48-bit unix-ms timestamp (big-endian)
-    //   * 4 bits version = 0b0111
-    //   * 12 bits random ("rand_a")
-    //   * 2 bits variant = 0b10
-    //   * 62 bits random ("rand_b")
+    //  * 48-bit unix-ms timestamp (big-endian)
+    //  * 4 bits version = 0b0111
+    //  * 12 bits random ("rand_a")
+    //  * 2 bits variant = 0b10
+    //  * 62 bits random ("rand_b")
     //
+
     // Total entropy: 74 bits. Time-ordered so v7 UUIDs sort
     // lexicographically and chronologically — ideal for DB keys.
     public fn new_v7() -> Uuid {

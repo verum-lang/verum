@@ -1,65 +1,75 @@
 /// # Verum Runtime Module (core/runtime)
 ///
+
 /// Unified runtime infrastructure implementing the Modular Runtime Architecture.
 /// Provides configurable runtime support for diverse target platforms:
 ///
+
 /// - `@cfg(runtime = "full")`: Full async with work-stealing, heap, threads
 /// - `@cfg(runtime = "single_thread")`: Single-threaded async (WASM, embedded)
 /// - `@cfg(runtime = "no_async")`: Synchronous mode with blocking I/O
 /// - `@cfg(runtime = "no_heap")`: Stack-only allocation (real-time, safety-critical)
 /// - `@cfg(runtime = "embedded")`: Minimal core intrinsics only (microcontrollers)
 ///
+
 /// ## Architecture
 ///
+
 /// ```
 /// ┌────────────────────────────────────────────────────────────────────────────┐
-/// │                       MODULAR RUNTIME ARCHITECTURE                         │
+/// │ MODULAR RUNTIME ARCHITECTURE │
 /// ├────────────────────────────────────────────────────────────────────────────┤
-/// │                                                                            │
-/// │  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐     │
-/// │  │   ASYNC     │   │    HEAP     │   │  THREADING  │   │     IO      │     │
-/// │  │  EXECUTOR   │   │  ALLOCATOR  │   │    POOL     │   │   DRIVER    │     │
-/// │  └──────┬──────┘   └──────┬──────┘   └──────┬──────┘   └──────┬──────┘     │
-/// │         │                 │                 │                 │            │
-/// │         ▼                 ▼                 ▼                 ▼            │
-/// │  ┌─────────────────────────────────────────────────────────────────────┐   │
-/// │  │                      RUNTIME FACADE                                 │   │
-/// │  │  RuntimeConfig protocol + ExecutionEnv (θ+)                         │   │
-/// │  └─────────────────────────────────────────────────────────────────────┘   │
-/// │                                    │                                       │
-/// │                                    ▼                                       │
-/// │  ┌─────────────────────────────────────────────────────────────────────┐   │
-/// │  │                      V-LLSI KERNEL (always)                         │   │
-/// │  │  • sys.syscall intrinsics  • Atomic operations  • TLS bootstrap     │   │
-/// │  └─────────────────────────────────────────────────────────────────────┘   │
-/// │                                                                            │
+/// │ │
+/// │ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ │
+/// │ │ ASYNC │ │ HEAP │ │ THREADING │ │ IO │ │
+/// │ │ EXECUTOR │ │ ALLOCATOR │ │ POOL │ │ DRIVER │ │
+/// │ └──────┬──────┘ └──────┬──────┘ └──────┬──────┘ └──────┬──────┘ │
+/// │ │ │ │ │ │
+/// │ ▼ ▼ ▼ ▼ │
+/// │ ┌─────────────────────────────────────────────────────────────────────┐ │
+/// │ │ RUNTIME FACADE │ │
+/// │ │ RuntimeConfig protocol + ExecutionEnv (θ+) │ │
+/// │ └─────────────────────────────────────────────────────────────────────┘ │
+/// │ │ │
+/// │ ▼ │
+/// │ ┌─────────────────────────────────────────────────────────────────────┐ │
+/// │ │ V-LLSI KERNEL (always) │ │
+/// │ │ • sys.syscall intrinsics • Atomic operations • TLS bootstrap │ │
+/// │ └─────────────────────────────────────────────────────────────────────┘ │
+/// │ │
 /// └────────────────────────────────────────────────────────────────────────────┘
 /// ```
 ///
+
 /// ## ExecutionEnv (θ+) - Four Pillars
 ///
+
 /// Every task executes within an ExecutionEnv providing:
 /// 1. **Memory**: CBGR tier, allocator, shared registry
 /// 2. **Capabilities**: Static dependencies + dynamic contexts
 /// 3. **Error Recovery**: Supervision, circuit breakers, retry policies
 /// 4. **Concurrency**: Executor handle, isolation model, parallelism config
 ///
+
 /// ## Zero FFI Architecture
 ///
+
 /// All operations use sys-subsystem calls via VBC intrinsics:
 /// - Memory: `sys.mmap`, `sys.munmap` → VBC opcode 0xF1
 /// - I/O: `sys.io_uring_enter`, `sys.kqueue` → VBC opcode 0xF4
 /// - Sync: `sys.futex`, `sys.atomic_*` → VBC opcode 0xF2
 /// - Time: `sys.clock_gettime` → VBC opcode 0xF5
 ///
+
 /// ## Performance Targets
 ///
-/// | Metric                | Target     | V-LLSI    |
+
+/// | Metric | Target | V-LLSI |
 /// |-----------------------|------------|-----------|
-/// | Context lookup        | < 10ns     | ~2ns      |
-/// | Task spawn overhead   | < 200ns    | ~150ns    |
-/// | Memory per task       | < 4KB      | ~2.5KB    |
-/// | Allocations per spawn | 0          | 0 (stack) |
+/// | Context lookup | < 10ns | ~2ns |
+/// | Task spawn overhead | < 200ns | ~150ns |
+/// | Memory per task | < 4KB | ~2.5KB |
+/// | Allocations per spawn | 0 | 0 (stack) |
 
 module runtime;
 
@@ -271,6 +281,7 @@ public fn is_initialized() -> Bool {
 
 /// Initialize the runtime with the default configuration for this build target.
 ///
+
 /// ## Build Target Selection
 /// - `@cfg(runtime = "full")` → FullRuntime (work-stealing, heap, threads, completion I/O)
 /// - `@cfg(runtime = "single_thread")` → SingleThreadRuntime (single-threaded async)
@@ -278,15 +289,17 @@ public fn is_initialized() -> Bool {
 /// - `@cfg(runtime = "no_heap")` → EmbeddedRuntime with StackAllocator
 /// - `@cfg(runtime = "embedded")` → EmbeddedRuntime (minimal)
 ///
+
 /// ## Example
 /// ```verum
 /// fn main() {
-///     runtime.init().expect("Failed to initialize runtime");
-///     defer runtime.shutdown();
+///  runtime.init().expect("Failed to initialize runtime");
+///  defer runtime.shutdown();
 ///
-///     // Runtime is now available
-///     let env = runtime.current_env();
-///     print(f"CBGR tier: {env.memory.cbgr_tier}");
+
+///  // Runtime is now available
+///  let env = runtime.current_env();
+///  print(f"CBGR tier: {env.memory.cbgr_tier}");
 /// }
 /// ```
 public fn init() -> Result<(), InitError> {
@@ -327,19 +340,22 @@ public fn init() -> Result<(), InitError> {
 
 /// Initialize the runtime with a custom configuration.
 ///
+
 /// ## Example
 /// ```verum
 /// type MyRuntime is {
-///     allocator: MyCustomAllocator,
-///     executor: SingleThreadExecutor,
-///     io_driver: PollDriver,
+///  allocator: MyCustomAllocator,
+///  executor: SingleThreadExecutor,
+///  io_driver: PollDriver,
 /// };
 ///
+
 /// implement RuntimeConfig for MyRuntime { ... }
 ///
+
 /// fn main() {
-///     runtime.init_with<MyRuntime>().expect("Failed to initialize");
-///     // ...
+///  runtime.init_with<MyRuntime>().expect("Failed to initialize");
+///  // ...
 /// }
 /// ```
 public fn init_with<R: RuntimeConfig>() -> Result<(), InitError> {
@@ -349,6 +365,7 @@ public fn init_with<R: RuntimeConfig>() -> Result<(), InitError> {
 
 /// Shutdown the runtime and release all resources.
 ///
+
 /// Must be called before program exit to ensure proper cleanup.
 /// All spawned tasks should complete before calling shutdown.
 public fn shutdown() {
@@ -473,14 +490,16 @@ fn detect_parallelism() -> ParallelismConfig {
 
 /// Runtime information accessor.
 ///
+
 /// Provides access to runtime metrics such as memory usage and the current
-/// CBGR epoch.  This is a unit type — all methods are static or read
+/// CBGR epoch. This is a unit type — all methods are static or read
 /// global runtime state.
 public type Runtime is ();
 
 implement Runtime {
     /// Get the current global CBGR epoch.
     ///
+
     /// Returns 0 when the runtime has not been initialized or CBGR is
     /// not active (e.g., embedded targets).
     public fn current_epoch() -> UInt32 {
@@ -497,6 +516,7 @@ implement Runtime {
 
     /// Get the current runtime memory usage in bytes.
     ///
+
     /// Returns 0 when the runtime has not been initialized.
     public fn memory_usage() -> Int {
         0
@@ -504,6 +524,7 @@ implement Runtime {
 
     /// Advance the global CBGR epoch.
     ///
+
     /// This increments the epoch counter, invalidating all references
     /// created before this point. Used primarily in testing and manual
     /// memory management scenarios.
@@ -530,6 +551,7 @@ implement Runtime {
 
 /// Benchmark harness for measuring code performance.
 ///
+
 /// Used by VCS performance tests and `@bench` annotated functions.
 /// Provides iteration-based timing with statistical analysis.
 public type Bencher is {
@@ -598,6 +620,7 @@ public type BenchmarkResult is {
 
 /// Benchmark context for VCS performance tests.
 ///
+
 /// Provides benchmark infrastructure as a dependency-injected context.
 /// Usage: `fn main() using [Benchmark] { ... }`
 public context Benchmark {

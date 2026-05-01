@@ -3,7 +3,7 @@
 // =============================================================================
 // PRAGMA journal_mode — one of DELETE / TRUNCATE / PERSIST / MEMORY / WAL / OFF.
 // Switching to WAL is persistent across sessions; switching back to a non-WAL
-// mode is also persistent.  MEMORY/OFF are connection-local for non-persistent
+// mode is also persistent. MEMORY/OFF are connection-local for non-persistent
 // databases; for file-backed they're rejected or short-lived.
 // Spec §15.4 + §18.4.
 // =============================================================================

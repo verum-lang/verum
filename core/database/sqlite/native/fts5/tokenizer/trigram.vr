@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 (FTS5 trigram tokenizer)
 //
+
 // Emits every 3-byte window from the input as a token. Used for fuzzy
 // match (`x LIKE '%abc%'` becomes "do all of {abc} appear as trigrams?").
 // =============================================================================

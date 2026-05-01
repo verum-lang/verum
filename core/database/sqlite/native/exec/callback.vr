@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_exec documents the callback's return as:
-//   * 0 → continue
-//   * non-zero → abort (SQLITE_ABORT)
+//  * 0 → continue
+//  * non-zero → abort (SQLITE_ABORT)
 //
+
 // We model that as a typed decision to remove the magic-zero idiom.
 // =============================================================================
 

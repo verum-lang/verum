@@ -5,44 +5,56 @@
 // Dependencies: core, core.security.hash.sha256
 // =============================================================================
 //
+
 // Base58 is a binary-to-text encoding designed to produce IDs and
 // addresses that humans copy-paste without confusion: it omits the
 // four visually-similar glyphs (0, O, I, l) from the Base64 set.
 //
+
 // Used by:
 //
-//   * Bitcoin legacy addresses (P2PKH, P2SH).
-//   * Solana public keys.
-//   * Stellar account IDs (StrKey).
-//   * IPFS v0 CIDs (Base58btc).
-//   * Monero subaddresses (via base58 variant).
+
+//  * Bitcoin legacy addresses (P2PKH, P2SH).
+//  * Solana public keys.
+//  * Stellar account IDs (StrKey).
+//  * IPFS v0 CIDs (Base58btc).
+//  * Monero subaddresses (via base58 variant).
 //
+
 // # Two variants here
 //
-//   * `encode` / `decode`          — raw Base58 (no checksum).
-//   * `encode_check` / `decode_check` — Base58Check: appends the
-//     first 4 bytes of double-SHA256 as a tail checksum so
-//     transcription errors get caught on decode.
+
+//  * `encode` / `decode` — raw Base58 (no checksum).
+//  * `encode_check` / `decode_check` — Base58Check: appends the
+//  first 4 bytes of double-SHA256 as a tail checksum so
+//  transcription errors get caught on decode.
 //
+
 // # Alphabet
 //
+
 // ```
-//   123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
+//  123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
 // ```
 //
+
 // # Encoding properties
 //
-//   * Zero-prefix bytes map to leading '1' characters — the
-//     classic Bitcoin "every 0x00 byte becomes a '1'" rule.
-//   * Encoding/decoding is variable-width: log58(256) ≈ 1.366
-//     characters per input byte.
+
+//  * Zero-prefix bytes map to leading '1' characters — the
+//  classic Bitcoin "every 0x00 byte becomes a '1'" rule.
+//  * Encoding/decoding is variable-width: log58(256) ≈ 1.366
+//  characters per input byte.
 //
+
 // # Performance note
 //
+
 // Pure big-integer division per character; ~1 MB/s for megabyte-
 // sized inputs. That's fine for addresses (≤ 50 bytes) but not
 // for bulk data — reach for Base64 there.
 //
+
 // =============================================================================
 
 module core.encoding.base58;
@@ -228,13 +240,17 @@ fn decode_digit(b: Byte) -> Result<Int, Base58Error> {
 // Base58Check
 // =============================================================================
 //
+
 // Appends the first 4 bytes of double-SHA256(payload) as a checksum:
 //
-//   output = base58( payload || SHA256(SHA256(payload))[0..4] )
+
+//  output = base58( payload || SHA256(SHA256(payload))[0..4] )
 //
+
 // Guards against transcription errors — a one-character flip has
 // probability 2^-32 of passing the checksum.
 //
+
 // =============================================================================
 
 public fn encode_check(payload: &[Byte]) -> List<Byte> {

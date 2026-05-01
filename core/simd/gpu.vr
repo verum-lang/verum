@@ -5,22 +5,26 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Verum GPU compute API for high-performance parallel computation.
 // Targets: CUDA (NVIDIA), ROCm (AMD), Metal (Apple), Vulkan.
 //
+
 // Architecture:
-//   @device(gpu) fn kernel(params...) { ... }
-//   → VBC tensor/gpu opcodes
-//   → MLIR gpu/linalg/tensor dialects
-//   → Target-specific lowering (NVVM/ROCDL/Metal/SPIRV)
-//   → GPU binary (PTX/HSACO/AIR/SPIRV)
+//  @device(gpu) fn kernel(params...) { ... }
+//  → VBC tensor/gpu opcodes
+//  → MLIR gpu/linalg/tensor dialects
+//  → Target-specific lowering (NVVM/ROCDL/Metal/SPIRV)
+//  → GPU binary (PTX/HSACO/AIR/SPIRV)
 //
+
 // Performance model:
-//   - Zero-copy host↔device transfers where possible
-//   - Automatic fusion of element-wise operations
-//   - Tensor core utilization on NVIDIA (TF32/FP16 matmul)
-//   - Workgroup-level shared memory for reductions
+//  - Zero-copy host↔device transfers where possible
+//  - Automatic fusion of element-wise operations
+//  - Tensor core utilization on NVIDIA (TF32/FP16 matmul)
+//  - Workgroup-level shared memory for reductions
 //
+
 // =============================================================================
 
 module gpu;

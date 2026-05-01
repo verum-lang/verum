@@ -4,11 +4,14 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // This module provides floating-point intrinsics that map directly to LLVM/CPU
 // instructions. All operations are zero-allocation and VBC-compatible.
 //
+
 // # Categories
 //
+
 // - Basic math: sqrt, cbrt, pow, exp, log
 // - Trigonometric: sin, cos, tan, asin, acos, atan
 // - Hyperbolic: sinh, cosh, tanh, asinh, acosh, atanh
@@ -17,6 +20,7 @@
 // - Classification: is_nan, is_inf, is_finite, is_normal
 // - Special values: infinity, nan, bit conversions
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 

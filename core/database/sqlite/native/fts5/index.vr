@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 (FTS5)
 //
+
 // `InvertedIndex` is the in-memory write-buffer + sorted segment list.
 // On each insert/delete the new entry lands in the in-memory buffer;
 // when the buffer crosses `flush_threshold` it is materialised as an
 // L0 segment.
 //
+
 // Lookups traverse: buffer → L0 → L1 → … → L3 and union the posting
 // lists. The merger compacts adjacent same-level segments into the
 // next level when the count crosses `merge_threshold`.

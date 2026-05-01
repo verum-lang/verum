@@ -1,8 +1,8 @@
 // =============================================================================
 // core/database/sqlite/native/lookaside_two_size_api/mod.vr
 // =============================================================================
-// SQLITE_CONFIG_LOOKASIDE2 — split-slot lookaside pool.  Two slot sizes are
-// kept (small + large), tuned independently.  Spec App.E.L.
+// SQLITE_CONFIG_LOOKASIDE2 — split-slot lookaside pool. Two slot sizes are
+// kept (small + large), tuned independently. Spec App.E.L.
 // =============================================================================
 
 module core.database.sqlite.native.lookaside_two_size_api;

@@ -16,10 +16,11 @@
 // verify that `Either<A, B>::Right(s)` binds `s` to the SECOND
 // type parameter (`B`), not the first (`A`).
 //
+
 // Pre-fix bug (closed as not-reproducing on the current pipeline,
 // kept as guard against regression):
-//   type Either<A, B> is | Left(A) | Right(B);
-//   match e { Either.Right(s) => ... }
+//  type Either<A, B> is | Left(A) | Right(B);
+//  match e { Either.Right(s) => ... }
 // type-checked `s` as the LEFT type (`A`) — causing E400
 // "expected 'Int', found 'Text'" on the Either<Int, Text> shape.
 // Triple-test covers both Right and Left bindings plus a swapped

@@ -14,6 +14,7 @@
 )]
 // Tests for Context System type checking
 //
+
 // Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
 
 use verum_ast::span::Span;

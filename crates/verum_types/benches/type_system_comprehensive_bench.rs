@@ -1,13 +1,16 @@
 //! Comprehensive Type System Performance Benchmarks
 //!
+
 //! **CRITICAL REQUIREMENTS**: Verify all type system performance targets
 //!
+
 //! # Performance Targets
 //! - Type inference: < 100ms for 10K LOC
 //! - Refinement type checking: < 50ms per function
 //! - Protocol resolution: < 10ms per protocol
 //! - Bidirectional checking: < 100ms for 10K LOC
 //!
+
 //! Run with: cargo bench --package verum_types --bench type_system_comprehensive_bench --release
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};

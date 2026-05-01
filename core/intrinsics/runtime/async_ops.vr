@@ -4,9 +4,11 @@
 // Layer: Stdlib (1)
 // Dependencies: Async runtime (executor, scheduler)
 //
+
 // These intrinsics require the Verum async runtime (executor, scheduler).
 // VBC Opcodes: Spawn (0xA0), Await (0xA1), IoSubmit (0x4C), IoPoll (0x4D)
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 
@@ -61,6 +63,7 @@ public type RawSingleThreadExecutorOpaque is (*const Byte);
 
 /// Spawn a task on the executor with a custom environment.
 ///
+
 /// VBC Opcode: Spawn (0xA0)
 /// Requires: Async runtime
 @intrinsic("spawn_with_env")
@@ -68,6 +71,7 @@ public fn spawn_with_env(future: RawFutureHandle, task_id: UInt64) -> RawJoinHan
 
 /// Spawn a task on an executor.
 ///
+
 /// VBC Opcode: Spawn (0xA0)
 /// Requires: Async runtime
 @intrinsic("executor_spawn")
@@ -75,6 +79,7 @@ public fn executor_spawn(executor: RawExecutorHandle, task: RawFutureHandle) -> 
 
 /// Block on a future until completion.
 ///
+
 /// Uses Await opcode (0xA1) in a loop
 /// Requires: Async runtime
 @intrinsic("executor_block_on")
@@ -82,12 +87,14 @@ public fn executor_block_on(executor: RawExecutorHandle, future: RawFutureHandle
 
 /// Poll a future synchronously (for no-async mode).
 ///
+
 /// Requires: Async runtime (or no-op in sync mode)
 @intrinsic("future_poll_sync")
 public fn future_poll_sync(future: RawFutureHandle) -> *const Byte;
 
 /// Get default executor handle.
 ///
+
 /// Requires: Async runtime global state (via TLS)
 @intrinsic("default_executor")
 public fn default_executor() -> RawExecutorHandle;
@@ -98,6 +105,7 @@ public fn default_executor() -> RawExecutorHandle;
 
 /// Async sleep for specified milliseconds.
 ///
+
 /// Uses IoSubmit (0x4C) / IoPoll (0x4D) with timer
 /// Requires: Async runtime + OS timer
 @intrinsic("async_sleep_ms")
@@ -105,6 +113,7 @@ public async fn async_sleep_ms(ms: UInt64);
 
 /// Async sleep for specified nanoseconds.
 ///
+
 /// Uses IoSubmit (0x4C) / IoPoll (0x4D) with timer
 /// Requires: Async runtime + OS timer
 @intrinsic("async_sleep_ns")
@@ -157,6 +166,7 @@ implement Eq for RawRecoveryError {
 
 /// Spawn a supervised task.
 ///
+
 /// Requires: Supervisor runtime
 @intrinsic("spawn_supervised")
 public fn spawn_supervised(
@@ -168,18 +178,21 @@ public fn spawn_supervised(
 
 /// Log an escalation event.
 ///
+
 /// Requires: Supervisor runtime
 @intrinsic("supervisor_log_escalation")
 public fn supervisor_log_escalation(reason: *const Byte);
 
 /// Set parent supervisor link.
 ///
+
 /// Requires: Supervisor runtime
 @intrinsic("supervisor_set_parent")
 public fn supervisor_set_parent(child: RawSupervisorHandleOpaque, parent: RawSupervisorHandleOpaque);
 
 /// Execute a future with recovery strategy.
 ///
+
 /// Requires: Recovery runtime
 @intrinsic("exec_with_recovery")
 public async fn exec_with_recovery(
@@ -197,12 +210,14 @@ public fn inline_cb_as_ref(inline_storage: *const Byte) -> RawCircuitBreakerOpaq
 
 /// Get global allocator reference.
 ///
+
 /// Requires: Global allocator registration
 @intrinsic("global_allocator")
 public fn global_allocator() -> RawAllocHandle;
 
 /// Get default I/O driver.
 ///
+
 /// Requires: I/O runtime
 @intrinsic("default_io_driver")
 public fn default_io_driver() -> RawIODriverHandle;

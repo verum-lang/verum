@@ -3,8 +3,10 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3_load_extension(db, file, ep, msg)
+
+//  sqlite3_load_extension(db, file, ep, msg)
 //
+
 // If `ep` is NULL the default entry point name is derived from the
 // file's stem (e.g. "libfoo.so" → "sqlite3_foo_init").
 // =============================================================================
@@ -34,7 +36,7 @@ fn push_text(dst: &mut Text, s: &Text) {
     while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
 }
 
-/// Derive "sqlite3_<stem>_init" from the filename.  Strips the leading
+/// Derive "sqlite3_<stem>_init" from the filename. Strips the leading
 /// directory + any trailing extension + a leading "lib" prefix.
 public fn default_symbol(file: &Text) -> Text {
     let bytes = file.as_bytes();

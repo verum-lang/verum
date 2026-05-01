@@ -5,13 +5,16 @@
 // Dependencies: mem/allocator (CBGR-aware native allocator)
 // =============================================================================
 //
+
 // This module provides semantic memory types (Heap, Shared, Weak) that use
 // the native CBGR allocator. All memory operations are tracked with generation
 // and epoch for use-after-free detection.
 //
+
 // Migrated from FFI (verum_bootstrap) to native allocator (mem/allocator.vr)
 // as part of V-LLSI self-hosting initiative.
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 12 (Migration Plan)
 // =============================================================================
 
@@ -54,12 +57,13 @@ mount core.intrinsics.{
 // Size and Alignment - Use Compile-time Type Properties
 // =============================================================================
 // Use T.size and T.alignment type properties directly.
-// Example: let size = Int.size;  // 8 bytes
-//          let align = MyStruct<T>.alignment;
+// Example: let size = Int.size; // 8 bytes
+//  let align = MyStruct<T>.alignment;
 // =============================================================================
 
 /// Read value from pointer without ownership transfer.
 ///
+
 /// Delegates to stdlib.intrinsics.ptr_read for typed intrinsic handling.
 @inline(always)
 public unsafe fn ptr_read<T>(ptr: &unsafe T) -> T {
@@ -68,6 +72,7 @@ public unsafe fn ptr_read<T>(ptr: &unsafe T) -> T {
 
 /// Write value to pointer without dropping existing value.
 ///
+
 /// Delegates to stdlib.intrinsics.ptr_write for typed intrinsic handling.
 @inline(always)
 public unsafe fn ptr_write<T>(ptr: &unsafe T, value: T) {
@@ -76,6 +81,7 @@ public unsafe fn ptr_write<T>(ptr: &unsafe T, value: T) {
 
 /// Run destructor for value at pointer.
 ///
+
 /// Delegates to stdlib.intrinsics.drop_in_place for typed intrinsic handling.
 @inline(always)
 public unsafe fn drop_in_place<T>(ptr: &mut T) {
@@ -84,6 +90,7 @@ public unsafe fn drop_in_place<T>(ptr: &mut T) {
 
 /// Prevent value from being dropped.
 ///
+
 /// Delegates to stdlib.intrinsics.forget for typed intrinsic handling.
 @inline(always)
 public fn forget<T>(value: T) {
@@ -92,15 +99,17 @@ public fn forget<T>(value: T) {
 
 /// Explicitly drop a value, running its destructor.
 ///
+
 /// This function takes ownership of the value and lets it go out of scope,
 /// triggering the Drop implementation if present. This is useful when you
 /// want to explicitly control when a value is dropped.
 ///
+
 /// # Example
 /// ```verum
 /// let resource = open_file("data.txt");
 /// // ... use resource ...
-/// drop(resource);  // Explicitly close the file now
+/// drop(resource); // Explicitly close the file now
 /// // resource is no longer valid here
 /// ```
 @inline(always)
@@ -111,6 +120,7 @@ public fn drop<T>(value: T) {
 
 /// Check if pointer is null.
 ///
+
 /// Delegates to stdlib.intrinsics.ptr_is_null for typed intrinsic handling.
 @inline(always)
 public fn is_null<T>(ptr: &unsafe T) -> Bool {
@@ -119,6 +129,7 @@ public fn is_null<T>(ptr: &unsafe T) -> Bool {
 
 /// Get null pointer.
 ///
+
 /// Delegates to stdlib.intrinsics.null_ptr for typed intrinsic handling.
 @inline(always)
 public fn null_ptr<T>() -> &unsafe T {
@@ -127,6 +138,7 @@ public fn null_ptr<T>() -> &unsafe T {
 
 /// Pointer offset.
 ///
+
 /// Delegates to stdlib.intrinsics.ptr_offset for typed intrinsic handling.
 @inline(always)
 public unsafe fn ptr_offset<T>(ptr: &unsafe T, count: Int) -> &unsafe T {
@@ -140,6 +152,7 @@ public unsafe fn ptr_offset<T>(ptr: &unsafe T, count: Int) -> &unsafe T {
 /// Heap-allocated value with unique ownership and CBGR tracking.
 /// Similar to Box<T> in Rust but with generation-based memory safety.
 ///
+
 /// The generation and epoch fields are used for CBGR validation:
 /// - On dereference, the stored generation is compared to the header
 /// - If they don't match, use-after-free is detected at ~15ns cost
@@ -153,8 +166,10 @@ public type Heap<T> is {
 implement<T> Heap<T> {
     /// Allocate a new value on the heap.
     ///
+
     /// # Panics
     ///
+
     /// Panics if allocation fails (out of memory).
     public fn new(value: T) -> Heap<T> {
         let size = T.size;
@@ -187,8 +202,10 @@ implement<T> Heap<T> {
 
     /// Allocate zeroed memory (for types where zero bits are valid).
     ///
+
     /// # Safety
     ///
+
     /// The type T must be valid when all bits are zero. This is
     /// typically true for primitive types and simple aggregates.
     public fn new_zeroed() -> Heap<T> {
@@ -209,6 +226,7 @@ implement<T> Heap<T> {
 
     /// Try to allocate a new value, returning error on failure.
     ///
+
     /// This is the non-panicking version of `new`.
     public fn try_new(value: T) -> Result<Heap<T>, AllocError> {
         let size = T.size;
@@ -230,6 +248,7 @@ implement<T> Heap<T> {
 
     /// Get immutable reference to the value.
     ///
+
     /// Performs CBGR generation validation to detect use-after-free.
     /// Cost: ~15ns (Tier 0), 0ns if compiler-proven safe (Tier 1).
     public fn as_ref(&self) -> &T {
@@ -239,6 +258,7 @@ implement<T> Heap<T> {
 
     /// Get mutable reference to the value.
     ///
+
     /// Performs CBGR generation validation to detect use-after-free.
     /// Cost: ~15ns (Tier 0), 0ns if compiler-proven safe (Tier 1).
     public fn as_mut(&mut self) -> &mut T {
@@ -248,10 +268,12 @@ implement<T> Heap<T> {
 
     /// Validate CBGR generation and epoch against the allocation header.
     ///
+
     /// The allocation header is 32 bytes before the user pointer:
-    ///   offset 0: generation (UInt32, atomic)
-    ///   offset 4: epoch_and_caps (UInt16 epoch + UInt16 caps, atomic)
+    ///  offset 0: generation (UInt32, atomic)
+    ///  offset 4: epoch_and_caps (UInt16 epoch + UInt16 caps, atomic)
     ///
+
     /// Uses atomic loads with Acquire ordering to ensure visibility across
     /// threads. Panics on mismatch (use-after-free detected). Cost: ~15ns.
     @inline(always)
@@ -272,6 +294,7 @@ implement<T> Heap<T> {
 
     /// Consume and return the inner value.
     ///
+
     /// This moves the value out of the heap allocation and frees
     /// the memory. The Heap wrapper is consumed.
     public fn into_inner(self) -> T {
@@ -291,8 +314,10 @@ implement<T> Heap<T> {
 
     /// Convert to raw pointer (leaks memory if not properly handled).
     ///
+
     /// # Safety
     ///
+
     /// The caller is responsible for eventually freeing the memory
     /// by calling `from_raw` and then dropping it or calling `into_inner`.
     public fn into_raw(self) -> &unsafe T {
@@ -303,8 +328,10 @@ implement<T> Heap<T> {
 
     /// Reconstruct from raw pointer.
     ///
+
     /// # Safety
     ///
+
     /// The pointer must have been obtained from `into_raw` on a Heap<T>.
     /// The generation and epoch are read from the allocation header.
     public unsafe fn from_raw(ptr: &unsafe T) -> Heap<T> {
@@ -331,6 +358,7 @@ implement<T> Heap<T> {
 
     /// Validate CBGR (explicit check for debugging).
     ///
+
     /// Returns true if the reference is still valid (no use-after-free).
     public fn is_valid(&self) -> Bool {
         let header = get_header_from_ptr(self.ptr as &unsafe Byte);
@@ -341,6 +369,7 @@ implement<T> Heap<T> {
 
     /// Consume the Heap, returning a raw pointer without deallocating.
     ///
+
     /// The caller is responsible for eventually freeing the memory.
     /// This is useful for creating static references or transferring
     /// ownership to FFI code.
@@ -352,6 +381,7 @@ implement<T> Heap<T> {
 
     /// Get the CBGR generation counter from the allocation header.
     ///
+
     /// This reads the actual generation from the heap header (not the cached
     /// value stored in the Heap struct). Useful for CBGR introspection tests.
     public fn header_generation(&self) -> UInt32 {
@@ -361,6 +391,7 @@ implement<T> Heap<T> {
 
     /// Get the current CBGR epoch from the allocation header.
     ///
+
     /// This reads the actual epoch from the heap header. The epoch tracks
     /// the allocation era for generational memory safety.
     public fn current_epoch(&self) -> UInt16 {
@@ -371,6 +402,7 @@ implement<T> Heap<T> {
 
     /// Check if this allocation is still valid (not freed).
     ///
+
     /// A generation of 0 indicates the memory has been freed. This is
     /// a lightweight check that does not validate epoch consistency.
     public fn is_allocated(&self) -> Bool {
@@ -381,6 +413,7 @@ implement<T> Heap<T> {
 
     /// Check if this allocation has been freed.
     ///
+
     /// Returns true if the generation in the heap header has been incremented
     /// past the stored generation value, indicating the memory was freed and
     /// potentially reused.
@@ -392,6 +425,7 @@ implement<T> Heap<T> {
 
     /// Get the CBGR epoch from the allocation header.
     ///
+
     /// Alias for `current_epoch()` — provided for symmetry with `header_generation()`.
     public fn header_epoch(&self) -> UInt32 {
         let header_addr = self.ptr as Int - 32;
@@ -401,6 +435,7 @@ implement<T> Heap<T> {
 
     /// Return the CBGR header size in bytes.
     ///
+
     /// Every heap allocation is preceded by a 32-byte CBGR header containing
     /// generation, epoch, capability flags, and bookkeeping metadata.
     /// Return the CBGR header size in bytes (32).
@@ -410,6 +445,7 @@ implement<T> Heap<T> {
 
     /// Check if this allocation has been freed.
     ///
+
     /// Compares the stored generation against the current header generation.
     /// If they differ, the allocation was freed and the slot potentially reused.
     public fn is_freed(&self) -> Bool {
@@ -503,9 +539,9 @@ implement<T: Default> Default for Heap<T> {
     }
 }
 
-// Display if T is Display — transparent to the inner value.  Box-style
+// Display if T is Display — transparent to the inner value. Box-style
 // pointers in Verum are conceptually invisible to user-facing output:
-// `print(Heap.new(42))` should render `42`, not `Heap(42)`.  Mirrors
+// `print(Heap.new(42))` should render `42`, not `Heap(42)`. Mirrors
 // Rust's `Display for Box<T>`.
 implement<T: Display> Display for Heap<T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -521,6 +557,7 @@ implement<T: Display> Display for Heap<T> {
 /// Multiple Shared<T> can point to the same value.
 /// The value is deallocated when the last reference is dropped.
 ///
+
 /// The reference counts use atomic operations for thread safety.
 @opaque
 public type Shared<T> is {
@@ -719,6 +756,7 @@ implement<T> Shared<T> {
 
     /// Get an immutable reference to the inner value.
     ///
+
     /// Convenience accessor equivalent to `Deref` — useful when an explicit
     /// method call is clearer than operator overloading.
     public fn get(&self) -> &T {
@@ -727,6 +765,7 @@ implement<T> Shared<T> {
 
     /// Check if two Shared pointers point to the same allocation.
     ///
+
     /// This compares pointer identity, not value equality.
     public fn ptr_eq(&self, other: &Shared<T>) -> Bool {
         self.ptr == other.ptr
@@ -813,9 +852,9 @@ implement<T: Default> Default for Shared<T> {
     }
 }
 
-// Display if T is Display — transparent to the inner value.  RC
+// Display if T is Display — transparent to the inner value. RC
 // pointers in Verum are conceptually invisible to user-facing output:
-// `print(Shared.new(42))` renders `42`, not `Shared(42)`.  Matches
+// `print(Shared.new(42))` renders `42`, not `Shared(42)`. Matches
 // the Heap<T> convention above and mirrors Rust's `Display for Rc<T>`.
 implement<T: Display> Display for Shared<T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -839,6 +878,7 @@ public type Weak<T> is {
 implement<T> Weak<T> {
     /// Try to upgrade to a strong reference.
     ///
+
     /// Returns Some if the value is still alive, None otherwise.
     public fn upgrade(&self) -> Maybe<Shared<T>> {
         unsafe {
@@ -894,6 +934,7 @@ implement<T> Weak<T> {
 implement<T> Weak<T> {
     /// Create a Weak reference from a Shared reference.
     ///
+
     /// This is the static counterpart of `Shared.downgrade()`.
     public fn from(shared: &Shared<T>) -> Weak<T> {
         shared.downgrade()
@@ -945,7 +986,7 @@ implement<T> Debug for Weak<T> {
 
 implement<T> Eq for Weak<T> {
     /// Identity equality — two `Weak<T>` are equal iff they were
-    /// produced from the same `Shared<T>` allocation.  Comparing
+    /// produced from the same `Shared<T>` allocation. Comparing
     /// generation + epoch + pointer is sufficient under CBGR
     /// (generation+epoch suffices to distinguish reused allocations
     /// from genuinely identical ones; the pointer is the address
@@ -958,7 +999,7 @@ implement<T> Eq for Weak<T> {
 }
 
 implement<T> Hash for Weak<T> {
-    /// Identity hash matching Eq's identity semantics.  Allows
+    /// Identity hash matching Eq's identity semantics. Allows
     /// `Map<Weak<T>, V>` keyed by allocation identity.
     fn hash(&self, hasher: &mut Hasher) {
         // Pointer-as-int address; combined with gen+epoch to
@@ -978,10 +1019,13 @@ implement<T> Hash for Weak<T> {
 
 /// Create a slice from raw parts.
 ///
+
 /// Delegates to stdlib.intrinsics.slice_from_raw_parts for typed intrinsic handling.
 ///
+
 /// # Safety
 ///
+
 /// The pointer must be valid for reading `len` elements of type T.
 @inline(always)
 public unsafe fn slice_from_raw_parts<T>(ptr: &unsafe T, len: Int) -> &[T] {
@@ -990,10 +1034,13 @@ public unsafe fn slice_from_raw_parts<T>(ptr: &unsafe T, len: Int) -> &[T] {
 
 /// Create a mutable slice from raw parts.
 ///
+
 /// Delegates to stdlib.intrinsics.slice_from_raw_parts_mut for typed intrinsic handling.
 ///
+
 /// # Safety
 ///
+
 /// The pointer must be valid for reading and writing `len` elements of type T.
 @inline(always)
 public unsafe fn slice_from_raw_parts_mut<T>(ptr: &unsafe T, len: Int) -> &mut [T] {
@@ -1006,10 +1053,13 @@ public unsafe fn slice_from_raw_parts_mut<T>(ptr: &unsafe T, len: Int) -> &mut [
 
 /// Copy memory between non-overlapping regions.
 ///
+
 /// Delegates to stdlib.intrinsics.memcpy for typed intrinsic handling.
 ///
+
 /// # Safety
 ///
+
 /// The source and destination must not overlap. Use `copy` for overlapping regions.
 @inline(always)
 public unsafe fn copy_nonoverlapping<T>(src: &T, dst: &mut T, count: Int) {
@@ -1019,8 +1069,10 @@ public unsafe fn copy_nonoverlapping<T>(src: &T, dst: &mut T, count: Int) {
 
 /// Copy memory that may overlap.
 ///
+
 /// Delegates to stdlib.intrinsics.memmove for typed intrinsic handling.
 ///
+
 /// This is safe for overlapping regions but slower than `copy_nonoverlapping`.
 @inline(always)
 public unsafe fn copy<T>(src: &T, dst: &mut T, count: Int) {
@@ -1030,6 +1082,7 @@ public unsafe fn copy<T>(src: &T, dst: &mut T, count: Int) {
 
 /// Fill memory with a byte value.
 ///
+
 /// Delegates to stdlib.intrinsics.memset for typed intrinsic handling.
 @inline(always)
 public unsafe fn fill<T>(ptr: &mut T, val: Byte, count: Int) {
@@ -1044,11 +1097,12 @@ public fn zero<T>(ptr: &mut T, count: Int) {
 
 /// Swap two values in place.
 ///
+
 /// Lowers to the typed `@intrinsic("swap", a, b)` so both operands stay
 /// in managed-reference form throughout — the codegen does not need to
 /// fabricate a raw `&unsafe T` from a `&mut T`, which would mis-cast a
 /// boxed value to a pointer and surface at runtime as
-/// `Expected pointer, got Some(N)`.  Mirrors `core.intrinsics.memory.swap`
+/// `Expected pointer, got Some(N)`. Mirrors `core.intrinsics.memory.swap`
 /// so the two definitions are functionally equivalent under the
 /// stdlib-loading first-wins gate (#163 history).
 @inline(always)
@@ -1058,6 +1112,7 @@ public fn swap<T>(a: &mut T, b: &mut T) {
 
 /// Replace a value, returning the old one.
 ///
+
 /// Lowers to the typed `@intrinsic("replace", dest, src)` for the same
 /// reason as `swap` above.
 @inline(always)
@@ -1072,8 +1127,10 @@ public fn take<T: Default>(dest: &mut T) -> T {
 
 /// Compare memory regions.
 ///
+
 /// Delegates to stdlib.intrinsics.memcmp for typed intrinsic handling.
 ///
+
 /// Returns 0 if equal, negative if a < b, positive if a > b.
 @inline(always)
 public fn memcmp<T>(a: &T, b: &T, count: Int) -> Int {
@@ -1087,6 +1144,7 @@ public fn memcmp<T>(a: &T, b: &T, count: Int) -> Int {
 
 /// Wrapper that prevents the contained value from being dropped.
 ///
+
 /// Use this when you need to control exactly when destruction happens,
 /// or when transferring ownership across FFI boundaries.
 @opaque
@@ -1107,8 +1165,10 @@ implement<T> ManuallyDrop<T> {
 
     /// Manually drop the inner value.
     ///
+
     /// # Safety
     ///
+
     /// Must not be called more than once. After calling this,
     /// the contained value is no longer valid.
     public unsafe fn drop(&mut self) {
@@ -1142,7 +1202,7 @@ implement<T: Debug> Debug for ManuallyDrop<T> {
 }
 
 // Display delegates transparently — ManuallyDrop is a drop-suppression
-// wrapper, conceptually invisible to user-facing rendering.  Mirrors
+// wrapper, conceptually invisible to user-facing rendering. Mirrors
 // the Heap<T> / Shared<T> / Cow<T> Display convention.
 implement<T: Display> Display for ManuallyDrop<T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -1180,6 +1240,7 @@ implement<T: Default> Default for ManuallyDrop<T> {
 
 /// A wrapper for potentially uninitialized memory.
 ///
+
 /// This type is used when you need to allocate memory for a value
 /// but initialize it later. Reading from uninitialized memory is UB.
 @opaque
@@ -1188,6 +1249,7 @@ public type MaybeUninit<T> is { value: T };
 implement<T> MaybeUninit<T> {
     /// Create uninitialized memory.
     ///
+
     /// The memory contents are undefined. Reading before initialization is UB.
     public fn uninit() -> MaybeUninit<T> {
         unsafe { intrinsic_uninit<MaybeUninit<T>>() }
@@ -1195,6 +1257,7 @@ implement<T> MaybeUninit<T> {
 
     /// Create zeroed memory.
     ///
+
     /// All bytes are set to zero. This may or may not be a valid value for T.
     public fn zeroed() -> MaybeUninit<T> {
         unsafe { intrinsic_zeroed<MaybeUninit<T>>() }
@@ -1207,6 +1270,7 @@ implement<T> MaybeUninit<T> {
 
     /// Write a value to the memory.
     ///
+
     /// Returns a mutable reference to the now-initialized value.
     public fn write(&mut self, value: T) -> &mut T {
         unsafe {
@@ -1217,8 +1281,10 @@ implement<T> MaybeUninit<T> {
 
     /// Assume the memory is initialized and get the value.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure the memory has been properly initialized.
     public unsafe fn assume_init(self) -> T {
         let value = ptr_read(&self.value as &unsafe T);
@@ -1228,8 +1294,10 @@ implement<T> MaybeUninit<T> {
 
     /// Get a reference to the value assuming it's initialized.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure the memory has been properly initialized.
     public unsafe fn assume_init_ref(&self) -> &T {
         &self.value
@@ -1237,8 +1305,10 @@ implement<T> MaybeUninit<T> {
 
     /// Get a mutable reference to the value assuming it's initialized.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure the memory has been properly initialized.
     public unsafe fn assume_init_mut(&mut self) -> &mut T {
         &mut self.value
@@ -1263,21 +1333,26 @@ implement<T> MaybeUninit<T> {
 
 /// Clone-on-Write smart pointer.
 ///
+
 /// `Cow<T>` can hold either a borrowed reference or an owned value.
 /// When mutable access is requested, the borrowed value is cloned
 /// into an owned copy, enabling efficient "copy only when needed" patterns.
 ///
+
 /// # Variants
 ///
+
 /// - `Borrowed(&T)` — holds a reference, zero overhead read access
 /// - `Owned(T)` — holds an owned clone, allows mutation
 ///
+
 /// # Example
 /// ```verum
 /// let text = "hello";
 /// let cow: Cow<Text> = Cow.Borrowed(&text);
 /// // No allocation yet
 ///
+
 /// let owned: Cow<Text> = cow.into_owned();
 /// // Now we have an owned copy
 /// ```
@@ -1310,6 +1385,7 @@ implement<T: Clone> Cow<T> {
 
     /// Convert to an owned value, cloning if necessary.
     ///
+
     /// If already owned, returns the value directly.
     /// If borrowed, clones the referenced value.
     public fn into_owned(self) -> T {
@@ -1321,6 +1397,7 @@ implement<T: Clone> Cow<T> {
 
     /// Get a mutable reference, cloning the value if currently borrowed.
     ///
+
     /// After this call, the Cow is guaranteed to be in the Owned state.
     public fn to_mut(&mut self) -> &mut T {
         match self {
@@ -1387,7 +1464,7 @@ implement<T: Clone + Default> Default for Cow<T> {
     }
 }
 
-// Display if T is Display — transparent to the inner value.  Cow
+// Display if T is Display — transparent to the inner value. Cow
 // transparently delegates user-facing output to its current
 // representation regardless of Borrowed / Owned state.
 implement<T: Clone + Display> Display for Cow<T> {
@@ -1402,18 +1479,21 @@ implement<T: Clone + Display> Display for Cow<T> {
 
 /// A wrapper that guarantees the pinned value will not be moved.
 ///
+
 /// `Pin<T>` prevents a value from being moved to a different memory address,
 /// which is critical for self-referential types and async futures. Once a
 /// value is pinned, its address remains stable until the Pin is dropped.
 ///
+
 /// For types that implement `Unpin`, pinning has no effect and the value
 /// can be freely moved in and out. For non-Unpin types, pinning guarantees
 /// address stability.
 ///
+
 /// # Example
 /// ```verum
 /// let pinned = Pin.new(42);
-/// let r = pinned.get_ref();  // &Int pointing to stable address
+/// let r = pinned.get_ref(); // &Int pointing to stable address
 /// assert_eq(*r, 42);
 /// ```
 public type Pin<T> is { pointer: T };
@@ -1421,6 +1501,7 @@ public type Pin<T> is { pointer: T };
 implement<T> Pin<T> {
     /// Create a new pinned value.
     ///
+
     /// For Unpin types, this is always safe. For non-Unpin types,
     /// the caller must ensure the value will not be moved after pinning.
     public fn new(pointer: T) -> Pin<T> {
@@ -1429,6 +1510,7 @@ implement<T> Pin<T> {
 
     /// Get an immutable reference to the pinned value.
     ///
+
     /// This is always safe because we only provide read access.
     public fn get_ref(&self) -> &T {
         &self.pointer
@@ -1436,6 +1518,7 @@ implement<T> Pin<T> {
 
     /// Get a mutable reference to the pinned value.
     ///
+
     /// For Unpin types, this is safe because they can be freely moved.
     /// For non-Unpin types, the caller must ensure the structural
     /// invariants of pinning are maintained.
@@ -1445,6 +1528,7 @@ implement<T> Pin<T> {
 
     /// Consume the Pin and return the inner value.
     ///
+
     /// For Unpin types, this is safe because they can be freely moved.
     /// For non-Unpin types, this violates pinning guarantees and
     /// should only be used with care.
@@ -1454,6 +1538,7 @@ implement<T> Pin<T> {
 
     /// Replace the pinned value, returning the old value.
     ///
+
     /// This is safe for Unpin types.
     public fn set(&mut self, value: T) {
         self.pointer = value;
@@ -1461,6 +1546,7 @@ implement<T> Pin<T> {
 
     /// Get an immutable reference to the inner value.
     ///
+
     /// Equivalent to `*pin` via Deref.
     public fn as_ref(&self) -> &T {
         &self.pointer
@@ -1468,6 +1554,7 @@ implement<T> Pin<T> {
 
     /// Transform the pinned value into a new Pin with a different type.
     ///
+
     /// Applies the function to the inner value and wraps the result.
     public fn map<U>(self, f: fn(T) -> U) -> Pin<U> {
         Pin { pointer: f(self.pointer) }
@@ -1528,7 +1615,7 @@ implement<T: Default> Default for Pin<T> {
 
 // Display delegates transparently — pinning is an unobservable
 // invariant from the user's perspective; rendered output should
-// match the underlying value.  Mirrors the wrapper-Display
+// match the underlying value. Mirrors the wrapper-Display
 // convention applied to Heap/Shared/Cow/ManuallyDrop.
 implement<T: Display> Display for Pin<T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -1546,9 +1633,11 @@ implement<T: Display> Display for Pin<T> {
 
 /// Allocate memory with given size and alignment.
 ///
+
 /// Returns a raw pointer to the allocated memory, or panics on failure.
 /// Use for collections that manage their own CBGR tracking.
 ///
+
 /// For a fallible counterpart that returns `Err(AllocError)` instead of
 /// panicking, see `try_alloc`. Collections building atop this primitive
 /// should prefer `try_alloc` at trust boundaries (FFI, untrusted-size
@@ -1562,12 +1651,14 @@ public fn alloc(size: Int, align: Int) -> &unsafe Byte {
 
 /// Fallible counterpart to `alloc`.
 ///
+
 /// Returns `Err(AllocError)` on allocation failure rather than
 /// panicking. The error variant carries enough detail
 /// (`AllocError.OutOfMemory { requested }`, `InvalidSize`,
 /// `InvalidAlignment`, etc.) for callers to distinguish recoverable
 /// from unrecoverable failures.
 ///
+
 /// This is the load-bearing primitive for every `try_<op>` method in
 /// the collections layer. Without this, a `try_*` wrapper that calls
 /// `alloc()` would still panic in the failure path — only catching the
@@ -1582,8 +1673,10 @@ public fn try_alloc(size: Int, align: Int) -> Result<&unsafe Byte, AllocError> {
 
 /// Allocate zeroed memory with given size and alignment.
 ///
+
 /// Returns a raw pointer to the allocated memory, or panics on failure.
 ///
+
 /// For a fallible counterpart see `try_alloc_zeroed`.
 public fn alloc_zeroed(size: Int, align: Int) -> &unsafe Byte {
     match cbgr_alloc_zeroed(size, align) {
@@ -1594,6 +1687,7 @@ public fn alloc_zeroed(size: Int, align: Int) -> &unsafe Byte {
 
 /// Fallible counterpart to `alloc_zeroed`.
 ///
+
 /// Returns `Err(AllocError)` on allocation failure rather than
 /// panicking. See `try_alloc` for rationale.
 public fn try_alloc_zeroed(size: Int, align: Int) -> Result<&unsafe Byte, AllocError> {
@@ -1605,8 +1699,10 @@ public fn try_alloc_zeroed(size: Int, align: Int) -> Result<&unsafe Byte, AllocE
 
 /// Deallocate memory previously allocated with alloc/alloc_zeroed.
 ///
+
 /// # Safety
 ///
+
 /// The pointer must have been allocated by alloc/alloc_zeroed.
 public fn dealloc(ptr: &unsafe Byte, _size: Int, _align: Int) {
     match cbgr_dealloc(ptr) {
@@ -1619,9 +1715,11 @@ public fn dealloc(ptr: &unsafe Byte, _size: Int, _align: Int) {
 
 /// Reallocate memory to a new size.
 ///
+
 /// Returns a raw pointer to the new allocation.
 /// The old content is copied (up to min(old_size, new_size) bytes).
 ///
+
 /// For a fallible counterpart see `try_realloc`.
 public fn realloc(ptr: &unsafe Byte, old_size: Int, new_size: Int, align: Int) -> &unsafe Byte {
     if new_size == 0 {
@@ -1650,6 +1748,7 @@ public fn realloc(ptr: &unsafe Byte, old_size: Int, new_size: Int, align: Int) -
 
 /// Fallible counterpart to `realloc`.
 ///
+
 /// Returns `Err(AllocError)` on allocation failure rather than
 /// panicking. The original allocation at `ptr` is left UNTOUCHED on
 /// failure — the caller still owns it and is responsible for its
@@ -1657,6 +1756,7 @@ public fn realloc(ptr: &unsafe Byte, old_size: Int, new_size: Int, align: Int) -
 /// either you get a new pointer and the old one has been freed, or
 /// you get an error and the old pointer is still valid.
 ///
+
 /// `new_size == 0` is treated as deallocation: returns `Ok(null)` and
 /// frees the old buffer (matching the behaviour of `realloc`).
 public fn try_realloc(
@@ -1697,6 +1797,7 @@ public fn try_realloc(
 
 /// Copy memory between non-overlapping regions (raw bytes version).
 ///
+
 /// Delegates to stdlib.intrinsics.memcpy for typed intrinsic handling.
 @inline(always)
 public unsafe fn memcpy(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
@@ -1705,6 +1806,7 @@ public unsafe fn memcpy(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
 
 /// Copy memory that may overlap (raw bytes version).
 ///
+
 /// Delegates to stdlib.intrinsics.memmove for typed intrinsic handling.
 @inline(always)
 public unsafe fn memmove(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
@@ -1713,8 +1815,10 @@ public unsafe fn memmove(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
 
 /// Compare memory regions (raw bytes version).
 ///
+
 /// Delegates to stdlib.intrinsics.memcmp for typed intrinsic handling.
 ///
+
 /// Returns 0 if equal, negative if a < b, positive if a > b.
 @inline(always)
 public fn memcmp_bytes(a: &unsafe Byte, b: &unsafe Byte, len: Int) -> Int {
@@ -1723,6 +1827,7 @@ public fn memcmp_bytes(a: &unsafe Byte, b: &unsafe Byte, len: Int) -> Int {
 
 /// Fill memory with a byte value (raw bytes version).
 ///
+
 /// Delegates to stdlib.intrinsics.memset for typed intrinsic handling.
 @inline(always)
 public unsafe fn memset(dst: &unsafe Byte, val: Byte, len: Int) {

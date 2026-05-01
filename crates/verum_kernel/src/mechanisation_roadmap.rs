@@ -1,38 +1,44 @@
 //! HTT + Adámek-Rosický mechanisation roadmap — V0 algorithmic
 //! kernel rule.
 //!
+
 //! ## What this delivers
 //!
+
 //! Lurie's *Higher Topos Theory* (HTT) and Adámek & Rosický's
 //! *Locally Presentable and Accessible Categories* (AR 1994) are the
 //! two load-bearing reference texts for Verum's (∞,1)-categorical
-//! kernel layer.  Full mechanisation of either is a multi-decade
+//! kernel layer. Full mechanisation of either is a multi-decade
 //! community project — the kernel cannot ship the entire content
 //! at once, but it CAN expose a structured roadmap that:
 //!
-//!   1. Enumerates each chapter / section's mechanisation status.
-//!   2. Lists the precise kernel modules / functions that discharge
-//!      each section.
-//!   3. Allows `verum audit --htt-roadmap` and
-//!      `verum audit --adamek-rosicky-roadmap` to surface the
-//!      coverage table.
-//!   4. Tracks version-stamped progress so successive Verum releases
-//!      can monotonically increase coverage without losing audit
-//!      provenance.
+
+//!  1. Enumerates each chapter / section's mechanisation status.
+//!  2. Lists the precise kernel modules / functions that discharge
+//!  each section.
+//!  3. Allows `verum audit --htt-roadmap` and
+//!  `verum audit --adamek-rosicky-roadmap` to surface the
+//!  coverage table.
+//!  4. Tracks version-stamped progress so successive Verum releases
+//!  can monotonically increase coverage without losing audit
+//!  provenance.
 //!
-//! V0 ships the static enumeration + per-section status flag.  V1
+
+//! ships the static enumeration + per-section status flag. V1
 //! promotion: each section gains a structural verification hook
 //! (a `pub fn verify_section_X_Y` that re-checks the kernel
 //! discharge).
 //!
+
 //! ## What this UNBLOCKS
 //!
-//!   - **`verum audit --htt-roadmap`** — emits a per-chapter coverage
-//!     report comparable across Verum releases.
-//!   - **`verum audit --adamek-rosicky-roadmap`** — same for AR 1994.
-//!   - **External community contributions** — the per-section
-//!     `RoadmapEntry` is a precise specification of what a community
-//!     PR would need to land to flip a `Pending` to `Mechanised`.
+
+//!  - **`verum audit --htt-roadmap`** — emits a per-chapter coverage
+//!  report comparable across Verum releases.
+//!  - **`verum audit --adamek-rosicky-roadmap`** — same for AR 1994.
+//!  - **External community contributions** — the per-section
+//!  `RoadmapEntry` is a precise specification of what a community
+//!  PR would need to land to flip a `Pending` to `Mechanised`.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -48,7 +54,7 @@ pub enum MechanisationStatus {
     /// surface exists.
     Mechanised,
     /// Section is partially mechanised: framework axiom + some
-    /// algorithmic content (e.g. V0 surface, V1 promotion pending).
+    /// algorithmic content (e.g. current surface, V1 promotion pending).
     Partial,
     /// Section is admitted via a paper-cited framework axiom; no
     /// algorithmic content yet.
@@ -138,7 +144,7 @@ impl RoadmapEntry {
 // =============================================================================
 
 /// Build the HTT mechanisation roadmap as it stands at this Verum
-/// release.  Per-chapter/section entries; iteration order matches
+/// release. Per-chapter/section entries; iteration order matches
 /// HTT's table of contents.
 pub fn htt_roadmap() -> Vec<RoadmapEntry> {
     vec![
@@ -236,7 +242,7 @@ pub fn htt_roadmap() -> Vec<RoadmapEntry> {
 // Adámek-Rosický 1994 roadmap
 // =============================================================================
 
-/// Build the AR 1994 mechanisation roadmap.  Per-section entries
+/// Build the AR 1994 mechanisation roadmap. Per-section entries
 /// with the chapter/page citation.
 pub fn adamek_rosicky_roadmap() -> Vec<RoadmapEntry> {
     vec![
@@ -374,11 +380,12 @@ impl CoverageReport {
 // MSFS self-containment audit
 // =============================================================================
 
-/// **MSFS self-containment witness.**  Aggregates the HTT and
+/// **MSFS self-containment witness.** Aggregates the HTT and
 /// Adámek-Rosický roadmaps into a single decision: does MSFS depend
 /// only on mechanised / partial / OutOfScopeForMsfs entries, with no
 /// `AxiomCited` or `Pending` items in MSFS scope?
 ///
+
 /// Returns true iff the trusted boundary BEYOND ZFC + 2-inacc is
 /// EMPTY for MSFS — the paper's claim "MSFS proven 100%
 /// from-first-principles in Verum (modulo ZFC + 2-inacc)" is
@@ -389,8 +396,8 @@ pub fn msfs_self_contained() -> bool {
     htt.msfs_self_contained() && ar.msfs_self_contained()
 }
 
-/// Dependencies of MSFS that are NOT yet mechanised.  Returns the
-/// list of (lineage, section) pairs needing future work.  An empty
+/// Dependencies of MSFS that are NOT yet mechanised. Returns the
+/// list of (lineage, section) pairs needing future work. An empty
 /// list means MSFS is fully self-contained; non-empty means there
 /// are genuine gaps.
 pub fn msfs_unmechanised_dependencies() -> Vec<(&'static str, Text)> {
@@ -454,9 +461,10 @@ mod tests {
 
     /// **THE MSFS SELF-CONTAINMENT INVARIANT.**
     ///
+
     /// This is the contract test that distinguishes "MSFS proven
     /// 100% from-first-principles in Verum" from a paper-cited
-    /// admission.  Iff this test passes, the paper's claim is
+    /// admission. Iff this test passes, the paper's claim is
     /// machine-verified at the kernel-roadmap level: every
     /// dependency that MSFS *actually invokes* is either
     /// mechanised or marked `OutOfScopeForMsfs` (i.e. NOT cited by

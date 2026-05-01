@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Scans the SQL text byte-by-byte; each placeholder is replaced with
 // the rendered literal via the caller-supplied lookup closure.
 // Inside quoted strings / identifiers the scanner passes bytes
@@ -87,8 +88,8 @@ fn clone_literal(l: &RenderLiteral) -> RenderLiteral {
     }
 }
 
-/// Expand placeholders.  Positional `?` uses a running counter;
-/// explicit `?NNN` uses the embedded index.  Named placeholders are
+/// Expand placeholders. Positional `?` uses a running counter;
+/// explicit `?NNN` uses the embedded index. Named placeholders are
 /// not resolved here — the caller must map them to numeric indices
 /// first and feed the numeric form.
 public fn expand(sql: &Text, bindings: &List<BoundValue>) -> Text {

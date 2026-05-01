@@ -14,6 +14,7 @@
 )]
 // Tests for expression parsing
 //
+
 // Tests for expression parsing: literals, operators, paths, closures, blocks, etc.
 // This module tests parsing of all Verum expression forms including:
 // - Literals (integers, floats, strings, chars, booleans)
@@ -920,7 +921,7 @@ fn test_parse_try_recover_single_arm() {
 
 // === RECOVER CLOSURE SYNTAX TESTS ===
 // Grammar: recover_closure = closure_params , recover_closure_body ;
-//          recover_closure_body = block_expr | expression ;
+//  recover_closure_body = block_expr | expression ;
 
 #[test]
 fn test_parse_try_recover_closure_with_block() {

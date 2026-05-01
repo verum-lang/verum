@@ -1,32 +1,41 @@
 //! Attribute metadata definitions for the Verum AST.
 //!
+
 //! This module defines [`AttributeMetadata`], which provides complete
 //! compile-time information about an attribute: its name, valid targets,
 //! argument specification, documentation, and more.
 //!
+
 //! # Overview
 //!
+
 //! Every registered attribute in Verum has associated metadata:
 //!
+
 //! ```rust
 //! use verum_ast::attr::{AttributeMetadata, AttributeTarget, ArgSpec, ArgType, AttributeCategory};
 //!
+
 //! let inline_meta = AttributeMetadata::new("inline")
-//!     .targets(AttributeTarget::Function)
-//!     .args(ArgSpec::Optional(ArgType::Ident))
-//!     .category(AttributeCategory::Optimization)
-//!     .doc("Control function inlining behavior")
-//!     .conflicts_with(["cold"])
-//!     .build();
+//!  .targets(AttributeTarget::Function)
+//!  .args(ArgSpec::Optional(ArgType::Ident))
+//!  .category(AttributeCategory::Optimization)
+//!  .doc("Control function inlining behavior")
+//!  .conflicts_with(["cold"])
+//!  .build();
 //! ```
 //!
+
 //! # Design
 //!
+
 //! Metadata is created using the builder pattern for ergonomic construction.
 //! Once built, metadata is immutable and can be shared across threads.
 //!
+
 //! # Attribute Registry
 //!
+
 //! Every attribute in Verum is registered with metadata specifying valid targets
 //! (function, type, field, etc.), argument specs, category, stability, conflicts,
 //! and requirements. Built-in attributes include @inline, @cold, @hot, @derive,
@@ -42,6 +51,7 @@ use super::target::AttributeTarget;
 
 /// Complete metadata for a registered attribute.
 ///
+
 /// Contains all information needed to:
 /// - Validate attribute usage at compile time
 /// - Generate documentation
@@ -87,6 +97,7 @@ pub struct AttributeMetadata {
 
     /// Type ID of the typed attribute struct (for conversion)
     ///
+
     /// This is `None` for attributes without a typed representation.
     typed_attr_id: Maybe<TypeIdWrapper>,
 
@@ -99,6 +110,7 @@ pub struct AttributeMetadata {
 
 /// Wrapper for TypeId to make it serializable (for debugging only).
 ///
+
 /// Note: TypeId serialization is not stable across compilations,
 /// so this should only be used for debugging, not persistence.
 #[derive(Debug, Clone)]
@@ -130,14 +142,17 @@ impl<'de> Deserialize<'de> for TypeIdWrapper {
 impl AttributeMetadata {
     /// Start building a new attribute metadata.
     ///
+
     /// # Examples
     ///
+
     /// ```rust
     /// use verum_ast::attr::AttributeMetadata;
     ///
+
     /// let meta = AttributeMetadata::new("inline")
-    ///     .doc("Control function inlining")
-    ///     .build();
+    ///  .doc("Control function inlining")
+    ///  .build();
     /// ```
     #[must_use]
     pub fn new(name: impl Into<Text>) -> AttributeMetadataBuilder {
@@ -152,6 +167,7 @@ impl AttributeMetadata {
 
     /// Check if this attribute conflicts with any in the given list.
     ///
+
     /// Returns the first conflicting attribute name, if any.
     #[must_use]
     pub fn conflicts_with_any(&self, attrs: &[&Text]) -> Maybe<Text> {
@@ -165,6 +181,7 @@ impl AttributeMetadata {
 
     /// Check if this attribute requires any missing attributes.
     ///
+
     /// Returns a list of missing required attributes.
     #[must_use]
     pub fn missing_requirements(&self, attrs: &[&Text]) -> List<Text> {
@@ -202,6 +219,7 @@ impl AttributeMetadata {
 
 /// Category for attribute organization.
 ///
+
 /// Categories help organize attributes in documentation and IDE support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[derive(Default)]
@@ -426,6 +444,7 @@ impl std::fmt::Display for Stability {
 
 /// Builder for [`AttributeMetadata`].
 ///
+
 /// Use [`AttributeMetadata::new()`] to start building.
 #[derive(Debug)]
 pub struct AttributeMetadataBuilder {
@@ -458,14 +477,17 @@ impl AttributeMetadataBuilder {
 
     /// Set valid targets for this attribute.
     ///
+
     /// # Examples
     ///
+
     /// ```rust
     /// use verum_ast::attr::{AttributeMetadata, AttributeTarget};
     ///
+
     /// let meta = AttributeMetadata::new("inline")
-    ///     .targets(AttributeTarget::Function)
-    ///     .build();
+    ///  .targets(AttributeTarget::Function)
+    ///  .build();
     /// ```
     #[must_use]
     pub fn targets(mut self, targets: AttributeTarget) -> Self {
@@ -553,6 +575,7 @@ impl AttributeMetadataBuilder {
 
     /// Associate with a typed attribute struct.
     ///
+
     /// This enables conversion from generic `Attribute` to the typed struct.
     #[must_use]
     pub fn typed_as<T: 'static>(mut self) -> Self {

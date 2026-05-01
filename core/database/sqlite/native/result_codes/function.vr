@@ -3,12 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Flags passed in the `eTextRep` argument of sqlite3_create_function:
-//   SQLITE_DETERMINISTIC  0x000000800
-//   SQLITE_DIRECTONLY     0x000080000
-//   SQLITE_SUBTYPE        0x000100000
-//   SQLITE_INNOCUOUS      0x000200000
-//   SQLITE_RESULT_SUBTYPE 0x001000000
+//  SQLITE_DETERMINISTIC 0x000000800
+//  SQLITE_DIRECTONLY 0x000080000
+//  SQLITE_SUBTYPE 0x000100000
+//  SQLITE_INNOCUOUS 0x000200000
+//  SQLITE_RESULT_SUBTYPE 0x001000000
 // =============================================================================
 
 module core.database.sqlite.native.result_codes.function;

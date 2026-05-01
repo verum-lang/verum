@@ -16,6 +16,7 @@ pub enum LLVMVerifierFailureAction {
 unsafe extern "C" {
     /// Verify that a module is valid, taking the specified action if not.
     ///
+
     /// Optionally returns a human-readable description of any invalid constructs,
     /// which must be disposed with `LLVMDisposeMessage`.
     pub fn LLVMVerifyModule(
@@ -25,10 +26,12 @@ unsafe extern "C" {
     ) -> LLVMBool;
     /// Verify that a single function is valid, taking the specified action.
     ///
+
     /// Useful for debugging.
     pub fn LLVMVerifyFunction(Fn: LLVMValueRef, Action: LLVMVerifierFailureAction) -> LLVMBool;
     /// Open a ghostview window displaying the CFG of the given function.
     ///
+
     /// Useful for debugging.
     pub fn LLVMViewFunctionCFG(Fn: LLVMValueRef);
     pub fn LLVMViewFunctionCFGOnly(Fn: LLVMValueRef);

@@ -289,7 +289,7 @@ fn compare_rejects_unknown_system() {
 
 #[test]
 fn task_83_seven_canonical_categories_all_reachable() {
-    // §1-§7 of #83 each map to a metric.  Verify every metric is
+    // §1-§7 of #83 each map to a metric. Verify every metric is
     // reachable through the CLI.
     let out = run(&["benchmark", "metrics", "--format", "json"]);
     assert!(out.status.success());

@@ -3,23 +3,28 @@
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, core.security.aead.{aes_gcm, chacha20_poly1305},
-//               core.net.quic.crypto.header_protection
+//  core.net.quic.crypto.header_protection
 // =============================================================================
 //
+
 // QUIC AEAD differs from TLS 1.3's only in the nonce derivation:
 // RFC 9001 §5.3 says
 //
-//   nonce = iv XOR pad_left(big_endian(packet_number), iv.len)
+
+//  nonce = iv XOR pad_left(big_endian(packet_number), iv.len)
 //
+
 // where the packet number is the FULL reconstructed PN, not the
 // wire-truncated form. AAD is the packet header including HP-cleared
 // first byte and the wire-truncated PN bytes.
 //
+
 // This module gives seal/open helpers that take `QuicSpaceKeys` (the
 // typed per-space key pair from connection_sm) and produce / consume
 // the encrypted payload. Header protection is applied / removed
 // outside of this module — see `packet_tx` / `packet_rx`.
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm.aead;
@@ -99,12 +104,14 @@ public fn build_nonce(iv: &[Byte; 12], packet_number: UInt64) -> [Byte; 12] {
 /// Classify the AEAD algorithm from the key length and HpKey variant.
 /// TLS 1.3 negotiates the suite; QUIC uses the same AEAD end-to-end.
 ///
+
 /// Rules:
-///   * 16-byte aead_key + HpKey.AesEcb128 → AES-128-GCM
-///   * 32-byte aead_key + HpKey.AesEcb256 → AES-256-GCM
-///   * 32-byte aead_key + HpKey.ChaCha20Block → ChaCha20-Poly1305
-///   * anything else → BadKeyLength
+///  * 16-byte aead_key + HpKey.AesEcb128 → AES-128-GCM
+///  * 32-byte aead_key + HpKey.AesEcb256 → AES-256-GCM
+///  * 32-byte aead_key + HpKey.ChaCha20Block → ChaCha20-Poly1305
+///  * anything else → BadKeyLength
 ///
+
 /// Disambiguates the two 32-byte cases via the HpKey form: the
 /// connection_sm guarantees they line up (see QuicSpaceKeys).
 fn classify(keys: &QuicSpaceKeys) -> Result<AeadKind, QuicAeadError> {

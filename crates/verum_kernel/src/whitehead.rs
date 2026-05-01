@@ -1,51 +1,60 @@
 //! Whitehead criterion for (∞, n)-equivalence — V0 algorithmic
 //! kernel rule (HTT 1.2.4.3 generalised).
 //!
+
 //! ## What this delivers
 //!
+
 //! The classical Whitehead theorem says: a continuous map between
 //! CW-complexes is a weak homotopy equivalence iff it induces an
-//! isomorphism on every homotopy group `π_k` for `k ≥ 0`.  Lurie's
+//! isomorphism on every homotopy group `π_k` for `k ≥ 0`. Lurie's
 //! generalisation (HTT 1.2.4.3) lifts this to (∞, n)-categories:
 //!
+
 //! > A morphism `f : X → Y` in an `(∞, n)`-category is an
 //! > equivalence iff for every `0 ≤ k ≤ n`:
-//! >   * `f` induces an isomorphism on `π_0` (the 0-cells).
-//! >   * For every basepoint `x ∈ X` and every `1 ≤ k ≤ n`,
-//! >     `f` induces an isomorphism on `π_k(X, x)`.
+//! > * `f` induces an isomorphism on `π_0` (the 0-cells).
+//! > * For every basepoint `x ∈ X` and every `1 ≤ k ≤ n`,
+//! > `f` induces an isomorphism on `π_k(X, x)`.
 //!
+
 //! This is the **decidable characterisation** of (∞, n)-equivalence
 //! that lets the kernel certify equivalences without invoking the
 //! `BridgeAudit` machinery used by [`crate::infinity_category::is_equivalence_at`]
 //! for limit-level cases.
 //!
+
 //! ## V0 algorithmic surface
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   1. [`WhiteheadCriterion`] — per-level homotopy-group iso
-//!      witness data.
-//!   2. [`is_equivalence_via_whitehead`] — decidable predicate
-//!      (no bridge admits).
-//!   3. [`whitehead_promote`] — algorithmic promotion: given a
-//!      `WhiteheadCriterion` certifying levels 0..=k for some `k`,
-//!      produce an [`crate::infinity_category::InfinityEquivalence`]
-//!      at level `k` with empty bridge audit.
-//!   4. [`weak_equivalence_lifts_in_kan_complex`] — HTT 1.2.4.3
-//!      witness flag: in a Kan complex (= `(∞, 1)`-groupoid),
-//!      every weak equivalence is an honest equivalence.
+
+//!  1. [`WhiteheadCriterion`] — per-level homotopy-group iso
+//!  witness data.
+//!  2. [`is_equivalence_via_whitehead`] — decidable predicate
+//!  (no bridge admits).
+//!  3. [`whitehead_promote`] — algorithmic promotion: given a
+//!  `WhiteheadCriterion` certifying levels 0..=k for some `k`,
+//!  produce an [`crate::infinity_category::InfinityEquivalence`]
+//!  at level `k` with empty bridge audit.
+//!  4. [`weak_equivalence_lifts_in_kan_complex`] — HTT 1.2.4.3
+//!  witness flag: in a Kan complex (= `(∞, 1)`-groupoid),
+//!  every weak equivalence is an honest equivalence.
 //!
+
 //! ## What this UNBLOCKS in MSFS
 //!
-//!   - **Theorem 5.1 §5** — `id_X` step at higher levels: with
-//!     Whitehead's per-level structure the step is decidable
-//!     for every concrete `n`, no bridge admit needed.
-//!   - **Lemma 3.4 V1** — equivalences inside the Grothendieck
-//!     construction can be certified via Whitehead and avoid the
-//!     `CohesiveAdjunctionUnitCounit` bridge for the (∞, 1)-fragment.
-//!   - **Trusted-base shrinkage** — every Whitehead-certified
-//!     equivalence has empty `BridgeAudit`, so the audit surface
-//!     in `verum audit --proof-honesty` strictly shrinks.
+
+//!  - **Theorem 5.1 §5** — `id_X` step at higher levels: with
+//!  Whitehead's per-level structure the step is decidable
+//!  for every concrete `n`, no bridge admit needed.
+//!  - **Lemma 3.4 V1** — equivalences inside the Grothendieck
+//!  construction can be certified via Whitehead and avoid the
+//!  `CohesiveAdjunctionUnitCounit` bridge for the (∞, 1)-fragment.
+//!  - **Trusted-base shrinkage** — every Whitehead-certified
+//!  equivalence has empty `BridgeAudit`, so the audit surface
+//!  in `verum audit --proof-honesty` strictly shrinks.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -58,7 +67,7 @@ use crate::ordinal::Ordinal;
 // Per-level homotopy-group iso witness
 // =============================================================================
 
-/// A per-level homotopy-group iso witness.  Records that at level
+/// A per-level homotopy-group iso witness. Records that at level
 /// `k` the morphism induces an isomorphism on `π_k`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PiLevelIso {
@@ -121,8 +130,8 @@ impl WhiteheadCriterion {
                 })
                 .collect(),
             _ => {
-                // For transfinite bounds, V0 surface emits a single
-                // collective witness (V1 promotion: per-cell Sup
+                // For transfinite bounds, current surface emits a single
+                // collective witness (Future work: per-cell Sup
                 // family of witnesses).
                 vec![PiLevelIso::new(
                     bound.clone(),
@@ -148,7 +157,7 @@ impl WhiteheadCriterion {
     }
 
     /// True iff the certificate covers every level up to its `bound`.
-    /// For finite bounds, expects `bound + 1` per-level entries.  For
+    /// For finite bounds, expects `bound + 1` per-level entries. For
     /// transfinite bounds, expects at least one collective witness.
     pub fn levels_complete(&self) -> bool {
         match &self.bound {
@@ -165,10 +174,12 @@ impl WhiteheadCriterion {
 /// Decide whether a Whitehead criterion certifies equivalence at the
 /// stated bound (HTT 1.2.4.3).
 ///
-/// **Decidable**: no bridge admits.  Returns `true` iff:
-///   1. Every per-level witness `PiLevelIso.induces_iso` is true.
-///   2. The certificate is complete (every level k ∈ [0, n] covered).
+
+/// **Decidable**: no bridge admits. Returns `true` iff:
+///  1. Every per-level witness `PiLevelIso.induces_iso` is true.
+///  2. The certificate is complete (every level k ∈ [0, n] covered).
 ///
+
 /// V0 algorithmic surface; V1 promotion will inspect the structural
 /// content of each iso witness.
 pub fn is_equivalence_via_whitehead(criterion: &WhiteheadCriterion) -> bool {
@@ -178,11 +189,13 @@ pub fn is_equivalence_via_whitehead(criterion: &WhiteheadCriterion) -> bool {
 /// Promote a verified Whitehead criterion to an
 /// [`InfinityEquivalence`] with **empty** bridge audit.
 ///
+
 /// This is the trusted-base-shrinkage primitive: equivalences certified
 /// via Whitehead bypass the [`crate::infinity_category::is_equivalence_at`]
 /// limit-level bridge admit (`CohesiveAdjunctionUnitCounit`) and produce
 /// audit-clean equivalence values.
 ///
+
 /// Returns `None` if the criterion fails the decidable predicate.
 pub fn whitehead_promote(
     criterion: &WhiteheadCriterion,
@@ -193,7 +206,7 @@ pub fn whitehead_promote(
     }
     // Whitehead promotion: empty audit (trusted boundary shrinks).
     // We deliberately do NOT touch `audit` — the primary contract is
-    // that Whitehead is a *bridge-free* certification.  We expose
+    // that Whitehead is a *bridge-free* certification. We expose
     // `audit` in the signature only to support callers chaining
     // Whitehead with bridge-using rules in the same proof tree.
     let _ = audit;
@@ -212,8 +225,9 @@ pub fn whitehead_promote(
 /// every weak equivalence is an honest equivalence — i.e. weak
 /// equivalence and equivalence coincide.
 ///
-/// V0 surface: the witness flag `holds` is always `true` (HTT 1.2.4.3
-/// is a theorem, not a conditional admit).  The kernel re-checks at
+
+/// current surface: the witness flag `holds` is always `true` (HTT 1.2.4.3
+/// is a theorem, not a conditional admit). The kernel re-checks at
 /// every citation site.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KanComplexLift {
@@ -225,7 +239,7 @@ pub struct KanComplexLift {
     pub holds: bool,
 }
 
-/// Build the HTT 1.2.4.3 witness for a Kan complex.  V0 surface
+/// Build the HTT 1.2.4.3 witness for a Kan complex. current surface
 /// returns the witness with `holds: true`.
 pub fn weak_equivalence_lifts_in_kan_complex(
     kan_complex: impl Into<Text>,

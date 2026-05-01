@@ -6,33 +6,41 @@
 // Reference: IEEE 802.3 §3.2.9, RFC 1952 §8 (gzip, same polynomial)
 // =============================================================================
 //
+
 // The classic 32-bit cyclic redundancy check used by Ethernet, gzip, PNG,
 // zlib, and — crucially for us — SQLite's WAL frame headers (see
 // `internal/specs/sqlite-native.md` §6.5 and Gap 5 in §3.2).
 //
+
 // This is NOT a cryptographic hash. It catches transmission errors cleanly
 // but adversarial tampering can reproduce any target checksum trivially.
 // Use SHA-256 or HMAC for security-sensitive integrity checks.
 //
+
 // # Semantics
 //
-//   * Polynomial: 0xEDB88320 (reflected form of 0x04C11DB7)
-//   * Initial value: 0xFFFFFFFF
-//   * Final XOR: 0xFFFFFFFF
-//   * Reflected input, reflected output
+
+//  * Polynomial: 0xEDB88320 (reflected form of 0x04C11DB7)
+//  * Initial value: 0xFFFFFFFF
+//  * Final XOR: 0xFFFFFFFF
+//  * Reflected input, reflected output
 //
+
 // These conventions match zlib's `crc32`, the `crc32c` CLI, Python's
 // `binascii.crc32`, and Rust's `crc32fast.hash`. Test vectors in
 // `vcs/specs/L2-standard/database/sqlite/l2_record/crc32_vectors.vr`
 // cross-validate against the "123456789" vector (0xCBF43926) and the
 // empty input vector (0x00000000).
 //
+
 // # API
 //
+
 // ```verum
 // // one-shot
 // let digest: UInt32 = crc32(b"hello world");
 //
+
 // // streaming
 // let mut h = Crc32.new();
 // h.update(chunk1);
@@ -40,19 +48,24 @@
 // let digest: UInt32 = h.finalize();
 // ```
 //
+
 // # Performance
 //
+
 // The reference implementation uses a 256-entry 32-bit table (1 KB), giving
 // the classic byte-at-a-time inner loop at ~400 MB/s on modern x86_64. For
 // bulk hashing, an accelerated backend can swap in SSE4.2 `_mm_crc32_u64`
 // (CRC32C, different polynomial) or PCLMULQDQ-based folding (same polynomial,
 // 10+ GB/s). Neither is wired up in v1.
 //
+
 // # Thread safety
 //
+
 // `Crc32` is a plain value type — clone freely. The precomputed table is a
 // module-level constant; readers are lock-free.
 //
+
 // =============================================================================
 
 module core.security.hash.crc32;
@@ -151,6 +164,7 @@ implement Crc32 {
 
 /// Compute the CRC32 digest of `data` in one call. Equivalent to:
 ///
+
 /// ```verum
 /// let mut h = Crc32.new(); h.update(data); h.finalize()
 /// ```

@@ -14,12 +14,14 @@
 )]
 // Comprehensive tests for the attr module.
 //
+
 // Tests all functionality in verum_ast::attr including:
 // - Profile enum and its methods
 // - ProfileAttr and profile compatibility
 // - FeatureAttr and feature validation
 // - Generic Attribute handling
 //
+
 // Tests for language profile attributes.
 
 use verum_ast::attr::*;
@@ -925,6 +927,7 @@ fn test_framework_translate_display_roundtrip() {
 // OWL 2 ATTRIBUTION FAMILY — Phase 3 C8
 // ============================================================================
 //
+
 // Round-trip tests for every Owl2*Attr from typed.rs. Builds a generic
 // `Attribute` representing the surface form, then asserts the typed
 // extractor produces the expected struct (or returns None for malformed
@@ -1262,6 +1265,7 @@ fn owl2_attrs_reject_wrong_attribute_name() {
 // QUANTITATIVE TYPE THEORY (Atkey QTT) — Phase 3 C5 V1
 // ============================================================================
 //
+
 // Round-trip tests for QuantityAttr. The attribute accepts five
 // equivalent surface shapes for each of the three quantities (`0`,
 // `1`, `omega`), all canonicalised to the `Quantity` enum. Rejection

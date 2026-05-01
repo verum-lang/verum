@@ -1,5 +1,6 @@
 //! Per-strategy dispatch contract tests (, §12 closure).
 //!
+
 //! specifies 9 base strategies (`runtime`, `static`,
 //! `fast`, `formal`, `proof`, `thorough`, `reliable`,
 //! `certified`, `synthesize`) plus 4 extension strategies
@@ -7,16 +8,18 @@
 //! a 13-variant ladder. This test file verifies each variant's
 //! contract per the spec table:
 //!
-//!   • from_attribute_value parses canonical + alias forms.
-//!   • as_str renders the canonical form.
-//!   • nu_ordinal returns the spec-mandated ν per §12.
-//!   • requires_smt() correctly classifies SMT vs non-SMT.
-//!   • is_synthesis() classifies orthogonal synthesis path.
-//!   • timeout_multiplier produces strictly monotone budgets
-//!     across the SMT-using fragment.
-//!   • LADDER constant is exhaustive (13 entries, no
-//!     duplicates).
+
+//!  • from_attribute_value parses canonical + alias forms.
+//!  • as_str renders the canonical form.
+//!  • nu_ordinal returns the spec-mandated ν per §12.
+//!  • requires_smt() correctly classifies SMT vs non-SMT.
+//!  • is_synthesis() classifies orthogonal synthesis path.
+//!  • timeout_multiplier produces strictly monotone budgets
+//!  across the SMT-using fragment.
+//!  • LADDER constant is exhaustive (13 entries, no
+//!  duplicates).
 //!
+
 //! These tests are the explicit §12 contract harness. If a
 //! future commit adds a 14th strategy, this file fails until
 //! every contract row is updated — keeping the §12 spec table

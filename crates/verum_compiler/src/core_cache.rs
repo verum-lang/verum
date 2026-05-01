@@ -2,39 +2,48 @@
 // for lightweight source scanning. Migration to verum_fast_parser planned for cog system.
 //! Stdlib Compilation Cache
 //!
+
 //! Industrial-grade caching system for compiled Verum stdlib.
 //! Ensures stdlib is compiled exactly once per project, with proper cache
 //! invalidation based on compiler version, target configuration, and source hash.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
-//! │                            CoreCache                                       │
-//! │  ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────────┐ │
-//! │  │   CacheKey      │    │   CacheEntry     │    │   CacheStore            │ │
-//! │  │ - compiler_ver  │    │ - metadata       │    │ - disk: target/.verum/  │ │
-//! │  │ - target_triple │    │ - vbc_modules    │    │ - memory: LRU cache     │ │
-//! │  │ - source_hash   │    │ - timestamp      │    │                         │ │
-//! │  └─────────────────┘    └──────────────────┘    └─────────────────────────┘ │
+//! │ CoreCache │
+//! │ ┌─────────────────┐ ┌──────────────────┐ ┌─────────────────────────┐ │
+//! │ │ CacheKey │ │ CacheEntry │ │ CacheStore │ │
+//! │ │ - compiler_ver │ │ - metadata │ │ - disk: target/.verum/ │ │
+//! │ │ - target_triple │ │ - vbc_modules │ │ - memory: LRU cache │ │
+//! │ │ - source_hash │ │ - timestamp │ │ │ │
+//! │ └─────────────────┘ └──────────────────┘ └─────────────────────────┘ │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Cache Invalidation
 //!
+
 //! The cache is invalidated when:
 //! - Verum compiler version changes
 //! - Target configuration changes (os, arch)
 //! - Stdlib source content changes (hash mismatch)
 //!
+
 //! # Usage
 //!
+
 //! ```ignore
 //! let cache = CoreCache::new(project_root)?;
 //!
+
 //! // Get compiled stdlib (compiles if needed, uses cache if valid)
 //! let stdlib = cache.get_or_compile(&source, &target)?;
 //!
+
 //! // Use stdlib for user code compilation
 //! pipeline.set_stdlib(stdlib);
 //! ```
@@ -60,6 +69,7 @@ use crate::core_source::{CoreSource, CoreSourceTrait};
 
 /// Unique identifier for a cached stdlib compilation.
 ///
+
 /// The cache key is computed from:
 /// - Compiler version (ensures cache invalidation on upgrades)
 /// - Target triple (os, arch, env)
@@ -182,6 +192,7 @@ pub struct CachedCoreMetadata {
 
     /// Meta function registry entries
     ///
+
     /// Includes all `meta fn` definitions from stdlib, used for
     /// compile-time code generation and metaprogramming.
     #[serde(default)]
@@ -189,6 +200,7 @@ pub struct CachedCoreMetadata {
 
     /// Macro definitions (derive, attribute, procedural)
     ///
+
     /// Includes all macro definitions like @derive(Debug), @derive(Clone),
     /// and custom attribute macros.
     #[serde(default)]
@@ -196,6 +208,7 @@ pub struct CachedCoreMetadata {
 
     /// Built-in derive implementations
     ///
+
     /// Maps derive names to their implementations for stdlib types.
     #[serde(default)]
     pub derives: Vec<CachedDeriveEntry>,
@@ -245,6 +258,7 @@ pub struct CachedModuleEntry {
 
 /// Cached meta function information.
 ///
+
 /// Meta functions execute at compile-time and are used for metaprogramming.
 /// This includes functions marked with `meta fn` keyword.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,6 +300,7 @@ pub struct CachedMetaParam {
 
 /// Cached macro definition information.
 ///
+
 /// Macros include derive macros (@derive), attribute macros (@attr),
 /// and procedural macros.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -305,6 +320,7 @@ pub struct CachedMacroEntry {
 
 /// Cached derive implementation information.
 ///
+
 /// Tracks built-in derives and their implementations for types.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedDeriveEntry {
@@ -324,6 +340,7 @@ pub struct CachedDeriveEntry {
 
 /// Cache storage backend.
 ///
+
 /// Supports both disk and memory caching for optimal performance.
 pub struct CoreCacheStore {
     /// Cache directory on disk
@@ -339,8 +356,10 @@ pub struct CoreCacheStore {
 impl CoreCacheStore {
     /// Create a new cache store.
     ///
+
     /// # Arguments
     ///
+
     /// * `project_root` - Root directory of the project
     pub fn new(project_root: &Path) -> Result<Self> {
         // Use target/.verum-cache/core/ for project-local caching
@@ -487,6 +506,7 @@ impl CoreCacheStore {
 
 /// Main stdlib caching interface.
 ///
+
 /// Provides automatic compilation and caching of the Verum standard library.
 /// Ensures stdlib is compiled exactly once per project, with proper cache
 /// invalidation.
@@ -501,8 +521,10 @@ pub struct CoreCache {
 impl CoreCache {
     /// Create a new stdlib cache for a project.
     ///
+
     /// # Arguments
     ///
+
     /// * `project_root` - Root directory of the project
     pub fn new(project_root: &Path) -> Result<Self> {
         let store = CoreCacheStore::new(project_root)?;
@@ -514,6 +536,7 @@ impl CoreCache {
 
     /// Get compiled stdlib, compiling if necessary.
     ///
+
     /// This is the main entry point for stdlib compilation caching.
     /// It will:
     /// 1. Check if cache is valid
@@ -521,13 +544,17 @@ impl CoreCache {
     /// 3. Compile stdlib if cache is invalid/missing
     /// 4. Store result in cache
     ///
+
     /// # Arguments
     ///
+
     /// * `source` - Stdlib source (embedded or local)
     /// * `target` - Target configuration
     ///
+
     /// # Returns
     ///
+
     /// Arc to cached stdlib entry (can be shared across threads)
     pub fn get_or_compile(
         &self,
@@ -638,6 +665,7 @@ impl CoreCache {
 
     /// Compile stdlib from source.
     ///
+
     /// This is the internal compilation logic. It uses the CoreSourceResolver
     /// to discover modules and compiles them in dependency order.
     fn compile_core(
@@ -683,8 +711,8 @@ impl CoreCache {
                     );
 
                     // Extract context declarations:
-                    //   `public context Name {`
-                    //   `public context protocol Name {`
+                    //  `public context Name {`
+                    //  `public context protocol Name {`
                     // These are pre-registered during NormalBuild so
                     // `using [ComputeDevice]` etc. resolve without
                     // requiring module loading order.
@@ -879,6 +907,7 @@ impl CoreCache {
 
     /// Extract meta-system information from stdlib source.
     ///
+
     /// This includes:
     /// - Meta functions (`meta fn` declarations)
     /// - Macro definitions (@derive, @attr, procedural)
@@ -1182,11 +1211,13 @@ impl CoreCache {
 
 /// Global stdlib cache instance.
 ///
+
 /// Initialized once per process and shared across all compilations.
 static GLOBAL_CORE_CACHE: std::sync::OnceLock<CoreCache> = std::sync::OnceLock::new();
 
 /// Initialize the global stdlib cache.
 ///
+
 /// Should be called once at process startup with the project root.
 pub fn init_global_cache(project_root: &Path) -> Result<()> {
     let cache = CoreCache::new(project_root)?;
@@ -1197,6 +1228,7 @@ pub fn init_global_cache(project_root: &Path) -> Result<()> {
 
 /// Get the global stdlib cache.
 ///
+
 /// Panics if not initialized.
 pub fn global_cache() -> &'static CoreCache {
     GLOBAL_CORE_CACHE

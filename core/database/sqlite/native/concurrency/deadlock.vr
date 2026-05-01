@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §20.4
 //
+
 // loom uses an actor-based pager so production deadlocks are
 // bounded by the actor's serialised mailbox. The detector here is
 // for *DST* (deterministic simulation testing): the simulator
@@ -10,6 +11,7 @@
 // detection at every step — any cycle is a real deadlock the prod
 // runtime would hit if scheduling went the wrong way.
 //
+
 // The graph is directed: edge `A → B` means "txn A is waiting for
 // a lock held by txn B".
 // =============================================================================

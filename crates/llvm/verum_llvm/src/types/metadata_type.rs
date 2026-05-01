@@ -17,6 +17,7 @@ pub struct MetadataType<'ctx> {
 impl<'ctx> MetadataType<'ctx> {
     /// Create `MetadataType` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't metadata type
     pub unsafe fn new(metadata_type: LLVMTypeRef) -> Self {
@@ -29,11 +30,14 @@ impl<'ctx> MetadataType<'ctx> {
 
     /// Creates a `FunctionType` with this `MetadataType` for its return type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let md_type = context.metadata_type();
     /// let fn_type = md_type.fn_type(&[], false);
@@ -44,14 +48,18 @@ impl<'ctx> MetadataType<'ctx> {
 
     /// Gets a reference to the `Context` this `MetadataType` was created in.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let md_type = context.metadata_type();
     ///
+
     /// assert_eq!(md_type.get_context(), context);
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {

@@ -1,36 +1,46 @@
 //! Compilation Profiling and Metrics Infrastructure
 //!
+
 //! This module provides comprehensive profiling and metrics collection for the
 //! Verum compilation pipeline. It tracks:
 //!
+
 //! - Time spent in each compilation phase
 //! - Memory allocation during compilation
 //! - Slow modules and functions (bottleneck identification)
 //! - Per-phase performance metrics
 //! - Overall compilation statistics
 //!
+
 //! # Example Usage
 //!
+
 //! ```no_run
 //! use verum_compiler::compilation_metrics::{CompilationProfileReport, ModuleMetrics};
 //! use std::time::Duration;
 //!
+
 //! let mut report = CompilationProfileReport::new();
 //!
+
 //! // Track phase execution
 //! report.record_phase("Lexical Parsing", Duration::from_millis(50), 1024 * 512);
 //! report.record_phase("Semantic Analysis", Duration::from_millis(150), 1024 * 1024);
 //!
+
 //! // Track module compilation
 //! report.add_module("main.vr", Duration::from_millis(200), 100);
 //!
+
 //! // Generate human-readable report
 //! println!("{}", report.summary());
 //!
+
 //! // Export as JSON for tooling
 //! let json = report.to_json().unwrap();
 //! ```
 //!
+
 //! Multi-pass compilation pipeline: Parse → Meta Registry → Macro Expansion →
 //! Contract Verification → Semantic Analysis → HIR → MIR → Optimization → Codegen.
 

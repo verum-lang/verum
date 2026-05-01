@@ -15,6 +15,7 @@
 // Tests for proof_extraction module
 // Migrated from src/proof_extraction.rs per CLAUDE.md standards
 //
+
 // FIXED (Session 23): Added explicit Text::from() calls for type inference.
 
 use verum_smt::proof_extraction::*;

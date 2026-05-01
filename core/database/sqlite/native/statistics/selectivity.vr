@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.2-§13.3
 //
+
 // Translates a `Predicate` against an index plus its stat1/stat4
 // catalogues into a `Selectivity` (0.0..1.0). The planner
 // multiplies independent predicates' selectivities to estimate

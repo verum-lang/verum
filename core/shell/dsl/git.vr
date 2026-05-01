@@ -5,16 +5,19 @@
 // Dependencies: core, text.regex, shell.{exec, escape, result, context}
 // =============================================================================
 //
+
 // Sum-type representation of git subcommands. Every variant binds its
 // arguments as Verum values with appropriate refinements (URLs match
 // scheme regex, refspecs match the git-refspec regex, etc.). Invalid
 // constructions are rejected at compile-time of the call-site, not at
 // runtime when the shell rejects the malformed command.
 //
+
 // Each variant implements `render() -> Text` returning a quoted shell
 // command line. The `git()` runner takes a `GitCmd` and dispatches via
 // `core.shell.exec.sh_check`.
 //
+
 // =============================================================================
 
 module git;
@@ -32,6 +35,7 @@ mount core.io.path.{Path, PathBuf};
 // Refinement-typed atoms
 // =============================================================================
 //
+
 // Constructors validate input; invalid values are unrepresentable.
 
 public type GitUrl is (Text);

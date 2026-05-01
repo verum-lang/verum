@@ -4,19 +4,24 @@
 // Version: 0.1.0
 // =============================================================================
 //
+
 // # Type Reflection
 //
+
 // Provides compile-time type introspection capabilities for meta programming.
 // All reflection happens at compile-time with zero runtime overhead.
 //
+
 // ## Capabilities
 //
+
 // - Field enumeration and inspection
 // - Variant enumeration for sum types
 // - Generic parameter access
 // - Protocol/trait information
 // - Attribute inspection
 //
+
 // =============================================================================
 
 module meta.reflection;
@@ -242,6 +247,7 @@ implement VariantInfo {
 
     /// Get pattern for matching this variant
     ///
+
     /// Returns pattern like "Some(x)" or "Point { x, y }"
     public fn pattern(&self) -> Text {
         match self.kind {
@@ -734,20 +740,23 @@ implement PrimitiveType {
 
 /// Information about a trait/protocol bound
 ///
+
 /// Represents bounds like `T: Clone + Send` or `T: Iterator<Item = Int>`.
 ///
+
 /// ## Example
 ///
+
 /// ```verum
 /// meta fn analyze_bounds<T>() -> List<TraitBound> using TypeInfo {
-///     let bounds = TypeInfo.bounds_of<T>();
-///     for bound in bounds {
-///         println(f"Bound: {bound.protocol_name}");
-///         for (name, ty) in bound.associated_types {
-///             println(f"  {name} = {ty}");
-///         }
-///     }
-///     bounds
+///  let bounds = TypeInfo.bounds_of<T>();
+///  for bound in bounds {
+///  println(f"Bound: {bound.protocol_name}");
+///  for (name, ty) in bound.associated_types {
+///  println(f" {name} = {ty}");
+///  }
+///  }
+///  bounds
 /// }
 /// ```
 public type TraitBound is {
@@ -815,19 +824,22 @@ implement TraitBound {
 
 /// Information about a lifetime parameter
 ///
+
 /// Represents lifetime parameters like `'a`, `'static`, or `'_`.
 ///
+
 /// ## Example
 ///
+
 /// ```verum
 /// meta fn analyze_lifetimes<T>() using TypeInfo {
-///     let lifetimes = TypeInfo.lifetime_params_of<T>();
-///     for lt in lifetimes {
-///         println(f"Lifetime: {lt.name}");
-///         if !lt.bounds.is_empty() {
-///             println(f"  Bounds: {lt.bounds.join(", ")}");
-///         }
-///     }
+///  let lifetimes = TypeInfo.lifetime_params_of<T>();
+///  for lt in lifetimes {
+///  println(f"Lifetime: {lt.name}");
+///  if !lt.bounds.is_empty() {
+///  println(f" Bounds: {lt.bounds.join(", ")}");
+///  }
+///  }
 /// }
 /// ```
 public type LifetimeParam is {
@@ -884,21 +896,25 @@ implement LifetimeParam {
 
 /// Information about ownership and borrowing for a type
 ///
+
 /// Provides compile-time insight into ownership semantics.
 ///
+
 /// ## Example
 ///
+
 /// ```verum
 /// meta fn derive_clone<T>() -> TokenStream using TypeInfo {
-///     let ownership = TypeInfo.ownership_of<T>();
+///  let ownership = TypeInfo.ownership_of<T>();
 ///
-///     if ownership.is_copy {
-///         // Can use simple copy
-///         quote { implement Clone for T { fn clone(&self) -> Self { *self } } }
-///     } else {
-///         // Need deep clone
-///         generate_deep_clone<T>()
-///     }
+
+///  if ownership.is_copy {
+///  // Can use simple copy
+///  quote { implement Clone for T { fn clone(&self) -> Self { *self } } }
+///  } else {
+///  // Need deep clone
+///  generate_deep_clone<T>()
+///  }
 /// }
 /// ```
 public type OwnershipInfo is {
@@ -966,15 +982,17 @@ implement OwnershipInfo {
 
 /// Information about a field's memory layout
 ///
+
 /// ## Example
 ///
+
 /// ```verum
 /// meta fn derive_serialize<T>() -> TokenStream using TypeInfo {
-///     let fields = TypeInfo.fields_of<T>();
-///     for field in fields {
-///         let offset = TypeInfo.field_offset<T>(field.name)?;
-///         // Use offset for binary serialization
-///     }
+///  let fields = TypeInfo.fields_of<T>();
+///  for field in fields {
+///  let offset = TypeInfo.field_offset<T>(field.name)?;
+///  // Use offset for binary serialization
+///  }
 /// }
 /// ```
 public type FieldOffset is {
@@ -1012,6 +1030,7 @@ implement FieldOffset {
 
 /// Result of method resolution for a type
 ///
+
 /// Contains information about where a method comes from.
 public type MethodResolution is {
     /// The resolved function info

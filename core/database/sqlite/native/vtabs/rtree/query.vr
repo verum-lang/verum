@@ -3,12 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.3
 //
+
 // Common SQLite R-tree usage:
 //
-//   SELECT id FROM things_rtree
-//    WHERE x_min <= 10 AND x_max >= 5
-//      AND y_min <= 20 AND y_max >= 15;
+
+//  SELECT id FROM things_rtree
+//  WHERE x_min <= 10 AND x_max >= 5
+//  AND y_min <= 20 AND y_max >= 15;
 //
+
 // We collect every per-dimension lower / upper bound and build the
 // final query bbox; the caller then runs `VtabRTree.search(&bbox)`.
 // =============================================================================
@@ -76,8 +79,8 @@ implement QueryBuilder {
         // i.e. the column's upper-bound is at most 10. The SQLite
         // R-tree grammar uses _min / _max suffixes per dimension.
         // For the probe bbox:
-        //   * `_max OP value` constrains the *upper* slot
-        //   * `_min OP value` constrains the *lower* slot
+        //  * `_max OP value` constrains the *upper* slot
+        //  * `_min OP value` constrains the *lower* slot
         match atom.op {
             OpLE => {
                 if atom.is_max_slot {

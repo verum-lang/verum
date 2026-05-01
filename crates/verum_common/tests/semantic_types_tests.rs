@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for semantic types API
 //!
+
 //! Tests all methods added to Text, List, Map, Set, OrderedMap, OrderedSet
 
 use verum_common::semantic_types::{List, Map, OrderedMap, OrderedSet, Set, Text};

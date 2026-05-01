@@ -1,67 +1,77 @@
 //! MLIR-based code generation for Verum GPU compilation.
 //!
+
 //! This module provides the GPU compilation path for the Verum compiler, targeting
 //! tensor operations and GPU-accelerated workloads via MLIR.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! Verum AST → VBC Bytecode
-//!                  │
-//!         ┌───────┴───────┐
-//!         ▼               ▼
-//!    CPU Path        GPU Path (this module)
-//!  (LLVM IR via      (MLIR via verum_mlir)
-//!   verum_llvm)            │
-//!                          ▼
-//!              ┌─────────────────────────────┐
-//!              │     Verum MLIR Dialect      │
-//!              │  - verum.tensor.*           │
-//!              │  - verum.cbgr.*             │
-//!              │  - verum.context.*          │
-//!              └─────────────────────────────┘
-//!                          │
-//!                          ▼ MLIR Passes
-//!              ┌─────────────────────────────┐
-//!              │  verum.tensor → linalg      │
-//!              │  linalg → scf → gpu         │
-//!              │  gpu → target-specific      │
-//!              └─────────────────────────────┘
-//!                          │
-//!         ┌────────────────┼────────────────┐
-//!         ▼                ▼                ▼
-//!      CUDA            ROCm            Vulkan
-//!    (PTX/NVVM)      (HSACO)         (SPIR-V)
+//!  │
+//!  ┌───────┴───────┐
+//!  ▼ ▼
+//!  CPU Path GPU Path (this module)
+//!  (LLVM IR via (MLIR via verum_mlir)
+//!  verum_llvm) │
+//!  ▼
+//!  ┌─────────────────────────────┐
+//!  │ Verum MLIR Dialect │
+//!  │ - verum.tensor.* │
+//!  │ - verum.cbgr.* │
+//!  │ - verum.context.* │
+//!  └─────────────────────────────┘
+//!  │
+//!  ▼ MLIR Passes
+//!  ┌─────────────────────────────┐
+//!  │ verum.tensor → linalg │
+//!  │ linalg → scf → gpu │
+//!  │ gpu → target-specific │
+//!  └─────────────────────────────┘
+//!  │
+//!  ┌────────────────┼────────────────┐
+//!  ▼ ▼ ▼
+//!  CUDA ROCm Vulkan
+//!  (PTX/NVVM) (HSACO) (SPIR-V)
 //! ```
 //!
+
 //! # GPU Path Usage
 //!
+
 //! ```rust,ignore
 //! use verum_codegen::mlir::{VbcToMlirGpuLowering, GpuLoweringConfig, GpuTarget};
 //! use verum_vbc::VbcModule;
 //!
+
 //! // Create GPU lowering with configuration
 //! let config = GpuLoweringConfig {
-//!     target: GpuTarget::Cuda,
-//!     opt_level: 2,
-//!     enable_tensor_cores: true,
-//!     max_shared_memory: 48 * 1024,
-//!     default_block_size: [256, 1, 1],
-//!     enable_async_copy: true,
-//!     debug_info: false,
+//!  target: GpuTarget::Cuda,
+//!  opt_level: 2,
+//!  enable_tensor_cores: true,
+//!  max_shared_memory: 48 * 1024,
+//!  default_block_size: [256, 1, 1],
+//!  enable_async_copy: true,
+//!  debug_info: false,
 //! };
 //!
+
 //! // Lower VBC to MLIR for GPU
 //! let ctx = verum_mlir::Context::new();
 //! let mut lowering = VbcToMlirGpuLowering::new(&ctx, config);
 //! lowering.lower_module(&vbc_module)?;
 //!
+
 //! // Get MLIR module for further processing
 //! let mlir_module = lowering.take_module();
 //! ```
 //!
+
 //! # GPU Targets
 //!
+
 //! | Target | Output | Use Case |
 //! |--------|--------|----------|
 //! | CUDA | PTX/NVVM IR | NVIDIA GPUs via CUDA |
@@ -70,8 +80,10 @@
 //! | Metal | Metal IR | Apple GPUs |
 //! | CpuFallback | LLVM IR | CPU emulation for testing |
 //!
+
 //! # Performance Targets
 //!
+
 //! - Tensor fusion: 30-50% memory bandwidth reduction
 //! - Kernel launch overhead: <5μs amortized
 //! - GPU utilization: >80% for compute-bound kernels

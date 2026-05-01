@@ -1,5 +1,6 @@
 //! Lowering context for VBC codegen.
 //!
+
 //! Tracks compilation state including:
 //! - Current function being compiled
 //! - Register allocator
@@ -20,6 +21,7 @@ use verum_common::Map;
 
 /// Context for VBC code generation.
 ///
+
 /// Tracks all state needed during function compilation.
 #[derive(Debug)]
 pub struct CodegenContext {
@@ -91,6 +93,7 @@ pub struct CodegenContext {
 
     /// Dotted module path for functions currently being collected/compiled.
     ///
+
     /// The codegen's `config.module_name` is fixed per-codegen-session and
     /// is `"main"` for a user-run of a single `.vr` file. But when that
     /// session subsequently pulls in stdlib `imported_modules`, each of
@@ -98,6 +101,7 @@ pub struct CodegenContext {
     /// file, and their top-level functions should be registered under
     /// `X.Y.Z.fn_name` — not under `main.fn_name`.
     ///
+
     /// `register_function` (the method wrapper, not the HashMap setter)
     /// reads this field to produce qualified aliases for cross-module
     /// paths like `super.darwin.tls.ctx_get` to resolve. `None` means
@@ -109,6 +113,7 @@ pub struct CodegenContext {
 
     /// CBGR tier context from escape analysis.
     ///
+
     /// Contains tier decisions that determine which instruction
     /// variant to emit for reference operations.
     pub tier_context: TierContext,
@@ -120,12 +125,14 @@ pub struct CodegenContext {
 
     /// Variable type tracking for correct instruction selection.
     ///
+
     /// Maps variable names to their inferred basic types.
     /// Used to select int vs float instructions for operations on variables.
     pub variable_types: HashMap<String, VarTypeKind>,
 
     /// Constant type tracking for correct instruction selection.
     ///
+
     /// Maps constant names to their declared types.
     /// Unlike `variable_types`, this persists across function compilations.
     /// Used to select int vs float instructions for operations on constants.
@@ -134,6 +141,7 @@ pub struct CodegenContext {
 
     /// Variable type name tracking for custom Eq protocol dispatch.
     ///
+
     /// Maps variable names to their custom type names (e.g., "err" → "OSError").
     /// Used to determine if `==` should dispatch to a custom `implement Eq` method.
     pub variable_type_names: HashMap<String, String>,
@@ -145,6 +153,7 @@ pub struct CodegenContext {
 
     /// Current match scrutinee type name for resolving variant patterns.
     ///
+
     /// When compiling `match expr { V6(x) => ... }`, we need to know if V6 refers to
     /// `IpAddr.V6` or `SocketAddr.V6`. If the scrutinee `expr` has a known type,
     /// we store it here so pattern binding can use the qualified variant name.
@@ -152,10 +161,12 @@ pub struct CodegenContext {
 
     /// Registers that contain raw FFI pointers (not CBGR references).
     ///
+
     /// When dereferencing values in these registers, we emit DerefRaw/DerefMutRaw
     /// instructions which bypass CBGR validation. This is necessary because FFI
     /// functions return raw C pointers that don't have CBGR headers.
     ///
+
     /// FFI raw pointer handling: registers containing pointers returned from FFI (extern)
     /// functions are tracked here. Dereferences emit DerefRaw/DerefMutRaw which bypass
     /// CBGR validation since FFI pointers lack CBGR headers (no generation/epoch metadata).
@@ -163,6 +174,7 @@ pub struct CodegenContext {
 
     /// Generic type parameters in scope for the current function.
     ///
+
     /// When compiling generic functions like `fn foo<T, U>()`, the type parameters
     /// T and U are added here. This allows `compile_simple_path()` to recognize
     /// type parameters as valid identifiers (not "undefined variables") when they
@@ -171,17 +183,20 @@ pub struct CodegenContext {
 
     /// Const generic parameters in scope for the current function.
     ///
+
     /// When compiling generic functions/impls like `fn foo<const N: Int>()` or
     /// `implement<const SIZE: Int> StackAllocator<SIZE>`, the const parameters
     /// like N and SIZE are added here. This allows `compile_simple_path()` to recognize
     /// const generic parameters as valid identifiers when they appear in expressions.
     ///
+
     /// Note: At VBC level, const generics are compile-time known values, but we emit
     /// them as runtime values via GetConst since they're resolved during monomorphization.
     pub const_generic_params: HashSet<String>,
 
     /// Newtype type names (single-field wrapper types like `type FileDesc is (Int)`).
     ///
+
     /// Used to optimize field access: `fd.0` on a newtype emits `Mov` instead of
     /// `GetF`, since the value IS the single field (no heap indirection).
     pub newtype_names: HashSet<String>,
@@ -197,6 +212,7 @@ pub struct CodegenContext {
 
     /// Variables that hold byte arrays (contiguous byte buffers).
     ///
+
     /// When a variable is declared as `let buf: [Byte; N] = uninit()` or similar,
     /// it's marked as a byte array variable. This affects how `&mut buf[idx] as *mut Byte`
     /// is compiled - we emit `ByteArrayElementAddr` instead of `GetE + Ref` to get
@@ -205,17 +221,20 @@ pub struct CodegenContext {
 
     /// Variables that hold typed arrays with their element sizes.
     ///
+
     /// Maps variable name to element size in bytes. For example:
     /// - `let arr: [UInt64; 4]` -> ("arr", 8)
     /// - `let arr: [UInt32; 10]` -> ("arr", 4)
     /// - `let arr: [UInt16; 100]` -> ("arr", 2)
     ///
+
     /// This is used for `TypedArrayElementAddr` to compute correct element offsets.
     /// Byte arrays (element size 1) are tracked separately in `byte_array_vars`.
     pub typed_array_vars: std::collections::HashMap<String, usize>,
 
     /// Depth counter for nested try/recover blocks.
     ///
+
     /// When > 0, the `?` operator emits `Throw` instead of `Ret` so that
     /// the error is caught by the enclosing try/recover handler rather than
     /// returning from the function.
@@ -223,12 +242,14 @@ pub struct CodegenContext {
 
     /// Required contexts from the current function's `using [...]` clause.
     ///
+
     /// When a function declares `using [Logger, Database]`, these context names
     /// are stored here. When compiling method calls like `Logger.log(msg)`, we
     /// check if the receiver name is in this set. If so, we emit a `CtxGet`
     /// instruction to retrieve the context value from the context stack before
     /// calling the method.
     ///
+
     /// This enables the context system to work correctly: functions that require
     /// contexts can access them via method calls on the context type name.
     pub required_contexts: HashSet<String>,
@@ -238,20 +259,24 @@ pub struct CodegenContext {
 
     /// Cache for Active pattern results to avoid double-calling pattern functions.
     ///
+
     /// When a partial Active pattern (returning `Maybe<T>`) is used in a match arm,
     /// the pattern function is called during `compile_pattern_test()` to check if
     /// it matches. The result (`Maybe<T>` value) is cached here so that during
     /// `compile_pattern_bind()`, we can extract the value without calling the
     /// pattern function again.
     ///
+
     /// Key: (scrutinee_register, pattern_name)
     /// Value: register containing the Maybe<T> result
     ///
+
     /// This cache is cleared at the end of each match arm to prevent stale entries.
     pub active_pattern_cache: HashMap<(Reg, String), Reg>,
 
     /// Thread-local static variables.
     ///
+
     /// Maps variable names declared with `@thread_local static mut VAR: T = init;`
     /// to their TLS slot index. When reading, emits `TlsGet { slot }`.
     /// When writing, emits `TlsSet { slot, val }`.
@@ -263,6 +288,7 @@ pub struct CodegenContext {
 
 /// Basic type kind for variable type tracking.
 ///
+
 /// Used during codegen to select appropriate int/float/bool instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VarTypeKind {
@@ -319,6 +345,7 @@ pub struct DeferInfo {
 
 /// Saved context state for nested function compilation (closures, generators).
 ///
+
 /// When compiling a closure or generator inside a function, we call `begin_function()`
 /// which clears labels, forward_jumps, loop_stack, defer_stack, and variable_type_names.
 /// This struct saves these values so they can be restored after the nested function
@@ -380,10 +407,12 @@ pub struct FunctionInfo {
     pub yield_type: Option<TypeRef>,
     /// Intrinsic name if this function is declared with @intrinsic("name").
     ///
+
     /// When set, calls to this function will be compiled using the intrinsic
     /// codegen path instead of emitting a regular Call instruction. The name
     /// is looked up in `INTRINSIC_REGISTRY` to get the `CodegenStrategy`.
     ///
+
     /// This enables industrial-grade intrinsic resolution where:
     /// 1. Intrinsic identity is established at declaration time via @intrinsic
     /// 2. The codegen uses this stored name rather than call-site name matching
@@ -411,12 +440,14 @@ pub struct FunctionInfo {
     pub takes_self_mut_ref: bool,
     /// Base type name of the return type (e.g., "Result", "Maybe", "List").
     ///
+
     /// Used for type tracking when calling functions that return wrapper types.
     /// For `fn foo() -> Result<T, E>`, this would be `Some("Result")`.
     /// Enables correct method dispatch on the return value.
     pub return_type_name: Option<String>,
     /// Inner type parameters of the return type.
     ///
+
     /// For `fn foo() -> Maybe<Char>`, this would be `Some(vec!["Char"])`.
     /// For `fn bar() -> Result<Int, Text>`, this would be `Some(vec!["Int", "Text"])`.
     /// Used for pattern matching to infer types of extracted values (e.g., `c` in `Some(c)`).
@@ -446,6 +477,7 @@ pub struct CodegenStats {
     pub tier2_refs: usize,
     /// Number of tier fallbacks (Tier 1/2 -> Tier 0 for safety).
     ///
+
     /// Tracks cases where a higher tier was requested but couldn't be
     /// verified safe, requiring fallback to runtime-checked Tier 0.
     /// High values here may indicate escape analysis gaps or unsafe
@@ -455,6 +487,7 @@ pub struct CodegenStats {
     pub capability_checks: usize,
     /// Number of statements filtered out by @cfg.
     ///
+
     /// Tracks statements that were skipped due to non-matching @cfg
     /// attributes. This helps verify that platform-specific code is
     /// being correctly filtered for the target platform.
@@ -465,6 +498,7 @@ pub struct CodegenStats {
 
 /// Identifier for expressions (used as key for tier decisions).
 ///
+
 /// In the full integration, this would come from the typed AST.
 /// For now, we use a simple u64 that can be derived from span or expression ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -472,9 +506,11 @@ pub struct ExprId(pub u64);
 
 /// CBGR tier context for code generation.
 ///
+
 /// Holds tier decisions from escape analysis that determine how
 /// references should be compiled (Tier 0 with checks, Tier 1 direct, etc.).
 ///
+
 /// Also preserves the Tier0Reason for expressions that remain at Tier 0,
 /// enabling better diagnostics and error messages.
 #[derive(Debug, Clone, Default)]
@@ -539,6 +575,7 @@ impl TierContext {
 
     /// Get tier for an expression.
     ///
+
     /// Returns the tier from escape analysis if available,
     /// otherwise returns the default tier.
     pub fn get_tier(&self, expr_id: ExprId) -> CbgrTier {
@@ -550,6 +587,7 @@ impl TierContext {
 
     /// Get tier for an expression with span information.
     ///
+
     /// Converts span (start, end) to ExprId for lookup.
     pub fn get_tier_for_span(&self, start: u32, end: u32) -> CbgrTier {
         let expr_id = ExprId(((start as u64) << 32) | (end as u64));
@@ -563,6 +601,7 @@ impl TierContext {
 
     /// Set tier decision with reason for an expression.
     ///
+
     /// The reason is stored only for Tier 0 expressions to enable better
     /// diagnostics when explaining why a reference couldn't be promoted.
     pub fn set_tier_with_reason(&mut self, expr_id: ExprId, tier: CbgrTier, reason: Option<Tier0Reason>) {
@@ -575,6 +614,7 @@ impl TierContext {
 
     /// Get the Tier0Reason for an expression, if available.
     ///
+
     /// Returns `Some(reason)` if the expression is at Tier 0 and a reason
     /// was recorded, `None` otherwise.
     pub fn get_tier0_reason(&self, expr_id: ExprId) -> Option<Tier0Reason> {
@@ -583,6 +623,7 @@ impl TierContext {
 
     /// Get a diagnostic message explaining why an expression is at Tier 0.
     ///
+
     /// Returns a human-readable string suitable for error messages and
     /// compiler diagnostics.
     pub fn get_tier0_diagnostic(&self, expr_id: ExprId) -> String {
@@ -612,14 +653,15 @@ impl TierContext {
 
     /// Iterate over all `(ExprId, CbgrTier)` decisions.
     ///
+
     /// Used by per-function tier-analysis aggregators in the
     /// compiler pipeline that need to merge multiple per-function
-    /// `TierContext`s into a module-level one.  Pre-#118 the
+    /// `TierContext`s into a module-level one. Pre-#118 the
     /// pipeline iterated `0..decision_count()` and constructed
     /// `ExprId(i)` for `i in 0..N` — but `from_analysis_result`
     /// populates decisions with span-encoded `ExprId(start<<32|end)`
     /// values, so the `0..N` lookup always missed and the merge
-    /// silently inserted only `default_tier` (Tier0).  CBGR tier
+    /// silently inserted only `default_tier` (Tier0). CBGR tier
     /// promotion (~15ns → 0ns) was never applied to user code.
     /// Exposing the canonical iterator makes the correct merge a
     /// one-liner: `for (id, t) in src.iter_decisions() { dst.set_tier(id, t); }`.
@@ -637,8 +679,9 @@ impl TierContext {
 
     /// Merge another tier context's decisions into this one.
     ///
+
     /// Conflict policy: later wins (last-write semantics inside the
-    /// `Map::insert`).  In practice the per-function aggregator
+    /// `Map::insert`). In practice the per-function aggregator
     /// produces disjoint key sets — every function's expressions
     /// have distinct (start,end) spans within a module — so this
     /// behaves like a disjoint union for the canonical caller.
@@ -655,14 +698,18 @@ impl TierContext {
 
     /// Enter an unsafe block.
     ///
+
     /// When inside an unsafe block, Tier 2 references are allowed without
     /// requiring explicit `&unsafe` syntax. This matches Verum's unsafe semantics
     /// where unsafe blocks allow raw memory operations.
     ///
+
     /// Returns the previous unsafe state for restoration.
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// // In codegen for unsafe block:
     /// let prev_unsafe = ctx.tier_context.enter_unsafe();
@@ -678,6 +725,7 @@ impl TierContext {
 
     /// Exit an unsafe block, restoring previous state.
     ///
+
     /// Pass the value returned from `enter_unsafe()` to properly
     /// handle nested unsafe blocks.
     pub fn exit_unsafe(&mut self, prev_state: bool) {
@@ -691,17 +739,22 @@ impl TierContext {
 
     /// Get the effective tier for a reference, considering unsafe context.
     ///
+
     /// When inside an unsafe block, this can promote references to Tier 2
     /// if the caller requests it. Outside unsafe, Tier 2 is only allowed
     /// with explicit `&unsafe` syntax.
     ///
+
     /// # Arguments
     ///
+
     /// * `expr_id` - The expression ID to look up
     /// * `want_tier2` - Whether Tier 2 is explicitly requested (e.g., `&unsafe T`)
     ///
+
     /// # Returns
     ///
+
     /// The effective tier, potentially promoted to Tier 2 if in unsafe context.
     pub fn get_effective_tier(&self, expr_id: ExprId, want_tier2: bool) -> CbgrTier {
         let base_tier = self.get_tier(expr_id);
@@ -727,6 +780,7 @@ impl TierContext {
 
     /// Check if a tier is allowed in the current context.
     ///
+
     /// Returns true if the requested tier is safe to use.
     /// Tier 2 requires either unsafe context or explicit `&unsafe`.
     pub fn is_tier_allowed(&self, tier: CbgrTier, is_explicit: bool) -> bool {
@@ -738,29 +792,36 @@ impl TierContext {
 
     /// Create from TierAnalysisResult (bridge to verum_cbgr).
     ///
+
     /// Converts RefId-keyed tier decisions from escape analysis
     /// to ExprId-keyed decisions for codegen. The RefId is used
     /// directly as the ExprId since they're both u64 identifiers.
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// use verum_cbgr::tier_analysis::{TierAnalyzer, analyze_tiers};
     /// use verum_vbc::codegen::TierContext;
     ///
+
     /// let result = analyze_tiers(&cfg);
     /// let tier_context = TierContext::from_analysis_result(&result);
     /// codegen.set_tier_context(tier_context);
     /// ```
     ///
+
     /// # ExprId/RefId Unification
     ///
+
     /// This method handles the ExprId/RefId mismatch between the CBGR tier analyzer
     /// (which uses RefId) and VBC codegen (which uses span-based ExprId):
     /// - If span information is available in TierAnalysisResult, we use span-based ExprId
-    ///   (encoded as `(start << 32) | end`) to match VBC codegen's span-based lookup.
+    ///  (encoded as `(start << 32) | end`) to match VBC codegen's span-based lookup.
     /// - If no span info is available, we fall back to using RefId directly as ExprId.
     ///
+
     /// The span-based approach is preferred because VBC codegen creates ExprId from
     /// expression spans, and this ensures tier decisions are correctly looked up.
     pub fn from_analysis_result(result: &verum_cbgr::tier_analysis::TierAnalysisResult) -> Self {
@@ -912,6 +973,7 @@ impl CodegenContext {
 
     /// Gets the tier for an expression.
     ///
+
     /// Returns the tier from escape analysis if available,
     /// otherwise returns the default (Tier0 - managed).
     pub fn get_tier_for_expr(&self, expr_id: ExprId) -> CbgrTier {
@@ -936,6 +998,7 @@ impl CodegenContext {
 
     /// Marks a register as containing a raw FFI pointer.
     ///
+
     /// Registers containing raw pointers must use DerefRaw/DerefMutRaw
     /// instructions which bypass CBGR validation.
     pub fn mark_raw_pointer(&mut self, reg: Reg) {
@@ -944,6 +1007,7 @@ impl CodegenContext {
 
     /// Checks if a register contains a raw FFI pointer.
     ///
+
     /// If true, dereference operations should use DerefRaw/DerefMutRaw
     /// instead of the standard Deref/DerefMut which expect CBGR headers.
     pub fn is_raw_pointer(&self, reg: Reg) -> bool {
@@ -952,6 +1016,7 @@ impl CodegenContext {
 
     /// Clears raw pointer tracking for a register.
     ///
+
     /// Called when a register is reused for a non-pointer value.
     pub fn clear_raw_pointer(&mut self, reg: Reg) {
         self.raw_pointer_regs.remove(&reg);
@@ -959,6 +1024,7 @@ impl CodegenContext {
 
     /// Clears all raw pointer register tracking.
     ///
+
     /// Called when starting a new function to reset state.
     pub fn clear_all_raw_pointers(&mut self) {
         self.raw_pointer_regs.clear();
@@ -968,10 +1034,12 @@ impl CodegenContext {
 
     /// Caches an Active pattern result for later use in pattern binding.
     ///
+
     /// When a partial Active pattern (returning `Maybe<T>`) is tested, we cache
     /// the result so that `compile_pattern_bind()` can extract the value without
     /// calling the pattern function again.
     ///
+
     /// The key is (scrutinee_register, pattern_name) to handle multiple patterns
     /// in the same match expression.
     pub fn cache_active_pattern_result(&mut self, scrutinee: Reg, pattern_name: &str, result_reg: Reg) {
@@ -980,9 +1048,11 @@ impl CodegenContext {
 
     /// Retrieves a cached Active pattern result.
     ///
+
     /// Returns the register containing the `Maybe<T>` result from the pattern
     /// function call made during `compile_pattern_test()`.
     ///
+
     /// Returns `None` if no cached result exists (shouldn't happen in normal flow).
     pub fn get_cached_active_pattern_result(&self, scrutinee: Reg, pattern_name: &str) -> Option<Reg> {
         self.active_pattern_cache.get(&(scrutinee, pattern_name.to_string())).copied()
@@ -990,6 +1060,7 @@ impl CodegenContext {
 
     /// Clears the active pattern cache for a specific scrutinee.
     ///
+
     /// Called at the end of each match arm to prevent stale entries from
     /// being used in subsequent arms.
     pub fn clear_active_pattern_cache_for(&mut self, scrutinee: Reg) {
@@ -998,6 +1069,7 @@ impl CodegenContext {
 
     /// Clears all active pattern cache entries.
     ///
+
     /// Called when starting a new match expression or function.
     pub fn clear_active_pattern_cache(&mut self) {
         self.active_pattern_cache.clear();
@@ -1007,6 +1079,7 @@ impl CodegenContext {
 
     /// Marks a variable as holding a byte array.
     ///
+
     /// Variables marked as byte arrays need special handling when their elements
     /// are referenced with `&mut arr[idx] as *mut Byte` - we emit `ByteArrayElementAddr`
     /// instead of `GetE + Ref` to get the actual memory address.
@@ -1016,6 +1089,7 @@ impl CodegenContext {
 
     /// Checks if a variable is a byte array.
     ///
+
     /// If true, `&mut var[idx] as *mut T` patterns should use `ByteArrayElementAddr`
     /// to compute the element address instead of fetching its value with `GetE`.
     pub fn is_byte_array_var(&self, name: &str) -> bool {
@@ -1024,6 +1098,7 @@ impl CodegenContext {
 
     /// Clears byte array variable tracking.
     ///
+
     /// Called when starting a new function to reset state.
     pub fn clear_byte_array_vars(&mut self) {
         self.byte_array_vars.clear();
@@ -1031,6 +1106,7 @@ impl CodegenContext {
 
     /// Marks a variable as holding a typed array with the specified element size.
     ///
+
     /// Variables marked as typed arrays need special handling when their elements
     /// are referenced with `&mut arr[idx] as *mut T` - we emit `TypedArrayElementAddr`
     /// with the element size to compute the correct memory address.
@@ -1040,6 +1116,7 @@ impl CodegenContext {
 
     /// Gets the element size of a typed array variable.
     ///
+
     /// Returns `Some(size)` if the variable is a typed array, `None` otherwise.
     /// For byte arrays (tracked separately), returns `Some(1)`.
     pub fn get_typed_array_elem_size(&self, name: &str) -> Option<usize> {
@@ -1052,6 +1129,7 @@ impl CodegenContext {
 
     /// Clears typed array variable tracking.
     ///
+
     /// Called when starting a new function to reset state.
     pub fn clear_typed_array_vars(&mut self) {
         self.typed_array_vars.clear();
@@ -1134,6 +1212,7 @@ impl CodegenContext {
 
     /// Emits a jump instruction with a placeholder offset.
     ///
+
     /// The offset will be patched when the target label is defined.
     pub fn emit_forward_jump(&mut self, label: &str, make_instr: impl FnOnce(i32) -> Instruction) {
         self.record_forward_jump(label);
@@ -1293,6 +1372,7 @@ impl CodegenContext {
 
     /// Exits the current scope.
     ///
+
     /// Returns variables that went out of scope (for drop calls).
     pub fn exit_scope(&mut self, is_error_path: bool) -> (Vec<(String, Reg)>, Vec<Vec<Instruction>>) {
         let defers = self.pop_defer_scope(is_error_path);
@@ -1304,12 +1384,15 @@ impl CodegenContext {
 
     /// Enters unsafe context for Tier 2 reference promotion.
     ///
+
     /// Returns the previous unsafe state to support nested unsafe blocks.
     /// The returned value should be passed to `exit_unsafe()` to properly
     /// restore state after the unsafe block.
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// // Compiling: unsafe { ... }
     /// let prev = ctx.enter_unsafe();
@@ -1317,8 +1400,10 @@ impl CodegenContext {
     /// ctx.exit_unsafe(prev);
     /// ```
     ///
+
     /// # Tier Promotion Behavior
     ///
+
     /// Inside an unsafe block:
     /// - Tier 0 stays Tier 0 (safety-critical references)
     /// - Tier 1 can be promoted to Tier 2 (skip CBGR validation)
@@ -1330,6 +1415,7 @@ impl CodegenContext {
 
     /// Exits unsafe context, restoring previous state.
     ///
+
     /// Pass the value returned from `enter_unsafe()` to correctly
     /// handle nested unsafe blocks.
     pub fn exit_unsafe(&mut self, prev_state: bool) {
@@ -1343,6 +1429,7 @@ impl CodegenContext {
 
     /// Get the effective tier for a reference, considering unsafe context.
     ///
+
     /// Delegates to TierContext's get_effective_tier for full tier promotion
     /// logic including unsafe block handling.
     pub fn get_effective_tier(&self, expr_id: super::context::ExprId, want_tier2: bool) -> CbgrTier {
@@ -1415,6 +1502,7 @@ impl CodegenContext {
 
     /// Interns a string into the string table and returns its raw index.
     ///
+
     /// Used by the Eq protocol dispatch to encode type names in CmpG's protocol_id field.
     /// The returned index can be used with `StringId` in the interpreter to resolve the name.
     pub fn intern_string_raw(&mut self, value: &str) -> u32 {
@@ -1511,6 +1599,7 @@ impl CodegenContext {
 
     /// Frees a temporary register.
     ///
+
     /// Also clears raw pointer tracking for the register to prevent stale
     /// FFI pointer marks from leaking to the next allocation of the same register.
     pub fn free_temp(&mut self, reg: Reg) {
@@ -1522,6 +1611,7 @@ impl CodegenContext {
 
     /// Starts compiling a new function.
     ///
+
     /// Each parameter is a tuple of (name, is_mutable).
     pub fn begin_function(&mut self, name: &str, params: &[(String, bool)], return_type: Option<TypeRef>) {
         self.registers.reset();
@@ -1562,6 +1652,7 @@ impl CodegenContext {
 
     /// Finishes compiling the current function.
     ///
+
     /// Returns the generated instructions and register count.
     pub fn end_function(&mut self) -> (Vec<Instruction>, u16) {
         self.current_function = None;
@@ -1577,6 +1668,7 @@ impl CodegenContext {
 
     /// Collects debug variable info from the register allocator.
     ///
+
     /// Returns (variable_name, register, is_parameter, arg_index) tuples
     /// for all named variables (locals + parameters).
     pub fn collect_debug_variables(&self) -> Vec<(String, u16, bool, u16)> {
@@ -1585,14 +1677,16 @@ impl CodegenContext {
 
     /// Registers a function for lookup.
     ///
+
     /// Two collision strategies:
-    ///   * different arity → stored under `name#arity` so
-    ///     `lookup_function_with_arity` can pick the right one at the
-    ///     call site (e.g. FFI `write(fd, buf, n)` and high-level
-    ///     `write(path, contents)`).
-    ///   * same arity → in `prefer_existing_functions` mode keep the
-    ///     existing entry; otherwise overwrite (user-mode wins).
+    ///  * different arity → stored under `name#arity` so
+    ///  `lookup_function_with_arity` can pick the right one at the
+    ///  call site (e.g. FFI `write(fd, buf, n)` and high-level
+    ///  `write(path, contents)`).
+    ///  * same arity → in `prefer_existing_functions` mode keep the
+    ///  existing entry; otherwise overwrite (user-mode wins).
     ///
+
     /// The arity-suffix branch must run in BOTH modes — without it, in
     /// stdlib-loading mode the second registration is dropped on the
     /// floor, so the caller-site `lookup_function_with_arity` can't find
@@ -1636,6 +1730,7 @@ impl CodegenContext {
 
     /// Unregisters a function by name.
     ///
+
     /// Used when a name collision is detected during variant registration.
     /// Returns true if the function was found and removed.
     pub fn unregister_function(&mut self, name: &str) -> bool {
@@ -1645,6 +1740,7 @@ impl CodegenContext {
     /// Returns true iff at least one variant constructor is currently
     /// registered whose `parent_type_name` matches the given type name.
     ///
+
     /// Used by the variant-registration fast-path to short-circuit
     /// stdlib loading when the user has already declared a type of the
     /// same name — see `register_type_constructors`.
@@ -1658,11 +1754,13 @@ impl CodegenContext {
     /// Removes every variant constructor whose `parent_type_name` matches
     /// the given type. A variant entry is one where `variant_tag.is_some()`.
     ///
+
     /// This is used when a user-defined type redeclares a name that the
     /// stdlib also defines: before the user's variants are registered,
     /// the stdlib's leftover constructor entries (qualified and simple)
     /// must be wiped so that the user's layout is the only one visible.
     ///
+
     /// Returns the number of entries removed.
     pub fn clear_variants_for_type(&mut self, type_name: &str) -> usize {
         let keys: Vec<String> = self
@@ -1711,6 +1809,7 @@ impl CodegenContext {
     /// Used to find qualified variant names (e.g., "Option.None") when
     /// the simple name is not registered due to collision.
     ///
+
     /// When multiple matches exist (e.g., "Ordering.Lt" and "GeneralCategory.Lt"),
     /// prefers the one whose parent_type_name matches the current function's return
     /// type. If no return type context is available, returns the match only if unique.
@@ -1767,6 +1866,7 @@ impl CodegenContext {
 
     /// Find a variant constructor by simple name and argument count.
     ///
+
     /// When a simple variant name (e.g., "Done") is in the collision set,
     /// this tries all qualified forms ("TypeName.Done") and picks the one
     /// whose param_count matches. Returns the variant tag if exactly one match.
@@ -1827,6 +1927,7 @@ impl CodegenContext {
 
     /// Find a variant tag by simple name and parent type.
     ///
+
     /// When a simple variant name (e.g., "Done") is in the collision set and
     /// we know the expected parent type (from match scrutinee), try the
     /// qualified form "TypeName.VariantName" directly.
@@ -1860,6 +1961,7 @@ impl CodegenContext {
 
     /// Find the parent type of a variant by looking up "*.variant_name" entries.
     ///
+
     /// Returns the parent_type_name if exactly one qualified variant with this
     /// name exists. Used to resolve type context when variable_type_names
     /// stores a variant name instead of the parent type name.
@@ -1899,6 +2001,7 @@ impl CodegenContext {
     /// Search for a variant constructor whose name ends with the given suffix
     /// and has the expected parameter count.
     ///
+
     /// This is used when matching patterns to find the correct variant when
     /// there are name collisions (e.g., IpAddr.V6 vs SocketAddr.V6).
     /// Returns the first matching variant with payload type information.
@@ -1920,12 +2023,15 @@ impl CodegenContext {
 
     /// Saves the current label/loop context for closure compilation.
     ///
+
     /// When compiling a closure or generator, `begin_function()` clears labels,
     /// forward_jumps, loop_stack, and defer_stack. This method saves these values
     /// BEFORE calling `begin_function()` so they can be restored after.
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// let saved = ctx.save_closure_context();
     /// ctx.begin_function("closure", &[], None);
@@ -1947,6 +2053,7 @@ impl CodegenContext {
 
     /// Restores label/loop context after closure compilation.
     ///
+
     /// Call this AFTER `end_function()` to restore the outer function's
     /// labels, forward_jumps, loop_stack, and defer_stack.
     pub fn restore_closure_context(&mut self, saved: ClosureCompilationContext) {
@@ -1960,20 +2067,24 @@ impl CodegenContext {
 
     /// Looks up a function by qualified name (e.g., "module::function" or "Type::method").
     ///
+
     /// Returns a match for the *exact* qualified name only. Callers that also
     /// want a simple-name fallback (for module-style imports where only the
     /// last segment is registered) must request it explicitly via
     /// `lookup_qualified_function_with_fallback`. The strict default prevents
     /// a whole class of silent rebinding bugs, for example:
     ///
+
     /// ```text
     /// // core/mem/epoch.vr — free function
     /// public fn current_epoch() -> UInt64 { … }
     ///
+
     /// // core/runtime/mod.vr — static method on a unit type
     /// implement Runtime { public fn current_epoch() -> UInt32 { … } }
     /// ```
     ///
+
     /// Here `Runtime::current_epoch` is not registered (the method is stored
     /// as `Runtime.current_epoch`); if the qualified lookup silently returned
     /// the bare `current_epoch`, every caller of `Runtime.current_epoch()`
@@ -2017,6 +2128,7 @@ impl CodegenContext {
 
     /// Imports all functions from a pre-compiled module's registry.
     ///
+
     /// This is used during stdlib compilation to make functions from
     /// previously compiled modules (e.g., core) available when compiling
     /// dependent modules (e.g., collections, async).
@@ -2031,6 +2143,7 @@ impl CodegenContext {
 
     /// Exports all currently registered functions.
     ///
+
     /// This is used during stdlib compilation to collect functions
     /// registered in this module for use by later modules.
     pub fn export_functions(&self) -> std::collections::HashMap<String, FunctionInfo> {
@@ -2085,6 +2198,7 @@ impl CodegenContext {
 
     /// Sets the required contexts for the current function.
     ///
+
     /// Called at the start of function compilation to track which context
     /// names from `using [...]` are available. When method calls are compiled,
     /// the codegen checks if the receiver is a required context and emits
@@ -2098,6 +2212,7 @@ impl CodegenContext {
 
     /// Checks if a name is a required context for the current function.
     ///
+
     /// Returns true if the name was declared in the function's `using [...]` clause.
     pub fn is_required_context(&self, name: &str) -> bool {
         self.required_contexts.contains(name) || self.context_aliases.contains_key(name)
@@ -2126,6 +2241,7 @@ impl CodegenContext {
 
     /// Registers a constant's type for correct instruction selection.
     ///
+
     /// Unlike variable types, constant types persist across function compilations.
     /// This is necessary because constants are declared at module scope and used
     /// in multiple functions.
@@ -2135,6 +2251,7 @@ impl CodegenContext {
 
     /// Gets a constant's type for instruction selection.
     ///
+
     /// Returns Unknown if the constant type is not registered.
     pub fn get_constant_type(&self, name: &str) -> VarTypeKind {
         self.constant_types.get(name).copied().unwrap_or(VarTypeKind::Unknown)
@@ -2319,6 +2436,7 @@ mod tests {
     // ───────────────────────────────────────────────────────────────
     // #118 — TierContext merge regression tests.
     //
+
     // Pre-#118 the compiler pipeline merged per-function tier
     // analyses with `for i in 0..decision_count() { dst.set_tier(
     // ExprId(i), src.get_tier(ExprId(i))) }`, which always missed

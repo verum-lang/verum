@@ -1,11 +1,14 @@
 //! Comprehensive quick fix generation for refinement violations
 //!
+
 //! Quick Fix Generation for Refinement Violations:
 //!
+
 //! This module generates actionable quick fixes for refinement type violations
 //! detected by the SMT solver. It provides 6 categories of fixes with different
 //! priorities and safety guarantees:
 //!
+
 //! 1. Runtime Check Wrapping (priority 1, safe)
 //! 2. Inline Refinement (priority 2, breaking)
 //! 3. Sigma Type Conversion (priority 3, breaking)
@@ -13,6 +16,7 @@
 //! 5. Weaken Refinement (priority 4, maybe breaking)
 //! 6. Promote to &checked (priority 5, safe)
 //!
+
 //! Each quick fix includes:
 //! - Human-readable title and description
 //! - Impact analysis (safe/breaking/unsafe)
@@ -659,9 +663,9 @@ impl<'a> QuickFixGenerator<'a> {
 
         // Format refinement type: BaseType{constraint}
         // Examples:
-        //   Int{i != 0}
-        //   List<T>{len(it) > 0}
-        //   Int{i > 0 && i < 100}
+        //  Int{i != 0}
+        //  List<T>{len(it) > 0}
+        //  Int{i > 0 && i < 100}
 
         // Check if constraint already references the refinement variable
         if constraint.contains("it") || constraint.contains(var_name.as_str()) {
@@ -928,6 +932,7 @@ impl<'a> QuickFixGenerator<'a> {
 
     /// Extract reference type from diagnostic using AST analysis
     ///
+
     /// Performs accurate extraction of reference types by:
     /// 1. First trying to get the code text at the diagnostic range
     /// 2. Analyzing the AST to find the exact type at that location

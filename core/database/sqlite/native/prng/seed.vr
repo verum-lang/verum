@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.1
 //
+
 // SQLite seeds its PRNG once on first use from `sqlite3OsRandomness`
 // (which wraps `/dev/urandom` on Posix, `BCryptGenRandom` on Win).
 // `SeedSource` lets the host swap in a deterministic source for DST.

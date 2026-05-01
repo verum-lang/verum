@@ -5,59 +5,75 @@
 // Dependencies: core, sync, async.waker, async.poll, async.future
 // =============================================================================
 //
+
 // Cooperative cancellation. A running task decides when it is safe to stop,
 // typically at `.await` points or explicit checkpoints. Cancellation signals
 // propagate by setting an atomic flag AND waking all registered observers
 // (async futures via Waker; sync callbacks via closure invocation).
 //
+
 // ## Usage — sync check
 //
-//     let source = CancellationTokenSource.new();
-//     let token = source.token();
-//     spawn async move {
-//         while !token.is_cancelled() {
-//             do_step().await;
-//         }
-//     };
-//     source.cancel();
+
+//  let source = CancellationTokenSource.new();
+//  let token = source.token();
+//  spawn async move {
+//  while !token.is_cancelled() {
+//  do_step().await;
+//  }
+//  };
+//  source.cancel();
 //
+
 // ## Usage — async wait (composable with `select`)
 //
-//     select {
-//         result = work() => handle_success(result),
-//         _ = token.cancelled() => handle_cancellation(),
-//     }
+
+//  select {
+//  result = work() => handle_success(result),
+//  _ = token.cancelled() => handle_cancellation(),
+//  }
 //
+
 // ## Usage — sync callback (bridge to non-async cleanup)
 //
-//     let reg = token.register(|| { close_handle(&fd); });
-//     // ... later, dropping `reg` deregisters the callback
+
+//  let reg = token.register(|| { close_handle(&fd); });
+//  // ... later, dropping `reg` deregisters the callback
 //
+
 // ## Usage — parent-child tree
 //
-//     let root = CancellationTokenSource.new();
-//     let child = root.token().child_source();
-//     // cancel on root propagates to child; canceling child does not affect root
+
+//  let root = CancellationTokenSource.new();
+//  let child = root.token().child_source();
+//  // cancel on root propagates to child; canceling child does not affect root
 //
+
 // ## Usage — timeout-linked
 //
-//     let token = CancellationToken.with_timeout(5.seconds());
-//     select {
-//         r = work() => r,
-//         _ = token.cancelled() => Err(Timeout),
-//     }
+
+//  let token = CancellationToken.with_timeout(5.seconds());
+//  select {
+//  r = work() => r,
+//  _ = token.cancelled() => Err(Timeout),
+//  }
 //
+
 // ## Usage — combine (any-of)
 //
-//     let combined = CancellationToken.combine(&[t1.clone(), t2.clone()]);
-//     // combined fires when either t1 or t2 fires
+
+//  let combined = CancellationToken.combine(&[t1.clone(), t2.clone()]);
+//  // combined fires when either t1 or t2 fires
 //
+
 // ## Structured reasons
 //
+
 // CancelReason carries *why* cancellation was triggered. Distinct variants
 // help handlers distinguish user-cancel (Cancelled) from timeout (Timeout)
 // from parent-cancel (ParentCancelled) from explicit abort (Aborted).
 //
+
 // Matches the vocabulary of Rust tokio.sync.CancellationToken, .NET
 // CancellationToken and Trio CancelScope.
 // =============================================================================
@@ -215,10 +231,11 @@ type CancellationCallback is {
 // Children are kept as weak refs to avoid cycles; parent-cancel walks
 // the list and propagates.
 //
+
 // State layout:
-//   state: 0 = active, 1 = cancelling (mid-propagation), 2 = cancelled (stable).
-//   reason: written once on first cancel via compare-exchange on state.
-//   next_id: monotonic counter for registration IDs.
+//  state: 0 = active, 1 = cancelling (mid-propagation), 2 = cancelled (stable).
+//  reason: written once on first cancel via compare-exchange on state.
+//  next_id: monotonic counter for registration IDs.
 
 public type CancellationFlag is {
     state: AtomicInt,
@@ -280,12 +297,13 @@ implement CancellationFlag {
         // Drain wakers — take ownership of the list and release lock
         // before invoking wakers (avoid re-entrancy under lock).
         //
+
         // Uses `replace(&mut <guard>, List.new())` rather than the
         // generic `take<T: Default>` helper from `base.memory` —
         // bounded generics on top-level functions are not yet
         // registered into the VBC function table by stdlib loading
         // (task #159), so callers that imported `take`/`mem_take`
-        // hit `[lenient] SKIP … undefined function`.  The
+        // hit `[lenient] SKIP … undefined function`. The
         // `replace<T>` form has no bound and registers cleanly.
         let waiters_drained = {
             let mut wg = self.waiters.lock().unwrap_or_else(|p| p.into_inner());
@@ -398,6 +416,7 @@ implement CancellationFlag {
 // Cheap to clone (Shared refcount bump). All clones observe the same flag.
 // Can only *read* cancellation state; only a Source can trigger cancel.
 //
+
 // The `cancel()` method on Token is retained for backwards-compatibility
 // with the phase-0 API; strictly, the intent is that only Sources cancel.
 // Tests and trivial use cases should prefer using a Source.
@@ -442,10 +461,11 @@ implement CancellationToken {
     /// Return `Err(CancellationError)` if cancelled, else `Ok(())`.
     /// Designed for checkpointing inside loops:
     ///
-    ///     for chunk in input {
-    ///         token.throw_if_cancelled()?;
-    ///         process(chunk);
-    ///     }
+
+    ///  for chunk in input {
+    ///  token.throw_if_cancelled()?;
+    ///  process(chunk);
+    ///  }
     public fn throw_if_cancelled(&self) -> Result<(), CancellationError> {
         if self.is_cancelled() {
             let r = self.reason().unwrap_or(CancelReason.Cancelled);
@@ -656,12 +676,14 @@ implement CancellationTokenSource {
 // -----------------------------------------------------------------------------
 // Usage:
 //
-//     let scope = CancelScope.new();
-//     let token = scope.token();
-//     // ... spawn tasks using `token` ...
-//     // when `scope` drops (at end of its owning scope), token is cancelled,
-//     // causing any outstanding work to unwind cleanly.
+
+//  let scope = CancelScope.new();
+//  let token = scope.token();
+//  // ... spawn tasks using `token` ...
+//  // when `scope` drops (at end of its owning scope), token is cancelled,
+//  // causing any outstanding work to unwind cleanly.
 //
+
 // Equivalent to Trio's `CancelScope`. Grammar intent: this type wants
 // `affine` semantics (linear consumption); compiler-level enforcement
 // depends on the affine-tracker maturity. Drop is the fallback.
@@ -742,14 +764,16 @@ implement Drop for CancelScope {
 // (the block is treated as a critical section). After the block, if the
 // token was cancelled meanwhile, it is surfaced.
 //
+
 // Usage:
 //
-//     token.with_shielded(async {
-//         // Even if token is cancelled here, we run to completion.
-//         db.commit_tx().await?;
-//         Ok(())
-//     }).await?;
-//     token.throw_if_cancelled()?;
+
+//  token.with_shielded(async {
+//  // Even if token is cancelled here, we run to completion.
+//  db.commit_tx().await?;
+//  Ok(())
+//  }).await?;
+//  token.throw_if_cancelled()?;
 
 implement CancellationToken {
     /// Run the block without observing this token during execution.

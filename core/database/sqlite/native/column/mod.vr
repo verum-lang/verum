@@ -8,11 +8,12 @@
 // `sqlite3_column_database_name`, `sqlite3_column_table_name`,
 // `sqlite3_column_origin_name`.
 //
+
 // Submodules:
-//   * `value`     — ColumnValue sum (Int64/Real/Text/Blob/Null)
-//   * `spec`      — ColumnSpec metadata (name + decltype + nullability + origin)
-//   * `row`       — ResultRow read-side accessor
-//   * `coerce`    — typed-coerce helpers (text→int64, real→int64 truncation, …)
+//  * `value` — ColumnValue sum (Int64/Real/Text/Blob/Null)
+//  * `spec` — ColumnSpec metadata (name + decltype + nullability + origin)
+//  * `row` — ResultRow read-side accessor
+//  * `coerce` — typed-coerce helpers (text→int64, real→int64 truncation, …)
 // =============================================================================
 
 module core.database.sqlite.native.column;

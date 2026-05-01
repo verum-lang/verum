@@ -14,6 +14,7 @@
 )]
 //! Comprehensive Tests for Specialization Selection
 //!
+
 //! Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 9.1 - Automatic Specialization Selection
 
 use verum_ast::span::Span;
@@ -578,11 +579,11 @@ fn test_error_conversion_no_impl() {
 #[test]
 fn test_diamond_specialization() {
     // Diamond pattern:
-    //       A (general)
-    //      / \
-    //     B   C (both specialize A)
-    //      \ /
-    //       D (specializes both B and C)
+    //  A (general)
+    //  / \
+    //  B C (both specialize A)
+    //  \ /
+    //  D (specializes both B and C)
 
     let mut lattice = SpecializationLattice::new();
 

@@ -1,49 +1,61 @@
 //! Points-to Analysis for CBGR Escape Analysis
 //!
+
 //! Implements Andersen-style inclusion-based points-to analysis for CBGR. Determines
 //! which memory locations each reference may point to, enabling precise alias analysis.
 //! Two references with disjoint points-to sets are guaranteed NoAlias, allowing
 //! independent promotion decisions. Works with the escape analysis pipeline to refine
 //! escape categories based on actual pointer relationships.
 //!
+
 //! This module implements production-grade Andersen-style points-to analysis to track
 //! pointer relationships across the entire program. This enables precise alias analysis
 //! and escape detection by determining what memory locations each reference may point to.
 //!
+
 //! # Algorithm Overview
 //!
+
 //! **Andersen's Algorithm** (inclusion-based points-to analysis):
 //! - Complexity: O(n³) worst-case, O(n²) typical
 //! - Precision: Flow-insensitive, context-insensitive
 //! - Constraint-based: Generate and solve inclusion constraints
 //!
+
 //! # Constraint Types
 //!
+
 //! 1. **Address-of**: `x = &y` → pts(x) ⊇ {y}
 //! 2. **Copy**: `x = y` → pts(x) ⊇ pts(y)
 //! 3. **Load**: `x = *y` → pts(x) ⊇ ⋃{pts(z) | z ∈ pts(y)}
 //! 4. **Store**: `*x = y` → ∀z ∈ pts(x): pts(z) ⊇ pts(y)
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! fn example() {
-//!     let x = 42;          // Allocation: x
-//!     let y = &x;          // Address-of: pts(y) = {x}
-//!     let z = y;           // Copy: pts(z) = pts(y) = {x}
-//!     let w = *z;          // Load: pts(w) = ⋃{pts(a) | a ∈ pts(z)} = ∅
+//!  let x = 42; // Allocation: x
+//!  let y = &x; // Address-of: pts(y) = {x}
+//!  let z = y; // Copy: pts(z) = pts(y) = {x}
+//!  let w = *z; // Load: pts(w) = ⋃{pts(a) | a ∈ pts(z)} = ∅
 //! }
 //! ```
 //!
+
 //! # Performance
 //!
+
 //! Target: O(n³) worst-case, O(n) for typical programs
 //! - Constraint generation: O(n) where n = instructions
 //! - Constraint solving: O(n³) worst-case with optimizations
 //! - Typical: O(n) to O(n²) for real programs
 //!
+
 //! # Integration
 //!
+
 //! Points-to analysis integrates with:
 //! - Alias analysis: Precise may-alias/must-alias queries
 //! - Escape analysis: Heap escape detection
@@ -61,6 +73,7 @@ use crate::analysis::{AliasSets, ControlFlowGraph, RefId};
 
 /// Points-to location identifier
 ///
+
 /// Represents a memory location that a pointer may point to.
 /// This can be a stack allocation, heap allocation, or abstract location.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -68,6 +81,7 @@ pub struct LocationId(pub u64);
 
 /// Field identifier for field-sensitive analysis
 ///
+
 /// Represents a specific field within a struct or tuple type.
 /// Field 0 is typically the base object itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -102,6 +116,7 @@ impl fmt::Display for FieldId {
 
 /// Field-sensitive location combining a base location with a field offset
 ///
+
 /// This enables tracking points-to relationships at the field level,
 /// allowing for more precise alias analysis of struct members.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -159,6 +174,7 @@ impl fmt::Display for LocationId {
 
 /// Variable identifier for points-to analysis
 ///
+
 /// Represents a program variable (SSA version) that can hold a pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct VarId(pub u64);
@@ -171,13 +187,15 @@ impl fmt::Display for VarId {
 
 /// Points-to set for a single variable
 ///
+
 /// Represents all memory locations that a variable may point to.
 /// This is the fundamental building block of points-to analysis.
 ///
+
 /// # Example
 /// ```rust,ignore
 /// let mut pts = PointsToSet::new(VarId(1));
-/// pts.add_location(LocationId(42));  // Variable 1 may point to location 42
+/// pts.add_location(LocationId(42)); // Variable 1 may point to location 42
 /// assert!(pts.may_point_to(LocationId(42)));
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,6 +234,7 @@ impl PointsToSet {
 
     /// Add a location to the points-to set
     ///
+
     /// Returns true if the set was modified (new location added)
     pub fn add_location(&mut self, location: LocationId) -> bool {
         if self.conservative {
@@ -227,6 +246,7 @@ impl PointsToSet {
 
     /// Add all locations from another set (union operation)
     ///
+
     /// Returns true if the set was modified
     pub fn add_all(&mut self, other: &PointsToSet) -> bool {
         if other.conservative {
@@ -267,6 +287,7 @@ impl PointsToSet {
 
 /// Location type classification
 ///
+
 /// Tracks whether a location is on the stack or heap.
 /// This is crucial for escape analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -306,9 +327,11 @@ impl LocationType {
 
 /// Points-to constraint
 ///
+
 /// Represents a constraint that must be satisfied in the points-to analysis.
 /// Constraints are generated from the program CFG and solved iteratively.
 ///
+
 /// Constraints generated from IR: AddressOf (x = &y), Copy (x = y), Load (x = *y),
 /// Store (*x = y). Solved via Andersen's inclusion-based fixpoint iteration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -421,21 +444,26 @@ impl PointsToConstraint {
 
 /// Points-to graph
 ///
+
 /// Represents the complete points-to relationship for a program.
 /// Implements a proper two-level points-to graph:
 ///
+
 /// Level 1: Variable → {Locations}
-///   Maps variables to the locations they may point to.
+///  Maps variables to the locations they may point to.
 ///
+
 /// Level 2: Location → {Locations}
-///   Maps locations to the locations that values stored there may point to.
-///   This is critical for proper Load constraint handling.
+///  Maps locations to the locations that values stored there may point to.
+///  This is critical for proper Load constraint handling.
 ///
+
 /// For `x = *y`:
 /// 1. Find all locations L that y points to: L ∈ pts(y)
 /// 2. For each l ∈ L, find what values stored at l point to: stored_pts(l)
 /// 3. Add all those targets to pts(x): pts(x) ⊇ ⋃{stored_pts(l) | l ∈ pts(y)}
 ///
+
 /// Two-level structure: Level 1 maps variables to their points-to sets (possible
 /// target locations). Level 2 maps locations to stored value targets (for Load
 /// constraint resolution: x = *y requires following y's targets to find stored values).
@@ -506,6 +534,7 @@ impl PointsToGraph {
 
     /// Add a location to a variable's points-to set
     ///
+
     /// Returns true if the set was modified
     pub fn add_points_to(&mut self, var: VarId, location: LocationId) -> bool {
         self.get_or_create_pts(var).add_location(location)
@@ -613,6 +642,7 @@ impl PointsToGraph {
 
     /// Add a location to another location's points-to set (for Store constraint)
     ///
+
     /// This tracks what locations a value stored at `target_loc` may point to.
     /// Returns true if the set was modified.
     pub fn add_location_points_to(
@@ -634,6 +664,7 @@ impl PointsToGraph {
 
     /// Union location points-to sets: `target_loc`'s pts ⊇ `source_pts`
     ///
+
     /// Returns true if target's set was modified.
     pub fn union_location_points_to(
         &mut self,
@@ -659,13 +690,16 @@ impl PointsToGraph {
 
     /// Associate a variable with a location
     ///
+
     /// This creates the second level of the points-to graph, allowing Load constraints
     /// to properly resolve what a dereferenced pointer points to.
     ///
+
     /// When we have:
-    ///   let x = &y;  // AddressOf: pts(x) = {loc_y}
-    ///   let z = *x;  // Load: pts(z) = pts(value_at_loc_y)
+    ///  let x = &y; // AddressOf: pts(x) = {loc_y}
+    ///  let z = *x; // Load: pts(z) = pts(value_at_loc_y)
     ///
+
     /// We need to know that loc_y is associated with variable y, so we can look up
     /// what y (or values stored at loc_y) points to.
     pub fn associate_location_with_var(&mut self, location: LocationId, var: VarId) {
@@ -674,6 +708,7 @@ impl PointsToGraph {
 
     /// Get the variable associated with a location
     ///
+
     /// This is used by Load constraint handling to find the points-to set of the
     /// value stored at a location.
     #[must_use]
@@ -698,6 +733,7 @@ impl PointsToGraph {
 
     /// Add a field-sensitive points-to relationship
     ///
+
     /// Records that the field `field` of allocation at `base` may point to `target`.
     /// Returns true if the set was modified.
     pub fn add_field_points_to(
@@ -720,6 +756,7 @@ impl PointsToGraph {
 
     /// Union field points-to sets
     ///
+
     /// Returns true if the target's set was modified.
     pub fn union_field_points_to(
         &mut self,
@@ -768,6 +805,7 @@ impl PointsToGraph {
 
     /// Copy points-to set from one variable to another
     ///
+
     /// Used for interprocedural analysis when propagating points-to information
     /// across function boundaries.
     pub fn propagate_points_to(&mut self, from: VarId, to: VarId) -> bool {
@@ -781,6 +819,7 @@ impl PointsToGraph {
 
     /// Get the transitive closure of locations reachable from a variable
     ///
+
     /// This follows the two-level points-to graph to find all locations
     /// that can be reached by dereferencing chains.
     #[must_use]
@@ -827,20 +866,24 @@ impl Default for PointsToGraph {
 
 /// Andersen-style points-to analyzer
 ///
+
 /// Implements inclusion-based points-to analysis using constraint generation
 /// and iterative solving to fixpoint.
 ///
+
 /// # Algorithm
 /// 1. Generate constraints from CFG
 /// 2. Initialize points-to sets
 /// 3. Solve constraints iteratively until fixpoint
 /// 4. Return final points-to graph
 ///
+
 /// # Complexity
 /// - Constraint generation: O(n) where n = instructions
 /// - Fixpoint iteration: O(n³) worst-case, O(n²) typical
 /// - Total: O(n³) worst-case, O(n) to O(n²) typical
 ///
+
 /// Runs the Andersen-style fixpoint: generate constraints from CFG, initialize
 /// points-to sets, iterate until no set grows, return final points-to graph.
 #[derive(Debug)]
@@ -903,14 +946,16 @@ impl PointsToAnalyzer {
 
     /// Generate constraints from a control flow graph
     ///
+
     /// Generates Andersen-style points-to constraints from CFG definitions and uses.
     /// This operates on the CFG abstraction layer; for direct MIR integration,
     /// use `generate_constraints_from_ir`.
     ///
+
     /// # Algorithm
     /// 1. For each basic block:
-    ///    - Process definitions (allocations, address-of)
-    ///    - Process uses (loads, stores, copies)
+    ///  - Process definitions (allocations, address-of)
+    ///  - Process uses (loads, stores, copies)
     /// 2. Map `RefIds` to `VarIds` for integration
     pub fn generate_constraints_from_cfg(
         &mut self,
@@ -974,15 +1019,17 @@ impl PointsToAnalyzer {
 
     /// Solve constraints iteratively to fixpoint
     ///
+
     /// # Algorithm (Andersen's)
     /// ```text
     /// while changed:
-    ///     changed = false
-    ///     for each constraint:
-    ///         if applying constraint changes any points-to set:
-    ///             changed = true
+    ///  changed = false
+    ///  for each constraint:
+    ///  if applying constraint changes any points-to set:
+    ///  changed = true
     /// ```
     ///
+
     /// # Complexity
     /// - Iterations: O(n) to O(n²) in practice
     /// - Per iteration: O(n × m) where m = avg points-to set size
@@ -1019,6 +1066,7 @@ impl PointsToAnalyzer {
 
     /// Apply a single constraint
     ///
+
     /// Returns true if any points-to set was modified
     fn apply_constraint(&mut self, constraint: &PointsToConstraint) -> bool {
         match constraint {
@@ -1040,11 +1088,13 @@ impl PointsToAnalyzer {
                 // Load constraint: x = *y
                 // pts(dest) ⊇ ⋃{stored_pts(z) | z ∈ pts(ptr)}
                 //
+
                 // This is the CRITICAL two-level points-to handling:
                 // 1. Find all locations L that ptr points to: L = pts(ptr)
                 // 2. For each l ∈ L, find what values stored at l point to
                 // 3. Add all those targets to pts(dest)
                 //
+
                 // The stored values' targets come from prior Store constraints
                 // which populate location_points_to.
 
@@ -1129,14 +1179,16 @@ impl PointsToAnalyzer {
                 // Store constraint: *x = y
                 // ∀z ∈ pts(ptr): stored_pts(z) ⊇ pts(value)
                 //
+
                 // This is the second half of two-level points-to handling:
                 // Store populates location_points_to, which Load reads.
                 //
+
                 // Store constraint semantics:
                 // - ptr points to some locations
                 // - value points to some locations
                 // - After *ptr = value, each location ptr points to should contain
-                //   all locations that value points to
+                //  all locations that value points to
 
                 let ptr_pts = match self.graph.get_points_to_set(*ptr) {
                     Maybe::Some(pts) => pts.clone(),
@@ -1204,6 +1256,7 @@ impl PointsToAnalyzer {
                 // Field-sensitive load: x = y->f
                 // pts(dest) ⊇ ⋃{field_pts(z, f) | z ∈ pts(ptr)}
                 //
+
                 // This uses the field-sensitive two-level points-to graph:
                 // 1. Find all locations L that ptr points to
                 // 2. For each l ∈ L, look up the field-specific points-to set
@@ -1281,6 +1334,7 @@ impl PointsToAnalyzer {
                 // Field-sensitive store: x->f = y
                 // ∀z ∈ pts(ptr): field_pts(z, f) ⊇ pts(value)
                 //
+
                 // This stores value's points-to set at each field location,
                 // enabling subsequent FieldLoad constraints to find it.
 
@@ -1461,14 +1515,16 @@ pub struct PointsToAnalysisStats {
 
 /// Builder for points-to analyzer
 ///
+
 /// Provides a fluent API for configuring and running points-to analysis.
 ///
+
 /// # Example
 /// ```rust,ignore
 /// let result = PointsToAnalyzerBuilder::new()
-///     .with_cfg(&cfg)
-///     .build()
-///     .analyze();
+///  .with_cfg(&cfg)
+///  .build()
+///  .analyze();
 /// ```
 pub struct PointsToAnalyzerBuilder {
     cfg: Maybe<ControlFlowGraph>,
@@ -1542,8 +1598,10 @@ pub struct PointsToAnalysisResult {
 
 /// Convert points-to graph to alias sets
 ///
+
 /// Integrates points-to analysis results with the existing alias analysis framework.
 ///
+
 /// Converts points-to results into AliasSets for the existing alias analysis framework.
 /// Two references with disjoint points-to sets are NoAlias; overlapping sets are MayAlias.
 #[must_use]
@@ -1568,6 +1626,7 @@ pub fn points_to_graph_to_alias_sets(graph: &PointsToGraph, reference: RefId) ->
 
 /// Check if reference points to heap using points-to graph
 ///
+
 /// Returns true if any location in the points-to set is heap-allocated.
 #[must_use]
 pub fn reference_points_to_heap(graph: &PointsToGraph, reference: RefId) -> bool {
@@ -1688,10 +1747,10 @@ mod tests {
     #[test]
     fn test_two_level_store_load() {
         // Test the critical two-level points-to analysis:
-        //   let x = &a;       // x points to loc_a
-        //   let y = &b;       // y points to loc_b
-        //   *x = y;           // Store: loc_a now contains pointer to loc_b
-        //   let z = *x;       // Load: z should point to loc_b (not loc_a!)
+        //  let x = &a; // x points to loc_a
+        //  let y = &b; // y points to loc_b
+        //  *x = y; // Store: loc_a now contains pointer to loc_b
+        //  let z = *x; // Load: z should point to loc_b (not loc_a!)
 
         let mut analyzer = PointsToAnalyzer::new();
 
@@ -1742,10 +1801,10 @@ mod tests {
     #[test]
     fn test_field_sensitive_store_load() {
         // Test field-sensitive two-level analysis:
-        //   let s = &struct_loc;  // s points to struct
-        //   let p = &target;      // p points to target
-        //   s->field = p;         // Store p into s.field
-        //   let q = s->field;     // Load from s.field - should get target
+        //  let s = &struct_loc; // s points to struct
+        //  let p = &target; // p points to target
+        //  s->field = p; // Store p into s.field
+        //  let q = s->field; // Load from s.field - should get target
 
         let mut analyzer = PointsToAnalyzer::new();
 

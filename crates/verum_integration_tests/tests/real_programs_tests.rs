@@ -14,6 +14,7 @@
 )]
 //! Real Program Integration Tests: Parse -> Typecheck -> VBC Codegen -> Interpret
 //!
+
 //! These tests exercise the full Verum compilation pipeline with realistic programs
 //! that combine multiple language features (types, control flow, functions, contexts).
 //! All programs use valid Verum syntax as defined in grammar/verum.ebnf.

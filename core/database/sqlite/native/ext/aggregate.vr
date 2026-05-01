@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.2, §19.1
 //
+
 // Aggregate functions follow the canonical (init, step, finalize)
 // reduction pattern. The protocol uses an *associated type* (not a
 // type parameter) for the per-group accumulator, which keeps the
@@ -10,15 +11,18 @@
 // allows polymorphic dispatch over arbitrary aggregates without
 // monomorphising the call site.
 //
+
 // Phase-1 ABI (used by the catalogue):
 //
-//   protocol AggregateFn {
-//       type State;
-//       fn init(&self) -> Self.State;
-//       fn step(&self, st: &mut Self.State, args: &List<Register>);
-//       fn finalize(&self, st: Self.State) -> Register;
-//   }
+
+//  protocol AggregateFn {
+//  type State;
+//  fn init(&self) -> Self.State;
+//  fn step(&self, st: &mut Self.State, args: &List<Register>);
+//  fn finalize(&self, st: Self.State) -> Register;
+//  }
 //
+
 // Built-in aggregates (sum/avg/min/max/count) live in
 // `core.database.sqlite.native.builtins.aggregate_fns` as concrete
 // types whose `AggregateFn` impl plugs into this protocol — the
@@ -64,13 +68,15 @@ public type AggregateFn is protocol {
 // Pre-canned aggregates as zero-state helpers (unit type)
 // -----------------------------------------------------------------------------
 //
+
 // Used by the test suite + as worked examples for extension authors.
 // The four below cover the full state-shape spectrum:
 //
-//   * `CountAll` — Int64 counter
-//   * `SumInt`   — Int64 accumulator + saw-non-null flag
-//   * `MaxInt`   — Maybe<Int64>
-//   * `Concat`   — Text builder
+
+//  * `CountAll` — Int64 counter
+//  * `SumInt` — Int64 accumulator + saw-non-null flag
+//  * `MaxInt` — Maybe<Int64>
+//  * `Concat` — Text builder
 // =============================================================================
 
 public type CountAll is { sep: Text };

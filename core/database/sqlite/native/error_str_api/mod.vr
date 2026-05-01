@@ -2,7 +2,7 @@
 // core/database/sqlite/native/error_str_api/mod.vr
 // =============================================================================
 // sqlite3_errstr(rc) — returns the English description of a primary result
-// code.  Independent of any sqlite3 connection.  Added 3.7.15.
+// code. Independent of any sqlite3 connection. Added 3.7.15.
 // Spec App E.E.
 // =============================================================================
 

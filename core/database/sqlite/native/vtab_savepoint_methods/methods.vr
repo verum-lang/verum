@@ -25,7 +25,7 @@ public fn writes_state(m: &VtabSavepointMethod) -> Bool {
     match m { MSavepoint => true, MRollbackTo => true, MRelease => false }
 }
 
-// Whether implementing this method is mandatory for table v2.  All three are
+// Whether implementing this method is mandatory for table v2. All three are
 // optional; engine treats absence as "no nested-txn support".
 public fn is_optional(_m: &VtabSavepointMethod) -> Bool { true }
 

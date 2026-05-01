@@ -4,14 +4,17 @@
 // Layer: 5 (Network — HTTP/3)
 // =============================================================================
 //
+
 // Typed view of the SETTINGS frame content. HTTP/3 peers MUST emit
 // SETTINGS as the first frame on their control streams and MUST NOT
 // emit it more than once (§7.2.4 "A SETTINGS frame MUST be sent as
 // the first frame of each control stream (see Section 6.2.1)").
 //
+
 // Unknown setting IDs are ignored — preserved via `extras` so
 // diagnostic tooling sees them.
 //
+
 // =============================================================================
 
 module core.net.h3.settings;

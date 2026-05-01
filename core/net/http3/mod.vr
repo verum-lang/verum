@@ -4,23 +4,26 @@
 // Layer: 5 (Network)
 // Dependencies: core.net.quic, core.net.http
 // Spec: https://datatracker.ietf.org/doc/html/rfc9114 (HTTP/3)
-//       https://datatracker.ietf.org/doc/html/rfc9204 (QPACK)
+//  https://datatracker.ietf.org/doc/html/rfc9204 (QPACK)
 //
+
 // HTTP/3 maps HTTP semantics onto QUIC. Each request/response uses a
 // bidirectional QUIC stream. Headers are compressed with QPACK (the
 // QUIC-friendly successor to HPACK) over two dedicated unidirectional
 // streams for encoder and decoder state exchange.
 //
+
 // # Module layout
 //
+
 // ```
 // core.net.http3
-// ├── mod.vr          — this file
-// ├── error.vr        — Http3Error + error codes (§8)
-// ├── frame.vr        — HTTP/3 frame types (DATA, HEADERS, SETTINGS, ...)
-// ├── qpack.vr        — QPACK encoder/decoder (intrinsic-backed)
-// └── client.vr       — Client high-level API
-// └── server.vr       — Server high-level API
+// ├── mod.vr — this file
+// ├── error.vr — Http3Error + error codes (§8)
+// ├── frame.vr — HTTP/3 frame types (DATA, HEADERS, SETTINGS, ...)
+// ├── qpack.vr — QPACK encoder/decoder (intrinsic-backed)
+// └── client.vr — Client high-level API
+// └── server.vr — Server high-level API
 // ```
 // =============================================================================
 

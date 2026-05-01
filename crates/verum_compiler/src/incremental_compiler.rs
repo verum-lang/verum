@@ -1,17 +1,21 @@
 //! Incremental Compilation Support
 //!
+
 //! Enables fast recompilation by caching:
 //! - Parsed ASTs
 //! - Type checking results
 //! - Meta registry
 //! - Optimization results
 //!
+
 //! Incremental compilation: item-level hashing distinguishes signature changes
 //! (which invalidate dependents) from body-only changes (which skip recompilation).
 //! Phase 2 meta registry cached; Phase 3 re-expands only changed modules.
 //!
+
 //! ## Key Features
 //!
+
 //! - **Dependency Tracking**: Automatic transitive dependency invalidation
 //! - **Cache Persistence**: Save/load cache across compilation sessions
 //! - **Topological Sorting**: Correct recompilation order based on dependency graph
@@ -116,6 +120,7 @@ impl IncrementalCompiler {
 
     /// Compute hash of file content using Blake3 for fast, high-quality hashing.
     ///
+
     /// Returns a u64 for compatibility with existing APIs, truncated from
     /// the full Blake3 256-bit hash.
     fn compute_content_hash(path: &PathBuf) -> std::io::Result<u64> {
@@ -168,6 +173,7 @@ impl IncrementalCompiler {
 
     /// Get the set of files that need recompilation given changed files
     ///
+
     /// Returns files in topological order (dependencies first)
     pub fn get_recompilation_set(&self, changed_files: &[PathBuf]) -> List<PathBuf> {
         let mut to_recompile = HashSet::new();
@@ -355,19 +361,20 @@ impl IncrementalCompiler {
 
     /// Save cache to disk for persistence across sessions
     ///
+
     /// Cache format:
     /// - Magic bytes (4 bytes): "VRMC"
     /// - Version (4 bytes): u32
     /// - Number of entries (8 bytes): u64
     /// - For each entry:
-    ///   - Path length (4 bytes): u32
-    ///   - Path (variable): UTF-8 bytes
-    ///   - Timestamp (16 bytes): SystemTime as duration since UNIX_EPOCH
-    ///   - Content hash (8 bytes): u64
-    ///   - Dependencies count (4 bytes): u32
-    ///   - For each dependency:
-    ///     - Path length (4 bytes): u32
-    ///     - Path (variable): UTF-8 bytes
+    ///  - Path length (4 bytes): u32
+    ///  - Path (variable): UTF-8 bytes
+    ///  - Timestamp (16 bytes): SystemTime as duration since UNIX_EPOCH
+    ///  - Content hash (8 bytes): u64
+    ///  - Dependencies count (4 bytes): u32
+    ///  - For each dependency:
+    ///  - Path length (4 bytes): u32
+    ///  - Path (variable): UTF-8 bytes
     pub fn save_cache(&self) -> std::io::Result<()> {
         let cache_path = self.cache_file_path().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "Cache directory not set")
@@ -627,6 +634,7 @@ impl IncrementalCompiler {
 
     /// Update item hashes for a module.
     ///
+
     /// Call this after compiling a module to enable fine-grained
     /// change detection on subsequent compilations.
     pub fn update_item_hashes(&mut self, path: PathBuf, hashes: crate::hash::ItemHashes) {
@@ -640,6 +648,7 @@ impl IncrementalCompiler {
 
     /// Determine what kind of recompilation is needed for a file.
     ///
+
     /// Returns:
     /// - `NoChange`: File hasn't changed
     /// - `BodyOnly`: Only function bodies changed, re-verification needed
@@ -657,16 +666,19 @@ impl IncrementalCompiler {
 
     /// Compute fine-grained recompilation sets.
     ///
+
     /// Returns a tuple of:
     /// - Files needing full recompilation (signature changed)
     /// - Files needing re-verification only (body-only changed in dependency)
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// let (full_recompile, verify_only) = compiler.compute_incremental_sets_fine_grained(
-    ///     &all_files,
-    ///     |path| compute_item_hashes(path),
+    ///  &all_files,
+    ///  |path| compute_item_hashes(path),
     /// );
     /// ```
     pub fn compute_incremental_sets_fine_grained<F>(
@@ -738,6 +750,7 @@ impl IncrementalCompiler {
 
     /// Check if a file only needs re-verification (not full recompilation).
     ///
+
     /// This is true when the file's dependencies had body-only changes.
     pub fn needs_verification_only(&self, path: &PathBuf) -> bool {
         self.verification_only_cache.contains(path)
@@ -815,10 +828,12 @@ impl IncrementalCompiler {
 
     /// Perform incremental compilation on changed files
     ///
+
     /// Returns the set of files that need full recompilation based on:
     /// 1. Files that have changed content
     /// 2. Files that depend on changed files (transitively)
     ///
+
     /// The returned list is in topological order (dependencies first).
     pub fn compute_incremental_set(&self, all_files: &[PathBuf]) -> List<PathBuf> {
         // Find changed files
@@ -838,6 +853,7 @@ impl IncrementalCompiler {
 
     /// Check if compilation cache is stale and should be cleared
     ///
+
     /// Returns true if:
     /// - Cache is older than specified duration
     /// - Cache version is incompatible
@@ -888,18 +904,22 @@ pub struct CacheStats {
 impl CacheStats {
     /// Generate a human-readable report of cache statistics
     ///
+
     /// # Example Output
     ///
+
     /// ```text
     /// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     /// Incremental Cache Stats
     /// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     ///
-    /// Cached modules:        42
-    /// Meta registry valid:   Yes
+
+    /// Cached modules: 42
+    /// Meta registry valid: Yes
     ///
-    /// Cache hit rate:        95.2%
-    /// Memory saved:          ~1.2 MB
+
+    /// Cache hit rate: 95.2%
+    /// Memory saved: ~1.2 MB
     /// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     /// ```
     pub fn report(&self) -> String {

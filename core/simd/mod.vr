@@ -1,5 +1,6 @@
 /// Verum Standard Library: Portable SIMD Types
 ///
+
 /// This module provides portable SIMD (Single Instruction, Multiple Data) types
 /// that compile to optimal instructions on any platform. Unlike platform-specific
 /// intrinsics, these types provide:
@@ -8,30 +9,38 @@
 /// - Automatic multi-versioning via @multiversion
 /// - Zero-cost abstractions (all operations inline to single instructions)
 ///
+
 /// # Architecture
 ///
+
 /// SIMD types use the @repr(simd) attribute which:
 /// 1. Selects optimal vector width for target platform
 /// 2. Generates platform-specific intrinsics
 /// 3. Supports runtime CPU feature detection for multi-versioning
 ///
+
 /// VBC (Verum Bytecode) opcodes 0xC0-0xCF are reserved for SIMD operations.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Portable SIMD vector operations
 /// let a = Vec4f.splat(1.0);
 /// let b = Vec4f.splat(2.0);
-/// let c = a.add(b);  // All lanes = 3.0
+/// let c = a.add(b); // All lanes = 3.0
 ///
+
 /// // Fused multiply-add (single instruction)
-/// let result = a.fma(b, c);  // a * b + c
+/// let result = a.fma(b, c); // a * b + c
 ///
+
 /// // Horizontal reduction
-/// let sum = c.reduce_add();  // Sum all lanes
+/// let sum = c.reduce_add(); // Sum all lanes
 /// ```
 ///
+
 /// Implementation Reference: docs/architecture/low-level-features.md Section 5
 
 // GPU compute types and kernel API (CUDA, ROCm, Metal, Vulkan)
@@ -50,6 +59,7 @@ public module bytes;
 
 /// Protocol for types that can be SIMD vector elements.
 ///
+
 /// Types must implement this protocol to be used in Vec<T, N>.
 /// The compiler uses these constants to select optimal implementations.
 public type SimdElement is protocol {
@@ -139,17 +149,21 @@ implement SimdElement for UInt64 {
 
 /// Portable SIMD vector type.
 ///
+
 /// Compiles to optimal instructions on any platform:
 /// - x86_64: SSE4.2 (128-bit), AVX2 (256-bit), AVX-512 (512-bit)
 /// - aarch64: NEON (128-bit), SVE (scalable)
 ///
+
 /// # Type Parameters
 /// - `T`: Element type (must implement SimdElement)
 /// - `N`: Number of lanes (must be power of 2)
 ///
+
 /// # Alignment
 /// Vectors are naturally aligned to their size (16/32/64 bytes).
 ///
+
 /// Note: Vec is a newtype around [T; N] to ensure its own methods
 /// (like min/max) take priority over Iterator methods on arrays.
 @repr(simd)
@@ -189,9 +203,11 @@ public type Vec32s is Vec<Int16, 32>;    // 32x16-bit short
 
 /// SIMD mask type for conditional operations.
 ///
+
 /// Each lane is a boolean indicating whether the operation should apply.
 /// Used for masked loads, stores, and conditional selects.
 ///
+
 /// Note: Mask is a newtype around [Bool; N] to ensure its own methods
 /// take priority over array/slice methods like count() and any().
 @repr(simd_mask)
@@ -209,8 +225,9 @@ public type Mask16 is Mask<16>;
 implement<T: SimdElement, N: meta USize> Vec<T, N> {
     /// Broadcast scalar to all lanes.
     ///
+
     /// ```verum
-    /// let v = Vec4f.splat(1.0);  // [1.0, 1.0, 1.0, 1.0]
+    /// let v = Vec4f.splat(1.0); // [1.0, 1.0, 1.0, 1.0]
     /// ```
     @inline(always)
     @intrinsic("simd_splat")
@@ -230,6 +247,7 @@ implement<T: SimdElement, N: meta USize> Vec<T, N> {
 
     /// Load from aligned memory.
     ///
+
     /// # Safety
     /// Pointer must be aligned to N * sizeof(T) bytes.
     /// Use @static_assert or meta constraint to verify alignment.
@@ -240,6 +258,7 @@ implement<T: SimdElement, N: meta USize> Vec<T, N> {
 
     /// Load from unaligned memory.
     ///
+
     /// Slightly slower than aligned load but works with any pointer.
     @inline(always)
     @intrinsic("simd_load_unaligned")
@@ -284,6 +303,7 @@ implement<T: SimdElement + Numeric, N: meta USize> Vec<T, N> {
 
     /// Fused multiply-add: a * b + c (single rounding).
     ///
+
     /// This is more accurate and faster than separate mul + add.
     /// Maps to FMA instruction on supported platforms.
     @inline(always)
@@ -380,9 +400,10 @@ implement<T: SimdElement + Ord, N: meta USize> Vec<T, N> {
 implement<T: SimdElement, N: meta USize> Vec<T, N> {
     /// Conditional select: choose a or b per lane based on mask.
     ///
+
     /// ```verum
     /// let mask = a.cmp_lt(b);
-    /// let min = Vec.select(mask, a, b);  // Per-lane minimum
+    /// let min = Vec.select(mask, a, b); // Per-lane minimum
     /// ```
     @inline(always)
     @intrinsic("simd_select")
@@ -406,12 +427,14 @@ implement<T: SimdElement, N: meta USize> Vec<T, N> {
 implement<T: SimdElement, N: meta USize> Vec<T, N> {
     /// Shuffle elements using compile-time mask.
     ///
+
     /// Each index in MASK selects a lane from self (0..N-1) or other (N..2N-1).
     ///
+
     /// ```verum
     /// let a = Vec4i.from_array([1, 2, 3, 4]);
     /// let b = Vec4i.from_array([5, 6, 7, 8]);
-    /// let c = a.shuffle<[0, 5, 2, 7]>(b);  // [1, 6, 3, 8]
+    /// let c = a.shuffle<[0, 5, 2, 7]>(b); // [1, 6, 3, 8]
     /// ```
     @inline(always)
     @intrinsic("simd_shuffle")
@@ -437,6 +460,7 @@ implement<T: SimdElement, N: meta USize> Vec<T, N> {
 implement<T: SimdElement, N: meta USize> Vec<T, N> {
     /// Gather: indexed load from memory.
     ///
+
     /// Loads T elements from base[indices[i]] for each lane i.
     /// Useful for non-contiguous memory access patterns.
     @inline(always)
@@ -445,6 +469,7 @@ implement<T: SimdElement, N: meta USize> Vec<T, N> {
 
     /// Scatter: indexed store to memory.
     ///
+
     /// Stores self[i] to base[indices[i]] for each lane i.
     @inline(always)
     @intrinsic("simd_scatter")
@@ -513,6 +538,7 @@ implement<N: meta USize> Mask<N> {
 
 /// Compile-time platform feature detection.
 ///
+
 /// Use these constants to conditionally compile code for specific platforms.
 
 @cfg(target_feature = "sse4.2")
@@ -546,21 +572,24 @@ public const HAS_NEON: Bool = false;
 
 /// Multi-version attribute for automatic CPU dispatch.
 ///
+
 /// The compiler generates multiple versions of the function and selects
 /// the optimal one at runtime based on CPU capabilities.
 ///
+
 /// ```verum
 /// @multiversion(
-///     avx512f = "avx512_impl",
-///     avx2 = "avx2_impl",
-///     sse4_2 = "sse_impl",
-///     default = "scalar_impl",
+///  avx512f = "avx512_impl",
+///  avx2 = "avx2_impl",
+///  sse4_2 = "sse_impl",
+///  default = "scalar_impl",
 /// )
 /// public fn process_batch(data: &mut [Float32]) {
-///     // Compiler generates dispatcher
+///  // Compiler generates dispatcher
 /// }
 /// ```
 ///
+
 /// The @multiversion attribute is processed by the compiler and generates:
 /// 1. Function variants for each target feature
 /// 2. Runtime CPU feature detection
@@ -572,17 +601,19 @@ public const HAS_NEON: Bool = false;
 
 /// VBC SIMD opcodes (0xC0-0xCF range).
 ///
+
 /// These opcodes are used by the VBC interpreter and JIT compiler.
 /// The kernel dispatch layer selects optimal implementations based on
 /// runtime CPU capabilities.
 ///
-/// | Operation          | VBC Opcode     | Description              |
+
+/// | Operation | VBC Opcode | Description |
 /// |--------------------|----------------|--------------------------|
-/// | Vec.splat()        | SIMD_SPLAT     | Broadcast scalar         |
-/// | Vec.load_aligned() | SIMD_LOAD      | Aligned load             |
-/// | Vec.add()          | SIMD_BINOP     | Element-wise arithmetic  |
-/// | Vec.fma()          | SIMD_FMA       | Fused multiply-add       |
-/// | Vec.reduce_add()   | SIMD_REDUCE    | Horizontal reduction     |
-/// | Vec.shuffle()      | SIMD_SHUFFLE   | Permute elements         |
-/// | Vec.gather()       | SIMD_GATHER    | Indexed load             |
-/// | Vec.scatter()      | SIMD_SCATTER   | Indexed store            |
+/// | Vec.splat() | SIMD_SPLAT | Broadcast scalar |
+/// | Vec.load_aligned() | SIMD_LOAD | Aligned load |
+/// | Vec.add() | SIMD_BINOP | Element-wise arithmetic |
+/// | Vec.fma() | SIMD_FMA | Fused multiply-add |
+/// | Vec.reduce_add() | SIMD_REDUCE | Horizontal reduction |
+/// | Vec.shuffle() | SIMD_SHUFFLE | Permute elements |
+/// | Vec.gather() | SIMD_GATHER | Indexed load |
+/// | Vec.scatter() | SIMD_SCATTER | Indexed store |

@@ -6,28 +6,34 @@
 // Spec: internal/specs/tls-quic.md §1.1 HTTP/3, §12 Phase 6
 // =============================================================================
 //
+
 // Pure-Verum HTTP/3 implementation. Ships alongside the intrinsic-
 // backed core.net.http3 during the co-existence phase; merges once
 // the connection_sm + handshake_driver pipeline lands end-to-end.
 //
+
 // # Module layout
 //
+
 // ```
 // core.net.h3
-// ├── mod.vr       ← this file (re-exports)
-// ├── frame.vr     — RFC 9114 §7 frame codec + stream-type prefix
-// ├── error.vr     — H3ErrorCode + H3Error enum (RFC 9114 §8 + RFC 9204 §6)
-// └── qpack/       — QPACK field compression (RFC 9204)
+// ├── mod.vr ← this file (re-exports)
+// ├── frame.vr — RFC 9114 §7 frame codec + stream-type prefix
+// ├── error.vr — H3ErrorCode + H3Error enum (RFC 9114 §8 + RFC 9204 §6)
+// └── qpack/ — QPACK field compression (RFC 9204)
 // ```
 //
+
 // # Status
 //
+
 // Phase 6 step 1: wire-level frame codec + QPACK static/literal
 // encoder/decoder. Client + server request-response drivers and
 // full dynamic-table support arrive in Phase 6 steps 2-3 once the
 // connection_sm pipeline can carry application-stream bytes end
 // to end.
 //
+
 // =============================================================================
 
 module core.net.h3;

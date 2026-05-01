@@ -1,17 +1,21 @@
 //! Stdlib type metadata definitions
 //!
+
 //! This module defines data structures for representing stdlib type information
 //! that can be loaded from pre-compiled stdlib.vbc archives.
 //!
+
 //! Stdlib type metadata definitions extracted from core .vr files during compilation pipeline.
 
 use verum_common::{List, Maybe, OrderedMap, Text};
 
 /// Metadata extracted from stdlib.vbc for type checking
 ///
+
 /// This struct contains all the type information needed to compile user code
 /// without having to parse stdlib source files.
 ///
+
 /// Uses `OrderedMap` (BTreeMap) instead of `Map` (HashMap) to ensure
 /// deterministic iteration order. HashMap iteration order depends on the
 /// per-process random hash seed, causing non-deterministic type registration
@@ -20,6 +24,7 @@ use verum_common::{List, Maybe, OrderedMap, Text};
 pub struct CoreMetadata {
     /// Type definitions (List<T>, Map<K,V>, Maybe<T>, etc.)
     ///
+
     /// Storage is `OrderedMap` (BTreeMap-backed) for O(log n) lookup by name.
     /// Iteration order from this map is alphabetical and MUST NOT be used for
     /// any operation where source declaration order matters — see
@@ -28,10 +33,12 @@ pub struct CoreMetadata {
 
     /// Type names in source declaration order (load order across the archive).
     ///
+
     /// Recorded as types are inserted into `types`. Provides a stable iteration
     /// order that reflects stdlib layer ordering (Core → Text → Collections → …)
     /// and per-module .vr file declaration order.
     ///
+
     /// Critical for: variant-name registration (Maybe must register `None|Some`
     /// before any sibling cog's variant aliases), inductive-constructor
     /// registration (Result must beat CheckedResult to the `Ok|Err` signature),
@@ -324,6 +331,7 @@ impl StdlibLayer {
 
     /// Get the module order for this layer.
     ///
+
     /// Derived from `ModuleOrder::default_order()` in `core_pipeline.rs`,
     /// which is the single source of truth for stdlib module ordering.
     pub fn modules(&self) -> Vec<&'static str> {
@@ -339,6 +347,7 @@ impl StdlibLayer {
 
 /// Get full stdlib module compilation order.
 ///
+
 /// Delegates to `ModuleOrder::default_order()` in `core_pipeline.rs`,
 /// which is the single source of truth for stdlib module ordering.
 pub fn stdlib_module_order() -> Vec<&'static str> {

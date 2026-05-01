@@ -25,6 +25,7 @@ use super::{
 
 /// Order in which to traverse an operation tree.
 //
+
 // NOTE: `MlirWalkOrder_*` constants in the regenerated `verum_mlir_sys`
 // bindings (LLVM 21) are `u32`, not the historical `i32`. The enum repr
 // MUST match, otherwise the discriminant initializers `= Mlir..._*` fail
@@ -276,6 +277,7 @@ pub trait OperationLike<'c: 'a, 'a>: Display + 'a {
     /// Walks this operation (and all nested operations) in either pre- or
     /// post-order.
     ///
+
     /// The closure is called once per operation; by returning
     /// `WalkResult::Advance`/`Skip`/`Interrupt` you control the traversal.
     fn walk<F>(&self, order: WalkOrder, mut callback: F)
@@ -331,6 +333,7 @@ pub trait OperationMutLike<'c: 'a, 'a>: OperationLike<'c, 'a> {
     /// Walks this operation (and all nested operations) in either pre- or
     /// post-order.
     ///
+
     /// The closure is called once per operation; by returning
     /// `WalkResult::Advance`/`Skip`/`Interrupt` you control the traversal.
     fn walk_mut<F>(&mut self, order: WalkOrder, mut callback: F)

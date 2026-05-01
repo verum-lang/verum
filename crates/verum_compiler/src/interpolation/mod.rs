@@ -1,33 +1,41 @@
 //! Safe interpolation handlers for semantic literals
 //!
+
 //! Interpolation system: tagged literal parsing (§1.4.4) and safe interpolation
 //! handlers (§1.4.5), all desugaring to meta-system operations.
 //!
+
 //! This module provides safe interpolation handlers that prevent injection attacks:
 //! - SQL interpolation with parameterized queries (prevents SQL injection)
 //! - HTML interpolation with auto-escaping (prevents XSS)
 //! - URL interpolation with proper encoding (prevents URL injection)
 //!
+
 //! ## Security Guarantees
 //!
+
 //! All interpolation handlers follow the principle of "secure by default":
 //! - All user input is automatically escaped/encoded
 //! - Dangerous contexts (script tags, event handlers) are forbidden
 //! - Scheme injection is prevented
 //! - Compile-time validation of structure
 //!
+
 //! ## Usage
 //!
+
 //! ```verum
 //! // SQL - parameterized queries
 //! let user_id = 42;
 //! let query = sql"SELECT * FROM users WHERE id = {user_id}";
 //!
+
 //! // HTML - auto-escaping
 //! let name = "<script>alert('xss')</script>";
 //! let html = html"<div>Hello, {name}!</div>";
 //! // Output: <div>Hello, &lt;script&gt;...&lt;/script&gt;!</div>
 //!
+
 //! // URL - percent-encoding
 //! let search = "hello world";
 //! let url = url"https://api.example.com/search?q={search}";
@@ -54,12 +62,14 @@ pub struct InterpolationDispatcher;
 impl InterpolationDispatcher {
     /// Dispatch interpolation to the appropriate handler
     ///
+
     /// # Arguments
     /// - `tag`: The interpolation tag (sql, html, url, etc.)
     /// - `template`: The template string
     /// - `interpolations`: The expressions to interpolate
     /// - `span`: Source location for error reporting
     ///
+
     /// # Returns
     /// The result of the interpolation as a string representation
     pub fn dispatch(

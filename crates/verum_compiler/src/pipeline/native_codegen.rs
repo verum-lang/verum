@@ -1,25 +1,28 @@
 //! Native LLVM AOT codegen + linking (Phase 6, Tier 1 execution).
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 12). Houses the
 //! AST → VBC → LLVM IR → native-binary path, plus the C-stubs
 //! / linker discovery / lld driver helpers it depends on.
 //!
+
 //! Methods:
 //!
-//!   * `phase_generate_native` — primary AOT entry; lowers VBC
-//!     to LLVM IR via `VbcToLlvmLowering`, runs LLVM optimisation
-//!     passes, emits object files, links with the C runtime.
-//!   * `get_project_root` — find Verum.toml-rooted project for
-//!     output-directory resolution.
-//!   * `generate_runtime_stubs` — emit the small C-runtime
-//!     bridge that wraps the verum stdlib's libc-facing symbols.
-//!   * `compile_c_file` — invoke the host C compiler on a single
-//!     stub file.
-//!   * `detect_c_compiler` — host-`cc` discovery (clang / gcc).
-//!   * `link_executable` — orchestrate linker invocation.
-//!   * `load_linker_config` / `link_with_config` /
-//!     `link_with_lld` — Verum.toml-driven linker configuration
-//!     and lld-fallback driver.
+
+//!  * `phase_generate_native` — primary AOT entry; lowers VBC
+//!  to LLVM IR via `VbcToLlvmLowering`, runs LLVM optimisation
+//!  passes, emits object files, links with the C runtime.
+//!  * `get_project_root` — find Verum.toml-rooted project for
+//!  output-directory resolution.
+//!  * `generate_runtime_stubs` — emit the small C-runtime
+//!  bridge that wraps the verum stdlib's libc-facing symbols.
+//!  * `compile_c_file` — invoke the host C compiler on a single
+//!  stub file.
+//!  * `detect_c_compiler` — host-`cc` discovery (clang / gcc).
+//!  * `link_executable` — orchestrate linker invocation.
+//!  * `load_linker_config` / `link_with_config` /
+//!  `link_with_lld` — Verum.toml-driven linker configuration
+//!  and lld-fallback driver.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -194,7 +197,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Resolve the panic strategy from `[runtime].panic` in
         // Verum.toml (defaults to "unwind" — see RuntimeFeatures::
-        // default()).  Threading this through here makes the
+        // default()). Threading this through here makes the
         // manifest setting actually drive emission of `verum_panic`
         // body shape — pre-fix the field was tracing-only at
         // session.rs:390 and the panic body always took the abort
@@ -204,7 +207,7 @@ impl<'s> CompilationPipeline<'s> {
         );
 
         // Resolve `[codegen].tail_call_optimization` from
-        // Verum.toml.  When false, every emitted function gets
+        // Verum.toml. When false, every emitted function gets
         // `disable-tail-calls=true` so the LLVM backend skips TCO.
         // Pre-fix the manifest field was tracing-only at
         // session.rs:432; setting it false had zero effect on
@@ -216,10 +219,10 @@ impl<'s> CompilationPipeline<'s> {
             .codegen
             .tail_call_optimization;
 
-        // Resolve `[codegen].vectorize` from Verum.toml.  When
+        // Resolve `[codegen].vectorize` from Verum.toml. When
         // false, every emitted function gets `no-loop-vectorize`
         // + `no-slp-vectorize` so LLVM's autovectorizer skips
-        // those functions regardless of opt level.  Sibling wire
+        // those functions regardless of opt level. Sibling wire
         // to tail_call_optimization above; same pattern.
         let vectorize = self
             .session
@@ -228,12 +231,12 @@ impl<'s> CompilationPipeline<'s> {
             .codegen
             .vectorize;
 
-        // Resolve `[codegen].inline_depth` from Verum.toml.  Maps
+        // Resolve `[codegen].inline_depth` from Verum.toml. Maps
         // to per-function `"inline-threshold"` LLVM string
         // attribute (threshold = inline_depth * 75; default 3 →
-        // 225 = LLVM default, no IR emission).  Pre-fix the
+        // 225 = LLVM default, no IR emission). Pre-fix the
         // manifest field was tracing-only at session.rs:448;
-        // setting it had zero effect on generated code.  Closes
+        // setting it had zero effect on generated code. Closes
         // task #267.
         let inline_depth = self
             .session
@@ -243,10 +246,10 @@ impl<'s> CompilationPipeline<'s> {
             .inline_depth;
 
         // Resolve manifest-driven runtime-bridge values
-        // (architectural prerequisite #261).  Each field flows
+        // (architectural prerequisite #261). Each field flows
         // through to a `__verum_runtime_*` LLVM global at codegen
         // time and reaches stdlib code through the
-        // `verum_get_runtime_*` getter functions.  Default 0 keeps
+        // `verum_get_runtime_*` getter functions. Default 0 keeps
         // the historical stdlib defaults (auto-detect via
         // num_cpus, platform stack size).
         let rt = &self.session.options().language_features.runtime;
@@ -416,13 +419,14 @@ impl<'s> CompilationPipeline<'s> {
             // early-cse which depend on pointer provenance tracking.
             // Safe passes: mem2reg (alloca→SSA), simplifycfg (branch cleanup).
             //
+
             // Function-level optimization hints (@inline, @cold, @hot, @optimize)
             // are applied as LLVM function attributes in vbc_lowering.rs.
             // These are respected automatically by the pass manager for:
-            //   - Code layout (.text.cold sections)
-            //   - Inlining decisions (alwaysinline/noinline/inlinehint)
-            //   - Size optimization (optsize/minsize on cold functions)
-            //   - Per-function target features (target-features/target-cpu)
+            //  - Code layout (.text.cold sections)
+            //  - Inlining decisions (alwaysinline/noinline/inlinehint)
+            //  - Size optimization (optsize/minsize on cold functions)
+            //  - Per-function target features (target-features/target-cpu)
             // When the module has arity collisions or skip-body
             // functions, LLVM function-level passes (mem2reg,
             // simplifycfg, instcombine) crash with SIGSEGV in
@@ -477,6 +481,7 @@ impl<'s> CompilationPipeline<'s> {
         // Dead stdlib functions may have invalid IR (unresolved intrinsics),
         // but GlobalDCE eliminates them, leaving only valid reachable code.
         //
+
         // Debug info verification failures (!dbg location on inlined calls) are
         // non-fatal — the code is correct, only metadata is inconsistent. Emit
         // a warning instead of aborting compilation.
@@ -536,13 +541,13 @@ impl<'s> CompilationPipeline<'s> {
         // `options.windows_subsystem` upstream by `verum_cli::commands::build`.
         // Here we apply it to the no-libc Windows configuration so the
         // produced .exe carries `/SUBSYSTEM:WINDOWS` (GUI) instead of
-        // the default `/SUBSYSTEM:CONSOLE`.  Ignored on non-Windows
+        // the default `/SUBSYSTEM:CONSOLE`. Ignored on non-Windows
         // targets — the linker config's flags table is unchanged when
         // `for_platform` returns a non-Windows variant.
         if let Some(ref subsystem_flag) = self.session.options().windows_subsystem {
             // Only apply when we have a no-libc config AND it's a
             // Windows config (otherwise the flag would be a silent
-            // no-op).  Detect via the platform field on the existing
+            // no-op). Detect via the platform field on the existing
             // config, falling back to inspection of the target triple.
             let is_windows_target = match &linker_config.no_libc_config {
                 Some(cfg) => matches!(cfg.platform, verum_codegen::link::Platform::Windows),
@@ -599,6 +604,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Get the project root directory
     ///
+
     /// Searches for Verum.toml starting from the input file's directory
     /// and walking up the directory tree. Falls back to input file's parent
     /// or current working directory if no Verum.toml is found.
@@ -746,9 +752,11 @@ impl<'s> CompilationPipeline<'s> {
         // - Custom Verum runtime in /core/ for threading, memory, I/O
         // - Platform-specific system calls via /core/sys/
         //
+
         // Entry point: /core/sys/init.vr provides the custom _start that
         // initializes the Verum runtime before calling the user's main function.
         //
+
         // Exception: GPU targets may link Metal/CUDA/ROCm frameworks via MLIR path.
         // ==========================================================================
 
@@ -802,6 +810,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Load linker configuration from Verum.toml
     ///
+
     /// Reads the [linker] section from Verum.toml and merges with profile-specific
     /// settings. Falls back to defaults if no Verum.toml is found.
     pub(super) fn load_linker_config(&self, project_root: &Path, profile: &str) -> Result<LinkingConfig> {
@@ -823,11 +832,13 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Link object files using configuration from Verum.toml
     ///
+
     /// This method supports two linking modes:
     /// - **LLD (LLVM Linker)**: When `use_lld = true` in Verum.toml, uses FinalLinker
-    ///   for LTO support and faster linking on Linux
+    ///  for LTO support and faster linking on Linux
     /// - **System Linker**: Falls back to system compiler (clang/gcc) for compatibility
     ///
+
     /// Configuration options from Verum.toml:
     /// - `output`: executable, shared, static, object
     /// - `lto`: none, thin, full
@@ -867,6 +878,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Link object files using LLD via FinalLinker
     ///
+
     /// This method uses the FinalLinker from phases/linking.rs which provides:
     /// - LTO support (Thin/Full)
     /// - CBGR runtime integration

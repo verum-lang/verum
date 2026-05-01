@@ -3,16 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.6 (strftime)
 //
+
 // SQLite's strftime supports a subset of the POSIX format codes:
 //
-//   %Y — year (4 digits)              %m — month (01-12)
-//   %d — day of month (01-31)         %H — hour (00-23)
-//   %M — minute (00-59)               %S — second (00-59)
-//   %f — fractional second (SS.SSS)   %j — day of year (001-366)
-//   %J — Julian day number (REAL)     %s — Unix epoch seconds
-//   %w — day of week (0=Sunday, 6=Saturday)
-//   %% — literal %
+
+//  %Y — year (4 digits) %m — month (01-12)
+//  %d — day of month (01-31) %H — hour (00-23)
+//  %M — minute (00-59) %S — second (00-59)
+//  %f — fractional second (SS.SSS) %j — day of year (001-366)
+//  %J — Julian day number (REAL) %s — Unix epoch seconds
+//  %w — day of week (0=Sunday, 6=Saturday)
+//  %% — literal %
 //
+
 // Anything else is copied verbatim.
 // =============================================================================
 

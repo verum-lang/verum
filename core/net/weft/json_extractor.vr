@@ -2,32 +2,37 @@
 // core/net/weft/json_extractor.vr — Json<T> handler-argument extractor
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §5.3 (Json<T>) + §11 (Phase 1
-//        follow-up: "Полноценный JSON-extractor")
+// Spec: internal/specs/net-framework.md §5.3 (Json<T>) + §11 (Phase 1
+//  follow-up: "Полноценный JSON-extractor")
 // =============================================================================
 //
+
 // Provides the spec-canonical `Json<T>` extractor — drop-in for axum-style
 // handlers — backed by `core.encoding.json`.
 //
+
 // The extractor performs five gates in fixed order:
 //
-//   1. Content-Type check — `application/json` (with optional
-//      `; charset=utf-8`). Anything else → 415 Unsupported Media Type.
-//   2. Body-size cap — caller-configured ceiling (default 1 MiB).
-//      Oversize → 413 Payload Too Large.
-//   3. UTF-8 validation — `core.encoding.json.parse` is UTF-8 native;
-//      invalid sequences → 400 Bad Request with the exact byte offset.
-//   4. Syntax parse — produces a JsonValue tree.
-//   5. Type-directed materialisation — `JsonDeserialize<T>` protocol
-//      lowers the tree into the user's typed value. Refinement
-//      violations bubble up as 422 Unprocessable Entity.
+
+//  1. Content-Type check — `application/json` (with optional
+//  `; charset=utf-8`). Anything else → 415 Unsupported Media Type.
+//  2. Body-size cap — caller-configured ceiling (default 1 MiB).
+//  Oversize → 413 Payload Too Large.
+//  3. UTF-8 validation — `core.encoding.json.parse` is UTF-8 native;
+//  invalid sequences → 400 Bad Request with the exact byte offset.
+//  4. Syntax parse — produces a JsonValue tree.
+//  5. Type-directed materialisation — `JsonDeserialize<T>` protocol
+//  lowers the tree into the user's typed value. Refinement
+//  violations bubble up as 422 Unprocessable Entity.
 //
+
 // The deserialise step uses the `JsonDeserialize<T>` protocol; users
 // implement it directly or derive it via `@derive(JsonDeserialize)`
 // on their record / sum type. Built-in impls cover the primitive
 // shapes (Int / Float / Bool / Text / List<T> / Map<K,V> / Maybe<T>)
 // + canonical record / sum patterns through the `@derive` machinery.
 //
+
 // =============================================================================
 
 module core.net.weft.json_extractor;
@@ -150,6 +155,7 @@ implement JsonExtractError {
 // JsonDeserialize<T> — protocol the user / derive macro implements
 // =============================================================================
 //
+
 // Plain protocol that takes a JsonValue tree + a *path* (the
 // reverse-DNS dotted location for error messages) and produces a
 // `Result<T, JsonExtractError>`. Refinement-type checks happen

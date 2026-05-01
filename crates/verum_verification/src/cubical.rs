@@ -1,45 +1,54 @@
 //! Cubical / HoTT first-class catalogue — typed primitive
 //! inventory + computation-rule registry + face-formula validator.
 //!
+
 //! ## Goal
 //!
+
 //! Verum becomes the first production proof assistant where
 //! cubical type theory, HoTT, AND classical foundation co-exist
-//! under foundation-neutral toggles.  Cubical-Agda and Lean's
+//! under foundation-neutral toggles. Cubical-Agda and Lean's
 //! Mathlib4 each support some of this; Verum's USP is the
 //! foundation-neutrality (cubical layer is opt-in, not the only
 //! option).
 //!
+
 //! This module is the **architectural foundation** for the cubical
 //! layer:
 //!
-//!   * Typed enumeration of cubical primitives (HComp / Transp /
-//!     Glue / Path / Equiv / J-rule / Univalence / …).
-//!   * Per-primitive structured doc (signature + semantics +
-//!     computation rules + example).
-//!   * Face-formula validator (the `i = 0`, `i = 1`, `i = 0 ∨ j = 1`
-//!     boundary-cube grammar).
-//!   * Path-formula well-formedness check.
-//!   * Single trait boundary [`CubicalCatalog`] consumed by IDE /
-//!     docs / kernel re-check.
+
+//!  * Typed enumeration of cubical primitives (HComp / Transp /
+//!  Glue / Path / Equiv / J-rule / Univalence / …).
+//!  * Per-primitive structured doc (signature + semantics +
+//!  computation rules + example).
+//!  * Face-formula validator (the `i = 0`, `i = 1`, `i = 0 ∨ j = 1`
+//!  boundary-cube grammar).
+//!  * Path-formula well-formedness check.
+//!  * Single trait boundary [`CubicalCatalog`] consumed by IDE /
+//!  docs / kernel re-check.
 //!
+
 //! ## V0 contract
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   * The full primitive catalogue (16 entries covering every
-//!     #78 acceptance bullet).
-//!   * Production-grade face-formula parser / validator.
-//!   * Per-primitive structured doc with computation-rule names.
-//!   * The trait surface and reference catalogue impl.
+
+//!  * The full primitive catalogue (16 entries covering every
+//!  #78 acceptance bullet).
+//!  * Production-grade face-formula parser / validator.
+//!  * Per-primitive structured doc with computation-rule names.
+//!  * The trait surface and reference catalogue impl.
 //!
+
 //! V1+ adds:
 //!
-//!   * Actual kernel-side reduction rules (currently the catalogue
-//!     names them; the reductions live in the kernel).
-//!   * HIT support (higher inductive types) checked via the
-//!     positivity-check infrastructure.
-//!   * Univalence-derivability proof from Glue.
+
+//!  * Actual kernel-side reduction rules (currently the catalogue
+//!  names them; the reductions live in the kernel).
+//!  * HIT support (higher inductive types) checked via the
+//!  positivity-check infrastructure.
+//!  * Univalence-derivability proof from Glue.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -241,7 +250,7 @@ pub struct CubicalEntry {
 // CubicalRule — typed inventory of computation rules
 // =============================================================================
 
-/// One computation / reduction rule.  These describe the
+/// One computation / reduction rule. These describe the
 /// definitional equations the cubical kernel reduces by.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CubicalRule {
@@ -253,17 +262,19 @@ pub struct CubicalRule {
 }
 
 /// Subset of canonical-rule names that the kernel actually applies
-/// during `verum_kernel::normalize`.  V0 ships seven structural
+/// during `verum_kernel::normalize`. ships seven structural
 /// reductions on the cubical face / interval markers; the rest are
 /// documented but their evaluators are V1 work (J-on-refl, ap-trans,
 /// equiv composition, ua-id / ua-trans / ua-sym, …).
 ///
+
 /// Used by:
 ///
-///   * The `cubical rules --kernel` CLI subcommand to mark which
-///     rules the kernel performs vs. which are documentation-only.
-///   * The CI gate that verifies every kernel-side reduction has a
-///     matching catalogue entry (single-source-of-truth invariant).
+
+///  * The `cubical rules --kernel` CLI subcommand to mark which
+///  rules the kernel performs vs. which are documentation-only.
+///  * The CI gate that verifies every kernel-side reduction has a
+///  matching catalogue entry (single-source-of-truth invariant).
 pub const KERNEL_APPLIED_RULES: &[&str] = &[
     "hcomp-id-when-empty-system",
     "hcomp-id-when-φ-equals-1",
@@ -717,7 +728,7 @@ impl FaceFormula {
         }
     }
 
-    /// Render canonically.  Round-trips through `parse`.
+    /// Render canonically. Round-trips through `parse`.
     pub fn render(&self) -> Text {
         match self {
             Self::Top => Text::from("1"),
@@ -740,15 +751,17 @@ impl FaceFormula {
         }
     }
 
-    /// Parse a face formula.  Accepts:
+    /// Parse a face formula. Accepts:
     ///
-    ///   * `0` / `⊥` / `bot` — bottom.
-    ///   * `1` / `⊤` / `top` — top.
-    ///   * `i = 0` / `i = 1` — endpoint.
-    ///   * `φ ∧ ψ` / `φ /\ ψ` / `φ and ψ` — conjunction.
-    ///   * `φ ∨ ψ` / `φ \/ ψ` / `φ or ψ` — disjunction.
-    ///   * Parens for grouping.
+
+    ///  * `0` / `⊥` / `bot` — bottom.
+    ///  * `1` / `⊤` / `top` — top.
+    ///  * `i = 0` / `i = 1` — endpoint.
+    ///  * `φ ∧ ψ` / `φ /\ ψ` / `φ and ψ` — conjunction.
+    ///  * `φ ∨ ψ` / `φ \/ ψ` / `φ or ψ` — disjunction.
+    ///  * Parens for grouping.
     ///
+
     /// `∨` binds looser than `∧` (standard mathematical convention).
     pub fn parse(input: &str) -> Result<Self, Text> {
         let tokens = tokenise(input)?;
@@ -800,7 +813,7 @@ fn tokenise(input: &str) -> Result<Vec<Tok>, Text> {
             '0' => {
                 chars.next();
                 // Bare "0" with no `=` adjacency = bottom (when at the
-                // start of a term).  Disambiguated by the parser.
+                // start of a term). Disambiguated by the parser.
                 out.push(Tok::Zero);
             }
             '1' => {
@@ -1052,7 +1065,7 @@ mod tests {
     fn computation_rules_non_empty() {
         let cat = DefaultCubicalCatalog::new();
         let rules = cat.computation_rules();
-        // V0 ships a substantive computation-rule inventory.
+        // ships a substantive computation-rule inventory.
         assert!(rules.len() >= 25);
     }
 
@@ -1259,8 +1272,8 @@ mod tests {
     #[test]
     fn task_78_face_formula_grammar_complete() {
         // Pin every CCHM-grammar production reachable via parse:
-        //   ⊤, ⊥, i=0, i=1, ∧, ∨, parens, free variables, ASCII
-        //   alternatives.
+        //  ⊤, ⊥, i=0, i=1, ∧, ∨, parens, free variables, ASCII
+        //  alternatives.
         for s in [
             "1",
             "0",
@@ -1319,7 +1332,7 @@ mod tests {
     #[test]
     fn kernel_applied_rules_are_subset_of_catalogue() {
         // Every name in `KERNEL_APPLIED_RULES` MUST exist in the
-        // canonical catalogue.  Single-source-of-truth invariant —
+        // canonical catalogue. Single-source-of-truth invariant —
         // the kernel can't reduce by a rule the catalogue doesn't
         // document.
         let cat = DefaultCubicalCatalog::new();

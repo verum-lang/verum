@@ -3,23 +3,27 @@
 // =============================================================================
 // Layer: Foundations / Examples
 //
+
 // This module is the canonical *reference implementation* of the
 // Phase B/C stdlib protocols: concrete Verum types that implement
 // the abstract protocols from hott.vr, simplicial.vr,
 // infinity_category.vr, operad.vr, and the quantum extensions in
 // algebra.vr / linalg.vr.
 //
+
 // Purpose:
 //
-//   1. **Acid test**: proves every Phase C protocol is actually
-//      implementable on concrete types (not just declarable).
-//   2. **Copy-paste starter kits**: downstream users can fork these
-//      and customise for their own applications.
-//   3. **Documentation by example**: the clearest way to learn a
-//      protocol is to see a complete implementation.
-//   4. **Regression fixtures**: any language change that breaks
-//      implementation of a protocol breaks one of these examples.
+
+//  1. **Acid test**: proves every Phase C protocol is actually
+//  implementable on concrete types (not just declarable).
+//  2. **Copy-paste starter kits**: downstream users can fork these
+//  and customise for their own applications.
+//  3. **Documentation by example**: the clearest way to learn a
+//  protocol is to see a complete implementation.
+//  4. **Regression fixtures**: any language change that breaks
+//  implementation of a protocol breaks one of these examples.
 //
+
 // Every example is intentionally *minimal* — the goal is to prove
 // the protocol can carry real mathematical content, not to build
 // industrial-grade structures.
@@ -2329,10 +2333,10 @@ public fn identity_infinity_functor() -> IdentityInfinityFunctor {
 // (protocol extends InfinityFunctor<C, C>), and is simultaneously
 // fully faithful and essentially surjective — hence an equivalence
 // of ∞-categories. Closes the full ∞-functor hierarchy:
-//   InfinityFunctor → IdentityInfFunctor
-//                   → FullyFaithfulInfFunctor
-//                   → EssentiallySurjectiveInfFunctor
-//                   → InfEquivalence (diamond)
+//  InfinityFunctor → IdentityInfFunctor
+//  → FullyFaithfulInfFunctor
+//  → EssentiallySurjectiveInfFunctor
+//  → InfEquivalence (diamond)
 implement IdentityInfFunctor<PointSimplicialSet> for IdentityInfinityFunctor {}
 
 implement FullyFaithfulInfFunctor<PointSimplicialSet, PointSimplicialSet>
@@ -2738,6 +2742,7 @@ public fn trivial_simplicial_homotopy() -> TrivialSimplicialHomotopy {
 // 2.32. Fibration chain — GrothendieckFibration / Opfibration / Bifibration
 // =============================================================================
 //
+
 // The IdentityInfinityFunctor is trivially a Grothendieck fibration
 // (every morphism is its own cartesian lift), an opfibration (dually),
 // and therefore a bifibration. It also satisfies the Kan-complex
@@ -2858,6 +2863,7 @@ public fn walking_arrow_morphism() -> Simplex {
 /// by natural-number pairs `(count_a, count_b)` — a concrete,
 /// computable monoid that exercises the algebraic protocol surface.
 ///
+
 /// The monoid operation is componentwise addition with identity
 /// `(0, 0)`. It is the simplest abelian free monoid and the prototype
 /// for free constructions in the Phase C algebra stack.
@@ -2976,7 +2982,7 @@ public fn bool2_leq(x: &Bool2, y: &Bool2) -> Bool {
 
 // Full `BooleanAlgebra` instance for `Bool2` — the lattice-theoretic
 // protocol chain:
-//   Lattice → BoundedLattice / DistributiveLattice → ComplementedLattice → BooleanAlgebra
+//  Lattice → BoundedLattice / DistributiveLattice → ComplementedLattice → BooleanAlgebra
 // The diamond inheritance is resolved by supplying the base `Lattice`
 // impl once and letting the protocol system reuse it for each branch.
 
@@ -3109,6 +3115,7 @@ implement OrthomodularLattice for Bool2 {
 /// `Hom(i, j) = {*}` if `i ≤ j`, empty otherwise. Composition is
 /// uniquely determined (it's a preorder, so hom-sets are subsingletons).
 ///
+
 /// This is one of the smallest non-trivial categories and the classical
 /// first example in category theory textbooks.
 public type Chain3 is {
@@ -3204,6 +3211,7 @@ theorem walking_arrow_dim_is_one()
 /// prime order — the prototype used throughout algebraic topology,
 /// representation theory, and number theory.
 ///
+
 /// Wrapped as a refined integer so the type system enforces the
 /// invariant `0 ≤ value ≤ 2` at the refinement layer.
 public type Z3 is {
@@ -3227,6 +3235,7 @@ public fn z3_two() -> Z3 {
 
 /// Group operation: addition modulo 3.
 ///
+
 /// Implemented without a general `%` by a three-way conditional over
 /// the unrefined sum, which the SMT solver can track precisely.
 public fn z3_add(x: &Z3, y: &Z3) -> Z3 {
@@ -3320,6 +3329,7 @@ implement AbelianGroup for Z3 {
 /// concrete Boolean algebra with 4 elements: `∅`, `{0}`, `{1}`,
 /// `{0, 1}`. Represented as a pair of membership flags.
 ///
+
 /// Used as a richer reference instance of `Lattice`/`BooleanAlgebra`
 /// than `Bool2` — exercises the full ortholattice surface with a
 /// non-trivial diamond structure.
@@ -3594,6 +3604,7 @@ theorem pow2_full_is_top(x: Pow2)
 /// The prototype for linear algebra over finite fields, coding
 /// theory, and discrete probability over finite sample spaces.
 ///
+
 /// Wrapped as a refined integer so `0 ≤ value ≤ 1` is enforced at
 /// the type level.
 public type F2 is {
@@ -3612,6 +3623,7 @@ public fn f2_one() -> F2 {
 
 /// Addition in F₂: `x + y = (x + y) mod 2`, i.e. XOR.
 ///
+
 /// Implemented without `%` by a two-way conditional so the refinement
 /// solver can precisely track the output range.
 public fn f2_add(x: &F2, y: &F2) -> F2 {
@@ -3945,6 +3957,7 @@ theorem nat4_double_double_self_inverse(x: Nat4)
 /// (in fact, a bounded lattice under lcm/gcd) and the canonical
 /// first non-trivial preorder.
 ///
+
 /// Implemented as a refined integer so the type system enforces
 /// `1 ≤ value ≤ 12`, and the divisibility relation is decidable by
 /// a single `%` check.
@@ -4110,6 +4123,7 @@ theorem int_shift_commutative(j: Int, k: Int, x: Int)
 // 20. Substantive computational theorems about concrete instances
 // =============================================================================
 //
+
 // The theorems above mostly lock in protocol inheritance. These
 // theorems state concrete computational properties of the reference
 // instances — facts the SMT backend must actually verify, not just
@@ -4286,36 +4300,40 @@ theorem day_convolution_representable()
 
 // =============================================================================
 // SECTION E — Advanced Epistemic, Translation, Coherence, Model Structure,
-//             Operad, and Cohesive Modality Examples
+//  Operad, and Cohesive Modality Examples
 // =============================================================================
 //
+
 // Six self-contained worked examples that exercise the protocols introduced in
-// Phase B/C.  Each example is intentionally minimal: the goal is mathematical
+// Phase B/C. Each example is intentionally minimal: the goal is mathematical
 // clarity, not industrial completeness.
 // =============================================================================
 
 // =============================================================================
-// E.1  Epistemic Theory Site Example
+// E.1 Epistemic Theory Site Example
 // =============================================================================
 //
+
 // An *epistemic theory site* is a small category whose objects are claims and
-// whose morphisms are justification arrows.  A Grothendieck topology on this
+// whose morphisms are justification arrows. A Grothendieck topology on this
 // site encodes which families of justifications jointly cover a claim.
 //
+
 // This example builds a five-claim mini-theory, attaches epistemic statuses
 // (Theorem, Definition, Conditional, Hypothesis, Retracted), checks joint
 // faithfulness, then demonstrates how retracting a foundational claim forces a
 // status-downgrade cascade through dependent claims.
 //
+
 // Epistemic rank lattice (higher = stronger):
-//   Theorem = 6 > Definition = 5 > Conditional = 4 >
-//   Hypothesis = 3 > Postulate = 2 > Interpretation = 1 > Retracted = 0
+//  Theorem = 6 > Definition = 5 > Conditional = 4 >
+//  Hypothesis = 3 > Postulate = 2 > Interpretation = 1 > Retracted = 0
 // =============================================================================
 
 /// A single claim in an epistemic theory.
-/// `id`    — opaque claim identifier (Int for simplicity)
-/// `rank`  — epistemic status rank (0 = Retracted … 6 = Theorem)
-/// `deps`  — indices into the claim list on which this claim depends
+/// `id` — opaque claim identifier (Int for simplicity)
+/// `rank` — epistemic status rank (0 = Retracted … 6 = Theorem)
+/// `deps` — indices into the claim list on which this claim depends
 public type EpistemicClaim is {
     id: Int,
     rank: Int,
@@ -4323,8 +4341,8 @@ public type EpistemicClaim is {
 };
 
 /// A small epistemic theory: a list of claims with a coverage predicate.
-/// `claims`       — ordered list of claims (index = canonical id)
-/// `is_faithful`  — whether the covering families jointly determine truth
+/// `claims` — ordered list of claims (index = canonical id)
+/// `is_faithful` — whether the covering families jointly determine truth
 public type EpistemicTheorySite is {
     claims: List<EpistemicClaim>,
     is_faithful: Bool,
@@ -4367,9 +4385,9 @@ public fn epistemic_site_example() -> Bool {
 
     // --- Status propagation: retract claim c0 (set rank to 0) ---
     // After retraction c0.rank = 0, which must cascade:
-    //   c2 depends on c0 → c2 propagated rank = min(6, 0) = 0
-    //   c3 depends on c2 → c3 propagated rank = min(4, 0) = 0
-    //   c4 depends on c3 → c4 propagated rank = min(3, 0) = 0
+    //  c2 depends on c0 → c2 propagated rank = min(6, 0) = 0
+    //  c3 depends on c2 → c3 propagated rank = min(4, 0) = 0
+    //  c4 depends on c3 → c4 propagated rank = min(3, 0) = 0
     // c1 depends only on c0 → c1 propagated rank = min(5, 0) = 0
     let retracted: List<EpistemicClaim> = [
         EpistemicClaim { id: 0, rank: 0, deps: [] },
@@ -4399,36 +4417,38 @@ theorem epistemic_joint_faithfulness_holds()
     proof by auto;
 
 // =============================================================================
-// E.2  Theory Translation Example (Partial Maps and Kan Extensions)
+// E.2 Theory Translation Example (Partial Maps and Kan Extensions)
 // =============================================================================
 //
+
 // A *theory translation* (or theory morphism) is a structure-preserving map
-// between two logical theories.  Here we model classical propositional logic
+// between two logical theories. Here we model classical propositional logic
 // (ClassicalPL) and intuitionistic propositional logic (IntuitionisticPL) as
 // finite categories whose objects are formula indices and whose morphisms are
 // provability witnesses (encoded as Int pairs).
 //
+
 // We then:
-//   (a) Define a partial function F: ClassicalPL → IntuitionisticPL that
-//       maps only the intuitionistically valid fragment.
-//   (b) Compute a left Kan extension Lan_K(F) and right Kan extension Ran_K(F)
-//       along the inclusion K: fragment ↪ ClassicalPL.
-//   (c) Measure the obstruction: how many classical formulas have no
-//       intuitionistic image under F.
+//  (a) Define a partial function F: ClassicalPL → IntuitionisticPL that
+//  maps only the intuitionistically valid fragment.
+//  (b) Compute a left Kan extension Lan_K(F) and right Kan extension Ran_K(F)
+//  along the inclusion K: fragment ↪ ClassicalPL.
+//  (c) Measure the obstruction: how many classical formulas have no
+//  intuitionistic image under F.
 // =============================================================================
 
 /// A theory encoded as a finite presentation.
 /// `objects` — formula indices (0-based)
-/// `name`    — human-readable theory name
+/// `name` — human-readable theory name
 public type FiniteTheory is {
     name: Text,
     object_count: Int,
 };
 
 /// A partial theory morphism: maps formula indices where defined.
-/// `source_count`  — number of objects in source theory
-/// `defined_on`    — set of source indices for which a mapping exists
-/// `image`         — parallel list: image[i] = target index for defined_on[i]
+/// `source_count` — number of objects in source theory
+/// `defined_on` — set of source indices for which a mapping exists
+/// `image` — parallel list: image[i] = target index for defined_on[i]
 public type PartialTheoryMorphism is {
     source_count: Int,
     defined_on: List<Int>,
@@ -4496,22 +4516,24 @@ theorem left_kan_leq_right_kan()
     proof by auto;
 
 // =============================================================================
-// E.3  Coherence Check Example (Functorial Triangle)
+// E.3 Coherence Check Example (Functorial Triangle)
 // =============================================================================
 //
+
 // Given three theories T₁, T₂, T₃ and theory translations
-//   F₁₂ : T₁ → T₂,   F₂₃ : T₂ → T₃,   F₁₃ : T₁ → T₃,
+//  F₁₂ : T₁ → T₂, F₂₃ : T₂ → T₃, F₁₃ : T₁ → T₃,
 // *functorial coherence* demands F₂₃ ∘ F₁₂ = F₁₃ on every object.
 //
+
 // This example:
-//   (a) Constructs a coherent triangle (all three morphisms agree).
-//   (b) Constructs an incoherent triangle (F₁₂; F₂₃ ≠ F₁₃ on object 1).
-//   (c) Detects the violation at the offending object.
+//  (a) Constructs a coherent triangle (all three morphisms agree).
+//  (b) Constructs an incoherent triangle (F₁₂; F₂₃ ≠ F₁₃ on object 1).
+//  (c) Detects the violation at the offending object.
 // =============================================================================
 
 /// A total theory morphism (function on object indices).
 /// `object_count` — number of objects in the source theory
-/// `mapping`      — mapping[i] = image of object i in the target theory
+/// `mapping` — mapping[i] = image of object i in the target theory
 public type TotalTheoryMorphism is {
     object_count: Int,
     mapping: List<Int>,
@@ -4546,10 +4568,10 @@ public fn coherent_triangle_example() -> Bool {
     // T₁ has 3 objects {0,1,2}, T₂ has 3, T₃ has 3.
     let f12 = TotalTheoryMorphism { object_count: 3, mapping: [1, 2, 0] };
     let f23 = TotalTheoryMorphism { object_count: 3, mapping: [2, 0, 1] };
-    // F₁₃ = F₂₃ ∘ F₁₂: 0↦1↦0, 1↦2↦1, 2↦0↦2  →  [0,1,2]
-    // Wait: f12(0)=1, f23(1)=0  → 0↦0
-    //       f12(1)=2, f23(2)=1  → 1↦1
-    //       f12(2)=0, f23(0)=2  → 2↦2
+    // F₁₃ = F₂₃ ∘ F₁₂: 0↦1↦0, 1↦2↦1, 2↦0↦2 → [0,1,2]
+    // Wait: f12(0)=1, f23(1)=0 → 0↦0
+    //  f12(1)=2, f23(2)=1 → 1↦1
+    //  f12(2)=0, f23(0)=2 → 2↦2
     // So composed = [0,1,2] = identity.
     let f13_coherent = TotalTheoryMorphism { object_count: 3, mapping: [0, 1, 2] };
     let violation = coherence_check(&f12, &f23, &f13_coherent);
@@ -4579,18 +4601,20 @@ theorem incoherent_triangle_detected()
     proof by auto;
 
 // =============================================================================
-// E.4  Quillen Model Structure Example (Finite Category)
+// E.4 Quillen Model Structure Example (Finite Category)
 // =============================================================================
 //
+
 // A Quillen model structure on a category C specifies three distinguished
 // classes of morphisms:
-//   W  — weak equivalences   (satisfy 2-out-of-3)
-//   C  — cofibrations        (stable under pushout, contain isomorphisms)
-//   F  — fibrations          (stable under pullback, contain isomorphisms)
+//  W — weak equivalences (satisfy 2-out-of-3)
+//  C — cofibrations (stable under pushout, contain isomorphisms)
+//  F — fibrations (stable under pullback, contain isomorphisms)
 // subject to the lifting axiom (acyclic cofibrations lift against fibrations)
 // and the factorisation axiom (every morphism factors as cof ∘ acyclic-fib and
 // acyclic-cof ∘ fib).
 //
+
 // This example builds the *minimal* (or *folk*) model structure on a
 // 3-object discrete category where every morphism is simultaneously a
 // weak equivalence, cofibration, and fibration.
@@ -4638,7 +4662,7 @@ public fn has_lifting(i: &FiniteMorphism, p: &FiniteMorphism) -> Bool {
 
 /// Verify the four key axioms on a representative morphism sample.
 public fn quillen_model_structure_example() -> Bool {
-    // Objects: {0, 1, 2};  morphisms: id₀, id₁, id₂, f₀₁, f₁₂, f₀₂.
+    // Objects: {0, 1, 2}; morphisms: id₀, id₁, id₂, f₀₁, f₁₂, f₀₂.
     let id0 = FiniteMorphism { source: 0, target: 0 };
     let id1 = FiniteMorphism { source: 1, target: 1 };
     let f01 = FiniteMorphism { source: 0, target: 1 };
@@ -4673,22 +4697,26 @@ theorem quillen_folk_all_morphisms_are_weak_equivs()
     proof by auto;
 
 // =============================================================================
-// E.5  Operad Example — Assoc and Comm, and Algebras
+// E.5 Operad Example — Assoc and Comm, and Algebras
 // =============================================================================
 //
+
 // The **associative operad** Assoc has one operation of each arity n≥0:
-//   Assoc(n) = {μₙ}  (the unique n-fold multiplication).
+//  Assoc(n) = {μₙ} (the unique n-fold multiplication).
 // Composition and symmetric-group action permute the inputs but preserve
 // the unique element.
 //
+
 // The **commutative operad** Comm has one operation of each arity and the
 // symmetric group acts trivially (all permutations fix the unique operation).
 //
+
 // An **algebra over Comm** is exactly a commutative (associative) algebra:
 // the single n-ary operation is symmetric under all permutations of inputs.
 //
+
 // We realise both as concrete types and show:
-//   Assoc algebra = monoid,  Comm algebra = commutative monoid.
+//  Assoc algebra = monoid, Comm algebra = commutative monoid.
 // =============================================================================
 
 /// Concrete model of the associative operad Assoc.
@@ -4848,31 +4876,37 @@ theorem comm_algebra_is_symmetric()
     proof by auto;
 
 // =============================================================================
-// E.6  Cohesive Modality Example — Shape ♭ ⊣ ♯ on a Discrete Cohesive Structure
+// E.6 Cohesive Modality Example — Shape ♭ ⊣ ♯ on a Discrete Cohesive Structure
 // =============================================================================
 //
+
 // A *cohesive ∞-topos* carries four adjoint functors arranged as:
 //
-//   Π ⊣ Disc ⊣ Γ ⊣ coDisc
+
+//  Π ⊣ Disc ⊣ Γ ⊣ coDisc
 //
+
 // where:
-//   Π    (shape / "points-to-pieces")  — colimit left adjoint to Disc
-//   Disc (discrete)                    — left adjoint to Γ
-//   Γ    (global sections)             — right adjoint to Disc, left to coDisc
-//   coDisc (codiscrete)                — right adjoint to Γ
+//  Π (shape / "points-to-pieces") — colimit left adjoint to Disc
+//  Disc (discrete) — left adjoint to Γ
+//  Γ (global sections) — right adjoint to Disc, left to coDisc
+//  coDisc (codiscrete) — right adjoint to Γ
 //
+
 // The *flat modality* ♭ = Disc ∘ Γ and the *sharp modality* ♯ = coDisc ∘ Γ
 // form an adjoint pair ♭ ⊣ ♯ on the topos.
 //
+
 // Concretely we model a one-object cohesive structure (the "walking point"):
-//   • Every space X is encoded as an Int (number of connected components).
-//   • Γ(X) = X (global sections = component count for a discrete space).
-//   • Disc(S) = S (discrete space on a set = the set itself, 0 structure).
-//   • coDisc(S) = S (codiscrete = same component count, maximal structure).
-//   • Π(X) = X (shape of a discrete space = itself).
+//  • Every space X is encoded as an Int (number of connected components).
+//  • Γ(X) = X (global sections = component count for a discrete space).
+//  • Disc(S) = S (discrete space on a set = the set itself, 0 structure).
+//  • coDisc(S) = S (codiscrete = same component count, maximal structure).
+//  • Π(X) = X (shape of a discrete space = itself).
 //
+
 // Under these definitions:
-//   ♭(X) = Disc(Γ(X)) = X,  ♯(X) = coDisc(Γ(X)) = X,
+//  ♭(X) = Disc(Γ(X)) = X, ♯(X) = coDisc(Γ(X)) = X,
 // and the unit η: X → ♯X and counit ε: ♭X → X are identities.
 // =============================================================================
 

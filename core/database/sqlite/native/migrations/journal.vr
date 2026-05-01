@@ -3,20 +3,23 @@
 // =============================================================================
 // Spec: sqlite-native.md operational tooling
 //
+
 // `MigrationJournal` is the structured representation of the
 // `__loom_migrations` table. The runner consults it to skip
 // already-applied versions and writes a row per attempt.
 //
+
 // Schema:
 //
-//   CREATE TABLE __loom_migrations (
-//       version    INTEGER PRIMARY KEY,
-//       name       TEXT NOT NULL,
-//       status     TEXT NOT NULL,          -- pending/applied/rolled_back/failed
-//       applied_at INTEGER,                -- monotonic ns
-//       error      TEXT,                   -- non-NULL on Failed
-//       checksum   INTEGER NOT NULL        -- SQL-text fingerprint
-//   );
+
+//  CREATE TABLE __loom_migrations (
+//  version INTEGER PRIMARY KEY,
+//  name TEXT NOT NULL,
+//  status TEXT NOT NULL, -- pending/applied/rolled_back/failed
+//  applied_at INTEGER, -- monotonic ns
+//  error TEXT, -- non-NULL on Failed
+//  checksum INTEGER NOT NULL -- SQL-text fingerprint
+//  );
 // =============================================================================
 
 module core.database.sqlite.native.migrations.journal;

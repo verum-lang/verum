@@ -1,6 +1,7 @@
 //! Integration tests for `verum audit --hygiene-strict` (F3, V8.1
 //! follow-up #196).
 //!
+
 //! Per V2: walk every top-level free function body for
 //! raw `self` occurrences. A *free function* is one declared at
 //! module scope whose first parameter is NOT a self-receiver.

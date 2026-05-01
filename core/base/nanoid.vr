@@ -5,49 +5,63 @@
 // Dependencies: core, core.base.random
 // =============================================================================
 //
+
 // URL-safe short IDs — the modern alternative to UUIDs for
 // database keys / URL slugs / share tokens where a compact form is
 // worth the drop from 128 bits to ~126 bits of entropy. Matches
 // the `nanoid` JS / Go / Rust / Python libraries byte-exactly:
 //
-//   21-char alphabet-subset default ≈ 126 bits of entropy.
-//   ID-birthday collision ≈ 1 per 2.4 × 10^18 IDs.
+
+//  21-char alphabet-subset default ≈ 126 bits of entropy.
+//  ID-birthday collision ≈ 1 per 2.4 × 10^18 IDs.
 //
+
 // Alphabet (URL-safe):
 //
-//   A-Z a-z 0-9 _ -     (64 characters)
+
+//  A-Z a-z 0-9 _ - (64 characters)
 //
+
 // # API
 //
+
 // ```
 // // Default 21-char ID, URL-safe alphabet.
 // let id: Text = nanoid.generate();
 //
+
 // // Custom length.
 // let short: Text = nanoid.generate_len(10);
 //
+
 // // Custom alphabet (must be ≤ 256 distinct bytes; each output
 // // character is a uniformly-sampled element).
 // let hex_id: Text = nanoid.generate_with_alphabet(
-//     b"0123456789abcdef", 16,
+//  b"0123456789abcdef", 16,
 // );
 // ```
 //
+
 // # Uniformity
 //
+
 // Rejection sampling over the power-of-two mask ≥ alphabet size.
 // Eliminates the modulo-bias that naive `rand % N` would produce
 // for non-power-of-two alphabet lengths.
 //
+
 // # Why this exists alongside uuid / snowflake
 //
-//   * UUID v4 / v7 — 36-character canonical form, 128 bits.
-//   * Snowflake   — 64-bit time-ordered, requires worker ID.
-//   * nanoid      — compact URL slug, 21 chars, URL-safe.
+
+//  * UUID v4 / v7 — 36-character canonical form, 128 bits.
+//  * Snowflake — 64-bit time-ordered, requires worker ID.
+//  * nanoid — compact URL slug, 21 chars, URL-safe.
 //
+
 // Pick per-deployment: nanoid for public URLs, snowflake for DB
 // primary keys, UUID for cross-system interop.
 //
+
 // =============================================================================
 
 module core.base.nanoid;

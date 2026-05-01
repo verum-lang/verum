@@ -1,5 +1,6 @@
 //! Coinductive Types Support
 //!
+
 //! This module provides support for coinductive types (infinite structures)
 //! with productivity checking as specified in:
 //! Coinductive types are dual to inductive types — defined by destructors (observations)
@@ -7,24 +8,30 @@
 //! `tail: Stream<A> -> Stream<A>`. Productivity checking ensures every path through
 //! a definition produces at least one constructor before making a recursive call.
 //!
+
 //! ## Features
 //!
+
 //! - **Stream types**: Infinite sequences with lazy evaluation
 //! - **Productivity checking**: Verify that streams produce values
 //! - **Coinductive reasoning**: Support for infinite data structures
 //! - **Bisimulation verification**: Z3-based observational equivalence
 //! - **Greatest fixpoint computation**: Using Z3 fixedpoint engine
 //!
+
 //! ## Implementation
 //!
+
 //! Coinductive types are dual to inductive types:
 //! - Inductive: defined by constructors (how to build them)
 //! - Coinductive: defined by destructors (how to observe them)
 //!
+
 //! Example: Stream<A> has destructors:
 //! - head : Stream<A> -> A
 //! - tail : Stream<A> -> Stream<A>
 //!
+
 //! Coinductive type syntax: `coinductive Stream<A: Type> : Type { head: Stream<A> -> A, tail: Stream<A> -> Stream<A> }`
 //! Productivity is verified by checking that every recursive call is guarded by a destructor application.
 
@@ -209,6 +216,7 @@ impl Default for TypeRegistry {
 
 /// Coinductive type definition
 ///
+
 /// Represents an infinite structure with observational behavior.
 #[derive(Debug, Clone)]
 pub struct CoinductiveType {
@@ -320,6 +328,7 @@ impl GuardContext {
 
 /// Coinductive type checker with productivity verification
 ///
+
 /// Coinductive type checker with productivity verification. Ensures all coinductive
 /// definitions (streams, infinite trees, etc.) are productive: every observation path
 /// produces a value before recursing. Uses Z3 fixedpoint engine for greatest fixpoint
@@ -388,9 +397,11 @@ impl CoinductiveChecker {
 
     /// Check productivity of a stream definition
     ///
+
     /// A stream is productive if every path through the definition produces
     /// at least one constructor (head) before making a recursive call (tail).
     ///
+
     /// Productivity check: every path through the stream definition must produce at least
     /// one constructor (head value) before making a recursive call (tail). This ensures
     /// the stream can always be observed to arbitrary depth without diverging.
@@ -731,31 +742,37 @@ impl CoinductiveChecker {
 
     /// Verify a coinductive proof principle using bisimulation
     ///
+
     /// For coinductive types, we use bisimulation to prove equality:
     /// 1. For each destructor, observations on left and right must be equal
     /// 2. For recursive destructors, substructures must be bisimilar
     ///
+
     /// This uses Z3 to verify observational equivalence at each step.
     ///
+
     /// ## Algorithm
     ///
+
     /// ```text
     /// bisimilar(left, right, type):
-    ///   for destructor in type.destructors:
-    ///     left_obs = apply_destructor(left, destructor)
-    ///     right_obs = apply_destructor(right, destructor)
+    ///  for destructor in type.destructors:
+    ///  left_obs = apply_destructor(left, destructor)
+    ///  right_obs = apply_destructor(right, destructor)
     ///
-    ///     if is_recursive(destructor.result_type, type):
-    ///       // Recursive case: assume bisimilarity (coinduction)
-    ///       // We verify one level and rely on the coinductive principle
-    ///       continue
-    ///     else:
-    ///       // Base case: verify equality using Z3
-    ///       if not verify_equal(left_obs, right_obs):
-    ///         return false
-    ///   return true
+
+    ///  if is_recursive(destructor.result_type, type):
+    ///  // Recursive case: assume bisimilarity (coinduction)
+    ///  // We verify one level and rely on the coinductive principle
+    ///  continue
+    ///  else:
+    ///  // Base case: verify equality using Z3
+    ///  if not verify_equal(left_obs, right_obs):
+    ///  return false
+    ///  return true
     /// ```
     ///
+
     /// Bisimulation verification: two coinductive values are observationally equivalent
     /// if applying the same sequence of destructors produces equal results. Encoded as
     /// a greatest fixpoint in Z3: for all destructor sequences, observations match.
@@ -785,6 +802,7 @@ impl CoinductiveChecker {
                 // By the coinductive principle, we assume the substructures are bisimilar
                 // This is the key to coinduction: we verify one level and trust the rest
                 //
+
                 // In a full implementation, we'd track a bisimulation relation and
                 // ensure we're not creating infinite loops. For now, we verify that
                 // the structure of the recursive call is well-formed.
@@ -880,6 +898,7 @@ impl CoinductiveChecker {
 
     /// Apply a destructor to an expression
     ///
+
     /// This creates a method call expression representing the application
     /// of the destructor to the coinductive value.
     fn apply_destructor(
@@ -1010,6 +1029,7 @@ impl CoinductiveChecker {
 
     /// Check if a recursive expression is well-formed
     ///
+
     /// A recursive expression is well-formed if it's a valid expression that
     /// could potentially construct a coinductive value.
     fn is_well_formed_recursive(&self, expr: &Expr) -> Result<bool, VerificationError> {
@@ -1037,9 +1057,11 @@ impl CoinductiveChecker {
 
     /// Verify coinductive type well-formedness using Z3 fixedpoint
     ///
+
     /// This uses Z3's fixedpoint engine to verify that a coinductive type
     /// definition is well-formed (i.e., it satisfies the greatest fixpoint).
     ///
+
     /// For a coinductive type T with destructors d1, d2, ..., we verify:
     /// - The greatest fixpoint GFP(F) exists where F is the functor
     /// - All corecursive definitions are productive
@@ -1176,10 +1198,12 @@ impl Default for CoinductiveChecker {
 
 /// Create Stream<A> coinductive type
 ///
+
 /// Stream<A> has two destructors:
 /// - head : Stream<A> -> A
 /// - tail : Stream<A> -> Stream<A>
 ///
+
 /// Create the canonical Stream<A> coinductive type with two destructors:
 /// - `head : Stream<A> -> A` (observe current element)
 /// - `tail : Stream<A> -> Stream<A>` (advance to next element)
@@ -1224,9 +1248,11 @@ pub fn stream_type(element_type: Type) -> CoinductiveType {
 
 /// Create Colist<A> (possibly-infinite list) coinductive type
 ///
+
 /// Colist<A> has one destructor:
 /// - uncons : Colist<A> -> Maybe<(A, Colist<A>)>
 ///
+
 /// This type represents possibly-infinite lists (can be finite or infinite).
 pub fn colist_type(element_type: Type) -> CoinductiveType {
     let mut destructors = List::new();
@@ -1285,10 +1311,12 @@ pub fn colist_type(element_type: Type) -> CoinductiveType {
 
 /// Create Process<A, B> (interactive process) coinductive type
 ///
+
 /// Process<A, B> models an interactive process that:
 /// - Receives inputs of type A
 /// - Produces outputs of type B
 ///
+
 /// Destructors:
 /// - step : Process<A, B> -> A -> (B, Process<A, B>)
 pub fn process_type(input_type: Type, output_type: Type) -> CoinductiveType {
@@ -1447,6 +1475,7 @@ pub struct BisimulationChecker<'a> {
 impl<'a> BisimulationChecker<'a> {
     /// Create a new bisimulation checker.
     ///
+
     /// `config.timeout_ms` is honoured by routing through a
     /// [`crate::context::Context`] built with a matching timeout —
     /// every Z3 solver instance the checker spawns inherits it.
@@ -1875,6 +1904,7 @@ impl ObservationEquivalence {
 
     /// Check if two values are observationally equivalent
     ///
+
     /// Two values are observationally equivalent if all observations
     /// (destructor applications) produce equivalent results.
     pub fn are_equivalent(
@@ -2085,6 +2115,7 @@ impl StreamFusionVerifier {
         // applying the LHS pattern produces observationally equivalent
         // results to applying the RHS pattern.
         //
+
         // We do this by:
         // 1. Creating symbolic streams
         // 2. Encoding both patterns as Z3 formulas
@@ -2142,6 +2173,7 @@ impl Default for StreamFusionVerifier {
 
 /// Create RoseTree<A> coinductive type (infinite tree with variable branching)
 ///
+
 /// RoseTree<A> has destructors:
 /// - root : RoseTree<A> -> A
 /// - children : RoseTree<A> -> Stream<RoseTree<A>>
@@ -2203,6 +2235,7 @@ pub fn rose_tree_type(element_type: Type) -> CoinductiveType {
 
 /// Create LazyList<A> coinductive type (possibly-infinite list)
 ///
+
 /// LazyList differs from Stream in that it can be finite.
 /// LazyList<A> has destructor:
 /// - force : LazyList<A> -> Maybe<(A, LazyList<A>)>
@@ -2266,9 +2299,11 @@ pub fn lazy_list_type(element_type: Type) -> CoinductiveType {
 
 /// Create StateT<S, A> coinductive type (stateful computation)
 ///
+
 /// StateT<S, A> represents a computation that threads state of type S
 /// and produces a value of type A.
 ///
+
 /// StateT<S, A> has destructor:
 /// - run : StateT<S, A> -> S -> (A, S)
 pub fn state_t_type(state_type: Type, result_type: Type) -> CoinductiveType {
@@ -2314,9 +2349,11 @@ pub fn state_t_type(state_type: Type, result_type: Type) -> CoinductiveType {
 
 /// Create WriterT<W, A> coinductive type (computation with output)
 ///
+
 /// WriterT<W, A> represents a computation that produces output of type W
 /// (where W is a monoid) alongside a result of type A.
 ///
+
 /// WriterT<W, A> has destructor:
 /// - run : WriterT<W, A> -> (A, W)
 pub fn writer_t_type(output_type: Type, result_type: Type) -> CoinductiveType {

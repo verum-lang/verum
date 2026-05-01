@@ -15,6 +15,7 @@
 )]
 //! Comprehensive tests for incremental parsing and real-time diagnostics
 //!
+
 //! This test suite validates:
 //! - Document synchronization
 //! - Incremental text updates

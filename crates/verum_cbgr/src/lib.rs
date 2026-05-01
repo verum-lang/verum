@@ -9,42 +9,53 @@
 #![allow(dead_code)]
 //! CBGR (Counter-Based Garbage Rejection) Compile-Time Analysis
 //!
+
 //! Verum uses a two-tier reference system with ThinRef (16 bytes: ptr + generation + epoch_caps)
 //! and FatRef (32 bytes: adds metadata + offset for slices/traits). Three reference types exist:
-//!   - `&T` (managed): Runtime CBGR validation (~15ns), default for application code
-//!   - `&checked T`: Zero-cost (0ns), requires compile-time proof via escape analysis
-//!   - `&unsafe T`: Zero-cost (0ns), manual safety proof required, must be in @unsafe function
+//!  - `&T` (managed): Runtime CBGR validation (~15ns), default for application code
+//!  - `&checked T`: Zero-cost (0ns), requires compile-time proof via escape analysis
+//!  - `&unsafe T`: Zero-cost (0ns), manual safety proof required, must be in @unsafe function
 //! CBGR uses epoch-based generation tracking with atomic acquire-release semantics for
 //! thread-safe validation. Escape analysis automatically promotes &T to &checked T when
 //! all four criteria are met: no escape, no concurrent access, allocation dominates uses,
 //! and lifetime is stack-bounded.
 //!
+
 //! This crate provides **compile-time analysis** for the CBGR memory safety system.
 //! Runtime CBGR checks are emitted as inline LLVM IR by `verum_codegen` (platform_ir.rs).
 //!
+
 //! # Three-Tier Safety Model
 //!
+
 //! - **Tier 0 (&T)**: CBGR-managed references with runtime checks (~15ns overhead)
 //! - **Tier 1 (&checked T)**: Statically-verified references (0ns overhead)
 //! - **Tier 2 (&unsafe T)**: Unsafe references (0ns overhead, manual safety)
 //!
+
 //! # Compile-Time Analysis Components
 //!
+
 //! - [`tier_types`]: Unified tier types (ReferenceTier, Tier0Reason, TierStatistics)
 //! - [`tier_analysis`]: Main tier analyzer for VBC integration
 //! - [`escape_analysis`]: Forward dataflow escape analysis
 //! - [`points_to_analysis`]: Andersen-style points-to analysis
 //! - [`dominance_analysis`]: Dominance-based promotion decisions
 //!
+
 //! # Codegen (Moved to verum_vbc)
 //!
+
 //! CBGR codegen abstractions are now in `verum_vbc::cbgr`:
 //! - `DereferenceCodegen`, `CapabilityCheckCodegen`, `CbgrDereferenceStrategy`
 //!
+
 //! # Usage
 //!
+
 //! For compile-time analysis:
 //!
+
 //! ```ignore
 //! use verum_cbgr::{EscapeAnalysisConfig, EnhancedEscapeAnalyzer};
 //! ```

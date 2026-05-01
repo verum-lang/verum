@@ -1,20 +1,22 @@
 //! SMT-based implementation of the `DependentTypeChecker` trait.
 //!
+
 //! This module lives in `verum_smt` (rather than `verum_types`) so the
 //! `verum_smt` → `verum_types` dependency edge remains acyclic. The trait
 //! definition and constraint types stay in
 //! `verum_types::dependent_integration`; only the concrete Smt-based
 //! implementation was migrated here.
 //!
+
 //! ```text
 //! TypeChecker (verum_types)
-//!   ↓ uses
+//!  ↓ uses
 //! DependentTypeChecker trait (verum_types::dependent_integration)
-//!   ↓ implemented by
+//!  ↓ implemented by
 //! SmtDependentTypeChecker (verum_smt - this file)
-//!   ↓ delegates to
+//!  ↓ delegates to
 //! verum_smt::DependentTypeBackend + Translator
-//!   ↓ uses
+//!  ↓ uses
 //! Z3 SMT Solver
 //! ```
 
@@ -38,6 +40,7 @@ use crate::{
 
 /// SMT-based dependent type checker
 ///
+
 /// Delegates to verum_smt::DependentTypeBackend for all verification.
 /// Maintains a Z3 context and translator for AST to SMT conversion.
 pub struct SmtDependentTypeChecker {

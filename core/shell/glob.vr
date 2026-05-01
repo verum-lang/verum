@@ -5,17 +5,20 @@
 // Dependencies: core, base.glob, io.path, io.fs, shell.context
 // =============================================================================
 //
+
 // Recursive directory walk + glob pattern matching, returning typed
 // `PathBuf` results. Reuses the pattern compiler in `core.base.glob` and
 // the directory iterator in `core.io.fs`.
 //
+
 // Highlights:
-//   * `**` matches any number of intermediate path components
-//   * `*` matches any non-separator sequence within a component
-//   * `?` matches a single non-separator byte
-//   * `[abc]` / `[!abc]` character classes
-//   * Honours the active `ShellContext.cwd` for relative patterns
+//  * `**` matches any number of intermediate path components
+//  * `*` matches any non-separator sequence within a component
+//  * `?` matches a single non-separator byte
+//  * `[abc]` / `[!abc]` character classes
+//  * Honours the active `ShellContext.cwd` for relative patterns
 //
+
 // =============================================================================
 
 module glob;

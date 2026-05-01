@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — SQLITE_STATUS_* / SQLITE_DBSTATUS_* / SQLITE_STMTSTATUS_*
 //
+
 // Each variant matches an SQLite-defined counter. Numeric codes are
 // from sqlite3.h (verbatim).
 // =============================================================================

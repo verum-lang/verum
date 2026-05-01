@@ -1,5 +1,6 @@
 //! Error types for verum_mlir.
 //!
+
 //! Comprehensive error handling for MLIR-based code generation,
 //! including dialect operations, lowering, optimization, and JIT compilation.
 

@@ -14,6 +14,7 @@
 )]
 // Tests for type parsing
 //
+
 // Tests for type system syntax: named, generic, function, refinement, dependent types
 // This module tests parsing of all Verum type forms including:
 // - Primitive types (Int, Float, Bool, Text, Char)

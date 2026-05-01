@@ -1,5 +1,6 @@
 //! Module-Level Type Inference Context
 //!
+
 //! This module implements COMPLETE module-level type inference infrastructure
 //! supporting:
 //! - Cross-function type inference and propagation
@@ -9,8 +10,10 @@
 //! - Incremental inference
 //! - Module-scoped type variable tracking
 //!
+
 //! Performance target: < 100ms for 10K LOC
 //!
+
 //! Module-level type inference: inferring types for top-level declarations across a module
 
 use crate::context::{ModuleId, TypeContext, TypeEnv, TypeScheme};
@@ -25,6 +28,7 @@ use verum_common::{List, Map, Maybe, Set, Text};
 
 /// Module-level type inference context
 ///
+
 /// Tracks all type information across an entire module, enabling:
 /// 1. Forward references (use before definition)
 /// 2. Mutual recursion
@@ -120,6 +124,7 @@ pub struct ProtocolImplInfo {
 
 /// Dependency graph for type inference ordering
 ///
+
 /// Tracks which functions depend on which other functions
 /// to enable proper inference order and detect mutual recursion.
 #[derive(Debug, Clone)]
@@ -277,6 +282,7 @@ impl ModuleContext {
 
     /// Generalize a type scheme relative to the module context
     ///
+
     /// Quantifies over type variables that don't appear in any
     /// function signatures (module-level generalization).
     pub fn generalize(&self, ty: Type, env: &TypeEnv) -> TypeScheme {
@@ -439,6 +445,7 @@ impl DependencyGraph {
 
     /// Tarjan's SCC algorithm - iterative version using explicit work stack
     ///
+
     /// This is an iterative implementation that avoids stack overflow for
     /// deep or recursive call graphs. Uses an explicit work stack with
     /// state machine to simulate the recursive algorithm.
@@ -572,6 +579,7 @@ impl DependencyGraph {
 
     /// Compute topological sort of the dependency graph
     ///
+
     /// Returns functions in an order where dependencies come before dependents.
     /// For SCCs (mutual recursion), all members are grouped together.
     pub fn topological_sort(&self) -> Result<List<Text>> {
@@ -606,6 +614,7 @@ impl DependencyGraph {
 
     /// Iterative depth-first search for topological sort
     ///
+
     /// Uses explicit work stack to avoid stack overflow on deep dependency graphs.
     fn topo_visit(
         &self,
@@ -711,6 +720,7 @@ impl Default for DependencyGraph {
 
 /// Module-level type inference engine
 ///
+
 /// Performs complete type inference for an entire module with:
 /// - Bidirectional inference integrated with module context
 /// - Fixpoint iteration for mutual recursion
@@ -748,6 +758,7 @@ impl ModuleTypeInference {
 
     /// Infer types for all functions in a module
     ///
+
     /// Algorithm:
     /// 1. Collect all function signatures
     /// 2. Build dependency graph
@@ -937,6 +948,7 @@ impl ModuleTypeInference {
 
     /// Extract all function calls from a block - iterative version
     ///
+
     /// Uses an explicit work queue to avoid stack overflow on deeply nested ASTs.
     fn extract_function_calls_from_block(&self, block: &verum_ast::expr::Block) -> Set<Text> {
         use verum_ast::expr::{ArrayExpr, ConditionKind, ExprKind};
@@ -1107,6 +1119,7 @@ impl ModuleTypeInference {
                             // 1. The async_iterable expression (to get the async iterator)
                             // 2. AsyncIterator::next method on the iterator
                             //
+
                             // We record the implicit "next" call since it's part of the
                             // AsyncIterator protocol that must be resolved.
                             // The actual method resolution happens during type checking,
@@ -1511,6 +1524,7 @@ impl ModuleTypeInference {
 
     /// Extract function calls from a statement - delegates to iterative block extraction
     ///
+
     /// Module-level type inference: inferring types for top-level declarations across a module
     fn extract_calls_from_stmt(&self, stmt: &verum_ast::stmt::Stmt) -> Set<Text> {
         use verum_ast::stmt::StmtKind;
@@ -1559,6 +1573,7 @@ impl ModuleTypeInference {
 
     /// Extract function calls from an expression - iterative version
     ///
+
     /// Uses extract_function_calls_from_block internally to avoid code duplication.
     fn extract_calls_from_expr(&self, expr: &Expr) -> Set<Text> {
         use verum_ast::expr::ExprKind;
@@ -1682,9 +1697,11 @@ impl ModuleInferenceMetrics {
 
 /// Convert an AST TypeBound to an internal ProtocolBound
 ///
+
 /// Type aliases and newtype definitions via "type X is T" syntax — Type constraints
 /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .4 - Negative bounds
 ///
+
 /// This handles all bound kinds:
 /// - Protocol bounds: T: Eq
 /// - Negative protocol bounds: T: !Clone
@@ -1770,8 +1787,10 @@ fn convert_type_bound_to_protocol_bound(bound: &verum_ast::ty::TypeBound) -> Opt
 
 /// Convert an AST Type to an internal Type
 ///
+
 /// Core type system: primitive types (Bool, Int, Float, Text, Unit), compound types (Array, Tuple, Record, Function)
 ///
+
 /// This performs a complete conversion from the parser's AST type
 /// representation to the type checker's internal type representation.
 fn convert_ast_type_to_internal(ast_ty: &verum_ast::ty::Type) -> Type {

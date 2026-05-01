@@ -1,5 +1,6 @@
 //! Debug adapter logic.
 //!
+
 //! Maps DAP requests to VBC interpreter operations: compiling the program,
 //! setting breakpoints, stepping, reading stack traces and variables.
 
@@ -532,9 +533,11 @@ impl DebugAdapter {
 
         // Execute the program using the table-based dispatch loop.
         //
+
         // In a production implementation this would use the interpreter's debug hook
         // callback mechanism for per-instruction breakpoint and step checking.
         //
+
         // For the initial implementation, we run the interpreter to completion.
         // The breakpoint and stepping state is tracked and ready for integration
         // when the per-instruction hook API is exposed.
@@ -581,6 +584,7 @@ impl Default for DebugAdapter {
 
 /// Compiles a `.vr` file to a VBC module.
 ///
+
 /// Uses the verum_compiler pipeline (parse, type check, VBC codegen).
 fn compile_program(path: &str) -> Result<VbcModule, String> {
     use std::path::Path;

@@ -4,15 +4,18 @@
 // Layer: 5 (Network)
 // =============================================================================
 //
+
 // TLS 1.3 reduces AlertLevel to two values: `warning` and `fatal`.
 // Warning alerts are mostly obsolete (RFC 8446 §6.2 "alerts that SHOULD
 // be treated as fatal MUST be treated as such; all other alerts in
 // TLS 1.3 are fatal by default"). We emit only fatal alerts.
 //
+
 // AlertDescription is a u8; the catalogue below names every value
 // a TLS 1.3 implementation might send/receive. Codes marked "(tls12)"
 // are legal only from a peer that downgrades — we parse but never emit.
 //
+
 // =============================================================================
 
 module core.net.tls13.alert;

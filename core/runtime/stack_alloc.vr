@@ -1,57 +1,65 @@
 /// # Stack-Based Allocators for No-Heap Environments
 ///
+
 /// Spec: docs/architecture/new-arch-spec.md#embedded-support
 ///
+
 /// Provides memory allocation strategies for environments without heap support:
 /// - Real-time systems with deterministic memory requirements
 /// - Safety-critical systems (DO-178C, ISO 26262)
 /// - Bare-metal embedded systems (Cortex-M, RISC-V)
 /// - WebAssembly with limited memory
 ///
+
 /// ## Architecture
 ///
+
 /// ```
 /// ┌────────────────────────────────────────────────────────────────────────────┐
-/// │                       STACK ALLOCATION ARCHITECTURE                        │
+/// │ STACK ALLOCATION ARCHITECTURE │
 /// ├────────────────────────────────────────────────────────────────────────────┤
-/// │                                                                            │
-/// │  ┌─────────────────────────────────────────────────────────────────────┐   │
-/// │  │                        STACK ALLOCATOR                              │   │
-/// │  │  • Fixed-size buffer (compile-time or linker-defined)               │   │
-/// │  │  • Bump allocation (O(1), deterministic)                            │   │
-/// │  │  • Stack-like deallocation (LIFO)                                   │   │
-/// │  │  • Optional watermark tracking                                      │   │
-/// │  └──────────────────────────────────────────────────────────────────────┘   │
-/// │                                    │                                       │
-/// │                                    ▼                                       │
-/// │  ┌──────────────────────────────────────────────────────────────────────┐   │
-/// │  │                        ARENA ALLOCATOR                               │   │
-/// │  │  • Multiple arenas for lifetime-scoped allocation                   │   │
-/// │  │  • Bulk deallocation (free entire arena at once)                    │   │
-/// │  │  • Sub-arena support for nested scopes                              │   │
-/// │  └──────────────────────────────────────────────────────────────────────┘   │
-/// │                                    │                                       │
-/// │                                    ▼                                       │
-/// │  ┌──────────────────────────────────────────────────────────────────────┐   │
-/// │  │                        POOL ALLOCATOR                                │   │
-/// │  │  • Fixed-size block allocation                                      │   │
-/// │  │  • O(1) alloc/free (freelist-based)                                 │   │
-/// │  │  • No fragmentation                                                 │   │
-/// │  └──────────────────────────────────────────────────────────────────────┘   │
-/// │                                                                            │
+/// │ │
+/// │ ┌─────────────────────────────────────────────────────────────────────┐ │
+/// │ │ STACK ALLOCATOR │ │
+/// │ │ • Fixed-size buffer (compile-time or linker-defined) │ │
+/// │ │ • Bump allocation (O(1), deterministic) │ │
+/// │ │ • Stack-like deallocation (LIFO) │ │
+/// │ │ • Optional watermark tracking │ │
+/// │ └──────────────────────────────────────────────────────────────────────┘ │
+/// │ │ │
+/// │ ▼ │
+/// │ ┌──────────────────────────────────────────────────────────────────────┐ │
+/// │ │ ARENA ALLOCATOR │ │
+/// │ │ • Multiple arenas for lifetime-scoped allocation │ │
+/// │ │ • Bulk deallocation (free entire arena at once) │ │
+/// │ │ • Sub-arena support for nested scopes │ │
+/// │ └──────────────────────────────────────────────────────────────────────┘ │
+/// │ │ │
+/// │ ▼ │
+/// │ ┌──────────────────────────────────────────────────────────────────────┐ │
+/// │ │ POOL ALLOCATOR │ │
+/// │ │ • Fixed-size block allocation │ │
+/// │ │ • O(1) alloc/free (freelist-based) │ │
+/// │ │ • No fragmentation │ │
+/// │ └──────────────────────────────────────────────────────────────────────┘ │
+/// │ │
 /// └────────────────────────────────────────────────────────────────────────────┘
 /// ```
 ///
+
 /// ## Performance Characteristics
 ///
-/// | Allocator        | Alloc Time | Free Time | Fragmentation | Use Case          |
+
+/// | Allocator | Alloc Time | Free Time | Fragmentation | Use Case |
 /// |------------------|------------|-----------|---------------|-------------------|
-/// | StackAllocator   | O(1) ~5ns  | O(1) ~2ns | None (LIFO)   | Scratch buffers   |
-/// | ArenaAllocator   | O(1) ~8ns  | O(1) ~1ns | None (bulk)   | Request handling  |
-/// | PoolAllocator    | O(1) ~10ns | O(1) ~5ns | None (fixed)  | Connection pools  |
+/// | StackAllocator | O(1) ~5ns | O(1) ~2ns | None (LIFO) | Scratch buffers |
+/// | ArenaAllocator | O(1) ~8ns | O(1) ~1ns | None (bulk) | Request handling |
+/// | PoolAllocator | O(1) ~10ns | O(1) ~5ns | None (fixed) | Connection pools |
 ///
+
 /// ## Safety Guarantees
 ///
+
 /// - No undefined behavior on out-of-memory (returns AllocError)
 /// - No fragmentation (predictable memory layout)
 /// - Deterministic allocation time (suitable for hard real-time)
@@ -70,26 +78,31 @@ mount core.intrinsics.{memcpy};
 
 /// Stack-based bump allocator with LIFO deallocation
 ///
+
 /// Provides deterministic O(1) allocation by maintaining a single bump pointer.
 /// Deallocation follows LIFO order (most recent allocation freed first).
 ///
+
 /// ## Memory Layout
 ///
+
 /// ```
 /// ┌───────────────────────────────────────────────────────────────┐
-/// │                      STACK BUFFER                             │
+/// │ STACK BUFFER │
 /// ├───────────────────────────────────────────────────────────────┤
-/// │ [allocated region]  │  [free region]     │                   │
-/// │ ◀─────────────────▶ │ ◀───────────────▶  │                   │
-/// │        used          │      available     │                   │
-/// │                      ▲                                        │
-/// │                      │                                        │
-/// │                   top (bump pointer)                          │
+/// │ [allocated region] │ [free region] │ │
+/// │ ◀─────────────────▶ │ ◀───────────────▶ │ │
+/// │ used │ available │ │
+/// │ ▲ │
+/// │ │ │
+/// │ top (bump pointer) │
 /// └───────────────────────────────────────────────────────────────┘
 /// ```
 ///
+
 /// ## Thread Safety
 ///
+
 /// StackAllocator is NOT thread-safe. Each thread/task should have its own
 /// allocator instance. For multi-threaded scenarios, use thread-local storage
 /// or explicit synchronization.
@@ -110,9 +123,11 @@ public type StackAllocator<const SIZE: Int> is {
 implement<const SIZE: Int> StackAllocator<SIZE> {
     /// Create a new stack allocator with zeroed buffer
     ///
+
     /// ## Performance
     /// - ~0ns (compile-time constant initialization)
     ///
+
     /// ## Example
     /// ```verum
     /// // 4KB stack allocator
@@ -129,6 +144,7 @@ implement<const SIZE: Int> StackAllocator<SIZE> {
 
     /// Create from existing buffer (for linker-defined memory regions)
     ///
+
     /// ## Safety
     /// Buffer must be properly aligned and sized.
     public fn from_buffer(buffer: [Byte; SIZE]) -> Self {
@@ -172,6 +188,7 @@ implement<const SIZE: Int> StackAllocator<SIZE> {
 
     /// Reset allocator to empty state
     ///
+
     /// ## Safety
     /// All previous allocations become invalid. Caller must ensure
     /// no references to allocated memory are still in use.
@@ -190,9 +207,11 @@ implement<const SIZE: Int> StackAllocator<SIZE> {
 
     /// Allocate memory with specified layout
     ///
+
     /// ## Performance
     /// - O(1), ~5ns
     ///
+
     /// ## Returns
     /// - Ok(ptr): Pointer to allocated memory
     /// - Err(AllocError): Not enough space
@@ -226,10 +245,12 @@ implement<const SIZE: Int> StackAllocator<SIZE> {
 
     /// Deallocate memory (LIFO only)
     ///
+
     /// ## Safety
     /// Deallocation must happen in LIFO order. Deallocating memory that
     /// wasn't the most recent allocation results in memory leaks.
     ///
+
     /// ## Performance
     /// - O(1), ~2ns
     public fn dealloc(&mut self, ptr: *mut Byte, layout: Layout) {
@@ -247,18 +268,22 @@ implement<const SIZE: Int> StackAllocator<SIZE> {
 
     /// Create a save point for stack unwinding
     ///
+
     /// ## Returns
     /// Current stack position that can be restored later
     ///
+
     /// ## Example
     /// ```verum
     /// let mut alloc = StackAllocator<1024>.new();
     /// let savepoint = alloc.save();
     ///
+
     /// // Allocate temporary data
     /// let ptr = alloc.alloc(Layout.new<[Byte; 100]>()).unwrap();
     /// // ... use ptr ...
     ///
+
     /// // Restore to savepoint (frees all allocations since save)
     /// alloc.restore(savepoint);
     /// ```
@@ -272,6 +297,7 @@ implement<const SIZE: Int> StackAllocator<SIZE> {
 
     /// Restore to a previous save point
     ///
+
     /// ## Safety
     /// All allocations made after the savepoint become invalid.
     @inline
@@ -336,23 +362,26 @@ public type StackSavepoint is {
 
 /// Arena allocator for lifetime-scoped allocation with bulk deallocation
 ///
+
 /// Arenas are useful when multiple allocations share a common lifetime
 /// (e.g., request handling, parser state). All allocations in an arena
 /// are freed together when the arena is dropped.
 ///
+
 /// ## Memory Layout
 ///
+
 /// ```
 /// ┌───────────────────────────────────────────────────────────────┐
-/// │                        ARENA                                  │
+/// │ ARENA │
 /// ├───────────────────────────────────────────────────────────────┤
-/// │ [chunk 1]     │ [chunk 2]     │ [chunk 3]     │ ...           │
-/// │ ┌───────────┐ │ ┌───────────┐ │ ┌───────────┐ │               │
-/// │ │ alloc 1   │ │ │ alloc 4   │ │ │ alloc 7   │ │               │
-/// │ │ alloc 2   │ │ │ alloc 5   │ │ │ alloc 8   │ │               │
-/// │ │ alloc 3   │ │ │ alloc 6   │ │ │ ...       │ │               │
-/// │ │ [free]    │ │ │ [free]    │ │ │           │ │               │
-/// │ └───────────┘ │ └───────────┘ │ └───────────┘ │               │
+/// │ [chunk 1] │ [chunk 2] │ [chunk 3] │ ... │
+/// │ ┌───────────┐ │ ┌───────────┐ │ ┌───────────┐ │ │
+/// │ │ alloc 1 │ │ │ alloc 4 │ │ │ alloc 7 │ │ │
+/// │ │ alloc 2 │ │ │ alloc 5 │ │ │ alloc 8 │ │ │
+/// │ │ alloc 3 │ │ │ alloc 6 │ │ │ ... │ │ │
+/// │ │ [free] │ │ │ [free] │ │ │ │ │ │
+/// │ └───────────┘ │ └───────────┘ │ └───────────┘ │ │
 /// └───────────────────────────────────────────────────────────────┘
 /// ```
 public type ArenaAllocator<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> is {
@@ -400,6 +429,7 @@ implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> ArenaAllocator<CHUNK_SIZ
 
     /// Allocate memory
     ///
+
     /// ## Performance
     /// - O(1), ~8ns
     public fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError> {
@@ -446,9 +476,11 @@ implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> ArenaAllocator<CHUNK_SIZ
 
     /// Reset arena (bulk deallocation)
     ///
+
     /// ## Performance
     /// - O(1), ~1ns
     ///
+
     /// ## Safety
     /// All allocations become invalid. Caller must ensure no references
     /// to arena memory are still in use.
@@ -460,6 +492,7 @@ implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> ArenaAllocator<CHUNK_SIZ
 
     /// Create a sub-arena for nested scopes
     ///
+
     /// Returns a savepoint that can be used to restore the arena state.
     @inline
     public fn save(&self) -> ArenaSavepoint {
@@ -520,26 +553,29 @@ public type ArenaSavepoint is {
 
 /// Pool allocator for fixed-size block allocation
 ///
+
 /// Optimal for allocating many objects of the same size (connections,
 /// request contexts, etc.). Provides O(1) allocation and deallocation
 /// with zero fragmentation.
 ///
+
 /// ## Memory Layout
 ///
+
 /// ```
 /// ┌───────────────────────────────────────────────────────────────┐
-/// │                         POOL                                  │
+/// │ POOL │
 /// ├───────────────────────────────────────────────────────────────┤
-/// │ [block 0] │ [block 1] │ [block 2] │ ... │ [block N-1]         │
-/// │ ┌───────┐ │ ┌───────┐ │ ┌───────┐ │     │ ┌───────┐           │
-/// │ │ data  │ │ │ next→ │ │ │ next→ │ │ ... │ │ next→ │           │
-/// │ │       │ │ │ (free)│ │ │ (free)│ │     │ │ null  │           │
-/// │ └───────┘ │ └───────┘ │ └───────┘ │     │ └───────┘           │
-/// │   (used)  │           │           │     │                     │
-/// │           │           ▲           │     │                     │
-/// │           │           │           │     │                     │
-/// │           └───────────┘           │     │                     │
-/// │                       freelist ───┘     │                     │
+/// │ [block 0] │ [block 1] │ [block 2] │ ... │ [block N-1] │
+/// │ ┌───────┐ │ ┌───────┐ │ ┌───────┐ │ │ ┌───────┐ │
+/// │ │ data │ │ │ next→ │ │ │ next→ │ │ ... │ │ next→ │ │
+/// │ │ │ │ │ (free)│ │ │ (free)│ │ │ │ null │ │
+/// │ └───────┘ │ └───────┘ │ └───────┘ │ │ └───────┘ │
+/// │ (used) │ │ │ │ │
+/// │ │ ▲ │ │ │
+/// │ │ │ │ │ │
+/// │ └───────────┘ │ │ │
+/// │ freelist ───┘ │ │
 /// └───────────────────────────────────────────────────────────────┘
 /// ```
 public type PoolAllocator<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> is {
@@ -600,9 +636,11 @@ implement<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> PoolAllocator<BLOCK_SIZ
 
     /// Allocate a block
     ///
+
     /// ## Performance
     /// - O(1), ~10ns
     ///
+
     /// ## Returns
     /// - Ok(ptr): Pointer to block
     /// - Err: Pool exhausted
@@ -628,9 +666,11 @@ implement<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> PoolAllocator<BLOCK_SIZ
 
     /// Free a block
     ///
+
     /// ## Performance
     /// - O(1), ~5ns
     ///
+
     /// ## Safety
     /// ptr must be a pointer previously returned by alloc_block
     public fn free_block(&mut self, ptr: *mut Byte) {

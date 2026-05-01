@@ -508,12 +508,13 @@ fn test_transitive_escape_info() {
 
 /// Helper to create a diamond CFG (if-then-else)
 ///
+
 /// ```text
-///     entry (0)
-///       /  \
-///   then(1) else(2)
-///       \  /
-///      exit(3)
+///  entry (0)
+///  / \
+///  then(1) else(2)
+///  \ /
+///  exit(3)
 /// ```
 fn create_diamond_cfg() -> ControlFlowGraph {
     let entry = BlockId(0);
@@ -596,16 +597,17 @@ fn create_diamond_cfg() -> ControlFlowGraph {
 
 /// Helper to create a nested diamond CFG
 ///
+
 /// ```text
-///       entry (0)
-///         /  \
-///     then(1) else(2)
-///      /  \     |
-///   t1(3) t2(4) |
-///      \  /     |
-///     merge(5)  |
-///        \     /
-///        exit(6)
+///  entry (0)
+///  / \
+///  then(1) else(2)
+///  / \ |
+///  t1(3) t2(4) |
+///  \ / |
+///  merge(5) |
+///  \ /
+///  exit(6)
 /// ```
 fn create_nested_diamond_cfg() -> ControlFlowGraph {
     let entry = BlockId(0);
@@ -790,17 +792,18 @@ fn test_path_condition_extension() {
 fn test_path_sensitive_simple_conditional() {
     // Test 1: Simple conditional escape
     //
+
     // ```
     // fn example(cond: bool) {
-    //     let x = allocate();  // entry
-    //     if cond {
-    //         // then: no escape
-    //         use(&x);
-    //     } else {
-    //         // else: no escape
-    //         use(&x);
-    //     }
-    //     // Both paths converge - safe to promote
+    //  let x = allocate(); // entry
+    //  if cond {
+    //  // then: no escape
+    //  use(&x);
+    //  } else {
+    //  // else: no escape
+    //  use(&x);
+    //  }
+    //  // Both paths converge - safe to promote
     // }
     // ```
 
@@ -857,14 +860,15 @@ fn test_path_sensitive_simple_conditional() {
 fn test_path_sensitive_conditional_escape() {
     // Test 2: Conditional escape on one path
     //
+
     // ```
     // fn example(cond: bool) -> &Data {
-    //     let x = allocate();
-    //     if cond {
-    //         return &x;  // escapes via return
-    //     } else {
-    //         use(&x);    // no escape
-    //     }
+    //  let x = allocate();
+    //  if cond {
+    //  return &x; // escapes via return
+    //  } else {
+    //  use(&x); // no escape
+    //  }
     // }
     // ```
 
@@ -912,19 +916,20 @@ fn test_path_sensitive_conditional_escape() {
 fn test_path_sensitive_nested_conditionals() {
     // Test 3: Nested conditionals with multiple paths
     //
+
     // ```
     // fn example(a: bool, b: bool) {
-    //     let x = allocate();
-    //     if a {
-    //         if b {
-    //             use(&x);  // path 1: no escape
-    //         } else {
-    //             use(&x);  // path 2: no escape
-    //         }
-    //     } else {
-    //         use(&x);      // path 3: no escape
-    //     }
-    //     // All 3 paths converge - safe to promote
+    //  let x = allocate();
+    //  if a {
+    //  if b {
+    //  use(&x); // path 1: no escape
+    //  } else {
+    //  use(&x); // path 2: no escape
+    //  }
+    //  } else {
+    //  use(&x); // path 3: no escape
+    //  }
+    //  // All 3 paths converge - safe to promote
     // }
     // ```
 
@@ -975,6 +980,7 @@ fn test_path_sensitive_nested_conditionals() {
 fn test_path_sensitive_infeasible_path_elimination() {
     // Test 4: Infeasible path elimination
     //
+
     // This test verifies that path-sensitive analysis can identify
     // and eliminate infeasible paths (where predicates are contradictory)
 
@@ -1006,16 +1012,17 @@ fn test_path_sensitive_infeasible_path_elimination() {
 fn test_path_sensitive_loop_escape() {
     // Test 5: Loop with conditional escape
     //
+
     // ```
     // fn example() {
-    //     let x = allocate();
-    //     loop {
-    //         if condition {
-    //             spawn(|| use(x));  // escapes via thread
-    //             break;
-    //         }
-    //         use(&x);  // no escape
-    //     }
+    //  let x = allocate();
+    //  loop {
+    //  if condition {
+    //  spawn(|| use(x)); // escapes via thread
+    //  break;
+    //  }
+    //  use(&x); // no escape
+    //  }
     // }
     // ```
 
@@ -1063,6 +1070,7 @@ fn test_path_sensitive_loop_escape() {
 fn test_path_sensitive_with_call_graph() {
     // Test 6: Path-sensitive analysis with interprocedural information
     //
+
     // Verifies that path-sensitive analysis integrates correctly with
     // call graph information
 
@@ -1151,6 +1159,7 @@ fn test_field_path_aliasing() {
 
     // Test 2: Field path aliasing
     //
+
     // Verifies that the aliasing detection correctly identifies when
     // field paths may refer to overlapping memory
 
@@ -1198,6 +1207,7 @@ fn test_field_path_prefix() {
 fn test_field_sensitive_basic() {
     // Test 3: Basic field-sensitive analysis
     //
+
     // Creates a simple CFG and analyzes field escape independently
     // Verifies that field-sensitive info is created correctly
 
@@ -1237,6 +1247,7 @@ fn test_field_sensitive_nested_struct() {
 
     // Test 4: Nested struct field access
     //
+
     // Tests field-sensitive analysis with nested struct accesses
     // like obj.field1.field2
 
@@ -1285,6 +1296,7 @@ fn test_field_sensitive_tuple_fields() {
 
     // Test 5: Tuple field access
     //
+
     // Tests analysis of tuple fields independently (e.g., tuple.0, tuple.1)
 
     let cfg = create_simple_cfg();
@@ -1323,6 +1335,7 @@ fn test_field_sensitive_partial_escape() {
 
     // Test 6: Partial field escape
     //
+
     // Tests scenario where some fields escape but others don't
     // This is the key benefit of field-sensitive analysis
 
@@ -1356,6 +1369,7 @@ fn test_field_sensitive_access_chain() {
 
     // Test 7: Field access chain
     //
+
     // Tests analysis of chained field accesses: obj.a.b.c
 
     let cfg = create_simple_cfg();
@@ -1393,6 +1407,7 @@ fn test_field_sensitive_with_path_sensitivity() {
 
     // Test 8: Field-sensitive combined with path-sensitive
     //
+
     // Tests the combined analysis that tracks escape per field per path
 
     let cfg = create_diamond_cfg();
@@ -1422,6 +1437,7 @@ fn test_field_sensitive_enum_variant() {
 
     // Test 9: Enum variant field access
     //
+
     // Tests analysis of enum variant fields like Some(x) or Result::Ok(y)
 
     let cfg = create_simple_cfg();
@@ -1460,6 +1476,7 @@ fn test_field_sensitive_merge() {
 
     // Test 10: Merging field-sensitive info
     //
+
     // Tests that field escape info from different analyses can be merged
 
     let ref_id = RefId(1);
@@ -1502,6 +1519,7 @@ fn test_field_escape_statistics() {
 
     // Test 11: Field escape statistics
     //
+
     // Verifies that statistics are correctly computed for field analysis
 
     let ref_id = RefId(1);

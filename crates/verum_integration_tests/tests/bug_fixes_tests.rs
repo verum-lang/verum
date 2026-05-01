@@ -15,9 +15,11 @@
 #![cfg(test)]
 // Regression Test Suite
 //
+
 // Tests for previously found bugs, edge cases from specification,
 // and corner cases discovered through fuzzing.
 //
+
 // Each test documents the bug/issue it prevents from regressing.
 
 use verum_ast::FileId;

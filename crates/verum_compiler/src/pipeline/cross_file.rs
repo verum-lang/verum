@@ -1,28 +1,31 @@
 //! Cross-file module resolution + per-module type-check driver.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 24). Houses the
 //! mount-graph resolution + cross-file context machinery that
 //! sits between parse and type-check, plus the actual per-module
 //! analysis driver (`analyze_module`).
 //!
+
 //! Surface:
 //!
-//!   * `expand_module` — Pass-2 macro expansion entry; walks
-//!     every item, collects macro/meta invocations, dispatches
-//!     to `MacroExpander`.
-//!   * `file_path_to_module_path` — fs path → dotted module path.
-//!   * `load_imported_modules` — recursive loader that resolves
-//!     `mount foo.bar` import statements.
-//!   * `extract_import_module_path` — `MountTreeKind` → string.
-//!   * `resolve_import_path` — relative / cog / super resolution.
-//!   * `module_path_to_file_path` — dotted → fs path.
-//!   * `register_modules_for_cross_file_resolution` — registers
-//!     loaded modules in the session's ModuleRegistry so cross-
-//!     file imports + contexts resolve.
-//!   * `analyze_module` — the per-module type-check driver;
-//!     `&self` post-#101 and runs in parallel via rayon
-//!     `par_iter` from the multi-pass / orchestration entry
-//!     points.
+
+//!  * `expand_module` — Pass-2 macro expansion entry; walks
+//!  every item, collects macro/meta invocations, dispatches
+//!  to `MacroExpander`.
+//!  * `file_path_to_module_path` — fs path → dotted module path.
+//!  * `load_imported_modules` — recursive loader that resolves
+//!  `mount foo.bar` import statements.
+//!  * `extract_import_module_path` — `MountTreeKind` → string.
+//!  * `resolve_import_path` — relative / cog / super resolution.
+//!  * `module_path_to_file_path` — dotted → fs path.
+//!  * `register_modules_for_cross_file_resolution` — registers
+//!  loaded modules in the session's ModuleRegistry so cross-
+//!  file imports + contexts resolve.
+//!  * `analyze_module` — the per-module type-check driver;
+//!  `&self` post-#101 and runs in parallel via rayon
+//!  `par_iter` from the multi-pass / orchestration entry
+//!  points.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -113,11 +116,13 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Convert a file path to a module path.
     ///
+
     /// Examples:
     /// - `/Users/.../src/domain/errors.vr` with src_root `/Users/.../src` -> `domain.errors`
     /// - `/Users/.../src/main.vr` with src_root `/Users/.../src` -> `main`
     /// - `/Users/.../src/services/mod.vr` with src_root `/Users/.../src` -> `services`
     ///
+
     /// File-to-module path mapping: strip src_root prefix, replace `/` with `.`,
     /// strip `.vr` extension, and treat `mod.vr` as the directory module name.
     pub(super) fn file_path_to_module_path(
@@ -159,11 +164,13 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Load imported modules into the module registry for single-file checking.
     ///
+
     /// When checking a single file that has imports (e.g., `import super.contexts.{Database}`),
     /// we need to load and parse the imported modules so that:
     /// 1. Types and functions can be resolved during type checking
     /// 2. Context protocols can be registered for `using [...]` clauses
     ///
+
     /// This method:
     /// 1. Extracts all import statements from the module
     /// 2. Resolves each import path to a file path
@@ -172,9 +179,11 @@ impl<'s> CompilationPipeline<'s> {
     /// 5. Registers the module in the session's ModuleRegistry
     /// 6. Iteratively loads that module's imports using a work queue
     ///
+
     /// Cross-module resolution: imports resolved to file paths, loaded, parsed,
     /// and registered. Uses a work queue for transitive import resolution.
     ///
+
     /// This function uses an iterative approach with an explicit work queue
     /// to avoid stack overflow when loading deeply nested module hierarchies.
     pub(super) fn load_imported_modules(
@@ -492,12 +501,15 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Resolve relative import paths (self, super) to absolute module paths.
     ///
+
     /// For modules defined in mod.vr files (e.g., `contexts/mod.vr` with path `contexts`):
     /// - `.database` or `self.database` -> `contexts.database` (child module)
     ///
+
     /// For regular modules (e.g., `handlers/search.vr` with path `handlers.search`):
     /// - `.other` or `self.other` -> `handlers.other` (sibling module)
     ///
+
     /// For super imports (supports chained super):
     /// - From `handlers.search`: `super.contexts` -> `contexts` (sibling of parent)
     /// - From `services.package_service`: `super.super.domain` -> `domain` (sibling of services)
@@ -518,10 +530,12 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Convert a module path to a filesystem path (relative to src_root or stdlib_root).
     ///
+
     /// For stdlib paths (std.*), this strips the "std" prefix:
     /// - std.time -> time/ (when src_root is core/)
     /// - core.base.Maybe -> core/Maybe (when src_root is core/)
     ///
+
     /// For user paths, this maps directly:
     /// - domain.errors -> domain/errors (when src_root is src/)
     pub(super) fn module_path_to_file_path(
@@ -549,6 +563,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Register all parsed modules in the session's ModuleRegistry for cross-file resolution.
     ///
+
     /// This phase (1.5) runs after parsing and before expansion to:
     /// 1. Create ModuleInfo for each parsed module
     /// 2. Extract exports (public types, functions, etc.)
@@ -556,6 +571,7 @@ impl<'s> CompilationPipeline<'s> {
     /// 4. Register in session.module_registry
     /// 5. Enable type resolution across files
     ///
+
     /// Phase 1.5: builds export tables (public types, functions) and extracts
     /// contexts/protocols from each module for cross-file name and context resolution.
     pub(super) fn register_modules_for_cross_file_resolution(&mut self) -> Result<()> {
@@ -685,14 +701,17 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Analyze a module (Pass 3)
     ///
+
     /// This performs type checking in multiple sub-passes:
     /// 1. Register cross-file contexts (protocols from other modules)
     /// 2. Register all type declarations (to handle forward references)
     /// 3. Check all functions and other items
     ///
+
     /// Cross-file context resolution enables `using [Context]` across files.
     /// Cross-module name resolution enables imports to resolve types from other modules.
     ///
+
     /// Per-module semantic analysis. Despite originally being `&mut self`,
     /// the body never writes any field of `Compiler` directly: every
     /// observable mutation flows through `Session::emit_diagnostic`
@@ -703,20 +722,23 @@ impl<'s> CompilationPipeline<'s> {
     /// machines with 16 cores, modules in a large project were analysed
     /// strictly one at a time.
     ///
+
     /// The `&self` signature (#101) unblocks `module_paths.par_iter()`
     /// at the call site for a 2-4× wall-clock win on multi-module
     /// projects. Parallel correctness rests on three invariants the
     /// audit verified:
     ///
-    ///   1. `TypeChecker` instances do not share mutable state — each
-    ///      thread owns its checker.
-    ///   2. Reads of `self.modules` / `self.collected_contexts` /
-    ///      `self.stdlib_metadata` are pure HashMap / List iteration
-    ///      with no concurrent writers (the loop runs after all parsing
-    ///      passes have completed).
-    ///   3. Diagnostic emission and error-counter polling are already
-    ///      lock-free atomic operations on `Session`.
+
+    ///  1. `TypeChecker` instances do not share mutable state — each
+    ///  thread owns its checker.
+    ///  2. Reads of `self.modules` / `self.collected_contexts` /
+    ///  `self.stdlib_metadata` are pure HashMap / List iteration
+    ///  with no concurrent writers (the loop runs after all parsing
+    ///  passes have completed).
+    ///  3. Diagnostic emission and error-counter polling are already
+    ///  lock-free atomic operations on `Session`.
     ///
+
     /// `lazy_resolver` is `Arc<Mutex<dyn LazyModuleResolver>>` so
     /// concurrent late-loads serialise on a single mutex — acceptable
     /// because reachability-narrowing makes late loads rare.
@@ -726,6 +748,7 @@ impl<'s> CompilationPipeline<'s> {
         // Type check all items in the module
         // Pass the module registry for cross-file type resolution
         //
+
         // Mode selection:
         // - NormalBuild (stdlib_metadata = Some): Use pre-compiled stdlib types
         // - StdlibBootstrap (stdlib_metadata = None): Use builtins only
@@ -821,6 +844,7 @@ impl<'s> CompilationPipeline<'s> {
         // making stdlib types, protocols, and implement block methods (List.push,
         // Maybe.unwrap, etc.) available for type checking user code.
         //
+
         // Without this, the TypeChecker only has built-in primitives and cannot
         // resolve stdlib types referenced in user code or cross-module imports.
         // ═══════════════════════════════════════════════════════════════════
@@ -951,8 +975,8 @@ impl<'s> CompilationPipeline<'s> {
 
         // Sub-pass 4: Register function signatures (enables forward references)
         // This allows functions to call other functions defined later in the file:
-        //   fn main() { helper() }  // helper is defined below
-        //   fn helper() { ... }
+        //  fn main() { helper() } // helper is defined below
+        //  fn helper() { ... }
         for item in &module.items {
             if let ItemKind::Function(func) = &item.kind {
                 if let Err(type_error) = checker.register_function_signature(func) {
@@ -964,8 +988,8 @@ impl<'s> CompilationPipeline<'s> {
 
         // Sub-pass 4.5: Register extern function signatures (FFI)
         // This allows calling FFI functions declared in extern blocks:
-        //   @ffi("libSystem.B.dylib")
-        //   extern { fn getpid() -> Int; }
+        //  @ffi("libSystem.B.dylib")
+        //  extern { fn getpid() -> Int; }
         for item in &module.items {
             if let ItemKind::ExternBlock(extern_block) = &item.kind {
                 // Register each function in the extern block
@@ -1020,6 +1044,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 1: Load source file
     ///
+
     /// If input is a directory, finds main.vr inside it.
     /// If input is a file, loads it directly.
     pub fn phase_load_source(&mut self) -> Result<FileId> {
@@ -1143,12 +1168,12 @@ impl<'s> CompilationPipeline<'s> {
         self.session.record_phase_metrics("Parsing", parse_time, 0);
 
         // Honour `--emit-ast`: serialise the freshly parsed module to
-        // a sidecar `.ast.json` next to the input source.  The flag
+        // a sidecar `.ast.json` next to the input source. The flag
         // was a config field with no readers — it has been declared
         // and defaulted on `CompilerOptions` for a long while, but
         // no compilation phase emitted anything when it was set, so
         // the documented "Emit AST in JSON format" contract was a
-        // no-op.  We mirror the `emit_types`/`emit_vbc` pattern of
+        // no-op. We mirror the `emit_types`/`emit_vbc` pattern of
         // best-effort write + debug log on failure (non-fatal).
         if self.session.options().emit_ast {
             let ast_path = self.session.options().input.with_extension("ast.json");
@@ -1176,6 +1201,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Public wrapper for type checking phase.
     ///
+
     /// Used by the `verum analyze` command to run type checking before
     /// CBGR analysis. Errors are returned but non-fatal for analysis purposes.
     pub fn run_type_check_phase(&mut self, module: &Module) -> Result<()> {
@@ -1184,6 +1210,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Public wrapper for building a function's control flow graph.
     ///
+
     /// Used by the `verum analyze` command to run escape analysis on individual
     /// functions without going through the full compilation pipeline.
     pub fn build_function_cfg_public(

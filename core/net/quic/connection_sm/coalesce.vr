@@ -5,28 +5,33 @@
 // Dependencies: core, collections, quic.{frame, packet, connection_sm.tx}
 // =============================================================================
 //
+
 // RFC 9000 §12.2 permits — and modern implementations rely on — more
 // than one QUIC packet in a single UDP datagram. The typical client
 // flight combines:
 //
-//   Initial   (carries CRYPTO with ClientHello, padded to MIN_INITIAL_SIZE)
-//   Handshake (carries CRYPTO with Finished when keys become available)
-//   0-RTT     (carries early-application-data STREAM frames when enabled)
-//   1-RTT     (short-header, app data) — MUST be last; Short headers lack
-//             a length field and consume the datagram tail.
+
+//  Initial (carries CRYPTO with ClientHello, padded to MIN_INITIAL_SIZE)
+//  Handshake (carries CRYPTO with Finished when keys become available)
+//  0-RTT (carries early-application-data STREAM frames when enabled)
+//  1-RTT (short-header, app data) — MUST be last; Short headers lack
+//  a length field and consume the datagram tail.
 //
+
 // Rules we enforce:
 //
-//   * Long-header packets carry a Length field; they can be chained
-//     in any order before a Short-header packet.
-//   * At most one Short-header packet per datagram.
-//   * Each constituent packet has its own PN + AEAD nonce; their
-//     header-protection masks are computed independently against
-//     their own ciphertext samples.
-//   * MIN_INITIAL_SIZE padding (1200 bytes — RFC 9000 §8.1) applies
-//     to the entire datagram, not just the Initial packet, so the
-//     coalescer defers PADDING frame emission until the end.
+
+//  * Long-header packets carry a Length field; they can be chained
+//  in any order before a Short-header packet.
+//  * At most one Short-header packet per datagram.
+//  * Each constituent packet has its own PN + AEAD nonce; their
+//  header-protection masks are computed independently against
+//  their own ciphertext samples.
+//  * MIN_INITIAL_SIZE padding (1200 bytes — RFC 9000 §8.1) applies
+//  to the entire datagram, not just the Initial packet, so the
+//  coalescer defers PADDING frame emission until the end.
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm.coalesce;
@@ -126,10 +131,10 @@ implement Eq for CoalesceError {
 
 /// Serialize every packet in the plan into one UDP datagram buffer.
 /// Enforces:
-///   * Only one Short-header packet (RFC 9000 §12.2).
-///   * Short-header, if present, is the last entry (no Length field
-///     for parsing).
-///   * Whole-datagram PADDING to `plan.pad_to` when set.
+///  * Only one Short-header packet (RFC 9000 §12.2).
+///  * Short-header, if present, is the last entry (no Length field
+///  for parsing).
+///  * Whole-datagram PADDING to `plan.pad_to` when set.
 public fn assemble(plan: &CoalescePlan) -> Result<List<Byte>, CoalesceError> {
     // Validate short-header constraint.
     let mut short_idx: Maybe<Int> = None;

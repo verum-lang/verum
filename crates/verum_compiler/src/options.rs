@@ -1,5 +1,6 @@
 //! Compiler Options and Configuration
 //!
+
 //! This module defines all compiler options including verification modes,
 //! profiling settings, and output formats.
 
@@ -125,6 +126,7 @@ pub struct CompilerOptions {
 
     /// Enable per-obligation profiling granularity.
     ///
+
     /// When `true`, the verification profiler surfaces a per-
     /// obligation breakdown within each verified function instead
     /// of only the function-level aggregate. Obligations include
@@ -132,11 +134,13 @@ pub struct CompilerOptions {
     /// invariants, termination measures, and structural-recursion
     /// conditions. Implies `profile_verification = true`.
     ///
+
     /// The human-readable report adds a "Slowest obligations"
     /// section sorted by wall-clock time; the JSON export carries
     /// the full per-obligation list under
     /// `per_obligation_timings`.
     ///
+
     /// Plumbed from the CLI flag `--profile-obligation`. See
     /// `docs/verification/performance.md §5`.
     pub profile_obligation: bool,
@@ -144,6 +148,7 @@ pub struct CompilerOptions {
     /// URL of a distributed verification cache (e.g. `s3://bucket/path`,
     /// `redis://host:6379`, `file:///nfs/verify-cache`).
     ///
+
     /// When set, cache lookups and stores are routed through the configured
     /// backend in addition to the in-memory cache. Intended for CI/CD where
     /// multiple agents share proofs. The actual transport is owned by the
@@ -165,22 +170,24 @@ pub struct CompilerOptions {
     pub distributed_cache_trust: Option<String>,
 
     /// Enable per-theorem closure-hash incremental verification cache
-    /// (`verum_verification::closure_cache`).  When true, theorem
+    /// (`verum_verification::closure_cache`). When true, theorem
     /// proofs whose closure-hash is in the cache and whose cached
     /// verdict was Ok are skipped without invoking the SMT / kernel
-    /// re-check.  Cache root defaults to
+    /// re-check. Cache root defaults to
     /// `<input.parent>/target/.verum_cache/closure-hashes/`; override
     /// via `closure_cache_root`.
     ///
+
     /// Cache key = blake3(verum_kernel::VVA_VERSION + signature +
     /// proof body + sorted+deduped @framework citations); kernel
     /// version drift invalidates ALL entries unconditionally.
     ///
+
     /// Off by default — opt-in via `verum verify --closure-cache`.
     pub closure_cache_enabled: bool,
 
-    /// Override the closure-cache root directory.  When `None`, the
-    /// default location under `target/.verum_cache/` is used.  Setting
+    /// Override the closure-cache root directory. When `None`, the
+    /// default location under `target/.verum_cache/` is used. Setting
     /// this to a fixed path is the standard way to share a cache
     /// across CI agents (e.g. `--closure-cache-root /nfs/verify/`).
     pub closure_cache_root: Option<std::path::PathBuf>,
@@ -212,20 +219,22 @@ pub struct CompilerOptions {
     /// Strip debug info only (keep function names)
     pub strip_debug: bool,
 
-    /// Windows PE subsystem selection.  `Some("CONSOLE")` (default
+    /// Windows PE subsystem selection. `Some("CONSOLE")` (default
     /// when None) emits `/SUBSYSTEM:CONSOLE` so the loader allocates
     /// a console window for the resulting `.exe`; `Some("WINDOWS")`
     /// emits `/SUBSYSTEM:WINDOWS` so the loader skips console
     /// allocation (Win32 GUI app — required for desktop applications
     /// to avoid a console flash on launch).
     ///
-    /// Ignored on non-Windows targets.  Resolution order, highest
+
+    /// Ignored on non-Windows targets. Resolution order, highest
     /// precedence first:
-    ///   1. CLI `--windows-subsystem={console|gui}` flag.
-    ///   2. Source-level `@gui` / `@console` attribute on `fn main`.
-    ///   3. Manifest `[build].windows_subsystem = "console" | "gui"`.
-    ///   4. Default `Console`.
+    ///  1. CLI `--windows-subsystem={console|gui}` flag.
+    ///  2. Source-level `@gui` / `@console` attribute on `fn main`.
+    ///  3. Manifest `[build].windows_subsystem = "console" | "gui"`.
+    ///  4. Default `Console`.
     ///
+
     /// The runtime helpers (`platform_ir.rs::emit_verum_os_write`)
     /// gracefully degrade under `Gui`: when `GetStdHandle(STD_OUTPUT_HANDLE)`
     /// returns `INVALID_HANDLE_VALUE` (no console available), the
@@ -313,10 +322,12 @@ pub struct CompilerOptions {
 
     /// Manifest-side override for the `debug_assertions` cfg flag.
     ///
+
     /// When `Some(b)`, the session's `TargetConfig.debug_assertions`
     /// is forced to `b` regardless of `optimization_level`. When
     /// `None`, the auto-derive `optimization_level == 0` rule wins.
     ///
+
     /// Carries the user's `[profile.<name>].debug_assertions` setting
     /// from `Verum.toml` through the build path; pre-fix the manifest
     /// value was tracing-only at `commands/build.rs`, so writing
@@ -356,10 +367,12 @@ pub struct CompilerOptions {
     // V-LLSI Profile Configuration
     /// Language profile for compilation.
     ///
+
     /// - **Application**: Safe, productive development (default). VBC-interpretable.
     /// - **Systems**: Performance-critical, optional unsafe. NOT VBC-interpretable.
     /// - **Research**: Experimental features. VBC-interpretable.
     ///
+
     /// V-LLSI (Verum Language Structured Interpretation) architecture defines
     /// three progressive profiles: Application (safe, VBC-interpretable),
     /// Systems (performance-critical, AOT-only, enables raw pointers/inline asm),
@@ -375,6 +388,7 @@ pub struct CompilerOptions {
 
     /// External cancellation flag for cooperative abort of VBC interpretation.
     ///
+
     /// When set to `true`, the VBC interpreter's dispatch loop will return
     /// `InstructionLimitExceeded` at the next check point (~every 1024 instructions).
     /// Used by the test runner to cancel timed-out tests.
@@ -382,6 +396,7 @@ pub struct CompilerOptions {
 
     /// Script-mode entry-point flag.
     ///
+
     /// When `true`, the entry source identified by [`Self::input`] is parsed
     /// in **script mode** — top-level statements (let, expression-stmts,
     /// defer / errdefer / provide) are accepted alongside regular items and
@@ -390,6 +405,7 @@ pub struct CompilerOptions {
     /// entry-detection pass picks the wrapper as the program entry instead
     /// of requiring an explicit `fn main()`.
     ///
+
     /// Independently of this flag, **any** source whose first bytes are a
     /// `#!` shebang (BOM-tolerant) is auto-detected as a script and parsed
     /// in script mode regardless of CLI invocation form. The flag covers
@@ -397,6 +413,7 @@ pub struct CompilerOptions {
     /// stdin) on a source that has no shebang but should still be treated
     /// as a single-file script.
     ///
+
     /// Only the entry source — the file matching [`Self::input`] — is
     /// affected by this flag. Stdlib modules and imported user modules are
     /// always parsed in library mode (the shebang prefix check still applies
@@ -597,6 +614,7 @@ impl CompilerOptions {
 
     /// Builder: Enable script mode for the entry source.
     ///
+
     /// When enabled, the entry file referenced by [`Self::input`] is parsed
     /// with top-level statements allowed; the parser folds them into a
     /// synthesised `__verum_script_main` wrapper that the entry-detection
@@ -670,6 +688,7 @@ impl CompilerOptions {
 
     /// Builder: Enable bounds check elimination
     ///
+
     /// When enabled, the verifier uses SMT to prove array accesses are within bounds,
     /// eliminating unnecessary runtime bounds checks in generated code.
     pub fn with_bounds_elimination(mut self, enable: bool) -> Self {
@@ -679,6 +698,7 @@ impl CompilerOptions {
 
     /// Builder: Enable CBGR elimination
     ///
+
     /// When enabled, escape analysis promotes `&T` references to `&checked T`
     /// when the verifier can prove the reference doesn't escape its scope.
     pub fn with_cbgr_elimination(mut self, enable: bool) -> Self {
@@ -688,6 +708,7 @@ impl CompilerOptions {
 
     /// Builder: Enable proof certificate generation
     ///
+
     /// When enabled, generates machine-verifiable proof certificates in the
     /// specified format (Coq, Lean, or Dedukti).
     pub fn with_proof_certificate(mut self, enable: bool) -> Self {
@@ -711,10 +732,12 @@ impl CompilerOptions {
 
     /// Builder: Set language profile.
     ///
+
     /// - **Application**: Safe, productive development (default). VBC-interpretable.
     /// - **Systems**: Performance-critical, optional unsafe. NOT VBC-interpretable.
     /// - **Research**: Experimental features. VBC-interpretable.
     ///
+
     /// V-LLSI architecture: Application (safe, VBC-interpretable), Systems
     /// (performance-critical, AOT-only), Research (experimental, VBC-interpretable).
     pub fn with_profile(mut self, profile: Profile) -> Self {
@@ -724,6 +747,7 @@ impl CompilerOptions {
 
     /// Builder: Set Systems profile for low-level programming.
     ///
+
     /// Systems profile enables raw pointers, inline assembly, and no-libc linking.
     /// Systems profile code is NOT VBC-interpretable - AOT compilation required.
     pub fn with_systems_profile(mut self) -> Self {
@@ -733,6 +757,7 @@ impl CompilerOptions {
 
     /// Builder: Set Research profile for experimental features.
     ///
+
     /// Research profile enables dependent types, formal proofs, and linear types.
     /// Research profile code IS VBC-interpretable.
     pub fn with_research_profile(mut self) -> Self {
@@ -742,6 +767,7 @@ impl CompilerOptions {
 
     /// Check if the current profile is VBC-interpretable.
     ///
+
     /// Systems profile is NOT interpretable (AOT only).
     pub fn is_vbc_interpretable(&self) -> bool {
         self.profile.is_vbc_interpretable()

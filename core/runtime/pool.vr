@@ -5,22 +5,26 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Provides a work-stealing thread pool backed by OS threads with a shared
 // task queue. Unlike spawn (which creates 1 OS thread per task), the pool
 // reuses a fixed set of worker threads.
 //
+
 // Usage:
-//   let pool = ThreadPool.new(4);         // 4 workers
-//   let h1 = pool.submit(compute, arg1);  // Submit tasks
-//   let h2 = pool.submit(compute, arg2);
-//   let r1 = h1.await();                  // Collect results
-//   let r2 = h2.await();
-//   pool.destroy();
+//  let pool = ThreadPool.new(4); // 4 workers
+//  let h1 = pool.submit(compute, arg1); // Submit tasks
+//  let h2 = pool.submit(compute, arg2);
+//  let r1 = h1.await(); // Collect results
+//  let r2 = h2.await();
+//  pool.destroy();
 //
-//   // Or use the global pool:
-//   let h = ThreadPool.global_submit(compute, arg);
-//   let r = h.await();
+
+//  // Or use the global pool:
+//  let h = ThreadPool.global_submit(compute, arg);
+//  let r = h.await();
 //
+
 // =============================================================================
 
 module pool;
@@ -33,6 +37,7 @@ mount core.*;
 
 /// A fixed-size thread pool for scheduling lightweight tasks.
 ///
+
 /// Workers share a single bounded queue protected by a mutex+condvar.
 /// Capacity: 4096 pending tasks, up to 64 worker threads.
 public type ThreadPool is {
@@ -41,6 +46,7 @@ public type ThreadPool is {
 
 /// A handle to a submitted task, used to retrieve the result.
 ///
+
 /// Drop drains the slot if the caller never awaited — keeps the
 /// pool's handle table bounded under fire-and-forget submission.
 public type PoolTaskHandle is {
@@ -83,6 +89,7 @@ implement ThreadPool {
 
     /// Destroy the pool, joining all worker threads.
     ///
+
     /// Most callers should NOT call this directly — the `Drop` impl
     /// below releases the pool when the `ThreadPool` value goes out
     /// of scope. The explicit method is retained for cases where

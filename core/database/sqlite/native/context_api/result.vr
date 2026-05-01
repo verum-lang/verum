@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// Every sqlite3_result_* call produces one `FnResult`.  The engine
+
+// Every sqlite3_result_* call produces one `FnResult`. The engine
 // marshals this into the column value of the row being built.
 // =============================================================================
 

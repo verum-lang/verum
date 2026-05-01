@@ -14,8 +14,10 @@
 )]
 //! Property-based tests for verum_lexer
 //!
+
 //! Tests invariants using proptest.
 //!
+
 //! Invariants tested:
 //! 1. parse → collect → concat = identity (roundtrip)
 //! 2. Lexer never panics on valid UTF-8

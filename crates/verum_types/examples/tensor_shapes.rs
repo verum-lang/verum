@@ -1,20 +1,26 @@
 //! Example: Tensor Shape Computation with Meta Parameters
 //!
+
 //! This example demonstrates how to use meta parameters for compile-time
 //! tensor shape computation in the Verum type system.
 //!
+
 //! Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Unified meta-system for compile-time computation
 //! Verum base types: Bool, Int, Float, Text, Unit, plus compound types (Array, Tuple, Record, Function) and Tensor<T, Shape> with compile-time shape parameters — with meta parameters
 //!
+
 //! # Key Features Demonstrated
 //!
+
 //! 1. **Compile-time shape computation** - Calculate tensor dimensions at compile time
 //! 2. **Meta parameter evaluation** - Evaluate arithmetic expressions for shapes
 //! 3. **Shape validation** - Verify tensor shapes are compatible
 //! 4. **Type-safe tensors** - Prevent dimension mismatches at compile time
 //!
+
 //! # Usage
 //!
+
 //! ```bash
 //! cargo run --example tensor_shapes
 //! ```

@@ -1,5 +1,6 @@
 //! Expr → SMT-LIB2 Translator.
 //!
+
 //! Translates Verum AST expressions into SMT-LIB2 string form
 //! suitable for injection into Z3 via `Solver::from_string`. This
 //! is the missing piece that connects the refinement-reflection
@@ -7,8 +8,10 @@
 //! body is translated here, the registry axiom becomes a genuine
 //! unfolding rule rather than a placeholder.
 //!
+
 //! ## Supported expression shapes
 //!
+
 //! | Verum AST | SMT-LIB2 |
 //! |---|---|
 //! | `42` (Int literal) | `42` |
@@ -33,11 +36,14 @@
 //! | `f(a, b)` | `(f a b)` |
 //! | `(expr)` | recurse |
 //!
+
 //! Unsupported shapes return `Err` — the caller decides whether
 //! to skip reflection or report a diagnostic.
 //!
+
 //! ## Soundness
 //!
+
 //! The translator is conservative: if it encounters an expression
 //! it cannot represent in QF_LIA/QF_NIA (the integer-arithmetic
 //! fragment Z3 handles well), it returns `Err` rather than

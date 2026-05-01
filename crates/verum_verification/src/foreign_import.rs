@@ -1,44 +1,51 @@
 //! Foreign-system theorem import — inverse of cross-format export.
 //!
+
 //! ## Goal
 //!
-//! Verum is foundation-neutral.  A Coq/Lean/Mizar/Isabelle corpus
+
+//! Verum is foundation-neutral. A Coq/Lean/Mizar/Isabelle corpus
 //! can be imported as Verum theorem skeletons whose statement is
 //! preserved, framework-attributed back to the source file/line, and
 //! left ready for a Verum-side proof body (or admitted via
-//! `@axiom` with the original citation).  This is the inverse of
+//! `@axiom` with the original citation). This is the inverse of
 //! `verum export` — together the two surfaces give Verum
 //! bidirectional reproducibility across every supported proof
 //! system.
 //!
+
 //! ## Architectural pattern
 //!
+
 //! Same single-trait-boundary pattern as the rest of the integration
 //! arc (ladder_dispatch / tactic_combinator / proof_repair /
 //! closure_cache / doc_render):
 //!
-//!   * [`ForeignTheorem`] — typed projection of one imported decl.
-//!   * [`ForeignSystem`] enum — Coq / Lean4 / Mizar / Isabelle.
-//!   * [`ForeignSystemImporter`] trait — single dispatch interface.
-//!   * Per-system reference impls: [`CoqImporter`], [`Lean4Importer`],
-//!     [`MizarImporter`], [`IsabelleImporter`].  V0 ships
-//!     statement-level extraction (regex-based).  V1 will add
-//!     proof-term translation.
-//!   * [`importer_for`] dispatcher — pick the right importer for a
-//!     [`ForeignSystem`] tag.
+
+//!  * [`ForeignTheorem`] — typed projection of one imported decl.
+//!  * [`ForeignSystem`] enum — Coq / Lean4 / Mizar / Isabelle.
+//!  * [`ForeignSystemImporter`] trait — single dispatch interface.
+//!  * Per-system reference impls: [`CoqImporter`], [`Lean4Importer`],
+//!  [`MizarImporter`], [`IsabelleImporter`]. ships
+//!  statement-level extraction (regex-based). Future work will add
+//!  proof-term translation.
+//!  * [`importer_for`] dispatcher — pick the right importer for a
+//!  [`ForeignSystem`] tag.
 //!
+
 //! ## V0 contract
 //!
-//!   * The importer extracts theorem **statements** (signature +
-//!     proposition) but admits the proof body as `@axiom` with a
-//!     `@framework(<system>, "<source>:<line>")` citation.
-//!   * The user then fills in the proof body with Verum tactics, or
-//!     keeps the `@axiom` and treats the foreign system as the trust
-//!     boundary.
-//!   * Citation chain is preserved end-to-end: a theorem imported
-//!     from `Mathlib.Algebra.Group.Basic` lands in Verum with
-//!     `@framework(lean_mathlib4, "Mathlib/Algebra/Group/Basic.lean:42")`,
-//!     so the audit subcommands surface the foreign provenance.
+
+//!  * The importer extracts theorem **statements** (signature +
+//!  proposition) but admits the proof body as `@axiom` with a
+//!  `@framework(<system>, "<source>:<line>")` citation.
+//!  * The user then fills in the proof body with Verum tactics, or
+//!  keeps the `@axiom` and treats the foreign system as the trust
+//!  boundary.
+//!  * Citation chain is preserved end-to-end: a theorem imported
+//!  from `Mathlib.Algebra.Group.Basic` lands in Verum with
+//!  `@framework(lean_mathlib4, "Mathlib/Algebra/Group/Basic.lean:42")`,
+//!  so the audit subcommands surface the foreign provenance.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -50,16 +57,19 @@ use verum_common::Text;
 
 /// Foreign proof system this importer handles.
 ///
+
 /// **Canonical 7-system enum** — single source of truth for foreign
-/// proof systems across the codebase.  Used by:
+/// proof systems across the codebase. Used by:
 ///
-///   - `verum_verification::foreign_import` — skeleton import (this module).
-///   - `verum_smt::cross_format_runner` — re-check via `Checker`.
-///   - `verum_kernel::soundness::corpus_export` — `CorpusBackend`.
-///   - `verum_smt::proof_replay` — proof-term lowering (`ProofReplayBackend`).
-///   - `verum_kernel::soundness::apply_graph` — foreign-prefix
-///     classification (mirrors `is_foreign_framework_target`).
+
+///  - `verum_verification::foreign_import` — skeleton import (this module).
+///  - `verum_smt::cross_format_runner` — re-check via `Checker`.
+///  - `verum_kernel::soundness::corpus_export` — `CorpusBackend`.
+///  - `verum_smt::proof_replay` — proof-term lowering (`ProofReplayBackend`).
+///  - `verum_kernel::soundness::apply_graph` — foreign-prefix
+///  classification (mirrors `is_foreign_framework_target`).
 ///
+
 /// **Pre-#166**: each layer had its own foreign-system enumeration
 /// (string-based dispatch in `proof_replay`, `ExportFormat` in
 /// `cross_format_runner`, this 4-variant enum in `foreign_import`).
@@ -67,27 +77,27 @@ use verum_common::Text;
 /// Verum and is the migration target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ForeignSystem {
-    /// Coq / Rocq — `.v` files.  Parses `Theorem` / `Lemma` /
+    /// Coq / Rocq — `.v` files. Parses `Theorem` / `Lemma` /
     /// `Corollary` / `Axiom` / `Definition`.
     Coq,
-    /// Lean 4 / Mathlib4 — `.lean` files.  Parses `theorem` /
+    /// Lean 4 / Mathlib4 — `.lean` files. Parses `theorem` /
     /// `lemma` / `axiom` / `def`.
     Lean4,
-    /// Mizar — `.miz` files.  Parses `theorem` / `definition` /
+    /// Mizar — `.miz` files. Parses `theorem` / `definition` /
     /// `reservation`.
     Mizar,
-    /// Isabelle/HOL — `.thy` files.  Parses `theorem` / `lemma` /
+    /// Isabelle/HOL — `.thy` files. Parses `theorem` / `lemma` /
     /// `axiomatization`.
     Isabelle,
-    /// Agda — `.agda` files.  Used by `verum_smt::proof_replay::agda`
-    /// for SMT proof-term replay.  Parses `theorem` / `lemma` /
+    /// Agda — `.agda` files. Used by `verum_smt::proof_replay::agda`
+    /// for SMT proof-term replay. Parses `theorem` / `lemma` /
     /// `postulate` (axiom-equivalent).
     Agda,
-    /// Dedukti / Lambdapi — `.dk` / `.lp` files.  Used by
+    /// Dedukti / Lambdapi — `.dk` / `.lp` files. Used by
     /// `verum_smt::proof_replay::dedukti` for λΠ-modulo proof terms.
     /// Universal logical framework — every other system encodes into it.
     Dedukti,
-    /// Metamath — `.mm` files.  Used by `verum_smt::proof_replay::metamath`.
+    /// Metamath — `.mm` files. Used by `verum_smt::proof_replay::metamath`.
     /// Tiny verifier (~500 LOC) — the formal-methods minimalist's choice.
     Metamath,
 }
@@ -108,7 +118,7 @@ impl ForeignSystem {
         }
     }
 
-    /// Parse a system tag from its diagnostic name.  Accepts a few
+    /// Parse a system tag from its diagnostic name. Accepts a few
     /// common aliases.
     pub fn from_name(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -151,9 +161,9 @@ impl ForeignSystem {
         }
     }
 
-    /// Install hint for the system's verifier toolchain.  Used by
+    /// Install hint for the system's verifier toolchain. Used by
     /// `Checker::install_hint()` and CLI diagnostics when a foreign
-    /// tool is missing.  One sentence, ASCII-clean.
+    /// tool is missing. One sentence, ASCII-clean.
     pub fn install_hint(self) -> &'static str {
         match self {
             Self::Coq => "install Coq via opam: `opam install coq`",
@@ -193,7 +203,7 @@ impl ForeignSystem {
     }
 
     /// Systems that currently have an `Importer` implementation
-    /// (statement-level skeleton extraction).  Excludes Agda / Dedukti
+    /// (statement-level skeleton extraction). Excludes Agda / Dedukti
     /// / Metamath which are output-only (proof-replay targets).
     pub fn with_importer() -> [ForeignSystem; 4] {
         [Self::Coq, Self::Lean4, Self::Mizar, Self::Isabelle]
@@ -205,7 +215,7 @@ impl ForeignSystem {
     }
 
     /// Whether this system has a corresponding `Checker`
-    /// (cross-format re-check via foreign toolchain).  Only Coq +
+    /// (cross-format re-check via foreign toolchain). Only Coq +
     /// Lean4 currently — the others lack hermetic checker integrations.
     pub fn has_checker(self) -> bool {
         matches!(self, Self::Coq | Self::Lean4)
@@ -245,7 +255,7 @@ pub struct ForeignTheorem {
     pub name: Text,
     pub kind: ForeignTheoremKind,
     /// Raw statement string (everything between `:` and the end of
-    /// the declaration before the proof body).  Verbatim — no
+    /// the declaration before the proof body). Verbatim — no
     /// translation; the user / LLM-tactic translates this to a
     /// Verum proposition at fill time.
     pub statement: Text,
@@ -254,18 +264,18 @@ pub struct ForeignTheorem {
     /// 1-based line number where the declaration begins.
     pub source_line: u32,
     /// `@framework(<tag>, "<source>:<line>")` citation for the
-    /// emitted Verum skeleton.  Composed from `system.framework_tag`
+    /// emitted Verum skeleton. Composed from `system.framework_tag`
     /// + `source_file:source_line`.
     pub framework_citation: Text,
     /// Qualified path produced by walking the enclosing scopes
     /// (Coq `Section`/`Module`, Lean `namespace`, Isabelle
-    /// `theory`).  Empty when the declaration is at top level.
+    /// `theory`). Empty when the declaration is at top level.
     /// Foreign-system convention: dot-separated.
     /// (#93 hardening — replaces the V0 flat-name view.)
     #[serde(default)]
     pub qualified_name: Text,
     /// Names of the enclosing scopes in source order, outermost
-    /// first.  Empty for top-level declarations.
+    /// first. Empty for top-level declarations.
     #[serde(default)]
     pub scope_path: Vec<Text>,
 }
@@ -356,9 +366,10 @@ pub trait ForeignSystemImporter: std::fmt::Debug + Send + Sync {
 
 /// Look up the canonical importer for a system tag.
 ///
+
 /// **Returns `None`** for systems without an importer
 /// (`Agda`/`Dedukti`/`Metamath` — they're proof-replay targets, not
-/// import sources).  Use [`ForeignSystem::with_importer`] to enumerate
+/// import sources). Use [`ForeignSystem::with_importer`] to enumerate
 /// systems with importers up-front.
 pub fn try_importer_for(system: ForeignSystem) -> Option<Box<dyn ForeignSystemImporter>> {
     match system {
@@ -374,7 +385,8 @@ pub fn try_importer_for(system: ForeignSystem) -> Option<Box<dyn ForeignSystemIm
 
 /// Look up the canonical importer for a system tag.
 ///
-/// **Panics** for systems without an importer.  Prefer
+
+/// **Panics** for systems without an importer. Prefer
 /// [`try_importer_for`] when handling unknown system tags from user
 /// input; this variant is for callers that have already validated the
 /// system has an importer (e.g., via [`ForeignSystem::with_importer`]).
@@ -391,16 +403,18 @@ pub fn importer_for(system: ForeignSystem) -> Box<dyn ForeignSystemImporter> {
 // CoqImporter
 // =============================================================================
 
-/// Coq / Rocq statement-level importer.  Recognises:
+/// Coq / Rocq statement-level importer. Recognises:
 ///
-///   * `Theorem <name> : <statement>.` (proof body discarded)
-///   * `Lemma <name> : <statement>.`
-///   * `Corollary <name> : <statement>.`
-///   * `Axiom <name> : <statement>.`
-///   * `Definition <name> ... : <type> := <body>.`
+
+///  * `Theorem <name> : <statement>.` (proof body discarded)
+///  * `Lemma <name> : <statement>.`
+///  * `Corollary <name> : <statement>.`
+///  * `Axiom <name> : <statement>.`
+///  * `Definition <name> ... : <type> := <body>.`
 ///
+
 /// The statement extends from the `:` after the name to the
-/// terminating `.` (Coq's statement terminator).  Multi-line
+/// terminating `.` (Coq's statement terminator). Multi-line
 /// statements are preserved verbatim.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CoqImporter;
@@ -442,15 +456,17 @@ const COQ_KEYWORDS: &[(&str, ForeignTheoremKind)] = &[
 // Lean4Importer
 // =============================================================================
 
-/// Lean 4 / Mathlib4 importer.  Recognises:
+/// Lean 4 / Mathlib4 importer. Recognises:
 ///
-///   * `theorem <name> : <statement> := <proof>` (proof discarded)
-///   * `lemma <name> : <statement> := <proof>`
-///   * `axiom <name> : <statement>`
-///   * `def <name> : <type> := <body>`
+
+///  * `theorem <name> : <statement> := <proof>` (proof discarded)
+///  * `lemma <name> : <statement> := <proof>`
+///  * `axiom <name> : <statement>`
+///  * `def <name> : <type> := <body>`
 ///
+
 /// Statement extends from `:` after the name to `:=` (the proof
-/// separator).  Stops at end-of-line if there's no `:=` (axioms).
+/// separator). Stops at end-of-line if there's no `:=` (axioms).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Lean4Importer;
 
@@ -490,7 +506,7 @@ const LEAN_KEYWORDS: &[(&str, ForeignTheoremKind)] = &[
 // MizarImporter
 // =============================================================================
 
-/// Mizar Mathematical Library importer.  Statement-level only;
+/// Mizar Mathematical Library importer. Statement-level only;
 /// Mizar's `proof ... end` blocks are admitted.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct MizarImporter;
@@ -529,7 +545,7 @@ const MIZAR_KEYWORDS: &[(&str, ForeignTheoremKind)] = &[
 // IsabelleImporter
 // =============================================================================
 
-/// Isabelle/HOL importer.  Recognises `theorem` / `lemma` /
+/// Isabelle/HOL importer. Recognises `theorem` / `lemma` /
 /// `axiomatization` keywords; statements span until the next
 /// `proof` / `by` / `apply` keyword (where the proof body begins).
 #[derive(Debug, Default, Clone, Copy)]
@@ -570,18 +586,20 @@ const ISABELLE_KEYWORDS: &[(&str, ForeignTheoremKind)] = &[
 // Shared statement-level extractor
 // =============================================================================
 
-/// Block-structured extractor (#93 hardening).  Handles:
+/// Block-structured extractor (#93 hardening). Handles:
 ///
-///   * Coq: `Section S. ... End S.` and `Module M. ... End M.` —
-///     names are pushed/popped from the scope stack so qualified
-///     declarations get the right `S.M.thm` rendering.
-///   * Lean4: `namespace foo ... end foo` — same model.
-///   * Isabelle: `theory T begin ... end` — wraps every declaration
-///     in the theory name.
-///   * Mizar: no block-nesting (top-level only); the importer still
-///     respects `definition ... end;` as a no-scope frame so
-///     internal declarations aren't double-counted.
+
+///  * Coq: `Section S. ... End S.` and `Module M. ... End M.` —
+///  names are pushed/popped from the scope stack so qualified
+///  declarations get the right `S.M.thm` rendering.
+///  * Lean4: `namespace foo ... end foo` — same model.
+///  * Isabelle: `theory T begin ... end` — wraps every declaration
+///  in the theory name.
+///  * Mizar: no block-nesting (top-level only); the importer still
+///  respects `definition ... end;` as a no-scope frame so
+///  internal declarations aren't double-counted.
 ///
+
 /// Multi-line statements are aggregated up to the per-system
 /// terminator (`.` for Coq/Isabelle/Mizar, `:=` or end-of-block
 /// for Lean) so a `Theorem foo : ...` whose statement spans 5
@@ -669,7 +687,7 @@ enum ScopeCloseShape<'a> {
 }
 
 /// Recognise `Section X.` / `Module X.` (Coq) / `namespace X` (Lean)
-/// / `theory X` (Isabelle).  Returns the new scope name on match.
+/// / `theory X` (Isabelle). Returns the new scope name on match.
 fn match_scope_open<'a>(line: &'a str, system: ForeignSystem) -> Option<&'a str> {
     let line = line.trim();
     match system {
@@ -720,9 +738,10 @@ fn match_scope_open<'a>(line: &'a str, system: ForeignSystem) -> Option<&'a str>
 
 /// Recognise scope-closing forms:
 ///
-///   * Coq:      `End X.`        → Named(X)
-///   * Lean4:    `end foo`       → Named(foo); `end` alone → Anonymous
-///   * Isabelle: `end`           → Anonymous
+
+///  * Coq: `End X.` → Named(X)
+///  * Lean4: `end foo` → Named(foo); `end` alone → Anonymous
+///  * Isabelle: `end` → Anonymous
 fn match_scope_close<'a>(line: &'a str, system: ForeignSystem) -> Option<ScopeCloseShape<'a>> {
     let line = line.trim().trim_end_matches('.').trim();
     match system {
@@ -783,12 +802,13 @@ fn is_ident_char(c: char) -> bool {
 }
 
 /// Aggregate a multi-line declaration into one logical line.
-/// Returns `(joined_text, lines_consumed)`.  The aggregator stops
+/// Returns `(joined_text, lines_consumed)`. The aggregator stops
 /// at the per-system terminator:
 ///
-///   * Coq / Mizar / Isabelle: `.` at end of a line (or top-level
-///     `proof` / `by` / `apply` for Isabelle).
-///   * Lean4: `:=` or a blank line.
+
+///  * Coq / Mizar / Isabelle: `.` at end of a line (or top-level
+///  `proof` / `by` / `apply` for Isabelle).
+///  * Lean4: `:=` or a blank line.
 fn aggregate_decl(remaining: &[&str], system: ForeignSystem) -> (String, usize) {
     let mut joined = String::new();
     let mut consumed = 0usize;
@@ -819,7 +839,7 @@ fn aggregate_decl(remaining: &[&str], system: ForeignSystem) -> (String, usize) 
             }
             // For systems where multi-line aggregation isn't yet
             // implemented, terminate at any line boundary so the
-            // caller advances cleanly.  Parsing for these systems
+            // caller advances cleanly. Parsing for these systems
             // lives in `verum_smt::proof_replay::*` and consumes
             // single-line declarations only.
             ForeignSystem::Agda
@@ -920,7 +940,7 @@ fn parse_decl_line(
     })
 }
 
-/// Strip system-specific comment forms.  Replaces comment regions
+/// Strip system-specific comment forms. Replaces comment regions
 /// with whitespace (preserving line numbers) so the keyword
 /// extractor works against a comment-free view.
 fn strip_comments(content: &str, system: ForeignSystem) -> String {
@@ -928,10 +948,10 @@ fn strip_comments(content: &str, system: ForeignSystem) -> String {
         ForeignSystem::Coq | ForeignSystem::Isabelle => strip_block_comments(content, "(*", "*)"),
         ForeignSystem::Lean4 => strip_line_comments(content, "--"),
         ForeignSystem::Mizar => strip_line_comments(content, "::"),
-        // Agda uses Lean-style `--` line comments + `{-  -}` block
+        // Agda uses Lean-style `--` line comments + `{- -}` block
         // comments; current minimal-viable handling strips only line
         // comments (matches how the proof_replay parser consumes Agda
-        // input).  Dedukti/Lambdapi use Coq-style block comments.
+        // input). Dedukti/Lambdapi use Coq-style block comments.
         ForeignSystem::Agda => strip_line_comments(content, "--"),
         ForeignSystem::Dedukti => strip_block_comments(content, "(;", ";)"),
         // Metamath uses `$( ... $)` block comments.
@@ -1030,7 +1050,7 @@ mod tests {
     #[test]
     fn all_systems_count_is_seven_post_166() {
         // #166 step 1: extended from 4 → 7 systems (Coq, Lean4, Mizar,
-        // Isabelle, Agda, Dedukti, Metamath).  Pin the count so future
+        // Isabelle, Agda, Dedukti, Metamath). Pin the count so future
         // additions are intentional.
         assert_eq!(ForeignSystem::all().len(), 7);
     }

@@ -14,8 +14,10 @@
 )]
 // Tests for module-aware type checking
 //
+
 // Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports
 //
+
 // These tests verify that the type system correctly:
 // - Tracks current module context
 // - Resolves qualified type names (Module.Type)

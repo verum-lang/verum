@@ -5,8 +5,10 @@
 // Dependencies: core, collections, io, sync
 // =============================================================================
 //
+
 // This module provides asynchronous programming support:
 //
+
 // - poll.vr: Poll state for futures
 // - waker.vr: Waker and Context for async runtime
 // - future.vr: Future protocol and combinators
@@ -15,6 +17,7 @@
 // - executor.vr: Simple async executor
 // - select.vr: Select expression support
 //
+
 // =============================================================================
 
 module async;

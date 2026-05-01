@@ -5,6 +5,7 @@
 // Spec: internal/specs/database.md §4.3
 // =============================================================================
 //
+
 // `Pool<C, M>` is a supervisor-tree node managing a fleet of
 // connections to a single database. The mode marker `M` controls
 // pgbouncer-compat: `Session` (default) keeps a connection across
@@ -57,7 +58,7 @@ public type Pool is protocol {
     async fn acquire(&self, timeout: Duration) -> Result<PoolHandle<Self.Conn>, DbError>;
 
     /// Drain — refuse new acquisitions, wait for in-flight checkouts,
-    /// close gracefully.  Returns when all connections are closed.
+    /// close gracefully. Returns when all connections are closed.
     async fn drain(&self, deadline: Duration) -> Result<(), DbError>;
 
     /// Live counts — useful for metrics / health-checks.

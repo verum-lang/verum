@@ -5,10 +5,12 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Poll<T> represents the state of an asynchronous computation:
 // - Ready(T): The computation completed with value T
 // - Pending: The computation is not yet complete
 //
+
 // =============================================================================
 
 module core.async.poll;
@@ -75,6 +77,7 @@ implement<T> Poll<T> {
 
 // For Poll<Result<T, E>>
 //
+
 // `map_ok` / `map_err` live HERE rather than the generic
 // `implement<T> Poll<T>` block above because they destructure
 // `Ready(Ok(_))` / `Ready(Err(_))` — operations only valid when

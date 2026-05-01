@@ -1,5 +1,6 @@
 //! ε-invariant ↔ md-ω bridge tests ().
 //!
+
 //! Per defect 3: the Actic ε-invariant ordinal
 //! arithmetic (Diakrisis 12-actic/03-epsilon-invariant.md) and
 //! the kernel's Cantor-normal-form OrdinalDepth (used by

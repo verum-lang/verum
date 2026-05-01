@@ -8,21 +8,25 @@ module sys.linux.thread;
 // Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
+
 // This module provides thread creation via clone/clone3 and comprehensive
 // futex operations for synchronization primitives.
 //
+
 // LinuxThread creation flow:
 // 1. Allocate stack (mmap or from pool)
 // 2. Initialize TLS block (create_thread_tls)
 // 3. clone3() with CLONE_SETTLS to create thread
 // 4. LinuxThread starts at entry function
 //
+
 // Futex provides building blocks for:
 // - Mutexes (futex_wait/wake)
 // - Condition variables (futex_wait with requeue)
 // - Semaphores (atomic inc + wake)
 // - Read-write locks (multiple wait queues)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -190,11 +194,13 @@ public const STACK_GUARD_SIZE: USize = 4096;
 
 /// Spawn a new thread.
 ///
+
 /// # Arguments
 /// * `entry` - LinuxThread entry function
 /// * `arg` - Argument passed to entry function
 /// * `stack_size` - Stack size (0 = default 2MB)
 ///
+
 /// # Returns
 /// LinuxThread handle on success, error on failure.
 public fn spawn(entry: LinuxThreadFn, arg: &unsafe Byte, stack_size: USize) -> Result<LinuxThread, LinuxThreadError> {
@@ -422,11 +428,13 @@ public const FUTEX_BITSET_MATCH_ANY: UInt32 = 0xFFFFFFFF;
 
 /// Wait on a futex if value matches expected.
 ///
+
 /// # Arguments
 /// * `addr` - Address of futex word
 /// * `expected` - Expected value (wait only if *addr == expected)
 /// * `timeout_ns` - Timeout in nanoseconds (None = infinite)
 ///
+
 /// # Returns
 /// * `Ok(())` - Woken normally
 /// * `Err(EAGAIN)` - Value changed before sleep
@@ -463,10 +471,12 @@ public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Re
 
 /// Wake threads waiting on a futex.
 ///
+
 /// # Arguments
 /// * `addr` - Address of futex word
 /// * `count` - Maximum number of threads to wake
 ///
+
 /// # Returns
 /// Number of threads woken.
 public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
@@ -489,6 +499,7 @@ public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
 
 /// Requeue waiters from one futex to another.
 ///
+
 /// # Arguments
 /// * `addr` - Address of source futex
 /// * `wake_count` - Number of waiters to wake
@@ -521,6 +532,7 @@ public fn futex_requeue(
 
 /// Requeue with value check.
 ///
+
 /// Only requeues if *addr == expected.
 public fn futex_cmp_requeue(
     addr: &Int,
@@ -642,8 +654,8 @@ implement LinuxSpinLock {
                 break;
             }
             // Spin-wait hint. Architecture-specific:
-            //   x86_64:  pause  — reduces memory-order violations
-            //   aarch64: yield  — hints SMT/CPU to hand off resources
+            //  x86_64: pause — reduces memory-order violations
+            //  aarch64: yield — hints SMT/CPU to hand off resources
             @cfg(target_arch = "x86_64")  { @asm("pause"); }
             @cfg(target_arch = "aarch64") { @asm("yield"); }
         }

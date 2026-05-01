@@ -1,18 +1,21 @@
 #![cfg(feature = "cvc5")]
 //! Comprehensive Benchmarking Comparison: Z3 vs CVC5
 //!
+
 //! This benchmark suite compares performance characteristics between Z3 and CVC5 across:
 //! - Different SMT theories (LIA, LRA, BV, NRA, Arrays)
 //! - Different problem sizes (small, medium, large)
 //! - Different complexity levels (trivial, moderate, hard)
 //! - Different query types (SAT, UNSAT, Unknown)
 //!
+
 //! Performance Targets:
 //! - Simple queries: < 1ms
 //! - Moderate queries: < 10ms
 //! - Complex queries: < 100ms
 //! - Very complex: < 1s
 //!
+
 //! SMT performance targets for CBGR verification: simple queries <1ms, moderate <10ms,
 //! complex <100ms, very complex <1s. CBGR check overhead: 15-50ns typical per dereference.
 //! Escape analysis can promote `&T` to `&checked T` (0ns) when safety is proven.

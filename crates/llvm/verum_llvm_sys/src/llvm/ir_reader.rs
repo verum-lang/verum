@@ -5,6 +5,7 @@ use super::prelude::*;
 unsafe extern "C" {
     /// Read LLVM IR from a memory buffer and convert it to an in-memory Module.
     ///
+
     /// Returns 0 on success, and an optional human-readable description of any
     /// errors that occurred.
     pub fn LLVMParseIRInContext(

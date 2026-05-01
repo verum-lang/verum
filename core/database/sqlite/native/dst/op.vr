@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.5 (DST)
 //
+
 // Each `DbOp` is one user-visible action the harness will replay
 // against the live Database. The set is deliberately small —
 // enough to drive the L7 façade, not enough to model every SQL

@@ -3,20 +3,23 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.4
 //
+
 // Each row of the dbstat virtual table is one B-tree page in the
 // database. SQLite's columns are:
 //
-//   name         TEXT      -- table or index name owning the page
-//   path         TEXT      -- '/<n>' = root, '/<n>/<m>' = m-th child of n
-//   pageno       INTEGER   -- 1-based page number
-//   pagetype     TEXT      -- 'internal' / 'leaf' / 'overflow'
-//   ncell        INTEGER   -- # cells on this page
-//   payload      INTEGER   -- bytes of payload on this page
-//   unused       INTEGER   -- unused bytes on this page
-//   mx_payload   INTEGER   -- biggest cell payload on this page
-//   pgoffset     INTEGER   -- byte offset of page in db file
-//   pgsize       INTEGER   -- bytes per page
+
+//  name TEXT -- table or index name owning the page
+//  path TEXT -- '/<n>' = root, '/<n>/<m>' = m-th child of n
+//  pageno INTEGER -- 1-based page number
+//  pagetype TEXT -- 'internal' / 'leaf' / 'overflow'
+//  ncell INTEGER -- # cells on this page
+//  payload INTEGER -- bytes of payload on this page
+//  unused INTEGER -- unused bytes on this page
+//  mx_payload INTEGER -- biggest cell payload on this page
+//  pgoffset INTEGER -- byte offset of page in db file
+//  pgsize INTEGER -- bytes per page
 //
+
 // =============================================================================
 
 module core.database.sqlite.native.dbstat.page_stat;

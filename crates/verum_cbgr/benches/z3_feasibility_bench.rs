@@ -1,5 +1,6 @@
 //! Performance benchmarks for Z3 feasibility checking
 //!
+
 //! This benchmark suite measures the performance of Z3 SMT solver integration
 //! for path feasibility checking in CBGR escape analysis.
 

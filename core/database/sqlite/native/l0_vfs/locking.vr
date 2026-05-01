@@ -6,38 +6,45 @@ module core.database.sqlite.native.l0_vfs.locking;
 // Layer: 0
 // Spec: sqlite-native.md §7.4, sqlite.org/lockingv3.html
 //
+
 // SQLite coordinates readers and writers across processes by exclusive-
 // and shared-locking disjoint bytes in a reserved region near 1 GiB.
 // The scheme transitions a connection through five monotone states:
 //
-//   UNLOCKED  →  SHARED  →  RESERVED  →  PENDING  →  EXCLUSIVE
-//        ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ←
-//            (release collapses straight back to UNLOCKED)
+
+//  UNLOCKED → SHARED → RESERVED → PENDING → EXCLUSIVE
+//  ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ←
+//  (release collapses straight back to UNLOCKED)
 //
+
 // Byte-range mapping (all offsets relative to the main database file,
 // well past any real data):
 //
-//     SHARED_FIRST  = 0x40000002         (1 073 741 826)   ┐  SHARED-range,
-//     SHARED_SIZE   = 510 bytes                            │  bytes
-//                                                          ┘  0x40000002..
-//                                                               0x40000200
-//     RESERVED_BYTE = 0x40000001         (1 073 741 825)
-//     PENDING_BYTE  = 0x40000000         (1 073 741 824)
+
+//  SHARED_FIRST = 0x40000002 (1 073 741 826) ┐ SHARED-range,
+//  SHARED_SIZE = 510 bytes │ bytes
+//  ┘ 0x40000002..
+//  0x40000200
+//  RESERVED_BYTE = 0x40000001 (1 073 741 825)
+//  PENDING_BYTE = 0x40000000 (1 073 741 824)
 //
+
 // Role of each lock:
 //
-//     SHARED     — shared lock on ONE byte inside the SHARED-range. Many
-//                  connections may hold their own shared byte concurrently;
-//                  a SHARED-state connection is a reader.
-//     RESERVED   — exclusive lock on the single RESERVED_BYTE. Only one
-//                  connection can be RESERVED at a time; it is a
-//                  prospective writer that has not yet blocked readers.
-//     PENDING    — exclusive lock on the single PENDING_BYTE. Blocks NEW
-//                  SHARED acquires while letting existing readers drain.
-//     EXCLUSIVE  — exclusive lock on the full SHARED-range (bytes
-//                  SHARED_FIRST..SHARED_FIRST+SHARED_SIZE). Only reachable
-//                  from RESERVED or PENDING; the writer now has the file.
+
+//  SHARED — shared lock on ONE byte inside the SHARED-range. Many
+//  connections may hold their own shared byte concurrently;
+//  a SHARED-state connection is a reader.
+//  RESERVED — exclusive lock on the single RESERVED_BYTE. Only one
+//  connection can be RESERVED at a time; it is a
+//  prospective writer that has not yet blocked readers.
+//  PENDING — exclusive lock on the single PENDING_BYTE. Blocks NEW
+//  SHARED acquires while letting existing readers drain.
+//  EXCLUSIVE — exclusive lock on the full SHARED-range (bytes
+//  SHARED_FIRST..SHARED_FIRST+SHARED_SIZE). Only reachable
+//  from RESERVED or PENDING; the writer now has the file.
 //
+
 // Backend: `core.sys.try_lock_region` (F_OFD_SETLK on Linux,
 // F_SETLK on Darwin, LockFileEx on Windows).
 // =============================================================================
@@ -131,13 +138,14 @@ public fn transition(
 ) -> Result<(), VfsError> {
     // SQLite's ordering (sqlite.org/lockingv3.html §3):
     //
-    //     Unlocked  → Shared      : shared-lock SHARED-byte
-    //     Shared    → Reserved    : exclusive-lock RESERVED_BYTE
-    //     Reserved  → Exclusive   : unlock SHARED-byte, exclusive-lock
-    //                               whole SHARED-range
-    //     Shared    → Pending     : exclusive-lock PENDING_BYTE
-    //     Pending   → Exclusive   : exclusive-lock whole SHARED-range
-    //     any       → Unlocked    : unlock everything
+
+    //  Unlocked → Shared : shared-lock SHARED-byte
+    //  Shared → Reserved : exclusive-lock RESERVED_BYTE
+    //  Reserved → Exclusive : unlock SHARED-byte, exclusive-lock
+    //  whole SHARED-range
+    //  Shared → Pending : exclusive-lock PENDING_BYTE
+    //  Pending → Exclusive : exclusive-lock whole SHARED-range
+    //  any → Unlocked : unlock everything
     match target {
         Unlocked  => release_all(manager),
         Shared    => acquire_shared(manager),
@@ -230,20 +238,23 @@ public fn acquire_pending(manager: &mut SqliteLockManager) -> Result<(), VfsErro
     }
 }
 
-/// Reserved/Pending → Exclusive.  Drops the SHARED-byte then takes
+/// Reserved/Pending → Exclusive. Drops the SHARED-byte then takes
 /// an exclusive lock over the entire SHARED-range.
 ///
+
 /// **Atomicity contract** (post-fix):
 ///
-///   On success     → manager.state == Exclusive (kernel matches).
-///   On EXCLUSIVE   → SHARED is restored AND manager.state stays
-///   acquire fail     at the original Reserved/Pending value; kernel
-///                    matches.  Caller may retry.
-///   On SHARED      → manager.state is forced to Unlocked AND a
-///   restore-fail     fatal IoError is returned.  Caller MUST close
-///                    the file: continuing with state-divergence
-///                    risks SQLite-protocol invariants.
+
+///  On success → manager.state == Exclusive (kernel matches).
+///  On EXCLUSIVE → SHARED is restored AND manager.state stays
+///  acquire fail at the original Reserved/Pending value; kernel
+///  matches. Caller may retry.
+///  On SHARED → manager.state is forced to Unlocked AND a
+///  restore-fail fatal IoError is returned. Caller MUST close
+///  the file: continuing with state-divergence
+///  risks SQLite-protocol invariants.
 ///
+
 /// Pre-fix the rollback path on EXCLUSIVE failure used `try_lock_region`
 /// without checking the result — if SHARED re-acquisition itself
 /// failed (rare but possible: another connection raced into the
@@ -272,7 +283,7 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
                     Ok(())
                 }
                 Err(e) => {
-                    // Roll back to the original state.  The SHARED byte
+                    // Roll back to the original state. The SHARED byte
                     // re-acquisition MUST succeed; if it doesn't, the
                     // kernel state has diverged from `manager.state`
                     // and continuing risks double-write corruption.
@@ -286,9 +297,9 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
                             Err(to_vfs_error(e))
                         }
                         Err(_) => {
-                            // CRITICAL: state divergence.  We dropped
+                            // CRITICAL: state divergence. We dropped
                             // SHARED, EXCLUSIVE failed, AND SHARED
-                            // restore failed.  The kernel now holds
+                            // restore failed. The kernel now holds
                             // NEITHER our SHARED byte NOR the EXCLUSIVE
                             // range, but `manager.state` was last
                             // Reserved/Pending which the SQLite

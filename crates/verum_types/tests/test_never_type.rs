@@ -14,6 +14,7 @@
 )]
 //! Test for Never type unification
 //!
+
 //! This test verifies that the Never type (!) properly unifies with all types,
 //! which is necessary for early return, break, and continue statements.
 

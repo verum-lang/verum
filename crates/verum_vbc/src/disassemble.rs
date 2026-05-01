@@ -1,5 +1,6 @@
 //! VBC module disassembler.
 //!
+
 //! Produces human-readable text representation of VBC bytecode modules.
 //! Used by `--emit-vbc` to dump compiled bytecode for debugging.
 

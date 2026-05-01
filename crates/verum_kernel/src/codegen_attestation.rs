@@ -1,43 +1,51 @@
 //! Verified-compilation kernel-discharge manifest (#162 / CompCert-style
 //! per-pass simulation theorems).
 //!
+
 //! # Architectural role
 //!
-//! Verum compiles via VBC (bytecode) → LLVM IR for AOT.  Currently every
+
+//! Verum compiles via VBC (bytecode) → LLVM IR for AOT. Currently every
 //! codegen pass is trusted by code-review only — there is no
-//! kernel-discharged correctness attestation.  CompCert's contribution
+//! kernel-discharged correctness attestation. CompCert's contribution
 //! to verified compilation was the per-pass simulation theorem: each
 //! compiler phase preserves observable behaviour with a kernel-checked
 //! semantic-preservation proof.
 //!
-//! Task #162 wants the same for Verum.  Each codegen pass should
+
+//! Task #162 wants the same for Verum. Each codegen pass should
 //! eventually emit a `@kernel_discharge("kernel_<pass>_preserves_semantics")`
-//! attestation that downstream tooling can audit.  This module is the
+//! attestation that downstream tooling can audit. This module is the
 //! **foundation layer**: a static manifest of the canonical pass roster
 //! plus per-pass attestation slots that future passes can populate.
 //!
+
 //! ```text
-//!   Pre-#162:  6 codegen passes, 0 kernel-discharge attestations
-//!              (trusted by code-review only)
-//!   #162 :     6 codegen passes, 0 attested + 6 NotYetAttested IOUs
-//!              (this manifest's V0 surface — observability only)
-//!   Future :   6 passes, k attested + (6-k) Admitted_with_IOU
-//!   Goal   :   6 passes, 6 attested (CompCert parity for Verum)
+//!  Pre-#162: 6 codegen passes, 0 kernel-discharge attestations
+//!  (trusted by code-review only)
+//!  #162 : 6 codegen passes, 0 attested + 6 NotYetAttested IOUs
+//!  (this manifest's current surface — observability only)
+//!  Future : 6 passes, k attested + (6-k) Admitted_with_IOU
+//!  Goal : 6 passes, 6 attested (CompCert parity for Verum)
 //! ```
 //!
+
 //! # What this manifest is NOT
 //!
+
 //! It is not a codegen pass itself, and it does not change any actual
-//! lowering or transformation.  This commit deliberately ships ONLY
+//! lowering or transformation. This commit deliberately ships ONLY
 //! the data layer; per-pass discharge work lands in subsequent commits
 //! that flip individual entries from `NotYetAttested` to
 //! `Discharged` or `Admitted_with_IOU`.
 //!
+
 //! # Pattern reference
 //!
+
 //! Mirror of [`crate::soundness::kernel_v0_manifest`] — same layered
 //! shape (status enum → row record → manifest function → helper
-//! count fns → audit gate).  Keeping the architectural shape uniform
+//! count fns → audit gate). Keeping the architectural shape uniform
 //! means audit tooling can be templated across both manifests.
 
 use serde::{Deserialize, Serialize};
@@ -47,36 +55,36 @@ use serde::{Deserialize, Serialize};
 // =============================================================================
 
 /// Canonical pass identifiers — match the actual phases under
-/// `crates/verum_codegen/src/`.  The ordering matches the lowering
+/// `crates/verum_codegen/src/`. The ordering matches the lowering
 /// order: VBC arrives, LLVM IR is built, and machine code is emitted
 /// at the tail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CodegenPassId {
-    /// Lowering of VBC bytecode IR into LLVM IR.  Implemented in
+    /// Lowering of VBC bytecode IR into LLVM IR. Implemented in
     /// `crates/verum_codegen/src/llvm/vbc_lowering.rs`.
     VbcLowering,
-    /// Mem-to-reg / SSA construction over the lowered IR.  Currently
+    /// Mem-to-reg / SSA construction over the lowered IR. Currently
     /// delegated to LLVM's `mem2reg` pass; the simulation invariant
     /// here is that SSA construction preserves the operational
     /// semantics established by [`Self::VbcLowering`].
     SsaConstruction,
     /// Generic register-allocation pass identifier — covers the
     /// allocation-strategy-agnostic invariant that allocation
-    /// preserves observable behaviour.  Specific allocators (e.g.
+    /// preserves observable behaviour. Specific allocators (e.g.
     /// linear-scan) carry their own attestations as well.
     RegisterAllocation,
     /// Linear-scan register allocator (the default Verum allocator
-    /// once it lands).  Has its own attestation distinct from the
+    /// once it lands). Has its own attestation distinct from the
     /// generic [`Self::RegisterAllocation`] entry because the
     /// linear-scan algorithm has additional structural invariants
     /// (live-range monotonicity) the generic invariant doesn't pin.
     LinearScanRegalloc,
     /// LLVM IR emission — the tail of the AOT pipeline before LLVM
-    /// itself takes over.  Discharges the invariant that the emitted
+    /// itself takes over. Discharges the invariant that the emitted
     /// IR is well-formed and semantically equivalent to the input.
     LlvmEmission,
-    /// Machine-code emission via LLVM's backend.  Verum sees this
+    /// Machine-code emission via LLVM's backend. Verum sees this
     /// as a black box (LLVM is outside our TCB), so this attestation
     /// is the boundary marker: anything past this point is LLVM's
     /// trust surface, not Verum's.
@@ -108,10 +116,10 @@ impl CodegenPassId {
         }
     }
 
-    /// Canonical kernel-discharge intrinsic name.  When a future
+    /// Canonical kernel-discharge intrinsic name. When a future
     /// commit wires up an attestation, it will register a
     /// `@kernel_discharge("<this name>")` annotation on the pass's
-    /// entry point.  The name format is `kernel_<tag>_preserves_semantics`.
+    /// entry point. The name format is `kernel_<tag>_preserves_semantics`.
     pub fn kernel_intrinsic_name(self) -> String {
         format!("kernel_{}_preserves_semantics", self.tag())
     }
@@ -129,6 +137,7 @@ impl std::fmt::Display for CodegenPassId {
 
 /// Discharge status for one codegen pass's preservation attestation.
 ///
+
 /// Mirrors the kernel-soundness IOU pattern from
 /// [`crate::soundness::kernel_v0_manifest::KernelV0Status`] but adds
 /// the explicit `NotYetAttested` step for the pre-attestation period.
@@ -144,7 +153,7 @@ pub enum AttestationStatus {
     Discharged,
     /// Pass is admitted with a structural-property IOU (the
     /// associated [`PassAttestation::proof_obligation`] names the
-    /// missing structural lemma).  This is the CompCert
+    /// missing structural lemma). This is the CompCert
     /// `Lemma <pass>_preserves_semantics. Admitted.` shape — honest
     /// about the gap.
     AdmittedWithIou {
@@ -153,8 +162,8 @@ pub enum AttestationStatus {
         iou: String,
     },
     /// Pass has not yet been attested at all — neither a discharge
-    /// nor a structured admit.  This is the pre-#162 surface:
-    /// "trusted by code-review only".  Each entry carries a
+    /// nor a structured admit. This is the pre-#162 surface:
+    /// "trusted by code-review only". Each entry carries a
     /// description of what would discharge it (the
     /// `proof_obligation` field on the parent [`PassAttestation`]).
     NotYetAttested,
@@ -206,22 +215,24 @@ impl std::fmt::Display for AttestationStatus {
 // PassAttestation — one row in the manifest
 // =============================================================================
 
-/// One codegen-pass attestation row.  Captures the pass identifier,
+/// One codegen-pass attestation row. Captures the pass identifier,
 /// the semantic invariant that an attestation must preserve, the
 /// concrete proof obligation describing what would discharge that
 /// invariant, and the current discharge status.
 ///
+
 /// # Field semantics
 ///
+
 /// * [`Self::pass`] — the canonical pass identifier.
 /// * [`Self::semantic_invariant`] — one-line statement of the
-///   observable behaviour the pass preserves (e.g. "the operational
-///   semantics of the input program is preserved by the pass").
+///  observable behaviour the pass preserves (e.g. "the operational
+///  semantics of the input program is preserved by the pass").
 /// * [`Self::proof_obligation`] — the structural lemma that would
-///   discharge the invariant.  When `status` is `Discharged`, this
-///   is the citation for the proof; when `Admitted_with_IOU`, this
-///   is the IOU describing what's missing; when `NotYetAttested`,
-///   this is the spec for the pending attestation.
+///  discharge the invariant. When `status` is `Discharged`, this
+///  is the citation for the proof; when `Admitted_with_IOU`, this
+///  is the IOU describing what's missing; when `NotYetAttested`,
+///  this is the spec for the pending attestation.
 /// * [`Self::status`] — current discharge classification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PassAttestation {
@@ -230,7 +241,7 @@ pub struct PassAttestation {
     /// Semantic invariant statement (one-line).
     pub semantic_invariant: String,
     /// Concrete proof obligation describing what would discharge the
-    /// invariant.  Doubles as the IOU citation when `status` is
+    /// invariant. Doubles as the IOU citation when `status` is
     /// `Admitted_with_IOU` or `NotYetAttested`.
     pub proof_obligation: String,
     /// Current discharge classification.
@@ -243,13 +254,15 @@ pub struct PassAttestation {
 
 /// Canonical attestation roster for Verum's codegen pipeline.
 ///
+
 /// This is the single source of truth for the codegen-attestation
-/// surface.  The manifest's V0 contents shipped with #162 — every
+/// surface. The manifest's V0 contents shipped with #162 — every
 /// entry is `NotYetAttested` and carries the precise structural
 /// invariant that would discharge it.
 ///
+
 /// **Stable contract**: adding a codegen pass requires a manifest
-/// entry.  Removing or renaming an entry is a breaking change for
+/// entry. Removing or renaming an entry is a breaking change for
 /// audit tooling.
 pub fn manifest() -> Vec<PassAttestation> {
     vec![
@@ -340,11 +353,11 @@ pub fn manifest() -> Vec<PassAttestation> {
     ]
 }
 
-/// Total codegen-pass count.  Matches the cardinality of
+/// Total codegen-pass count. Matches the cardinality of
 /// [`CodegenPassId`].
 pub const CODEGEN_PASS_COUNT: usize = 6;
 
-/// Total codegen-pass count via the manifest.  Should equal
+/// Total codegen-pass count via the manifest. Should equal
 /// [`CODEGEN_PASS_COUNT`].
 pub fn pass_count() -> usize {
     manifest().len()
@@ -453,7 +466,7 @@ mod tests {
 
     #[test]
     fn v0_baseline_is_zero_attested_six_pending() {
-        // V0 surface (#162 commit): every pass is NotYetAttested.
+        // current surface (#162 commit): every pass is NotYetAttested.
         // Every future attestation flips entries to Admitted or
         // Discharged and bumps these counts.
         assert_eq!(attested_count(), 0);

@@ -1,19 +1,22 @@
 //! Tensor expression chain analyzer (#91-1, #95).
 //!
+
 //! Walks a function's VBC instruction stream and identifies maximal
 //! Pure tensor expression chains — sequences of tensor ops where:
 //!
-//!   1. Every op is from the tensor surface (TensorBinop, TensorUnop,
-//!      TensorMatmul, TensorReduce, TensorFlashAttention,
-//!      TensorRmsNorm, TensorLayerNorm, TensorSoftmax, etc.).
-//!   2. Each producer's output register is consumed exactly once,
-//!      forming a linear data-dependency chain (DAG with single use
-//!      per intermediate).
-//!   3. No intervening I/O, mutation, or non-tensor side effect
-//!      breaks the chain. Pure tensor ops can freely move past each
-//!      other since they only touch heap-allocated tensor handles
-//!      that the runtime guarantees `noalias` on.
+
+//!  1. Every op is from the tensor surface (TensorBinop, TensorUnop,
+//!  TensorMatmul, TensorReduce, TensorFlashAttention,
+//!  TensorRmsNorm, TensorLayerNorm, TensorSoftmax, etc.).
+//!  2. Each producer's output register is consumed exactly once,
+//!  forming a linear data-dependency chain (DAG with single use
+//!  per intermediate).
+//!  3. No intervening I/O, mutation, or non-tensor side effect
+//!  breaks the chain. Pure tensor ops can freely move past each
+//!  other since they only touch heap-allocated tensor handles
+//!  that the runtime guarantees `noalias` on.
 //!
+
 //! The analyzer is deliberately conservative: it only fuses
 //! single-use chains. Multi-use intermediates (where a tensor handle
 //! is read by two downstream ops) are left unfused — they need
@@ -21,6 +24,7 @@
 //! follow-up) can fuse them with a "duplicate computation" cost
 //! check against the rematerialisation budget.
 //!
+
 //! Output: `Vec<TensorChain>` — each chain has the registers it
 //! depends on (`inputs`), the ordered tensor ops, and the final
 //! output register. The fusion lowering pass (#96) then emits a
@@ -109,13 +113,15 @@ pub enum TensorOpKind {
 /// Fusion plan derived from a `Vec<TensorChain>`. Tells the LLVM
 /// lowering pass:
 ///
-///   * which instruction indices are part of a fused chain (skip
-///     their per-op lowering — `chain_replaces[idx]` would emit
-///     duplicate runtime calls)
-///   * which instruction index is the "anchor" for each chain (the
-///     index where the fused-kernel runtime call is emitted in
-///     place of the original op)
+
+///  * which instruction indices are part of a fused chain (skip
+///  their per-op lowering — `chain_replaces[idx]` would emit
+///  duplicate runtime calls)
+///  * which instruction index is the "anchor" for each chain (the
+///  index where the fused-kernel runtime call is emitted in
+///  place of the original op)
 ///
+
 /// Anchors are picked as the LAST instruction of each chain so all
 /// chain inputs are guaranteed to be live at the anchor PC — earlier
 /// anchor positions would let LLVM SSA construction dead-code the
@@ -208,6 +214,7 @@ fn match_op_at(pc_instr: &Instruction, op: &ChainOp) -> Option<bool> {
 /// instruction stream so the lowering can interleave them with the
 /// surrounding (non-tensor) IR.
 ///
+
 /// Takes `&[Instruction]` directly rather than `&VbcFunction` so the
 /// analyzer can be unit-tested without needing to construct a full
 /// `FunctionDescriptor` chain.
@@ -216,12 +223,12 @@ pub fn analyze_instructions(instructions: &[Instruction]) -> Vec<TensorChain> {
     let use_counts = compute_use_counts(instructions);
 
     // Two-pass scan:
-    //   pass 1 — for every tensor op, record the (kind, srcs, dst)
-    //            tuple plus its index in the instruction stream
-    //   pass 2 — greedily extend chains: starting from each tensor
-    //            op whose dst is consumed exactly once by another
-    //            tensor op, walk forward absorbing single-use
-    //            intermediates until the chain breaks.
+    //  pass 1 — for every tensor op, record the (kind, srcs, dst)
+    //  tuple plus its index in the instruction stream
+    //  pass 2 — greedily extend chains: starting from each tensor
+    //  op whose dst is consumed exactly once by another
+    //  tensor op, walk forward absorbing single-use
+    //  intermediates until the chain breaks.
     let mut tensor_ops: Vec<(usize, ChainOp)> = Vec::new();
     for (idx, instr) in instructions.iter().enumerate() {
         if let Some(op) = classify(instr) {
@@ -450,9 +457,9 @@ mod tests {
     /// and output r12.
     #[test]
     fn linear_chain_is_fused() {
-        // r10 = r1 @ r2          ; matmul producing r10
-        // r11 = r10 + r3         ; add  producing r11 (consumes r10 once)
-        // r12 = r11 * r4         ; mul  producing r12 (consumes r11 once)
+        // r10 = r1 @ r2 ; matmul producing r10
+        // r11 = r10 + r3 ; add producing r11 (consumes r10 once)
+        // r12 = r11 * r4 ; mul producing r12 (consumes r11 once)
         let stream = vec![
             matmul(10, 1, 2),
             binop(TensorBinaryOp::Add, 11, 10, 3),

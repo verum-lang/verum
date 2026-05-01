@@ -3,29 +3,33 @@
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, collections, core.encoding.varint,
-//               core.net.quic.{frame, packet, connection_id, version},
-//               core.net.quic.crypto.header_protection
+//  core.net.quic.{frame, packet, connection_id, version},
+//  core.net.quic.crypto.header_protection
 // =============================================================================
 //
+
 // Incoming UDP datagram → one or more QUIC packets (coalesced). For
 // each packet:
 //
-//   1. Peek the first byte → long vs short form.
-//   2. For long: parse version, dcid_len + dcid, scid_len + scid, then
-//      per-type fields up to the truncated PN bytes. Determine pn_len
-//      via HP removal.
-//   3. For short: parse dcid (caller-known length) then truncated PN.
-//   4. HP unmask: sample = wire[pn_offset + 4 .. +20].
-//      mask[0] XOR first byte low nibble; mask[1..=pn_len] XOR pn bytes.
-//   5. Reconstruct full PN via RFC 9000 §A.3 given largest_acked_received.
-//   6. AEAD open (key, nonce = iv XOR pn, AAD = header bytes with HP
-//      removed).
-//   7. Return decrypted payload + header metadata.
+
+//  1. Peek the first byte → long vs short form.
+//  2. For long: parse version, dcid_len + dcid, scid_len + scid, then
+//  per-type fields up to the truncated PN bytes. Determine pn_len
+//  via HP removal.
+//  3. For short: parse dcid (caller-known length) then truncated PN.
+//  4. HP unmask: sample = wire[pn_offset + 4 .. +20].
+//  mask[0] XOR first byte low nibble; mask[1..=pn_len] XOR pn bytes.
+//  5. Reconstruct full PN via RFC 9000 §A.3 given largest_acked_received.
+//  6. AEAD open (key, nonce = iv XOR pn, AAD = header bytes with HP
+//  removed).
+//  7. Return decrypted payload + header metadata.
 //
+
 // Further steps (frame parsing + dispatch to recovery / streams / TLS)
 // are driven by the caller — this module's job is the crypto + parse
 // boundary.
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm.rx;
@@ -142,6 +146,7 @@ public type InboundPacket is
 /// is the caller's advertised DCID length (relevant only for Short
 /// headers — Long headers embed DCID length on the wire).
 ///
+
 /// Returns either the decrypted InboundPacket + bytes consumed, or
 /// an error. Callers iterate over coalesced packets by threading
 /// `consumed` through subsequent calls.

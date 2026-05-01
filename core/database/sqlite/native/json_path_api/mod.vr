@@ -4,12 +4,15 @@
 // JSON path syntax — used by JSON1 extension functions.
 // Spec §16.5 — JSON1.
 //
+
 // Path grammar (simplified):
-//   path ::= '$' segment*
-//   segment ::= '.' name | '[' index ']'
+//  path ::= '$' segment*
+//  segment ::= '.' name | '[' index ']'
 //
-// Examples:  $.foo, $[0], $.foo.bar[2], $.items[#-1] (last), $.**.bar (tree wildcard)
+
+// Examples: $.foo, $[0], $.foo.bar[2], $.items[#-1] (last), $.**.bar (tree wildcard)
 //
+
 // =============================================================================
 
 module core.database.sqlite.native.json_path_api;

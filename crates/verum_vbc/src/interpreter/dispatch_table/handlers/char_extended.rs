@@ -9,6 +9,7 @@ use super::bytecode_io::*;
 
 /// CharExtended (0x2B) - Character classification and conversion.
 ///
+
 /// Sub-opcodes organized by category:
 /// - 0x00-0x0F: ASCII Classification (fast path, inline)
 /// - 0x10-0x1F: ASCII Case Conversion (fast path, inline)
@@ -16,12 +17,15 @@ use super::bytecode_io::*;
 /// - 0x30-0x3F: Unicode Case Conversion (runtime lookup)
 /// - 0x40-0x4F: Char Value Operations
 ///
+
 /// # Performance
 ///
+
 /// ASCII operations are implemented inline with ~2ns overhead.
 /// Unicode operations use Rust's char methods which may require
 /// Unicode data lookup (~20-50ns).
 ///
+
 /// CBGR tier analysis: char extended operations dispatched via sub-opcode byte after
 /// the primary CharExtended (0xCA) opcode. Unicode lookups take ~20-50ns.
 pub(in super::super) fn handle_char_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {

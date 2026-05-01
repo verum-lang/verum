@@ -1,48 +1,57 @@
 //! Unified `VerificationGoal` type — the single verification surface.
 //!
+
 //! # The unification
 //!
+
 //! Verum has three notions of "the thing we verify":
 //!
-//!   1. **Function contracts** — `fn f(x: T) requires P ensures Q`
-//!      produces an obligation that the SMT-dispatch path discharges.
-//!   2. **Theorem propositions** — `theorem T(...) ensures Q { proof }`
-//!      produces an obligation discharged by the kernel +
-//!      tactic_elaborator.
-//!   3. **Refinement-type predicates** — `let x: Int{>= 0} = expr`
-//!      produces an obligation checked at type-application time.
+
+//!  1. **Function contracts** — `fn f(x: T) requires P ensures Q`
+//!  produces an obligation that the SMT-dispatch path discharges.
+//!  2. **Theorem propositions** — `theorem T(...) ensures Q { proof }`
+//!  produces an obligation discharged by the kernel +
+//!  tactic_elaborator.
+//!  3. **Refinement-type predicates** — `let x: Int{>= 0} = expr`
+//!  produces an obligation checked at type-application time.
 //!
+
 //! Without a shared representation, "what is Verum proving about
 //! this program?" has three different answers depending on the
 //! source, and the audit gate cannot enumerate the trust extension
-//! uniformly.  This module supplies the shared representation:
+//! uniformly. This module supplies the shared representation:
 //! every source produces a `VerificationGoal { hypotheses,
 //! conclusion, source }`, and every dispatcher consumes one.
 //!
+
 //! # Architectural alignment with Verum philosophy
 //!
+
 //! - **Semantic honesty**: a goal IS what we're proving — not "the
-//!   thing the SMT layer wants" or "the thing the kernel checks".
-//!   One concept, one type.
+//!  thing the SMT layer wants" or "the thing the kernel checks".
+//!  One concept, one type.
 //! - **No magic**: every goal has explicit `hypotheses`,
-//!   `conclusion`, `source`.  Nothing implicit.
+//!  `conclusion`, `source`. Nothing implicit.
 //! - **Foundation-neutral**: hypotheses + conclusion are kernel
-//!   `Term` values — they live in the same trust base as
-//!   `proof_checker`.
+//!  `Term` values — they live in the same trust base as
+//!  `proof_checker`.
 //!
+
 //! # Surface
 //!
-//!   - [`VerificationGoal`] + [`GoalSource`].
-//!   - [`from_theorem_decl`] / [`from_fn_decl`] / [`from_refinement`]
-//!     — AST-to-goal converters for the three sources.
-//!   - [`VerificationGoal::to_term`] — encode as a closed
-//!     `Pi(H_1, Pi(H_2, ..., Pi(H_n, C)))` for direct kernel use.
-//!   - [`VerificationGoal::audit_metadata`] — JSON-ready projection
-//!     for audit-gate dashboards.
+
+//!  - [`VerificationGoal`] + [`GoalSource`].
+//!  - [`from_theorem_decl`] / [`from_fn_decl`] / [`from_refinement`]
+//!  — AST-to-goal converters for the three sources.
+//!  - [`VerificationGoal::to_term`] — encode as a closed
+//!  `Pi(H_1, Pi(H_2, ..., Pi(H_n, C)))` for direct kernel use.
+//!  - [`VerificationGoal::audit_metadata`] — JSON-ready projection
+//!  for audit-gate dashboards.
 //!
+
 //! The SMT dispatch and refinement-check pathways still own their
 //! own internal pipelines; routing them through `VerificationGoal`
-//! is a separate migration.  This module establishes the target
+//! is a separate migration. This module establishes the target
 //! shape so that migration can land incrementally.
 
 use std::collections::BTreeMap;
@@ -58,12 +67,14 @@ use crate::tactic_elaborator::{
 // VerificationGoal
 // =============================================================================
 
-/// A unified verification goal.  Every source of "what to prove" in
+/// A unified verification goal. Every source of "what to prove" in
 /// Verum produces a value of this type; every dispatcher (SMT,
 /// kernel, refinement-check) consumes one.
 ///
+
 /// **Logical reading**: `H_1 ∧ H_2 ∧ ... ∧ H_n ⇒ C`.
 ///
+
 /// **Kernel-Term reading**: as a closed Pi-chain
 /// `Pi(H_1, Pi(H_2, ..., Pi(H_n, C)))` (see [`VerificationGoal::to_term`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -72,16 +83,17 @@ pub struct VerificationGoal {
     /// Logically conjoined as the antecedent.
     pub hypotheses: Vec<Term>,
     /// Translated `ensures` clause (or refinement predicate, or
-    /// theorem proposition).  The consequent.
+    /// theorem proposition). The consequent.
     pub conclusion: Term,
-    /// Where this goal came from.  Diagnostic + audit-gate metadata.
+    /// Where this goal came from. Diagnostic + audit-gate metadata.
     pub source: GoalSource,
 }
 
 /// The pipeline source that produced a [`VerificationGoal`].
 ///
+
 /// **Architectural significance**: this enum makes the verification
-/// surface explicit.  An audit gate that sees only `Theorem` sources
+/// surface explicit. An audit gate that sees only `Theorem` sources
 /// is reviewing the proof corpus; one that sees only `FnContract` is
 /// reviewing implementation contracts; one that sees mixes can
 /// answer "what's the trust extension across the entire program?"
@@ -92,7 +104,7 @@ pub enum GoalSource {
         /// Theorem name as written in source.
         name: String,
     },
-    /// `lemma name(...) ensures Q { proof { ... } }`.  Identical
+    /// `lemma name(...) ensures Q { proof { ... } }`. Identical
     /// shape to `Theorem` semantically; preserved as a separate
     /// source for diagnostic clarity.
     Lemma {
@@ -104,13 +116,13 @@ pub enum GoalSource {
         /// Corollary name.
         name: String,
     },
-    /// `fn f(x: T) requires P ensures Q`.  The fn-contract pathway.
+    /// `fn f(x: T) requires P ensures Q`. The fn-contract pathway.
     FnContract {
         /// Function name.
         fn_name: String,
     },
-    /// Subgoal generated by a tactic step.  E.g., `apply lemma; ...`
-    /// produces subgoals for each unmatched premise.  The `parent`
+    /// Subgoal generated by a tactic step. E.g., `apply lemma; ...`
+    /// produces subgoals for each unmatched premise. The `parent`
     /// names the enclosing theorem; `depth` records the nesting
     /// level so reviewers can reconstruct the proof tree.
     TacticSubgoal {
@@ -120,7 +132,7 @@ pub enum GoalSource {
         depth: usize,
     },
     /// Refinement-type predicate obligation: `let x: T{P(x)} = expr`
-    /// generates the obligation `P(expr)`.  The `ty_name` is the
+    /// generates the obligation `P(expr)`. The `ty_name` is the
     /// declared refinement type name (e.g. `"NonNegInt"` for
     /// `Int{>= 0}` if a name is available; else the auto-generated tag).
     Refinement {
@@ -143,7 +155,7 @@ impl GoalSource {
         }
     }
 
-    /// Identifier for the source.  Theorem / fn / etc. name.
+    /// Identifier for the source. Theorem / fn / etc. name.
     pub fn name(&self) -> &str {
         match self {
             GoalSource::Theorem { name } => name,
@@ -158,7 +170,7 @@ impl GoalSource {
 
 impl VerificationGoal {
     /// **Build a goal explicitly** from translated hypotheses and
-    /// conclusion.  Lower-level constructor; prefer the
+    /// conclusion. Lower-level constructor; prefer the
     /// `from_*` helpers when starting from AST.
     pub fn new(hypotheses: Vec<Term>, conclusion: Term, source: GoalSource) -> Self {
         Self {
@@ -170,16 +182,18 @@ impl VerificationGoal {
 
     /// **Encode the goal as a single closed kernel `Term`.**
     ///
-    /// The result is `Pi(H_1, Pi(H_2, ..., Pi(H_n, C)))`.  This is the
+
+    /// The result is `Pi(H_1, Pi(H_2, ..., Pi(H_n, C)))`. This is the
     /// type a proof certificate must inhabit — the de Bruijn criterion
     /// reads off this term.
     ///
+
     /// **Closure invariant**: caller must ensure all hypotheses and
-    /// the conclusion are closed.  No checking here; the kernel will
+    /// the conclusion are closed. No checking here; the kernel will
     /// reject if they aren't.
     pub fn to_term(&self) -> Term {
         let mut acc = self.conclusion.clone();
-        // Wrap from innermost (last hypothesis) outwards.  Each
+        // Wrap from innermost (last hypothesis) outwards. Each
         // wrapping adds one Pi-binder; the body's de-Bruijn indices
         // shift up by one — but since we don't re-construct the
         // hypotheses' references here, callers must build hypotheses
@@ -203,8 +217,9 @@ impl VerificationGoal {
 
     /// **Project metadata** for audit-gate JSON emission.
     ///
+
     /// Returns a `BTreeMap` with stable string keys: `kind`, `name`,
-    /// `hypothesis_count`.  Suitable for direct serde-JSON emission.
+    /// `hypothesis_count`. Suitable for direct serde-JSON emission.
     pub fn audit_metadata(&self) -> BTreeMap<String, String> {
         let mut m = BTreeMap::new();
         m.insert("kind".to_string(), self.source.kind_tag().to_string());
@@ -231,24 +246,28 @@ use verum_ast::ty::{Type, TypeKind};
 /// **Convert a theorem (or lemma / corollary) declaration to a
 /// VerificationGoal.**
 ///
+
 /// Hypotheses are constructed in two layers:
 ///
-///   1. Generic-parameter binders, one per entry in `theorem.generics`
-///      (e.g. `<A, B>`).  Each gets `Universe(0)` as a placeholder
-///      type — sufficient to thread the de Bruijn index through the
-///      Pi-chain so the conclusion can reference type variables.
-///   2. Value-parameter binders, one per entry in `theorem.params`
-///      (e.g. `(x: A, n: Int)`).  Same `Universe(0)` placeholder
-///      until full type translation lands.
-///   3. `requires`-clause hypotheses, translated via
-///      [`proposition_to_term`].
+
+///  1. Generic-parameter binders, one per entry in `theorem.generics`
+///  (e.g. `<A, B>`). Each gets `Universe(0)` as a placeholder
+///  type — sufficient to thread the de Bruijn index through the
+///  Pi-chain so the conclusion can reference type variables.
+///  2. Value-parameter binders, one per entry in `theorem.params`
+///  (e.g. `(x: A, n: Int)`). Same `Universe(0)` placeholder
+///  until full type translation lands.
+///  3. `requires`-clause hypotheses, translated via
+///  [`proposition_to_term`].
 ///
+
 /// The conclusion is the theorem's `proposition` (synthesised from
 /// `ensures` clauses), translated via [`proposition_to_term`].
 ///
+
 /// **Why parameters become hypotheses**: a theorem
 /// `theorem id<A>(x: A) ensures x` is logically `∀A. ∀x:A. x` — the
-/// generics + params are universal quantifiers.  Pi-chain encoding
+/// generics + params are universal quantifiers. Pi-chain encoding
 /// turns them into hypotheses of the goal so the certificate's
 /// claimed type reflects the full quantified statement, not just
 /// the proposition body.
@@ -258,12 +277,12 @@ pub fn from_theorem_decl(
     ctx: &ElabContext,
 ) -> Result<VerificationGoal, ElabError> {
     let mut hypotheses: Vec<Term> = Vec::new();
-    // Generic-parameter binders.  Each generic contributes one
+    // Generic-parameter binders. Each generic contributes one
     // Pi-binder with `Universe(0)` as the placeholder type.
     for _ in theorem.generics.iter() {
         hypotheses.push(Term::Universe(0));
     }
-    // Value-parameter binders.  Same placeholder until the type
+    // Value-parameter binders. Same placeholder until the type
     // translator produces real Term encodings of param types.
     for _ in theorem.params.iter() {
         hypotheses.push(Term::Universe(0));
@@ -295,16 +314,18 @@ pub enum TheoremKind {
 
 /// **Convert a function declaration to a VerificationGoal.**
 ///
+
 /// - Hypotheses: the function's `requires` clauses translated via
-///   [`proposition_to_term`].
+///  [`proposition_to_term`].
 /// - Conclusion: synthesised from the function's `ensures` clauses
-///   conjunctively.  When `ensures` is empty, the conclusion is
-///   `Universe(0)` (vacuously true).
+///  conjunctively. When `ensures` is empty, the conclusion is
+///  `Universe(0)` (vacuously true).
 /// - Source: `GoalSource::FnContract { fn_name }`.
 ///
+
 /// **Limitation**: the function body's verification (showing the
 /// implementation actually satisfies `ensures` under `requires`) is
-/// the SMT-layer's job.  This converter produces the *contract*
+/// the SMT-layer's job. This converter produces the *contract*
 /// goal; the obligation against the body is a separate pipeline.
 pub fn from_fn_decl(
     fn_decl: &FunctionDecl,
@@ -356,13 +377,15 @@ pub fn from_fn_decl(
 
 /// **Convert a refinement-type obligation to a VerificationGoal.**
 ///
+
 /// `let x: Int{P(x)} = expr` generates the obligation `P(expr)`.
 /// The base type is encoded in `hypotheses` (a single hypothesis
 /// representing `x : T`); the predicate's translation is the
 /// conclusion.
 ///
+
 /// - `base_type_term`: the kernel-Term encoding of the refinement's
-///   base type (e.g. `Universe(0)` for the simplest case).
+///  base type (e.g. `Universe(0)` for the simplest case).
 /// - `predicate`: the predicate Expr that must hold.
 /// - `ty_name`: a human-readable refinement-type tag.
 pub fn from_refinement(
@@ -383,23 +406,27 @@ pub fn from_refinement(
 
 /// **High-level converter: `Type::Refined` + witness → VerificationGoal.**
 ///
+
 /// This is the load-bearing function for the
 /// "specification ≡ refinement type ≡ proof obligation" unification
-/// (#160).  Given:
+/// (#160). Given:
 ///
-///   - `refined_ty`: a `Type` whose `kind` is `TypeKind::Refined { base,
-///     predicate }`.  Other type kinds return
-///     [`ElabError::UnsupportedExpression`] — the caller is expected
-///     to dispatch only refined types here.
-///   - `ty_name`: a human-readable name for the refinement (e.g.
-///     `"NonNegInt"` or an auto-generated tag for an inline `T{...}`).
+
+///  - `refined_ty`: a `Type` whose `kind` is `TypeKind::Refined { base,
+///  predicate }`. Other type kinds return
+///  [`ElabError::UnsupportedExpression`] — the caller is expected
+///  to dispatch only refined types here.
+///  - `ty_name`: a human-readable name for the refinement (e.g.
+///  `"NonNegInt"` or an auto-generated tag for an inline `T{...}`).
 ///
+
 /// Algorithm: extract the predicate expression from
 /// `refined_ty.kind = TypeKind::Refined { predicate, .. }`, hand it
 /// to [`from_refinement`] with `Universe(0)` as the base-type term
 /// (the placeholder encoding while a full Type-to-Term translator
 /// remains future work).
 ///
+
 /// **Why this matters for #160**: by routing every refinement-type
 /// application through [`VerificationGoal`], the type checker, the
 /// SMT dispatcher, and the audit gate see *the same shape* whether
@@ -427,13 +454,15 @@ pub fn from_refined_type(
 
 /// **The full spec-≡-refinement-≡-obligation unification handle.**
 ///
+
 /// Given any of the four sources of a verification obligation,
-/// produce a [`VerificationGoal`] of the same shape.  This is the
+/// produce a [`VerificationGoal`] of the same shape. This is the
 /// deep semantic unification driving #160: regardless of where the
 /// obligation arose, downstream consumers see ONE type.
 ///
+
 /// The dispatch is by the `source` discriminant; each branch routes
-/// through the existing `from_*` converter.  Adding a new
+/// through the existing `from_*` converter. Adding a new
 /// obligation source (e.g., a CBGR escape-analysis check) is one
 /// new variant + one new converter.
 #[derive(Debug, Clone)]
@@ -456,7 +485,7 @@ pub enum ObligationSource<'a> {
     },
 }
 
-/// Dispatch the universal converter.  Returns the same shape of
+/// Dispatch the universal converter. Returns the same shape of
 /// [`VerificationGoal`] regardless of source.
 pub fn from_obligation_source(
     source: ObligationSource<'_>,
@@ -492,7 +521,7 @@ fn translate_clauses<'a>(
 
 use verum_ast::decl::{Item, ItemKind};
 
-/// One row in the [`module_verification_surface`] report.  Pairs a
+/// One row in the [`module_verification_surface`] report. Pairs a
 /// successfully-translated [`VerificationGoal`] with the source-AST
 /// declaration name + source-kind tag.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -506,7 +535,7 @@ pub struct VerificationSurfaceRow {
     pub goal: VerificationGoal,
 }
 
-/// Aggregate verification surface for a module.  This is what an
+/// Aggregate verification surface for a module. This is what an
 /// audit gate emits when answering "what is Verum proving here?"
 /// across the entire program.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -554,15 +583,17 @@ impl VerificationSurface {
 /// surface** — one [`VerificationGoal`] per theorem / lemma /
 /// corollary / fn-with-contract.
 ///
+
 /// Refinement-type obligations are NOT collected here because they
 /// arise at type-application sites (let bindings, parameter
 /// applications), not at declaration sites; collecting them
 /// requires a type-checking pass over the module body, which is
 /// future integration work with the type checker.
 ///
+
 /// The walker is intentionally pure — no I/O, no audit-gate
-/// rendering.  Callers wanting a CLI report wrap the output in
-/// JSON or pretty-printed form.  The walker establishes the
+/// rendering. Callers wanting a CLI report wrap the output in
+/// JSON or pretty-printed form. The walker establishes the
 /// contract: every declaration in `items` whose surface generates
 /// an obligation contributes one row to the surface.
 pub fn module_verification_surface(
@@ -1044,7 +1075,7 @@ mod tests {
 
     // FunctionDecl tests deferred to integration suite — the type
     // has 30+ fields without a `new()` constructor, and the from_fn_decl
-    // converter is exercised end-to-end by the corpus walker.  The
+    // converter is exercised end-to-end by the corpus walker. The
     // unit tests above pin the converter's algorithm via the
     // smaller TheoremDecl + Refinement entry points which share the
     // same translate_clauses + proposition_to_term helpers.

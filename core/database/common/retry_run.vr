@@ -5,18 +5,21 @@
 // Spec: internal/specs/database.md §5.5
 // =============================================================================
 //
+
 // `run_with_retry<R>(policy, body)` is the canonical retry path for
 // idempotent database operations. The body closure produces a fresh
 // `Result<R, DbError>` on each attempt; we look at
 // `err.is_retryable()` and either retry with full-jitter exponential
 // backoff or surface the error to the caller.
 //
+
 // Determinism. The PRNG state lives inside `RetryPolicy.seed` —
 // `seed == 0` draws from a process-default LCG, anything non-zero
 // gives reproducible attempt scheduling for DST tests. The actual
 // jitter math is in `RetryPolicy::jittered_delay_ms` so this module
 // stays free of timing logic.
 //
+
 // The body is a `fn() -> Result<R, DbError>` rather than `fn(&mut Tx)`
 // because the transaction handle is `affine` and must be re-acquired
 // on each attempt. The caller's body closes over the connection /
@@ -35,11 +38,12 @@ mount core.database.common.retry.{RetryPolicy, RetryAttemptInfo};
 // Internal — initialise the per-call PRNG state from the policy.
 // -----------------------------------------------------------------------------
 //
+
 // Centralised so the three retry variants below share one canonical
-// seed initialiser.  An earlier revision had three copies of the
+// seed initialiser. An earlier revision had three copies of the
 // `seed == 0 ? default : seed` decision drifting independently.
 
-/// Default-seed constant used when `policy.seed == 0`.  Fixed value
+/// Default-seed constant used when `policy.seed == 0`. Fixed value
 /// makes the no-explicit-seed path deterministic across runs (good
 /// for replay-able tests); for real-world jitter the caller passes
 /// a non-zero seed (e.g. wall-clock micros).
@@ -51,7 +55,7 @@ fn init_prng_state(policy: &RetryPolicy) -> Int {
 
 // -----------------------------------------------------------------------------
 // Decision helper — given the policy + current attempt + error,
-// decide whether to retry and how long to wait.  Sharing this
+// decide whether to retry and how long to wait. Sharing this
 // across sync / async / inspect variants keeps the rules single-
 // sourced; behaviour-changing tweaks land in one place.
 // -----------------------------------------------------------------------------
@@ -78,9 +82,10 @@ fn decide_retry(
 // -----------------------------------------------------------------------------
 
 /// Run `body` against the configured policy, retrying on retryable
-/// errors with full-jitter exponential backoff.  Returns the first
+/// errors with full-jitter exponential backoff. Returns the first
 /// `Ok(R)` or the final `Err(DbError)` after the budget is spent.
 ///
+
 /// The body is expected to be idempotent — the framework does not
 /// enforce this at the type level (database.md §5.5 documents the
 /// `Idempotent` marker as informational), but the retry semantics
@@ -112,7 +117,7 @@ public fn run_with_retry_sync<R, F: fn() -> Result<R, DbError>>(
 // -----------------------------------------------------------------------------
 
 /// Async equivalent — the body produces an awaitable `Future<Result<R,
-/// DbError>>`.  Same retry rules; the inter-attempt sleep is awaited
+/// DbError>>`. Same retry rules; the inter-attempt sleep is awaited
 /// instead of blocking.
 public async fn run_with_retry<R, F: fn() -> Result<R, DbError>>(
     policy: RetryPolicy,
@@ -142,7 +147,7 @@ public async fn run_with_retry<R, F: fn() -> Result<R, DbError>>(
 // -----------------------------------------------------------------------------
 
 /// Like `run_with_retry_sync` but threads each attempt's
-/// `RetryAttemptInfo` through `inspector` before sleeping.  Useful
+/// `RetryAttemptInfo` through `inspector` before sleeping. Useful
 /// for metrics labels and DST replay diagnostics.
 public fn run_with_retry_inspect_sync<R, F: fn() -> Result<R, DbError>, G: fn(RetryAttemptInfo) -> ()>(
     policy: RetryPolicy,
@@ -173,7 +178,7 @@ public fn run_with_retry_inspect_sync<R, F: fn() -> Result<R, DbError>, G: fn(Re
     }
 }
 
-/// Async variant of the inspect-able runner.  Same shape, awaited
+/// Async variant of the inspect-able runner. Same shape, awaited
 /// sleep — used by Postgres and MySQL handlers that want OTel-span-
 /// per-attempt observability.
 public async fn run_with_retry_inspect<R, F: fn() -> Result<R, DbError>, G: fn(RetryAttemptInfo) -> ()>(

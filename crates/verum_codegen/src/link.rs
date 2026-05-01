@@ -1,37 +1,43 @@
 //! Linking Infrastructure for Verum
 //!
+
 //! This module provides a unified API for linking Verum programs,
 //! supporting multiple output formats and link-time optimization.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────┐
-//! │                      verum_codegen::link                    │
-//! │  ┌──────────────┐  ┌─────────────┐  ┌──────────────────┐   │
-//! │  │ LinkSession  │──│  LtoEngine  │──│ LinkerBackend    │   │
-//! │  │              │  │             │  │ (LLD/System)     │   │
-//! │  └──────────────┘  └─────────────┘  └──────────────────┘   │
+//! │ verum_codegen::link │
+//! │ ┌──────────────┐ ┌─────────────┐ ┌──────────────────┐ │
+//! │ │ LinkSession │──│ LtoEngine │──│ LinkerBackend │ │
+//! │ │ │ │ │ │ (LLD/System) │ │
+//! │ └──────────────┘ └─────────────┘ └──────────────────┘ │
 //! └─────────────────────────────────────────────────────────────┘
-//!           │                 │                   │
-//!           ▼                 ▼                   ▼
-//!     Object Files      LLVM Bitcode         Native Binary
+//!  │ │ │
+//!  ▼ ▼ ▼
+//!  Object Files LLVM Bitcode Native Binary
 //! ```
 //!
+
 //! # Example
 //!
+
 //! ```no_run
 //! use verum_codegen::link::{LinkSession, OutputFormat};
 //!
+
 //! let session = LinkSession::new()
-//!     .output_format(OutputFormat::Executable)
-//!     .output("program")
-//!     .add_object("main.o")
-//!     .add_object("lib.o")
-//!     .enable_lto()
-//!     .strip_symbols()
-//!     .build()?
-//!     .link()?;
+//!  .output_format(OutputFormat::Executable)
+//!  .output("program")
+//!  .add_object("main.o")
+//!  .add_object("lib.o")
+//!  .enable_lto()
+//!  .strip_symbols()
+//!  .build()?
+//!  .link()?;
 //! # Ok::<(), verum_codegen::link::LinkError>(())
 //! ```
 
@@ -83,6 +89,7 @@ pub type LinkResult<T> = Result<T, LinkError>;
 
 /// Target platform for linking.
 ///
+
 /// Verum uses platform-specific no-libc linking:
 /// - **Linux**: Direct syscalls (stable ABI) - no libraries
 /// - **macOS**: libSystem.B.dylib only (Apple requirement)
@@ -90,6 +97,7 @@ pub type LinkResult<T> = Result<T, LinkError>;
 /// - **FreeBSD**: Direct syscalls (stable ABI) - no libraries
 /// - **Embedded**: Bare-metal, no OS
 ///
+
 /// V-LLSI (Verum Low-Level System Interface) Architecture:
 /// Verum uses a self-hosted, no-libc runtime architecture with platform-specific
 /// system call layers. Each platform has its own syscall/library strategy:
@@ -185,12 +193,14 @@ impl Platform {
 
 /// Platform-specific linking configuration for no-libc builds.
 ///
+
 /// Verum uses a fully self-contained runtime without libc dependency.
 /// All runtime functionality is provided by:
 /// - LLVM intrinsics for math (llvm.sin.f32, llvm.sqrt.f64, etc.)
 /// - /core/ for runtime (threads, memory, I/O)
 /// - /core/sys/ for platform-specific syscalls
 ///
+
 /// V-LLSI Architecture - No-libc linking:
 /// Verum compiles with a fully self-contained runtime. System functionality
 /// comes from LLVM intrinsics (math ops), core/ stdlib (threads, memory, I/O),
@@ -215,6 +225,7 @@ pub struct NoLibcConfig {
 impl NoLibcConfig {
     /// Create Linux no-libc linking configuration.
     ///
+
     /// Linux uses direct syscalls via the stable kernel ABI.
     /// Entry point: _start (from /core/sys/init.vr)
     /// No external libraries required.
@@ -236,6 +247,7 @@ impl NoLibcConfig {
 
     /// Create macOS no-libc linking configuration.
     ///
+
     /// macOS prohibits direct syscalls - must use libSystem.B.dylib.
     /// This is the minimal system library on macOS.
     /// Entry point: main (via dyld)
@@ -262,6 +274,7 @@ impl NoLibcConfig {
 
     /// Create Windows no-libc linking configuration.
     ///
+
     /// Windows uses IAT imports from ntdll.dll and kernel32.dll only.
     /// Entry point: mainCRTStartup
     /// NO MSVC CRT, NO UCRT.
@@ -288,10 +301,11 @@ impl NoLibcConfig {
 
     /// Create Windows linking configuration for GUI (no console window).
     ///
+
     /// Used when the binary is a Win32 GUI application — `/SUBSYSTEM:WINDOWS`
     /// tells the loader to skip console allocation, so launching the
     /// .exe by double-clicking or via `CreateProcess` does not flash
-    /// a console window.  The runtime's `print()` / stdout helpers
+    /// a console window. The runtime's `print()` / stdout helpers
     /// gracefully degrade in this mode (see `verum_os_write` IR in
     /// `platform_ir.rs::emit_verum_os_write` — null/invalid stdout
     /// handle short-circuits to a no-op rather than blocking).
@@ -305,12 +319,14 @@ impl NoLibcConfig {
     /// Create a Windows linking configuration with an explicit
     /// subsystem flag.
     ///
+
     /// `subsystem_flag` must be either `"CONSOLE"` or `"WINDOWS"` (the
     /// literals accepted by `link.exe` / `lld-link`'s `/SUBSYSTEM:`
-    /// argument).  Other values are passed through verbatim — keep
+    /// argument). Other values are passed through verbatim — keep
     /// the manifest / CLI parser tight upstream so this stays a
     /// closed enum in practice.
     ///
+
     /// The CLI's `WindowsSubsystem` enum (`verum_cli::config`)
     /// produces these flags via `WindowsSubsystem::as_link_flag`;
     /// see #29 for the end-to-end manifest-knob + CLI-flag wiring.
@@ -323,6 +339,7 @@ impl NoLibcConfig {
 
     /// Create FreeBSD no-libc linking configuration.
     ///
+
     /// FreeBSD uses direct syscalls similar to Linux.
     pub fn freebsd() -> Self {
         Self {
@@ -339,6 +356,7 @@ impl NoLibcConfig {
 
     /// Create embedded/bare-metal linking configuration.
     ///
+
     /// Embedded targets have no OS and no system libraries.
     /// Entry point is typically Reset_Handler or platform-specific.
     pub fn embedded() -> Self {
@@ -357,6 +375,7 @@ impl NoLibcConfig {
 
     /// Create WASM-WASI linking configuration.
     ///
+
     /// Uses WASI (WebAssembly System Interface) for I/O, filesystem, clocks.
     /// Entry point: _start (WASI convention).
     /// Linked with wasm-ld (LLVM LLD WASM flavor).
@@ -378,6 +397,7 @@ impl NoLibcConfig {
 
     /// Create WASM embedded linking configuration.
     ///
+
     /// No WASI — pure WASM module for browser or custom host.
     /// Host provides functionality via @wasm_import.
     pub fn wasm_embedded() -> Self {
@@ -736,27 +756,32 @@ impl LinkSession {
 
     /// Apply no-libc linking configuration for the target platform.
     ///
+
     /// This configures the linker to produce a self-contained binary without
     /// libc dependency. Platform-specific behavior:
     ///
+
     /// - **Linux**: Direct syscalls, no libraries
     /// - **macOS**: libSystem.B.dylib only (Apple requirement)
     /// - **Windows**: ntdll.dll + kernel32.dll only (no CRT)
     /// - **FreeBSD**: Direct syscalls, no libraries
     /// - **Embedded**: Bare-metal, no OS
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_codegen::link::{LinkSession, Platform, OutputFormat};
     ///
+
     /// let session = LinkSession::new()
-    ///     .output_format(OutputFormat::Executable)
-    ///     .output("program")
-    ///     .add_object("main.o")
-    ///     .with_no_libc(Platform::Linux)
-    ///     .build()?
-    ///     .link()?;
+    ///  .output_format(OutputFormat::Executable)
+    ///  .output("program")
+    ///  .add_object("main.o")
+    ///  .with_no_libc(Platform::Linux)
+    ///  .build()?
+    ///  .link()?;
     /// # Ok::<(), verum_codegen::link::LinkError>(())
     /// ```
     pub fn with_no_libc(self, platform: Platform) -> Self {
@@ -769,12 +794,13 @@ impl LinkSession {
     }
 
     /// Apply no-libc configuration with an explicit Windows subsystem
-    /// flag.  On non-Windows platforms `subsystem_flag` is ignored
-    /// (the same `for_platform` config applies).  On Windows the
+    /// flag. On non-Windows platforms `subsystem_flag` is ignored
+    /// (the same `for_platform` config applies). On Windows the
     /// flag selects between `/SUBSYSTEM:CONSOLE` (default,
     /// `subsystem_flag = "CONSOLE"`) and `/SUBSYSTEM:WINDOWS`
     /// (`subsystem_flag = "WINDOWS"`).
     ///
+
     /// The CLI / manifest pipeline routes through this entry point
     /// so a single `verum build` invocation produces the correct
     /// `.exe` for either subsystem without further branching.

@@ -2,27 +2,33 @@
 // core/net/weft/timeout.vr — TimeoutLayer
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §5.5
+// Spec: internal/specs/net-framework.md §5.5
 // =============================================================================
 //
+
 // Wraps any `Handler` with a per-request deadline. On timeout the
 // wrapped call is cancelled (Future drop => cancellation propagates
 // through structured-concurrency to whatever I/O is inside) and the
 // framework returns `WeftError.Timeout` (→ 504 Gateway Timeout).
 //
+
 // # Example
 //
+
 // ```verum
 // let svc = ServiceBuilder.new(router)
-//     .layer(TimeoutLayer.ms(5000))
-//     .build();
+//  .layer(TimeoutLayer.ms(5000))
+//  .build();
 // ```
 //
+
 // # Zero-overhead on the happy path
 //
+
 // Implementation is a plain `select` against a timer; no extra
 // allocations, no boxed future. Matches Tower's `Timeout` cost profile.
 //
+
 // =============================================================================
 
 module core.net.weft.timeout;

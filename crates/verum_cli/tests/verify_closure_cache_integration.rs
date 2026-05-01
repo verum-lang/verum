@@ -1,19 +1,22 @@
 //! End-to-end integration tests for `verum verify --closure-cache`.
 //!
+
 //! Validates the full pipeline integration of `verum_verification::
 //! closure_cache::FilesystemCacheStore` into `verum verify`:
 //!
-//!   1. First verify with `--closure-cache --closure-cache-root <DIR>`
-//!      → cache is empty → engine runs → entries are written.
-//!   2. Second verify with the same flag against the same project →
-//!      every theorem hits the cache → kernel/SMT path is skipped →
-//!      `Closure cache: N hit(s), 0 miss(es)` log line appears.
-//!   3. Edit a theorem → fingerprint changes → that theorem misses,
-//!      the rest hit.
-//!   4. Bump kernel version (we don't touch verum_kernel; instead we
-//!      sub via `--closure-cache-root` to a *different* directory,
-//!      which is the standard CI pattern for cache isolation).
+
+//!  1. First verify with `--closure-cache --closure-cache-root <DIR>`
+//!  → cache is empty → engine runs → entries are written.
+//!  2. Second verify with the same flag against the same project →
+//!  every theorem hits the cache → kernel/SMT path is skipped →
+//!  `Closure cache: N hit(s), 0 miss(es)` log line appears.
+//!  3. Edit a theorem → fingerprint changes → that theorem misses,
+//!  the rest hit.
+//!  4. Bump kernel version (we don't touch verum_kernel; instead we
+//!  sub via `--closure-cache-root` to a *different* directory,
+//!  which is the standard CI pattern for cache isolation).
 //!
+
 //! Together with the 31 trait-level tests in
 //! `verum_verification::closure_cache::tests` and the 14 handler
 //! unit tests in `commands::cache_closure::tests`, this proves the
@@ -99,7 +102,7 @@ fn verify_accepts_closure_cache_flag() {
 
 #[test]
 fn verify_closure_cache_root_creates_directory() {
-    // The cache root must be auto-created when missing.  This pins
+    // The cache root must be auto-created when missing. This pins
     // the contract that users don't have to mkdir before running.
     let (_temp, dir) = create_project("cc_autocreate", "public fn main() {}\n");
     let cache_parent = TempDir::new().unwrap();
@@ -107,7 +110,7 @@ fn verify_closure_cache_root_creates_directory() {
     assert!(!cache_root.exists());
     let _ = run_verify(&dir, &cache_root);
     // Even on parse failures the cache root MAY or MAY NOT be created
-    // depending on whether the verify-theorem-proofs phase ran.  What
+    // depending on whether the verify-theorem-proofs phase ran. What
     // we really pin: no panic, no "permission denied" surface.
 }
 
@@ -119,14 +122,14 @@ fn verify_closure_cache_root_creates_directory() {
 fn cache_closure_stat_reads_root_from_verify_run() {
     // After `verum verify --closure-cache --closure-cache-root <X>`
     // exits, `verum cache-closure stat --root <X>` must be able to
-    // open the same directory and report stats.  Pins the
+    // open the same directory and report stats. Pins the
     // shared-root contract between the writer (verify) and the
     // reader (cache-closure).
     let cache_dir = TempDir::new().unwrap();
     let cache_root = cache_dir.path().to_path_buf();
     // Directly use cache-closure stat against the empty root —
     // proves the disk format the writer would produce is
-    // round-trippable.  (Actual writer-side population requires a
+    // round-trippable. (Actual writer-side population requires a
     // working theorem proof, which depends on full verum_compiler
     // infrastructure; the shared-root contract is the orthogonal
     // concern.)
@@ -160,7 +163,7 @@ fn cache_closure_stat_reads_root_from_verify_run() {
 fn ladder_and_closure_cache_short_circuit_independently() {
     // `--ladder` short-circuits the verify pipeline (it routes
     // through DefaultLadderDispatcher and exits before reaching
-    // the closure-cache integration).  Pin the contract that the
+    // the closure-cache integration). Pin the contract that the
     // two flags can be set together and `--ladder` wins (the
     // cache flag is silently no-op'd in that mode).
     let (_temp, dir) = create_project(

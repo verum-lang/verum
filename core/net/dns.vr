@@ -5,11 +5,14 @@
 // Dependencies: core, net/addr, net/udp, sys/common
 // =============================================================================
 //
+
 // Pure DNS protocol implementation over native UDP sockets. No FFI dependencies.
 // Implements RFC 1035 DNS wire protocol for complete control over resolution.
 //
+
 // # Features
 //
+
 // - lookup_host(): Resolve hostname to IP addresses via DNS protocol
 // - lookup_addr(): Reverse DNS lookup (PTR records)
 // - Resolver: Configurable DNS resolver with custom nameservers
@@ -17,31 +20,38 @@
 // - DNS-over-UDP with TCP fallback for large responses
 // - Async resolution for high-concurrency scenarios
 //
+
 // # Example
 //
+
 // ```verum
 // use net.dns.{lookup_host, Resolver};
 //
+
 // // Simple hostname resolution
 // let addrs = lookup_host("example.com")?;
 // for addr in addrs {
-//     print(f"Resolved: {addr}");
+//  print(f"Resolved: {addr}");
 // }
 //
+
 // // Custom resolver
 // let resolver = Resolver.new()
-//     .nameserver_ip(Ipv4Addr.new(8, 8, 8, 8))
-//     .timeout_ms(3000);
+//  .nameserver_ip(Ipv4Addr.new(8, 8, 8, 8))
+//  .timeout_ms(3000);
 // let mx = resolver.lookup_mx("example.com")?;
 // ```
 //
+
 // # Performance Notes
 //
+
 // - Uses UDP for queries (512-byte limit, falls back to TCP if truncated)
 // - Parallel A/AAAA queries for dual-stack resolution
 // - Connection reuse via UdpSocket binding
 // - Zero-copy response parsing where possible
 //
+
 // =============================================================================
 
 module dns;
@@ -127,14 +137,15 @@ const DNS_HEADER_SIZE: Int = 12;
 const DNS_PORT: Int = 53;
 
 /// Maximum number of compression-pointer follows during a single
-/// `decode_domain_name` call.  RFC 1035 §4.1.4 allows pointer
+/// `decode_domain_name` call. RFC 1035 §4.1.4 allows pointer
 /// compression within DNS messages but doesn't cap the chain length;
 /// hostile responses can construct pointer chains where each pointer
 /// goes backward to a non-overlapping prior position, defeating the
-/// simple forward-pointer infinite-loop check.  Without a depth cap,
+/// simple forward-pointer infinite-loop check. Without a depth cap,
 /// the parser walks an attacker-supplied chain doing O(chain_length)
 /// work per query.
 ///
+
 /// 16 follows is far above any legitimate DNS response (RFCs typically
 /// see ≤2 levels of compression in practice) but bounded enough to
 /// reject a pointer-bomb in O(1) work.
@@ -176,6 +187,7 @@ implement DnsError {
 
     /// Create a DnsError from an I/O error.
     ///
+
     /// The pre-fix collapse `NetworkError(f"{e}")` threw away
     /// the typed `IoErrorKind` — callers had no way to
     /// distinguish a DNS-server timeout from a transport
@@ -184,17 +196,18 @@ implement DnsError {
     /// DNS-domain analogue maps to a typed variant; the
     /// transport-level catch-all remains `NetworkError`.
     ///
+
     /// Mapping:
-    ///   * `TimedOut`         → `DnsError.Timeout`
-    ///   * `NotFound`         → `DnsError.HostNotFound`
-    ///     (the DNS-server-supplied result for an unknown
-    ///     host bubbles up through the IoError surface in
-    ///     resolver-stub paths)
-    ///   * `ConnectionRefused`→ `DnsError.Refused`
-    ///   * `WouldBlock` /
-    ///     `Interrupted`      → `DnsError.TryAgain`
-    ///     (transient — caller should retry)
-    ///   * everything else    → `NetworkError(<formatted>)`
+    ///  * `TimedOut` → `DnsError.Timeout`
+    ///  * `NotFound` → `DnsError.HostNotFound`
+    ///  (the DNS-server-supplied result for an unknown
+    ///  host bubbles up through the IoError surface in
+    ///  resolver-stub paths)
+    ///  * `ConnectionRefused`→ `DnsError.Refused`
+    ///  * `WouldBlock` /
+    ///  `Interrupted` → `DnsError.TryAgain`
+    ///  (transient — caller should retry)
+    ///  * everything else → `NetworkError(<formatted>)`
     fn from_io_error(e: IoError) -> DnsError {
         match e.kind {
             IoErrorKind.TimedOut          => DnsError.Timeout,
@@ -350,6 +363,7 @@ implement DnsHeader {
 
 /// Encode a domain name to DNS wire format (labels).
 ///
+
 /// Domain "www.example.com" becomes: [3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0]
 fn encode_domain_name(name: &Text) -> Result<List<Byte>, DnsError> {
     if name.is_empty() || name.len() > DNS_MAX_NAME_LENGTH {
@@ -383,20 +397,21 @@ fn encode_domain_name(name: &Text) -> Result<List<Byte>, DnsError> {
 
 /// Decode a domain name from DNS wire format with pointer decompression.
 ///
+
 /// Returns (decoded_name, bytes_consumed).
 fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError> {
     let mut name_parts = List.new();
     let mut pos = start;
     let mut bytes_consumed = 0;
     let mut followed_pointer = false;
-    // SOUNDNESS: cap the pointer-follow chain.  RFC 1035 compression
+    // SOUNDNESS: cap the pointer-follow chain. RFC 1035 compression
     // permits backward pointers; previous revision only checked
     // `offset >= pos` (forward loop), which doesn't catch a chain of
     // backward pointers each landing on a non-overlapping prior
-    // position.  Without this counter, a hostile DNS response can
+    // position. Without this counter, a hostile DNS response can
     // force O(chain_length) work per query — pointer-bomb DoS.
     let mut pointer_follows: Int = 0;
-    // SOUNDNESS: cap total bytes consumed.  A pointer chain that
+    // SOUNDNESS: cap total bytes consumed. A pointer chain that
     // makes the parser visit many labels without ever hitting the
     // 0-byte terminator is bounded by the name-length limit; this
     // is an additional safety belt that fires before the per-label
@@ -438,7 +453,7 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
                 return Err(DnsError.InvalidResponse);
             }
 
-            // Cap pointer-chain depth.  Hostile responses construct
+            // Cap pointer-chain depth. Hostile responses construct
             // chains of backward pointers each landing on a
             // non-overlapping prior position; that pattern bypasses
             // the offset >= pos check but still pins CPU.
@@ -458,7 +473,7 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
 
         // Belt-and-braces total-bytes cap: even with a bounded
         // pointer chain, a chain that walks many distinct labels
-        // could exceed the legal name length.  Reject early.
+        // could exceed the legal name length. Reject early.
         total_label_bytes = total_label_bytes + len + 1;
         if total_label_bytes > DNS_MAX_NAME_LENGTH {
             return Err(DnsError.InvalidResponse);
@@ -906,18 +921,20 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
         // Query system DNS servers via GetNetworkParams (iphlpapi.dll).
         // The FIXED_INFO structure contains a linked list of DNS server addresses.
         //
+
         // FIXED_INFO layout (partial, for DNS extraction):
-        //   offset 0:    HostName[132]
-        //   offset 132:  DomainName[132]
-        //   offset 264:  *CurrentDnsServer (pointer)
-        //   offset 272:  DnsServerList (IP_ADDR_STRING, inline)
-        //     IP_ADDR_STRING layout:
-        //       offset 0: *Next (pointer to next entry)
-        //       offset 8: IpAddress.String[16] (null-terminated ASCII)
-        //       offset 24: IpMask.String[16]
-        //       offset 40: Context (DWORD)
-        //   (total IP_ADDR_STRING = 48 bytes on x64)
+        //  offset 0: HostName[132]
+        //  offset 132: DomainName[132]
+        //  offset 264: *CurrentDnsServer (pointer)
+        //  offset 272: DnsServerList (IP_ADDR_STRING, inline)
+        //  IP_ADDR_STRING layout:
+        //  offset 0: *Next (pointer to next entry)
+        //  offset 8: IpAddress.String[16] (null-terminated ASCII)
+        //  offset 24: IpMask.String[16]
+        //  offset 40: Context (DWORD)
+        //  (total IP_ADDR_STRING = 48 bytes on x64)
         //
+
         // Strategy: allocate buffer, call GetNetworkParams, walk the linked list.
 
         let mut buf_size: UInt32 = 0;
@@ -1004,20 +1021,24 @@ fn generate_query_id() -> UInt16 {
 
 /// A configurable DNS resolver.
 ///
+
 /// The Resolver allows customizing DNS resolution behavior, including:
 /// - Custom nameservers
 /// - Timeout configuration
 /// - Query retries
 /// - Search domains
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let resolver = Resolver.new()
-///     .nameserver_ip(Ipv4Addr.new(8, 8, 8, 8))
-///     .timeout_ms(5000)
-///     .retries(3);
+///  .nameserver_ip(Ipv4Addr.new(8, 8, 8, 8))
+///  .timeout_ms(5000)
+///  .retries(3);
 ///
+
 /// let addrs = resolver.lookup("example.com")?;
 /// ```
 public type Resolver is {
@@ -1050,6 +1071,7 @@ implement Resolver {
 
     /// Create a resolver using system configuration.
     ///
+
     /// Reads nameservers from /etc/resolv.conf on Unix systems.
     public fn system() -> Resolver {
         let nameservers = read_system_nameservers();
@@ -1156,6 +1178,7 @@ implement Resolver {
 
     /// Query a nameserver via TCP (used when UDP response is truncated).
     ///
+
     /// DNS over TCP uses a 2-byte length prefix before the query/response
     /// per RFC 1035 Section 4.2.2.
     fn query_tcp(&self, name: &Text, qtype: UInt16, nameserver: &Ipv4Addr) -> Result<List<DnsRecordEntry>, DnsError> {
@@ -1348,6 +1371,7 @@ implement Resolver {
 
     /// Look up MX records for a domain.
     ///
+
     /// Returns mail exchangers sorted by priority (lowest first).
     public fn lookup_mx(&self, domain: &Text) -> Result<List<(Int, Text)>, DnsError> {
         let records = self.query(domain, DnsRecordType.MX)?;
@@ -1380,6 +1404,7 @@ implement Resolver {
 
     /// Look up SRV records for a service.
     ///
+
     /// SRV records are used for service discovery. The name should be in
     /// the format `_service._proto.domain` (e.g., `_http._tcp.example.com`).
     public fn lookup_srv(&self, name: &Text) -> Result<List<(Int, Int, Int, Text)>, DnsError> {
@@ -1438,21 +1463,26 @@ implement Resolver {
 
 /// Resolve a hostname to a list of IP addresses.
 ///
+
 /// This function uses the system's DNS configuration to resolve
 /// a hostname to one or more IP addresses. Both IPv4 and IPv6 addresses
 /// may be returned.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let addrs = lookup_host("www.example.com")?;
 /// for addr in addrs {
-///     print(f"IP: {addr}");
+///  print(f"IP: {addr}");
 /// }
 /// ```
 ///
+
 /// # Errors
 ///
+
 /// Returns `DnsError.NotFound` if the hostname does not exist.
 /// Returns `DnsError.TryAgain` for temporary failures.
 public fn lookup_host(hostname: &Text) -> Result<List<IpAddr>, DnsError> {
@@ -1512,17 +1542,22 @@ public fn lookup_host_v6(hostname: &Text) -> Result<List<Ipv6Addr>, DnsError> {
 
 /// Perform a reverse DNS lookup (IP address to hostname).
 ///
+
 /// Given an IP address, returns the associated hostname if one exists.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let hostname = lookup_addr(&IpAddr.v4(8, 8, 8, 8))?;
-/// print(f"Hostname: {hostname}");  // e.g., "dns.google"
+/// print(f"Hostname: {hostname}"); // e.g., "dns.google"
 /// ```
 ///
+
 /// # Errors
 ///
+
 /// Returns `DnsError.NotFound` if no PTR record exists for the IP.
 public fn lookup_addr(addr: &IpAddr) -> Result<Text, DnsError> {
     let resolver = Resolver.system();
@@ -1531,6 +1566,7 @@ public fn lookup_addr(addr: &IpAddr) -> Result<Text, DnsError> {
 
 /// Build PTR query name from IP address.
 ///
+
 /// For IPv4: 1.2.3.4 -> 4.3.2.1.in-addr.arpa
 /// For IPv6: 2001:db8.1 -> 1.0.0.0...8.b.d.0.1.0.0.2.ip6.arpa
 fn build_ptr_name(addr: &IpAddr) -> Text {
@@ -1583,10 +1619,13 @@ fn format_nibble(n: Byte) -> Text {
 
 /// Asynchronously resolve a hostname to IP addresses.
 ///
+
 /// This function performs DNS resolution using async I/O for better concurrency.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let addrs = lookup_host_async("www.example.com").await?;
 /// ```
@@ -1717,14 +1756,17 @@ public async fn lookup_addr_async(addr: &IpAddr) -> Result<Text, DnsError> {
 
 /// Resolve hostname and port to socket addresses.
 ///
+
 /// This is a convenience function that combines DNS resolution with port.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let addrs = resolve("www.example.com", 80)?;
 /// for addr in addrs {
-///     print(f"Socket: {addr}");
+///  print(f"Socket: {addr}");
 /// }
 /// ```
 public fn resolve(hostname: &Text, port: Int) -> Result<List<SocketAddr>, DnsError> {
@@ -1765,6 +1807,7 @@ public fn is_ip_address(s: &Text) -> Bool {
 
 /// Validate a domain name format.
 ///
+
 /// Checks that the domain name follows DNS naming rules:
 /// - Labels are 1-63 characters
 /// - Total length is 1-253 characters

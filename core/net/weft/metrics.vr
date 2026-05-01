@@ -2,19 +2,22 @@
 // core/net/weft/metrics.vr — MetricsLayer + Prometheus-style registry
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §7.2
+// Spec: internal/specs/net-framework.md §7.2
 // =============================================================================
 //
+
 // A minimal metrics registry that records per-request counters and
 // latency histograms in a Prometheus-compatible shape. Phase 1 exports
 // a text endpoint rendering (same as `/metrics` in a Prometheus job);
 // OTLP push and exemplars arrive in phase 5 (§7.7).
 //
+
 // The registry itself is thread-safe via a single Mutex. Hot paths (the
 // MetricsHandler below) take the lock only to update counters; for the
 // baseline 4 metrics that each handler touches this is uncontended in
 // practice. A future lock-free per-shard variant is straightforward.
 //
+
 // =============================================================================
 
 module core.net.weft.metrics;
@@ -35,16 +38,17 @@ mount core.net.weft.error.{WeftError};
 // =============================================================================
 
 /// Lock-free counter — single AtomicInt with `Relaxed` ordering on
-/// the hot path.  Pre-fix (#319) used `Mutex<Int>`, which forced
+/// the hot path. Pre-fix (#319) used `Mutex<Int>`, which forced
 /// every `incr()` to take a system mutex (one cmpxchg + a syscall
-/// in the contended path).  Post-fix every increment is a single
+/// in the contended path). Post-fix every increment is a single
 /// fetch_add, ~2 ns on modern x86 / 10 ns on aarch64 — three
 /// orders of magnitude better than the locked path under
 /// contention.
 ///
+
 /// `Relaxed` is sufficient: the metric value is read by Prometheus
 /// scrape (eventual-consistency) and the increments don't need
-/// happens-before with surrounding work.  If a future scenario
+/// happens-before with surrounding work. If a future scenario
 /// needs a coherent multi-counter snapshot, a stronger ordering
 /// can be added on-demand.
 public type WeftCounter is {
@@ -71,13 +75,14 @@ implement WeftCounter {
 /// Prometheus client default (in ms — SLI-style), adjusted for web
 /// handlers: 5 15 30 60 120 250 500 1000 2500 5000 10000.
 ///
+
 /// Pre-fix (#319) `count` and `sum_ms` were each `Mutex<Int>` and
 /// `counts` was `Mutex<List<Int>>` — a single observe_ms() took
-/// THREE separate lock-acquire-release cycles.  Worse, a reader
+/// THREE separate lock-acquire-release cycles. Worse, a reader
 /// observing between the count-lock and sum_ms-lock could see
-/// inconsistent ratios (count > sum_ms / count).  Post-fix
+/// inconsistent ratios (count > sum_ms / count). Post-fix
 /// `count` and `sum_ms` are AtomicInt (single fetch_add each, no
-/// lock contention).  `counts` retains a Mutex<List<Int>> for now
+/// lock contention). `counts` retains a Mutex<List<Int>> for now
 /// because Verum's List<AtomicInt> ergonomics are not yet
 /// optimised — that follow-up is tracked but the high-impact
 /// per-observation cost is already eliminated by the count+sum
@@ -104,14 +109,14 @@ implement WeftHistogram {
     }
 
     public fn observe_ms(&self, ms: Int) {
-        // Lock-free count + sum updates.  Two atomic fetch_adds
+        // Lock-free count + sum updates. Two atomic fetch_adds
         // (Relaxed) instead of two mutex lock-release cycles.
         let _ = self.count.fetch_add(1, MemoryOrdering.Relaxed);
         let _ = self.sum_ms.fetch_add(ms, MemoryOrdering.Relaxed);
         // Bucket update still requires a brief Mutex (List<Int>
-        // doesn't yet have an atomic-element API).  The lock is
+        // doesn't yet have an atomic-element API). The lock is
         // held only for the bucket-find + single increment — no
-        // I/O, no awaits.  Tracked as a follow-up for
+        // I/O, no awaits. Tracked as a follow-up for
         // [AtomicInt; N] migration.
         let mut cs = self.counts.lock();
         let mut placed = false;

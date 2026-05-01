@@ -337,6 +337,7 @@ impl AotCompileConfig {
 
 /// Build Tier 2: AOT debug binary (MLIR-based)
 ///
+
 /// NOTE: Tier 2/3 artifact building is pending implementation.
 fn build_tier2(_manifest_dir: &Path, _output_path: &Path, _release: bool) -> Result<bool> {
     // Tier 2 AOT compilation requires VBC → LLVM IR lowering
@@ -386,6 +387,7 @@ fn create_aot_artifact(
 
 /// Build Tier 3: AOT release binary with full optimizations and LTO
 ///
+
 /// NOTE: Tier 2/3 artifact building is pending implementation.
 fn build_tier3(_manifest_dir: &Path, _output_path: &Path, _release: bool) -> Result<bool> {
     // Tier 3 AOT compilation requires VBC → LLVM IR lowering with LTO
@@ -662,6 +664,7 @@ fn create_metadata(
 /// proof bundle. Returns `Some(reason)` when the gate is set AND
 /// any proof failed; otherwise `None`.
 ///
+
 /// Extracted so the gate semantics can be unit-tested without
 /// constructing a full publish context. The check is gated: when
 /// the flag is OFF (default), the existing permissive behaviour
@@ -966,7 +969,7 @@ fn load_readme(manifest_dir: &Path) -> Option<Text> {
         if readme_path.exists()
             && let Ok(content) = std::fs::read_to_string(&readme_path)
         {
-            // Truncate very large READMEs (> 64KB).  Clamp the
+            // Truncate very large READMEs (> 64KB). Clamp the
             // truncation point DOWN to the nearest char boundary —
             // raw byte slicing panics when byte 65000 lands inside
             // a multi-byte UTF-8 char, which is virtually

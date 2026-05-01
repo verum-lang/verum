@@ -1,5 +1,6 @@
 //! Type unification algorithm.
 //!
+
 //! This module implements Robinson's unification algorithm with extensions for:
 //! - Refinement types (structural unification)
 //! - Occurs check (prevent infinite types)
@@ -9,6 +10,7 @@
 //! - Higher inductive types (HITs)
 //! - Quantitative type theory
 //!
+
 //! Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking
 
 use crate::ty::{EqTerm, Quantity, Substitution, SubstitutionExt, Type, TypeVar, UniverseLevel};
@@ -22,11 +24,13 @@ use verum_common::{List, Map};
 
 /// Unifier performs type unification.
 ///
+
 /// CRITICAL: The Unifier now maintains an accumulated substitution that
 /// grows with each unification. This is essential for proper Hindley-Milner
 /// type inference - type variables resolved in earlier unifications must
 /// be reflected in later type comparisons.
 ///
+
 /// Hindley-Milner type inference: algorithm W with let-polymorphism, constraint collection, and unification
 pub struct Unifier {
     /// Count of unifications performed (for metrics)
@@ -36,7 +40,7 @@ pub struct Unifier {
     /// Maximum permitted unify_inner recursion depth (#304).
     /// Pre-fix this was a hardcoded `MAX_UNIFY_DEPTH = 50`
     /// constant; embedders running heavy generic-type inference
-    /// could not raise the cap.  Default 50 stays for backward
+    /// could not raise the cap. Default 50 stays for backward
     /// compatibility (50 frames × ~2500 lines of match arms ≈
     /// the safe stack-frame budget on 64MB-stack threads); use
     /// `with_max_unify_depth` to override.
@@ -108,6 +112,7 @@ pub struct Unifier {
     /// Whether cubical-type normalization is enabled (Path/Partial/Eq
     /// definitional equality uses the cubical `whnf` normalizer).
     ///
+
     /// When `false` (i.e. `[types] cubical = false` in `verum.toml`),
     /// the unifier falls back to strict syntactic equality on cubical
     /// terms. Users disabling cubical lose identities like
@@ -116,9 +121,9 @@ pub struct Unifier {
     cubical_enabled: bool,
 }
 
-/// Default `unify_inner` recursion budget (#304).  50 frames ×
+/// Default `unify_inner` recursion budget (#304). 50 frames ×
 /// ~2500-line match arms ≈ the safe stack-frame budget on
-/// 64 MiB-stack threads.  Embedders with deeper generic-type
+/// 64 MiB-stack threads. Embedders with deeper generic-type
 /// inference can raise via `Unifier::with_max_unify_depth`.
 pub const DEFAULT_MAX_UNIFY_DEPTH: u32 = 50;
 
@@ -194,6 +199,7 @@ impl Unifier {
 
     /// Enable or disable cubical normalization during unification.
     ///
+
     /// Populated by the compilation session from `[types] cubical` in
     /// `verum.toml`. Disabling causes PathType/Partial/Eq arms to use
     /// strict syntactic equality instead of `CubicalTerm::whnf`-based
@@ -330,6 +336,7 @@ impl Unifier {
 
     /// Register a type alias mapping (e.g., "Byte" -> UInt8 Named type).
     ///
+
     /// Performs cycle detection: registering `type A is B` when a chain
     /// B -> ... -> A already exists is rejected so that `try_expand_alias`
     /// cannot produce infinite recursion or unreachable types.
@@ -555,7 +562,7 @@ impl Unifier {
             // #306: surface the silent depth-limit fallback so a
             // chain of self-referential type aliases hitting the
             // cap is observable in telemetry rather than producing
-            // a mysteriously-unsubstituted type.  Conservative fall
+            // a mysteriously-unsubstituted type. Conservative fall
             // back is correct (returns the type unmodified) but
             // hiding the event from the user makes downstream
             // type-error messages baffling.
@@ -679,6 +686,7 @@ impl Unifier {
 
     /// Generate a stable signature for a variant type (sorted variant names with payload types).
     ///
+
     /// IMPORTANT: Must produce identical signatures to `variant_type_signature()` in infer.rs
     /// and `variant_type_signature_static()` in protocol.rs.
     fn variant_type_signature(variants: &IndexMap<Text, Type>) -> Text {
@@ -940,9 +948,11 @@ impl Unifier {
 
     /// Check if a type contains any unresolved type variables.
     ///
+
     /// This is used during associated type projection unification to determine
     /// whether a projection can be resolved or must be deferred.
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Associated type resolution
     fn has_type_vars(ty: &Type) -> bool {
         use Type::*;
@@ -978,17 +988,21 @@ impl Unifier {
 
     /// Unify two context expressions directly (public API for context polymorphism).
     ///
+
     /// This is the entry point for callers (e.g., type inference) that need to unify
     /// context expressions from callback types without going through full function type
     /// unification. For example, when inferring `C` in:
     ///
+
     /// ```verum
     /// fn map<T, U, using C>(iter: I, f: fn(T) -> U using C) -> MapIter<T,U> using C
     /// ```
     ///
+
     /// The inference engine can call `unify_context_exprs(C_var, concrete_ctx)` to bind
     /// the context variable `C` to the concrete context requirement of the callback `f`.
     ///
+
     /// Context polymorphism rules:
     /// - Variable vs Concrete: binds variable to the concrete requirement
     /// - Variable vs Variable: binds one to the other (if distinct)
@@ -1044,8 +1058,10 @@ impl Unifier {
 
     /// Unify optional context expressions for context polymorphism (internal).
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.5 - Context Polymorphism
     ///
+
     /// Rules:
     /// - None/None: compatible (both pure)
     /// - Concrete/Concrete: must be equal
@@ -1109,14 +1125,17 @@ impl Unifier {
 
     /// Unify two types, returning a substitution that makes them equal.
     ///
+
     /// This is the core of Hindley-Milner type inference.
     /// The algorithm finds the most general unifier (MGU) if one exists.
     ///
+
     /// CRITICAL FIX: The unifier now:
     /// 1. Applies the accumulated substitution to both types before unifying
     /// 2. Composes the new substitution with the accumulated one
     /// 3. Stores the composed substitution for future unifications
     ///
+
     /// This ensures that type variables resolved in earlier unifications are
     /// properly reflected in later type comparisons.
     pub fn unify(&mut self, t1: &Type, t2: &Type, span: Span) -> Result<Substitution> {
@@ -1182,7 +1201,7 @@ impl Unifier {
 
         // Recursion depth guard to prevent stack overflow (RAII for safety on early returns)
         // Each recursive unify_inner_impl frame is ~2500 lines of match arms,
-        // consuming significant stack.  Default cap is
+        // consuming significant stack. Default cap is
         // DEFAULT_MAX_UNIFY_DEPTH = 50 (calibrated for 64 MiB
         // thread stacks); #304 makes it overridable via
         // `with_max_unify_depth` so embedders running heavier
@@ -1199,19 +1218,19 @@ impl Unifier {
         result
     }
 
-    /// Override the unify_inner recursion budget (#304).  Useful
+    /// Override the unify_inner recursion budget (#304). Useful
     /// when embedders running heavy generic-type inference need
     /// to raise the default 50-frame cap, or when fuzzing /
-    /// security-sensitive contexts want to lower it.  Setting `0`
+    /// security-sensitive contexts want to lower it. Setting `0`
     /// rejects every unification (the gate fires on the first
-    /// frame).  Returns `self` for fluent construction.
+    /// frame). Returns `self` for fluent construction.
     pub fn with_max_unify_depth(mut self, max_depth: u32) -> Self {
         self.max_unify_depth = max_depth;
         self
     }
 
     /// Read mirror of the configured maximum unify recursion
-    /// depth.  Surfaced as a getter so embedders can confirm
+    /// depth. Surfaced as a getter so embedders can confirm
     /// the value the manifest set without exercising the full
     /// unify path.
     pub fn configured_max_unify_depth(&self) -> u32 {
@@ -1277,6 +1296,7 @@ impl Unifier {
             // Sized integers (UInt32, UInt16, etc.) coerce bidirectionally with Int
             // to allow natural usage: `let epoch: UInt32 = 42;` or `assert(epoch == 0);`
             //
+
             // The lookup is structural via the `IntCoercible` protocol from
             // `core/base/coercion.vr` — populated by
             // `verum_compiler::stdlib_coercion_registry::scan_protocol_implementations`
@@ -1339,6 +1359,7 @@ impl Unifier {
             // substituted with type variables. Allow them to unify with any
             // concrete type.
             //
+
             // Heuristic: strictly single-letter uppercase only. Dropping the
             // two-letter case eliminates the need for a hardcoded exclusion
             // list (previously "Ok" | "No" | "Eq" | "Fn" | "IO") while leaving
@@ -1407,13 +1428,15 @@ impl Unifier {
                 // For unification, we require exact structural match of type parameters.
                 // Subtyping of bounds is handled separately in the subtype checker.
                 //
+
                 // Function type unification: parameter types unify contravariantly, return types covariantly - Function type unification
                 // requires identical type parameter structure. The subtype relation allows
                 // contravariance in bounds, but unification is stricter.
                 //
+
                 // Example:
-                //   fn f<T: Ord>(x: T) and fn f<T: Eq>(x: T) do NOT unify
-                //   But fn f<T: Ord>(x: T) <: fn f<T: Eq>(x: T) if Ord extends Eq
+                //  fn f<T: Ord>(x: T) and fn f<T: Eq>(x: T) do NOT unify
+                //  But fn f<T: Ord>(x: T) <: fn f<T: Eq>(x: T) if Ord extends Eq
                 if tp1.len() != tp2.len() {
                     return Err(TypeError::Mismatch {
                         expected: t2.to_text(),
@@ -1425,6 +1448,7 @@ impl Unifier {
                 // Context unification with support for context polymorphism
                 // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.5 - Context Polymorphism
                 //
+
                 // Unification rules for contexts:
                 // - None/None: compatible (both pure)
                 // - Concrete/Concrete: must be equal
@@ -1956,15 +1980,17 @@ impl Unifier {
             // Unified reference model: &T (managed CBGR ~15ns), &checked T (statically verified 0ns), &unsafe T (unchecked 0ns) — .3.3 - Three-Tier Reference Coercion
             // Hierarchy: &unsafe T <: &checked T <: &T (Liskov Substitution Principle)
             //
+
             // ALLOWED (implicit upcast - "forgetful"):
-            //   &unsafe T → &checked T  ✓
-            //   &unsafe T → &T          ✓
-            //   &checked T → &T         ✓
+            //  &unsafe T → &checked T ✓
+            //  &unsafe T → &T ✓
+            //  &checked T → &T ✓
             //
+
             // FORBIDDEN (downcast):
-            //   &T → &checked T         ✗
-            //   &T → &unsafe T          ✗
-            //   &checked T → &unsafe T  ✗
+            //  &T → &checked T ✗
+            //  &T → &unsafe T ✗
+            //  &checked T → &unsafe T ✗
 
             // Same-tier references: direct unification with mutability coercion
             // &mut T can be used where &T is expected (mutable → immutable is safe)
@@ -2037,6 +2063,7 @@ impl Unifier {
 
             // UPCAST: &unsafe T → &checked T
             //
+
             // Unsafe references coerce to checked references, but mutability
             // still has to match (or downgrade mut→immut). Silently allowing
             // `&unsafe mut T → &checked T` would break the guarantee that a
@@ -2439,21 +2466,26 @@ impl Unifier {
 
             // ASSOCIATED TYPE PROJECTIONS
             //
+
             // Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Associated type resolution
             //
+
             // Associated type projections are represented as Generic { name: "::AssocName", args: [base] }
             // where base is the type being projected from (e.g., S in S.Item).
             //
+
             // When unifying a projection with another type:
             // 1. If both are projections with same name and bases unify -> unify
             // 2. If projection has type variable base -> allow (deferred constraint)
             // 3. If projection has concrete base -> try to resolve, then unify result
             //
+
             // This enables generic code like:
-            //   implement<S: Stream> Stream for Enumerate<S> {
-            //       fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<(Int, S.Item)>>
-            //   }
+            //  implement<S: Stream> Stream for Enumerate<S> {
+            //  fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<(Int, S.Item)>>
+            //  }
             //
+
             // Where S.Item must unify with the actual item type from poll_next results.
 
             // Case 1: Both are projections (same associated type name)
@@ -2497,12 +2529,14 @@ impl Unifier {
                 // We allow this unification to succeed, effectively treating the projection
                 // as compatible with the other type. This is sound because:
                 //
+
                 // 1. The base type variable will be resolved later during constraint solving
                 // 2. When resolved, the actual associated type will be determined
                 // 3. At that point, full type checking will verify compatibility
                 //
+
                 // This matches the semantic that in generic code like:
-                //   fn enumerate<S: Stream>(s: S) -> impl Stream<Item = (Int, S.Item)>
+                //  fn enumerate<S: Stream>(s: S) -> impl Stream<Item = (Int, S.Item)>
                 // The S.Item is "opaque" until S is instantiated with a concrete type.
 
                 // If the other type also has unresolved vars, just succeed
@@ -2597,6 +2631,7 @@ impl Unifier {
                         // - Type args are [E, A] in declaration order
                         // - But payloads might be [Int, List<Text>] in map iteration order
                         //
+
                         // New approach: Extract type args from Variant using unification with
                         // the original type definition, then unify those with the Generic's args.
 
@@ -2909,8 +2944,8 @@ impl Unifier {
             // 2. Base types unify
             // 3. Refinements are compatible
             // 4. Concrete compile-time values (when both sides carry one) match.
-            //    This is how `StaticMatrix<T, 2, 3>` vs `StaticMatrix<T, 3, 2>`
-            //    produces a dimension-mismatch diagnostic.
+            //  This is how `StaticMatrix<T, 2, 3>` vs `StaticMatrix<T, 3, 2>`
+            //  produces a dimension-mismatch diagnostic.
             (
                 Meta {
                     name: n1,
@@ -3130,17 +3165,20 @@ impl Unifier {
 
             // Cubical Path Types
             //
-            //   Γ ⊢ A : Type    Γ ⊢ a, b : A
-            //   ─────────────────────────── (Path-Form)
-            //   Γ ⊢ Path<A>(a, b) : Type
+
+            //  Γ ⊢ A : Type Γ ⊢ a, b : A
+            //  ─────────────────────────── (Path-Form)
+            //  Γ ⊢ Path<A>(a, b) : Type
             //
+
             // Two path types unify when:
-            //   1. Their carrier spaces unify as regular types,
-            //   2. Their left endpoints are definitionally equal as cubical
-            //      terms (normalized via `whnf` — so `transp (λ i. A) x ≡ x`
-            //      and `refl x @ i ≡ x` are accepted),
-            //   3. Their right endpoints are likewise definitionally equal.
+            //  1. Their carrier spaces unify as regular types,
+            //  2. Their left endpoints are definitionally equal as cubical
+            //  terms (normalized via `whnf` — so `transp (λ i. A) x ≡ x`
+            //  and `refl x @ i ≡ x` are accepted),
+            //  3. Their right endpoints are likewise definitionally equal.
             //
+
             // Without this arm, path types silently fall into the fallback
             // mismatch path — which made the 492-line cubical normalizer in
             // `crate::cubical` dead code on the unification hot path.
@@ -3183,10 +3221,11 @@ impl Unifier {
             // of `A` defined on the face constraint `φ`. Used in Kan
             // composition to describe the compositional boundary.
             //
+
             // Two partial types unify when:
-            //   1. Their element types unify,
-            //   2. Their face constraints are definitionally equal
-            //      (cubical normalization handles `(i ∨ ~i) ≡ 1`, etc.).
+            //  1. Their element types unify,
+            //  2. Their face constraints are definitionally equal
+            //  (cubical normalization handles `(i ∨ ~i) ≡ 1`, etc.).
             (
                 Type::Partial { element_type: e1, face: f1 },
                 Type::Partial { element_type: e2, face: f2 },
@@ -3469,6 +3508,7 @@ impl Unifier {
             // Existential Types
             // Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .5 - Existential Unification
             //
+
             // Two existential types unify if their bodies unify after alpha-renaming
             // to use the same bound variable.
             (Exists { var: v1, body: b1 }, Exists { var: v2, body: b2 }) => {
@@ -3496,6 +3536,7 @@ impl Unifier {
             // Universal Types (Forall)
             // Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — Universal Types
             //
+
             // Two universal types unify if their bodies unify after alpha-renaming
             (Forall { vars: vs1, body: b1 }, Forall { vars: vs2, body: b2 }) => {
                 // Must have same arity
@@ -3693,6 +3734,7 @@ impl Unifier {
             // Bool ↔ Int and Char ↔ Int coercions — REMOVED (semantic honesty)
             // ================================================================
             //
+
             // Previously this unifier silently accepted `Bool` and `Char` as
             // subtypes of `Int`, meaning `let x: Int = true`, `fn f() -> Int {
             // true }`, and `a: Int + b: Bool` all type-checked cleanly — an
@@ -3702,31 +3744,37 @@ impl Unifier {
             // fail because `fn bad_add(a: Int, b: Bool) -> Int { a + b }` was
             // accepted.
             //
+
             // The original justification was to enable patterns like
             // `assert_eq(x > 0, 1)` and arithmetic on characters. Those
             // patterns are themselves code smells — they paper over missing
             // explicit conversions. The correct forms are:
             //
-            //   - `assert_eq(x > 0, true)`  (compare booleans with booleans)
-            //   - `(ch as Int) == 65`       (explicit cast for char)
+
+            //  - `assert_eq(x > 0, true)` (compare booleans with booleans)
+            //  - `(ch as Int) == 65` (explicit cast for char)
             //
+
             // Removing the coercions:
-            //   - makes `test_type_error_detection` pass correctly
-            //   - restores type safety for Bool and Char at assignment,
-            //     return, argument passing, and binary operator sites
-            //   - aligns with CLAUDE.md Rule: "Semantic Honesty"
-            //   - keeps the Verum refinement system sound (Int refinements
-            //     like `Int{>= 0}` can no longer be "satisfied" by a Bool)
+            //  - makes `test_type_error_detection` pass correctly
+            //  - restores type safety for Bool and Char at assignment,
+            //  return, argument passing, and binary operator sites
+            //  - aligns with CLAUDE.md Rule: "Semantic Honesty"
+            //  - keeps the Verum refinement system sound (Int refinements
+            //  like `Int{>= 0}` can no longer be "satisfied" by a Bool)
             //
+
             // If a user really needs Bool-as-Int semantics they must write
             // an explicit cast `as Int` or use `if cond { 1 } else { 0 }`.
             //
+
             // Related: CLAUDE.md section "Semantic Types", the test
             // `crates/verum_compiler/tests/type_error_detection_debug.rs`
             // that documents the full matrix of cases (Int+Bool, Bool+Bool,
             // let x: Int = true, fn f() -> Int { true }, ...), and
             // `crates/verum_compiler/tests/integration_test.rs:113-138`.
             //
+
             // Note: `(Char, Char)` still unifies (same-type reflexivity) via
             // the general primitive case below; only the cross-type
             // coercions are removed here.
@@ -3744,7 +3792,7 @@ impl Unifier {
             // Placeholder types: forward-declared recursive types have placeholder inner types
             // that should unify with any concrete type until fully resolved.
             // Example: SegmentError { inner: <placeholder:SegmentError> } unifies with
-            //          SegmentError { inner: MmapFailed(...) | MunmapFailed(...) | ... }
+            //  SegmentError { inner: MmapFailed(...) | MunmapFailed(...) | ... }
             (Placeholder { .. }, _) | (_, Placeholder { .. }) => {
                 Ok(Substitution::new())
             }
@@ -3754,6 +3802,7 @@ impl Unifier {
             // wrappers (DynTensor<Float>, etc.) are used interchangeably.
             // This bidirectional coercion allows natural math code without explicit wraps.
             //
+
             // The lookup is structural via the `TensorLike` protocol from
             // `core/base/coercion.vr` — populated by
             // `scan_protocol_implementations` (see #101 step 2). The HashSet
@@ -3878,6 +3927,7 @@ impl Unifier {
             // List<USize> vs Int, Range<Int> vs (Maybe<USize>, Maybe<USize>), etc.
             // These arise from type inference through indexing and slicing operations.
             //
+
             // The lookup is structural via the `Indexable` and `RangeLike`
             // protocols from `core/base/coercion.vr` — populated by
             // `scan_protocol_implementations` (see #101 step 2). The HashSets
@@ -3939,6 +3989,7 @@ impl Unifier {
 
     /// Bind a type variable to a type.
     ///
+
     /// Performs the occurs check to prevent infinite types.
     fn bind_var(&self, var: TypeVar, ty: &Type, span: Span) -> Result<Substitution> {
         // Don't bind to itself
@@ -4006,6 +4057,7 @@ impl Unifier {
 
     /// Rename bound variable in a type (for alpha-equivalence).
     ///
+
     /// Used when unifying Pi/Sigma types with different parameter names.
     /// Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Alpha-equivalence for dependent types
     fn rename_bound_var(ty: &Type, from: &Text, to: &Text) -> Type {
@@ -4356,6 +4408,7 @@ impl Unifier {
 
     /// Check if two equality type terms are definitionally equal.
     ///
+
     /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution — Equality types
     fn eq_terms_equal(t1: &EqTerm, t2: &EqTerm) -> bool {
         match (t1, t2) {
@@ -4467,6 +4520,7 @@ impl Unifier {
 
     /// Check if two universe levels can unify.
     ///
+
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Universe hierarchy
     fn universe_levels_unify(l1: &UniverseLevel, l2: &UniverseLevel) -> bool {
         match (l1, l2) {
@@ -4488,6 +4542,7 @@ impl Unifier {
 
     /// Check if two quantities are compatible for unification.
     ///
+
     /// Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .4 - Quantitative Type Theory
     fn quantities_compatible(q1: &Quantity, q2: &Quantity) -> bool {
         match (q1, q2) {
@@ -4521,9 +4576,11 @@ impl Unifier {
 
     /// Check if a type contains a projection (associated type access)
     ///
+
     /// Projections are represented as `Type::Generic { name: "T.Item", ... }`
     /// or `Type::Generic { name: "T::Item", ... }`.
     ///
+
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Bounds
     pub fn contains_projection(ty: &Type) -> bool {
         match ty {
@@ -4573,22 +4630,28 @@ impl Unifier {
 
     /// Unify with projection normalization
     ///
+
     /// This method attempts to normalize any projections in the types before
     /// unifying. If normalization fails (e.g., because a type variable is not
     /// yet resolved), it defers the projection and continues with regular unification.
     ///
+
     /// # Arguments
     ///
+
     /// * `t1` - First type to unify
     /// * `t2` - Second type to unify
     /// * `protocol_checker` - Protocol checker for resolving projections
     /// * `span` - Source span for error messages
     ///
+
     /// # Returns
     ///
+
     /// * `Ok((subst, deferred))` - Substitution and any deferred projections
     /// * `Err(TypeError)` - Unification failed
     ///
+
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Bounds
     pub fn unify_with_projections(
         &mut self,
@@ -4650,16 +4713,21 @@ impl Unifier {
 
     /// Normalize a type by resolving all projections
     ///
+
     /// This is a convenience method that wraps the ProjectionResolver.
     ///
+
     /// # Arguments
     ///
+
     /// * `ty` - Type to normalize
     /// * `protocol_checker` - Protocol checker for resolving projections
     /// * `span` - Source span for error messages
     ///
+
     /// # Returns
     ///
+
     /// The normalized type, or the original type if normalization fails.
     pub fn normalize_projections(
         ty: &Type,
@@ -4699,9 +4767,11 @@ impl Unifier {
     /// Check if a type lives in the Prop universe (proof-irrelevant).
     /// Inductive types: recursive type definitions with structural recursion, termination checking — .1
     ///
+
     /// Returns true if the type's universe is Prop, meaning all inhabitants
     /// are definitionally equal (proof irrelevance).
     ///
+
     /// # Examples
     /// - Prop itself is in Prop (but we check the type-of)
     /// - Equality types Eq<A, x, y> can be in Prop

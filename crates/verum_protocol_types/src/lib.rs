@@ -5,30 +5,38 @@
 
 //! # Verum Protocol Type Definitions
 //!
+
 //! This crate contains foundational protocol/trait type definitions needed by both
 //! `verum_types` and `verum_smt` to break the circular dependency.
 //!
+
 //! ## Architecture
 //!
+
 //! This crate sits at LAYER 1.5 (between verum_ast and verum_types):
 //!
+
 //! ```text
 //! LAYER 2: verum_types ──┐
-//!                         ├──> LAYER 1.5: verum_protocol_types
-//! LAYER 2: verum_smt ────┘           │
-//!                                     ↓
-//!                        LAYER 1: verum_ast, verum_common
+//!  ├──> LAYER 1.5: verum_protocol_types
+//! LAYER 2: verum_smt ────┘ │
+//!  ↓
+//!  LAYER 1: verum_ast, verum_common
 //! ```
 //!
+
 //! ## Contents
 //!
+
 //! - **Protocol Type Definitions**: Core protocol/trait structures (without verification)
 //! - **GAT Type Definitions**: Generic Associated Type structures
 //! - **CBGR Predicate Types**: Generation tracking predicate types
 //! - **Specialization Types**: Specialization lattice structures
 //!
+
 //! ## Design Principles
 //!
+
 //! 1. **No Verification Logic**: Only type definitions, no SMT or verification code
 //! 2. **Semantic Types**: Use List, Text, Map from verum_common
 //! 3. **Spec References**: Link to relevant specification sections

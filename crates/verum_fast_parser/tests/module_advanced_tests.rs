@@ -14,6 +14,7 @@
 )]
 //! Advanced module system tests for Verum parser
 //!
+
 //! Tests cover:
 //! - Relative imports (mount .foo.*)
 //! - Re-exports (public mount)

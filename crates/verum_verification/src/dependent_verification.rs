@@ -1,27 +1,33 @@
 //! Dependent-Type Verification Orchestrator.
 //!
+
 //! This module wires together the four standalone verification
 //! subsystems built in Phase A-D into a single dispatch API:
 //!
+
 //! * **Cubical normalization** (`verum_types::cubical`) — Path-type
-//!   definitional equality via WHNF reduction.
+//!  definitional equality via WHNF reduction.
 //! * **Universe constraint solving** (`verum_types::universe_solver`)
-//!   — resolving universe levels accumulated during type checking.
+//!  — resolving universe levels accumulated during type checking.
 //! * **SMT dependent verification** (`verum_smt::dependent`) — Pi/
-//!   Sigma/Equality/Fin type goals via Z3.
+//!  Sigma/Equality/Fin type goals via Z3.
 //! * **Instance coherence** (`verum_types::instance_search`) —
-//!   global `implement P for T` coherence reporting.
+//!  global `implement P for T` coherence reporting.
 //! * **Domain encodings** (`verum_smt::domains::{sheaf,epistemic}`)
-//!   — ∞-sheaf descent + quantum-epistemic invariant preservation.
+//!  — ∞-sheaf descent + quantum-epistemic invariant preservation.
 //!
+
 //! ## Usage
 //!
+
 //! Downstream code (e.g., the pipeline's verification phase) creates
 //! a `DependentVerifier`, registers the goals encountered during
 //! type checking, and invokes `verify_all()` at module-boundary.
 //!
+
 //! ## Status
 //!
+
 //! This is the **integration layer** the plan refers to. The
 //! underlying modules all work standalone; this orchestrator makes
 //! them a cohesive verification pipeline.
@@ -85,6 +91,7 @@ impl DependentVerdict {
 
 /// The dependent-type verification orchestrator.
 ///
+
 /// Accumulates goals during type checking, then discharges them
 /// in a single pass at module boundary.
 #[derive(Debug, Default)]
@@ -117,6 +124,7 @@ impl DependentVerifier {
     /// has already populated a `ProtocolChecker` during type checking
     /// and wants to route its coherence view through the orchestrator:
     ///
+
     /// ```ignore
     /// let registry = protocol_checker.export_instance_registry();
     /// verifier.set_instance_registry(registry);

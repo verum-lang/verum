@@ -15,6 +15,7 @@
 )]
 //! Comprehensive tests for Error Context Protocol (Tier 2.3)
 //!
+
 //! Tests cover:
 //! - Basic context addition
 //! - Lazy context evaluation

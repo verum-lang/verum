@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (CDC) — sqlite3session_patchset
 //
+
 // `SessionPatch` is the compact analogue of `Change`: only the modified
 // columns are present, with NULL standing for "unchanged" in the
 // `new_row`. Used when the consumer doesn't need OLD row values
 // and bandwidth matters (replication over WAN).
 //
+
 // Conversion `ChangeSet → PatchSet` is lossy in two ways:
-//   * OLD row is dropped except for primary-key columns
-//   * NEW row drops cells that match OLD
+//  * OLD row is dropped except for primary-key columns
+//  * NEW row drops cells that match OLD
 //
+
 // Reverse `PatchSet → ChangeSet` is impossible without the target
 // database state (which the applier already has).
 // =============================================================================

@@ -4,15 +4,18 @@
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
+
 // Thin async wrapper around the SendStream / RecvStream halves in
 // core.net.quic.stream_sm. Adds:
 //
-//   * AsyncRead / AsyncWrite protocol impls so `QuicApiStream` composes
-//     with the rest of the stdlib (io.copy, async_iterator).
-//   * Cancellation-aware reads that honour the connection's idle
-//     timer + per-connection Nursery scope.
-//   * A cheap `close()` that emits FIN + RESET_STREAM cleanly.
+
+//  * AsyncRead / AsyncWrite protocol impls so `QuicApiStream` composes
+//  with the rest of the stdlib (io.copy, async_iterator).
+//  * Cancellation-aware reads that honour the connection's idle
+//  timer + per-connection Nursery scope.
+//  * A cheap `close()` that emits FIN + RESET_STREAM cleanly.
 //
+
 // =============================================================================
 
 module core.net.quic.api.stream;

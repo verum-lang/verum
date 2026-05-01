@@ -4,6 +4,7 @@
 // Common layout patterns as one-liner functions: header/body/footer splits,
 // sidebar+main, centered boxes, equal columns/rows, percentage splits.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#16.2
 // =============================================================================
 

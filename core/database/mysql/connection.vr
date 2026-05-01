@@ -2,31 +2,33 @@
 // core/database/mysql/connection.vr — MysqlConnection state machine
 // =============================================================================
 // Spec: internal/specs/database.md §6.3, dev.mysql.com/doc/dev/mysql-server/
-//       latest/page_protocol_basic_packets.html
+//  latest/page_protocol_basic_packets.html
 //
+
 // Drives the v10 protocol forward:
 //
-//   1. TCP connect.
-//   2. Read Initial Handshake — capture capabilities + auth-plugin name +
-//      20-byte auth scramble.
-//   3. Reject auth-plugin != caching_sha2_password (mysql_native_password
-//      requires `@allow_legacy_auth` opt-in; v0.1 ships only the modern
-//      default).
-//   4. Build & send HandshakeResponse41 with the caching_sha2 fast-path
-//      response. Increment sequence number per packet.
-//   5. Read AuthMoreData / OK / ERR / AuthSwitchRequest:
-//        * OK directly      → fast auth without AuthMoreData (server
-//                             cached the password successfully)
-//        * AuthMoreData(0x03) → expect OK next
-//        * AuthMoreData(0x04) → full-auth required; v0.1 returns
-//                                TLS_PENDING (RSA exchange + cleartext
-//                                fall-back land in T10c)
-//        * AuthSwitch        → reject; pinned to caching_sha2_password
-//        * ERR               → translate via dberr_from_mysql
-//   6. simple_query(sql) sends COM_QUERY (resets seq to 0), reads
-//      ColumnCount LEI → MyColumnDefinition41 packets → EOF (or
-//      DEPRECATE_EOF skips this) → DataRow text packets → OK / EOF /
-//      ERR. Returns MySimpleQueryResult.
+
+//  1. TCP connect.
+//  2. Read Initial Handshake — capture capabilities + auth-plugin name +
+//  20-byte auth scramble.
+//  3. Reject auth-plugin != caching_sha2_password (mysql_native_password
+//  requires `@allow_legacy_auth` opt-in; v0.1 ships only the modern
+//  default).
+//  4. Build & send HandshakeResponse41 with the caching_sha2 fast-path
+//  response. Increment sequence number per packet.
+//  5. Read AuthMoreData / OK / ERR / AuthSwitchRequest:
+//  * OK directly → fast auth without AuthMoreData (server
+//  cached the password successfully)
+//  * AuthMoreData(0x03) → expect OK next
+//  * AuthMoreData(0x04) → full-auth required; v0.1 returns
+//  TLS_PENDING (RSA exchange + cleartext
+//  fall-back land in T10c)
+//  * AuthSwitch → reject; pinned to caching_sha2_password
+//  * ERR → translate via dberr_from_mysql
+//  6. simple_query(sql) sends COM_QUERY (resets seq to 0), reads
+//  ColumnCount LEI → MyColumnDefinition41 packets → EOF (or
+//  DEPRECATE_EOF skips this) → DataRow text packets → OK / EOF /
+//  ERR. Returns MySimpleQueryResult.
 // =============================================================================
 
 module core.database.mysql.connection;
@@ -102,7 +104,7 @@ public type MySimpleQueryResult is {
 // MysqlPreparedStatement — handle returned by COM_STMT_PREPARE
 // -----------------------------------------------------------------------------
 
-/// Server-assigned prepared statement.  The `statement_id` is valid
+/// Server-assigned prepared statement. The `statement_id` is valid
 /// for the lifetime of the connection; `close_prepared` releases it.
 /// Client-side it's a plain handle (not affine) — matches MySQL's
 /// session-local lifecycle and SQLite's prepared-statement shape.
@@ -111,7 +113,7 @@ public type MysqlPreparedStatement is {
     num_params: Int,
     num_columns: Int,
     /// MySQL field-type byte per parameter — used by the binary
-    /// protocol type vector.  v0.1 trusts whatever the user supplies
+    /// protocol type vector. v0.1 trusts whatever the user supplies
     /// in `StmtParam` rather than coercing; spec parity with
     /// caching_sha2_password's "let the wire match" pattern.
     param_types: List<Int>,
@@ -122,9 +124,9 @@ public type MysqlPreparedStatement is {
     sql: Text,
 };
 
-/// Result of executing a prepared statement.  For non-SELECT shapes
+/// Result of executing a prepared statement. For non-SELECT shapes
 /// `rows` is empty and `affected_rows` / `last_insert_id` are
-/// populated from the OK packet.  For SELECT shapes `rows` holds
+/// populated from the OK packet. For SELECT shapes `rows` holds
 /// every binary-protocol row (columns are positionally indexed
 /// against `stmt.column_types`).
 public type MysqlPreparedResult is {
@@ -216,10 +218,10 @@ implement MysqlConnection {
         send_packet(self, payload.as_slice())?;
 
         // First reply is one of:
-        //   * ERR              → translated, return
-        //   * OK               → INSERT/UPDATE/DELETE/DDL — no rows
-        //   * LOCAL INFILE     → not supported in v0.1, return error
-        //   * column-count LEI → SELECT, decode rows
+        //  * ERR → translated, return
+        //  * OK → INSERT/UPDATE/DELETE/DDL — no rows
+        //  * LOCAL INFILE → not supported in v0.1, return error
+        //  * column-count LEI → SELECT, decode rows
         let pkt = recv_packet(self)?;
         let body = pkt.into_payload();
         let kind = classify(body.as_slice(), self.capabilities);
@@ -360,25 +362,27 @@ implement MysqlConnection {
     // Prepared statements (database.md §6.3.3 — COM_STMT_PREPARE / EXECUTE)
     // -------------------------------------------------------------------------
     //
+
     // The binary protocol — 3-5× faster than COM_QUERY on repeated
     // calls and the only safe surface for parameterised values
     // (text-protocol concatenation invites SQL injection).
     //
+
     // Lifecycle:
-    //   prepare(sql)         → returns MysqlPreparedStatement holding
-    //                           the server-assigned statement_id +
-    //                           param/column metadata.
-    //   execute(stmt, params)→ runs the statement with the given
-    //                           parameter vector; returns rows in
-    //                           binary protocol form.
-    //   close(stmt)          → frees the statement_id server-side
-    //                           (no response — fire-and-forget).
-    //   reset(stmt)          → clears any long-data state; used by
-    //                           streaming workflows.
+    //  prepare(sql) → returns MysqlPreparedStatement holding
+    //  the server-assigned statement_id +
+    //  param/column metadata.
+    //  execute(stmt, params)→ runs the statement with the given
+    //  parameter vector; returns rows in
+    //  binary protocol form.
+    //  close(stmt) → frees the statement_id server-side
+    //  (no response — fire-and-forget).
+    //  reset(stmt) → clears any long-data state; used by
+    //  streaming workflows.
 
     /// Prepare `sql` — round-trips COM_STMT_PREPARE, parses the
     /// COM_STMT_PREPARE_OK + parameter MyColumnDefinitions + result-
-    /// column MyColumnDefinitions.  Returns the typed handle.
+    /// column MyColumnDefinitions. Returns the typed handle.
     public fn prepare(&mut self, sql: &Text) -> Result<MysqlPreparedStatement, DbError> {
         match self.state {
             McsReady => {}
@@ -455,7 +459,7 @@ implement MysqlConnection {
     }
 
     /// Execute a prepared statement with the supplied parameter
-    /// vector.  `params.len()` must match `stmt.num_params`.  Returns
+    /// vector. `params.len()` must match `stmt.num_params`. Returns
     /// the binary-protocol row payload (each row is a list of
     /// `Maybe<List<Byte>>` per column, matching MySQL's NULL bitmap).
     public fn execute_prepared(
@@ -510,7 +514,7 @@ implement MysqlConnection {
         }
 
         // Result-set form: column count (lenenc) + N MyColumnDef + EOF
-        // + binary rows + EOF/OK.  We already have the column types
+        // + binary rows + EOF/OK. We already have the column types
         // from prepare time, so we skip re-decoding MyColumnDefs and
         // just count packets to find the row boundary.
         let (col_count_opt, _) = match decode_lei(fb.as_slice(), 0) {
@@ -578,8 +582,8 @@ implement MysqlConnection {
         })
     }
 
-    /// Free the server-side statement.  No reply is sent on the
-    /// wire — the statement_id is invalidated immediately.  Closing
+    /// Free the server-side statement. No reply is sent on the
+    /// wire — the statement_id is invalidated immediately. Closing
     /// twice is a no-op since we don't track a closed flag client-
     /// side; the server simply ignores unknown statement_ids on
     /// subsequent EXECUTE.
@@ -596,7 +600,7 @@ implement MysqlConnection {
         Ok(())
     }
 
-    /// Reset a prepared statement's parameter state.  Server replies
+    /// Reset a prepared statement's parameter state. Server replies
     /// with OK or ERR.
     public fn reset_prepared(&mut self, stmt: &MysqlPreparedStatement)
         -> Result<(), DbError>

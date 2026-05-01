@@ -3,12 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_backup_step returns one of:
-//   SQLITE_OK       → more pages to copy
-//   SQLITE_DONE     → source fully copied
-//   SQLITE_BUSY     → destination locked; caller may retry
-//   SQLITE_LOCKED   → source locked; caller may retry
-//   any error code  → copy aborted
+//  SQLITE_OK → more pages to copy
+//  SQLITE_DONE → source fully copied
+//  SQLITE_BUSY → destination locked; caller may retry
+//  SQLITE_LOCKED → source locked; caller may retry
+//  any error code → copy aborted
 // =============================================================================
 
 module core.database.sqlite.native.backup_api.outcome;

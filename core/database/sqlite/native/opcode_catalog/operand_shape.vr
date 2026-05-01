@@ -3,13 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.2
 //
+
 // Each opcode carries up to 5 operands (p1..p5 in SQLite's
 // terminology). The semantic kind of each slot determines:
 //
-//   * how the disassembler renders it (literal vs register vs jump)
-//   * how the optimiser can rewrite it
-//   * how the fuzz mutator picks valid replacement values
+
+//  * how the disassembler renders it (literal vs register vs jump)
+//  * how the optimiser can rewrite it
+//  * how the fuzz mutator picks valid replacement values
 //
+
 // We omit the legacy `p4` / `p5` slot details — they're seldom needed
 // in loom (constants live in the constant pool). The catalogue
 // captures the dominant first-three slot shape per opcode.

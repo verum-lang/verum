@@ -6,17 +6,20 @@ module core.database.sqlite.native.l4_vdbe.optimizer;
 // Layer: 4
 // Spec: sqlite-native.md §11.5
 //
+
 // Before handing a `VdbeProgram` to the interpreter, the codegen runs
 // a small set of purity-preserving passes to eliminate obvious waste:
 //
-//   * Noop elimination        — drop `Noop` instructions and renumber
-//                                  jump targets.
-//   * Jump threading          — `Goto A; A: Goto B` → `Goto B`.
-//   * Constant folding (Add)  — `Integer 1 → r1; Integer 2 → r2;
-//                                  Add r1 r2 → r3` → `Integer 3 → r3`.
-//   * Dead-register writes    — `SCopy r1 → r2` when r2 is never read
-//                                  before next overwrite.
+
+//  * Noop elimination — drop `Noop` instructions and renumber
+//  jump targets.
+//  * Jump threading — `Goto A; A: Goto B` → `Goto B`.
+//  * Constant folding (Add) — `Integer 1 → r1; Integer 2 → r2;
+//  Add r1 r2 → r3` → `Integer 3 → r3`.
+//  * Dead-register writes — `SCopy r1 → r2` when r2 is never read
+//  before next overwrite.
 //
+
 // For now we ship Noop elimination + Jump threading + one-shot
 // constant fold for Add/Subtract/Multiply. The remaining passes will
 // land with the planner work in L5.

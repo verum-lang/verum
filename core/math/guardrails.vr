@@ -2,17 +2,20 @@
 // Verum Math Stack - L9.5: Guardrails and Safety
 // =============================================================================
 //
+
 // Content filtering, output validation, and safety constraints for AI agents.
 // Provides a composable system for input/output validation.
 //
+
 // Architecture:
-//   - GuardrailResult: Outcome of safety checks (Pass/Block/Modify)
-//   - ContentClassifier: ML-based content classification
-//   - PIIFilter: Personally Identifiable Information redaction
-//   - TopicGuardrail: Topic restriction enforcement
-//   - GuardrailChain: Composable guardrail pipeline
-//   - GuardedAgent: Agent wrapper with guardrails
+//  - GuardrailResult: Outcome of safety checks (Pass/Block/Modify)
+//  - ContentClassifier: ML-based content classification
+//  - PIIFilter: Personally Identifiable Information redaction
+//  - TopicGuardrail: Topic restriction enforcement
+//  - GuardrailChain: Composable guardrail pipeline
+//  - GuardedAgent: Agent wrapper with guardrails
 //
+
 // Spec: math-spec.md Section 51 - Guardrails and Safety
 // =============================================================================
 
@@ -28,6 +31,7 @@ mount core.sync.mutex.{Mutex};
 
 // Result of a guardrail check
 //
+
 // Sum type representing the three possible outcomes of a safety check:
 // - Pass: Content is safe to proceed
 // - Block: Content is blocked with a reason
@@ -122,6 +126,7 @@ implement ClassificationResult {
 
 // Content classifier for safety using a neural network model
 //
+
 // Uses a text classification model to detect harmful content categories.
 public type ContentClassifier is {
     // Classification model (Text -> ClassificationResult)
@@ -187,6 +192,7 @@ implement ContentClassifier {
 
 // Protocol for input/output guardrails
 //
+
 // Guardrails can check both input (before processing) and output
 // (after generation) for safety.
 public type Guardrail is protocol {
@@ -225,6 +231,7 @@ implement GuardrailPattern {
 
 // PII (Personally Identifiable Information) filter
 //
+
 // Detects and redacts common PII patterns like emails, phone numbers,
 // SSNs, and credit card numbers.
 public type PIIFilter is {
@@ -301,6 +308,7 @@ implement Guardrail for PIIFilter {
 
 // Topic restriction guardrail
 //
+
 // Ensures content is within allowed topics and not in blocked topics.
 public type TopicGuardrail is {
     // Topics that are allowed (empty = all allowed)
@@ -400,6 +408,7 @@ public type GuardrailMode is
 
 // Composite guardrail chain
 //
+
 // Chains multiple guardrails together with configurable execution mode.
 public type GuardrailChain is {
     // List of guardrails to apply
@@ -524,6 +533,7 @@ implement Guardrail for GuardrailChain {
 
 // Guarded agent wrapper
 //
+
 // Wraps any Agent with input and output guardrails for safe operation.
 public type GuardedAgent<A: Agent> is {
     // The underlying agent
@@ -633,6 +643,7 @@ implement<A: Agent> Agent for GuardedAgent<A> {
 
 // Simple keyword-based filter
 //
+
 // Blocks content containing any of the specified keywords.
 public type KeywordFilter is {
     // Keywords to block (original casing — preserved for the
@@ -732,6 +743,7 @@ implement Guardrail for KeywordFilter {
 
 // Length-based guardrail
 //
+
 // Ensures content length is within acceptable bounds.
 public type LengthGuardrail is {
     // Minimum allowed length (0 = no minimum)
@@ -803,6 +815,7 @@ implement Guardrail for LengthGuardrail {
 
 // Rate limiting guardrail
 //
+
 // Limits the rate of requests within a time window. The
 // `request_times` list lives behind a `Mutex` so the
 // `Guardrail::check_input(&self, ...)` implementation (which
@@ -810,6 +823,7 @@ implement Guardrail for LengthGuardrail {
 // log via interior mutability — this is the canonical
 // concurrent-rate-limiter pattern.
 //
+
 // Pre-fix `check_input` was an `always-pass` placeholder
 // because the field was a bare `List<U64>` that needed
 // `&mut self` to update — incompatible with the protocol's
@@ -837,6 +851,7 @@ implement RateLimitGuardrail {
 
     // Clean old entries and check if request is allowed.
     //
+
     // Takes `&self` — the `Mutex` provides interior mutability so
     // the timestamp list can be updated even when called through
     // the `Guardrail::check_input` protocol's immutable receiver.
@@ -989,25 +1004,30 @@ implement Guardrail for ClassifierGuardrail {
 // Example Usage (Documentation)
 // =============================================================================
 //
+
 // // Create a guarded agent with multiple safety layers
 // let classifier = ContentClassifier.new(load_safety_model());
 //
+
 // let input_guardrails = GuardrailBuilder.new()
-//     .strict()
-//     .with_pii_filter()
-//     .with_blocked_keywords(["password", "secret"].to_list())
-//     .with_length_limits(1, 10000)
-//     .build();
+//  .strict()
+//  .with_pii_filter()
+//  .with_blocked_keywords(["password", "secret"].to_list())
+//  .with_length_limits(1, 10000)
+//  .build();
 //
+
 // let output_guardrails = GuardrailBuilder.new()
-//     .first_block()
-//     .with_pii_filter()
-//     .with_classifier(classifier)
-//     .build();
+//  .first_block()
+//  .with_pii_filter()
+//  .with_classifier(classifier)
+//  .build();
 //
+
 // let agent = LLMAgent.new(model, tokenizer);
 // let guarded_agent = GuardedAgent.new(agent, input_guardrails, output_guardrails);
 //
+
 // // Use the guarded agent safely
 // let response = guarded_agent.think("What is the weather today?");
 // =============================================================================

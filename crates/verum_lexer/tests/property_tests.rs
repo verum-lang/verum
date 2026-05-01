@@ -14,6 +14,7 @@
 )]
 // Property-Based Tests for Verum Lexer
 //
+
 // Uses proptest to verify lexer invariants across randomly generated inputs.
 
 use proptest::prelude::*;

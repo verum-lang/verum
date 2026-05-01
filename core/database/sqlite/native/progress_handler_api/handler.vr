@@ -13,7 +13,7 @@ public fn unconfigured() -> ProgressConfig {
     ProgressConfig { interval: 0, installed: false }
 }
 
-// Install the handler.  N=0 (or negative) clears it.
+// Install the handler. N=0 (or negative) clears it.
 public fn install(n: Int) -> ProgressConfig {
     if n <= 0 { return unconfigured(); }
     ProgressConfig { interval: n, installed: true }
@@ -42,7 +42,7 @@ public fn aborts_stmt(e: &ProgressEffect) -> Bool {
     match e { EfInterrupt => true, _ => false }
 }
 
-// Counter of executed opcodes.  When (count % interval == 0) the engine
+// Counter of executed opcodes. When (count % interval == 0) the engine
 // invokes the callback.
 public type Tick is
     | TkSilent

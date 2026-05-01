@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for goto_definition module
 //!
+
 //! Tests the go-to-definition functionality including:
 //! - Top-level function definitions
 //! - Local variable definitions

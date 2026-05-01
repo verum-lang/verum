@@ -3,21 +3,27 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.5
 //
+
 // Pattern (where dst = ra OP rb is `Add` / `Subtract` / `Multiply` /
 // `Divide` / `Remainder`):
 //
-//   N: Integer  c1, ra
-//   N+1: Integer c2, rb
-//   N+2: Add ra, rb, dst
+
+//  N: Integer c1, ra
+//  N+1: Integer c2, rb
+//  N+2: Add ra, rb, dst
 //
+
 // →
 //
-//   N:   Noop
-//   N+1: Noop
-//   N+2: Integer (c1 op c2), dst
+
+//  N: Noop
+//  N+1: Noop
+//  N+2: Integer (c1 op c2), dst
 //
+
 // (The Noop pass cleans up the placeholders.)
 //
+
 // We restrict to Integer literals + integer operations to keep
 // SQLite's well-defined integer-overflow semantics. Division/Remainder
 // fold only when the divisor is non-zero.

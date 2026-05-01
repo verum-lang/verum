@@ -14,6 +14,7 @@
 )]
 //! CVC5 Backend Integration Tests
 //!
+
 //! Tests the CVC5 backend implementation with stub FFI layer.
 
 #![cfg(feature = "cvc5")]
@@ -112,24 +113,27 @@ fn test_quantifier_mode_enum() {
 // NOTE: Full integration tests with actual CVC5 solving would go here
 // when the cvc5-sys feature is enabled and libcvc5 is available.
 //
+
 // Example test structure:
 //
+
 // #[test]
 // #[cfg(feature = "cvc5-sys")]
 // fn test_cvc5_basic_solving() {
-//     let mut solver = Cvc5Backend::new(Cvc5Config::default()).unwrap();
-//     let int_sort = solver.int_sort();
-//     let x = solver.mk_const(&"x".to_string(), int_sort.clone()).unwrap();
-//     let zero = solver.mk_int_val(0).unwrap();
-//     let gt = solver.mk_gt(&x, &zero).unwrap();
-//     solver.assert(&gt).unwrap();
+//  let mut solver = Cvc5Backend::new(Cvc5Config::default()).unwrap();
+//  let int_sort = solver.int_sort();
+//  let x = solver.mk_const(&"x".to_string(), int_sort.clone()).unwrap();
+//  let zero = solver.mk_int_val(0).unwrap();
+//  let gt = solver.mk_gt(&x, &zero).unwrap();
+//  solver.assert(&gt).unwrap();
 //
-//     match solver.check_sat().unwrap() {
-//         SatResult::Sat => {
-//             let model = solver.get_model().unwrap();
-//             let x_val = solver.eval(&x).unwrap();
-//             assert!(matches!(x_val, Cvc5Value::Int(v) if v > 0));
-//         }
-//         _ => panic!("Expected SAT result"),
-//     }
+
+//  match solver.check_sat().unwrap() {
+//  SatResult::Sat => {
+//  let model = solver.get_model().unwrap();
+//  let x_val = solver.eval(&x).unwrap();
+//  assert!(matches!(x_val, Cvc5Value::Int(v) if v > 0));
+//  }
+//  _ => panic!("Expected SAT result"),
+//  }
 // }

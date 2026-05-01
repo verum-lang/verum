@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_wal_checkpoint_v2
 //
+
 // `CheckpointEngine` derives a `CheckpointPlan` describing what the
 // pager / VFS must do for the given mode. The plan is a sequence of
 // primitive ops; the L1 pager + L0 VFS execute them.

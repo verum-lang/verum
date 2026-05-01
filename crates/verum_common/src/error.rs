@@ -1,34 +1,41 @@
 //! Unified Error Hierarchy
 //!
+
 //! Verum uses a unified error hierarchy with a single VerumError type that
 //! categorizes errors into 5 levels: L0 (type prevention), L1 (static verification),
 //! L2 (explicit handling - IO/parse/memory), L3 (fault tolerance - circuit breaker/retry),
 //! L4 (security containment). Each error carries message, kind, location, context, and
 //! optional backtrace. CBGR violations are a domain-specific subcategory (ErrorKind::Cbgr).
 //!
+
 //! This module provides a **single unified error type** ([`VerumError`]) that consolidates
 //! all error types from across the Verum platform. This eliminates error type proliferation
 //! while maintaining rich error context and diagnostic information.
 //!
+
 //! # Core Concept
 //!
+
 //! Instead of many different error types:
 //! ```text
 //! IoError, ParseError, NetworkError, DatabaseError, ...
 //! ```
 //!
+
 //! Verum uses a single `VerumError` with categorized error kinds:
 //! ```text
 //! VerumError {
-//!     message: "...",
-//!     kind: ErrorKind::Parse,
-//!     context: Some("..."),
-//!     location: Some("src/main.rs:42:15"),
+//!  message: "...",
+//!  kind: ErrorKind::Parse,
+//!  context: Some("..."),
+//!  location: Some("src/main.rs:42:15"),
 //! }
 //! ```
 //!
+
 //! # Error Categories
 //!
+
 //! [`VerumError`] categorizes errors by kind:
 //! - **Parse** - Parsing or lexing failed
 //! - **Type** - Type checking failed
@@ -41,8 +48,10 @@
 //! - **NotFound** - Resource not found
 //! - And more...
 //!
+
 //! # Rich Context
 //!
+
 //! Errors capture:
 //! - **Message** - Human-readable description
 //! - **Kind** - Error category for filtering/handling
@@ -50,35 +59,44 @@
 //! - **Backtrace** - Full stack trace (when enabled)
 //! - **Context chain** - Multi-level error context
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_common::error::{VerumError, ErrorKind};
 //!
+
 //! // Create an error
 //! let err = VerumError::new("Invalid input", ErrorKind::Invalid);
 //!
+
 //! // Add context
 //! let err = err.with_context("Processing user input");
 //!
+
 //! // Add location
 //! let err = err.with_location("src/main.rs", 42, 15);
 //!
+
 //! // Display with full information
-//! eprintln!("{}", err);  // Shows message, kind, location, context
+//! eprintln!("{}", err); // Shows message, kind, location, context
 //! ```
 //!
+
 //! # Backtrace Support
 //!
+
 //! Backtraces are captured when `VERUM_BACKTRACE=1`:
 //! ```text
 //! error[E0001]: Invalid input (Processing user input)
-//!    at src/main.rs:42:15
+//!  at src/main.rs:42:15
 //!
+
 //! Backtrace:
-//!    0: parse_input
-//!    1: main
-//!    ...
+//!  0: parse_input
+//!  1: main
+//!  ...
 //! ```
 
 use crate::Text;
@@ -94,14 +112,18 @@ pub type Result<T, E = VerumError> = core::result::Result<T, E>;
 
 /// Unified error type for the Verum platform
 ///
+
 /// This type consolidates all error categories from across the platform,
 /// providing a single error type with rich context and diagnostic information.
 ///
+
 /// # Examples
 ///
+
 /// ```rust
 /// use verum_common::error::{VerumError, ErrorKind};
 ///
+
 /// let err = VerumError::new("out of bounds", ErrorKind::Memory);
 /// assert_eq!(err.kind(), ErrorKind::Memory);
 /// ```
@@ -172,6 +194,7 @@ impl fmt::Display for ErrorLocation {
 
 /// Error categories aligned with 5-level architecture
 ///
+
 /// Each kind maps to a specific level of the error handling system:
 /// - Level 0: Type/Refinement/Context errors (prevented at compile-time)
 /// - Level 1: Verification errors (SMT solver failures)
@@ -639,32 +662,39 @@ pub use crate::formatting::{format_cycle_str as format_cycle, format_list_str as
 // CBGR Violation Kinds - Single Source of Truth
 // =============================================================================
 //
+
 // This enum is the ONLY definition of CBGR violation kinds in the codebase.
 // All crates must use this definition via `verum_common::CbgrViolationKind`.
 //
+
 // CBGR Violation Kinds — single source of truth for all memory safety violations
 // detected by the CBGR (Capability-Based Generation References) system.
 // All crates must use this definition via `verum_common::CbgrViolationKind`.
 // FFI error codes are in 0x1000-0x10FF range. Tier behavior:
-//   Tier 0 (Interpreter): Runtime validation ~100ns
-//   Tier 1-2 (JIT): Inline checks with escape analysis ~5-15ns
-//   Tier 3 (AOT): Static elimination where provable, 0ns
+//  Tier 0 (Interpreter): Runtime validation ~100ns
+//  Tier 1-2 (JIT): Inline checks with escape analysis ~5-15ns
+//  Tier 3 (AOT): Static elimination where provable, 0ns
 
 /// CBGR (Capability-Based Generation References) violation kinds.
 ///
+
 /// This is the single source of truth for all memory safety violations
 /// detected by the CBGR system across all execution tiers.
 ///
+
 /// # Tier Behavior
 ///
+
 /// | Tier | Check Method | Overhead |
 /// |------|--------------|----------|
 /// | 0 (Interpreter) | Runtime validation | ~100ns |
 /// | 1-2 (JIT) | Inline checks with escape analysis | ~5-15ns |
 /// | 3 (AOT) | Static elimination where provable | 0ns |
 ///
+
 /// # Error Codes
 ///
+
 /// Each variant maps to a unique FFI error code in the 0x1000-0x10FF range:
 /// - `UseAfterFree` → 0x1001
 /// - `DoubleFree` → 0x1002
@@ -675,11 +705,14 @@ pub use crate::formatting::{format_cycle_str as format_cycle, format_list_str as
 /// - `NullPointer` → 0x1007
 /// - `OutOfBounds` → 0x1008
 ///
+
 /// # Examples
 ///
+
 /// ```rust
 /// use verum_common::CbgrViolationKind;
 ///
+
 /// let violation = CbgrViolationKind::UseAfterFree;
 /// assert!(violation.is_fatal());
 /// assert_eq!(violation.ffi_error_code(), 0x1001);
@@ -689,6 +722,7 @@ pub use crate::formatting::{format_cycle_str as format_cycle, format_list_str as
 pub enum CbgrViolationKind {
     /// Reference used after the object was deallocated.
     ///
+
     /// This is the most common memory safety error, caught when:
     /// - The generation counter doesn't match the expected value
     /// - The object has been explicitly freed
@@ -696,6 +730,7 @@ pub enum CbgrViolationKind {
 
     /// Attempt to free an object that was already freed.
     ///
+
     /// Detected when:
     /// - Deallocation is called with an already-invalidated generation
     /// - The same pointer is freed multiple times
@@ -703,12 +738,14 @@ pub enum CbgrViolationKind {
 
     /// Reference generation doesn't match current object generation.
     ///
+
     /// This indicates the reference is stale - the object was reallocated
     /// and a new generation was assigned.
     GenerationMismatch = 2,
 
     /// Reference epoch is older than current runtime epoch.
     ///
+
     /// Epochs provide coarse-grained temporal safety. When the runtime
     /// advances its epoch (e.g., during GC), all references from
     /// previous epochs become invalid.
@@ -716,6 +753,7 @@ pub enum CbgrViolationKind {
 
     /// Operation requires a capability the reference doesn't have.
     ///
+
     /// CBGR references carry capability bits (read, write, execute, etc.).
     /// This violation occurs when code attempts an operation not permitted
     /// by the reference's capabilities.
@@ -723,6 +761,7 @@ pub enum CbgrViolationKind {
 
     /// Reference is structurally invalid (corrupted or uninitialized).
     ///
+
     /// This catches:
     /// - Uninitialized references
     /// - References with impossible combinations of fields
@@ -731,12 +770,14 @@ pub enum CbgrViolationKind {
 
     /// Attempt to dereference a null pointer.
     ///
+
     /// While Verum's type system prevents most null pointers,
     /// FFI boundaries and unsafe code can still produce them.
     NullPointer = 6,
 
     /// Access beyond the bounds of an allocation.
     ///
+
     /// For fat references (slices, arrays), this catches
     /// out-of-bounds indexing that would access unallocated memory.
     OutOfBounds = 7,
@@ -745,6 +786,7 @@ pub enum CbgrViolationKind {
 impl CbgrViolationKind {
     /// Check if this violation represents a fatal memory safety error.
     ///
+
     /// Fatal violations should never be ignored or recovered from,
     /// as they indicate fundamental memory corruption.
     #[inline]
@@ -760,6 +802,7 @@ impl CbgrViolationKind {
 
     /// Check if this violation is recoverable.
     ///
+
     /// Some violations (like capability denial) indicate policy violations
     /// rather than memory corruption, and may be recoverable.
     #[inline]
@@ -769,6 +812,7 @@ impl CbgrViolationKind {
 
     /// Get the FFI error code for this violation kind.
     ///
+
     /// Returns a code in the 0x1000-0x10FF range for CBGR errors.
     #[inline]
     pub const fn ffi_error_code(&self) -> u32 {
@@ -777,6 +821,7 @@ impl CbgrViolationKind {
 
     /// Create from an FFI error code.
     ///
+
     /// Returns `None` if the code is not a valid CBGR error code.
     #[inline]
     pub const fn from_ffi_error_code(code: u32) -> Option<Self> {
@@ -835,17 +880,21 @@ impl fmt::Display for CbgrViolationKind {
 
 /// Detailed CBGR violation with context information.
 ///
+
 /// This struct wraps `CbgrViolationKind` with additional diagnostic
 /// information useful for debugging and error reporting.
 ///
+
 /// # Examples
 ///
+
 /// ```rust
 /// use verum_common::{CbgrViolation, CbgrViolationKind};
 ///
+
 /// let violation = CbgrViolation::new(
-///     CbgrViolationKind::UseAfterFree,
-///     0xDEADBEEF,
+///  CbgrViolationKind::UseAfterFree,
+///  0xDEADBEEF,
 /// ).with_generation(42, 100)
 ///  .with_epoch(1, 2);
 /// ```

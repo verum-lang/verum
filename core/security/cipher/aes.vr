@@ -4,49 +4,60 @@
 // Layer: 2 (core primitive)
 // Dependencies: core
 // Reference: NIST FIPS 197 — Advanced Encryption Standard
-//            NIST SP 800-38A §6 (modes of operation live in aes_modes.vr)
+//  NIST SP 800-38A §6 (modes of operation live in aes_modes.vr)
 // =============================================================================
 //
+
 // AES-128 and AES-256 block-cipher core — single-block encrypt/decrypt +
 // key schedule. Block size is always 16 bytes; key size is 16 (AES-128)
 // or 32 (AES-256). AES-192 is intentionally omitted — neither TLS 1.3,
 // QUIC, nor any modern protocol negotiates it; leaving it out keeps
 // the attack surface smaller.
 //
+
 // # Constant-time discipline
 //
+
 // The reference implementation below uses the standard 256-byte S-box
 // and inverse S-box. **Table-lookups into a 256-byte block are cache-
 // timing susceptible on shared hardware.** Production deployments MUST
 // enable `@cfg(feature = "crypto-accel")` which substitutes the
 // block-encrypt / key-schedule bodies with:
 //
-//   * Intel AES-NI / VAES (AVX-512): `aesenc`, `aesdec`, `aeskeygenassist`
-//     — hardware primitives that are natively constant-time and ~10 GiB/s.
-//   * ARMv8 AES Crypto Extensions: `aese`, `aesd`, `aesmc`, `aesimc`
-//     — same guarantees on modern ARM cores.
+
+//  * Intel AES-NI / VAES (AVX-512): `aesenc`, `aesdec`, `aeskeygenassist`
+//  — hardware primitives that are natively constant-time and ~10 GiB/s.
+//  * ARMv8 AES Crypto Extensions: `aese`, `aesd`, `aesmc`, `aesimc`
+//  — same guarantees on modern ARM cores.
 //
+
 // The reference code remains as the canonical golden source — all
 // accelerated implementations are differentially tested against it via
 // property-tests in `vcs/specs/L1-core/security/run/aes_kat.vr`
 // (NIST KAT + FIPS 197 Appendix C vectors).
 //
+
 // # Typed keys — refinement-checked sizes
 //
+
 // Keys are fixed-size byte arrays. Handlers that accept `AesKey128`
 // have compile-time guarantee on the 16-byte length; `AesKey256` the
 // 32-byte length. Mis-sized keys are a type error, not a runtime
 // condition.
 //
+
 // # Typed round-key state
 //
+
 // `RoundKeys128` / `RoundKeys256` hold the expanded round keys as
 // `[UInt32; 44]` / `[UInt32; 60]` (one u32 per AES word, 4 per round,
 // 11 / 15 rounds total). This layout matches the FIPS 197 schedule
 // exactly and is identical to what AES-NI's `aeskeygenassist` fills.
 //
+
 // # Usage
 //
+
 // ```verum
 // let key: AesKey128 = [0x2b, 0x7e, /* ... 14 more ... */];
 // let rk = RoundKeys128.expand(&key);
@@ -54,6 +65,7 @@
 // aes128_encrypt_block(&rk, &mut block);
 // ```
 //
+
 // =============================================================================
 
 module core.security.cipher.aes;
@@ -228,6 +240,7 @@ fn sub_shift_mix_round(state: &mut [Byte; 16], rk: &[UInt32; 4]) {
     // SubBytes + ShiftRows combined (ShiftRows is free in the SBOX lookup
     // because we read the shifted source indices directly).
     //
+
     // Note the column-major order — FIPS 197 §3.4 defines state[row][col].
     // Here state[i] stores column-major: state[c*4 + r].
     let s0  = sub_byte(state[ 0]);
@@ -255,8 +268,8 @@ fn sub_shift_mix_round(state: &mut [Byte; 16], rk: &[UInt32; 4]) {
     let r30 = s12; let r31 = s1;  let r32 = s6;  let r33 = s11;
 
     // MixColumns per FIPS 197 §5.1.3:
-    //   s'_c = (02 · s0) XOR (03 · s1) XOR s2 XOR s3
-    //   where all ops are in GF(2^8).
+    //  s'_c = (02 · s0) XOR (03 · s1) XOR s2 XOR s3
+    //  where all ops are in GF(2^8).
     let m00 = xtime(r00) ^ (xtime(r01) ^ r01) ^ r02 ^ r03;
     let m01 = r00 ^ xtime(r01) ^ (xtime(r02) ^ r02) ^ r03;
     let m02 = r00 ^ r01 ^ xtime(r02) ^ (xtime(r03) ^ r03);
@@ -367,6 +380,7 @@ fn add_round_key(state: &mut [Byte; 16], rk: &[UInt32; 4]) {
 
 /// Single-block AES-128 encrypt. In-place on `block`.
 ///
+
 /// `@cfg(feature = "crypto-accel")` substitutes this with `aesenc`
 /// (AES-NI) / `aese`+`aesmc` (ARMv8) — the reference here remains
 /// the canonical FIPS 197 golden source for differential testing.
@@ -413,6 +427,7 @@ public fn aes256_encrypt_block(rk: &RoundKeys256, block: &mut [Byte; 16]) {
 // Inverse cipher — FIPS 197 §5.3
 // =============================================================================
 //
+
 // The inverse cipher reverses the encrypt pipeline. We use the
 // straightforward §5.3 form (InvShiftRows → InvSubBytes →
 // AddRoundKey → InvMixColumns per round, traversing round keys in
@@ -421,6 +436,7 @@ public fn aes256_encrypt_block(rk: &RoundKeys256, block: &mut [Byte; 16]) {
 // directions — the encrypt/decrypt code share the SAME RoundKeys128 /
 // RoundKeys256 expansion.
 //
+
 // `@cfg(feature = "crypto-accel")` substitutes the bodies below with
 // AES-NI `aesdec` / `aesdeclast` (Intel) or `aesd` / `aesimc` (ARMv8
 // Crypto Extensions) — both natively constant-time and ~10 GiB/s.
@@ -518,8 +534,8 @@ fn inv_sub_shift_unmix_round(state: &mut [Byte; 16], rk: &[UInt32; 4]) {
     let a33 = r33 ^ ((rk[3] & 0xFF) as Byte);
 
     // InvMixColumns per FIPS 197 §5.3.3:
-    //   s'_c = (0E · s0c) ⊕ (0B · s1c) ⊕ (0D · s2c) ⊕ (09 · s3c)
-    //          (matrix shifts cyclically for rows 1, 2, 3)
+    //  s'_c = (0E · s0c) ⊕ (0B · s1c) ⊕ (0D · s2c) ⊕ (09 · s3c)
+    //  (matrix shifts cyclically for rows 1, 2, 3)
     state[ 0] = mul_0e(a00) ^ mul_0b(a01) ^ mul_0d(a02) ^ mul_09(a03);
     state[ 1] = mul_09(a00) ^ mul_0e(a01) ^ mul_0b(a02) ^ mul_0d(a03);
     state[ 2] = mul_0d(a00) ^ mul_09(a01) ^ mul_0e(a02) ^ mul_0b(a03);
@@ -585,6 +601,7 @@ fn inv_sub_shift_final(state: &mut [Byte; 16], rk: &[UInt32; 4]) {
 
 /// Single-block AES-128 decrypt.
 ///
+
 /// Inverse of `aes128_encrypt_block` — uses the SAME round-key
 /// schedule, traversed in reverse round order. Constant-time
 /// discipline: same as the encrypt path, table-lookup susceptible on

@@ -1,19 +1,20 @@
 //! K-Shape / K-Flat / K-Sharp integration tests for cohesive
 //! modalities.
 //!
+
 //! Cohesive modalities ∫ ⊣ ♭ ⊣ ♯ (Schreiber DCCT, cohesive HoTT).
 //! The kernel admits the type-formers unconditionally; the
 //! triple-adjunction laws (η, ε, triangle identities) are framework
 //! axioms in `core.math.frameworks.schreiber_dcct`. This file covers
 //! the kernel-level mechanics:
-//!   • Each modality is a type-level endofunctor: `M(A) : Type_i`
-//!     when `A : Type_i`.
-//!   • Universe levels are preserved (no implicit ascent).
-//!   • Modalities applied to non-types are rejected.
-//!   • Substitution / normalisation / free-vars all descend.
-//!   • Modal-depth ordinal `m_depth_omega` increments by 1 per
-//!     modality application — gates K-Refine-omega the same way
-//!     ModalBox / ModalDiamond do.
+//!  • Each modality is a type-level endofunctor: `M(A) : Type_i`
+//!  when `A : Type_i`.
+//!  • Universe levels are preserved (no implicit ascent).
+//!  • Modalities applied to non-types are rejected.
+//!  • Substitution / normalisation / free-vars all descend.
+//!  • Modal-depth ordinal `m_depth_omega` increments by 1 per
+//!  modality application — gates K-Refine-omega the same way
+//!  ModalBox / ModalDiamond do.
 
 use verum_common::{Heap, Text};
 use verum_kernel::{

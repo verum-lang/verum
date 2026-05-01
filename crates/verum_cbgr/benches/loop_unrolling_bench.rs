@@ -1,9 +1,11 @@
 //! Benchmarks for Loop Unrolling
 //!
+
 //! Benchmarks for CBGR loop unrolling escape analysis. Validates that loop
 //! unrolling (detecting loops, unrolling up to configurable bound, per-iteration
 //! escape analysis) completes within performance targets for practical code sizes.
 //!
+
 //! These benchmarks measure the performance of loop unrolling for escape analysis.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};

@@ -6,17 +6,21 @@ module core.database.sqlite.native.l5_sql.resolver;
 // Layer: 5
 // Spec: sqlite-native.md §13.1
 //
+
 // The resolver rewrites `EColumn(_, name)` AST nodes into
 // `EColumnRef(cursor_id, col_idx)` using a ColumnScope built from the
 // SchemaCache entry for the source table. Downstream codegen lowers
 // `EColumnRef` into a `Column(cursor_id, col_idx, dst)` opcode.
 //
+
 // For v1 the resolver handles:
 //
-//   * SELECT from a single FROM table
-//   * INSERT / UPDATE / DELETE targeting a single table
-//   * Bare `SELECT expr` (no FROM) — nothing to resolve, passthrough
+
+//  * SELECT from a single FROM table
+//  * INSERT / UPDATE / DELETE targeting a single table
+//  * Bare `SELECT expr` (no FROM) — nothing to resolve, passthrough
 //
+
 // Multi-table SELECT, subqueries, CTEs, and JOIN column resolution
 // land with the planner enhancement; the resolver signature accepts
 // a `List<ColumnScope>` for that forward-compatibility.

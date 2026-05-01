@@ -1,5 +1,6 @@
 //! Dependent Types SMT Backend Demo
 //!
+
 //! This example demonstrates the SMT backend support for dependent types,
 //! including Pi types (dependent functions), Sigma types (dependent pairs),
 //! and equality types (propositional equality).

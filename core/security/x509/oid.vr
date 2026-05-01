@@ -4,24 +4,29 @@
 // Layer: 3 (X.509 subsystem)
 // Dependencies: core
 // Reference: RFC 5280, RFC 8017, RFC 8446, NIST SP 800-186, Mozilla NSS
-//            secoid.c (the definitive OID catalogue used by rustls /
-//            curl / Firefox).
+//  secoid.c (the definitive OID catalogue used by rustls /
+//  curl / Firefox).
 // =============================================================================
 //
+
 // Every X.509 certificate carries ObjectIdentifiers in three places:
 //
-//   1. `signatureAlgorithm` (outer TBSCertificate signature)
-//   2. `subjectPublicKeyInfo.algorithm`
-//   3. Each `Extension.extnID` + inner critical OIDs (e.g. EKU usages,
-//      policies, AIA access methods, CRL distribution points).
+
+//  1. `signatureAlgorithm` (outer TBSCertificate signature)
+//  2. `subjectPublicKeyInfo.algorithm`
+//  3. Each `Extension.extnID` + inner critical OIDs (e.g. EKU usages,
+//  policies, AIA access methods, CRL distribution points).
 //
+
 // Parsing a cert means matching those OIDs against a known catalogue.
 // We keep the catalogue statically typed so that misspelled OIDs are
 // a compile-time error — no stringly-typed "1.2.840.113549.1.1.11"
 // scattered through verify paths.
 //
+
 // # Wire representation
 //
+
 // DER encodes OIDs as a sequence of "sub-identifiers" with a custom
 // base-128 encoding (RFC 6025 §10). The wire format is fiddly; the
 // **identity** of an OID is just the sequence of arc values. We
@@ -30,12 +35,15 @@
 // form. `Oid.matches_der(bytes)` compares wire bytes against the
 // in-memory arc sequence without ever materialising a List<UInt32>.
 //
+
 // # Coverage
 //
+
 // Everything in this module is used by at least one cert in Mozilla's
 // NSS root store (Verified against Mozilla bundle 2024-09-01 — 140
 // roots). New OIDs land here, not in individual parse modules.
 //
+
 // =============================================================================
 
 module core.security.x509.oid;

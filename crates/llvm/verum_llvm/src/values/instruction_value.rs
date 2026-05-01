@@ -153,8 +153,10 @@ pub struct InstructionValue<'ctx> {
 impl<'ctx> InstructionValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and of type instruction.
     pub unsafe fn new(instruction_value: LLVMValueRef) -> Self {
         debug_assert!(!instruction_value.is_null());
@@ -278,6 +280,7 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Returns the tail call kind on call instructions.
     ///
+
     /// Other instructions return `None`.
     pub fn get_tail_call_kind(self) -> Option<super::LLVMTailCallKind> {
         if self.get_opcode() == InstructionOpcode::Call {
@@ -289,6 +292,7 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Check whether this instructions supports [fast-math flags][0].
     ///
+
     /// [0]: https://llvm.org/docs/LangRef.html#fast-math-flags
     pub fn can_use_fast_math_flags(self) -> bool {
         unsafe { verum_llvm_sys::core::LLVMCanValueUseFastMathFlags(self.as_value_ref()) == 1 }
@@ -318,6 +322,7 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Check if a `zext` instruction has the non-negative flag set.
     ///
+
     /// Calling this function on other instructions is safe and returns `None`.
     pub fn get_non_negative_flag(self) -> Option<bool> {
         (self.get_opcode() == InstructionOpcode::ZExt)
@@ -326,6 +331,7 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Set the non-negative flag on `zext` instructions.
     ///
+
     /// Calling this function on other instructions is safe and results in a no-op.
     pub fn set_non_negative_flag(self, flag: bool) {
         if self.get_opcode() == InstructionOpcode::ZExt {
@@ -335,6 +341,7 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Checks if an `or` instruction has the `disjoint` flag set.
     ///
+
     /// Calling this function on other instructions is safe and returns `None`.
     pub fn get_disjoint_flag(self) -> Option<bool> {
         (self.get_opcode() == InstructionOpcode::Or)
@@ -343,6 +350,7 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Set the `disjoint` flag on `or` instructions.
     ///
+
     /// Calling this function on other instructions is safe and results in a no-op.
     pub fn set_disjoint_flag(self, flag: bool) {
         if self.get_opcode() == InstructionOpcode::Or {
@@ -619,12 +627,15 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Obtains the number of operands an `InstructionValue` has.
     /// An operand is a `BasicValue` used in an IR instruction.
     ///
+
     /// The following example,
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("ivs");
     /// let builder = context.create_builder();
@@ -634,45 +645,54 @@ impl<'ctx> InstructionValue<'ctx> {
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let fn_type = void_type.fn_type(&[f32_ptr_type.into()], false);
     ///
+
     /// let function = module.add_function("take_f32_ptr", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// builder.position_at_end(basic_block);
     ///
+
     /// let arg1 = function.get_first_param().unwrap().into_pointer_value();
     /// let f32_val = f32_type.const_float(std::f64::consts::PI);
     /// let store_instruction = builder.build_store(arg1, f32_val).unwrap();
     /// let free_instruction = builder.build_free(arg1).unwrap();
     /// let return_instruction = builder.build_return(None).unwrap();
     ///
+
     /// assert_eq!(store_instruction.get_num_operands(), 2);
     /// assert_eq!(free_instruction.get_num_operands(), 2);
     /// assert_eq!(return_instruction.get_num_operands(), 0);
     /// ```
     ///
+
     /// will generate LLVM IR roughly like (varying slightly across LLVM versions):
     ///
+
     /// ```ir
     /// ; ModuleID = 'ivs'
     /// source_filename = "ivs"
     ///
+
     /// define void @take_f32_ptr(float* %0) {
     /// entry:
-    ///   store float 0x400921FB60000000, float* %0
-    ///   %1 = bitcast float* %0 to i8*
-    ///   tail call void @free(i8* %1)
-    ///   ret void
+    ///  store float 0x400921FB60000000, float* %0
+    ///  %1 = bitcast float* %0 to i8*
+    ///  tail call void @free(i8* %1)
+    ///  ret void
     /// }
     ///
+
     /// declare void @free(i8*)
     /// ```
     ///
+
     /// which makes the number of instruction operands clear:
     /// 1) Store has two: a const float and a variable float pointer %0
     /// 2) Bitcast has one: a variable float pointer %0
     /// 3) Function call has two: i8 pointer %1 argument, and the free function itself
     /// 4) Void return has zero: void is not a value and does not count as an operand
-    ///    even though the return instruction can take values.
+    ///  even though the return instruction can take values.
     pub fn get_num_operands(self) -> u32 {
         unsafe { LLVMGetNumOperands(self.as_value_ref()) as u32 }
     }
@@ -680,12 +700,15 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Obtains the operand an `InstructionValue` has at a given index if any.
     /// An operand is a `BasicValue` used in an IR instruction.
     ///
+
     /// The following example,
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("ivs");
     /// let builder = context.create_builder();
@@ -695,17 +718,21 @@ impl<'ctx> InstructionValue<'ctx> {
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let fn_type = void_type.fn_type(&[f32_ptr_type.into()], false);
     ///
+
     /// let function = module.add_function("take_f32_ptr", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// builder.position_at_end(basic_block);
     ///
+
     /// let arg1 = function.get_first_param().unwrap().into_pointer_value();
     /// let f32_val = f32_type.const_float(std::f64::consts::PI);
     /// let store_instruction = builder.build_store(arg1, f32_val).unwrap();
     /// let free_instruction = builder.build_free(arg1).unwrap();
     /// let return_instruction = builder.build_return(None).unwrap();
     ///
+
     /// assert!(store_instruction.get_operand(0).is_some());
     /// assert!(store_instruction.get_operand(1).is_some());
     /// assert!(store_instruction.get_operand(2).is_none());
@@ -716,29 +743,34 @@ impl<'ctx> InstructionValue<'ctx> {
     /// assert!(return_instruction.get_operand(1).is_none());
     /// ```
     ///
+
     /// will generate LLVM IR roughly like (varying slightly across LLVM versions):
     ///
+
     /// ```ir
     /// ; ModuleID = 'ivs'
     /// source_filename = "ivs"
     ///
+
     /// define void @take_f32_ptr(float* %0) {
     /// entry:
-    ///   store float 0x400921FB60000000, float* %0
-    ///   %1 = bitcast float* %0 to i8*
-    ///   tail call void @free(i8* %1)
-    ///   ret void
+    ///  store float 0x400921FB60000000, float* %0
+    ///  %1 = bitcast float* %0 to i8*
+    ///  tail call void @free(i8* %1)
+    ///  ret void
     /// }
     ///
+
     /// declare void @free(i8*)
     /// ```
     ///
+
     /// which makes the instruction operands clear:
     /// 1) Store has two: a const float and a variable float pointer %0
     /// 2) Bitcast has one: a variable float pointer %0
     /// 3) Function call has two: i8 pointer %1 argument, and the free function itself
     /// 4) Void return has zero: void is not a value and does not count as an operand
-    ///    even though the return instruction can take values.
+    ///  even though the return instruction can take values.
     pub fn get_operand(self, index: u32) -> Option<Operand<'ctx>> {
         let num_operands = self.get_num_operands();
 
@@ -751,8 +783,10 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Get the operand of an `InstructionValue`.
     ///
+
     /// # Safety
     ///
+
     /// The index must be less than [InstructionValue::get_num_operands].
     pub unsafe fn get_operand_unchecked(self, index: u32) -> Option<Operand<'ctx>> {
         let operand = unsafe { LLVMGetOperand(self.as_value_ref(), index) };
@@ -784,10 +818,12 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Sets the operand an `InstructionValue` has at a given index if possible.
     /// An operand is a `BasicValue` used in an IR instruction.
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("ivs");
     /// let builder = context.create_builder();
@@ -797,20 +833,25 @@ impl<'ctx> InstructionValue<'ctx> {
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let fn_type = void_type.fn_type(&[f32_ptr_type.into()], false);
     ///
+
     /// let function = module.add_function("take_f32_ptr", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// builder.position_at_end(basic_block);
     ///
+
     /// let arg1 = function.get_first_param().unwrap().into_pointer_value();
     /// let f32_val = f32_type.const_float(std::f64::consts::PI);
     /// let store_instruction = builder.build_store(arg1, f32_val).unwrap();
     /// let free_instruction = builder.build_free(arg1).unwrap();
     /// let return_instruction = builder.build_return(None).unwrap();
     ///
+
     /// // This will produce invalid IR:
     /// free_instruction.set_operand(0, f32_val);
     ///
+
     /// assert_eq!(free_instruction.get_operand(0).unwrap().unwrap_value(), f32_val);
     /// ```
     pub fn set_operand<BV: BasicValue<'ctx>>(self, index: u32, val: BV) -> bool {
@@ -827,11 +868,13 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Gets the use of an operand(`BasicValue`), if any.
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::BasicValue;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("ivs");
     /// let builder = context.create_builder();
@@ -841,17 +884,21 @@ impl<'ctx> InstructionValue<'ctx> {
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let fn_type = void_type.fn_type(&[f32_ptr_type.into()], false);
     ///
+
     /// let function = module.add_function("take_f32_ptr", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// builder.position_at_end(basic_block);
     ///
+
     /// let arg1 = function.get_first_param().unwrap().into_pointer_value();
     /// let f32_val = f32_type.const_float(std::f64::consts::PI);
     /// let store_instruction = builder.build_store(arg1, f32_val).unwrap();
     /// let free_instruction = builder.build_free(arg1).unwrap();
     /// let return_instruction = builder.build_return(None).unwrap();
     ///
+
     /// assert_eq!(store_instruction.get_operand_use(1), arg1.get_first_use());
     /// ```
     pub fn get_operand_use(self, index: u32) -> Option<BasicValueUse<'ctx>> {
@@ -866,8 +913,10 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Gets the use of an operand(`BasicValue`), if any.
     ///
+
     /// # Safety
     ///
+
     /// The index must be smaller than [InstructionValue::get_num_operands].
     pub unsafe fn get_operand_use_unchecked(self, index: u32) -> Option<BasicValueUse<'ctx>> {
         let use_ = unsafe { LLVMGetOperandUse(self.as_value_ref(), index) };
@@ -892,14 +941,18 @@ impl<'ctx> InstructionValue<'ctx> {
     /// An index is used in `ExtractValue` and `InsertValue` instructions to specify
     /// which field or element to access in an aggregate type (struct or array).
     ///
+
     /// Returns 0 for instructions that are not `ExtractValue` or `InsertValue`.
     ///
+
     /// The following example,
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::BasicValue;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("ivs");
     /// let builder = context.create_builder();
@@ -908,15 +961,19 @@ impl<'ctx> InstructionValue<'ctx> {
     /// let struct_type = context.struct_type(&[i32_type.into(), i32_type.into()], false);
     /// let fn_type = void_type.fn_type(&[], false);
     ///
+
     /// let function = module.add_function("test", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// builder.position_at_end(basic_block);
     ///
+
     /// let struct_val = struct_type.get_undef();
     /// let extract_instruction = builder.build_extract_value(struct_val, 0, "extract").unwrap()
-    ///     .as_instruction_value().unwrap();
+    ///  .as_instruction_value().unwrap();
     ///
+
     /// assert_eq!(extract_instruction.get_num_indices(), 1);
     /// ```
     pub fn get_num_indices(self) -> u32 {
@@ -931,14 +988,18 @@ impl<'ctx> InstructionValue<'ctx> {
     /// An index is used in `ExtractValue` and `InsertValue` instructions to specify
     /// which field or element to access in an aggregate type (struct or array).
     ///
+
     /// Returns an empty vector for instructions that are not `ExtractValue` or `InsertValue`.
     ///
+
     /// The following example,
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::BasicValue;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("ivs");
     /// let builder = context.create_builder();
@@ -947,15 +1008,19 @@ impl<'ctx> InstructionValue<'ctx> {
     /// let struct_type = context.struct_type(&[i32_type.into(), i32_type.into()], false);
     /// let fn_type = void_type.fn_type(&[], false);
     ///
+
     /// let function = module.add_function("test", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// builder.position_at_end(basic_block);
     ///
+
     /// let struct_val = struct_type.get_undef();
     /// let extract_instruction = builder.build_extract_value(struct_val, 0, "extract").unwrap()
-    ///     .as_instruction_value().unwrap();
+    ///  .as_instruction_value().unwrap();
     ///
+
     /// assert_eq!(extract_instruction.get_indices(), vec![0]);
     /// ```
     pub fn get_indices(self) -> Vec<u32> {
@@ -972,13 +1037,16 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Gets the first use of an `InstructionValue` if any.
     ///
+
     /// The following example,
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::BasicValue;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("ivs");
     /// let builder = context.create_builder();
@@ -988,17 +1056,21 @@ impl<'ctx> InstructionValue<'ctx> {
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let fn_type = void_type.fn_type(&[f32_ptr_type.into()], false);
     ///
+
     /// let function = module.add_function("take_f32_ptr", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// builder.position_at_end(basic_block);
     ///
+
     /// let arg1 = function.get_first_param().unwrap().into_pointer_value();
     /// let f32_val = f32_type.const_float(std::f64::consts::PI);
     /// let store_instruction = builder.build_store(arg1, f32_val).unwrap();
     /// let free_instruction = builder.build_free(arg1).unwrap();
     /// let return_instruction = builder.build_return(None).unwrap();
     ///
+
     /// assert!(arg1.get_first_use().is_some());
     /// ```
     pub fn get_first_use(self) -> Option<BasicValueUse<'ctx>> {
@@ -1010,6 +1082,7 @@ impl<'ctx> InstructionValue<'ctx> {
     /// `%3 = icmp slt i32 %0, %1`
     /// this gives the `slt`.
     ///
+
     /// If the instruction is not an `ICmp`, this returns None.
     pub fn get_icmp_predicate(self) -> Option<IntPredicate> {
         // REVIEW: this call to get_opcode() can be inefficient;
@@ -1028,6 +1101,7 @@ impl<'ctx> InstructionValue<'ctx> {
     /// `%3 = fcmp olt float %0, %1`
     /// this gives the `olt`.
     ///
+
     /// If the instruction is not an `FCmp`, this returns None.
     pub fn get_fcmp_predicate(self) -> Option<FloatPredicate> {
         // REVIEW: this call to get_opcode() can be inefficient;
@@ -1046,6 +1120,7 @@ impl<'ctx> InstructionValue<'ctx> {
     /// `%3 = atomicrmw add i32* %ptr, i32 %val monotonic`
     /// this gives the `add`.
     ///
+
     /// If the instruction is not an `AtomicRMW`, this returns None.
     pub fn get_atomic_rmw_bin_op(self) -> Option<AtomicRMWBinOp> {
         if self.get_opcode() == InstructionOpcode::AtomicRMW {

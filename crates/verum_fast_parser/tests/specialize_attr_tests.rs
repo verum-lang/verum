@@ -14,8 +14,10 @@
 )]
 //! Tests for @specialize attribute parsing.
 //!
+
 //! Tests for protocol specialization: conditional impl, overlapping resolution, default impl
 //!
+
 //! This module tests parsing of specialization attributes in all supported forms:
 //! 1. Basic specialization: @specialize
 //! 2. Negative specialization: @specialize(negative)

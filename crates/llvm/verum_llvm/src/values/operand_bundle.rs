@@ -36,8 +36,10 @@ pub struct OperandBundleArgsIter<'a, 'ctx> {
 impl<'ctx> OperandBundle<'ctx> {
     /// Get an operand bundle from a [LLVMOperandBundleRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and represent an operand bundle.
     pub unsafe fn new(bundle: LLVMOperandBundleRef) -> Self {
         Self {
@@ -48,17 +50,22 @@ impl<'ctx> OperandBundle<'ctx> {
 
     /// Create a new operand bundle.
     ///
+
     /// # Example
     ///
+
     /// ```
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::OperandBundle;
     ///
+
     /// let context = Context::create();
     /// let i32_type = context.i32_type();
     ///
+
     /// let op_bundle = OperandBundle::create("tag", &[i32_type.const_zero().into()]);
     ///
+
     /// assert_eq!(op_bundle.get_tag().unwrap(), "tag");
     /// let arg = op_bundle.get_args().nth(0).unwrap().into_int_value();
     /// assert!(arg.is_const());
@@ -81,11 +88,14 @@ impl<'ctx> OperandBundle<'ctx> {
 
     /// Get this operand bundle's tag.
     ///
+
     /// # Example
     ///
+
     /// ```
     /// use verum_llvm::values::OperandBundle;
     ///
+
     /// let op_bundle = OperandBundle::create("tag", &[]);
     /// assert_eq!(op_bundle.get_tag().unwrap(), "tag");
     /// ```
@@ -99,16 +109,20 @@ impl<'ctx> OperandBundle<'ctx> {
 
     /// Iterate over this operand bundle's arguments.
     ///
+
     /// # Example
     ///
+
     /// ```
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::OperandBundle;
     ///
+
     /// let context = Context::create();
     /// let i32_type = context.i32_type();
     /// let f32_type = context.f32_type();
     ///
+
     /// let op_bundle = OperandBundle::create("tag", &[i32_type.const_zero().into(), f32_type.const_float(1.23).into()]);
     /// assert_eq!(op_bundle.get_args().count(), 2);
     /// assert_eq!(op_bundle.get_args().len(), 2);

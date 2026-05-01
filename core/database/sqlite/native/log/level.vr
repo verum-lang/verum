@@ -1,7 +1,7 @@
 // =============================================================================
 // log/level.vr — severity levels for sqlite3_log
 // =============================================================================
-// Spec: SQLite C API.  SQLite's log severities are derived from the
+// Spec: SQLite C API. SQLite's log severities are derived from the
 // primary error code: SQLITE_NOTICE / SQLITE_WARNING are the two
 // soft-info channels; everything else maps to "error".
 // =============================================================================

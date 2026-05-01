@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: postgresql.org/docs/16/protocol-message-formats.html
 //
+
 // All Postgres wire integers are network byte order (big-endian).
-// Strings are NUL-terminated UTF-8.  Length prefixes COUNT THE LENGTH
+// Strings are NUL-terminated UTF-8. Length prefixes COUNT THE LENGTH
 // PREFIX ITSELF — a 4-byte payload yields `0x00000008` on the wire.
 //
+
 // `WireBuf` from `core.database.common.types` already implements the
 // big-endian writer surface; this module is the Postgres-flavoured
 // frame wrapper around it (1-byte type tag prefix + length-self
@@ -75,6 +77,7 @@ implement Eq for PgFrameError {
 /// type byte (used for the initial Startup / SSLRequest / CancelRequest
 /// messages which have no tag).
 ///
+
 /// The closure receives a fresh `WireBuf`; the function takes care of
 /// the length-self-adjustment after the closure returns.
 public fn frame<F: fn(&mut WireBuf) -> ()>(

@@ -6,14 +6,17 @@ module core.database.sqlite.native.l2_record.strict;
 // Layer: 2
 // Spec: sqlite-native.md §9.4, sqlite.org/stricttables.html
 //
+
 // `CREATE TABLE t (...) STRICT` flips SQLite's weak-typing default:
 //
-//   * Each column MUST declare an explicit type from the strict set
-//     `ANY | INT | INTEGER | REAL | TEXT | BLOB`.
-//   * Inserts of values whose serial type doesn't match the column
-//     return `SQLITE_CONSTRAINT_DATATYPE`.
-//   * The usual affinity coercion does NOT apply.
+
+//  * Each column MUST declare an explicit type from the strict set
+//  `ANY | INT | INTEGER | REAL | TEXT | BLOB`.
+//  * Inserts of values whose serial type doesn't match the column
+//  return `SQLITE_CONSTRAINT_DATATYPE`.
+//  * The usual affinity coercion does NOT apply.
 //
+
 // `ANY` is a pass-through — every value is accepted regardless of
 // serial type, matching SQLite's semantics (it's the explicit opt-out
 // of strict checking for a single column).
@@ -110,7 +113,7 @@ implement Eq for StrictConstraintError {
 public fn strict_type_from_text(declared: &Text) -> Result<StrictType, StrictConstraintError> {
     let folded = fold_text_ascii(declared);
     let raw = folded.as_bytes();
-    // Strip optional leading/trailing whitespace so "  TEXT  " matches.
+    // Strip optional leading/trailing whitespace so " TEXT " matches.
     let mut start: Int = 0;
     while start < raw.len() && (raw[start] == (0x20 as Byte) || raw[start] == (0x09 as Byte)) {
         start = start + 1;

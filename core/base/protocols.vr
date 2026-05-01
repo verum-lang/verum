@@ -156,6 +156,7 @@ public type Hasher is protocol {
 
 /// Default FxHash-based hasher for performance.
 ///
+
 /// Implements the canonical FxHash algorithm
 /// (`rotate_left(5)` ⊕ byte) ⊗ SEED), the same construction
 /// used by `rustc`'s internal `rustc-hash` crate. FxHash is
@@ -181,16 +182,17 @@ implement DefaultHasher {
 implement Hasher for DefaultHasher {
     fn write(&mut self, bytes: &[Byte]) {
         // Canonical FxHash 64-bit step:
-        //   state := (state.rotate_left(5) ^ byte) * SEED
+        //  state := (state.rotate_left(5) ^ byte) * SEED
         //
+
         // The earlier implementation reversed the order
         // (`state := state * SEED; state ^= byte`), which
         // matches the function name "FxHash" only loosely:
-        //   * the most-recent byte never participated in the
-        //     multiplication (its bits got XOR'd in but never
-        //     diffused);
-        //   * the rotate-left avalanche step was missing,
-        //     weakening distribution further.
+        //  * the most-recent byte never participated in the
+        //  multiplication (its bits got XOR'd in but never
+        //  diffused);
+        //  * the rotate-left avalanche step was missing,
+        //  weakening distribution further.
         // Using the canonical step gives the avalanche
         // properties the name implies.
         for byte in bytes {
@@ -328,10 +330,10 @@ public type Into<T> is protocol {
     fn into(self) -> T;
 };
 
-// Reflexive From: every type converts From itself.  Without
+// Reflexive From: every type converts From itself. Without
 // this, `let y: T = x.into()` for `x: T` fails to compile —
 // the `Into` blanket below requires a `From<T>` instance, and
-// the same-type case has no provider.  This impl makes
+// the same-type case has no provider. This impl makes
 // `.into()` chains uniformly applicable, including the trivial
 // identity case that callers naturally hit when threading
 // values through generic code that may or may not need
@@ -351,13 +353,17 @@ implement<T, U: From<T>> Into<U> for T {
 
 /// Protocol for fallible type conversions (reverse direction).
 ///
+
 /// This is the reciprocal of TryFrom. Where TryFrom allows you to write
 /// `U.try_from(value)`, TryInto allows you to write `value.try_into()`.
 ///
+
 /// A blanket implementation provides TryInto<U> for any T where U: TryFrom<T>.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// let n: Int = 42;
 /// let result: Result<PositiveInt, Text> = n.try_into();
@@ -426,6 +432,7 @@ implement Formatter {
 
     /// Write an integer as its decimal representation.
     ///
+
     /// Correctly handles `Int.MIN`: `-Int.MIN` overflows back to
     /// `Int.MIN` in two's-complement, so the naïve negate-and-
     /// loop pattern silently produced "-" with no digits for the
@@ -602,6 +609,7 @@ public type One is protocol {
 
 /// Marker protocol for types that support atomic operations.
 ///
+
 /// Types implementing Atomic can be used with generic atomic intrinsics:
 /// - atomic_load<T>
 /// - atomic_store<T>
@@ -610,11 +618,13 @@ public type One is protocol {
 /// - atomic_fetch_add<T> (requires T: Integer)
 /// - atomic_fetch_sub<T> (requires T: Integer)
 ///
+
 /// ## Supported Sizes
 /// Atomic operations are supported for 1, 2, 4, and 8 byte types.
 /// The VBC runtime dispatches to appropriate hardware instructions
 /// based on the type's size.
 ///
+
 /// Implementations may provide `meta fn ATOMIC_SIZE() -> Int` for
 /// compile-time size queries.
 public type Atomic is protocol extends Copy + Sized {};
@@ -641,6 +651,7 @@ implement Atomic for Bool   {}
 
 /// Marker protocol for integer types that support arithmetic atomic operations.
 ///
+
 /// Types implementing Integer can use fetch-and-modify atomics:
 /// - atomic_fetch_add<T>
 /// - atomic_fetch_sub<T>
@@ -648,6 +659,7 @@ implement Atomic for Bool   {}
 /// - atomic_fetch_or<T>
 /// - atomic_fetch_xor<T>
 ///
+
 /// Implementations may provide:
 /// - `meta fn IS_SIGNED() -> Bool` - whether this is a signed integer type
 /// - `meta fn BIT_WIDTH() -> Int` - bit width of the integer type
@@ -677,6 +689,7 @@ implement Integer for ISize  {}
 
 /// Marker protocol for signed integer types.
 ///
+
 /// Types implementing SignedInteger support operations that depend on
 /// signed arithmetic semantics, such as wrapping_neg which handles MIN.
 public type SignedInteger is protocol extends Integer {};
@@ -695,9 +708,11 @@ implement SignedInteger for ISize  {}
 
 /// Marker protocol for all numeric types (integers and floats).
 ///
+
 /// Types implementing Numeric support basic arithmetic operations:
 /// - add, sub, mul, div, rem (via intrinsics)
 ///
+
 /// This protocol is used by the generic arithmetic intrinsics in
 /// stdlib.intrinsics to provide type-safe arithmetic for all numeric types.
 public type Numeric is protocol extends Copy + Sized {};
@@ -728,6 +743,7 @@ implement Numeric for Float64 {}
 
 /// Marker protocol for signed numeric types (signed integers and floats).
 ///
+
 /// Types implementing SignedNumeric support operations that depend on
 /// sign, such as negation.
 public type SignedNumeric is protocol extends Numeric {};
@@ -749,6 +765,7 @@ implement SignedNumeric for Float64 {}
 
 /// Opaque type identifier for runtime type discrimination.
 ///
+
 /// Used by the `Any` protocol for dynamic dispatch and downcasting.
 /// Each distinct type has a unique TypeId at runtime.
 public type TypeId is (UInt64);
@@ -784,11 +801,13 @@ implement Hash for TypeId {
 /// Protocol for type erasure, enabling dynamic dispatch and runtime type
 /// identification.
 ///
+
 /// Types implementing Any can:
 /// - Be stored as `&dyn Any` for type-erased storage
 /// - Have their TypeId queried at runtime
 /// - Be downcast back to their concrete type
 ///
+
 /// All types automatically implement Any.
 public type Any is protocol {
     /// Get the TypeId of the concrete type.
@@ -801,18 +820,22 @@ public type Any is protocol {
 
 /// Protocol for types that provide a human-readable description.
 ///
+
 /// This is the base protocol for error types, enabling structured error handling.
 /// All error types should implement Describable to provide a description.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// type IoError is { message: Text, kind: IoErrorKind };
 ///
+
 /// implement Describable for IoError {
-///     fn description(&self) -> Text {
-///         self.message.clone()
-///     }
+///  fn description(&self) -> Text {
+///  self.message.clone()
+///  }
 /// }
 /// ```
 public type Describable is protocol {
@@ -826,18 +849,22 @@ public type Describable is protocol {
 
 /// Protocol for error types with source chaining.
 ///
+
 /// Extends Describable with optional source error for building error chains.
 /// Named `ErrorSource` to avoid collision with the concrete `Error` type in
 /// `core.base.result`.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// type IoError is { message: Text, cause: Maybe<Heap<dyn Describable>> };
 ///
+
 /// implement ErrorSource for IoError {
-///     fn description(&self) -> Text { self.message.clone() }
-///     fn source(&self) -> Maybe<&dyn Describable> { None }
+///  fn description(&self) -> Text { self.message.clone() }
+///  fn source(&self) -> Maybe<&dyn Describable> { None }
 /// }
 /// ```
 public type ErrorSource is protocol extends Describable {
@@ -853,6 +880,7 @@ public type ErrorSource is protocol extends Describable {
 
 /// Protocol for types that can be parsed from a text representation.
 ///
+
 /// This enables the standard parsing pattern:
 /// ```verum
 /// let n: Int = "42".parse()?;
@@ -871,6 +899,7 @@ public type FromStr is protocol {
 
 /// Protocol for converting values to Text.
 ///
+
 /// All types implementing Display automatically get ToString.
 public type ToString is protocol {
     /// Convert to a Text representation.
@@ -893,11 +922,14 @@ implement<T: Display> ToString for T {
 
 /// Protocol for borrowing data as a reference of a different type.
 ///
+
 /// Used for efficient lookups in hash maps and other collections
 /// where owned and borrowed keys should be interchangeable.
 ///
+
 /// # Contract
 ///
+
 /// If a type implements both Borrow<T> and Hash, then the hash of
 /// the borrowed form must equal the hash of the original.
 public type Borrow<Borrowed> is protocol {

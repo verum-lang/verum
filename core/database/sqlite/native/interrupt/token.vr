@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The token has three observable states:
 //
-//   * `ItArmed`         — no cancellation requested
-//   * `ItFiring(reason)`— cancellation requested, VDBE will abort asap
-//   * `ItServed(count)` — the VDBE observed the firing and bumped the
-//                         served counter; state transitions back to
-//                         Armed on the next statement begin.
+
+//  * `ItArmed` — no cancellation requested
+//  * `ItFiring(reason)`— cancellation requested, VDBE will abort asap
+//  * `ItServed(count)` — the VDBE observed the firing and bumped the
+//  served counter; state transitions back to
+//  Armed on the next statement begin.
 // =============================================================================
 
 module core.database.sqlite.native.interrupt.token;

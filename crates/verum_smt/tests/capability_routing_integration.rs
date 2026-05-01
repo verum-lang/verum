@@ -1,15 +1,19 @@
 //! Integration tests for the complementary Z3 + CVC5 SMT architecture.
 //!
+
 //! These tests exercise the full pipeline end-to-end:
 //!
-//!   `@verify(...)` attribute → `VerifyStrategy` → `BackendSwitcher`
-//!                                                 → `CapabilityRouter`
-//!                                                 → telemetry recording
+
+//!  `@verify(...)` attribute → `VerifyStrategy` → `BackendSwitcher`
+//!  → `CapabilityRouter`
+//!  → telemetry recording
 //!
+
 //! They use in-memory constructed goals rather than a compiled Verum source
 //! because constructing real VBC-backed goals requires the full compilation
 //! pipeline. The tests focus on verifying that:
 //!
+
 //! 1. The routing decisions match the expected theory winners.
 //! 2. Telemetry is recorded correctly for each routing path.
 //! 3. `VerifyStrategy` parses all documented attribute values.
@@ -405,7 +409,7 @@ fn telemetry_json_export_is_machine_readable() {
 #[test]
 fn theory_classification_prioritizes_correctly() {
     // Priority: Sequences > Strings > NRA > NIA > Arrays > BV > Datatypes >
-    //           LRA > LIA > Quantified > UF > Propositional > Mixed
+    //  LRA > LIA > Quantified > UF > Propositional > Mixed
 
     let mut chars = ExtendedCharacteristics::default();
     chars.has_sequences = true;

@@ -3,6 +3,7 @@
 //! → safety-gate → verify → context-validation → VBC codegen →
 //! execute).
 //!
+
 //! These tests use Tier 0 (VBC interpreter) which is 100% stable.
 //! A separate `#[ignore]` test suite would cross-check Tier 1 (LLVM
 //! AOT) once the pre-existing LLVM codegen crash (SIGSEGV ~60% of
@@ -329,15 +330,17 @@ fn gate_unsafe_rejected_by_interpreter() {
 
 // ----- Regression: repeated AOT build of `cbgr_demo.vr` -----
 //
+
 // Before the rayon-fence fix, `verum build examples/cbgr_demo.vr`
 // SIGSEGV'd in LLVM pass-constructor `__cxa_guard_acquire` on
 // ~60-70% of release invocations. The fix has two parts:
-//   1. eager `Target::initialize_native` in `verum_cli::main`
-//      (pre-populates IR-pass registry on the main thread), and
-//   2. `rayon::broadcast(|_| ())` in `pipeline.rs` in place of
-//      `rayon::yield_now()` (a true fence — forces every rayon
-//      worker to wake, run a no-op, and re-park before LLVM starts).
+//  1. eager `Target::initialize_native` in `verum_cli::main`
+//  (pre-populates IR-pass registry on the main thread), and
+//  2. `rayon::broadcast(|_| ())` in `pipeline.rs` in place of
+//  `rayon::yield_now()` (a true fence — forces every rayon
+//  worker to wake, run a no-op, and re-park before LLVM starts).
 //
+
 // Release builds show 0/100 crashes after the fix. Debug builds
 // retain a small residual rate (~10%) due to different codegen
 // timing. This test runs against whichever binary `cargo test`

@@ -1,11 +1,13 @@
 //! Locks the protocol hierarchy traversal in
 //! `SpecializationVerifier::is_subprotocol`.
 //!
+
 //! Pre-fix the function returned `false` for everything except the trivial
 //! reflexive case (`sub == super`). The comment admitted "Full implementation
 //! would traverse the protocol hierarchy graph" but used `false` as a
 //! conservative default.
 //!
+
 //! Impact: `type_implements_protocol_local` (called from coherence checking)
 //! uses `is_subprotocol` to decide whether a type implementing a subprotocol
 //! also satisfies a superprotocol bound. Without traversal, every transitive
@@ -13,6 +15,7 @@
 //! so a type with only an `Iterator` impl was wrongly judged not to implement
 //! `IntoIterator`, narrowing valid specializations.
 //!
+
 //! Post-fix: BFS over `super_protocols` graph from `register_protocol`'s
 //! data, with cycle guard.
 
@@ -100,11 +103,11 @@ fn transitive_subprotocol_is_recognized() {
 #[test]
 fn diamond_inheritance_is_supported() {
     // A inherits from both B and C; B and C both inherit from D.
-    //   D
+    //  D
     //  / \
-    // B   C
+    // B C
     //  \ /
-    //   A
+    //  A
     let mut verifier = SpecializationVerifier::new().expect("verifier");
     verifier.register_protocol(protocol_with_supers("A", &["B", "C"]));
     verifier.register_protocol(protocol_with_supers("B", &["D"]));

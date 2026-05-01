@@ -1,5 +1,6 @@
 //! Permission router for intrinsic gating (#12 / P3.2).
 //!
+
 //! Every `Syscall`-category intrinsic and any other intrinsic
 //! tagged with [`IntrinsicHint::RequiresPermission`](crate::intrinsics::IntrinsicHint::RequiresPermission)
 //! is the unconditional trust boundary of the interpreter: before
@@ -9,8 +10,10 @@
 //! into a `PermissionDenied` error instead of executing the
 //! syscall.
 //!
+
 //! ## Performance budget
 //!
+
 //! The warm-path target is **≤2ns** per check. The router caches
 //! the most-recent `(scope, target_id, decision)` triple in a
 //! single field; a repeated request for the same target hits the
@@ -19,22 +22,27 @@
 //! falls through to the user-supplied policy and back-fills the
 //! one-entry cache on the way out.
 //!
+
 //! A larger backing map (currently `std::collections::HashMap`
 //! keyed on `(scope, target_id)`) is reserved for the multi-loop
 //! case where the one-entry cache thrashes between two callers.
 //! It is consulted before the user policy and updated on every
 //! decision.
 //!
+
 //! ## Default policy
 //!
+
 //! With no [`PermissionRouter::set_policy`] configured the router
 //! is **allow-all**. Production deployments wire a policy
 //! callback that consults a host-supplied capability table; the
 //! callback is invoked *only* on cache misses, so the cost of an
 //! elaborate policy lookup is amortised across the loop.
 //!
+
 //! ## Why a runtime router
 //!
+
 //! The compile-time SMT verifier already discharges most
 //! capability obligations (a function annotated `using
 //! [Filesystem]` that escapes the obligation gets a verifier
@@ -49,13 +57,14 @@ use std::collections::HashMap;
 
 /// Coarse-grained namespace for capability checks.
 ///
+
 /// Mirrors the family of [`IntrinsicCategory`](crate::intrinsics::IntrinsicCategory)
 /// values that the compiler can tag with `RequiresPermission`,
 /// plus broader stdlib-level scopes (file-open, socket-bind)
 /// that desugar to the same router under the hood.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PermissionScope {
-    /// Raw `syscallN` intrinsics.  `target_id` is the syscall
+    /// Raw `syscallN` intrinsics. `target_id` is the syscall
     /// number on Linux/macOS or the platform-equivalent.
     Syscall,
     /// File-system access — `open`, `unlink`, `mkdir`, etc.
@@ -65,17 +74,17 @@ pub enum PermissionScope {
     /// `target_id` is a stable hash of the address tuple.
     Network,
     /// Process / thread management — `fork`, `exec`, signal
-    /// dispatch.  `target_id` is the operation kind.
+    /// dispatch. `target_id` is the operation kind.
     Process,
     /// Direct memory operations bypassing CBGR — `mmap`,
-    /// `munmap`, raw `alloc`.  `target_id` is the requested
+    /// `munmap`, raw `alloc`. `target_id` is the requested
     /// region kind / size class.
     Memory,
     /// Cryptographic primitives that touch host RNG / HSM.
     /// `target_id` is the algorithm tag.
     Cryptography,
-    /// Wall-clock / monotonic time.  `target_id` is the clock
-    /// id.  Most observational time intrinsics are
+    /// Wall-clock / monotonic time. `target_id` is the clock
+    /// id. Most observational time intrinsics are
     /// **not** gated; this scope exists for the rare
     /// privileged clock (`clock_settime`).
     Time,
@@ -84,6 +93,7 @@ pub enum PermissionScope {
 impl PermissionScope {
     /// Stable byte encoding for wire-format use.
     ///
+
     /// The bytecode encoder writes `PermissionAssert::scope_tag`
     /// using these values (see `bytecode.rs::encode_instruction`).
     /// The dispatch handler decodes them via the inverse
@@ -122,6 +132,7 @@ impl PermissionScope {
 
 /// Opaque target identifier within a [`PermissionScope`].
 ///
+
 /// The router treats it as an arbitrary `u64` — interpretation is
 /// scope-specific. Codegen passes a stable hash (path, addr,
 /// algorithm) so that repeated calls with the same logical
@@ -133,16 +144,17 @@ pub type PermissionTargetId = u64;
 pub enum PermissionDecision {
     /// Caller is permitted to invoke the gated operation.
     Allow,
-    /// Caller is denied.  Codegen lowers this into a
+    /// Caller is denied. Codegen lowers this into a
     /// `PermissionDenied` Verum error at the call site.
     Deny,
 }
 
 /// Trait alias for the user-supplied policy callback.
 ///
+
 /// The closure must be `Send + Sync` because the router is
 /// shared across threads in the multi-worker scheduler hook
-/// (T1-I).  It is invoked **only on cache misses**, so the cost
+/// (T1-I). It is invoked **only on cache misses**, so the cost
 /// of a database lookup or RPC round-trip is amortised across
 /// the surrounding hot loop.
 pub type PolicyFn =
@@ -150,6 +162,7 @@ pub type PolicyFn =
 
 /// Statistics recorded by the router.
 ///
+
 /// Used by the diagnostic surface (`verum audit --capabilities`)
 /// and by performance benchmarks to prove the warm-path budget.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -177,19 +190,20 @@ struct LastEntry {
 
 /// Routes intrinsic permission checks (#12 / P3.2).
 ///
+
 /// Construct with [`PermissionRouter::allow_all`] for the default
 /// permissive policy, or [`PermissionRouter::with_policy`] to
 /// install a host-supplied callback. Either form is mutated
 /// in-place by [`PermissionRouter::check`] as it back-fills the
 /// caches.
 pub struct PermissionRouter {
-    /// One-entry warm-path cache.  Single equality compare
+    /// One-entry warm-path cache. Single equality compare
     /// against this field hits ≤2ns on contemporary cores.
     last: Option<LastEntry>,
     /// Backing cache for the multi-loop case where two callers
     /// alternate targets and would thrash `last`.
     map: HashMap<(PermissionScope, PermissionTargetId), PermissionDecision>,
-    /// User-supplied policy.  `None` means "allow all".
+    /// User-supplied policy. `None` means "allow all".
     policy: Option<Box<PolicyFn>>,
     /// Diagnostic counters.
     pub stats: PermissionRouterStats,
@@ -213,7 +227,7 @@ impl Default for PermissionRouter {
 }
 
 impl PermissionRouter {
-    /// Construct a router that allows every check.  This is the
+    /// Construct a router that allows every check. This is the
     /// default policy when the embedder wires nothing else; it
     /// preserves prior interpreter behaviour for code that
     /// hasn't migrated to capability-aware execution yet.
@@ -227,7 +241,7 @@ impl PermissionRouter {
     }
 
     /// Construct a router that consults `policy` on every cache
-    /// miss.  The closure is invoked *only* on misses, so the
+    /// miss. The closure is invoked *only* on misses, so the
     /// cost of an elaborate lookup is amortised across the
     /// surrounding loop.
     pub fn with_policy<F>(policy: F) -> Self
@@ -242,9 +256,9 @@ impl PermissionRouter {
         }
     }
 
-    /// Replace the policy callback in place.  The caches survive
+    /// Replace the policy callback in place. The caches survive
     /// — entries decided by the old policy remain Allow/Deny
-    /// even after `set_policy`.  Call [`PermissionRouter::clear_cache`]
+    /// even after `set_policy`. Call [`PermissionRouter::clear_cache`]
     /// to drop them.
     pub fn set_policy<F>(&mut self, policy: F)
     where
@@ -253,7 +267,7 @@ impl PermissionRouter {
         self.policy = Some(Box::new(policy));
     }
 
-    /// Clear `last` and the backing map.  Used by host code
+    /// Clear `last` and the backing map. Used by host code
     /// that wants to re-evaluate every target after a policy
     /// switch.
     pub fn clear_cache(&mut self) {
@@ -263,13 +277,15 @@ impl PermissionRouter {
 
     /// Route a single check.
     ///
+
     /// Path order:
-    ///   1. `last` one-entry cache  → ≤2ns warm path
-    ///   2. backing `map` lookup    → ~10–30ns
-    ///   3. user policy callback    → cost-dominated by the
-    ///      policy itself
-    ///   4. allow-all fallback when no policy is wired
+    ///  1. `last` one-entry cache → ≤2ns warm path
+    ///  2. backing `map` lookup → ~10–30ns
+    ///  3. user policy callback → cost-dominated by the
+    ///  policy itself
+    ///  4. allow-all fallback when no policy is wired
     ///
+
     /// The decision is back-filled into both caches so the next
     /// matching request hits the warm path.
     #[inline]
@@ -528,7 +544,7 @@ mod tests {
     #[test]
     fn warm_path_under_a_million_iterations() {
         // Smoke-tests the warm path doesn't drift into the
-        // policy under a tight loop.  Not a perf benchmark —
+        // policy under a tight loop. Not a perf benchmark —
         // benches/ owns the actual ≤2ns measurement — but the
         // cache-hit invariant is verifiable here.
         let mut router = PermissionRouter::allow_all();

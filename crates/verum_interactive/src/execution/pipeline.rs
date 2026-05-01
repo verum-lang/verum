@@ -1,5 +1,6 @@
 //! Execution pipeline: Parse → Codegen → Execute.
 //!
+
 //! This module orchestrates the transformation of Verum source code into
 //! executed results via the VBC interpreter.
 
@@ -102,12 +103,14 @@ pub struct CellExecutionOutput {
 
 /// The execution pipeline.
 ///
+
 /// Manages the flow from source code to executed results:
 /// 1. Parse source using `IncrementalScriptParser`
 /// 2. Compile AST to VBC using `VbcCodegen`
 /// 3. Execute VBC using `Interpreter`
 /// 4. Format results for display
 ///
+
 /// Format an AST TypeKind as a readable string (used by TypeChecker integration).
 fn format_ast_type(kind: &verum_ast::TypeKind) -> String {
     match kind {
@@ -467,6 +470,7 @@ impl ExecutionPipeline {
 
     /// Compiles and executes, tracking bindings for a specific cell.
     ///
+
     /// Cross-cell state: prior bindings from `context` are injected as
     /// `let name = <literal>;` preamble before the user's source. This
     /// makes variables from earlier cells available without modifying VBC.
@@ -485,6 +489,7 @@ impl ExecutionPipeline {
 
     /// Generate let-binding preamble from execution context.
     ///
+
     /// For each primitive binding (Int, Float, Bool, Text), emits a
     /// `let name = literal;` line so the VBC codegen treats it as a
     /// normal local variable. This enables cross-cell variable reuse
@@ -527,9 +532,11 @@ impl ExecutionPipeline {
 
     /// Compiles and executes source code, returning a CellOutput.
     ///
+
     /// This is a convenience method for async execution that takes a cell ID
     /// and returns the playbook's CellOutput type.
     ///
+
     /// Note: This method clones the context internally for thread-safe async execution.
     pub fn execute_source(
         &mut self,

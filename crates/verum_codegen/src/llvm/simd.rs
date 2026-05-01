@@ -1,38 +1,48 @@
 //! SIMD (Single Instruction, Multiple Data) code generation.
 //!
+
 //! This module provides LLVM IR generation for SIMD vector operations,
 //! implementing platform-specific lowering for various CPU architectures.
 //!
+
 //! # Overview
 //!
+
 //! SIMD operations in Verum use portable vector types (`Vec<T, N>`, `Mask<N>`)
 //! that compile to optimal instructions on each target platform:
 //!
+
 //! - **x86_64**: SSE4.2, AVX, AVX2, AVX-512
 //! - **aarch64**: NEON, SVE
 //! - **RISC-V**: V extension
 //!
+
 //! # Generated Code Patterns
 //!
+
 //! ```llvm
 //! ; Vector addition (4xf32)
 //! %sum = fadd <4 x float> %a, %b
 //!
+
 //! ; Fused multiply-add (with intrinsic)
 //! %fma = call <4 x float> @llvm.fma.v4f32(<4 x float> %a, <4 x float> %b, <4 x float> %c)
 //!
+
 //! ; Horizontal sum reduction
 //! %sum = call float @llvm.vector.reduce.fadd.v4f32(float 0.0, <4 x float> %v)
 //! ```
 //!
+
 //! # SIMD Architecture
 //!
+
 //! Verum provides portable SIMD via `Vec<T: SimdElement, N>` types with `@repr(simd)`.
 //! Key features:
 //! - Portable vector types compile to optimal instructions per platform:
-//!   x86_64 (SSE4.2/AVX/AVX2/AVX-512), aarch64 (NEON/SVE), RISC-V (V extension)
+//!  x86_64 (SSE4.2/AVX/AVX2/AVX-512), aarch64 (NEON/SVE), RISC-V (V extension)
 //! - Operations: splat, load (aligned/unaligned), arithmetic (+, *, fma),
-//!   horizontal reductions, shuffle/permute, gather/scatter, masked load/store
+//!  horizontal reductions, shuffle/permute, gather/scatter, masked load/store
 //! - `Mask<N>` type for conditional SIMD operations (lane-wise comparisons)
 //! - `@multiversion` attribute generates multiple implementations for runtime dispatch
 //! - `@target_feature(enable = "avx2")` for platform-specific intrinsic access
@@ -291,6 +301,7 @@ pub struct SimdStats {
 
 /// SIMD code generation context.
 ///
+
 /// Provides LLVM IR generation for SIMD vector operations with
 /// platform-specific intrinsic selection.
 pub struct SimdLowering<'ctx> {
@@ -384,6 +395,7 @@ impl<'ctx> SimdLowering<'ctx> {
 
     /// Splat (broadcast) a scalar to all lanes.
     ///
+
     /// ```llvm
     /// %v = insertelement <4 x float> poison, float %scalar, i32 0
     /// %splat = shufflevector <4 x float> %v, <4 x float> poison, <4 x i32> zeroinitializer
@@ -714,6 +726,7 @@ impl<'ctx> SimdLowering<'ctx> {
 
     /// Build a shuffle operation with compile-time mask.
     ///
+
     /// ```llvm
     /// %result = shufflevector <4 x float> %a, <4 x float> %b, <4 x i32> <i32 0, i32 5, i32 2, i32 7>
     /// ```

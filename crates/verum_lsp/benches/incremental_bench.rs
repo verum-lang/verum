@@ -1,5 +1,6 @@
 //! Performance benchmarks for incremental parsing
 //!
+
 //! This benchmark suite validates the performance targets:
 //! - Document sync: <10ms for typical changes
 //! - Incremental parse: <50ms for 1000 LOC files

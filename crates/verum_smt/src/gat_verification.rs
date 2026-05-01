@@ -1,30 +1,36 @@
 //! GAT (Generic Associated Type) Constraint Verification
 //!
+
 //! GATs (Generic Associated Types) allow protocol associated types to have their own
 //! type parameters, e.g., `type Item<T> where T: Clone`. Well-formedness requires:
 //! (1) where-clause constraints are satisfiable, (2) no circular type dependencies,
 //! (3) variance annotations are consistent. In CBGR, GATs use generation tracking
 //! instead of lifetime parameters, simplifying lending iterator patterns.
 //!
+
 //! This module encodes GAT constraints to Z3 and verifies:
 //! 1. Type parameter constraints are satisfied
 //! 2. Where clauses hold for all instantiations
 //! 3. No circular dependencies in GAT definitions
 //! 4. Variance constraints are respected
 //!
+
 //! # Performance Targets
 //!
+
 //! - Simple GAT verification: <50ms
 //! - Complex GAT with multiple constraints: <100ms
 //! - Circular dependency detection: <20ms
 //!
+
 //! # Theory
 //!
+
 //! GATs are encoded as universally quantified formulas in Z3:
 //! ```smt2
 //! (forall ((T Sort))
-//!   (=> (constraint T)
-//!       (well_formed (GAT T))))
+//!  (=> (constraint T)
+//!  (well_formed (GAT T))))
 //! ```
 
 use std::collections::HashMap;
@@ -44,6 +50,7 @@ use z3::{FuncDecl, Pattern, SatResult, Solver, Sort, Symbol};
 
 /// Protocol table entry for SMT verification
 ///
+
 /// Tracks protocol hierarchies and method requirements for bound checking.
 #[derive(Debug, Clone, Default)]
 pub struct ProtocolTable {
@@ -299,11 +306,13 @@ impl VarianceTracker {
             TypeKind::DynProtocol { bounds, bindings } => {
                 // dyn Protocol types require comprehensive bounds analysis.
                 //
+
                 // The type parameter can appear in:
                 // 1. Protocol bounds themselves (e.g., dyn Iterator<Item = T>)
                 // 2. Associated type bindings (e.g., dyn Container<Item = T>)
                 // 3. Transitively through superprotocols
                 //
+
                 // Protocol bounds constrain input behavior, so they are contravariant.
                 // Associated type bindings can appear in covariant position.
                 for bound in bounds.iter() {
@@ -341,6 +350,7 @@ impl VarianceTracker {
 
     /// Analyze a type bound for variance of the tracked parameter
     ///
+
     /// TypeBounds can contain type parameters in:
     /// 1. Protocol bounds with generic arguments (e.g., Iterator<Item = T>)
     /// 2. Equality bounds (e.g., Self::Item = T)
@@ -422,10 +432,12 @@ impl VarianceTracker {
 
     /// Analyze a protocol bound for variance of the tracked parameter
     ///
+
     /// ProtocolBounds can contain type parameters in:
     /// 1. The protocol path itself (rare, e.g., dyn T)
     /// 2. Type arguments to the protocol (e.g., Iterator<Item = T>)
     ///
+
     /// Returns true if the parameter was found in the bound
     pub fn analyze_protocol_bound(
         &mut self,
@@ -615,10 +627,13 @@ pub struct GATStats {
 
 /// GAT constraint verifier
 ///
+
 /// Encodes GAT definitions to Z3 and verifies well-formedness properties.
 ///
+
 /// # SMT Encoding Strategy
 ///
+
 /// Protocol bounds are encoded using:
 /// 1. Uninterpreted `Type` and `Protocol` sorts
 /// 2. `implements(Type, Protocol) -> Bool` predicate
@@ -641,9 +656,10 @@ pub struct GATVerifier {
 impl GATVerifier {
     /// Create a new GAT verifier.
     ///
+
     /// SMT-state setup (Z3 context, Verum context, AST translator) was
     /// previously stored on this struct but never used; verification
-    /// methods that need an SMT backend allocate one locally.  When/if
+    /// methods that need an SMT backend allocate one locally. When/if
     /// extended verification operations require persistent SMT state,
     /// add the fields back wired into actual call sites.
     pub fn new() -> Self {
@@ -666,6 +682,7 @@ impl GATVerifier {
 
     /// Initialize SMT sorts and predicates for protocol encoding
     ///
+
     /// Creates:
     /// - `Type` sort: Abstract sort for all types
     /// - `Protocol` sort: Abstract sort for all protocols
@@ -751,18 +768,22 @@ impl GATVerifier {
 
     /// Verify a GAT definition
     ///
+
     /// Checks:
     /// 1. Type parameter constraints are satisfiable
     /// 2. Where clauses are well-formed
     /// 3. No circular dependencies
     /// 4. Variance annotations are correct
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_smt::gat_verification::GATVerifier;
     /// use verum_smt::AssociatedTypeGAT;
     ///
+
     /// let verifier = GATVerifier::new();
     /// let gat = AssociatedTypeGAT::simple("Item".into(), vec![].into());
     /// let result = verifier.verify(&gat);
@@ -844,11 +865,12 @@ impl GATVerifier {
 
     /// Check for circular dependencies in GAT definitions
     ///
+
     /// Example of circular dependency:
     /// ```verum
     /// protocol Bad {
-    ///     type A<T> = Self.B<T>
-    ///     type B<T> = Self.A<T>  // Circular!
+    ///  type A<T> = Self.B<T>
+    ///  type B<T> = Self.A<T> // Circular!
     /// }
     /// ```
     fn check_circular_dependencies(&mut self, gat: &AssociatedTypeGAT) -> Result<(), GATError> {
@@ -888,6 +910,7 @@ impl GATVerifier {
 
     /// Extract GAT name from a protocol bound
     ///
+
     /// Parses the bound's protocol path to extract GAT references.
     /// This handles:
     /// - Simple protocol bounds: `Clone` -> None (not a GAT)
@@ -933,6 +956,7 @@ impl GATVerifier {
 
     /// Extract GAT references from a type
     ///
+
     /// Recursively traverses a type to find all GAT references.
     /// This is critical for dependency analysis and cycle detection.
     fn extract_gat_references(ty: &Type, deps: &mut Set<Text>) {
@@ -1058,10 +1082,13 @@ impl GATVerifier {
 
     /// Verify constraints on a type parameter
     ///
+
     /// Encodes the constraint as a Z3 formula and checks satisfiability.
     ///
+
     /// # SMT Encoding
     ///
+
     /// For `type Item<T> where T: Clone + Debug`, generates:
     /// ```smt2
     /// (declare-sort Type)
@@ -1072,7 +1099,7 @@ impl GATVerifier {
     /// (declare-const Debug Protocol)
     /// (assert (implements T_Item Clone))
     /// (assert (implements T_Item Debug))
-    /// (check-sat)  ; Should be SAT (there exist types implementing both)
+    /// (check-sat) ; Should be SAT (there exist types implementing both)
     /// ```
     fn verify_type_param_constraints(
         &mut self,
@@ -1203,10 +1230,13 @@ impl GATVerifier {
 
     /// Encode a protocol bound as a Z3 Boolean formula
     ///
+
     /// Translates `param_name: Protocol` to `implements(param_name, Protocol)`
     ///
+
     /// # SMT Encoding
     ///
+
     /// For bound `T: Clone`, generates:
     /// ```smt2
     /// (implements T_const Clone_const)
@@ -1259,11 +1289,12 @@ impl GATVerifier {
 
     /// Encode protocol hierarchy constraints to solver
     ///
+
     /// For each super-protocol relationship, adds:
     /// ```smt2
     /// (assert (forall ((T Type))
-    ///   (=> (implements T SubProtocol)
-    ///       (implements T SuperProtocol))))
+    ///  (=> (implements T SubProtocol)
+    ///  (implements T SuperProtocol))))
     /// ```
     fn encode_protocol_hierarchy(&self, solver: &Solver) {
         let implements_pred = match self.implements_pred.as_ref() {
@@ -1320,8 +1351,10 @@ impl GATVerifier {
 
     /// Verify a where clause on a GAT
     ///
+
     /// Example: `type Item<T> where T: Clone + Debug`
     ///
+
     /// Checks:
     /// 1. Parameter exists in GAT definition
     /// 2. All protocol bounds are well-formed (protocols exist)
@@ -1426,17 +1459,20 @@ impl GATVerifier {
 
     /// Verify lifetime bounds on GAT type parameters
     ///
+
     /// GATs can have lifetime bounds that constrain how long the associated type
     /// can be used. This verifies:
     /// 1. Lifetime parameters are valid (e.g., 'a, 'b, 'static)
     /// 2. Lifetime bounds are well-formed (outlives relationships)
     /// 3. Lifetime bounds are satisfiable
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// protocol Container {
-    ///     type Item<'a> where Self: 'a;  // Item requires Self to outlive 'a
+    ///  type Item<'a> where Self: 'a; // Item requires Self to outlive 'a
     /// }
     /// ```
     fn verify_lifetime_bounds(
@@ -1591,15 +1627,18 @@ impl GATVerifier {
 
     /// Verify transitive bounds on GAT type parameters
     ///
+
     /// When a type parameter has bounds like `T: Clone` and there's a where clause
     /// like `where T::Item: Debug`, we need to verify that transitive bounds are
     /// satisfiable.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// protocol Container {
-    ///     type Item<T> where T: Clone, T: Iterator, <T as Iterator>::Item: Debug;
+    ///  type Item<T> where T: Clone, T: Iterator, <T as Iterator>::Item: Debug;
     /// }
     /// ```
     fn verify_transitive_bounds(
@@ -1704,6 +1743,7 @@ impl GATVerifier {
 
     /// Check variance annotation correctness
     ///
+
     /// Ensures variance matches actual usage in the GAT definition.
     fn check_variance(
         &self,
@@ -1741,14 +1781,17 @@ impl GATVerifier {
 
     /// Infer variance from type parameter usage
     ///
+
     /// Analysis rules:
     /// - Appears only in output positions (return types, &T): Covariant
     /// - Appears only in input positions (parameters): Contravariant
     /// - Appears in both or in mutable positions (&mut T): Invariant
     /// - Not used: Covariant by default (safe)
     ///
+
     /// # Position Tracking
     ///
+
     /// The algorithm tracks position polarity through type structure:
     /// - Initial position: Covariant (output)
     /// - fn(T) -> U: T is Contravariant, U is Covariant
@@ -1788,10 +1831,13 @@ impl GATVerifier {
 
     /// Verify GAT instantiation with concrete type arguments
     ///
+
     /// Checks that the type arguments satisfy all GAT constraints.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// // GAT: type Item<T> where T: Clone
     /// // Instantiation: Item<Int>
@@ -1821,6 +1867,7 @@ impl GATVerifier {
 
     /// Verify a type argument satisfies parameter constraints
     ///
+
     /// Full implementation that:
     /// 1. Queries the protocol table for direct implementations
     /// 2. Checks superprotocol hierarchy for transitive implementations
@@ -1962,6 +2009,7 @@ impl GATVerifier {
 
     /// Verify a generic type bound using SMT solver
     ///
+
     /// For generic types, we encode the constraint as an SMT formula:
     /// forall T. (implements(T, Bound) => valid_instantiation)
     fn verify_generic_type_bound_smt(
@@ -2171,6 +2219,7 @@ pub struct CacheStats {
 
 /// Verify a GAT definition is well-formed
 ///
+
 /// Convenience function for one-off verification.
 pub fn verify_gat(gat: &AssociatedTypeGAT) -> GATVerificationResult {
     let mut verifier = GATVerifier::new();
@@ -2179,6 +2228,7 @@ pub fn verify_gat(gat: &AssociatedTypeGAT) -> GATVerificationResult {
 
 /// Verify multiple GATs (batch verification)
 ///
+
 /// More efficient than individual calls due to caching.
 pub fn verify_gats(gats: &[AssociatedTypeGAT]) -> List<GATVerificationResult> {
     let mut verifier = GATVerifier::new();
@@ -2193,6 +2243,7 @@ pub fn verify_gats(gats: &[AssociatedTypeGAT]) -> List<GATVerificationResult> {
 
 /// Check if a GAT is well-formed (quick check)
 ///
+
 /// Returns true if all constraints are satisfied.
 pub fn is_well_formed(gat: &AssociatedTypeGAT) -> bool {
     let result = verify_gat(gat);

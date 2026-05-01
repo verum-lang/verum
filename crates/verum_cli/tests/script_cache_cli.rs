@@ -1,5 +1,6 @@
 //! End-to-end CLI tests for `verum cache <subcmd>` (P5.2).
 //!
+
 //! These tests populate a custom cache root with synthetic entries via
 //! the public `verum_cli::script::cache::ScriptCache` API, then drive the
 //! `verum cache` subcommands as a subprocess and assert on stdout. The

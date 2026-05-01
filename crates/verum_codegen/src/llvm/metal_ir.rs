@@ -1,21 +1,25 @@
 //! Metal GPU runtime as LLVM IR — replaces verum_metal.m (563 LOC).
 //!
+
 //! All Objective-C calls compile to `objc_msgSend(receiver, selector, ...)`.
 //! This is a C function in `/usr/lib/libobjc.dylib` that LLVM IR can call directly.
 //!
+
 //! Key ObjC runtime functions:
-//!   - `objc_msgSend(ptr, ptr, ...) -> ptr` — message dispatch
-//!   - `sel_registerName(ptr) -> ptr` — get selector from C string
-//!   - `objc_getClass(ptr) -> ptr` — get class by name
-//!   - `objc_retain(ptr) -> ptr` — increment refcount (__bridge_retained)
-//!   - `objc_release(ptr)` — decrement refcount (__bridge_transfer)
-//!   - `MTLCreateSystemDefaultDevice() -> ptr` — Metal framework entry point
+//!  - `objc_msgSend(ptr, ptr, ...) -> ptr` — message dispatch
+//!  - `sel_registerName(ptr) -> ptr` — get selector from C string
+//!  - `objc_getClass(ptr) -> ptr` — get class by name
+//!  - `objc_retain(ptr) -> ptr` — increment refcount (__bridge_retained)
+//!  - `objc_release(ptr)` — decrement refcount (__bridge_transfer)
+//!  - `MTLCreateSystemDefaultDevice() -> ptr` — Metal framework entry point
 //!
+
 //! ARC bridging:
-//!   - `__bridge` = no-op cast (same pointer)
-//!   - `__bridge_retained` = objc_retain (increment refcount)
-//!   - `__bridge_transfer` = transfer ownership (no increment, will release)
+//!  - `__bridge` = no-op cast (same pointer)
+//!  - `__bridge_retained` = objc_retain (increment refcount)
+//!  - `__bridge_transfer` = transfer ownership (no increment, will release)
 //!
+
 //! MTLSize struct: `{ NSUInteger, NSUInteger, NSUInteger }` = 24 bytes.
 //! On arm64, passed in registers (x0-x2 for each triple).
 
@@ -1375,6 +1379,7 @@ impl<'ctx> MetalIR<'ctx> {
         // We need to bitcast the return. The ptr (i64) bits will contain the double bits
         // on arm64 since d0 and x0 are separate register files.
         //
+
         // For correctness, we should declare a separate variant that returns double.
         // Let's declare objc_msgSend_double: (ptr, ptr, ...) -> double
         let objc_msg_send_fp = {

@@ -25,9 +25,10 @@ public fn result_bytes(r: &OctetLengthResult) -> Int {
     match r { RBytes(n) => n.clone(), RNull => 0 }
 }
 
-// Serial-type widths (§3.0 record format).  Mirrors serial_type_api but kept
+// Serial-type widths (§3.0 record format). Mirrors serial_type_api but kept
 // inline for self-containment.
 //
+
 // Signed-bounds comparison rather than abs-then-compare: for `n =
 // Int64.MIN` the historical `zero - n` wrapped back to Int.MIN, leaving
 // `v < 0`, and then `v <= 127` was trivially true → the function
@@ -55,7 +56,7 @@ public fn evaluate(v: &ValueKind) -> OctetLengthResult {
 }
 
 // length() vs octet_length() differ for TEXT — length() returns the
-// character count, octet_length() returns the byte count.  This helper
+// character count, octet_length() returns the byte count. This helper
 // projects the difference for documentation/test parity.
 public fn length_minus_octet_length_text(byte_count: Int, char_count: Int) -> Int {
     byte_count - char_count

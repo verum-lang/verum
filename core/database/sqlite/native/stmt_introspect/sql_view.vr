@@ -3,12 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3_sql(stmt)           → original SQL text (possibly with
-//                                   ? placeholders)
-//   sqlite3_expanded_sql(stmt)  → SQL text with parameter values
-//                                   substituted (caller must sqlite3_free)
-//   sqlite3_normalized_sql(stmt)→ SQL text with literals replaced by
-//                                   ? and whitespace / case canonicalised
+
+//  sqlite3_sql(stmt) → original SQL text (possibly with
+//  ? placeholders)
+//  sqlite3_expanded_sql(stmt) → SQL text with parameter values
+//  substituted (caller must sqlite3_free)
+//  sqlite3_normalized_sql(stmt)→ SQL text with literals replaced by
+//  ? and whitespace / case canonicalised
 // =============================================================================
 
 module core.database.sqlite.native.stmt_introspect.sql_view;

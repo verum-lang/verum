@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// All six surfaces return SQLITE_OK or a primary/extended code.  We
-// model the common shape here.  snapshot_cmp additionally returns a
+
+// All six surfaces return SQLITE_OK or a primary/extended code. We
+// model the common shape here. snapshot_cmp additionally returns a
 // three-way ordering via a dedicated Order value.
 // =============================================================================
 

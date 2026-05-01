@@ -2,21 +2,26 @@
 // qtt.vr — Quantitative Type Theory Resource Tracking
 // =============================================================================
 //
+
 // Layer: Standard Library / Types
 //
+
 // Surface for `verum_types.qtt_usage` + `verum_types.qtt_walker`.
 // QTT assigns every binding a *quantity* describing how many
 // times it may be used. The type system enforces these counts
 // at compile time, preventing resource leaks (Linear used zero
 // times) and aliasing violations (Linear used twice).
 //
+
 // ## Quantities
 //
-//   * `Zero`     — erased; usable only at the type level
-//   * `One`      — linear; exactly once at runtime
-//   * `Many`     — unrestricted; any number of times
-//   * `AtMost(n)`— affine; at most n times
+
+//  * `Zero` — erased; usable only at the type level
+//  * `One` — linear; exactly once at runtime
+//  * `Many` — unrestricted; any number of times
+//  * `AtMost(n)`— affine; at most n times
 //
+
 // =============================================================================
 
 module core.types.qtt;
@@ -40,9 +45,10 @@ public type Quantity is
 public const QTT_SATURATION: Int = 1 << 30;
 
 /// Normalise a quantity into canonical form:
-///   * `AtMost { n: 0 }` ↔ `Zero` (zero uses allowed in either case)
-///   * `AtMost { n: m }` for `m > QTT_SATURATION` collapses to `Many`
+///  * `AtMost { n: 0 }` ↔ `Zero` (zero uses allowed in either case)
+///  * `AtMost { n: m }` for `m > QTT_SATURATION` collapses to `Many`
 ///
+
 /// `AtMost { n: 1 }` is intentionally NOT normalised to `One` — they
 /// differ semantically: `One` requires exactly one runtime occurrence,
 /// `AtMost { n: 1 }` admits zero occurrences too. The lattice isn't
@@ -70,6 +76,7 @@ public fn allows(q: Quantity, uses: Int{>= 0}) -> Bool {
 
 /// Additive composition (sequential composition).
 ///
+
 /// `add_quantity(p, q)` is the cumulative count when one binding
 /// is used `p` times and then `q` times — the natural pattern for
 /// `let`-sequencing. Identity is `Zero`; absorbing element is
@@ -111,23 +118,26 @@ fn saturating_at_most(a: Int, b: Int) -> Quantity {
 
 /// Multiplicative composition (scaling under a binder).
 ///
+
 /// When a parameter `x: A` is used `outer` times in the function's
 /// body, and `A` itself was bound with quantity `inner`, the
 /// effective usage of `A` from the call site is `outer × inner`.
 ///
+
 /// Identity is `One`. Absorbing element is `Zero`. `Many × q`
 /// saturates to `Many` (positive q); `Many × Zero == Zero` because
 /// "infinite uses of an erased value" is still erased.
 ///
+
 /// ```text
-///     One  × q     = q                           (identity)
-///     q    × One   = q                           (identity)
-///     Zero × q     = Zero                        (absorbing)
-///     q    × Zero  = Zero                        (absorbing)
-///     Many × Many  = Many
-///     Many × AtMost(_)   = Many
-///     AtMost(_) × Many   = Many
-///     AtMost(a) × AtMost(b) = AtMost(a · b)
+///  One × q = q (identity)
+///  q × One = q (identity)
+///  Zero × q = Zero (absorbing)
+///  q × Zero = Zero (absorbing)
+///  Many × Many = Many
+///  Many × AtMost(_) = Many
+///  AtMost(_) × Many = Many
+///  AtMost(a) × AtMost(b) = AtMost(a · b)
 /// ```
 public fn mul_quantity(a: Quantity, b: Quantity) -> Quantity {
     let na = normalize_quantity(a);
@@ -176,12 +186,14 @@ public fn bottom_quantity() -> Quantity {
 /// Subquantity ordering: `is_sub(a, b)` is true iff every usage
 /// pattern allowed by `a` is also allowed by `b`. The lattice is:
 ///
+
 /// ```text
-///     Zero  ≤  One  ≤  AtMost(n)  ≤  Many
-///                         ⌣
-///                  (AtMost(n) ≤ AtMost(m) when n ≤ m)
+///  Zero ≤ One ≤ AtMost(n) ≤ Many
+///  ⌣
+///  (AtMost(n) ≤ AtMost(m) when n ≤ m)
 /// ```
 ///
+
 /// Used by inference to decide when to promote a binding's
 /// declared quantity to a more permissive one (e.g. coercing a
 /// `One` argument into a `Many` parameter is sound, the other way
@@ -285,7 +297,7 @@ public fn check_binding(name: Text, declared: Quantity, observed: Int{>= 0}) -> 
 implement Eq for Quantity {
     /// Quantities compare by their normalised canonical form.
     /// `AtMost { n: 0 }` and `Zero` are NOT distinct under Eq —
-    /// they admit the same set of runtime usages.  `AtMost { n: 1 }`
+    /// they admit the same set of runtime usages. `AtMost { n: 1 }`
     /// stays distinct from `One` (the lattice isn't total around 1
     /// — see `normalize_quantity` doc).
     fn eq(&self, other: &Quantity) -> Bool {
@@ -314,10 +326,10 @@ implement Clone for Quantity {
 
 implement Display for Quantity {
     /// Renders quantities in their algebraic notation:
-    ///   `Zero`            → `0`     (erased — no runtime occurrence)
-    ///   `One`             → `1`     (linear — exactly one occurrence)
-    ///   `Many`            → `ω`     (unrestricted — any number)
-    ///   `AtMost { n }`    → `≤n`    (bounded affine)
+    ///  `Zero` → `0` (erased — no runtime occurrence)
+    ///  `One` → `1` (linear — exactly one occurrence)
+    ///  `Many` → `ω` (unrestricted — any number)
+    ///  `AtMost { n }` → `≤n` (bounded affine)
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             Quantity.Zero       => f.write_str("0"),
@@ -419,7 +431,7 @@ implement Eq for QttViolation {
 
 implement Display for QttViolation {
     /// Renders a QTT violation in human-readable form for verifier
-    /// diagnostics.  Each variant surfaces the binding name and
+    /// diagnostics. Each variant surfaces the binding name and
     /// the relevant declared quantity so callers can locate the
     /// offending binding directly from the message.
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {

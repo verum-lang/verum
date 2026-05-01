@@ -2,17 +2,20 @@
 // Verum Math Stack - L9.6: Retrieval-Augmented Generation (RAG)
 // =============================================================================
 //
+
 // Knowledge retrieval and augmented generation pipeline for LLM applications.
 // Provides document chunking, vector storage, and retrieval-augmented generation.
 //
+
 // Architecture:
-//   - Document: Chunked content with embeddings
-//   - VectorStore: Protocol for vector similarity search
-//   - HNSWVectorStore: HNSW-based approximate nearest neighbor search
-//   - TextChunker: Document splitting with configurable overlap
-//   - RAGPipeline: End-to-end retrieval-augmented generation
-//   - HybridRetriever: Combined dense + sparse retrieval (RRF)
+//  - Document: Chunked content with embeddings
+//  - VectorStore: Protocol for vector similarity search
+//  - HNSWVectorStore: HNSW-based approximate nearest neighbor search
+//  - TextChunker: Document splitting with configurable overlap
+//  - RAGPipeline: End-to-end retrieval-augmented generation
+//  - HybridRetriever: Combined dense + sparse retrieval (RRF)
 //
+
 // Spec: math-spec.md Section 52 - Retrieval-Augmented Generation (RAG)
 // =============================================================================
 
@@ -27,6 +30,7 @@ mount core.math.agent;
 
 // Document chunk for retrieval
 //
+
 // Represents a chunk of text with optional embedding and metadata.
 // Documents are the unit of retrieval in vector stores.
 public type Document is {
@@ -93,6 +97,7 @@ implement Document {
 
 // Protocol for vector similarity search
 //
+
 // Vector stores index document embeddings and provide efficient
 // nearest neighbor search.
 public type VectorStore is protocol {
@@ -162,6 +167,7 @@ type HNSWNode is {
 
 // HNSW index for approximate nearest neighbor search
 //
+
 // Implements the HNSW algorithm for efficient vector similarity search
 // with sub-linear query time complexity.
 public type HNSWIndex is {
@@ -505,6 +511,7 @@ public type ChunkStrategy is
 
 // Text chunker for document splitting
 //
+
 // Splits documents into smaller chunks suitable for embedding and retrieval.
 public type TextChunker is {
     // Chunk size in characters
@@ -598,6 +605,7 @@ implement TextChunker {
 
 // RAG (Retrieval-Augmented Generation) pipeline
 //
+
 // Combines embedding, retrieval, and generation for knowledge-augmented responses.
 public type RAGPipeline<E, G, V> is {
     // Embedding model (Text -> Vector)
@@ -921,6 +929,7 @@ implement SparseIndex for BM25Index {
 
 // Hybrid retrieval combining dense and sparse search
 //
+
 // Uses Reciprocal Rank Fusion (RRF) to combine results from
 // vector similarity and keyword search.
 public type HybridRetriever<D: VectorStore, S: SparseIndex> is {
@@ -1020,24 +1029,29 @@ fn random_float() -> Float {
 // Example Usage (Documentation)
 // =============================================================================
 //
+
 // // Create RAG pipeline
 // let embedder = load_embedding_model("sentence-transformers/all-mpnet-base-v2");
 // let generator = load_llm("meta-llama/Llama-2-7b-chat");
 // let vector_store = HNSWVectorStore.with_defaults(768);
 //
+
 // let rag = RAGPipeline.new(embedder, generator, vector_store)
-//     .with_k(5)
-//     .with_chunk_size(512, 50);
+//  .with_k(5)
+//  .with_chunk_size(512, 50);
 //
+
 // // Add documents
 // rag.add_document(
-//     &"Verum is a programming language designed for verified computing...".to_text(),
-//     Map.from([("source".to_text(), Value.Text("docs/intro.md".to_text()))]),
+//  &"Verum is a programming language designed for verified computing...".to_text(),
+//  Map.from([("source".to_text(), Value.Text("docs/intro.md".to_text()))]),
 // );
 //
+
 // // Query
 // let answer = rag.query(&"What is Verum?".to_text());
 //
+
 // // Query with sources
 // let (answer, sources) = rag.query_with_sources(&"How does memory safety work?".to_text());
 // =============================================================================

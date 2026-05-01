@@ -5,12 +5,14 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Compile-time and runtime validators for tagged string literals:
-//   json#"{"key": "value"}"    → validates JSON syntax
-//   sql#"SELECT * FROM users"  → validates SQL syntax
-//   regex#"[a-z]+"             → validates regex pattern
-//   uri#"https://example.com"  → validates URI format
+//  json#"{"key": "value"}" → validates JSON syntax
+//  sql#"SELECT * FROM users" → validates SQL syntax
+//  regex#"[a-z]+" → validates regex pattern
+//  uri#"https://example.com" → validates URI format
 //
+
 // =============================================================================
 
 module tagged_literals;

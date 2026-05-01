@@ -3,12 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — EXPLAIN ANALYZE)
 //
+
 // `OpStat` records, for each opcode the VDBE actually executed:
 //
-//   * `count`         — times the opcode dispatched
-//   * `total_ns`      — cumulative wall-clock time in handler
-//   * `worst_ns`      — slowest single dispatch
+
+//  * `count` — times the opcode dispatched
+//  * `total_ns` — cumulative wall-clock time in handler
+//  * `worst_ns` — slowest single dispatch
 //
+
 // Aggregated across a query, a single `OpStat` table tells you
 // where the interpreter actually spent its budget.
 // =============================================================================

@@ -1,8 +1,10 @@
 //! Type Inference Performance Benchmarks
 //!
+
 //! This benchmark validates the type inference performance target:
 //! **Target: < 100ms for 10K LOC**
 //!
+
 //! NOTE: Significantly simplified from original due to API changes.
 //! The original used removed ExprKind::Var, ExprKind::Lambda, Pattern::Var,
 //! Literal::Int(i64), and InferMode::Synthesis which no longer exist.

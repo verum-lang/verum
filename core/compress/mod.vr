@@ -4,45 +4,57 @@
 // Layer: 4 (I/O-adjacent)
 // =============================================================================
 //
+
 // Uniform API over gzip, brotli, zstd, lz4. Primary consumers:
 //
+
 // - HTTP/1.1 + HTTP/2 `Content-Encoding` negotiation (Weft §6.1-6.2).
 // - WebSocket per-message-deflate (RFC 7692) (Weft §6.4).
 // - TLS certificate compression (RFC 8879) (Weft §6.11).
 // - gRPC message compression.
 // - Data-pipeline ingest / egress.
 //
+
 // # Design
 //
+
 // Three shared abstractions:
 //
+
 // 1. `Codec` protocol — one-shot `encode` / `decode` byte-slice-in/out.
 // 2. `Encoder<Write>` / `Decoder<Read>` — streaming Writer/Reader adapters.
 // 3. `Algorithm` sum-type — runtime-selectable (negotiated at wire-level).
 //
+
 // Implementations dispatch through `@intrinsic("verum.compress.*")` symbols
 // that resolve at link time to:
 //
+
 // | Algorithm | Backend | Feature flag |
-// | gzip      | zlib / miniz | `compress-zlib` (default) |
-// | brotli    | libbrotli    | `compress-brotli` |
-// | zstd      | libzstd      | `compress-zstd` |
-// | lz4       | liblz4       | `compress-lz4` |
+// | gzip | zlib / miniz | `compress-zlib` (default) |
+// | brotli | libbrotli | `compress-brotli` |
+// | zstd | libzstd | `compress-zstd` |
+// | lz4 | liblz4 | `compress-lz4` |
 //
+
 // Absence of a feature flag → the corresponding functions return
 // `Err(CompressError.UnsupportedAlgorithm)` at runtime. Core algorithm
 // surface is declared unconditionally so user code can branch on
 // `Algorithm` values without `@cfg`-guarded call sites.
 //
+
 // # Levels
 //
+
 // Each codec exposes a numeric `level: Int` parameter:
 //
+
 // - gzip: 0 (store only) .. 9 (slowest, smallest); 6 is default.
 // - brotli: 0..11; 4 default (reasonable speed/ratio).
 // - zstd: 1..22; 3 default; negative levels (-1..-131072) are "fast" mode.
 // - lz4: 1..12; 1 default (pure speed).
 //
+
 // =============================================================================
 
 module core.compress;
@@ -252,10 +264,10 @@ public fn decode(algo: Algorithm, input: &[Byte], max_output_bytes: Int, out: &m
     // Validate max_output_bytes at the dispatch site BEFORE any
     // intrinsic call. Without this guard a caller passing 0 or
     // negative could trigger ambiguous backend behaviour:
-    //   * Some C zlib bindings interpret 0 as "no limit", silently
-    //     defeating the zip-bomb defence.
-    //   * Negative values are at best a wraparound trap and at worst
-    //     an unsafe cast through to a size_t parameter.
+    //  * Some C zlib bindings interpret 0 as "no limit", silently
+    //  defeating the zip-bomb defence.
+    //  * Negative values are at best a wraparound trap and at worst
+    //  an unsafe cast through to a size_t parameter.
     // Reject explicitly so the contract is enforced uniformly across
     // every backend.
     if max_output_bytes <= 0 {

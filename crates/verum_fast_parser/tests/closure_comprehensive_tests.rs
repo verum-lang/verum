@@ -14,6 +14,7 @@
 )]
 //! Comprehensive closure and lambda tests for Verum parser
 //!
+
 //! Tests cover:
 //! - Basic closure syntax (|params| body)
 //! - Typed closure parameters

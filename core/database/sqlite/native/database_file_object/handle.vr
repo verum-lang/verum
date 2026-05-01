@@ -11,7 +11,7 @@ mount base.{Bool, Text};
 
 public type FileObjectHandle is {
     schema: Text,
-    /// Opaque sqlite3_file* address.  0 means "no file backing"
+    /// Opaque sqlite3_file* address. 0 means "no file backing"
     /// (e.g. :memory:, temp, or missing schema).
     file_ptr: Int64,
 }

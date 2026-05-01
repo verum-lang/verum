@@ -54,6 +54,7 @@ implement Buffer {
     /// renderer does not emit a stray half-glyph. Invisible/combining
     /// codepoints fold into the preceding cluster and contribute 0 columns.
     ///
+
     /// Returns the column position after the written text.
     public fn set_string(&mut self, x: Int, y: Int, text: &Text, style: Style) -> Int {
         if y < 0 || y >= self.height { return x; }

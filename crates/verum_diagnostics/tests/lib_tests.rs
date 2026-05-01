@@ -14,6 +14,7 @@
 )]
 // Unit tests for lib.rs
 //
+
 // Migrated from src/lib.rs to comply with CLAUDE.md test organization.
 
 use verum_diagnostics::{DiagnosticBuilder, RefinementErrorBuilder, Severity, Span, codes};

@@ -4,14 +4,16 @@
 // Layer: 7 (façade — sqlite3_test_control)
 // Spec: SQLite C API — sqlite3_test_control(op, …)
 //
+
 // A grab-bag of test-only control opcodes SQLite exposes for fault
 // injection, internal-invariant introspection, and benchmark
-// hooking.  Real embedders rarely call these; the VCS harness + DST
+// hooking. Real embedders rarely call these; the VCS harness + DST
 // runner do.
 //
+
 // Submodules:
-//   * `opcode`   — TestCtrlOp + numeric table
-//   * `engine`   — call counter + last-observed op
+//  * `opcode` — TestCtrlOp + numeric table
+//  * `engine` — call counter + last-observed op
 // =============================================================================
 
 module core.database.sqlite.native.test_control;

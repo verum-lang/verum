@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md Appendix D
 //
+
 // SQLite has ~30 primary result codes plus ~60 extended codes.
 // We carry both as a flat enum so the L7 façade can map any
 // SQLite-shaped error into a strongly-typed `OpcodeDbError` for callers.
 //
+
 // Wire codes match SQLite C ABI exactly so debugger / log
 // aggregator tooling can decode them with the same tables.
 // =============================================================================

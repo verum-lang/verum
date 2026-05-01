@@ -4,29 +4,36 @@
 // Layer: 1 (crypto primitives + capability labels)
 // =============================================================================
 //
+
 // Organization:
 //
-// - `hash/`        — hash functions (SHA-256, SHA-512 (planned), SHA-3 (planned))
-// - `mac/`         — message authentication codes (HMAC-SHA-256, HMAC-SHA-512)
-// - `kdf/`         — key derivation functions (HKDF-SHA-256, PBKDF2 (planned))
-// - `util/`        — timing-safe primitives (constant_time_eq), etc.
-// - `labels.vr`    — capability labels (information-flow)
-// - `regions.vr`   — region-based memory safety
+
+// - `hash/` — hash functions (SHA-256, SHA-512 (planned), SHA-3 (planned))
+// - `mac/` — message authentication codes (HMAC-SHA-256, HMAC-SHA-512)
+// - `kdf/` — key derivation functions (HKDF-SHA-256, PBKDF2 (planned))
+// - `util/` — timing-safe primitives (constant_time_eq), etc.
+// - `labels.vr` — capability labels (information-flow)
+// - `regions.vr` — region-based memory safety
 //
+
 // Backends:
 //
+
 // Current implementations are pure-Verum reference code. Industrial
 // deployments should enable a hardware-accelerated / formally-verified
 // backend at link-time via one of:
 //
-//   `@cfg(feature = "crypto-hacl-star")`   — Project Everest HACL*
-//                                             (formally verified)
-//   `@cfg(feature = "crypto-openssl")`      — OpenSSL 3.x FFI
-//   `@cfg(feature = "crypto-ring")`         — ring 0.17+ FFI
+
+//  `@cfg(feature = "crypto-hacl-star")` — Project Everest HACL*
+//  (formally verified)
+//  `@cfg(feature = "crypto-openssl")` — OpenSSL 3.x FFI
+//  `@cfg(feature = "crypto-ring")` — ring 0.17+ FFI
 //
+
 // Reference implementations remain available for bootstrap, cross-check,
 // and golden-test vectors regardless of backend choice.
 //
+
 // =============================================================================
 
 module core.security;
@@ -91,6 +98,7 @@ public module merkle;
 // AEAD / cipher / ECC / sig sub-umbrellas
 // =============================================================================
 //
+
 // Each sub-umbrella ships 1–3 cryptographic primitives. Pre-fix
 // each shipped its `.vr` files but had no `mod.vr` and no
 // declaration here — `mount core.security.aead.aes_gcm;` worked
@@ -132,6 +140,7 @@ public module permission;
 
 // Re-exports of most-used surface.
 //
+
 // NOTE: module `hash.sha256` and a free function `sha256` would collide
 // at import site — `Sha256.digest(bytes)` is the idiomatic one-shot form.
 // The streaming `Sha256.new() / update / finalize` is the general form.

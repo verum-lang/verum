@@ -3,11 +3,13 @@
 // =============================================================================
 // Layer: 5 (Widgets)
 //
+
 // Closed state: renders the currently selected item followed by a ▾ chevron.
 // Open state: pops a bordered list beneath the control showing all items with
 // the highlighted row ready for selection. Supports optional incremental
 // search (prefix-match on item labels) and keyboard + mouse input.
 //
+
 // The widget is generic over item type `T`; the caller provides a label
 // function so any domain type can be rendered without newtype wrappers.
 // =============================================================================

@@ -1,5 +1,6 @@
 //! Error types for LLVM-based VBC lowering.
 //!
+
 //! This module defines errors that can occur during the VBC → LLVM IR
 //! lowering process.
 
@@ -78,6 +79,7 @@ pub enum LoweringSeverity {
 
 /// A structured diagnostic emitted during LLVM lowering.
 ///
+
 /// Replaces raw `eprintln!` warnings with a collected, structured format
 /// that can be filtered, counted, and displayed consistently.
 #[derive(Debug, Clone)]
@@ -132,22 +134,26 @@ impl LoweringDiagnostic {
 // BuildExt — Zero-cost error propagation for LLVM builder operations
 // =============================================================================
 //
+
 // LLVM builder methods (build_store, build_gep, etc.) return Result<T, BuilderError>.
 // Instead of .unwrap() which panics on any LLVM error, use .or_llvm_err()? to
 // propagate errors as LlvmLoweringError::BuilderError with the original message.
 //
+
 // Usage:
-//   builder.build_store(ptr, val).or_llvm_err()?;
-//   let gep = builder.build_gep(ty, ptr, &indices, "name").or_llvm_err()?;
+//  builder.build_store(ptr, val).or_llvm_err()?;
+//  let gep = builder.build_gep(ty, ptr, &indices, "name").or_llvm_err()?;
 
 /// Extension trait for converting any `Result<T, E: Display>` into
 /// `Result<T, LlvmLoweringError>` via `.or_llvm_err()`.
 ///
+
 /// This replaces `.unwrap()` calls on LLVM builder operations with proper
 /// error propagation through the lowering pipeline.
 pub trait BuildExt<T> {
     /// Convert a builder Result into a lowering Result.
     ///
+
     /// Equivalent to `.map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))`.
     fn or_llvm_err(self) -> Result<T>;
 }
@@ -161,9 +167,10 @@ impl<T, E: std::fmt::Display> BuildExt<T> for std::result::Result<T, E> {
 
 /// Extension trait for converting `Option<T>` into `Result<T, LlvmLoweringError>`.
 ///
+
 /// Usage:
-///   let block = builder.get_insert_block().or_internal("no current basic block")?;
-///   let param = func.get_nth_param(0).or_internal("missing param 0")?;
+///  let block = builder.get_insert_block().or_internal("no current basic block")?;
+///  let param = func.get_nth_param(0).or_internal("missing param 0")?;
 pub trait OptionExt<T> {
     /// Convert None into an internal error with the given message.
     fn or_internal(self, msg: &str) -> Result<T>;

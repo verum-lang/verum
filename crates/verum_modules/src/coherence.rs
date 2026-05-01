@@ -1,35 +1,43 @@
 //! Protocol coherence checking and orphan rule validation.
 //!
+
 //! Implements the coherence system from Section 4 of the specification:
 //! - Orphan rule validation (Section 4.1.1)
 //! - Overlap prevention (Section 4.1.3)
 //! - Specialization tracking (Section 4.1.4)
 //! - Cross-crate conflict detection (Section 4.2)
 //!
+
 //! # Overview
 //!
+
 //! Protocol coherence ensures that there is exactly one implementation of a
 //! protocol for any given type across the entire program. This prevents
 //! ambiguity in method dispatch and enables modular reasoning.
 //!
+
 //! # Key Principles
 //!
+
 //! **Orphan Rule** (Section 4.1.1):
 //! For `implement Protocol for Type` to be valid, at least one of:
 //! - Protocol is defined in the current crate, OR
 //! - Type is defined in the current crate (or uses a local type parameter)
 //!
+
 //! **Overlap Prevention** (Section 4.1.3):
 //! Two implementations overlap if there exists a type substitution that makes
 //! them apply to the same Protocol-Type pair. Overlap is a compile error
 //! unless using explicit specialization.
 //!
+
 //! **Specialization** (Section 4.1.4):
 //! Specialized implementations can override more general implementations when:
 //! - Marked with `@specialize` annotation
 //! - Strictly more specific than the general implementation
 //! - In the same crate as the general implementation
 //!
+
 //! These rules ensure global coherence of the type system across the entire
 //! dependency graph.
 
@@ -306,6 +314,7 @@ impl ImplEntry {
 
 /// Structured representation of a type for overlap checking.
 ///
+
 /// This enum provides a parsed view of type strings that enables
 /// precise overlap detection through structural comparison.
 #[derive(Debug, Clone, PartialEq)]
@@ -331,6 +340,7 @@ enum TypeStructure<'a> {
 
 /// Coherence checker - validates protocol implementations.
 ///
+
 /// Implements the coherence checking algorithm from Section 4:
 /// 1. Collect all implementations from dependency graph
 /// 2. Build implementation table: (Protocol, Type) → [Implementations]
@@ -338,6 +348,7 @@ enum TypeStructure<'a> {
 /// 4. Validate orphan rules for each implementation
 /// 5. Check specialization hierarchy
 ///
+
 /// Algorithm: (1) collect all implementations from dependency graph,
 /// (2) build implementation table: (Protocol, Type) -> [Implementations],
 /// (3) detect conflicts where implementations.len() > 1 for same pair,
@@ -409,14 +420,17 @@ impl CoherenceChecker {
 
     /// Check if a type uses a local type parameter.
     ///
+
     /// For generic implementations like `implement Protocol for List<MyLocalType>`,
     /// the implementation is valid if any type parameter is local.
     ///
+
     /// This function performs comprehensive type analysis:
     /// 1. Checks explicit type parameters
     /// 2. Parses the for_type string to extract nested types
     /// 3. Checks all extracted types against local type registry
     ///
+
     /// Orphan Rule: for `implement Protocol for Type` to be valid, at least
     /// one of Protocol or Type must be defined in the current cog.
     fn uses_local_type_param(&self, impl_entry: &ImplEntry) -> bool {
@@ -442,6 +456,7 @@ impl CoherenceChecker {
 
     /// Extract all type names from a type string representation.
     ///
+
     /// This function parses type strings like:
     /// - `List<MyType>` -> ["List", "MyType"]
     /// - `Map<Key, List<Value>>` -> ["Map", "Key", "List", "Value"]
@@ -449,6 +464,7 @@ impl CoherenceChecker {
     /// - `fn(A, B) -> C` -> ["A", "B", "C"]
     /// - `&mut T` -> ["T"]
     ///
+
     /// Orphan rule check: LocalProtocol(P, C) OR LocalType(T, C) must hold.
     /// LocalType includes generic types with local type parameters.
     fn extract_all_type_names(&self, type_str: &Text) -> List<Text> {
@@ -519,9 +535,11 @@ impl CoherenceChecker {
 
     /// Check orphan rule for a single implementation.
     ///
+
     /// Orphan rule check: LocalProtocol(P, C) OR LocalType(T, C) must hold.
     /// LocalType includes generic types with local type parameters.
     ///
+
     /// For `implement Protocol for Type` to be valid:
     /// LocalProtocol(Protocol, CurrentCrate) ∨ LocalType(Type, CurrentCrate)
     pub fn check_orphan_rule(&self, entry: &ImplEntry) -> Result<(), CoherenceError> {
@@ -561,11 +579,13 @@ impl CoherenceChecker {
 
     /// Check for overlapping implementations.
     ///
+
     /// Overlap check: two implementations overlap if there exists a type
     /// substitution sigma such that Type1[sigma] = Type2[sigma] AND
     /// Protocol1[sigma] = Protocol2[sigma]. Overlap is a compile error
     /// unless using explicit @specialize annotation.
     ///
+
     /// Two implementations overlap if there exists a substitution that makes them
     /// apply to the same (Protocol, Type) pair.
     pub fn check_overlap(
@@ -596,8 +616,8 @@ impl CoherenceChecker {
         // implementing the same protocol for a type with the same simple name
         // are NOT overlapping because Verum uses nominal typing. Types with the
         // same name in different modules are distinct types. For example:
-        //   - implement Debug for StackFrame in core.runtime.thread
-        //   - implement Debug for StackFrame in core.base.error
+        //  - implement Debug for StackFrame in core.runtime.thread
+        //  - implement Debug for StackFrame in core.base.error
         // These implement Debug for two DIFFERENT StackFrame types.
         if impl1.impl_module != impl2.impl_module {
             let mod1_str = impl1.impl_module.to_string();
@@ -630,22 +650,28 @@ impl CoherenceChecker {
 
     /// Check if two types may overlap.
     ///
+
     /// This implements a unification-based overlap check. Two types overlap if
     /// there exists a substitution that makes them equal. This is more precise
     /// than simple string comparison.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Exact match: types are identical
     /// 2. Type variable match: either type is a variable (can unify with anything)
     ///
+
     /// Check if two sets of @cfg predicates are mutually exclusive.
     ///
+
     /// Two predicate sets are mutually exclusive when both are non-empty and
     /// they contain conflicting values for the same key. For example:
     /// - `target_os = "linux"` and `target_os = "macos"` are mutually exclusive
     /// - `target_os = "linux"` and `feature = "foo"` are NOT mutually exclusive
     ///
+
     /// Known single-valued cfg keys: `target_os`, `target_arch`, `target_env`,
     /// `target_vendor`, `target_endian`, `target_pointer_width`, `runtime`.
     fn cfg_predicates_mutually_exclusive(preds1: &[Text], preds2: &[Text]) -> bool {
@@ -699,6 +725,7 @@ impl CoherenceChecker {
     /// 3. Generic instantiation match: same base type with overlapping parameters
     /// 4. Recursive check: for compound types, check component overlap
     ///
+
     /// Overlap check: two implementations overlap if there exists a type
     /// substitution sigma such that Type1[sigma] = Type2[sigma] AND
     /// Protocol1[sigma] = Protocol2[sigma]. Overlap is a compile error
@@ -906,10 +933,12 @@ impl CoherenceChecker {
 
     /// Validate specialization hierarchy.
     ///
+
     /// Specialization: specialized implementations override general ones when
     /// marked with @specialize, strictly more specific, and in the same crate.
     /// The specialization hierarchy must form a tree (no diamonds).
     ///
+
     /// Specialization rules:
     /// 1. Specialized impl must be strictly more specific than general impl
     /// 2. Must use @specialize annotation
@@ -953,18 +982,22 @@ impl CoherenceChecker {
 
     /// Check if type1 is more specific than type2.
     ///
+
     /// A type is more specific if it can be obtained from a more general type
     /// through substitution of type variables with concrete types or more
     /// constrained type variables.
     ///
+
     /// # Specificity Rules
     ///
+
     /// 1. Concrete type > Type variable (e.g., `Int` > `T`)
     /// 2. Constrained type > Unconstrained type (e.g., `T: Clone` > `T`)
     /// 3. Same base with more concrete params > more generic params
-    ///    (e.g., `List<Int>` > `List<T>`)
+    ///  (e.g., `List<Int>` > `List<T>`)
     /// 4. Nested specificity applies recursively
     ///
+
     /// Specialization: specialized implementations override general ones when
     /// marked with @specialize, strictly more specific, and in the same crate.
     /// The specialization hierarchy must form a tree (no diamonds). - Specialization
@@ -1126,6 +1159,7 @@ impl CoherenceChecker {
 
     /// Check if one type has more constraints than another.
     ///
+
     /// This checks for "where" clauses and other constraint indicators
     /// in the original type text.
     fn has_more_constraints(&self, specific: &Text, general: &Text) -> bool {
@@ -1180,6 +1214,7 @@ impl CoherenceChecker {
 
     /// Check for cross-crate conflicts.
     ///
+
     /// Cross-crate conflict detection: collects all implementations from the
     /// dependency graph, builds (Protocol, Type) -> [Implementations] table,
     /// and emits errors if multiple implementations exist for the same pair.
@@ -1219,6 +1254,7 @@ impl CoherenceChecker {
 
     /// Run all coherence checks.
     ///
+
     /// Returns a list of all coherence errors found.
     pub fn check_all(&self) -> List<CoherenceError> {
         let mut errors = List::new();
@@ -1318,10 +1354,12 @@ impl Default for CoherenceChecker {
 
 /// Convert AST type to string representation for coherence checking.
 ///
+
 /// This function produces a canonical string representation of types for
 /// comparison purposes in coherence checking. The representation is designed
 /// to be stable and comparable across different type instances.
 ///
+
 /// Full coherence check: validates orphan rules, detects overlapping
 /// implementations, and verifies specialization hierarchy across all crates.
 pub fn type_to_string(ty: &AstType) -> Text {

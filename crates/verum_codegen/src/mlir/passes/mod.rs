@@ -1,65 +1,76 @@
 //! Optimization Pass Infrastructure for Verum MLIR.
 //!
+
 //! This module provides the pass management infrastructure for Verum's
 //! MLIR-based code generation. It includes:
 //!
+
 //! - **Domain-specific passes**: CBGR elimination, context monomorphization, refinement propagation
 //! - **Standard MLIR passes**: CSE, canonicalization, LICM, inlining
 //! - **Pipeline management**: Ordered pass execution with verification
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
-//! │                     PassPipeline                                 │
-//! │  ┌─────────────────────────────────────────────────────────┐    │
-//! │  │              Verum Domain Passes                        │    │
-//! │  │  ├── CbgrEliminationPass       (escape analysis)       │    │
-//! │  │  ├── ContextMonomorphizationPass (specialization)      │    │
-//! │  │  └── RefinementPropagationPass (redundancy elim)       │    │
-//! │  └─────────────────────────────────────────────────────────┘    │
-//! │  ┌─────────────────────────────────────────────────────────┐    │
-//! │  │              MLIR Transform Passes                      │    │
-//! │  │  ├── Canonicalization                                   │    │
-//! │  │  ├── CSE (Common Subexpression Elimination)            │    │
-//! │  │  ├── SCCP (Sparse Conditional Constant Propagation)    │    │
-//! │  │  ├── DCE (Dead Code Elimination)                       │    │
-//! │  │  ├── LICM (Loop Invariant Code Motion)                 │    │
-//! │  │  ├── Mem2Reg                                           │    │
-//! │  │  └── Inlining                                          │    │
-//! │  └─────────────────────────────────────────────────────────┘    │
-//! │  ┌─────────────────────────────────────────────────────────┐    │
-//! │  │              LLVM Lowering Passes                       │    │
-//! │  │  ├── Verum → SCF → CF → LLVM dialect                   │    │
-//! │  │  └── Type/Op conversions                               │    │
-//! │  └─────────────────────────────────────────────────────────┘    │
+//! │ PassPipeline │
+//! │ ┌─────────────────────────────────────────────────────────┐ │
+//! │ │ Verum Domain Passes │ │
+//! │ │ ├── CbgrEliminationPass (escape analysis) │ │
+//! │ │ ├── ContextMonomorphizationPass (specialization) │ │
+//! │ │ └── RefinementPropagationPass (redundancy elim) │ │
+//! │ └─────────────────────────────────────────────────────────┘ │
+//! │ ┌─────────────────────────────────────────────────────────┐ │
+//! │ │ MLIR Transform Passes │ │
+//! │ │ ├── Canonicalization │ │
+//! │ │ ├── CSE (Common Subexpression Elimination) │ │
+//! │ │ ├── SCCP (Sparse Conditional Constant Propagation) │ │
+//! │ │ ├── DCE (Dead Code Elimination) │ │
+//! │ │ ├── LICM (Loop Invariant Code Motion) │ │
+//! │ │ ├── Mem2Reg │ │
+//! │ │ └── Inlining │ │
+//! │ └─────────────────────────────────────────────────────────┘ │
+//! │ ┌─────────────────────────────────────────────────────────┐ │
+//! │ │ LLVM Lowering Passes │ │
+//! │ │ ├── Verum → SCF → CF → LLVM dialect │ │
+//! │ │ └── Type/Op conversions │ │
+//! │ └─────────────────────────────────────────────────────────┘ │
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Pass Execution Order
 //!
+
 //! 1. **Early optimization**: Canonicalization, CSE
 //! 2. **Domain passes**: CBGR elimination, context mono, refinement
 //! 3. **Late optimization**: LICM, inlining, DCE
 //! 4. **Lowering**: Verum → SCF → CF → LLVM
 //!
+
 //! # Usage
 //!
+
 //! ```rust,ignore
 //! use crate::mlir::passes::{PassPipeline, PassConfig};
 //!
+
 //! // Create pipeline with default configuration
 //! let mut pipeline = PassPipeline::new(&context);
 //!
+
 //! // Configure passes
 //! pipeline.with_config(PassConfig {
-//!     enable_cbgr_elimination: true,
-//!     enable_context_mono: true,
-//!     enable_standard_opts: true,
-//!     optimization_level: 2,
-//!     verbose: true,
+//!  enable_cbgr_elimination: true,
+//!  enable_context_mono: true,
+//!  enable_standard_opts: true,
+//!  optimization_level: 2,
+//!  verbose: true,
 //! });
 //!
+
 //! // Run pipeline
 //! let result = pipeline.run(&mut module)?;
 //! println!("{}", result.summary());
@@ -176,6 +187,7 @@ impl PassStats {
 
 /// Trait for Verum optimization passes.
 ///
+
 /// All custom optimization passes should implement this trait.
 /// The trait provides a standard interface for pass execution
 /// with proper error handling and statistics collection.
@@ -185,6 +197,7 @@ pub trait VerumPass {
 
     /// Run the pass on a module.
     ///
+
     /// Returns a result indicating whether the IR was modified
     /// and statistics about the pass execution.
     fn run(&self, module: &mut Module<'_>) -> Result<PassResult>;
@@ -216,6 +229,7 @@ pub trait VerumPass {
 
 /// Wrapper for MLIR's Canonicalization pass.
 ///
+
 /// This pass applies canonicalization patterns to simplify the IR.
 /// It's typically run early in the pipeline to normalize the IR.
 pub struct CanonicalizationPass;

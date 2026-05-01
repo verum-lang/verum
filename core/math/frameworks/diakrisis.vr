@@ -2,30 +2,36 @@
 // Diakrisis — framework axiom package
 // =============================================================================
 //
+
 // Trusted-axiom package exposing the five foundational meta-classification
 // theorems closed inside the Diakrisis corpus of foundations. Per the
 // foundation-marketplace pattern used elsewhere in `core.math.frameworks.*`,
 // every axiom carries:
 //
-//   • A public name describing the *mathematical* structure it asserts —
-//     names are chosen for foundational meaning, NOT for corpus branding.
-//   • An `@framework(diakrisis, "<citation>")` annotation that records the
-//     trusted boundary so `verum audit --framework-axioms` can enumerate
-//     dependencies. The citation locates the theorem inside the Diakrisis
-//     catalogue (107.T / 108.T / 109.T / 138.T / 139.T).
+
+//  • A public name describing the *mathematical* structure it asserts —
+//  names are chosen for foundational meaning, NOT for corpus branding.
+//  • An `@framework(diakrisis, "<citation>")` annotation that records the
+//  trusted boundary so `verum audit --framework-axioms` can enumerate
+//  dependencies. The citation locates the theorem inside the Diakrisis
+//  catalogue (107.T / 108.T / 109.T / 138.T / 139.T).
 //
+
 // Downstream code that cites these axioms is *rigorous in Verum modulo
 // Diakrisis* — same treatment as `lurie_htt` for HTT-dependent code.
 //
+
 // The five axioms collectively establish the canonical-primitive
 // metaclassification structure on top of ZFC + 2 inaccessibles:
 //
-//   relative_consistency_under_2_inaccessibles  (107.T) — relative-consistency baseline
-//   articulation_enactment_morita_duality        (108.T) — M ⊣ A biadjunction
-//   no_universal_practice_dual                   (109.T) — dual no-go for absolute practice
-//   dual_gauge_surjection_kernel                 (138.T) — kernel of dual gauge surjection
-//   dual_primitive_initial_object                (139.T) — initiality in classifier 2-category
+
+//  relative_consistency_under_2_inaccessibles (107.T) — relative-consistency baseline
+//  articulation_enactment_morita_duality (108.T) — M ⊣ A biadjunction
+//  no_universal_practice_dual (109.T) — dual no-go for absolute practice
+//  dual_gauge_surjection_kernel (138.T) — kernel of dual gauge surjection
+//  dual_primitive_initial_object (139.T) — initiality in classifier 2-category
 //
+
 // Together with `core.action.articulation` / `core.action.enactments`
 // these provide the OC/DC backbone every higher framework refines.
 // =============================================================================
@@ -42,6 +48,7 @@ mount core.action.enactments.{Enactment, alpha_of, epsilon, is_adjoint};
 /// neutral form: there is a model-construction interpretation of the
 /// 13-axiom theory inside any model of `ZFC + κ_1 < κ_2 inaccessible`.
 ///
+
 /// Operational consequence: any proof produced under this trusted boundary
 /// is at most as strong as `Con(ZFC + 2-inacc)`.
 /// V3: parameterised over an articulation; ensures the kernel α ⊣ ε
@@ -59,14 +66,17 @@ public axiom relative_consistency_under_2_inaccessibles(alpha: Articulation) -> 
 /// The articulation 2-category and the enactment 2-category are
 /// Morita-dual through the canonical biadjunction
 ///
-///     M : Articulation ⇄ Enactment : A
+
+///  M : Articulation ⇄ Enactment : A
 ///
+
 /// where `M` is the meta-classifier (taking an articulation to the
 /// enactment of using it) and `A` is the activation modality (taking an
 /// enactment to the articulation it presupposes). The biadjunction is
 /// witnessed by the unit / counit pair already exposed in
 /// `core.action.enactments.is_adjoint`.
 ///
+
 /// Operational form: for any `α : Articulation`, the canonical pair
 /// `(α, ε(α))` is biadjoint — `is_adjoint(α, ε(α))` holds — and this
 /// constitutes a Morita-duality witness.
@@ -83,6 +93,7 @@ public axiom articulation_enactment_morita_duality<A: Articulation>(alpha: A) ->
 /// no-go is asymmetric: it constrains the practical (DC) side without
 /// forcing the same structural restriction on the articulation (OC) side.
 ///
+
 /// Operational form: the proposition "there exists an enactment whose
 /// activation-image covers every articulation" is refuted under the
 /// 13-axiom canonical system.
@@ -104,6 +115,7 @@ public axiom no_universal_practice_dual(e: Enactment, claimed_universal: Bool) -
 /// under composition and activation, making it a stable subobject in
 /// the enactment 2-category.
 ///
+
 /// Operational form: for any enactment `e`, every enactment `e'`
 /// gauge-equivalent to `e` shares its articulation under `alpha_of`.
 @framework(diakrisis, "Theorem 138.T (kernel of dual gauge surjection)")
@@ -120,6 +132,7 @@ public axiom dual_gauge_surjection_kernel<E: Enactment>(e: E, e_prime: E) -> Boo
 /// the top extensional structure. Every articulated enactment sits
 /// uniquely above the raw baseline through a canonical 2-cell.
 ///
+
 /// Operational form: there is at most one enactment morphism from the
 /// raw baseline into any specified target enactment (uniqueness of the
 /// initial-object factorisation).

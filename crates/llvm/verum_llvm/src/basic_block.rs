@@ -19,8 +19,10 @@ use std::marker::PhantomData;
 
 /// A `BasicBlock` is a container of instructions.
 ///
+
 /// `BasicBlock`s are values because they can be referenced by instructions (ie branching and switches).
 ///
+
 /// A well formed `BasicBlock` is a list of non terminating instructions followed by a single terminating
 /// instruction. `BasicBlock`s are allowed to be malformed prior to running validation because it may be useful
 /// when constructing or modifying a program.
@@ -33,8 +35,10 @@ pub struct BasicBlock<'ctx> {
 impl<'ctx> BasicBlock<'ctx> {
     /// Create a basic block from an [LLVMBasicBlockRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and point to a valid LLVM basic block.
     pub unsafe fn new(basic_block: LLVMBasicBlockRef) -> Option<Self> {
         if basic_block.is_null() {
@@ -57,24 +61,30 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Obtains the `FunctionValue` that this `BasicBlock` belongs to, if any.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::builder::Builder;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// let function = module.add_function("do_nothing", fn_type, None);
     ///
+
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// assert_eq!(basic_block.get_parent().unwrap(), function);
     ///
+
     /// basic_block.remove_from_function();
     ///
+
     /// assert!(basic_block.get_parent().is_none());
     /// ```
     pub fn get_parent(self) -> Option<FunctionValue<'ctx>> {
@@ -83,27 +93,34 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Gets the `BasicBlock` preceding the current one, in its own scope, if any.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::builder::Builder;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// let function1 = module.add_function("do_nothing", fn_type, None);
     ///
+
     /// let basic_block1 = context.append_basic_block(function1, "entry");
     ///
+
     /// assert!(basic_block1.get_previous_basic_block().is_none());
     ///
+
     /// let function2 = module.add_function("do_nothing", fn_type, None);
     ///
+
     /// let basic_block2 = context.append_basic_block(function2, "entry");
     /// let basic_block3 = context.append_basic_block(function2, "next");
     ///
+
     /// assert!(basic_block2.get_previous_basic_block().is_none());
     /// assert_eq!(basic_block3.get_previous_basic_block().unwrap(), basic_block2);
     /// ```
@@ -115,27 +132,34 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Gets the `BasicBlock` succeeding the current one, in its own scope, if any.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::builder::Builder;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// let function1 = module.add_function("do_nothing", fn_type, None);
     ///
+
     /// let basic_block1 = context.append_basic_block(function1, "entry");
     ///
+
     /// assert!(basic_block1.get_next_basic_block().is_none());
     ///
+
     /// let function2 = module.add_function("do_nothing", fn_type, None);
     ///
+
     /// let basic_block2 = context.append_basic_block(function2, "entry");
     /// let basic_block3 = context.append_basic_block(function2, "next");
     ///
+
     /// assert!(basic_block1.get_next_basic_block().is_none());
     /// assert_eq!(basic_block2.get_next_basic_block().unwrap(), basic_block3);
     /// assert!(basic_block3.get_next_basic_block().is_none());
@@ -149,23 +173,28 @@ impl<'ctx> BasicBlock<'ctx> {
     /// Prepends one `BasicBlock` before another.
     /// It returns `Err(())` when either `BasicBlock` has no parent, as LLVM assumes they both have parents.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::builder::Builder;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// let function = module.add_function("do_nothing", fn_type, None);
     ///
+
     /// let basic_block1 = context.append_basic_block(function, "entry");
     /// let basic_block2 = context.append_basic_block(function, "next");
     ///
+
     /// basic_block2.move_before(basic_block1);
     ///
+
     /// assert!(basic_block1.get_next_basic_block().is_none());
     /// assert_eq!(basic_block2.get_next_basic_block().unwrap(), basic_block1);
     /// ```
@@ -184,23 +213,28 @@ impl<'ctx> BasicBlock<'ctx> {
     /// Appends one `BasicBlock` after another.
     /// It returns `Err(())` when either `BasicBlock` has no parent, as LLVM assumes they both have parents.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::builder::Builder;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// let function = module.add_function("do_nothing", fn_type, None);
     ///
+
     /// let basic_block1 = context.append_basic_block(function, "entry");
     /// let basic_block2 = context.append_basic_block(function, "next");
     ///
+
     /// basic_block1.move_after(basic_block2);
     ///
+
     /// assert!(basic_block1.get_next_basic_block().is_none());
     /// assert_eq!(basic_block2.get_next_basic_block().unwrap(), basic_block1);
     /// ```
@@ -218,6 +252,7 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Obtains the first `InstructionValue` in this `BasicBlock`, if any.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
@@ -225,6 +260,7 @@ impl<'ctx> BasicBlock<'ctx> {
     /// use verum_llvm::builder::Builder;
     /// use verum_llvm::values::InstructionOpcode;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_module");
@@ -233,9 +269,11 @@ impl<'ctx> BasicBlock<'ctx> {
     /// let function = module.add_function("do_nothing", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// builder.position_at_end(basic_block);
     /// builder.build_return(None);
     ///
+
     /// assert_eq!(basic_block.get_first_instruction().unwrap().get_opcode(), InstructionOpcode::Return);
     /// ```
     pub fn get_first_instruction(self) -> Option<InstructionValue<'ctx>> {
@@ -250,6 +288,7 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Obtains the last `InstructionValue` in this `BasicBlock`, if any. A `BasicBlock` must have a last instruction to be valid.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
@@ -257,6 +296,7 @@ impl<'ctx> BasicBlock<'ctx> {
     /// use verum_llvm::builder::Builder;
     /// use verum_llvm::values::InstructionOpcode;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_module");
@@ -265,9 +305,11 @@ impl<'ctx> BasicBlock<'ctx> {
     /// let function = module.add_function("do_nothing", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// builder.position_at_end(basic_block);
     /// builder.build_return(None);
     ///
+
     /// assert_eq!(basic_block.get_last_instruction().unwrap().get_opcode(), InstructionOpcode::Return);
     /// ```
     pub fn get_last_instruction(self) -> Option<InstructionValue<'ctx>> {
@@ -282,32 +324,39 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Performs a linear lookup to obtain a instruction based on the name
     ///
+
     /// # Example
     /// ```rust
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("ret");
     /// let builder = context.create_builder();
     ///
+
     /// let void_type = context.void_type();
     /// let i32_type = context.i32_type();
     /// let i32_ptr_type = i32_type.ptr_type(AddressSpace::default());
     /// let i32_ptr_type = context.ptr_type(AddressSpace::default());
     ///
+
     /// let fn_type = void_type.fn_type(&[i32_ptr_type.into()], false);
     /// let fn_value = module.add_function("ret", fn_type, None);
     /// let entry = context.append_basic_block(fn_value, "entry");
     /// builder.position_at_end(entry);
     ///
+
     /// let var = builder.build_alloca(i32_type, "some_number").unwrap();
     /// builder.build_store(var, i32_type.const_int(1 as u64, false)).unwrap();
     /// builder.build_return(None).unwrap();
     ///
+
     /// let block = fn_value.get_first_basic_block().unwrap();
     /// let some_number = block.get_instruction_with_name("some_number");
     ///
+
     /// assert!(some_number.is_some());
     /// assert_eq!(some_number.unwrap().get_name().unwrap().to_str(), Ok("some_number"))
     /// ```
@@ -318,6 +367,7 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Obtains the terminating `InstructionValue` in this `BasicBlock`, if any. A `BasicBlock` must have a terminating instruction to be valid.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
@@ -325,6 +375,7 @@ impl<'ctx> BasicBlock<'ctx> {
     /// use verum_llvm::builder::Builder;
     /// use verum_llvm::values::InstructionOpcode;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_module");
@@ -333,9 +384,11 @@ impl<'ctx> BasicBlock<'ctx> {
     /// let function = module.add_function("do_nothing", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// builder.position_at_end(basic_block);
     /// builder.build_return(None);
     ///
+
     /// assert_eq!(basic_block.get_terminator().unwrap().get_opcode(), InstructionOpcode::Return);
     /// ```
     /// Returns the terminator instruction of this basic block, or `None` if the block
@@ -359,12 +412,14 @@ impl<'ctx> BasicBlock<'ctx> {
     /// Removes this `BasicBlock` from its parent `FunctionValue`.
     /// It returns `Err(())` when it has no parent to remove from.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::builder::Builder;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
@@ -372,10 +427,13 @@ impl<'ctx> BasicBlock<'ctx> {
     /// let function = module.add_function("do_nothing", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// assert_eq!(basic_block.get_parent().unwrap(), function);
     ///
+
     /// basic_block.remove_from_function();
     ///
+
     /// assert!(basic_block.get_parent().is_none());
     /// ```
     // SubTypes: Don't need to call get_parent for a BasicBlock<HasParent> and would return BasicBlock<Orphan>
@@ -396,12 +454,14 @@ impl<'ctx> BasicBlock<'ctx> {
     /// Removes this `BasicBlock` completely from memory. This is unsafe because you could easily have other references to the same `BasicBlock`.
     /// It returns `Err(())` when it has no parent to delete from, as LLVM assumes it has a parent.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::builder::Builder;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
@@ -409,8 +469,9 @@ impl<'ctx> BasicBlock<'ctx> {
     /// let function = module.add_function("do_nothing", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// unsafe {
-    ///     basic_block.delete();
+    ///  basic_block.delete();
     /// }
     /// assert!(function.get_basic_blocks().is_empty());
     /// ```
@@ -427,12 +488,14 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Obtains the `ContextRef` this `BasicBlock` belongs to.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::builder::Builder;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
@@ -440,6 +503,7 @@ impl<'ctx> BasicBlock<'ctx> {
     /// let function = module.add_function("do_nothing", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
+
     /// assert_eq!(context, basic_block.get_context());
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {
@@ -448,11 +512,14 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Gets the name of a `BasicBlock`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -461,6 +528,7 @@ impl<'ctx> BasicBlock<'ctx> {
     /// let fn_val = module.add_function("my_fn", fn_type, None);
     /// let bb = context.append_basic_block(fn_val, "entry");
     ///
+
     /// assert_eq!(bb.get_name().to_str(), Ok("entry"));
     /// ```
     pub fn get_name(&self) -> &CStr {
@@ -484,11 +552,14 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Replaces all uses of this basic block with another.
     ///
+
     /// # Example
     ///
+
     /// ```
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -501,8 +572,10 @@ impl<'ctx> BasicBlock<'ctx> {
     /// builder.position_at_end(entry);
     /// let branch_inst = builder.build_unconditional_branch(bb1).unwrap();
     ///
+
     /// bb1.replace_all_uses_with(&bb2);
     ///
+
     /// assert_eq!(branch_inst.get_operand(0).unwrap().unwrap_block(), bb2);
     /// ```
     pub fn replace_all_uses_with(self, other: &BasicBlock<'ctx>) {
@@ -519,13 +592,16 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Gets the first use of this `BasicBlock` if any.
     ///
+
     /// The following example,
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::BasicValue;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("ivs");
     /// let builder = context.create_builder();
@@ -538,6 +614,7 @@ impl<'ctx> BasicBlock<'ctx> {
     /// builder.position_at_end(entry);
     /// let branch_inst = builder.build_unconditional_branch(bb1);
     ///
+
     /// assert!(bb2.get_first_use().is_none());
     /// assert!(bb1.get_first_use().is_some());
     /// ```
@@ -553,12 +630,16 @@ impl<'ctx> BasicBlock<'ctx> {
 
     /// Gets the address of this `BasicBlock` if possible. Returns `None` if `self` is the entry block to a function.
     ///
+
     /// # Safety
     ///
+
     /// The returned PointerValue may only be used for `call` and `indirect_branch` instructions
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// let context = Context::create();
@@ -569,6 +650,7 @@ impl<'ctx> BasicBlock<'ctx> {
     /// let entry_bb = context.append_basic_block(fn_val, "entry");
     /// let next_bb = context.append_basic_block(fn_val, "next");
     ///
+
     /// assert!(unsafe { entry_bb.get_address() }.is_none());
     /// assert!(unsafe { next_bb.get_address() }.is_some());
     /// ```

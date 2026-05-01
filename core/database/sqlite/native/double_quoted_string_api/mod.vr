@@ -5,6 +5,7 @@
 // "identifier" resolution.
 // Spec §14.1.3 — double-quoted string literals.
 //
+
 // SQLITE_DBCONFIG_DQS_DML / _DQS_DDL control whether "name" inside a DML or
 // DDL statement is treated as a string literal when not a valid identifier.
 // Modern apps should always disable both.

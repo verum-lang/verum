@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for script parsing modes
 //!
+
 //! These tests verify the script parser, incremental parsing, recovery strategies,
 //! and type integration work correctly in REPL and interactive contexts.
 
@@ -388,6 +389,7 @@ fn test_is_complete() {
 // These tests should be re-enabled when the module is moved to a higher-level crate.
 
 /*
+
 #[test]
 fn test_type_checker_literal_inference() {
     let mut checker = ScriptTypeChecker::new();
@@ -493,6 +495,7 @@ fn test_type_environment_persistence() {
 // ====================
 
 /*
+
 #[test]
 fn test_repl_session_simulation() {
     let mut checker = ScriptTypeChecker::new();

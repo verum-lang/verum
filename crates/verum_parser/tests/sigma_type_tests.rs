@@ -14,12 +14,15 @@
 )]
 // Test suite for sigma-type refinement parsing.
 //
+
 // Sigma-types are a key feature of Verum's refinement type system.
 // Rule 3 of Five Binding Rules: sigma-type `n: T where pred` is canonical dependent type form
 //
+
 // Syntax: name: Type where predicate
 // Example: x: Int where x > 0
 //
+
 // This test suite verifies that the parser correctly handles sigma-type syntax
 // in all relevant contexts.
 
@@ -425,6 +428,7 @@ fn test_real_world_valid_user() {
 // - Comparison with other refinement styles: 10 tests
 // - Real-world examples: 10 tests
 //
+
 // This comprehensive test suite ensures that the parser correctly handles
 // sigma-type syntax (Rule 3 of the Five Binding Rules) in all contexts,
 // and that it coexists properly with the other refinement type styles.

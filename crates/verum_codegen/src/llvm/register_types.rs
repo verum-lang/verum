@@ -1,37 +1,46 @@
 //! Register Type Map — unified type tracking for VBC → LLVM lowering.
 //!
+
 //! This module replaces the 40+ `HashSet<u16>` register tracking fields in
 //! `FunctionContext` with a single `HashMap<u16, RegisterType>` that derives
 //! all type predicates from VBC TypeRef information.
 //!
+
 //! # Architecture
 //!
+
 //! The VBC bytecode already carries full type information via `TypeRef` on every
 //! instruction. The old approach discarded this information and rebuilt it
 //! through ad-hoc `mark_*_register()` / `is_*_register()` calls scattered
 //! across 19,000+ lines of instruction.rs. This led to:
 //!
+
 //! - 40+ HashSet<u16> fields for separate type categories
 //! - `set_register()` clearing 23 HashSets on every register write
 //! - Name-based type detection (`starts_with("Map.")`, etc.)
 //! - Chain-walking for type propagation through Mov/RefMut
 //!
+
 //! The new approach stores type information once per register assignment,
 //! using the same `TypeRef` that VBC already provides. All boolean predicates
 //! (is_list, is_map, is_float, etc.) are derived on demand via O(1) pattern
 //! matching on the stored TypeRef.
 //!
+
 //! # Migration Strategy
 //!
+
 //! Phase 1 (current): RegisterTypeMap coexists with legacy HashSets.
-//!   - Pre-pass populates RegisterTypeMap from VBC instructions
-//!   - Legacy HashSets continue to be maintained
-//!   - Debug assertions verify consistency
+//!  - Pre-pass populates RegisterTypeMap from VBC instructions
+//!  - Legacy HashSets continue to be maintained
+//!  - Debug assertions verify consistency
 //!
+
 //! Phase 2: Migrate `is_*_register()` call sites to use RegisterTypeMap
-//!   - One category at a time (float, bool, list, map, ...)
-//!   - Remove corresponding HashSet after each migration
+//!  - One category at a time (float, bool, list, map, ...)
+//!  - Remove corresponding HashSet after each migration
 //!
+
 //! Phase 3: Remove all legacy HashSets and `mark_*` methods
 
 use std::collections::{HashMap, HashSet};
@@ -43,6 +52,7 @@ use verum_vbc::types::{TypeId, TypeRef};
 
 /// Complete type information for a register, derived from VBC TypeRef.
 ///
+
 /// This replaces all the individual boolean tracking sets (is_list, is_map, etc.)
 /// with a single enum that carries the full type + metadata needed for lowering.
 #[derive(Debug, Clone)]
@@ -558,6 +568,7 @@ impl RegisterType {
 
 /// Unified register type tracker.
 ///
+
 /// Stores a single `RegisterType` per register, replacing 40+ separate
 /// HashSet<u16> tracking fields. All type predicates are derived from the
 /// stored RegisterType via O(1) pattern matching.
@@ -994,6 +1005,7 @@ impl RegisterTypeMap {
 
 /// How to compile a method call on a given type.
 ///
+
 /// Replaces the Strategy 0/1/2/3/4 cascade in instruction.rs with a
 /// declarative dispatch table.
 #[derive(Debug, Clone)]
@@ -1032,6 +1044,7 @@ pub enum MethodDispatchTarget {
 
 /// Declarative method dispatch table.
 ///
+
 /// Maps (type_category, method_name) → DispatchTarget. Built once per
 /// module compilation, replacing the 3000-line Strategy cascade.
 #[derive(Debug, Default)]
@@ -1066,6 +1079,7 @@ impl MethodDispatchTable {
 
     /// Register all built-in method dispatch overrides.
     ///
+
     /// These are methods that cannot go through the standard compiled
     /// function lookup because they need C runtime, inline LLVM IR,
     /// or special handling.

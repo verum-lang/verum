@@ -1,8 +1,10 @@
 //! AST formatting utilities for LSP
 //!
+
 //! This module provides formatting functions specific to verum_ast types,
 //! used across hover.rs, completion.rs, and other LSP modules.
 //!
+
 //! Formatting utilities shared across LSP modules (hover, completion, etc.).
 
 use verum_ast::LiteralKind;
@@ -12,6 +14,7 @@ use verum_ast::ty::{PathSegment, TypeKind};
 
 /// Format function parameters for display
 ///
+
 /// # Examples
 /// ```ignore
 /// let params = vec![/* function params */];
@@ -42,9 +45,11 @@ pub fn format_params(params: &[FunctionParam]) -> String {
 
 /// Format a pattern for display
 ///
+
 /// Handles all pattern kinds including identifiers, wildcards, tuples, variants,
 /// literals, or-patterns, rest patterns, ranges, slices, and more.
 ///
+
 /// # Examples
 /// ```ignore
 /// let pattern = /* pattern */;
@@ -183,6 +188,7 @@ pub fn format_pattern(pattern: &verum_ast::Pattern) -> String {
 
 /// Format a type for display
 ///
+
 /// # Examples
 /// ```ignore
 /// let ty = /* type */;
@@ -258,6 +264,7 @@ fn format_path(path: &verum_ast::Path) -> String {
 
 /// Format an expression for display
 ///
+
 /// Handles all common expression kinds including binary, unary, call, field access,
 /// index, tuple, array, block, if, match, for, while, loop, closure, and more.
 fn format_expr(expr: &verum_ast::Expr) -> String {
@@ -523,6 +530,7 @@ fn format_literal(lit: &verum_ast::Literal) -> String {
 
 /// Format a function signature for hover/completion
 ///
+
 /// # Examples
 /// ```ignore
 /// let func = /* function decl */;
@@ -559,6 +567,7 @@ pub fn format_function_signature(func: &verum_ast::FunctionDecl) -> String {
 
 /// Format a type declaration for hover/completion
 ///
+
 /// # Examples
 /// ```ignore
 /// let type_decl = /* type declaration */;

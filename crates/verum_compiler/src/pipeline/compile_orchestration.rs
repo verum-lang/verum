@@ -1,20 +1,22 @@
 //! Multi-file compilation orchestration.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 14). Houses the four
 //! public entry points that drive compilation across discovered
 //! source files:
 //!
-//!   * `compile_string` — single-source convenience for testing
-//!     and simple use cases.
-//!   * `compile_multi_pass` — three-pass architecture
-//!     (parse → analyze → verify) over a Map of pre-parsed
-//!     sources, with rayon-parallel per-module type checking
-//!     and verification.
-//!   * `compile_project` — discovers + parses + multi-passes
-//!     all .vr files in the project tree.
-//!   * `check_project` — type-check-only project flow that
-//!     returns a CheckResult with diagnostics + statistics
-//!     (used by IDEs, CI/CD, dev workflows).
+
+//!  * `compile_string` — single-source convenience for testing
+//!  and simple use cases.
+//!  * `compile_multi_pass` — three-pass architecture
+//!  (parse → analyze → verify) over a Map of pre-parsed
+//!  sources, with rayon-parallel per-module type checking
+//!  and verification.
+//!  * `compile_project` — discovers + parses + multi-passes
+//!  all .vr files in the project tree.
+//!  * `check_project` — type-check-only project flow that
+//!  returns a CheckResult with diagnostics + statistics
+//!  (used by IDEs, CI/CD, dev workflows).
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -46,6 +48,7 @@ use super::{
 impl<'s> CompilationPipeline<'s> {
     /// Compile a string of source code (simple API)
     ///
+
     /// This is a convenience method for testing and simple use cases.
     /// It compiles the given source code as a single module.
     pub fn compile_string(&mut self, source: &str) -> Result<()> {
@@ -109,6 +112,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run multi-pass compilation on multiple source files.
     ///
+
     /// This is the main entry point for the multi-pass architecture.
     /// It processes all source files through three distinct passes.
     pub fn compile_multi_pass(&mut self, sources: &Map<Text, Text>) -> Result<()> {
@@ -285,11 +289,13 @@ impl<'s> CompilationPipeline<'s> {
 
         // PASS 3: Semantic Analysis (parallel, #101)
         //
+
         // Skip analysis for verification-only modules (they reuse cached
         // type check results). This is the key optimization: when only the
         // implementation of a dependency changed (not its signature), we
         // don't need to re-type-check dependent modules.
         //
+
         // Parallelism rationale: each call to `analyze_module` constructs
         // its own `TypeChecker` and never writes back to `Compiler` state
         // — every "mutation" routes through `Session::emit_diagnostic`
@@ -300,6 +306,7 @@ impl<'s> CompilationPipeline<'s> {
         // `self.modules` / `self.collected_contexts` are pure HashMap /
         // List iteration with no concurrent writers in this phase.
         //
+
         // Opt-out: `VERUM_NO_PARALLEL_ANALYZE=1` falls back to the
         // sequential loop. Useful for debugging non-deterministic
         // diagnostic ordering or pinning down a parallel-only regression.
@@ -413,16 +420,19 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Compile a multi-file project by discovering all .vr files.
     ///
+
     /// This method uses the ModuleLoader to:
     /// 1. Discover all .vr files in the project directory
     /// 2. Load and parse each module
     /// 3. Register modules in the session's ModuleRegistry
     /// 4. Run multi-pass compilation
     ///
+
     /// Discovers .vr files following module-file mapping (foo.vr = module foo,
     /// foo/mod.vr = directory module). Registers in session's ModuleRegistry,
     /// then runs multi-pass compilation.
     ///
+
     /// Note: For deep recursion scenarios, ensure RUST_MIN_STACK is set
     /// appropriately (e.g., 16MB) in the build/test environment.
     pub fn compile_project(&mut self) -> Result<()> {
@@ -443,6 +453,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Load and parse all modules using ModuleLoader.
         //
+
         // File I/O is naturally parallel: each `read_to_string` is an
         // independent syscall, and OS schedulers exploit kernel-level
         // parallelism (epoll, io_uring) to overlap multiple reads
@@ -450,6 +461,7 @@ impl<'s> CompilationPipeline<'s> {
         // composes with the OS's read-ahead so wall-clock scales with
         // the slower of (cores, disk-throughput).
         //
+
         // Opt-out via `VERUM_NO_PARALLEL_READ=1` for diagnostic
         // ordering reproducibility in CI / regression triage.
         let parallel_read = std::env::var("VERUM_NO_PARALLEL_READ").is_err();
@@ -510,17 +522,21 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Type-check a multi-file project without code generation.
     ///
+
     /// This method discovers all .vr files in the project directory and runs
     /// multi-pass type checking without generating any code. It's useful for:
     /// - IDE integration (quick feedback)
     /// - CI/CD pipelines (validation only)
     /// - Development workflows (check before run)
     ///
+
     /// Returns a CheckResult with diagnostics and statistics.
     ///
+
     /// Runs check-only mode: discovers modules, parses, type checks, but does
     /// not generate code. Returns diagnostics and statistics.
     ///
+
     /// Note: For deep recursion scenarios (type inference, import resolution,
     /// module dependency analysis), ensure RUST_MIN_STACK is set appropriately
     /// (e.g., 16MB) in the build/test environment.
@@ -1096,6 +1112,7 @@ impl<'s> CompilationPipeline<'s> {
         // `phases/phase0_stdlib.rs` paths that push to
         // `self.stdlib_errors` without calling `emit_diagnostic`.
         //
+
         // So `final_error_count - initial_error_count` already counts
         // ONLY user-file errors (the session sees just those). The
         // previous hardcoded `user_errors: 0` was a bug that silently

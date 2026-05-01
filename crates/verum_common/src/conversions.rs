@@ -1,36 +1,45 @@
 //! Type Conversions - Central conversion utilities for Rust std ↔ Verum types
 //!
+
 //! This module provides THE central place for all conversions between Rust std types
 //! and Verum semantic types. This eliminates duplication across the codebase.
 //!
+
 //! # Architecture
 //!
+
 //! - Generic conversion functions for common operations
 //! - Trait-based conversions for ergonomic usage
 //! - From/Into implementations for seamless interop
 //!
+
 //! # Examples
 //!
+
 //! ```
 //! use verum_common::conversions::*;
 //! use verum_common::Maybe;
 //!
+
 //! // Option to Maybe
 //! let opt: Option<i32> = Some(42);
 //! let maybe: Maybe<i32> = option_to_maybe(opt);
 //! assert_eq!(maybe, Maybe::Some(42));
 //!
+
 //! // Maybe to Option
 //! let maybe: Maybe<i32> = Maybe::Some(42);
 //! let opt: Option<i32> = maybe_to_option(maybe);
 //! assert_eq!(opt, Some(42));
 //!
+
 //! // Using traits
 //! let opt: Option<i32> = Some(42);
 //! let maybe: Maybe<i32> = opt.to_maybe();
 //! assert_eq!(maybe, Maybe::Some(42));
 //! ```
 //!
+
 //! Central conversion utilities between Rust std types and Verum semantic types,
 //! ensuring seamless interop while maintaining the semantic naming convention.
 
@@ -42,19 +51,24 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Converts std::option::Option to Maybe
 ///
+
 /// This is a central helper function used throughout verum crates for seamless
 /// conversion between Rust's Option and Verum's semantic Maybe type.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::option_to_maybe;
 /// use verum_common::Maybe;
 ///
+
 /// let opt: Option<i32> = Some(42);
 /// let maybe = option_to_maybe(opt);
 /// assert_eq!(maybe, Maybe::Some(42));
 ///
+
 /// let opt: Option<i32> = None;
 /// let maybe = option_to_maybe(opt);
 /// assert_eq!(maybe, Maybe::None);
@@ -70,18 +84,23 @@ pub fn option_to_maybe<T>(opt: Option<T>) -> Maybe<T> {
 
 /// Converts Maybe to std::option::Option
 ///
+
 /// Used when calling APIs that expect Option<T> (like Z3, external crates, etc).
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::maybe_to_option;
 /// use verum_common::Maybe;
 ///
+
 /// let maybe: Maybe<i32> = Maybe::Some(42);
 /// let opt = maybe_to_option(maybe);
 /// assert_eq!(opt, Some(42));
 ///
+
 /// let maybe: Maybe<i32> = Maybe::None;
 /// let opt = maybe_to_option(maybe);
 /// assert_eq!(opt, None);
@@ -99,12 +118,15 @@ pub fn maybe_to_option<T>(maybe: Maybe<T>) -> Option<T> {
 
 /// Converts Vec to List
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::vec_to_list;
 /// use verum_common::List;
 ///
+
 /// let vec = vec![1, 2, 3];
 /// let list = vec_to_list(vec);
 /// assert_eq!(list, List::from(vec![1, 2, 3]));
@@ -117,12 +139,15 @@ pub fn vec_to_list<T>(vec: Vec<T>) -> List<T> {
 
 /// Converts List to Vec
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::list_to_vec;
 /// use verum_common::List;
 ///
+
 /// let list: List<i32> = List::from(vec![1, 2, 3]);
 /// let vec = list_to_vec(list);
 /// assert_eq!(vec, vec![1, 2, 3]);
@@ -137,13 +162,16 @@ pub fn list_to_vec<T>(list: List<T>) -> Vec<T> {
 
 /// Converts HashMap to Map
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::hashmap_to_map;
 /// #[allow(clippy::disallowed_types)]
 /// use std::collections::HashMap;
 ///
+
 /// let mut hm = HashMap::new();
 /// hm.insert("key", 42);
 /// let map = hashmap_to_map(hm);
@@ -157,12 +185,15 @@ pub fn hashmap_to_map<K: Eq + std::hash::Hash, V>(hm: HashMap<K, V>) -> Map<K, V
 
 /// Converts Map to HashMap
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::map_to_hashmap;
 /// use verum_common::Map;
 ///
+
 /// let mut map = Map::new();
 /// map.insert("key", 42);
 /// let hm = map_to_hashmap(map);
@@ -178,13 +209,16 @@ pub fn map_to_hashmap<K: Eq + std::hash::Hash, V>(map: Map<K, V>) -> HashMap<K, 
 
 /// Converts HashSet to Set
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::hashset_to_set;
 /// #[allow(clippy::disallowed_types)]
 /// use std::collections::HashSet;
 ///
+
 /// let mut hs = HashSet::new();
 /// hs.insert(42);
 /// let set = hashset_to_set(hs);
@@ -198,12 +232,15 @@ pub fn hashset_to_set<T>(hs: HashSet<T>) -> Set<T> {
 
 /// Converts Set to HashSet
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::set_to_hashset;
 /// use verum_common::Set;
 ///
+
 /// let mut set = Set::new();
 /// set.insert(42);
 /// let hs = set_to_hashset(set);
@@ -219,13 +256,16 @@ pub fn set_to_hashset<T>(set: Set<T>) -> HashSet<T> {
 
 /// Converts BTreeMap to OrderedMap
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::btreemap_to_ordered_map;
 /// #[allow(clippy::disallowed_types)]
 /// use std::collections::BTreeMap;
 ///
+
 /// let mut btm = BTreeMap::new();
 /// btm.insert("key", 42);
 /// let map = btreemap_to_ordered_map(btm);
@@ -239,12 +279,15 @@ pub fn btreemap_to_ordered_map<K, V>(btm: BTreeMap<K, V>) -> OrderedMap<K, V> {
 
 /// Converts OrderedMap to BTreeMap
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::ordered_map_to_btreemap;
 /// use verum_common::OrderedMap;
 ///
+
 /// let mut map = OrderedMap::new();
 /// map.insert("key", 42);
 /// let btm = ordered_map_to_btreemap(map);
@@ -260,13 +303,16 @@ pub fn ordered_map_to_btreemap<K, V>(map: OrderedMap<K, V>) -> BTreeMap<K, V> {
 
 /// Converts BTreeSet to OrderedSet
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::btreeset_to_ordered_set;
 /// #[allow(clippy::disallowed_types)]
 /// use std::collections::BTreeSet;
 ///
+
 /// let mut bts = BTreeSet::new();
 /// bts.insert(42);
 /// let set = btreeset_to_ordered_set(bts);
@@ -280,12 +326,15 @@ pub fn btreeset_to_ordered_set<T>(bts: BTreeSet<T>) -> OrderedSet<T> {
 
 /// Converts OrderedSet to BTreeSet
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::ordered_set_to_btreeset;
 /// use verum_common::OrderedSet;
 ///
+
 /// let mut set = OrderedSet::new();
 /// set.insert(42);
 /// let bts = ordered_set_to_btreeset(set);
@@ -301,11 +350,14 @@ pub fn ordered_set_to_btreeset<T>(set: OrderedSet<T>) -> BTreeSet<T> {
 
 /// Converts String to Text
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::string_to_text;
 ///
+
 /// let s = String::from("hello");
 /// let text = string_to_text(s);
 /// assert_eq!(text, "hello");
@@ -318,12 +370,15 @@ pub fn string_to_text(s: String) -> Text {
 
 /// Converts Text to String
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::text_to_string;
 /// use verum_common::Text;
 ///
+
 /// let text: Text = Text::from("hello");
 /// let s = text_to_string(text);
 /// assert_eq!(s, "hello");
@@ -336,11 +391,14 @@ pub fn text_to_string(text: Text) -> String {
 
 /// Converts &str to Text
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::str_to_text;
 ///
+
 /// let text = str_to_text("hello");
 /// assert_eq!(text, "hello");
 /// ```
@@ -394,13 +452,17 @@ pub type VerumResult<T, E> = crate::Result<T, E>;
 
 /// Converts std::result::Result to Verum Result
 ///
+
 /// Since both are the same type currently, this is a semantic no-op.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::result_to_verum;
 ///
+
 /// let res: Result<i32, &str> = Ok(42);
 /// let verum_res = result_to_verum(res);
 /// assert_eq!(verum_res, Ok(42));
@@ -412,14 +474,18 @@ pub fn result_to_verum<T, E>(res: Result<T, E>) -> VerumResult<T, E> {
 
 /// Converts Verum Result to std::result::Result
 ///
+
 /// Since both are the same type currently, this is a semantic no-op.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::verum_to_result;
 /// use verum_common::Result as VerumResult;
 ///
+
 /// let verum_res: VerumResult<i32, &str> = Ok(42);
 /// let res = verum_to_result(verum_res);
 /// assert_eq!(res, Ok(42));
@@ -433,14 +499,18 @@ pub fn verum_to_result<T, E>(res: VerumResult<T, E>) -> Result<T, E> {
 
 /// Converts Box to Heap
 ///
+
 /// Since Heap is currently a type alias for Box, this is a no-op,
 /// but provides semantic clarity and future-proofs code.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::box_to_heap;
 ///
+
 /// let b = Box::new(42);
 /// let heap = box_to_heap(b);
 /// assert_eq!(*heap, 42);
@@ -453,15 +523,19 @@ pub fn box_to_heap<T>(b: Box<T>) -> crate::Heap<T> {
 
 /// Converts Heap to Box
 ///
+
 /// Since Heap is currently a type alias for Box, this is a no-op,
 /// but provides semantic clarity and future-proofs code.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::heap_to_box;
 /// use verum_common::Heap;
 ///
+
 /// let heap: Heap<i32> = Box::new(42);
 /// let b = heap_to_box(heap);
 /// assert_eq!(*b, 42);
@@ -476,12 +550,15 @@ pub fn heap_to_box<T>(heap: crate::Heap<T>) -> Box<T> {
 
 /// Convert iterator of Options to iterator of Maybes
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::options_to_maybes;
 /// use verum_common::Maybe;
 ///
+
 /// let opts = vec![Some(1), None, Some(3)];
 /// let maybes: Vec<Maybe<i32>> = options_to_maybes(opts.into_iter()).collect();
 /// assert_eq!(maybes, vec![Maybe::Some(1), Maybe::None, Maybe::Some(3)]);
@@ -495,12 +572,15 @@ where
 
 /// Convert iterator of Maybes to iterator of Options
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::conversions::maybes_to_options;
 /// use verum_common::Maybe;
 ///
+
 /// let maybes = vec![Maybe::Some(1), Maybe::None, Maybe::Some(3)];
 /// let opts: Vec<Option<i32>> = maybes_to_options(maybes.into_iter()).collect();
 /// assert_eq!(opts, vec![Some(1), None, Some(3)]);

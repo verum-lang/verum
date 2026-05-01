@@ -4,16 +4,19 @@
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
+
 // Top-level client that dials a QUIC server, completes the TLS 1.3
 // handshake over QUIC-CRYPTO frames, and exposes ergonomic stream +
 // datagram APIs:
 //
-//   let client = QuicClient.connect("example.com:443", opts).await?;
-//   let mut s  = client.open_bidi_stream().await?;
-//   s.write_all(b"ping").await?;
-//   let resp = s.read_to_end().await?;
-//   client.send_datagram(b"hello").await?;
+
+//  let client = QuicClient.connect("example.com:443", opts).await?;
+//  let mut s = client.open_bidi_stream().await?;
+//  s.write_all(b"ping").await?;
+//  let resp = s.read_to_end().await?;
+//  client.send_datagram(b"hello").await?;
 //
+
 // =============================================================================
 
 module core.net.quic.api.client;

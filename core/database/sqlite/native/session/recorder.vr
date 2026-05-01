@@ -3,9 +3,11 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (CDC) — sqlite3session_create + attach
 //
+
 // `Session` records every DML against a table that's been
 // `attach`ed. Tables not in the attach list are silently ignored.
 //
+
 // `Session` implements the `UpdateHook` and `PreUpdateHook` protocols
 // so it can be subscribed via the standard `FnRegistry.set_*_hook`
 // surface — no special integration with the connection needed.

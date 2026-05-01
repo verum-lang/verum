@@ -1,25 +1,33 @@
 //! Capability tracking for context attenuation
 //!
+
 //! This module implements compile-time tracking of context capabilities
 //! Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Section 10.
 //!
+
 //! # Overview
 //!
+
 //! The capability system tracks which capabilities are available for each
 //! context at compile time, enabling:
 //!
+
 //! - Static verification that operations match available capabilities
 //! - Capability intersection during attenuation
 //! - Clear error messages for capability violations
 //!
+
 //! # Integration with Type System
 //!
+
 //! Context types track their associated capabilities:
 //!
+
 //! ```text
 //! Context<T> with Capabilities[ReadOnly, Query]
 //! ```
 //!
+
 //! When attenuating, the type system verifies that:
 //! 1. New capabilities are a subset of existing capabilities
 //! 2. Operations only use available capabilities
@@ -30,6 +38,7 @@ use verum_common::{List, Maybe, Set, Text};
 
 /// Type-level capability tracking for contexts
 ///
+
 /// This associates a capability set with a context type, enabling
 /// compile-time verification of capability requirements.
 #[derive(Debug, Clone, PartialEq)]
@@ -70,6 +79,7 @@ impl ContextCapabilities {
 
     /// Attenuate this context with a new capability set
     ///
+
     /// Returns a new ContextCapabilities with the intersection of capabilities.
     pub fn attenuate(&self, new_capabilities: TypeCapabilitySet) -> Self {
         let intersected = self.capabilities.intersect(&new_capabilities);
@@ -103,6 +113,7 @@ impl ContextCapabilities {
 
 /// Type-level capability representation
 ///
+
 /// Similar to AST Capability but used during type checking.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeCapability {
@@ -184,6 +195,7 @@ impl TypeCapability {
 
 /// Set of type-level capabilities
 ///
+
 /// Used during type checking to track available capabilities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeCapabilitySet {
@@ -315,6 +327,7 @@ impl Default for TypeCapabilitySet {
 
 /// Method capability mapper
 ///
+
 /// Maps context methods to their required capabilities based on:
 /// 1. Explicit capability annotations (future feature)
 /// 2. Method name heuristics
@@ -334,8 +347,10 @@ impl MethodCapabilityMapper {
 
     /// Register a custom capability mapping for a method
     ///
+
     /// # Arguments
     ///
+
     /// * `context_name` - The context name (e.g., "Database")
     /// * `method_name` - The method name (e.g., "execute")
     /// * `capabilities` - The required capabilities
@@ -351,19 +366,24 @@ impl MethodCapabilityMapper {
 
     /// Extract capability requirements for a context method
     ///
+
     /// This implements the method-level capability extraction algorithm:
     /// 1. Check for custom mappings first
     /// 2. Use sub-context information if available
     /// 3. Fall back to method name heuristics
     ///
+
     /// # Arguments
     ///
+
     /// * `context_name` - The context name
     /// * `method_name` - The method name
     /// * `context_decl` - Optional context declaration for sub-context lookup
     ///
+
     /// # Returns
     ///
+
     /// A TypeCapabilitySet containing the required capabilities
     pub fn extract_method_capabilities(
         &self,
@@ -392,6 +412,7 @@ impl MethodCapabilityMapper {
 
     /// Extract capabilities from sub-context membership
     ///
+
     /// If a method is defined in a sub-context, use the sub-context name
     /// as a hint for the required capability.
     fn extract_from_sub_context(
@@ -584,6 +605,7 @@ impl Default for MethodCapabilityMapper {
 
 /// Capability requirement for a function or operation
 ///
+
 /// Associates an operation with the capabilities it requires.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapabilityRequirement {
@@ -630,6 +652,7 @@ impl CapabilityRequirement {
 
 /// Capability checker for type checking
 ///
+
 /// Verifies that operations have the required capabilities at compile time.
 pub struct CapabilityChecker {
     /// Currently available context capabilities

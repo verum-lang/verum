@@ -3,12 +3,15 @@
 // =============================================================================
 // Spec: SQLite URI filenames
 //
+
 // Grammar accepted (whitespace not significant):
 //
-//   uri := 'file:' [ '//' [ host ] '/' ] path [ '?' query ]
-//   query := pair ('&' pair)*
-//   pair := key '=' value | key
+
+//  uri := 'file:' [ '//' [ host ] '/' ] path [ '?' query ]
+//  query := pair ('&' pair)*
+//  pair := key '=' value | key
 //
+
 // Output: `ParsedUri { path, params }`. Path is percent-decoded; the
 // query parameters are routed through `UriParams.merge`.
 // =============================================================================

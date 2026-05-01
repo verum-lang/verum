@@ -2,21 +2,24 @@
 // core.action.articulation — Articulation type, OC-side counterpart of Enactment
 // =============================================================================
 //
+
 // VVA §11.3 — every Articulation α has a canonical Enactment ε(α);
-// every Enactment carries the Articulation it enacts.  Together they
+// every Enactment carries the Articulation it enacts. Together they
 // witness the adjunction α ⊣ ε that brides core.math.frameworks
 // (object-centric, OC) and core.action (dependency-centric, DC).
 //
+
 // Articulation is the *syntactic* projection of CoreTerm.FrameworkAxiom
 // — a framework name + citation pair — so it can be carried at runtime
 // by any Verum value without dragging a kernel-term dependency into the
-// stdlib.  When the kernel produces an axiom, it surfaces as
+// stdlib. When the kernel produces an axiom, it surfaces as
 // `Articulation { framework, citation, lineage }`; when user code
 // constructs one directly, the lineage records the primitive name.
 //
+
 // The neutral Actic articulation (`raw_actic_articulation`) is used by
 // any Enactment that was lifted from a bare ε-primitive without an
-// originating framework axiom.  Identity, composition, and gauge
+// originating framework axiom. Identity, composition, and gauge
 // canonicalisation all preserve it, so `alpha_of(primitive_enact(p))`
 // is always well-defined and total.
 // =============================================================================

@@ -5,44 +5,53 @@
 // Dependencies: core, core.collections, core.time.duration
 // =============================================================================
 //
+
 // Parses compact human-readable duration strings used in config
 // files, CLI flags, and cron-adjacent scheduler APIs:
 //
-//   "5m30s"     → 5 minutes + 30 seconds
-//   "1h15m"     → 1 hour + 15 minutes
-//   "2d"        → 2 days
-//   "500ms"     → 500 milliseconds
-//   "1.5s"      → 1.5 seconds  (fractional)
-//   "2h 30m"    → whitespace tolerated
-//   "-15m"      → negative durations
+
+//  "5m30s" → 5 minutes + 30 seconds
+//  "1h15m" → 1 hour + 15 minutes
+//  "2d" → 2 days
+//  "500ms" → 500 milliseconds
+//  "1.5s" → 1.5 seconds (fractional)
+//  "2h 30m" → whitespace tolerated
+//  "-15m" → negative durations
 //
+
 // Plus ISO 8601 style for cross-language config files:
 //
-//   "PT5M"      → 5 minutes
-//   "PT1H30M"   → 1h 30m
-//   "PT0.5S"    → 500 ms
-//   "P1D"       → 1 day
+
+//  "PT5M" → 5 minutes
+//  "PT1H30M" → 1h 30m
+//  "PT0.5S" → 500 ms
+//  "P1D" → 1 day
 //
+
 // # Supported units
 //
+
 // | Unit | Suffix | Example |
 // | ---- | ------ | ------- |
-// | nanoseconds  | `ns` | `100ns` |
+// | nanoseconds | `ns` | `100ns` |
 // | microseconds | `us` / `µs` | `250us` |
 // | milliseconds | `ms` | `500ms` |
-// | seconds      | `s`  | `30s`   |
-// | minutes      | `m`  | `5m`    |
-// | hours        | `h`  | `2h`    |
-// | days         | `d`  | `7d`    |
-// | weeks        | `w`  | `1w`    |
+// | seconds | `s` | `30s` |
+// | minutes | `m` | `5m` |
+// | hours | `h` | `2h` |
+// | days | `d` | `7d` |
+// | weeks | `w` | `1w` |
 //
+
 // # API
 //
+
 // ```
 // let d: Duration = duration_parse.parse(&Text.from("1h30m"))?;
 // let d: Duration = duration_parse.parse(&Text.from("PT1H30M"))?;
 // ```
 //
+
 // =============================================================================
 
 module core.time.duration_parse;
@@ -208,10 +217,12 @@ fn parse_compact(b: &[Byte]) -> Result<Duration, DurationParseError> {
 // ISO 8601 (subset: days / hours / minutes / seconds)
 // =============================================================================
 //
-//   Pn(Y|M|W|D)T n(H|M|S) with fractional S allowed.
-//   We do NOT support year/month because their length is locale-
-//   dependent; a follow-up `calendar_parse` module can handle those.
+
+//  Pn(Y|M|W|D)T n(H|M|S) with fractional S allowed.
+//  We do NOT support year/month because their length is locale-
+//  dependent; a follow-up `calendar_parse` module can handle those.
 //
+
 // =============================================================================
 
 fn parse_iso8601(b: &[Byte]) -> Result<Duration, DurationParseError> {

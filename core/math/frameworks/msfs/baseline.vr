@@ -2,11 +2,13 @@
 // MSFS — baseline metatheoretic framework
 // =============================================================================
 //
+
 // Source of truth: A. Sereda, "The Moduli Space of Formal Systems:
 // Classification, Stabilization, and a No-Go Theorem for Absolute
 // Foundations", Zenodo 19755781 (2026), MSFS §1 — Conventions and
 // Notation.
 //
+
 // This module installs the framework axioms that fix the ambient
 // metatheory in which every MSFS theorem is stated. They are *not*
 // proved here — they are the explicit declaration of what the rest of
@@ -14,29 +16,36 @@
 // transitively cites this `msfs` lineage through `verum audit
 // --framework-axioms`.
 //
+
 // Three baseline declarations land here:
 //
-//   1. `msfs_baseline_zfc_2inacc` — Convention 1.1 (paper.tex):
-//      MSFS lives inside ZFC + 2 inaccessible cardinals
-//      κ_1 < κ_2, providing Grothendieck universes U_1 ⊂ U_2 large
-//      enough for the 2-categorical machinery used in §§3–10.
+
+//  1. `msfs_baseline_zfc_2inacc` — Convention 1.1 (paper.tex):
+//  MSFS lives inside ZFC + 2 inaccessible cardinals
+//  κ_1 < κ_2, providing Grothendieck universes U_1 ⊂ U_2 large
+//  enough for the 2-categorical machinery used in §§3–10.
 //
-//   2. `msfs_grothendieck_universes` — the U_1 / U_2 typing facts
-//      (sub-universe inclusion + accessibility).
+
+//  2. `msfs_grothendieck_universes` — the U_1 / U_2 typing facts
+//  (sub-universe inclusion + accessibility).
 //
-//   3. `msfs_categorical_machinery_baseline` — the bibliographic
-//      stack (Kelly 1982, Lurie HTT 2009, Lurie HA 2017,
-//      Riehl–Verity 2022, Adámek–Rosický 1994) is admitted as the
-//      categorical infrastructure layer over which Convention 1.2
-//      and §§3–10 build. Individual results are cited per-theorem
-//      via the `lurie_htt`, `riehl_verity`, etc. lineages already
-//      shipped in `core.math.frameworks.*`.
+
+//  3. `msfs_categorical_machinery_baseline` — the bibliographic
+//  stack (Kelly 1982, Lurie HTT 2009, Lurie HA 2017,
+//  Riehl–Verity 2022, Adámek–Rosický 1994) is admitted as the
+//  categorical infrastructure layer over which Convention 1.2
+//  and §§3–10 build. Individual results are cited per-theorem
+//  via the `lurie_htt`, `riehl_verity`, etc. lineages already
+//  shipped in `core.math.frameworks.*`.
 //
+
 // Carrier protocols:
 //
-//   • `Universe` — abstract Grothendieck universe.
-//   • `InaccessibleCardinal` — large-cardinal witness inhabiting U_2.
+
+//  • `Universe` — abstract Grothendieck universe.
+//  • `InaccessibleCardinal` — large-cardinal witness inhabiting U_2.
 //
+
 // The carriers are *minimal* — they expose just enough structure for
 // downstream axioms to refer to U_1/U_2 by handle. Concrete encodings
 // (set-theoretic models) are out of scope: the corpus is foundation-
@@ -85,6 +94,7 @@ public type InaccessibleCardinal is protocol {
 /// Grothendieck universes U_1 ⊂ U_2. Every theorem in this corpus
 /// is stated *inside* this extension.
 ///
+
 /// Operationally: this axiom is the consistency-strength upper bound
 /// of the entire MSFS corpus. `verum audit --coord` records its
 /// presence on every transitively-citing theorem.
@@ -122,6 +132,7 @@ public axiom msfs_grothendieck_universes(
 /// per-author `core.math.frameworks.*` packages already shipped
 /// (lurie_htt, riehl_verity, etc.).
 ///
+
 /// This is *not* a proof obligation; it is the corpus-wide
 /// declaration that the cited works are admitted as authoritative
 /// for the categorical layer.

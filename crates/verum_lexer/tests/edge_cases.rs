@@ -14,6 +14,7 @@
 )]
 //! Edge case tests for verum_lexer
 //!
+
 //! Tests boundary conditions and unusual inputs for lexer robustness.
 
 use verum_ast::span::FileId;

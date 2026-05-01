@@ -1,8 +1,10 @@
 //! Refinement type information for module exports.
 //!
+
 //! This module stores refinement information without creating a circular dependency
 //! with verum_types. The actual RefinementType is constructed by verum_types when needed.
 //!
+
 //! Refinement types work across module boundaries: when a type with refinements
 //! is exported, the refinement becomes part of the public API contract. All three
 //! refinement syntaxes (inline: Int{> 0}, declarative: Text where is_email,
@@ -16,10 +18,12 @@ use verum_common::{List, Maybe, Text};
 
 /// Refinement information stored with exported types.
 ///
+
 /// This stores the raw AST components that verum_types can use to reconstruct
 /// the full RefinementType. This avoids circular dependencies between verum_modules
 /// and verum_types.
 ///
+
 /// Stores raw AST components for refinement reconstruction by verum_types,
 /// avoiding circular dependencies between verum_modules and verum_types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,17 +68,21 @@ impl RefinementInfo {
 
 /// A single contract predicate (precondition, postcondition, or invariant).
 ///
+
 /// Represents a logical assertion that must hold at specific points
 /// in program execution.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
-/// @requires(x > 0)           // Predicate { kind: Requires, expr: x > 0 }
-/// @ensures(result >= x)      // Predicate { kind: Ensures, expr: result >= x }
-/// @invariant(self.len >= 0)  // Predicate { kind: Invariant, expr: self.len >= 0 }
+/// @requires(x > 0) // Predicate { kind: Requires, expr: x > 0 }
+/// @ensures(result >= x) // Predicate { kind: Ensures, expr: result >= x }
+/// @invariant(self.len >= 0) // Predicate { kind: Invariant, expr: self.len >= 0 }
 /// ```
 ///
+
 /// Used for Design-by-Contract verification at module boundaries and
 /// cross-module refinement validation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -140,6 +148,7 @@ impl PredicateKind {
 
 /// A binding introduced by a predicate.
 ///
+
 /// Enables naming of intermediate values for clearer predicates:
 /// ```verum
 /// @ensures(old_len: self.len() => self.len() == old_len + 1)
@@ -261,28 +270,34 @@ impl VerificationStatus {
 
 /// A complete contract for a function or type.
 ///
+
 /// Contracts enable Design-by-Contract programming and are verified at
 /// module boundaries to ensure type safety across compilation units.
 ///
+
 /// # Cross-Module Verification
 ///
+
 /// When a function is exported:
 /// 1. Its contract predicates are stored in the module's export table
 /// 2. Callers verify they satisfy preconditions (`requires`)
 /// 3. The callee is proven to satisfy postconditions (`ensures`)
 /// 4. SMT verification at module boundaries ensures soundness
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @requires(x >= 0, "input must be non-negative")
 /// @ensures(result >= 0)
 /// @ensures(result * result <= x)
 /// public fn sqrt(x: Float) -> Float {
-///     // Implementation
+///  // Implementation
 /// }
 /// ```
 ///
+
 /// Used for Design-by-Contract verification at module boundaries and
 /// cross-module refinement validation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -484,6 +499,7 @@ impl Default for RefinementContract {
 
 /// Extract contracts from function attributes.
 ///
+
 /// Parses `@requires`, `@ensures`, `@invariant`, `@modifies`, `@decreases`
 /// attributes into a RefinementContract.
 pub fn extract_contract_from_attributes(

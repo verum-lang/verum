@@ -3,11 +3,13 @@
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
 // Spec: J. Adámek + J. Rosický, "Locally Presentable and Accessible
-//       Categories", London Math. Soc. Lecture Notes 189, CUP 1994.
+//  Categories", London Math. Soc. Lecture Notes 189, CUP 1994.
 // Spec: J. Lurie, "Higher Topos Theory" §5.4 (presentable ∞-categories).
 //
+
 // **Foundational module — M-INFRA Phase 2.**
 //
+
 // The MSFS verification chain transitively cites "S_S^global is
 // κ_1-accessible" at multiple sites (paper §3.3 — Definition 3.3
 // closure + (R5a) accessibility; §6 Theorem 6.1 — colimit construction
@@ -16,21 +18,24 @@
 // axioms with no underlying type-level surface; this module surfaces
 // the structural content.
 //
+
 // Architecture:
 //
-//   • RegularCardinal — opaque carrier for the regular cardinal κ
-//     parameter. Concrete instances ω, κ_1, κ_2 admit-axioms ship in
-//     `core.math.cardinals` (TODO follow-up); for now the protocol
-//     captures the identity-only surface.
-//   • LambdaFiltered<κ> — the "λ-filtered diagram" predicate; the
-//     building block for Adámek–Rosický's accessibility framework.
-//   • LambdaPresentable<C, λ> — an object `x : C` is λ-presentable
-//     when Hom(x, -) preserves λ-filtered colimits.
-//   • AccessibleCategory<κ> — a category C is κ-accessible iff
-//     (i) it has all κ-filtered colimits, (ii) it has a small dense
-//     subcategory of κ-presentable objects.
-//   • Accessible∞Category — the ∞-categorical lift (Lurie HTT 5.4).
+
+//  • RegularCardinal — opaque carrier for the regular cardinal κ
+//  parameter. Concrete instances ω, κ_1, κ_2 admit-axioms ship in
+//  `core.math.cardinals` (TODO follow-up); for now the protocol
+//  captures the identity-only surface.
+//  • LambdaFiltered<κ> — the "λ-filtered diagram" predicate; the
+//  building block for Adámek–Rosický's accessibility framework.
+//  • LambdaPresentable<C, λ> — an object `x : C` is λ-presentable
+//  when Hom(x, -) preserves λ-filtered colimits.
+//  • AccessibleCategory<κ> — a category C is κ-accessible iff
+//  (i) it has all κ-filtered colimits, (ii) it has a small dense
+//  subcategory of κ-presentable objects.
+//  • Accessible∞Category — the ∞-categorical lift (Lurie HTT 5.4).
 //
+
 // The module is protocol-only at this layer (M-INFRA Phase 2); Phase 3
 // will land concrete instances (Set is ω-accessible, Cat is ω-accessible,
 // the κ_1-accessible witness for S_S^global from MSFS §3.3).
@@ -49,12 +54,14 @@ mount core.math.infinity_category.{InfinityCategory};
 /// `κ`-small union of `κ`-small sets is `κ`-small. The standard
 /// inhabited examples used throughout MSFS are:
 ///
-///   - `ω` — the first infinite cardinal (countable). Used for "ω-
-///     filtered" diagrams ≡ "filtered" diagrams in the classical sense.
-///   - `κ_1` — the first inaccessible cardinal of MSFS Convention 1.1
-///     (Grothendieck universe `U_1`).
-///   - `κ_2` — the second inaccessible (Grothendieck universe `U_2`).
+
+///  - `ω` — the first infinite cardinal (countable). Used for "ω-
+///  filtered" diagrams ≡ "filtered" diagrams in the classical sense.
+///  - `κ_1` — the first inaccessible cardinal of MSFS Convention 1.1
+///  (Grothendieck universe `U_1`).
+///  - `κ_2` — the second inaccessible (Grothendieck universe `U_2`).
 ///
+
 /// The protocol exposes the regularity property as an opaque
 /// witness — concrete cardinal arithmetic lives in
 /// `core.math.cardinals` (forthcoming).
@@ -77,10 +84,12 @@ public type RegularCardinal is protocol {
 /// `J`. The standard λ = ω case recovers the classical "filtered"
 /// notion: every finite diagram extends to a cocone.
 ///
+
 /// Adámek–Rosický 1.4 gives the equivalent characterisation: J is
 /// λ-filtered iff it is non-empty AND every parallel-pair fork of
 /// size `< λ` admits a coequaliser cocone.
 ///
+
 /// **Why this matters for MSFS.** MSFS Definition 3.3 closure O3
 /// (small limits and colimits) lands the closure inside `S_S^global`
 /// at strictly greater depth; the Adámek–Rosický invariant is that
@@ -117,6 +126,7 @@ public axiom lambda_filtered_descends<J, lambda: RegularCardinal, mu: RegularCar
 /// from a λ-filtered diagram `D` factors through some `D(j)` for
 /// `j ∈ J`, and the factorisation is essentially unique.
 ///
+
 /// **Examples (paper-cited).** In the category of sets, a set `X` is
 /// ω-presentable iff `|X| < ω` (finite). In the category of groups,
 /// a group is ω-presentable iff it is finitely presented in the
@@ -148,11 +158,13 @@ public axiom lambda_presentable_ascends<C: Category, lambda: RegularCardinal, mu
 
 /// A category `C` is **κ-accessible** (for a regular cardinal κ) iff:
 ///
-///   (i)  C has all κ-filtered colimits.
-///   (ii) C has a small dense subcategory `C_κ ⊆ C` whose objects are
-///        all κ-presentable, in the sense that every object of C is
-///        a κ-filtered colimit of objects in `C_κ`.
+
+///  (i) C has all κ-filtered colimits.
+///  (ii) C has a small dense subcategory `C_κ ⊆ C` whose objects are
+///  all κ-presentable, in the sense that every object of C is
+///  a κ-filtered colimit of objects in `C_κ`.
 ///
+
 /// **Adámek–Rosický 1.26** is the key structural result: κ-accessible
 /// categories are closed under κ-filtered colimits, accessible
 /// reindexing, and accessible localisation. This is the load-bearing
@@ -207,6 +219,7 @@ public axiom accessible_eq_models_of_accessible_theory<kappa: RegularCardinal>(
 /// all κ-filtered ∞-colimits AND a small dense full subcategory of
 /// κ-compact objects (the ∞-categorical analogue of κ-presentable).
 ///
+
 /// Per Lurie HTT 5.4.2.1, every presentable ∞-category is accessible
 /// (the converse uses the additional cocompleteness assumption). The
 /// MSFS Convention 1.1 setup with `U_1 ⊂ U_2` Grothendieck universes
@@ -257,6 +270,7 @@ public axiom presentable_implies_accessible<C, kappa: RegularCardinal>(
 /// `S_S^global`" claim — the underlying construction is built on
 /// (∞, n)-categorical accessibility, not on the bare paper citation.
 ///
+
 /// **Why this matters.** Pre-this-module the bridge from "Lurie HTT
 /// 5.1.4 Grothendieck construction" to "S_S^global at depth ≥ 1"
 /// was a single witness axiom (`msfs_definition_3_3_o2_lands_in_global`)

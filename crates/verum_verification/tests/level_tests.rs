@@ -62,8 +62,8 @@ fn test_from_annotation() {
 /// `VerifyStrategy`; the level enum is the coarse compile-time gradient.
 #[test]
 fn test_from_annotation_covers_every_grammar_strategy() {
-    // Grammar production:  verify_strategy = ( 'runtime' | 'static' | 'formal'
-    //   | 'proof' | 'fast' | 'thorough' | 'reliable' | 'certified' | 'synthesize' ) ,
+    // Grammar production: verify_strategy = ( 'runtime' | 'static' | 'formal'
+    //  | 'proof' | 'fast' | 'thorough' | 'reliable' | 'certified' | 'synthesize' ) ,
     let grammar_names = [
         "runtime", "static", "formal", "proof",
         "fast", "thorough", "reliable", "certified", "synthesize",

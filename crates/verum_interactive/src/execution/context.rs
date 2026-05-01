@@ -1,5 +1,6 @@
 //! Execution context for cross-cell state preservation.
 //!
+
 //! The `ExecutionContext` maintains variable bindings and function definitions
 //! across cell executions, enabling a notebook-like experience where later cells
 //! can reference values defined in earlier cells.
@@ -46,6 +47,7 @@ pub struct FunctionInfo {
 
 /// Dependency graph for cells.
 ///
+
 /// Tracks which cells depend on which bindings, enabling smart re-execution
 /// when a binding changes.
 #[derive(Debug, Default, Clone)]
@@ -90,6 +92,7 @@ impl DependencyGraph {
 
 /// Execution context for a playground session.
 ///
+
 /// Maintains state across cell executions including:
 /// - Variable bindings (name → value + metadata)
 /// - Function definitions
@@ -191,6 +194,7 @@ impl ExecutionContext {
 
     /// Injects bindings into the interpreter state before execution.
     ///
+
     /// This transfers the current bindings from the execution context into
     /// the VBC interpreter's global state, making them available for the
     /// next cell execution.
@@ -208,6 +212,7 @@ impl ExecutionContext {
 
     /// Extracts bindings from the interpreter state after execution.
     ///
+
     /// This captures any new or modified bindings from the executed cell
     /// and stores them in the execution context for future cells.
     pub fn extract_bindings(
@@ -236,6 +241,7 @@ impl ExecutionContext {
 
     /// Clears all bindings defined by a specific cell.
     ///
+
     /// Used when a cell is re-executed to remove stale bindings.
     pub fn clear_cell_bindings(&mut self, cell_id: CellId) {
         // Remove bindings defined by this cell

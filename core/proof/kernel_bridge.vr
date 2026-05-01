@@ -1,39 +1,47 @@
 // =============================================================================
 // core.proof.kernel_bridge — Verum-side surface for the 15 ∞-cat + foundation
-//                            kernel modules shipped on 2026-04-29
+//  kernel modules shipped on 2026-04-29
 // =============================================================================
 //
+
 // **Integration status (2026-04-29 closing sweep):**
 //
-//   * Kernel layer: 19 dispatcher entries in
-//     `verum_kernel::intrinsic_dispatch::available_intrinsics()`,
-//     each backed by an algorithmic V0 surface in the corresponding
-//     `verum_kernel::*` module.  Coverage verified by
-//     `verum audit --kernel-intrinsics`.
+
+//  * Kernel layer: 19 dispatcher entries in
+//  `verum_kernel::intrinsic_dispatch::available_intrinsics()`,
+//  each backed by an algorithmic current surface in the corresponding
+//  `verum_kernel::*` module. Coverage verified by
+//  `verum audit --kernel-intrinsics`.
 //
-//   * Verum-bridge layer: every `kernel_*` axiom below has a
-//     matching dispatcher entry; `verum_kernel::intrinsic_dispatch::
-//     missing_dispatchers()` reports zero gaps.
+
+//  * Verum-bridge layer: every `kernel_*` axiom below has a
+//  matching dispatcher entry; `verum_kernel::intrinsic_dispatch::
+//  missing_dispatchers()` reports zero gaps.
 //
-//   * MSFS proof bodies: `core/math/syn_mod.vr::
-//     syn_mod_lemma_3_4_steps_2_3` and
-//     `core/math/concrete_accessible.vr::
-//     grothendieck_construction_n_1_constructive` now reference
-//     the kernel-discharge route inline; downstream theorems pick
-//     up the kernel coverage transitively.
+
+//  * MSFS proof bodies: `core/math/syn_mod.vr::
+//  syn_mod_lemma_3_4_steps_2_3` and
+//  `core/math/concrete_accessible.vr::
+//  grothendieck_construction_n_1_constructive` now reference
+//  the kernel-discharge route inline; downstream theorems pick
+//  up the kernel coverage transitively.
 //
-//   * Tactic dispatcher: `verum_smt::industrial_fast_path::
-//     dispatch_by_name` routes `apply lia/decide/induction/
-//     congruence/eauto` to the deterministic kernel tactics in
-//     `verum_kernel::tactics_industrial`, falling back to Z3 on
-//     `Open` outcomes.
+
+//  * Tactic dispatcher: `verum_smt::industrial_fast_path::
+//  dispatch_by_name` routes `apply lia/decide/induction/
+//  congruence/eauto` to the deterministic kernel tactics in
+//  `verum_kernel::tactics_industrial`, falling back to Z3 on
+//  `Open` outcomes.
 //
-//   * CLI surface: `verum audit --htt-roadmap`, `--ar-roadmap`,
-//     `--self-recognition`, `--cross-format`, `--kernel-intrinsics`
-//     (5 new subcommands) walk the kernel surfaces and emit
-//     plain/JSON reports.
+
+//  * CLI surface: `verum audit --htt-roadmap`, `--ar-roadmap`,
+//  `--self-recognition`, `--cross-format`, `--kernel-intrinsics`
+//  (5 new subcommands) walk the kernel surfaces and emit
+//  plain/JSON reports.
 //
+
 //
+
 // This module exposes the algorithmic kernel rules from
 // `crates/verum_kernel/src/{yoneda, cartesian_fibration,
 // adjoint_functor, whitehead, reflective_subcategory,
@@ -42,35 +50,40 @@
 // tactics_industrial, cross_format_gate, mechanisation_roadmap}.rs`
 // as Verum-callable @framework declarations.
 //
+
 // **Promotion ladder.** Each kernel rule is exposed here as a
 // witness-typed framework declaration whose ensures clause names
-// the algorithmic content the kernel produces.  Pre-this-module the
+// the algorithmic content the kernel produces. Pre-this-module the
 // MSFS proof body in `core/math/syn_mod.vr` invoked
 // `lurie_htt_5_1_4_syn_is_grothendieck` as an opaque paper-citation
 // axiom; with this module the @theorem chain can route through
 // `kernel_grothendieck_construction` whose ensures matches the
 // kernel-checked output of `verum_kernel::grothendieck::build_grothendieck`.
 //
+
 // **Audit surface.** `verum audit --kernel-bridge` walks this module
 // and reports per-rule (a) whether the kernel module exists, (b)
 // whether the bridge declaration matches the kernel signature, (c)
-// whether at least one MSFS @theorem cites the bridge.  This makes
+// whether at least one MSFS @theorem cites the bridge. This makes
 // the Verum-side ↔ Rust-kernel coupling first-class observable.
 //
+
 // **Discharge map.** The MSFS framework axioms now have algorithmic
 // kernel discharge:
 //
-//   lurie_htt_5_1_4_syn_is_grothendieck   ↔ kernel_grothendieck_construction
-//   msfs_htt_3_2_straightening            ↔ kernel_straightening_equivalence
-//   msfs_aft_iota_r                       ↔ kernel_reflective_subcategory_aft
-//   msfs_s_s_closed_under_yoneda          ↔ kernel_yoneda_embedding
-//   msfs_s_s_closed_under_colimits        ↔ kernel_compute_colimit
-//   msfs_s_s_is_infty_topos               ↔ kernel_infinity_topos
-//   msfs_epi_mono_factorisation           ↔ kernel_epi_mono_factorisation
-//   msfs_n_truncation_factorisation       ↔ kernel_n_truncation_factorisation
-//   diakrisis_pronk_bicat_fractions       ↔ kernel_pronk_bicat_fractions
-//   msfs_id_x_violates_pi_4 (n > 0)       ↔ kernel_whitehead_promote
+
+//  lurie_htt_5_1_4_syn_is_grothendieck ↔ kernel_grothendieck_construction
+//  msfs_htt_3_2_straightening ↔ kernel_straightening_equivalence
+//  msfs_aft_iota_r ↔ kernel_reflective_subcategory_aft
+//  msfs_s_s_closed_under_yoneda ↔ kernel_yoneda_embedding
+//  msfs_s_s_closed_under_colimits ↔ kernel_compute_colimit
+//  msfs_s_s_is_infty_topos ↔ kernel_infinity_topos
+//  msfs_epi_mono_factorisation ↔ kernel_epi_mono_factorisation
+//  msfs_n_truncation_factorisation ↔ kernel_n_truncation_factorisation
+//  diakrisis_pronk_bicat_fractions ↔ kernel_pronk_bicat_fractions
+//  msfs_id_x_violates_pi_4 (n > 0) ↔ kernel_whitehead_promote
 //
+
 // =============================================================================
 
 module core.proof.kernel_bridge;
@@ -79,33 +92,39 @@ module core.proof.kernel_bridge;
 // Strict parameterised bridges — refinement-typed (M-CORE-1, 2026-04-29).
 // =============================================================================
 //
+
 // Each bridge below uses **inline refinement types** (Verum's K-Refine
 // kernel rule) to encode the dispatcher's preconditions DIRECTLY in the
-// argument types.  Pathological arguments are rejected at *type-construction*
+// argument types. Pathological arguments are rejected at *type-construction*
 // time — no separate `requires` mechanism is needed because the kernel's
 // existing K-Refine rule already enforces the refinement predicates as
 // part of the type identity.
 //
-// Example.  When a corpus proof body writes
+
+// Example. When a corpus proof body writes
 //
-//   apply kernel_grothendieck_construction_strict(0)
+
+//  apply kernel_grothendieck_construction_strict(0)
 //
+
 // the argument `0 : StrictPos = Int{> 0}` triggers the K-Refine rule
 // (`dp(it > 0) < dp(Int) + 1`); the predicate `0 > 0` evaluates to
 // `false`, so the kernel REFUSES to construct the refined value and
 // the apply node fails to elaborate.
 //
+
 // This is the elegant Verum-idiomatic solution: the `requires` clause
 // is **lifted into the type** (where it belongs), eliminating the
 // dispatcher-vs-kernel-recheck divergence that the previous
-// `requires`-clause form left open.  K-Refine is the single source of
+// `requires`-clause form left open. K-Refine is the single source of
 // truth.
 //
-// **Discharge surface mapping.**  Each strict bridge corresponds to a
+
+// **Discharge surface mapping.** Each strict bridge corresponds to a
 // `verum_kernel::intrinsic_dispatch` dispatcher entry; the dispatcher's
 // argument-validation logic is now redundant for the strict-form callers
 // (the K-Refine rule has already filtered pathological inputs before
-// the dispatcher ever sees them).  The dispatcher remains useful for
+// the dispatcher ever sees them). The dispatcher remains useful for
 // audit tooling that walks the proof tree post-hoc.
 // =============================================================================
 
@@ -114,23 +133,23 @@ module core.proof.kernel_bridge;
 // -----------------------------------------------------------------------------
 
 /// Strictly-positive integer (used for diagram sizes, fibre counts,
-/// non-empty witness counts).  Constructing a `StrictPos` from `0` or
+/// non-empty witness counts). Constructing a `StrictPos` from `0` or
 /// any negative integer triggers a kernel rejection via K-Refine.
 public type StrictPos is Int{> 0};
 
 /// Non-negative integer (used for ordinal levels, truncation levels,
-/// universe indices).  Constructing from a negative integer triggers
+/// universe indices). Constructing from a negative integer triggers
 /// a kernel rejection via K-Refine.
 public type NonNegInt is Int{>= 0};
 
-/// (∞,1)-cat-or-higher level: at least 1.  Used by HTT 3.2.0.1
+/// (∞,1)-cat-or-higher level: at least 1. Used by HTT 3.2.0.1
 /// straightening (which requires ≥ (∞,1)) and HTT 5.2.8.4 epi-mono
 /// factorisation.
 public type CatLevelGte1 is Int{>= 1};
 
-/// A boolean witness that is provably `true` at construction.  Used
+/// A boolean witness that is provably `true` at construction. Used
 /// by bridges that demand all-of-N witness flags (Giraud axioms,
-/// Pronk BF1–BF5, etc.).  K-Refine refuses any `False`-valued literal.
+/// Pronk BF1–BF5, etc.). K-Refine refuses any `False`-valued literal.
 public type True is Bool{== true};
 
 // -----------------------------------------------------------------------------
@@ -227,10 +246,12 @@ public axiom kernel_saft_adjunction_strict(
 
 /// **Bridge: Yoneda embedding `y: C → PSh(C)` (HTT 1.2.1).**
 ///
+
 /// Discharges `msfs_s_s_closed_under_yoneda`: every `S_S^global`
 /// admits a fully-faithful embedding into its presheaf ∞-category,
 /// and the embedding lands in the representable subcategory.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::yoneda::yoneda_embedding(c)` returns a
 /// `YonedaEmbedding` with `is_fully_faithful = true` and the
@@ -242,6 +263,7 @@ public axiom kernel_yoneda_embedding() -> Bool
 
 /// **Bridge: ∞-Kan extension `Lan_f(p)` (HTT 4.3.3.7).**
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::yoneda::build_kan_extension(f, p, ...)` returns
 /// `Some(KanExtension)` iff `f` is fully-faithful AND target has
@@ -258,9 +280,11 @@ public axiom kernel_kan_extension() -> Bool
 /// **Bridge: Straightening / Unstraightening equivalence
 /// (HTT 3.2.0.1).**
 ///
+
 /// Discharges `msfs_htt_3_2_straightening`: for every base
 /// ∞-category `C`, there is an equivalence `coCart(C) ≃ Fun(C, ∞-Cat)`.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::cartesian_fibration::build_straightening_equivalence(c)`.
 @framework(msfs, "Bridge — kernel cartesian_fibration::build_straightening_equivalence (HTT 3.2.0.1)")
@@ -271,9 +295,11 @@ public axiom kernel_straightening_equivalence() -> Bool
 /// **Bridge: Grothendieck construction = Unstraightening
 /// (HTT 5.1.4).**
 ///
+
 /// Discharges `lurie_htt_5_1_4_syn_is_grothendieck`: every `S`-indexed
 /// diagram `D : λ → cF` admits the total Cartesian fibration `∫D`.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::grothendieck::build_grothendieck(diagram)` returns
 /// `Some(GrothendieckConstruction)` for every well-formed input.
@@ -289,6 +315,7 @@ public axiom kernel_grothendieck_construction() -> Bool
 /// **Bridge: SAFT — left adjoint exists when source is presentable
 /// and functor preserves small colimits (HTT 5.5.2.9).**
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::adjoint_functor::build_adjunction(...)`.
 @framework(msfs, "Bridge — kernel adjoint_functor::build_adjunction (HTT 5.5.2.9)")
@@ -298,10 +325,12 @@ public axiom kernel_saft_adjunction() -> Bool
 
 /// **Bridge: Reflective subcategory construction (HTT 5.2.7).**
 ///
+
 /// Discharges `msfs_aft_iota_r`: the (ι, r) reflective subcategory
 /// pair for `S_S^global ↪ cF` exists under SAFT preconditions +
 /// fully-faithful inclusion.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::reflective_subcategory::build_reflective_subcategory(...)`.
 @framework(msfs, "Bridge — kernel reflective_subcategory::build_reflective_subcategory (HTT 5.2.7 + Lemma 10.3)")
@@ -315,11 +344,13 @@ public axiom kernel_reflective_subcategory_aft() -> Bool
 
 /// **Bridge: Whitehead promotion — TRUSTED-BASE-SHRINKAGE primitive.**
 ///
+
 /// Discharges `msfs_id_x_violates_pi_4` at higher (∞,n)-levels by
 /// replacing the bridge-audited equivalence claim with a per-level
-/// `π_k`-iso-witness check.  Whitehead-promoted equivalences carry
+/// `π_k`-iso-witness check. Whitehead-promoted equivalences carry
 /// EMPTY `BridgeAudit` — strictly shrinks the trusted boundary.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::whitehead::whitehead_promote(criterion, audit)`
 /// produces an `InfinityEquivalence` without touching `audit`.
@@ -334,9 +365,11 @@ public axiom kernel_whitehead_promote() -> Bool
 
 /// **Bridge: Pointwise colimit in `PSh(C)` (HTT 5.1.2.3).**
 ///
+
 /// Discharges `msfs_s_s_closed_under_colimits`: presheaf categories
 /// admit all small colimits, computed pointwise.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::limits_colimits::compute_colimit_in_psh(diagram)`.
 @framework(msfs, "Bridge — kernel limits_colimits::compute_colimit_in_psh (HTT 5.1.2.3)")
@@ -347,6 +380,7 @@ public axiom kernel_compute_colimit() -> Bool
 /// **Bridge: Pullback / Pushout / Equaliser / Coequaliser builders
 /// (HTT 4.4 specialised).**
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::limits_colimits::{build_pullback, build_pushout,
 /// build_equaliser, build_coequaliser}`.
@@ -361,10 +395,12 @@ public axiom kernel_specialised_limits() -> Bool
 
 /// **Bridge: n-truncation `τ_{≤n}(x)` (HTT 5.5.6).**
 ///
+
 /// Used by `msfs_id_x_violates_pi_4` proof body for level descent:
 /// `τ_{≤n}(id_X) ≃ id_{τ_{≤n}(X)}` propagates the violation argument
 /// through the level hierarchy.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::truncation::truncate_to_level(x, c, n)`.
 @framework(msfs, "Bridge — kernel truncation::truncate_to_level (HTT 5.5.6)")
@@ -378,8 +414,10 @@ public axiom kernel_truncate_to_level() -> Bool
 
 /// **Bridge: Epi-mono factorisation (HTT 5.2.8.4).**
 ///
+
 /// Discharges `msfs_epi_mono_factorisation`.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::factorisation::build_epi_mono_factorisation(c)`.
 @framework(msfs, "Bridge — kernel factorisation::build_epi_mono_factorisation (HTT 5.2.8.4)")
@@ -389,9 +427,11 @@ public axiom kernel_epi_mono_factorisation() -> Bool
 
 /// **Bridge: n-truncation factorisation (HTT 5.2.8.16).**
 ///
+
 /// Discharges `msfs_n_truncation_factorisation`: the
 /// (n-connected, n-truncated) factorisation system.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::factorisation::build_n_truncation_factorisation(c, n)`.
 @framework(msfs, "Bridge — kernel factorisation::build_n_truncation_factorisation (HTT 5.2.8.16)")
@@ -405,10 +445,12 @@ public axiom kernel_n_truncation_factorisation() -> Bool
 
 /// **Bridge: Pronk's bicategory of fractions `C[W^{-1}]`.**
 ///
+
 /// Discharges `diakrisis_pronk_bicat_fractions`: the AC/OC duality
 /// classifier in Diakrisis 16.10 is constructed as Pronk's bicategory
 /// of fractions on `(LegitimateAbstraction, S-pop equivalences)`.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::pronk_fractions::build_bicat_of_fractions(c, w, axioms)`.
 @framework(diakrisis, "Bridge — kernel pronk_fractions::build_bicat_of_fractions (Pronk 1996, BF1–BF5)")
@@ -422,10 +464,12 @@ public axiom kernel_pronk_bicat_fractions() -> Bool
 
 /// **Bridge: (∞,1)-topos under HTT 6.1.0.4 Giraud axioms.**
 ///
+
 /// Discharges `msfs_s_s_is_infty_topos`: `S_S^global` is an
 /// (∞,1)-topos via its left-exact localisation of
 /// `PSh(LegitimateAbstraction)`.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::infinity_topos::build_infinity_topos(...)`.
 @framework(msfs, "Bridge — kernel infinity_topos::build_infinity_topos (HTT 6.1)")
@@ -439,10 +483,12 @@ public axiom kernel_infinity_topos() -> Bool
 
 /// **Bridge: Kernel rule ↔ ZFC + 2-inacc decomposition.**
 ///
+
 /// For every kernel rule (K-Refine, K-Univ, K-Pos, K-Norm, K-FwAx,
 /// K-Adj-Unit, K-Adj-Counit), the kernel exposes the precise ZFC
 /// axioms + Grothendieck universes required to model it.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::zfc_self_recognition::required_meta_theory(rule)`
 /// returns a `MetaTheoryRequirements` record.
@@ -453,10 +499,12 @@ public axiom kernel_zfc_self_recognition() -> Bool
 
 /// **Bridge: Recursive functions + Gödel coding.**
 ///
+
 /// Cantor pairing + primitive recursive function evaluation
 /// (Zero/Succ/Proj/Comp/PrimRec) + bounded μ-recursion + recursive
 /// AST encoding to ℕ.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::godel_coding::{cantor_pair, PrimitiveRecursive::eval,
 /// MuRecursive::eval, GodelEncoding::encode}`.
@@ -467,12 +515,14 @@ public axiom kernel_godel_coding() -> Bool
 
 /// **Bridge: Industrial-grade tactics.**
 ///
+
 /// Five deterministic decision-procedure tactics:
 /// `tactic_lia` (LIA), `tactic_decide` (truth-table tautology),
 /// `tactic_induction` (ℕ-induction), `tactic_congruence` (EUF),
-/// `tactic_eauto` (depth-bounded back-chain).  Each returns a
+/// `tactic_eauto` (depth-bounded back-chain). Each returns a
 /// re-checkable `TacticOutcome::{Closed, Open}`.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::tactics_industrial::{tactic_lia, tactic_decide,
 /// tactic_induction, tactic_congruence, tactic_eauto}`.
@@ -483,10 +533,12 @@ public axiom kernel_tactics_industrial() -> Bool
 
 /// **Bridge: Cross-format CI hard gate.**
 ///
+
 /// Verum proofs export to Coq / Lean 4 / Isabelle/HOL / Dedukti.
 /// The hard gate decides whether a given artefact survives the
 /// round-trip through every required backend.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::cross_format_gate::evaluate_gate(report)`.
 @framework(verum, "Bridge — kernel cross_format_gate::evaluate_gate (4-format CI)")
@@ -496,10 +548,12 @@ public axiom kernel_cross_format_gate() -> Bool
 
 /// **Bridge: Mechanisation roadmap.**
 ///
+
 /// HTT (Lurie 2009) + AR 1994 chapter-by-chapter mechanisation
 /// status enumeration with `MechanisationStatus::{Mechanised,
 /// Partial, AxiomCited, Pending, OutOfScopeForMsfs}` per section.
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::mechanisation_roadmap::{htt_roadmap,
 /// adamek_rosicky_roadmap, CoverageReport::compute}`.
@@ -514,11 +568,13 @@ public axiom kernel_mechanisation_roadmap() -> Bool
 
 /// **Bridge: MSFS self-containment witness.**
 ///
+
 /// Returns `true` iff MSFS is fully self-contained modulo
 /// ZFC + 2 inaccessibles — i.e. every HTT and Adámek-Rosický
 /// dependency cited by an MSFS proof body is mechanised, partial,
 /// or marked `OutOfScopeForMsfs` (NOT cited by any MSFS proof).
 ///
+
 /// Kernel discharge:
 /// `verum_kernel::mechanisation_roadmap::msfs_self_contained()`
 /// computes the predicate from the live roadmap data; this bridge

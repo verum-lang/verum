@@ -2,46 +2,54 @@
 //! the type-theoretic results currently outside the Verum kernel's
 //! decidable fragment.
 //!
-//! This module is the **trusted boundary** for K-Round-Trip V2's
+
+//! This module is the **trusted boundary** for K-Round-Trip's
 //! universal canonicalize. Each admit names a specific Diakrisis
 //! preprint result (paragraph + theorem number); when the preprint
 //! resolves and the result lands in the kernel as a structural
 //! algorithm, the corresponding admit is removed and call sites are
 //! re-checked against the now-derivable lemma.
 //!
+
 //! # Why bridge admits, not silent assumptions
 //!
+
 //! Pre-V2 the round-trip rule had a single error variant
-//! (`KernelError::RoundTripFailed`) that fired whenever the V0/V1
+//! (`KernelError::RoundTripFailed`) that fired whenever the
 //! decidable fragment couldn't admit a pair. Calls into the universal
 //! algorithm were either rejected or had to be discharged by an ad-hoc
 //! `@framework(...)` axiom citation in user code. V2 closes this gap
 //! by making the dependency explicit at the kernel surface:
 //!
-//!   * `BridgeId::ConfluenceOfModalRewrite` — Diakrisis Theorem 16.10
-//!     confluence of the (Box / Diamond / Shape / Flat / Sharp)
-//!     rewrite system. Required when two canonical-form paths over
-//!     a modal subterm produce structurally-different normal forms;
-//!     the bridge asserts they meet at a common further reduct.
+
+//!  * `BridgeId::ConfluenceOfModalRewrite` — Diakrisis Theorem 16.10
+//!  confluence of the (Box / Diamond / Shape / Flat / Sharp)
+//!  rewrite system. Required when two canonical-form paths over
+//!  a modal subterm produce structurally-different normal forms;
+//!  the bridge asserts they meet at a common further reduct.
 //!
-//!   * `BridgeId::QuotientCanonicalRepresentative` — Diakrisis
-//!     Theorem 16.7 canonical-representative selector for
-//!     `Quotient(base, equiv)`. Required when two terms differ
-//!     only in their choice of equivalence-class representative.
+
+//!  * `BridgeId::QuotientCanonicalRepresentative` — Diakrisis
+//!  Theorem 16.7 canonical-representative selector for
+//!  `Quotient(base, equiv)`. Required when two terms differ
+//!  only in their choice of equivalence-class representative.
 //!
-//!   * `BridgeId::CohesiveAdjunctionUnitCounit` — Diakrisis Theorem
-//!     14.3 unit/counit naturality for the (∫ ⊣ ♭ ⊣ ♯) cohesive
-//!     adjunction triple. Required for `Flat(Sharp(x))` collapse
-//!     under the right adjoint side.
+
+//!  * `BridgeId::CohesiveAdjunctionUnitCounit` — Diakrisis Theorem
+//!  14.3 unit/counit naturality for the (∫ ⊣ ♭ ⊣ ♯) cohesive
+//!  adjunction triple. Required for `Flat(Sharp(x))` collapse
+//!  under the right adjoint side.
 //!
-//!   * `BridgeId::EpsMuTauWitness` — Diakrisis Axiom A-3 σ_α / π_α
-//!     τ-witness construction. The K-Eps-Mu rule's V3-incremental
-//!     decides necessary conditions structurally; the V3-final
-//!     sufficient witness construction (σ_α from the Code_S
-//!     morphism + π_α from Perform_{ε_math} naturality through
-//!     axiom A-3) is the residual preprint-blocked step. V3-final
-//!     surfaces the construction as this admit.
+
+//!  * `BridgeId::EpsMuTauWitness` — Diakrisis Axiom A-3 σ_α / π_α
+//!  τ-witness construction. The K-Eps-Mu rule's
+//!  decides necessary conditions structurally; the
+//!  sufficient witness construction (σ_α from the Code_S
+//!  morphism + π_α from Perform_{ε_math} naturality through
+//!  axiom A-3) is the residual preprint-blocked step.
+//!  surfaces the construction as this admit.
 //!
+
 //! Each admit has a kernel re-check facade — `check_<bridge>` —
 //! that audits the bridge invocation site (recording the
 //! [`BridgeAdmit`] in a returned audit trail) but does NOT verify
@@ -49,8 +57,10 @@
 //! (`vcs/red-team/round-1-architecture.md`, the `verum audit
 //! --proof-honesty` walker) enumerate every bridge-admit usage.
 //!
+
 //! # Future direction (V3 promotion)
 //!
+
 //! When Diakrisis 16.10 confluence lands as a structural algorithm,
 //! `check_confluence_of_modal_rewrite` is rewritten to actually
 //! compute the common reduct (instead of admitting it) and the
@@ -75,7 +85,7 @@ pub enum BridgeId {
     ConfluenceOfModalRewrite,
 
     /// Diakrisis Theorem 16.7 — canonical-representative selector
-    /// for `Quotient(base, equiv)`.  Decidable equality of quotient
+    /// for `Quotient(base, equiv)`. Decidable equality of quotient
     /// representatives modulo the equivalence relation.
     QuotientCanonicalRepresentative,
 
@@ -86,16 +96,16 @@ pub enum BridgeId {
     CohesiveAdjunctionUnitCounit,
 
     /// Diakrisis Axiom A-3 — σ_α / π_α τ-witness for the K-Eps-Mu
-    /// naturality rule. V3-incremental decides the necessary
+    /// naturality rule. decides the necessary
     /// conditions (depth preservation, free-variable preservation,
     /// β-normalisation invariance) structurally; this admit covers
-    /// the V3-final sufficient witness construction
+    /// the sufficient witness construction
     /// (σ_α from the Code_S morphism + π_α from
     /// Perform_{ε_math} naturality).
     EpsMuTauWitness,
 
     /// Diakrisis Lemma 131.L4 — extended Drake reflection beyond
-    /// the Theorem 134.T tight κ_2 bound. K-Universe-Ascent V2 invokes
+    /// the Theorem 134.T tight κ_2 bound. K-Universe-Ascent invokes
     /// this admit for κ_n → κ_n stabilisation at n ≥ 3 (arbitrary
     /// inaccessible tier) and for multi-step ascents (κ_s → κ_t with
     /// t > s+1). The structural Drake-reflection algorithm beyond κ_2
@@ -137,7 +147,7 @@ impl BridgeId {
     }
 }
 
-/// One bridge-admit invocation. Captured by the V2 canonicalize
+/// One bridge-admit invocation. Captured by the canonicalize
 /// algorithm so audit walkers can enumerate every reliance on a
 /// preprint-blocked result.
 #[derive(Debug, Clone, PartialEq)]
@@ -149,8 +159,8 @@ pub struct BridgeAdmit {
 }
 
 /// Audit trail for a canonicalize / round-trip run. Empty trail means
-/// the algorithm completed entirely within the V0/V1 decidable
-/// fragment; non-empty trail means the V2 universal path admitted
+/// the algorithm completed entirely within the decidable
+/// fragment; non-empty trail means the universal path admitted
 /// at least one preprint-blocked claim.
 #[derive(Debug, Clone, Default)]
 pub struct BridgeAudit {
@@ -201,9 +211,10 @@ impl BridgeAudit {
 /// Bridge invocation: confluence of modal rewrites. Admits without
 /// re-deriving — V3 will replace this with a structural algorithm.
 ///
+
 /// Returns the LHS unchanged (the bridge does not perform any
 /// reduction; it is purely an audit-recording hook). Callers that
-/// need the modal subterm normalized should still apply the V0/V1
+/// need the modal subterm normalized should still apply the
 /// rewrites before invoking the bridge.
 pub fn admit_confluence_of_modal_rewrite(
     audit: &mut BridgeAudit,
@@ -235,7 +246,7 @@ pub fn admit_cohesive_adjunction_unit_counit(
 }
 
 /// Bridge invocation: K-Eps-Mu σ_α / π_α τ-witness construction.
-/// V3-final hands off to this admit when V3-incremental gates pass
+/// hands off to this admit when gates pass
 /// but the sufficient witness construction is still preprint-blocked
 /// on Diakrisis A-3. The term is returned unchanged — purely an
 /// audit-recording hook. V3 promotion replaces the body with the
@@ -252,7 +263,8 @@ pub fn admit_eps_mu_tau_witness(
 /// Bridge invocation: extended Drake reflection beyond the κ_2
 /// tight-bound terminus (Diakrisis Lemma 131.L4).
 ///
-/// K-Universe-Ascent V2 invokes this when verifying ascents that
+
+/// K-Universe-Ascent invokes this when verifying ascents that
 /// reach an inaccessible κ_n with n ≥ 3, or that span more than
 /// one tier in a single step (κ_s → κ_t with t > s+1).
 pub fn admit_drake_reflection_extended(

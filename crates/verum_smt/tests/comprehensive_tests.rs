@@ -14,9 +14,11 @@
 )]
 //! Comprehensive SMT Solver Tests
 //!
+
 //! Exhaustive testing of Z3 integration and SMT verification.
 //! Coverage target: 60% → 95%
 //!
+
 //! Test categories:
 //! - Z3 basic theories (arithmetic, boolean, arrays, bitvectors)
 //! - Quantifier elimination and instantiation
@@ -27,26 +29,32 @@
 //! - Parallel solving
 //! - Refinement type verification
 //!
+
 //! IMPORTANT: These tests use deprecated Z3 API patterns from z3-rs < 0.19.
 //!
+
 //! **WHY DISABLED**: Z3-rs 0.19+ changed the API:
 //! - OLD: `Int::new_const("x")`
 //! - NEW: `Int::new_const(&ctx, "x")` (requires context parameter)
 //! - OLD: `x.add(&[&y])`
 //! - NEW: `Int::add(&ctx, &[&x, &y])` (static method with context)
 //!
+
 //! **TO FIX**: Requires rewriting all 851 lines of tests to:
 //! 1. Create Z3 Config and Context in each test
 //! 2. Pass context to all Int/Bool/Array construction
 //! 3. Use new static method signatures
 //!
+
 //! **ESTIMATED EFFORT**: 20-30 hours
 //!
+
 //! **DECISION NEEDED**:
 //! - Option A: Budget time to rewrite using current Z3 API
 //! - Option B: Delete and create focused integration tests when needed
 //! - Option C: Create test harness that manages Z3 contexts
 //!
+
 //! Tests require Z3 API migration: forall_const, exists_const, Context params (~20-30 hours).
 
 // REQUIRES Z3 API MIGRATION (~20-30 hours): forall_const, exists_const, Context params

@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 — fts5/merger.vr
 //
+
 // When level-N has accumulated `merge_threshold` segments, the merger
 // fuses them into a single level-(N+1) segment. This compaction is
 // what keeps lookup cost logarithmic in number-of-documents rather
 // than linear in number-of-writes.
 //
+
 // The merger is *idempotent* — running it twice produces identical
 // state — and *level-by-level*: a single `compact_step` promotes
 // one level only, so the overall throughput is bounded.

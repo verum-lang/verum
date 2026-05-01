@@ -2,8 +2,9 @@
 // mesh/xds/mod.vr — Envoy xDS v3 (ADS) client
 // =============================================================================
 // Spec: https://www.envoyproxy.io/docs/envoy/latest/api-docs/xds_protocol
-//       https://github.com/envoyproxy/envoy/blob/main/api/envoy/service/discovery/v3/ads.proto
+//  https://github.com/envoyproxy/envoy/blob/main/api/envoy/service/discovery/v3/ads.proto
 //
+
 // The Aggregated Discovery Service (ADS) multiplexes Listener (LDS),
 // Cluster (CDS), Route (RDS), Endpoint (EDS), and Secret (SDS)
 // resource subscriptions over a single bi-directional gRPC stream.
@@ -11,15 +12,17 @@
 // HTTP2 + protobuf, backed by our core.net.http2 + core.protobuf
 // layers at runtime via the verum.xds.* intrinsic family.
 //
+
 // # Module layout
 //
+
 // ```
 // core.mesh.xds
-// ├── mod.vr         — re-exports
-// ├── types.vr       — TypeUrls + ResourceName + Node metadata
-// ├── resources.vr   — Typed resource parsers (LDS / CDS / RDS / EDS)
-// ├── client.vr      — ADS gRPC stream client
-// └── error.vr       — XdsError
+// ├── mod.vr — re-exports
+// ├── types.vr — TypeUrls + ResourceName + Node metadata
+// ├── resources.vr — Typed resource parsers (LDS / CDS / RDS / EDS)
+// ├── client.vr — ADS gRPC stream client
+// └── error.vr — XdsError
 // ```
 // =============================================================================
 

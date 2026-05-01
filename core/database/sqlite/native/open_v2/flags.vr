@@ -1,7 +1,7 @@
 // =============================================================================
 // open_v2/flags.vr — SQLITE_OPEN_* bitmap
 // =============================================================================
-// Spec: SQLite C API.  These mirror the sqlite3.h constants 1:1.
+// Spec: SQLite C API. These mirror the sqlite3.h constants 1:1.
 // =============================================================================
 
 module core.database.sqlite.native.open_v2.flags;

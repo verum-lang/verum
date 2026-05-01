@@ -1,49 +1,60 @@
 //! Production-quality incremental parsing support.
 //!
+
 //! Enables efficient re-parsing when source is edited by:
 //! 1. Tracking text changes (insertions, deletions, replacements)
 //! 2. Identifying the smallest affected subtree using node stability analysis
 //! 3. Re-parsing only that subtree with proper context
 //! 4. Replacing it in the green tree using structural sharing
 //!
+
 //! # Key Concepts
 //!
+
 //! ## Node Stability
 //!
+
 //! A node is "stable" if it can be independently re-parsed without affecting
 //! surrounding nodes. Stable boundaries include:
 //! - Top-level items (functions, types, imports)
 //! - Blocks delimited by braces
 //! - Statements ending with semicolons
 //!
+
 //! ## Reparse Context
 //!
+
 //! When re-parsing a subtree, we need to know what parsing rule to use:
 //! - SOURCE_FILE nodes use module parsing
 //! - FN_DEF nodes use function definition parsing
 //! - BLOCK nodes use block parsing
 //! - LET_STMT nodes use statement parsing
 //!
+
 //! ## Structural Sharing
 //!
+
 //! Green trees store relative widths, not absolute offsets. This enables
 //! O(log n) updates: only the path from the edit to the root needs recreation.
 //!
+
 //! # Performance Targets
 //!
+
 //! - Single character edit: < 5ms
 //! - Multi-line edit (< 10 lines): < 20ms
 //! - Large edit (> 10 lines): Falls back to full reparse
 //!
+
 //! Incremental Parsing Algorithm:
 //! 1. Find smallest affected subtree containing the edit (walk down green tree)
 //! 2. Compute local edit coordinates relative to subtree start
 //! 3. Re-parse only that subtree using appropriate parsing rule based on node kind
-//!    (SOURCE_FILE -> module, FN_DEF -> function, BLOCK -> block, etc.)
+//!  (SOURCE_FILE -> module, FN_DEF -> function, BLOCK -> block, etc.)
 //! 4. Replace subtree in green tree via O(log n) path update with structural sharing
-//!    Stable boundaries for subtree detection: top-level items, brace-delimited blocks,
-//!    semicolon-terminated statements. Heuristic: use incremental if edit < 20% of tree.
-//!    Falls back to full reparse for edits spanning >10 lines.
+//!  Stable boundaries for subtree detection: top-level items, brace-delimited blocks,
+//!  semicolon-terminated statements. Heuristic: use incremental if edit < 20% of tree.
+//!  Falls back to full reparse for edits spanning >10 lines.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -57,6 +68,7 @@ use crate::{GreenChild, GreenNode, SyntaxKind, TextRange, TextSize};
 
 /// Represents a text edit (insertion, deletion, or replacement).
 ///
+
 /// Edits are described in terms of the original text coordinates.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextEdit {
@@ -327,6 +339,7 @@ impl NodeStabilityAnalyzer {
 
     /// Check if an edit is contained within stable boundaries.
     ///
+
     /// Returns true if the edit doesn't cross delimiter tokens like braces.
     pub fn edit_is_contained(node: &GreenNode, edit: &TextEdit) -> bool {
         // If edit spans the entire node, it's not contained
@@ -428,6 +441,7 @@ impl IncrementalStats {
 
 /// Incremental update engine.
 ///
+
 /// This is the core engine for incremental parsing. It:
 /// 1. Finds the smallest affected subtree for an edit
 /// 2. Determines if incremental parsing is beneficial
@@ -459,10 +473,12 @@ impl IncrementalEngine {
 
     /// Find the smallest subtree affected by an edit.
     ///
+
     /// This traverses the tree to find the smallest containing node that:
     /// 1. Fully contains the edit range
     /// 2. Is stable (can be independently reparsed)
     ///
+
     /// Returns the path to the affected node and the node itself.
     pub fn find_affected_subtree(
         &mut self,
@@ -595,6 +611,7 @@ impl IncrementalEngine {
 
     /// Apply an edit to the green tree incrementally.
     ///
+
     /// Returns the new root node with the edit applied.
     pub fn apply_edit<F>(
         &mut self,
@@ -737,6 +754,7 @@ impl IncrementalEngine {
 
     /// Check if incremental parsing is beneficial.
     ///
+
     /// Returns false if the edit is large enough that full reparse is faster.
     pub fn should_use_incremental(&self, root: &GreenNode, edit: &TextEdit) -> bool {
         let tree_size = root.width() as usize;
@@ -775,6 +793,7 @@ impl IncrementalEngine {
 
 /// Change tracker for batching and merging document edits.
 ///
+
 /// This is designed for LSP integration where multiple edits may come
 /// in rapid succession and need to be processed together.
 #[derive(Debug)]
@@ -846,6 +865,7 @@ impl ChangeTracker {
 
     /// Merge adjacent/overlapping edits for efficiency.
     ///
+
     /// This is called before applying edits to reduce the number of
     /// incremental parse operations needed.
     pub fn merge_edits(&mut self) {
@@ -888,6 +908,7 @@ impl ChangeTracker {
 
     /// Apply all pending edits to source text.
     ///
+
     /// Edits are applied in reverse order (last edit first) to maintain
     /// correct positions.
     pub fn apply_all(&self, mut source: String) -> String {
@@ -900,6 +921,7 @@ impl ChangeTracker {
 
     /// Compose pending edits into a single edit if possible.
     ///
+
     /// Returns None if edits cannot be composed (non-contiguous).
     pub fn compose(&self) -> Option<TextEdit> {
         if self.pending_edits.is_empty() {

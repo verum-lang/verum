@@ -2,6 +2,7 @@
 // core.math.stack_model — (∞,2)-stack semantics + κ-universe tower (VVA-3)
 // =============================================================================
 //
+
 // Operational realisation of the (∞,2)-stack model that underlies the
 // canonical-primitive 13-axiom system. Theoretical foundation: the
 // `core.math.frameworks.diakrisis_stack_model` package; this module
@@ -9,26 +10,31 @@
 // about universe levels, descent data, and the meta-classifier
 // reflection.
 //
+
 // The Cat-model used as the Verum baseline (the standard six-pack +
 // owl2_fs) is the canonical truncation of this stack model:
 //
-//     CatBaseline ≃ truncate(stack_model, level = 2, universe = κ_1)
+
+//  CatBaseline ≃ truncate(stack_model, level = 2, universe = κ_1)
 //
+
 // Working at the full stack-model level becomes necessary whenever
 // any axiom requires Axi-7 / Axi-8 non-triviality (the 14.T2 family of
 // witnesses), at which point the Cat-truncation is insufficient.
 //
+
 // V0 (this file) ships:
-//   • `Universe` enum with κ_1 / κ_2 levels (no κ_3 per the tight
-//     bound Theorem 134.T).
-//   • `StackArticulation` protocol extending `Articulation` with
-//     `universe_level`, `stack_object`, `descent_data`.
-//   • `meta_classify_stack` — operational image of M_stack
-//     (foundation-neutral name; the diakrisis citation is recorded
-//     via the framework annotation).
-//   • Trusted-boundary axioms for the four key 131.T sub-results +
-//     the truncation theorem.
+//  • `Universe` enum with κ_1 / κ_2 levels (no κ_3 per the tight
+//  bound Theorem 134.T).
+//  • `StackArticulation` protocol extending `Articulation` with
+//  `universe_level`, `stack_object`, `descent_data`.
+//  • `meta_classify_stack` — operational image of M_stack
+//  (foundation-neutral name; the diakrisis citation is recorded
+//  via the framework annotation).
+//  • Trusted-boundary axioms for the four key 131.T sub-results +
+//  the truncation theorem.
 //
+
 // LOC budget: 3000 LOC stdlib total per VVA-3 V0 plan; ~200 LOC
 // kernel rule (`K-Universe-Ascent`) deferred to V1 once kernel work
 // schedules.
@@ -87,6 +93,7 @@ public fn universe_lt(a: Universe, b: Universe) -> Bool {
 /// representative stack-object, and descent data witnessing the
 /// hyperdescent property.
 ///
+
 /// Concrete reasoners furnish their own implementation per their
 /// supported universe range. The Cat-baseline implementation pins
 /// `universe_level = Truncated` for every articulation; the full
@@ -109,8 +116,9 @@ public type StackArticulation is protocol {
 /// to κ_2-articulations (universe ascent); by Lemma 131.L3 the lift
 /// is INTERNAL at κ_2 (no further ascent — Drake reflection closure).
 ///
-/// V0 form: trusted-boundary signature + axiom characterisation.
-/// V1 will wire the actual stack-classification computation.
+
+/// current form: trusted-boundary signature + axiom characterisation.
+/// Future work will wire the actual stack-classification computation.
 @enact(epsilon = "ω·2")
 /// V3 form: ensures the input articulation has a well-defined
 /// universe level (the stack-classification result is internal at
@@ -146,7 +154,8 @@ public axiom meta_classify_stack_kappa_2_closure<S: StackArticulation>(f: S) -> 
 /// the stack model. This is the obstruction that prevents Axi-8 from
 /// collapsing back into the Cat-baseline.
 ///
-/// V0 form: trusted-boundary axiom; V1 will surface a constructive
+
+/// current form: trusted-boundary axiom; Future work will surface a constructive
 /// witness (the canonical non-representable cocone) for use by
 /// downstream reasoners.
 /// V3 form: parameterised over the candidate κ — ensures the
@@ -168,8 +177,10 @@ public axiom stack_tower_colimit_not_representable(u: Universe) -> Bool
 /// the seven coordinate-point frameworks) is the canonical truncation
 /// of the stack-model:
 ///
-///     CatBaseline ≃ truncate(stack_model, level = 2, universe = κ_1).
+
+///  CatBaseline ≃ truncate(stack_model, level = 2, universe = κ_1).
 ///
+
 /// Operational consequence: any verification that completes inside
 /// the Cat-baseline lifts trivially to the full stack model.
 /// Verification that requires Axi-8 non-triviality CANNOT be done in
@@ -189,6 +200,7 @@ public axiom cat_baseline_is_truncation_of_stack(truncation_level: Universe) -> 
 /// is insufficient (Axi-7 / Axi-8 fail to realise); 3 is unnecessary
 /// (Drake reflection at κ_2 closes the tower).
 ///
+
 /// Operational consequence: the `Universe` enum has exactly two
 /// non-trivial levels (κ_1 and κ_2). Adding `Kappa3` to the enum
 /// would be a structural error.
@@ -212,7 +224,8 @@ public axiom tight_2_inaccessibles_bound(u: Universe) -> Bool
 /// witness; in the Cat-baseline it would *fail* (per Theorem 14.T2),
 /// but in the full stack model it *holds* (per Theorem 131.T Step 3).
 ///
-/// V0 form: trusted-boundary axiom; downstream reasoners that depend
+
+/// current form: trusted-boundary axiom; downstream reasoners that depend
 /// on Axi-8 non-triviality cite this through the framework annotation.
 /// V3 form: parameterised over the StackArticulation witness whose
 /// universe-level the meta-classifier would have to represent —

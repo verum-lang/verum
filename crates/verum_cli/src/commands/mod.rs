@@ -49,7 +49,7 @@ pub mod tactic;
 /// users / IDE / CI can inspect / list / clear / probe the
 /// per-theorem closure-hash incremental verification cache.
 pub mod cache_closure;
-/// `verum doc-render` subcommand — auto-paper generator.  Walks
+/// `verum doc-render` subcommand — auto-paper generator. Walks
 /// every `.vr` file, projects @theorem / @lemma / @corollary /
 /// @axiom to typed `DocItem`s, and renders Markdown / LaTeX / HTML
 /// via `verum_verification::doc_render::DefaultDocRenderer`.
@@ -60,20 +60,20 @@ pub mod doc_render;
 /// back to the source via `@framework(<system>, "<source>:<line>")`.
 pub mod foreign_import;
 /// `verum llm-tactic` subcommand — LCF-style fail-closed LLM proof
-/// proposer.  The LLM may propose tactic sequences but the kernel
+/// proposer. The LLM may propose tactic sequences but the kernel
 /// re-checks every step before committing.
 pub mod llm_tactic;
 /// `verum proof-repl` subcommand — non-interactive batch driver
-/// for the proof REPL state machine.  Apply tactics, undo / redo,
+/// for the proof REPL state machine. Apply tactics, undo / redo,
 /// hint, visualise the proof tree.
 pub mod proof_repl;
 /// `verum benchmark` subcommand — head-to-head comparison surface
-/// (#83).  Runs the configured suite against one or more systems
+/// (#83). Runs the configured suite against one or more systems
 /// (Verum / Coq / Lean4 / Isabelle / Agda) and emits a typed
 /// comparison matrix.
 pub mod benchmark;
 /// `verum cert-replay` subcommand — multi-backend SMT certificate
-/// cross-validation.  Kernel-only structural check + per-backend
+/// cross-validation. Kernel-only structural check + per-backend
 /// replay + multi-backend consensus gate.
 pub mod cert_replay;
 /// `verum cog-registry` subcommand — interact with the cog

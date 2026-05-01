@@ -5,28 +5,34 @@
 // Dependencies: core, collections, .{frame, settings, error, qpack, request}
 // =============================================================================
 //
+
 // Pure-Verum HTTP/3 connection driver that sits above the QUIC
 // transport (core.net.quic.connection_sm). Doesn't touch sockets or
 // CRYPTO frames directly — works on decoded QUIC stream bytes:
 //
-//   on_uni_stream(stream_id, bytes) — peer opened a unidirectional
-//                                      stream; first byte(s) are the
-//                                      stream-type prefix.
-//   on_bidi_stream(stream_id, bytes) — peer opened a request stream.
-//   on_peer_fin(stream_id)           — stream ended (EOF).
-//   drain_outbound() -> List<StreamWrite>
-//                                     — bytes to push onto peer-
-//                                      facing QUIC streams.
+
+//  on_uni_stream(stream_id, bytes) — peer opened a unidirectional
+//  stream; first byte(s) are the
+//  stream-type prefix.
+//  on_bidi_stream(stream_id, bytes) — peer opened a request stream.
+//  on_peer_fin(stream_id) — stream ended (EOF).
+//  drain_outbound() -> List<StreamWrite>
+//  — bytes to push onto peer-
+//  facing QUIC streams.
 //
+
 // Internal state machine:
 //
-//   Initial
-//     └── emit control stream with SETTINGS ──▶ AwaitingPeerControl
-//                                               └── peer SETTINGS received
-//                                                   ──▶ Established
+
+//  Initial
+//  └── emit control stream with SETTINGS ──▶ AwaitingPeerControl
+//  └── peer SETTINGS received
+//  ──▶ Established
 //
+
 // Once Established, peers can open request streams at will.
 //
+
 // =============================================================================
 
 module core.net.h3.connection;
@@ -313,7 +319,7 @@ implement H3Connection {
             PeerUniKind.UnknownUni { buf: pending } => {
                 // Stream type prefix is a QUIC varint (1-8 B); a TCP /
                 // TLS-record split can deliver it across multiple
-                // on_uni_stream calls.  Append, then attempt to parse.
+                // on_uni_stream calls. Append, then attempt to parse.
                 pending.extend_from_slice(bytes);
                 match decode_stream_type(pending.as_slice()) {
                     Ok((uk, pos)) => {
@@ -339,7 +345,7 @@ implement H3Connection {
                         }
                     },
                     Err(_) => {
-                        // Prefix incomplete — keep accumulating.  Cap the
+                        // Prefix incomplete — keep accumulating. Cap the
                         // buffer at 16 bytes (max QUIC varint is 8 B; 2x
                         // gives slack for malformed peers without unbounded
                         // memory growth) and drop the stream past that.

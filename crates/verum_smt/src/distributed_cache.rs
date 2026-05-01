@@ -1,30 +1,37 @@
 //! Distributed verification cache with S3, Redis, and filesystem backends
 //!
+
 //! Enables teams to share verification results across CI/CD pipelines,
 //! dramatically reducing verification time on unchanged code.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
-//! ┌─────────────┐     ┌─────────────────┐     ┌────────────────┐
-//! │ Local Cache │────►│ Distributed     │────►│ Remote Storage │
-//! │ (LRU)       │     │ Cache           │     │ (S3/Redis/FS)  │
-//! └─────────────┘     └─────────────────┘     └────────────────┘
-//!       │                     │                        │
-//!       │ Fast (µs)           │ Medium (ms)            │ Slow (10-100ms)
-//!       └─────────────────────┴────────────────────────┘
+//! ┌─────────────┐ ┌─────────────────┐ ┌────────────────┐
+//! │ Local Cache │────►│ Distributed │────►│ Remote Storage │
+//! │ (LRU) │ │ Cache │ │ (S3/Redis/FS) │
+//! └─────────────┘ └─────────────────┘ └────────────────┘
+//!  │ │ │
+//!  │ Fast (µs) │ Medium (ms) │ Slow (10-100ms)
+//!  └─────────────────────┴────────────────────────┘
 //! ```
 //!
+
 //! # Backend Options
 //!
+
 //! | Backend | Feature Flag | Use Case |
 //! |---------|--------------|----------|
 //! | S3 | `distributed-cache` | Team/CI sharing via cloud storage |
 //! | Redis | `redis-cache` | Low-latency team sharing |
 //! | Filesystem | (always available) | Local persistent fallback |
 //!
+
 //! # Features
 //!
+
 //! - **S3-compatible storage**: Works with AWS S3, MinIO, Cloudflare R2, etc.
 //! - **Redis storage**: Low-latency distributed caching for teams
 //! - **Filesystem fallback**: Persistent local cache when cloud unavailable
@@ -33,44 +40,52 @@
 //! - **TTL-based expiration**: Configurable max age for cache entries
 //! - **Local cache layer**: Minimize network round-trips
 //!
+
 //! # Example
 //!
+
 //! ```rust,no_run
 //! use verum_smt::distributed_cache::{DistributedCache, DistributedCacheConfig, TrustLevel, CachedResult};
 //! use verum_common::Maybe;
 //! use std::time::Duration;
 //!
+
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = DistributedCacheConfig {
-//!     storage_url: "s3://my-bucket/verum-cache".into(),
-//!     trust_level: TrustLevel::Signatures,
-//!     max_age: Duration::from_secs(30 * 24 * 60 * 60), // 30 days
-//!     credentials: Maybe::None,
-//!     filesystem_fallback: Maybe::Some(".verum/cache".into()),
-//!     redis_url: Maybe::None,
+//!  storage_url: "s3://my-bucket/verum-cache".into(),
+//!  trust_level: TrustLevel::Signatures,
+//!  max_age: Duration::from_secs(30 * 24 * 60 * 60), // 30 days
+//!  credentials: Maybe::None,
+//!  filesystem_fallback: Maybe::Some(".verum/cache".into()),
+//!  redis_url: Maybe::None,
 //! };
 //!
+
 //! let mut cache = DistributedCache::new(config);
 //!
+
 //! // Check if result is cached
 //! if let Maybe::Some(entry) = cache.get("some-key").await {
-//!     println!("Cache hit! Saved time: {}ms", entry.metadata.original_time_ms);
+//!  println!("Cache hit! Saved time: {}ms", entry.metadata.original_time_ms);
 //! } else {
-//!     // Run verification, then cache result
-//!     cache.put("some-key", CachedResult::Proved, 1500).await?;
+//!  // Run verification, then cache result
+//!  cache.put("some-key", CachedResult::Proved, 1500).await?;
 //! }
 //! # Ok(())
 //! # }
 //! ```
 //!
+
 //! # Enabling Features
 //!
+
 //! To use S3 backend:
 //! ```toml
 //! [dependencies]
 //! verum_smt = { version = "*", features = ["distributed-cache"] }
 //! ```
 //!
+
 //! To use Redis backend:
 //! ```toml
 //! [dependencies]
@@ -463,6 +478,7 @@ impl DistributedCache {
 
     /// Look up verification result
     ///
+
     /// First checks local cache, then falls back to remote storage.
     pub async fn get(&self, key: &str) -> Maybe<CacheEntry> {
         // 1. Check local cache first
@@ -606,6 +622,7 @@ impl DistributedCache {
 
     /// Fetch from S3-compatible storage
     ///
+
     /// Falls back to filesystem cache if S3 credentials are not available.
     #[cfg(feature = "distributed-cache")]
     async fn fetch_remote(&self, key: &str) -> Result<CacheEntry, DistributedCacheError> {
@@ -690,10 +707,12 @@ impl DistributedCache {
 
     /// Fetch from remote storage (filesystem fallback when S3 feature disabled)
     ///
+
     /// When the `distributed-cache` feature is disabled, this falls back to:
     /// 1. Redis (if `redis-cache` feature enabled and configured)
     /// 2. Filesystem cache (if `filesystem_fallback` configured)
     ///
+
     /// # Enabling S3 Support
     /// ```toml
     /// verum_smt = { version = "*", features = ["distributed-cache"] }
@@ -720,6 +739,7 @@ impl DistributedCache {
 
     /// Upload to S3-compatible storage
     ///
+
     /// If credentials are not available (neither in config nor environment),
     /// this method falls back to filesystem cache. This is useful for development
     /// and testing without S3 access.
@@ -814,10 +834,12 @@ impl DistributedCache {
 
     /// Upload to remote storage (filesystem fallback when S3 feature disabled)
     ///
+
     /// When the `distributed-cache` feature is disabled, this stores to:
     /// 1. Redis (if `redis-cache` feature enabled and configured)
     /// 2. Filesystem cache (if `filesystem_fallback` configured)
     ///
+
     /// # Enabling S3 Support
     /// ```toml
     /// verum_smt = { version = "*", features = ["distributed-cache"] }
@@ -1060,19 +1082,21 @@ impl DistributedCache {
 
     // ==================== Redis Backend ====================
     //
+
     // Redis is the *non-S3* fallback path: it is reachable only
     // when `distributed-cache` is OFF (the S3 fetch_remote /
-    // upload_remote variants don't consult Redis).  Cfg-gate the
+    // upload_remote variants don't consult Redis). Cfg-gate the
     // three Redis helpers on the same `not(distributed-cache)`
     // condition as the call sites at lines 706 / 830 to keep them
     // out of compilation when both features are on (the workspace
     // default), which avoids a `dead_code` lint without an
     // `#[allow]` crutch.
     //
+
     // Wiring Redis into the S3 path as a co-existing fallback is a
     // separate architectural change — would let `distributed-cache`
     // + `redis-cache` co-exist (S3 first, Redis on miss, filesystem
-    // last).  Until that lands, the cfg-pair below correctly tracks
+    // last). Until that lands, the cfg-pair below correctly tracks
     // reachability.
 
     /// Fetch entry from Redis cache
@@ -1233,6 +1257,7 @@ pub fn generate_cache_key(file_hash: &str, func_sig: &str, mode: &str) -> Text {
 
 /// Verify cryptographic signature using Ed25519
 ///
+
 /// SECURITY: This performs actual Ed25519 signature verification.
 /// Signatures are created using the signing key and verified using the
 /// corresponding verifying key. Invalid or tampered signatures will fail.
@@ -1314,6 +1339,7 @@ fn get_session_verifying_key() -> Option<VerifyingKey> {
 
 /// Parse S3 URL into (bucket, prefix, endpoint)
 ///
+
 /// Supports:
 /// - `s3://bucket/prefix` → (bucket, prefix, https://s3.amazonaws.com)
 /// - `s3://bucket/prefix?endpoint=https://custom.endpoint` → with custom endpoint
@@ -1495,6 +1521,7 @@ pub enum DistributedCacheError {
 
     /// Not yet implemented
     ///
+
     /// This error is returned when a feature is not available.
     /// Enable the corresponding feature flag to use this functionality:
     /// - `distributed-cache`: S3-compatible storage backend

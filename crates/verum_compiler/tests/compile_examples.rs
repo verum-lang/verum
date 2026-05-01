@@ -17,6 +17,7 @@
 
 //! Integration tests for compiling and running example programs
 //!
+
 //! Tests the end-to-end compilation pipeline with various example programs
 //! that exercise different language features.
 

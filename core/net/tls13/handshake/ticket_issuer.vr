@@ -3,15 +3,17 @@
 // =============================================================================
 // Layer: 5 (Network — TLS 1.3 core)
 // Dependencies: core, core.time, core.security.util.rng,
-//               core.net.tls13.{handshake.{messages, extension, resumption},
-//                                cipher_suite, keyschedule.schedule}
+//  core.net.tls13.{handshake.{messages, extension, resumption},
+//  cipher_suite, keyschedule.schedule}
 // =============================================================================
 //
+
 // RFC 8446 §4.6.1 — after the handshake completes (post client's
 // Finished), the server MAY emit one or more NewSessionTicket
 // messages on the application-data stream. Each ticket carries
 // enough state for the client to resume the session later.
 //
+
 // This module is the "glue" between `ServerConnected` (the final
 // state of server_sm) and the typed `NewSessionTicket` wire message.
 // Callers invoke `issue_post_handshake_ticket(...)` once per ticket
@@ -19,6 +21,7 @@
 // AEAD-sealed by the record layer (Content Type = Handshake) on
 // the 1-RTT server-traffic secret.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.ticket_issuer;

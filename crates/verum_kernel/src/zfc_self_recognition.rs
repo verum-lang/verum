@@ -1,59 +1,68 @@
 //! Kernel self-recognition vs. ZFC + 2 inaccessibles — V0
 //! algorithmic kernel rule.
 //!
+
 //! ## What this delivers
 //!
+
 //! Verum's trusted kernel is sound *relative* to a meta-theory; the
 //! conventional choice is **ZFC + 2 strongly inaccessible cardinals**
 //! (κ_1 < κ_2), the smallest fragment of set theory that:
 //!
-//!   1. Models every kernel-defining axiom (extensionality, pairing,
-//!      union, infinity, separation, replacement, foundation, choice).
-//!   2. Provides Grothendieck universes for the universe-tower
-//!      (`Type_0 ∈ Type_1 ∈ Type_2`) — one per inaccessible.
-//!   3. Houses the (∞,1)-categorical content (HTT lives in
-//!      ZFC + 1 inaccessible; the second inaccessible is needed
-//!      for the *meta*-classifier of (∞,1)-categories).
+
+//!  1. Models every kernel-defining axiom (extensionality, pairing,
+//!  union, infinity, separation, replacement, foundation, choice).
+//!  2. Provides Grothendieck universes for the universe-tower
+//!  (`Type_0 ∈ Type_1 ∈ Type_2`) — one per inaccessible.
+//!  3. Houses the (∞,1)-categorical content (HTT lives in
+//!  ZFC + 1 inaccessible; the second inaccessible is needed
+//!  for the *meta*-classifier of (∞,1)-categories).
 //!
+
 //! Pre-this-module the kernel's relative-consistency claim was
 //! folklore — there was no algorithmic surface that listed the seven
 //! kernel rules, decomposed each into its ZFC-axiom + universe-cardinal
 //! requirements, or decided whether a kernel-derivable judgement
 //! could be lifted into the meta-theory.
 //!
+
 //! ## V0 algorithmic surface
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   1. [`ZfcAxiom`] — the eight ZFC axioms (one ZFC-extension flag
-//!      per axiom; see Kunen 2011 Ch. III).
-//!   2. [`InaccessibleLevel`] — `Kappa1` / `Kappa2` (the two
-//!      Grothendieck universes Verum's universe-tower requires).
-//!   3. [`KernelRuleId`] — the seven rules: `K-Refine`, `K-Univ`,
-//!      `K-Pos`, `K-Norm`, `K-FwAx`, `K-Adj-Unit`, `K-Adj-Counit`.
-//!   4. [`MetaTheoryRequirements`] — per-rule decomposition record
-//!      `(zfc_axioms, inaccessibles)` listing exactly which
-//!      meta-theoretic assumptions the rule rests on.
-//!   5. [`required_meta_theory(rule)`] — algorithmic decomposition.
-//!   6. [`is_zfc_plus_2_inacc_provable(rule)`] — decision predicate.
-//!   7. [`SelfRecognitionAudit`] — accumulator structure that records
-//!      every kernel-rule citation and surfaces the union of
-//!      meta-theory requirements (the "trusted-base report").
+
+//!  1. [`ZfcAxiom`] — the eight ZFC axioms (one ZFC-extension flag
+//!  per axiom; see Kunen 2011 Ch. III).
+//!  2. [`InaccessibleLevel`] — `Kappa1` / `Kappa2` (the two
+//!  Grothendieck universes Verum's universe-tower requires).
+//!  3. [`KernelRuleId`] — the seven rules: `K-Refine`, `K-Univ`,
+//!  `K-Pos`, `K-Norm`, `K-FwAx`, `K-Adj-Unit`, `K-Adj-Counit`.
+//!  4. [`MetaTheoryRequirements`] — per-rule decomposition record
+//!  `(zfc_axioms, inaccessibles)` listing exactly which
+//!  meta-theoretic assumptions the rule rests on.
+//!  5. [`required_meta_theory(rule)`] — algorithmic decomposition.
+//!  6. [`is_zfc_plus_2_inacc_provable(rule)`] — decision predicate.
+//!  7. [`SelfRecognitionAudit`] — accumulator structure that records
+//!  every kernel-rule citation and surfaces the union of
+//!  meta-theory requirements (the "trusted-base report").
 //!
+
 //! ## What this UNBLOCKS
 //!
-//!   - **VVA §16.5 Phase 5** ("Full MSFS self-recognition") — the
-//!     `core.math.foundations.self_recognition` corpus has the
-//!     .vr-level axiomatic surface; this module provides the
-//!     algorithmic counterpart, completing the cross-validation
-//!     loop the file's introduction requires.
-//!   - **`verum audit --self-recognition`** — the CLI command can
-//!     now query [`SelfRecognitionAudit::report`] for the precise
-//!     set of meta-theoretic axioms a given proof transitively
-//!     depends on.
-//!   - **MSFS §11 Trinitarian construction** — three inaccessibles
-//!     are required per VVA roadmap; the [`InaccessibleLevel`] enum
-//!     extends naturally (V1 promotion lands `Kappa3`).
+
+//!  - **VVA §16.5 Phase 5** ("Full MSFS self-recognition") — the
+//!  `core.math.foundations.self_recognition` corpus has the
+//!  .vr-level axiomatic surface; this module provides the
+//!  algorithmic counterpart, completing the cross-validation
+//!  loop the file's introduction requires.
+//!  - **`verum audit --self-recognition`** — the CLI command can
+//!  now query [`SelfRecognitionAudit::report`] for the precise
+//!  set of meta-theoretic axioms a given proof transitively
+//!  depends on.
+//!  - **MSFS §11 Trinitarian construction** — three inaccessibles
+//!  are required per VVA roadmap; the [`InaccessibleLevel`] enum
+//!  extends naturally (V1 promotion lands `Kappa3`).
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -62,7 +71,7 @@ use verum_common::Text;
 // ZFC axiom enumeration
 // =============================================================================
 
-/// The eight ZFC axioms (per Kunen 2011 *Set Theory* Ch. III).  Each
+/// The eight ZFC axioms (per Kunen 2011 *Set Theory* Ch. III). Each
 /// kernel rule rests on a subset of these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ZfcAxiom {
@@ -124,14 +133,14 @@ impl ZfcAxiom {
 // Inaccessible cardinals
 // =============================================================================
 
-/// Inaccessible cardinal level.  `Kappa1` is the first strongly
+/// Inaccessible cardinal level. `Kappa1` is the first strongly
 /// inaccessible (gives `Type_1`); `Kappa2` is the second (gives
 /// `Type_2`, host for the (∞,1)-classifier).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InaccessibleLevel {
-    /// `κ_1` — the first strongly inaccessible.  Models `Type_1`.
+    /// `κ_1` — the first strongly inaccessible. Models `Type_1`.
     Kappa1,
-    /// `κ_2` — the second strongly inaccessible.  Hosts the
+    /// `κ_2` — the second strongly inaccessible. Hosts the
     /// (∞,1)-classifier of small ∞-categories.
     Kappa2,
 }
@@ -151,16 +160,17 @@ impl InaccessibleLevel {
 // Kernel rule identifier
 // =============================================================================
 
-/// The seven kernel rules whose ZFC-decomposition we expose.  Per
+/// The seven kernel rules whose ZFC-decomposition we expose. Per
 /// VVA §11.3 the rule list is:
 ///
-///   K-Refine — depth-strict comprehension (Diakrisis T-2f*).
-///   K-Univ — universe-consistency (predicative hierarchy).
-///   K-Pos — strict positivity (Berardi 1998).
-///   K-Norm — strong normalisation (Huber 2019 + K-FwAx).
-///   K-FwAx — framework-axiom admission (Prop-only side condition).
-///   K-Adj-Unit — α ⊣ ε unit identity (Diakrisis 108.T).
-///   K-Adj-Counit — α ⊣ ε counit identity.
+
+///  K-Refine — depth-strict comprehension (Diakrisis T-2f*).
+///  K-Univ — universe-consistency (predicative hierarchy).
+///  K-Pos — strict positivity (Berardi 1998).
+///  K-Norm — strong normalisation (Huber 2019 + K-FwAx).
+///  K-FwAx — framework-axiom admission (Prop-only side condition).
+///  K-Adj-Unit — α ⊣ ε unit identity (Diakrisis 108.T).
+///  K-Adj-Counit — α ⊣ ε counit identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KernelRuleId {
     /// K-Refine — depth-strict comprehension.
@@ -232,18 +242,19 @@ pub struct MetaTheoryRequirements {
 /// Decompose a kernel rule into its meta-theoretic requirements.
 /// Per Kunen 2011 + Lurie HTT App. A:
 ///
+
 /// * `K-Refine`: needs Separation (the comprehension `{x:A | P(x)}`
-///   IS Separation) + Replacement (depth-stratification across types).
+///  IS Separation) + Replacement (depth-stratification across types).
 /// * `K-Univ`: needs Replacement (universe successor) + 2 inaccessibles
-///   (Type_1 and Type_2 require κ_1 and κ_2 respectively).
+///  (Type_1 and Type_2 require κ_1 and κ_2 respectively).
 /// * `K-Pos`: needs Foundation (rejection of non-positive recursion
-///   uses ∈-induction) + Separation.
+///  uses ∈-induction) + Separation.
 /// * `K-Norm`: needs Foundation + Replacement (transfinite induction
-///   on reduction depth) + 1 inaccessible (universal SN model).
+///  on reduction depth) + 1 inaccessible (universal SN model).
 /// * `K-FwAx`: needs Pairing + Union (axiom-set construction) +
-///   Separation (Prop-only side-condition).
+///  Separation (Prop-only side-condition).
 /// * `K-Adj-Unit` / `K-Adj-Counit`: need Replacement + 1 inaccessible
-///   (the adjunction lives in (∞,1)-Cat, modelled in U_κ_1).
+///  (the adjunction lives in (∞,1)-Cat, modelled in U_κ_1).
 pub fn required_meta_theory(rule: KernelRuleId) -> MetaTheoryRequirements {
     use InaccessibleLevel::*;
     use KernelRuleId::*;
@@ -320,8 +331,9 @@ pub fn required_meta_theory(rule: KernelRuleId) -> MetaTheoryRequirements {
 /// Returns true iff the rule's meta-theoretic requirements are a
 /// subset of `(ZFC, [κ_1, κ_2])`.
 ///
+
 /// **All seven rules** are provable in ZFC + 2 inaccessibles (this is
-/// the design invariant of the Verum kernel).  V0 surface reads off
+/// the design invariant of the Verum kernel). current surface reads off
 /// the requirement record and confirms set inclusion.
 pub fn is_zfc_plus_2_inacc_provable(rule: KernelRuleId) -> bool {
     let req = required_meta_theory(rule);
@@ -373,7 +385,7 @@ impl SelfRecognitionAudit {
             .collect()
     }
 
-    /// The union of inaccessibles transitively required.  Returns in
+    /// The union of inaccessibles transitively required. Returns in
     /// canonical (Kappa1, Kappa2) order with duplicates removed.
     pub fn required_inaccessibles(&self) -> Vec<InaccessibleLevel> {
         let mut required = std::collections::HashSet::new();

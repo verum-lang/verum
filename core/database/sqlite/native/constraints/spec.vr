@@ -3,14 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md §17.3..§17.6
 //
+
 // Five constraint kinds carried by a CREATE TABLE / ALTER TABLE:
 //
-//   * CheckConstraint  — `CHECK (expr)` table- or column-level
-//   * NotNull          — `NOT NULL [ON CONFLICT <pol>]`
-//   * Unique           — `UNIQUE (cols) [ON CONFLICT <pol>]`
-//   * PrimaryKey       — `PRIMARY KEY (cols) [autoincrement] [ON CONFLICT pol]`
-//   * ForeignKey       — `FOREIGN KEY (cols) REFERENCES t(cols) [actions]`
-//   * Generated        — column-level `GENERATED ALWAYS AS (expr) [STORED|VIRTUAL]`
+
+//  * CheckConstraint — `CHECK (expr)` table- or column-level
+//  * NotNull — `NOT NULL [ON CONFLICT <pol>]`
+//  * Unique — `UNIQUE (cols) [ON CONFLICT <pol>]`
+//  * PrimaryKey — `PRIMARY KEY (cols) [autoincrement] [ON CONFLICT pol]`
+//  * ForeignKey — `FOREIGN KEY (cols) REFERENCES t(cols) [actions]`
+//  * Generated — column-level `GENERATED ALWAYS AS (expr) [STORED|VIRTUAL]`
 // =============================================================================
 
 module core.database.sqlite.native.constraints.spec;

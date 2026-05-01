@@ -1,17 +1,21 @@
 //! Model-theoretic discharge of protocol axioms at impl sites.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 3). For every `implement
 //! P for T { ... }` block in the module, this surface collects P's
 //! axioms (Self-substituted to T's concrete ops) and discharges each
 //! via:
 //!
-//!   * An explicit `proof X by tactic;` clause inside the impl block.
-//!   * `ProofSearchEngine::auto_prove` fallback.
+
+//!  * An explicit `proof X by tactic;` clause inside the impl block.
+//!  * `ProofSearchEngine::auto_prove` fallback.
 //!
+
 //! Unverified obligations surface as diagnostics at warning severity
 //! by default; the session option `model_verification_level` can
 //! elevate them to errors.
 //!
+
 //! Reference specification: `docs/architecture/model-theoretic-semantics.md`.
 
 use anyhow::Result;

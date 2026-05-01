@@ -1,8 +1,10 @@
 //! Industrial-grade tactic combinator catalogue — the single source
 //! of truth for Verum's tactical proof-construction surface.
 //!
+
 //! ## What this module is
 //!
+
 //! Verum has multiple tactic surfaces (parser-level `TacticExpr`, Z3
 //! `verum_smt::tactics::TacticCombinator`, .vr stdlib `tactic` decls
 //! in `core/proof/tactics/`). Each surface evolved independently —
@@ -10,49 +12,58 @@
 //! combinator set, its algebraic laws, or its semantics in a form
 //! consumable by IDE / CLI / documentation tooling.
 //!
+
 //! This module provides that **single trait boundary**:
 //!
-//!   * [`TacticCombinator`] — typed enum of the 15 canonical
-//!     combinator forms (sequencing / choice / iteration / focus /
-//!     forward-style / explicit instantiation / decision-procedure
-//!     ergonomics).
-//!   * [`TacticEntry`] — a structured-doc record (name + signature
-//!     + semantics + laws + example).
-//!   * [`TacticCatalog`] — single-trait dispatch interface; LSP /
-//!     CLI / docs-generator consume the same catalogue.
-//!   * [`DefaultTacticCatalog`] — V0 reference catalogue covering
-//!     every combinator listed in the #76 acceptance criteria.
-//!   * [`AlgebraicLaw`] — typed inventory of the algebraic laws
-//!     (`skip ; t ≡ t`, `(t ; u) ; v ≡ t ; (u ; v)`, etc.) the
-//!     `verum_smt::tactic_laws` simplifier exploits.
+
+//!  * [`TacticCombinator`] — typed enum of the 15 canonical
+//!  combinator forms (sequencing / choice / iteration / focus /
+//!  forward-style / explicit instantiation / decision-procedure
+//!  ergonomics).
+//!  * [`TacticEntry`] — a structured-doc record (name + signature
+//!  + semantics + laws + example).
+//!  * [`TacticCatalog`] — single-trait dispatch interface; LSP /
+//!  CLI / docs-generator consume the same catalogue.
+//!  * [`DefaultTacticCatalog`] — V0 reference catalogue covering
+//!  every combinator listed in the #76 acceptance criteria.
+//!  * [`AlgebraicLaw`] — typed inventory of the algebraic laws
+//!  (`skip ; t ≡ t`, `(t ; u) ; v ≡ t ; (u ; v)`, etc.) the
+//!  `verum_smt::tactic_laws` simplifier exploits.
 //!
+
 //! ## Why this is a fundamental refactor
 //!
+
 //! The pre-this-module situation:
 //!
-//!   * `core/proof/tactics/combinators.vr` carried prose-comment
-//!     algebraic laws but they were not machine-readable; the
-//!     `verum_smt::tactic_laws` Rust simplifier had its own copy.
-//!   * `verum_smt::tactics::TacticCombinator` covered Z3-side
-//!     primitives (Single / AndThen / OrElse / Repeat / TryFor /
-//!     IfThenElse / WithParams / ParOr) but said nothing about
-//!     surface-level combinators (Solve / NamedFocus / Have /
-//!     ApplyWith / PerGoalSplit) that compile down to those.
-//!   * No CLI / IDE entry point existed to ask "what are the
-//!     combinators? what are their laws? what's the example for
-//!     `solve`?".
+
+//!  * `core/proof/tactics/combinators.vr` carried prose-comment
+//!  algebraic laws but they were not machine-readable; the
+//!  `verum_smt::tactic_laws` Rust simplifier had its own copy.
+//!  * `verum_smt::tactics::TacticCombinator` covered Z3-side
+//!  primitives (Single / AndThen / OrElse / Repeat / TryFor /
+//!  IfThenElse / WithParams / ParOr) but said nothing about
+//!  surface-level combinators (Solve / NamedFocus / Have /
+//!  ApplyWith / PerGoalSplit) that compile down to those.
+//!  * No CLI / IDE entry point existed to ask "what are the
+//!  combinators? what are their laws? what's the example for
+//!  `solve`?".
 //!
+
 //! After this module:
 //!
-//!   * Every Verum surface (LSP completion, docs generator,
-//!     `verum tactic` CLI) consumes [`DefaultTacticCatalog`] for
-//!     authoritative metadata.
-//!   * Adapter chaining via [`CompositeTacticCatalog`] lets domain-
-//!     specific catalogues (cubical, stochastic, MSFS) extend the
-//!     base set without forking.
+
+//!  * Every Verum surface (LSP completion, docs generator,
+//!  `verum tactic` CLI) consumes [`DefaultTacticCatalog`] for
+//!  authoritative metadata.
+//!  * Adapter chaining via [`CompositeTacticCatalog`] lets domain-
+//!  specific catalogues (cubical, stochastic, MSFS) extend the
+//!  base set without forking.
 //!
+
 //! ## Foundation-neutral
 //!
+
 //! The catalogue carries semantics in human-readable text (not as
 //! executable code) — execution lives in
 //! `verum_smt::tactics::apply_combinator`. The catalogue is the
@@ -67,30 +78,30 @@ use verum_smt::tactic_laws::{LawId, CANONICAL_LAW_TABLE};
 // TacticCombinator — the 15 canonical forms
 // =============================================================================
 
-/// A canonical combinator form.  Mirrors the `tactic_expr` rule in
+/// A canonical combinator form. Mirrors the `tactic_expr` rule in
 /// `grammar/verum.ebnf` plus the four forward-style operators
 /// (`have` / `case` / `apply X with` / per-goal split) added in #76.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TacticCombinator {
-    /// `skip` — identity for `Seq`.  Always succeeds, leaves state
+    /// `skip` — identity for `Seq`. Always succeeds, leaves state
     /// unchanged.
     Skip,
-    /// `fail` — identity for `OrElse`.  Never succeeds.
+    /// `fail` — identity for `OrElse`. Never succeeds.
     Fail,
-    /// `t1 ; t2` — sequential composition.  Runs `t1`, then `t2` on
+    /// `t1 ; t2` — sequential composition. Runs `t1`, then `t2` on
     /// every resulting subgoal.
     Seq,
-    /// `t1 || t2` — choice.  Try `t1`; on failure, try `t2`.
+    /// `t1 || t2` — choice. Try `t1`; on failure, try `t2`.
     OrElse,
-    /// `repeat t` — unbounded repetition.  Stops at fixpoint or when
+    /// `repeat t` — unbounded repetition. Stops at fixpoint or when
     /// `t` fails / makes no progress.
     Repeat,
-    /// `repeat n t` — bounded repetition.  At most `n` iterations.
+    /// `repeat n t` — bounded repetition. At most `n` iterations.
     RepeatN,
-    /// `try t` — soft-fail.  Run `t`; if it fails, succeed silently.
+    /// `try t` — soft-fail. Run `t`; if it fails, succeed silently.
     /// Equivalent to `t || skip`.
     Try,
-    /// `solve t` — total-discharge guard.  Run `t`; if any goal
+    /// `solve t` — total-discharge guard. Run `t`; if any goal
     /// remains open, FAIL the whole tactic.
     Solve,
     /// `first { t1; t2; …; tn }` — first-success choice.
@@ -102,7 +113,7 @@ pub enum TacticCombinator {
     /// `case foo => t` — focus on the goal labelled `foo`.
     NamedFocus,
     /// `[t1; t2; …; tn]` — per-goal split: apply `ti` to the `i`-th
-    /// goal.  Fails if the goal count differs from `n`.
+    /// goal. Fails if the goal count differs from `n`.
     PerGoalSplit,
     /// `have h : T := pt` — forward-style hypothesis introduction.
     Have,
@@ -228,7 +239,7 @@ impl CombinatorCategory {
 // AlgebraicLaw — typed inventory of the simplifier's normalisation rules
 // =============================================================================
 
-/// One algebraic identity satisfied by the combinators.  These laws
+/// One algebraic identity satisfied by the combinators. These laws
 /// are the simplifier's normalisation rule-set; the catalogue surfaces
 /// them as machine-readable data so the docs generator and the
 /// simplifier share a single source of truth.
@@ -275,15 +286,18 @@ pub struct TacticEntry {
 
 /// Single dispatch interface for the canonical combinator catalogue.
 ///
+
 /// Contract:
 ///
-///   * `entries()` returns one [`TacticEntry`] per combinator covered.
-///   * `lookup(name)` returns `Some` for every name the catalogue
-///     ships; `None` for unknown names.
-///   * `laws()` returns the algebraic laws relevant to the catalogue's
-///     combinators — used by the docs generator and the runtime
-///     simplifier alike.
+
+///  * `entries()` returns one [`TacticEntry`] per combinator covered.
+///  * `lookup(name)` returns `Some` for every name the catalogue
+///  ships; `None` for unknown names.
+///  * `laws()` returns the algebraic laws relevant to the catalogue's
+///  combinators — used by the docs generator and the runtime
+///  simplifier alike.
 ///
+
 /// Implementations MAY restrict their entry set (e.g. a cubical-only
 /// catalogue could ship only the path-induction-style combinators).
 /// The reference [`DefaultTacticCatalog`] covers all 15 canonical
@@ -301,7 +315,7 @@ pub trait TacticCatalog {
 // DefaultTacticCatalog — V0 reference (all 15 combinators)
 // =============================================================================
 
-/// V0 reference catalogue.  Every combinator listed in the #76
+/// V0 reference catalogue. Every combinator listed in the #76
 /// acceptance criteria is shipped with full structured doc.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultTacticCatalog;
@@ -329,7 +343,7 @@ impl TacticCatalog for DefaultTacticCatalog {
     }
 }
 
-/// Per-combinator entry constructor.  Single source of truth for
+/// Per-combinator entry constructor. Single source of truth for
 /// `signature` / `semantics` / `example` / participating laws.
 fn entry_for(c: TacticCombinator) -> TacticEntry {
     let (signature, semantics, example, laws): (&str, &str, &str, &[&str]) = match c {
@@ -444,6 +458,7 @@ fn entry_for(c: TacticCombinator) -> TacticEntry {
 
 /// Map a [`LawId`] to the surface combinators that participate in it.
 ///
+
 /// The catalogue's `participants` field is the *only* per-law metadata
 /// the verification crate adds on top of the `verum_smt::tactic_laws`
 /// canonical inventory — name / lhs / rhs / rationale all come from
@@ -468,9 +483,10 @@ fn participants_for(id: LawId) -> Vec<TacticCombinator> {
 
 /// Canonical algebraic-laws inventory.
 ///
+
 /// **Single source of truth** — the prose (`name` / `lhs` / `rhs` /
 /// `rationale`) is projected from
-/// [`verum_smt::tactic_laws::CANONICAL_LAW_TABLE`].  Adding or
+/// [`verum_smt::tactic_laws::CANONICAL_LAW_TABLE`]. Adding or
 /// renaming a law happens in one place (the `verum_smt` table) and
 /// propagates here automatically; this crate only contributes the
 /// per-law `participants` mapping over its own `TacticCombinator`
@@ -493,9 +509,9 @@ fn canonical_laws() -> Vec<AlgebraicLaw> {
 // =============================================================================
 
 /// Combine multiple catalogues — the base [`DefaultTacticCatalog`] +
-/// domain-specific extensions (cubical, stochastic, MSFS).  Lookup
+/// domain-specific extensions (cubical, stochastic, MSFS). Lookup
 /// queries each in order; entries from earlier catalogues shadow
-/// later ones with the same name.  Laws are unioned (deduplicated by
+/// later ones with the same name. Laws are unioned (deduplicated by
 /// name).
 pub struct CompositeTacticCatalog {
     pub catalogs: Vec<Box<dyn TacticCatalog + Send + Sync>>,
@@ -667,7 +683,7 @@ mod tests {
     #[test]
     fn laws_match_verum_smt_canonical_table_one_to_one() {
         // Single-source-of-truth invariant: the catalogue's law set
-        // equals `LawId::all()` (kebab-case names).  Drift here means
+        // equals `LawId::all()` (kebab-case names). Drift here means
         // `verum_smt::tactic_laws::CANONICAL_LAW_TABLE` and the
         // verification-crate catalogue have diverged — a regression
         // the V0→V1 hardening pass exists to prevent.

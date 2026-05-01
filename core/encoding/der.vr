@@ -3,46 +3,56 @@
 // =============================================================================
 // Layer: 2 (Encoding)
 // Dependencies: core, security.x509.oid (for Oid type — reverse dependency
-//               is acceptable here because Oid has no DER-side callers
-//               aside from this reader).
+//  is acceptable here because Oid has no DER-side callers
+//  aside from this reader).
 // Reference: ITU-T X.690 (07/2002)
-//            RFC 5280 Appendix A (PKIX profile of DER)
-//            RFC 6025 (ASN.1 notes)
+//  RFC 5280 Appendix A (PKIX profile of DER)
+//  RFC 6025 (ASN.1 notes)
 // =============================================================================
 //
+
 // Zero-allocation forward-reading DER parser. Every `read_*` method
 // consumes the next primitive/constructed element from the underlying
 // byte slice and advances the cursor. On mismatch, the reader returns
 // `DerError` with enough context to diagnose malformed certificates at
 // source.
 //
+
 // # Strict DER (not BER)
 //
+
 // This parser is intentionally strict:
 //
-//   * Definite-length encoding only (indefinite-length is BER-only).
-//   * Length octets in their shortest form (short form when < 128).
-//   * BOOLEAN value octets must be 0x00 or 0xFF exactly.
-//   * INTEGER must have no redundant leading 0x00 / 0xFF.
-//   * OID arc 1 ≤ 39 when arc 0 ∈ {0, 1} (X.690 §8.19.4).
+
+//  * Definite-length encoding only (indefinite-length is BER-only).
+//  * Length octets in their shortest form (short form when < 128).
+//  * BOOLEAN value octets must be 0x00 or 0xFF exactly.
+//  * INTEGER must have no redundant leading 0x00 / 0xFF.
+//  * OID arc 1 ≤ 39 when arc 0 ∈ {0, 1} (X.690 §8.19.4).
 //
+
 // Encountering BER-only wire form = `DerError.MalformedDer`.
 //
+
 // # Zero-alloc discipline
 //
+
 // All "value" return types are slice-references into the original
 // input buffer. No List<Byte> allocations on the hot path. A
 // Certificate parses end-to-end producing only one heap allocation
 // per RDN list — and that lives inside the returned Certificate ADT,
 // not inside the reader.
 //
+
 // # Lifetime model
 //
+
 // `DerReader<'a>` borrows the input. Sub-readers (returned by
 // `read_sequence`, `read_set`, `read_explicit`) share the `'a`
 // lifetime of the parent. The outer reader must outlive all
 // sub-readers, enforced by the Verum borrow checker.
 //
+
 // =============================================================================
 
 module core.encoding.der;
@@ -120,7 +130,7 @@ fn err(kind: DerErrorKind, pos: Int, msg: Text) -> DerError {
 }
 
 // Display + Debug + Eq for DerErrorKind / DerError —
-// standard stdlib protocol impls.  Foundation for any
+// standard stdlib protocol impls. Foundation for any
 // security-layer error variant that wraps DerError
 // (CrlError, OcspError, X509ParseError, …).
 
@@ -286,6 +296,7 @@ implement DerReader {
     /// `element_end = value_start + length` is the first octet past
     /// the element. The cursor remains at the pre-call position.
     ///
+
     /// Implementation: uses a scratch clone of the reader so the
     /// parse is non-destructive; cheap because `List<Byte>` buffers
     /// share their backing storage through Verum's arena semantics.
@@ -527,6 +538,7 @@ implement DerReader {
     /// `List<UInt32>`; caller wraps into `Oid` at the point of use
     /// so this module stays free of x509 dependency.
     ///
+
     /// X.690 §8.19 encoding: the first two arcs are packed into one
     /// sub-identifier as `arc0 * 40 + arc1`, where `arc0 ∈ {0,1,2}`.
     /// For arc0 ∈ {0,1} the packed value is < 80 (arc1 ≤ 39). For

@@ -42,7 +42,7 @@ public fn classify(v: Float) -> StorageClass {
 // SQLite's display of a REAL value prefers the shortest round-trip decimal.
 // We return a simple flag indicating whether the value is finite.
 public fn is_finite(v: Float) -> Bool {
-    // NaN !=  NaN; ±inf * 0 is NaN.
+    // NaN != NaN; ±inf * 0 is NaN.
     v == v && (v - v) == (0.0 as Float)
 }
 

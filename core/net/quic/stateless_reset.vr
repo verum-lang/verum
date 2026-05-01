@@ -5,6 +5,7 @@
 // Dependencies: core, core.security.mac.hmac, core.security.util.rng
 // =============================================================================
 //
+
 // RFC 9000 §10.3 — an endpoint that receives a UDP datagram it cannot
 // match to a known connection MAY emit a "Stateless Reset" — a packet
 // that ends with the 16-byte reset token that the peer previously
@@ -12,38 +13,45 @@
 // `NEW_CONNECTION_ID` frame). The peer, on recognising the trailing
 // token, immediately tears down its local state for that connection.
 //
+
 // Security goals (RFC 9000 §21.11):
 //
-//   * Tokens MUST be unpredictable — an off-path attacker that
-//     observes only the wire cannot guess a valid token. This module
-//     derives tokens as HMAC-SHA256(key, CID)[..16], where `key` is
-//     a long-lived 32-byte server secret. Rotating the key
-//     invalidates old tokens, forcing clients to re-establish.
+
+//  * Tokens MUST be unpredictable — an off-path attacker that
+//  observes only the wire cannot guess a valid token. This module
+//  derives tokens as HMAC-SHA256(key, CID)[..16], where `key` is
+//  a long-lived 32-byte server secret. Rotating the key
+//  invalidates old tokens, forcing clients to re-establish.
 //
-//   * Reset packets MUST be indistinguishable from any other QUIC
-//     short-header packet. We fill with CSPRNG bytes to `min_len`
-//     (default 43 random + 16 token = 59 bytes, RFC 9000 §10.3),
-//     set bit 6 (Fixed Bit = 1) and clear bit 7 (Long Header = 0) in
-//     the first octet, and leave everything else random so the
-//     packet can't be identified as a reset without the token.
+
+//  * Reset packets MUST be indistinguishable from any other QUIC
+//  short-header packet. We fill with CSPRNG bytes to `min_len`
+//  (default 43 random + 16 token = 59 bytes, RFC 9000 §10.3),
+//  set bit 6 (Fixed Bit = 1) and clear bit 7 (Long Header = 0) in
+//  the first octet, and leave everything else random so the
+//  packet can't be identified as a reset without the token.
 //
-//   * Endpoints MUST pace their own reset emission (RFC 9000 §10.3.3)
-//     to prevent amplification: send at most one reset per datagram
-//     that would have been dropped, and cap the outgoing rate. This
-//     module ships the token derivation + packet format; the rate
-//     limiter lives alongside the connection dispatcher in
-//     `transport/listener.vr`.
+
+//  * Endpoints MUST pace their own reset emission (RFC 9000 §10.3.3)
+//  to prevent amplification: send at most one reset per datagram
+//  that would have been dropped, and cap the outgoing rate. This
+//  module ships the token derivation + packet format; the rate
+//  limiter lives alongside the connection dispatcher in
+//  `transport/listener.vr`.
 //
+
 // # Threat model / correctness
 //
-//   * Token collisions are a function of the 128-bit birthday bound
-//     (~2^64 peers before even a 1% chance). HMAC-SHA256 truncated
-//     to 128 bits preserves that bound.
-//   * The module is constant-time against tokens it doesn't match —
-//     `try_match_stateless_reset` compares via diff-accumulator so
-//     a timing side-channel cannot distinguish "no token matched"
-//     from "token matched except last byte".
+
+//  * Token collisions are a function of the 128-bit birthday bound
+//  (~2^64 peers before even a 1% chance). HMAC-SHA256 truncated
+//  to 128 bits preserves that bound.
+//  * The module is constant-time against tokens it doesn't match —
+//  `try_match_stateless_reset` compares via diff-accumulator so
+//  a timing side-channel cannot distinguish "no token matched"
+//  from "token matched except last byte".
 //
+
 // =============================================================================
 
 module core.net.quic.stateless_reset;
@@ -76,8 +84,10 @@ implement StatelessResetKey {
 
     /// Derive the 16-byte reset token for a given CID.
     ///
+
     /// token = HMAC-SHA256(key, cid)[0..16]
     ///
+
     /// Callers typically compute this once per issued CID and embed
     /// it in the `stateless_reset_token` transport parameter (for
     /// the preferred_address's CID) or in subsequent
@@ -97,8 +107,8 @@ implement StatelessResetKey {
 
 /// Minimum size of a stateless reset packet per RFC 9000 §10.3.
 /// Short-header layout:
-///   * ≥ 43 bytes random (looks like encrypted header+PN+ciphertext)
-///   * ends with 16-byte token
+///  * ≥ 43 bytes random (looks like encrypted header+PN+ciphertext)
+///  * ends with 16-byte token
 public const STATELESS_RESET_MIN_SIZE: Int = 21;          // RFC: token + 5
 public const STATELESS_RESET_RECOMMENDED_SIZE: Int = 43 + 16;   // 59 bytes
 
@@ -107,17 +117,20 @@ public const STATELESS_RESET_RECOMMENDED_SIZE: Int = 43 + 16;   // 59 bytes
 /// triggering datagram minus 1, so a stateless-reset storm cannot
 /// amplify traffic).
 ///
+
 /// Wire layout (RFC 9000 §10.3):
 ///
-///   0                                                            wire_len-16
-///   ┌─────────────────────────────────────────────────────────────┬─────────┐
-///   │ 1 octet  │ (random) — ≥ 20 bytes, appears as short header  │ 16-byte │
-///   │  bit7=0  │   + packet number + ciphertext                   │  token  │
-///   │  bit6=1  │                                                  │         │
-///   └──────────┴──────────────────────────────────────────────────┴─────────┘
+
+///  0 wire_len-16
+///  ┌─────────────────────────────────────────────────────────────┬─────────┐
+///  │ 1 octet │ (random) — ≥ 20 bytes, appears as short header │ 16-byte │
+///  │ bit7=0 │ + packet number + ciphertext │ token │
+///  │ bit6=1 │ │ │
+///  └──────────┴──────────────────────────────────────────────────┴─────────┘
 ///
+
 /// bit 7 (Long Header) = 0 signals short header.
-/// bit 6 (Fixed Bit)   = 1 required to be valid.
+/// bit 6 (Fixed Bit) = 1 required to be valid.
 /// Other bits random so the packet is indistinguishable from 1-RTT.
 public fn build_stateless_reset(token: &[Byte; 16], min_size: Int) -> List<Byte> {
     let target = if min_size < STATELESS_RESET_RECOMMENDED_SIZE {
@@ -196,9 +209,11 @@ implement ResetTokenSet {
 /// Scan `wire` for a trailing stateless reset token. Returns the
 /// index into `known.tokens` if a match was found, else `None`.
 ///
+
 /// Constant-time per token (diff-accumulator comparison) to avoid
 /// leaking which token matched via timing.
 ///
+
 /// `wire` must be ≥ `STATELESS_RESET_MIN_SIZE` (RFC 9000 §10.3);
 /// shorter datagrams cannot be reset packets.
 public fn try_match_stateless_reset(

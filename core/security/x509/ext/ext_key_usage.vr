@@ -2,18 +2,21 @@
 // security/x509/ext/ext_key_usage.vr — RFC 5280 §4.2.1.12
 // =============================================================================
 //
+
 // ExtKeyUsageSyntax ::= SEQUENCE SIZE (1..MAX) OF KeyPurposeId
 // KeyPurposeId ::= OBJECT IDENTIFIER
 //
+
 // Most relevant id-kp values for WebPKI:
-//   id-kp-serverAuth     — TLS server auth (MANDATORY on TLS server EE)
-//   id-kp-clientAuth     — TLS client auth
-//   id-kp-codeSigning    — signing binaries
-//   id-kp-emailProtection — S/MIME
-//   id-kp-timeStamping   — TSA
-//   id-kp-OCSPSigning    — OCSP responder delegated signing
-//   anyExtendedKeyUsage  — 2.5.29.37.0 — grants ALL purposes
+//  id-kp-serverAuth — TLS server auth (MANDATORY on TLS server EE)
+//  id-kp-clientAuth — TLS client auth
+//  id-kp-codeSigning — signing binaries
+//  id-kp-emailProtection — S/MIME
+//  id-kp-timeStamping — TSA
+//  id-kp-OCSPSigning — OCSP responder delegated signing
+//  anyExtendedKeyUsage — 2.5.29.37.0 — grants ALL purposes
 //
+
 // =============================================================================
 
 module core.security.x509.ext.ext_key_usage;

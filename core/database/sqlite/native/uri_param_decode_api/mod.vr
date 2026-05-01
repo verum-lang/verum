@@ -4,6 +4,7 @@
 // sqlite3_uri_parameter / _boolean / _int64 / _key — decode helper taxonomy.
 // Spec §7.6 — sqlite3_open_v2 URI.
 //
+
 // Boolean keywords: yes/no/on/off/true/false/1/0
 // =============================================================================
 

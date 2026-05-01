@@ -5,9 +5,11 @@
 // Dependencies: types.vr, keys.vr
 // =============================================================================
 //
+
 // Mouse event parsing for SGR extended mode (CSI < Pb ; Px ; Py M/m) and
 // enable/disable escape sequences for mouse tracking modes.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5
 // =============================================================================
 
@@ -21,7 +23,7 @@ mount super.keys.Modifiers;
 // =============================================================================
 
 /// Parse SGR mouse parameters into a MouseEvent.
-/// SGR format: CSI < Pb ; Px ; Py M  (press) or CSI < Pb ; Px ; Py m (release)
+/// SGR format: CSI < Pb ; Px ; Py M (press) or CSI < Pb ; Px ; Py m (release)
 /// Pb encodes button and modifiers, Px/Py are 1-indexed coordinates.
 public fn parse_sgr_mouse(params: &List<Int>, final_byte: Byte) -> Maybe<MouseEvent> {
     if params.len() < 3 {

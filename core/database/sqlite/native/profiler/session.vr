@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — EXPLAIN ANALYZE)
 //
+
 // `ProfileSession` is the per-statement aggregator. The L4 interpreter
 // calls into it on every dispatch and every row materialised; the L7
 // façade returns it from `Statement.explain_analyze()`.

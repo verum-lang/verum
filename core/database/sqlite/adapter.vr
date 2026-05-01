@@ -5,17 +5,19 @@
 // Spec: internal/specs/database.md §6.2 (SQLite adapter)
 // =============================================================================
 //
+
 // Vendor-side identity for the SQLite adapter. Reports `AdSqlite` for
 // metric labels and error tagging, and gates connection construction
 // behind a typed config that captures every choice loom needs:
 //
-//   * `target` — `:memory:` or a file URI / path
-//   * `capability` — readonly / readwrite / admin (mirrors loom mode)
-//   * `journal_mode` — WAL is the default once T3 lands; rollback for
-//     legacy v0.1 builds
-//   * `busy_timeout_ms` — implicit retry on SQLITE_BUSY at the engine
-//     level (independent from the application-level
-//     `core.database.common.retry.run_with_retry`)
+
+//  * `target` — `:memory:` or a file URI / path
+//  * `capability` — readonly / readwrite / admin (mirrors loom mode)
+//  * `journal_mode` — WAL is the default once T3 lands; rollback for
+//  legacy v0.1 builds
+//  * `busy_timeout_ms` — implicit retry on SQLITE_BUSY at the engine
+//  level (independent from the application-level
+//  `core.database.common.retry.run_with_retry`)
 // =============================================================================
 
 module core.database.sqlite.adapter;

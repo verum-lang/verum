@@ -1,12 +1,15 @@
 //! GPU binary extraction and embedding for AOT compilation.
 //!
+
 //! After the MLIR GPU pass pipeline completes (including
 //! `GpuModuleToBinaryPass`), this module:
 //!
+
 //! 1. Translates the host-side MLIR (LLVM dialect) to LLVM IR
 //! 2. Embeds GPU kernel binaries as global constant data
 //! 3. Generates runtime loader stubs (cuModuleLoad / MTLLibrary)
 //!
+
 //! The result is a self-contained LLVM module that can be compiled to
 //! a native executable with embedded GPU kernels.
 
@@ -74,12 +77,14 @@ impl GpuBinaryEmitter {
 
     /// Emit GPU binaries from a fully-lowered MLIR module.
     ///
+
     /// The MLIR module must have been through the complete GPU pass pipeline
     /// (including `GpuModuleToBinaryPass`). After that pass, the module
     /// contains:
     /// - Host code in the LLVM dialect
     /// - GPU kernels compiled to binary blobs attached as attributes
     ///
+
     /// This function:
     /// 1. Translates host MLIR → LLVM IR
     /// 2. Extracts kernel binary data
@@ -107,10 +112,12 @@ impl GpuBinaryEmitter {
 
         // Step 3: Extract GPU kernel binaries from the MLIR module.
         //
+
         // After GpuModuleToBinaryPass, gpu.module ops are replaced with
         // gpu.binary ops containing the compiled kernel data. The host
         // code references these via gpu.launch_func.
         //
+
         // For the initial implementation, we embed the kernel source
         // (MSL/PTX) directly. MLIR's binary pass handles compilation
         // if the target toolchain is available (ptxas, metal compiler).
@@ -174,6 +181,7 @@ impl GpuBinaryEmitter {
 
     /// Extract GPU kernel binaries from the MLIR module.
     ///
+
     /// Walks the module looking for gpu.binary operations or embedded
     /// kernel data in gpu.module attributes. If the MLIR binary pass
     /// didn't produce actual binaries (e.g., target compiler not found),
@@ -184,18 +192,22 @@ impl GpuBinaryEmitter {
         // mlirOperationWalk + mlirOperationGetAttributeByName to find
         // "gpu.binary" attributes on gpu.module operations.
         //
+
         // For the current implementation, we use the MLIR module's string
         // representation to parse out kernel information. This is a
         // pragmatic approach that works with any MLIR version.
         //
+
         // The MLIR module after GPU passes has this structure:
-        //   - Host functions in LLVM dialect (calls to gpu runtime)
-        //   - GPU binaries embedded as string/dense attributes
+        //  - Host functions in LLVM dialect (calls to gpu runtime)
+        //  - GPU binaries embedded as string/dense attributes
         //
+
         // Since GpuModuleToBinaryPass compiles the kernels using the
         // target toolchain (ptxas for CUDA, metal compiler for Metal),
         // the actual binary data is in the module attributes.
         //
+
         // If the binary pass didn't run (no toolchain found), we
         // generate a fallback entry that the runtime can JIT-compile.
         let fallback = self.generate_fallback_kernel();
@@ -217,11 +229,13 @@ impl GpuBinaryEmitter {
                 // METAL_SHADER_SOURCE). The runtime compiles MSL at
                 // first use via MTLDevice.newLibraryWithSource().
                 //
+
                 // In a fully productionized pipeline, we would:
                 // 1. Run `xcrun metal` to precompile MSL → .metallib
                 // 2. Embed the .metallib binary here
                 // 3. Load via MTLDevice.newLibraryWithData() at runtime
                 //
+
                 // The current approach is correct and production-ready:
                 // Metal runtime compilation is fast (<100ms) and cached
                 // per pipeline state. Apple's own frameworks use this.

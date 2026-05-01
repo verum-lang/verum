@@ -5,46 +5,58 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Shell-style glob matching — the pattern language every file-
 // picker, `.gitignore`, workspace-manifest, and log-filter uses.
 //
+
 // # Supported syntax
 //
-//   *           match any sequence of non-separator characters
-//   **          match any number of path segments (extended glob)
-//   ?           match any single non-separator character
-//   [abc]       character class; matches any of `a`, `b`, `c`
-//   [a-z]       character range
-//   [!abc]      negated class (`^` also accepted)
-//   \c          literal `c` (escape)
-//   /           path separator; `*` does not cross it, `**` does.
+
+//  * match any sequence of non-separator characters
+//  ** match any number of path segments (extended glob)
+//  ? match any single non-separator character
+//  [abc] character class; matches any of `a`, `b`, `c`
+//  [a-z] character range
+//  [!abc] negated class (`^` also accepted)
+//  \c literal `c` (escape)
+//  / path separator; `*` does not cross it, `**` does.
 //
+
 // # API
 //
+
 // ```
 // // Simple match.
 // let ok: Bool = glob.matches("src/**/*.rs", "src/foo/bar.rs");
 //
+
 // // Compile once, test many — useful for a preloaded .gitignore.
 // let pat = glob.compile("target/**")?;
 // if pat.matches_path("target/debug/verum") { ... }
 // ```
 //
+
 // # Semantics
 //
+
 // Matching is byte-level — no UTF-8 case folding. Case-sensitivity
 // is caller-provided via a flag on `compile_with`.
 //
+
 // `**` must be a complete path segment: `a/**/b` matches `a/b` and
 // `a/x/y/b`. The equivalent in `fnmatch(FNM_PATHNAME | FNM_LEADING_DIR)`.
 //
+
 // # Why this ships
 //
+
 // Every user-level tool (.gitignore walker, Jest's test matchers,
 // tar's --exclude, rsync's filter, the Bazel and Cargo workspace
 // manifests) reinvents glob — almost always with a subtly different
 // `**` interpretation. One tested module unifies them.
 //
+
 // =============================================================================
 
 module core.base.glob;

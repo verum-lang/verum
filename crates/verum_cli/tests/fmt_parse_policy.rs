@@ -1,5 +1,6 @@
 //! Parse-failure policy contract for `verum fmt`.
 //!
+
 //! When the parser fails on a `.vr` file, the formatter has three
 //! options: silently fall back to whitespace normalisation, leave
 //! the file untouched and warn, or refuse to format and fail the

@@ -1,9 +1,11 @@
 //! Compilation Regression Benchmark
 //!
+
 //! Criterion-based benchmarks for detecting performance regressions in the
 //! Verum compiler pipeline. Each benchmark isolates a specific compilation
 //! phase so regressions can be pinpointed to the responsible subsystem.
 //!
+
 //! Benchmarks:
 //! - Parse speed (1K LOC Verum program)
 //! - Type check speed (50 functions)

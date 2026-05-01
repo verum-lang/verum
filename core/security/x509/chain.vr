@@ -3,36 +3,44 @@
 // =============================================================================
 // Layer: 3 (X.509 subsystem)
 // Dependencies: core, security.{hash, ecc, sig}, x509.{certificate, ext,
-//               time, trust_store, algorithm, spki}
+//  time, trust_store, algorithm, spki}
 // =============================================================================
 //
+
 // RFC 5280 §6.1.3 path validation checks, applied left-to-right
 // (EE → intermediate₁ → ... → root):
 //
-//   (a)(1)  Signature on prospective certificate verifies under the
-//           public key of its predecessor in the chain.
-//   (a)(2)  X509Certificate is valid at the current time (notBefore ≤ now ≤ notAfter).
-//   (a)(3)  X509Certificate has not been revoked. [CRL / OCSP — v1.1]
-//   (a)(4)  X509Certificate's issuer matches the predecessor's subject
-//           (byte-exact DER equality per RFC 5280 §4.1.2.6).
+
+//  (a)(1) Signature on prospective certificate verifies under the
+//  public key of its predecessor in the chain.
+//  (a)(2) X509Certificate is valid at the current time (notBefore ≤ now ≤ notAfter).
+//  (a)(3) X509Certificate has not been revoked. [CRL / OCSP — v1.1]
+//  (a)(4) X509Certificate's issuer matches the predecessor's subject
+//  (byte-exact DER equality per RFC 5280 §4.1.2.6).
 //
-//   (b)     Name constraints: if a constraint cert appears earlier in
-//           the chain, every subordinate cert's names must be within
-//           the permitted subtrees and outside any excluded subtrees.
+
+//  (b) Name constraints: if a constraint cert appears earlier in
+//  the chain, every subordinate cert's names must be within
+//  the permitted subtrees and outside any excluded subtrees.
 //
-//   (c)     KeyUsage: every non-EE cert must have keyCertSign set.
-//           BasicConstraints: every non-EE cert must have cA=TRUE.
+
+//  (c) KeyUsage: every non-EE cert must have keyCertSign set.
+//  BasicConstraints: every non-EE cert must have cA=TRUE.
 //
-//   (d)     pathLenConstraint: no cert with pathLen=N may be followed
-//           by more than N intermediate CAs before the EE.
+
+//  (d) pathLenConstraint: no cert with pathLen=N may be followed
+//  by more than N intermediate CAs before the EE.
 //
-//   (e)     Critical extensions: every critical extension must be
-//           recognised by the validator (the extension decoder did
-//           this already — unknown critical => parse_extensions error).
+
+//  (e) Critical extensions: every critical extension must be
+//  recognised by the validator (the extension decoder did
+//  this already — unknown critical => parse_extensions error).
 //
+
 // We skip (a)(3) in v1 (revocation is Phase 2). Everything else is
 // enforced here.
 //
+
 // =============================================================================
 
 module core.security.x509.chain;
@@ -64,10 +72,12 @@ mount core.security.sig.rsa.{RsaPublicKey as RsaVerifyKey, RsaHash, verify_pkcs1
 /// verifications until the issuer search times out — a CPU-DoS
 /// vector well-documented in TLS implementations.
 ///
+
 /// 16 is well above any well-formed real-world chain (typical:
 /// EE + 1-3 intermediates + root = 4 certs; long-tail edge cases
 /// peak at 5-7). Browsers cap around 10; we pick 16 for headroom.
 ///
+
 /// RFC 5280 §6 says implementations SHOULD support paths up to a
 /// certain depth without specifying a number — but the protocol
 /// has no theoretical upper bound, so applications must impose one.
@@ -94,7 +104,7 @@ public type ChainError is
     | UnsupportedAlgorithm(Int);
 
 // Display + Debug + Eq for ChainError — standard stdlib
-// protocol impls.  Cert-index payloads ARE surfaced
+// protocol impls. Cert-index payloads ARE surfaced
 // (helpful for diagnostics without leaking key/signature
 // bytes); BadSignature surfaces only the index, never
 // the failing signature or key material.
@@ -177,14 +187,14 @@ public type VerifiedChain is {
 implement VerifiedChain {
     /// V10 theorem helper (tls-quic.md §9): length of the verified chain
     /// is always `1 + |inters| + 1` (end-entity + intermediates + root),
-    /// and the chain is non-empty.  Since `VerifiedChain` can ONLY be
+    /// and the chain is non-empty. Since `VerifiedChain` can ONLY be
     /// constructed by `validate_chain`, the structural invariant is a
     /// consequence of type-level construction — any `VerifiedChain`
     /// value witnesses a successful validation.
     public fn length(&self) -> Int { 2 + self.inters.len() }
 
     /// V10 checker — returns true iff the chain is well-formed:
-    /// EE first, then intermediates (if any), then root.  Used as a
+    /// EE first, then intermediates (if any), then root. Used as a
     /// sanity assertion + as the SMT obligation's syntactic hook.
     public fn is_valid(&self) -> Bool { self.length() >= 2 }
 }

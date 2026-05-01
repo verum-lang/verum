@@ -1,5 +1,6 @@
 //! IR expressions.
 //!
+
 //! [`IrExpr`] is a typed expression form that lives between the raw
 //! surface AST and the kernel's `CoreTerm`. It canonicalises the shapes
 //! downstream passes (SMT translator, proof engine, kernel replay)
@@ -7,6 +8,7 @@
 //! bindings, and the arithmetic / propositional / equality operators
 //! the verifier actually reasons about.
 //!
+
 //! The shape is intentionally close to the surface AST so lowering is
 //! a direct walk — the IR's value is *stability* and *shared vocabulary*,
 //! not a radical transformation.

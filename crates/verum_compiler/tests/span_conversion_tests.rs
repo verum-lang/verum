@@ -14,6 +14,7 @@
 )]
 //! Integration tests for AST span to diagnostic span conversion
 //!
+
 //! Tests the complete flow from source file -> AST -> diagnostics with accurate
 //! line/column information in error messages.
 
@@ -73,7 +74,7 @@ fn test_diagnostic_with_accurate_span() {
 
     // Span covering "a + b" on line 2, starting at byte offset 36
     // Line 1: "fn add(a: Int, b: Int) -> Int {\n" = 32 chars
-    // Line 2: "    a + b\n" => "a" starts at 36
+    // Line 2: " a + b\n" => "a" starts at 36
     let ast_span = Span::new(36, 41, file_id);
     let diag_span = session.convert_span(ast_span);
 
@@ -148,7 +149,7 @@ fn test_utf8_span_conversion() {
     let diag_span = session.convert_span(ast_span);
 
     assert_eq!(diag_span.line, 2, "Should be on line 2");
-    // "    let msg" means msg is at column 9 (1-indexed), but byte offset within
+    // " let msg" means msg is at column 9 (1-indexed), but byte offset within
     // line may differ. Calculate expected column from line start.
     let line2_start = source.find('\n').unwrap() + 1;
     let expected_col = (msg_offset as usize - line2_start) + 1;

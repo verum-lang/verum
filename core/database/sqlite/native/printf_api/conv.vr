@@ -3,12 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_mprintf extensions.
 //
+
 // SQLite supports %d/%u/%x/%X/%o/%s/%z/%q/%Q/%w/%f/%e/%g/%c/%%
 // The non-standard specifiers:
-//   %q  — single-quote-escaped string (SQL literal)
-//   %Q  — like %q but emits NULL for NULL arguments and wraps in quotes
-//   %w  — identifier-escaped string (double-quoted with "" doubled)
-//   %z  — plain string that sqlite3_free'd after use
+//  %q — single-quote-escaped string (SQL literal)
+//  %Q — like %q but emits NULL for NULL arguments and wraps in quotes
+//  %w — identifier-escaped string (double-quoted with "" doubled)
+//  %z — plain string that sqlite3_free'd after use
 // =============================================================================
 
 module core.database.sqlite.native.printf_api.conv;

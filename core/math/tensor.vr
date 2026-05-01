@@ -3,28 +3,35 @@
 // =============================================================================
 // Layer: 4 (Tensor)
 //
+
 // Provides N-dimensional array operations with hardware-aware dispatch:
 // - Static and dynamic shape tensors
 // - Element-wise, reduction, and shape operations
 // - VBC opcode integration for CPU/GPU dispatch
 // - CBGR-compatible memory management
 //
+
 // # Design Philosophy
 //
+
 // Two tensor variants serve different use cases:
 // - `Tensor<T, Shape>`: Compile-time shape verification (faster, safer)
 // - `DynTensor<T>`: Runtime shape flexibility (model inputs, dynamic operations)
 //
+
 // All operations route through VBC opcodes, enabling:
 // - Interpreter mode: SIMD-optimized kernels (AVX2/NEON)
 // - JIT/AOT mode: MLIR linalg dialect -> LLVM vectorization
 //
+
 // # Context System Integration
 //
+
 // Operations use Verum's context system for:
 // - ComputeDevice: CPU/GPU placement
 // - Random: PRNG for random tensors
 //
+
 // Spec: docs/architecture/math-spec.md Part V (L4)
 // =============================================================================
 
@@ -144,6 +151,7 @@ implement Device {
 
 // Low-level tensor data reference (internal use)
 //
+
 // TensorHandle separates logical identity from physical storage:
 // - Copy-on-write semantics
 // - CBGR generation tracking for safety
@@ -235,24 +243,27 @@ type ReduceOp is
 
 // Tensor with compile-time shape verification
 //
+
 // Shape is encoded as meta parameter, enabling:
 // - Dimension mismatch detection at compile time
 // - Automatic shape inference for operations
 // - Zero-cost shape checks (no runtime overhead)
 //
+
 // Example:
 // ```verum
 // let a: Tensor<Float, [2, 3]> = Tensor.zeros();
 // let b: Tensor<Float, [3, 4]> = Tensor.zeros();
-// let c: Tensor<Float, [2, 4]> = matmul_static(&a, &b);  // Shape inferred
+// let c: Tensor<Float, [2, 4]> = matmul_static(&a, &b); // Shape inferred
 // ```
 // NOTE: Static Tensor<T, meta Shape> requires const generics (meta generic params)
 // which are not yet supported by the parser. Using DynTensor<T> for all tensor
 // operations until const generics are implemented.
 //
+
 // Future syntax:
-//   public type Tensor<T: Numeric, meta Shape: [USize]> is { data: TensorHandle };
-//   implement<T: Numeric, meta S: [USize]> Tensor<T, S> { ... }
+//  public type Tensor<T: Numeric, meta Shape: [USize]> is { data: TensorHandle };
+//  implement<T: Numeric, meta S: [USize]> Tensor<T, S> { ... }
 
 // Temporary alias: Tensor<T> is DynTensor<T> until const generics are implemented
 public type Tensor<T: Numeric> is DynTensor<T>;
@@ -263,11 +274,13 @@ public type Tensor<T: Numeric> is DynTensor<T>;
 
 // Runtime-shaped tensor
 //
+
 // Use when shape depends on runtime values:
 // - Variable batch sizes
 // - Data-dependent shapes (e.g., nonzero indices)
 // - Framework interop (PyTorch, ONNX import)
 //
+
 // For known shapes, prefer Tensor<T, Shape> for compile-time verification.
 public type DynTensor<T: Numeric> is {
     data: TensorHandle,
@@ -485,6 +498,7 @@ implement<T: Numeric> DynTensor<T> {
 
 // View into tensor (shares storage)
 //
+
 // Views enable efficient slicing and reshaping without copies.
 // Modifications through a view affect the underlying tensor.
 public type TensorView<T: Numeric> is {
@@ -1443,10 +1457,10 @@ public fn chunk<T: Numeric>(x: &DynTensor<T>, chunk_size: USize, dim: USize) -> 
 // NOTE: Static shape operations require const generics (meta generic params)
 // which are not yet supported by the parser. These will be enabled when
 // const generics are implemented:
-//   matmul_static<T, meta M, meta K, meta N>(...)
-//   transpose_static<T, meta M, meta N>(...)
-//   add_static<T, meta A, meta B>(...)
-//   broadcast_shape<meta A, meta B>()
+//  matmul_static<T, meta M, meta K, meta N>(...)
+//  transpose_static<T, meta M, meta N>(...)
+//  add_static<T, meta A, meta B>(...)
+//  broadcast_shape<meta A, meta B>()
 
 // =============================================================================
 // Substantive tensor theorems (SMT-discharged)

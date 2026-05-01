@@ -14,9 +14,11 @@
 )]
 //! Integration test demonstrating all literal parsers working together
 //!
+
 //! This test validates that all 6 literal parsers (email, uri, xml, yaml, interval, matrix)
 //! are fully functional and integrated into the compilation pipeline.
 //!
+
 //! Per CLAUDE.md: Tests in tests/ directory, not in src/ with #[cfg(test)]
 
 use verum_ast::{FileId, Span};

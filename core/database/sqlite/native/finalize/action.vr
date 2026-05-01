@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Three distinct actions share a family:
 //
-//   * sqlite3_finalize         — destroy stmt + release VM + budgets
-//   * sqlite3_reset            — rewind stmt + re-arm for next sqlite3_step
-//   * sqlite3_clear_bindings   — reset all bound parameters to NULL
+
+//  * sqlite3_finalize — destroy stmt + release VM + budgets
+//  * sqlite3_reset — rewind stmt + re-arm for next sqlite3_step
+//  * sqlite3_clear_bindings — reset all bound parameters to NULL
 // =============================================================================
 
 module core.database.sqlite.native.finalize.action;

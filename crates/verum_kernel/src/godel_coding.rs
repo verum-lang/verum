@@ -1,49 +1,55 @@
-//! Recursive functions + Gödel coding — V0 algorithmic kernel rule.
+//! Recursive functions + Gödel coding — algorithmic kernel rule.
 //!
+
 //! ## What this delivers
 //!
+
 //! Self-reference and Gödel-style incompleteness arguments require a
 //! decidable encoding of formulae and proofs as natural numbers
-//! (Gödel numbers).  Pre-this-module Verum's kernel had no algorithmic
+//! (Gödel numbers). Pre-this-module Verum's kernel had no algorithmic
 //! Gödel-coding surface — proofs about provability/representability
 //! had to admit via framework axioms.
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   1. [`PrimitiveRecursive`] — the canonical Gödel-style enum of
-//!      *primitive recursive functions*: `Zero`, `Succ`, `Proj(i, k)`,
-//!      `Comp(g, hs)`, `PrimRec(g, h)`.  Decidable evaluation on
-//!      every input vector.
-//!   2. [`MuRecursive`] — adds bounded `MuMin(f, bound)` for full
-//!      μ-recursion (Kleene's normal form).  Total only when `f`
-//!      witnesses a zero within the supplied `bound`.
-//!   3. [`GodelEncoding`] — pairing-function encode/decode for
-//!      `(symbol, arg_list)` AST cells; uses the standard Cantor
-//!      pairing `⟨a, b⟩ = (a + b)(a + b + 1)/2 + b`.
-//!   4. [`encode_term`] / [`decode_term`] — round-trip identification
-//!      between [`crate::CoreTerm`]-shaped AST trees and `u64` Gödel
-//!      numbers (V0 surface: handles a small symbol alphabet; V1
-//!      promotion to full kernel-CoreTerm round-trip).
-//!   5. [`is_primitive_recursive`] / [`is_mu_recursive`] — decidable
-//!      class-membership tests.
-//!   6. [`representable_in_pa`] — witness flag that the encoded
-//!      function is *representable* in Peano arithmetic (every
-//!      primitive recursive function is; not every μ-recursive one).
+
+//!  1. [`PrimitiveRecursive`] — the canonical Gödel-style enum of
+//!  *primitive recursive functions*: `Zero`, `Succ`, `Proj(i, k)`,
+//!  `Comp(g, hs)`, `PrimRec(g, h)`. Decidable evaluation on
+//!  every input vector.
+//!  2. [`MuRecursive`] — adds bounded `MuMin(f, bound)` for full
+//!  μ-recursion (Kleene's normal form). Total only when `f`
+//!  witnesses a zero within the supplied `bound`.
+//!  3. [`GodelEncoding`] — pairing-function encode/decode for
+//!  `(symbol, arg_list)` AST cells; uses the standard Cantor
+//!  pairing `⟨a, b⟩ = (a + b)(a + b + 1)/2 + b`.
+//!  4. [`encode_term`] / [`decode_term`] — round-trip identification
+//!  between [`crate::CoreTerm`]-shaped AST trees and `u64` Gödel
+//!  numbers (current surface: handles a small symbol alphabet; V1
+//!  promotion to full kernel-CoreTerm round-trip).
+//!  5. [`is_primitive_recursive`] / [`is_mu_recursive`] — decidable
+//!  class-membership tests.
+//!  6. [`representable_in_pa`] — witness flag that the encoded
+//!  function is *representable* in Peano arithmetic (every
+//!  primitive recursive function is; not every μ-recursive one).
 //!
+
 //! ## What this UNBLOCKS
 //!
-//!   - **Gödel's first incompleteness theorem** — the meta-theorem
-//!     that any consistent recursively-axiomatised system extending
-//!     PA admits a true-but-unprovable sentence.  Pre-this-module
-//!     was admitted via host-stdlib `godel_first_incompleteness` axiom.
-//!     Promotion: invoke [`GodelEncoding::encode`] on the diagonal
-//!     formula directly.
-//!   - **MSFS Theorem 5.1 §5** — the diagonalisation argument for
-//!     `id_X violates Π_4` requires Gödel-coding for the
-//!     representability step; promotion via this module.
-//!   - **Diakrisis Yanofsky 2003** — every diagonal-paradox claim
-//!     reduces to a primitive-recursive fixed-point construction;
-//!     `MuRecursive` enables the in-kernel discharge.
+
+//!  - **Gödel's first incompleteness theorem** — the meta-theorem
+//!  that any consistent recursively-axiomatised system extending
+//!  PA admits a true-but-unprovable sentence. Pre-this-module
+//!  was admitted via host-stdlib `godel_first_incompleteness` axiom.
+//!  Promotion: invoke [`GodelEncoding::encode`] on the diagonal
+//!  formula directly.
+//!  - **MSFS Theorem 5.1 §5** — the diagonalisation argument for
+//!  `id_X violates Π_4` requires Gödel-coding for the
+//!  representability step; promotion via this module.
+//!  - **Diakrisis Yanofsky 2003** — every diagonal-paradox claim
+//!  reduces to a primitive-recursive fixed-point construction;
+//!  `MuRecursive` enables the in-kernel discharge.
 
 use serde::{Deserialize, Serialize};
 
@@ -54,16 +60,17 @@ use serde::{Deserialize, Serialize};
 /// Primitive recursive function representation (Kleene's normal
 /// form, restricted to primitive recursion — no `μ` operator).
 ///
+
 /// **Closure operations**:
-///   * [`PrimitiveRecursive::Zero`] — the constant 0 function.
-///   * [`PrimitiveRecursive::Succ`] — the unary successor `n ↦ n+1`.
-///   * [`PrimitiveRecursive::Proj { i, k }`] — the `i`-th projection
-///     of arity `k` (1-based: `i ∈ [1, k]`).
-///   * [`PrimitiveRecursive::Comp { g, hs }`] — composition
-///     `g(h_1(x⃗), ..., h_m(x⃗))`.
-///   * [`PrimitiveRecursive::PrimRec { g, h }`] — primitive recursion
-///     defined by `f(0, x⃗) = g(x⃗)`,
-///     `f(n+1, x⃗) = h(n, f(n, x⃗), x⃗)`.
+///  * [`PrimitiveRecursive::Zero`] — the constant 0 function.
+///  * [`PrimitiveRecursive::Succ`] — the unary successor `n ↦ n+1`.
+///  * [`PrimitiveRecursive::Proj { i, k }`] — the `i`-th projection
+///  of arity `k` (1-based: `i ∈ [1, k]`).
+///  * [`PrimitiveRecursive::Comp { g, hs }`] — composition
+///  `g(h_1(x⃗), ..., h_m(x⃗))`.
+///  * [`PrimitiveRecursive::PrimRec { g, h }`] — primitive recursion
+///  defined by `f(0, x⃗) = g(x⃗)`,
+///  `f(n+1, x⃗) = h(n, f(n, x⃗), x⃗)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PrimitiveRecursive {
     /// `0` — the zero function (arity 0).
@@ -77,7 +84,7 @@ pub enum PrimitiveRecursive {
         /// Arity of the projection.
         k: u32,
     },
-    /// Composition `g(h_1, ..., h_m)`.  `g` has arity `m`; every
+    /// Composition `g(h_1, ..., h_m)`. `g` has arity `m`; every
     /// `h_j` has the same arity `n` (the composition's arity).
     Comp {
         /// The outer function.
@@ -102,10 +109,11 @@ impl PrimitiveRecursive {
     }
 
     /// Evaluate this primitive recursive function on the given
-    /// argument vector.  Returns the function's natural-number value.
+    /// argument vector. Returns the function's natural-number value.
     ///
+
     /// Total on every input — primitive recursion is *always*
-    /// terminating.  Saturates at `u64::MAX` defensively for
+    /// terminating. Saturates at `u64::MAX` defensively for
     /// pathological recursion depths.
     pub fn eval(&self, args: &[u64]) -> u64 {
         match self {
@@ -176,7 +184,7 @@ pub fn is_primitive_recursive(_pr: &PrimitiveRecursive) -> bool {
 // =============================================================================
 
 /// μ-recursive functions extend primitive recursive ones by adding
-/// the *bounded minimisation* operator `MuMin(f, bound)`.  Total iff
+/// the *bounded minimisation* operator `MuMin(f, bound)`. Total iff
 /// the existential clause is witnessed within the bound; partial
 /// otherwise.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -184,7 +192,7 @@ pub enum MuRecursive {
     /// Lift a primitive recursive function.
     Prim(PrimitiveRecursive),
     /// `μ y < bound. f(y, x⃗) = 0` — minimal `y` below the bound such
-    /// that `f` returns 0.  When no such `y` exists in the bound,
+    /// that `f` returns 0. When no such `y` exists in the bound,
     /// returns `None`.
     MuMin {
         /// The predicate we're minimising over.
@@ -195,7 +203,7 @@ pub enum MuRecursive {
 }
 
 impl MuRecursive {
-    /// Evaluate the μ-recursive function.  Returns `None` when an
+    /// Evaluate the μ-recursive function. Returns `None` when an
     /// unbounded search fails to terminate within the supplied bound.
     pub fn eval(&self, args: &[u64]) -> Option<u64> {
         match self {
@@ -221,7 +229,7 @@ pub fn is_mu_recursive(_mu: &MuRecursive) -> bool {
 }
 
 /// Witness flag: every primitive recursive function is *representable*
-/// in Peano arithmetic (Gödel 1931 / Kleene 1952).  Returns true for
+/// in Peano arithmetic (Gödel 1931 / Kleene 1952). Returns true for
 /// every primitive recursive input.
 pub fn representable_in_pa(_pr: &PrimitiveRecursive) -> bool {
     true
@@ -231,9 +239,10 @@ pub fn representable_in_pa(_pr: &PrimitiveRecursive) -> bool {
 // Gödel encoding
 // =============================================================================
 
-/// Cantor pairing function: bijection `ℕ × ℕ → ℕ`.  Defined as
+/// Cantor pairing function: bijection `ℕ × ℕ → ℕ`. Defined as
 /// `⟨a, b⟩ = (a + b)(a + b + 1)/2 + b`.
 ///
+
 /// Saturates at `u64::MAX` on overflow.
 pub fn cantor_pair(a: u64, b: u64) -> u64 {
     let sum = a.saturating_add(b);
@@ -255,7 +264,7 @@ pub fn cantor_unpair(z: u64) -> (u64, u64) {
     (a, b)
 }
 
-/// Integer floor of the square root of `n`.  Newton's method for `u64`.
+/// Integer floor of the square root of `n`. Newton's method for `u64`.
 fn isqrt_floor(n: u64) -> u64 {
     if n == 0 {
         return 0;
@@ -270,7 +279,7 @@ fn isqrt_floor(n: u64) -> u64 {
 }
 
 /// Encode a list of `u64` symbols into a single Gödel number using
-/// iterated Cantor pairing.  Empty list maps to `0`.
+/// iterated Cantor pairing. Empty list maps to `0`.
 pub fn encode_list(symbols: &[u64]) -> u64 {
     let mut acc: u64 = 0;
     for &s in symbols.iter().rev() {
@@ -280,7 +289,7 @@ pub fn encode_list(symbols: &[u64]) -> u64 {
 }
 
 /// Decode a Gödel number into a list of `n` symbols (the requested
-/// length).  Inverse of [`encode_list`] modulo length.
+/// length). Inverse of [`encode_list`] modulo length.
 pub fn decode_list(z: u64, len: usize) -> Vec<u64> {
     let mut out = Vec::with_capacity(len);
     let mut cur = z;
@@ -359,8 +368,8 @@ mod tests {
 
     #[test]
     fn primrec_addition_via_succ_and_proj() {
-        // add(0, y) = y      = π_1^1(y)
-        // add(n+1, y) = S(add(n, y))  = S(π_2^3(n, add(n,y), y))
+        // add(0, y) = y = π_1^1(y)
+        // add(n+1, y) = S(add(n, y)) = S(π_2^3(n, add(n,y), y))
         let g = PrimitiveRecursive::Proj { i: 1, k: 1 };
         let h = PrimitiveRecursive::Comp {
             g: Box::new(PrimitiveRecursive::Succ),

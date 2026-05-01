@@ -3,13 +3,16 @@
 // =============================================================================
 // Spec: https://www.sqlite.org/eqp.html (EXPLAIN QUERY PLAN)
 //
+
 // Each row:
 //
-//   id      INTEGER   — node id
-//   parent  INTEGER   — parent node id (0 ⇒ root)
-//   notused INTEGER   — always 0 (legacy)
-//   detail  TEXT      — human description ("SCAN TABLE users", etc.)
+
+//  id INTEGER — node id
+//  parent INTEGER — parent node id (0 ⇒ root)
+//  notused INTEGER — always 0 (legacy)
+//  detail TEXT — human description ("SCAN TABLE users", etc.)
 //
+
 // Rows form a forest where `id > parent`; children of one parent
 // appear in execution order.
 // =============================================================================

@@ -4,9 +4,11 @@
 // Layer: 5 (Network — TLS 1.3 core)
 // =============================================================================
 //
+
 // Pre-encryption record assembly + post-decryption record parsing.
 // Never carries an AEAD key — see record.aead for the sealed form.
 //
+
 // =============================================================================
 
 module core.net.tls13.record.plaintext;
@@ -34,6 +36,7 @@ implement TlsPlaintext {
     /// Handshake / Alert messages exchanged in the clear, plus the
     /// legacy ChangeCipherSpec records during middlebox compatibility).
     ///
+
     /// Post-encryption records use the ciphertext wrapper — see
     /// `record.aead.AeadState.seal`.
     public fn encode(&self, out: &mut List<Byte>) -> Result<(), RecordEncodeError> {
@@ -88,16 +91,19 @@ implement Eq for RecordEncodeError {
 // TLSInnerPlaintext — the encrypted payload structure
 // =============================================================================
 //
+
 // TLSInnerPlaintext ::= struct {
-//     opaque     content[TLSPlaintext.length];
-//     ContentType type;
-//     uint8      zeros[length_of_padding];
+//  opaque content[TLSPlaintext.length];
+//  ContentType type;
+//  uint8 zeros[length_of_padding];
 // };
 //
+
 // Padding is zero bytes appended after the ContentType marker. On
 // receipt, the decoder strips trailing zeros to find the ContentType
 // at the tail.
 //
+
 // =============================================================================
 
 /// Build the inner-plaintext blob from a content payload + type +

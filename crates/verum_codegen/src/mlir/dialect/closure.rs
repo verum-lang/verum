@@ -1,5 +1,6 @@
 //! Comprehensive closure dialect operations for Verum.
 //!
+
 //! This module implements industrial-grade closure support, including:
 //! - Closure creation with capture analysis
 //! - Three capture modes: by value, by reference, by move
@@ -7,29 +8,34 @@
 //! - Indirect function calls
 //! - Closure optimization passes
 //!
+
 //! # Closure Layout
 //!
+
 //! ```text
 //! Closure<F> = {
-//!     fn_ptr: *const (),      // Pointer to closure function
-//!     env_ptr: *mut Env<F>,   // Pointer to captured environment
-//!     drop_fn: *const (),     // Optional destructor for env
+//!  fn_ptr: *const (), // Pointer to closure function
+//!  env_ptr: *mut Env<F>, // Pointer to captured environment
+//!  drop_fn: *const (), // Optional destructor for env
 //! }
 //!
+
 //! Env<F> = {
-//!     capture_0: T0,          // First captured variable
-//!     capture_1: T1,          // Second captured variable
-//!     ...
+//!  capture_0: T0, // First captured variable
+//!  capture_1: T1, // Second captured variable
+//!  ...
 //! }
 //! ```
 //!
+
 //! # Capture Modes
 //!
-//! | Mode     | Symbol | Behavior |
+
+//! | Mode | Symbol | Behavior |
 //! |----------|--------|----------|
-//! | ByValue  | `=`    | Copy/clone value into closure |
-//! | ByRef    | `&`    | Capture reference to value |
-//! | ByMove   | `move` | Move value into closure |
+//! | ByValue | `=` | Copy/clone value into closure |
+//! | ByRef | `&` | Capture reference to value |
+//! | ByMove | `move` | Move value into closure |
 
 use verum_mlir::{
     Context,
@@ -178,12 +184,14 @@ impl Default for ClosureEnv {
 
 /// Closure create operation.
 ///
+
 /// Creates a closure from a function and captured environment.
 ///
+
 /// ```mlir
 /// %closure = verum.closure_create @fn_name, [%cap0, %cap1] {
-///     capture_modes = ["by_value", "by_ref"],
-///     fn_type = (i64) -> i64
+///  capture_modes = ["by_value", "by_ref"],
+///  fn_type = (i64) -> i64
 /// } : !verum.closure<(i64) -> i64>
 /// ```
 pub struct ClosureCreateOp;
@@ -240,8 +248,10 @@ impl ClosureCreateOp {
 
 /// Closure call operation.
 ///
+
 /// Calls a closure with the given arguments.
 ///
+
 /// ```mlir
 /// %result = verum.closure_call %closure(%arg0, %arg1) : (i64, i64) -> i64
 /// ```
@@ -268,8 +278,10 @@ impl ClosureCallOp {
 
 /// Closure environment load operation.
 ///
+
 /// Loads a captured value from the closure environment.
 ///
+
 /// ```mlir
 /// %value = verum.closure_env_load %env, 0 : i64
 /// ```
@@ -299,8 +311,10 @@ impl ClosureEnvLoadOp {
 
 /// Closure environment store operation.
 ///
+
 /// Stores a value into the closure environment.
 ///
+
 /// ```mlir
 /// verum.closure_env_store %env, 0, %value : i64
 /// ```
@@ -329,12 +343,14 @@ impl ClosureEnvStoreOp {
 
 /// Closure environment allocate operation.
 ///
+
 /// Allocates a new closure environment.
 ///
+
 /// ```mlir
 /// %env = verum.closure_env_alloc {
-///     size = 32 : i64,
-///     alignment = 8 : i64
+///  size = 32 : i64,
+///  alignment = 8 : i64
 /// } : !llvm.ptr
 /// ```
 pub struct ClosureEnvAllocOp;
@@ -368,8 +384,10 @@ impl ClosureEnvAllocOp {
 
 /// Closure environment free operation.
 ///
+
 /// Frees a closure environment.
 ///
+
 /// ```mlir
 /// verum.closure_env_free %env
 /// ```
@@ -390,8 +408,10 @@ impl ClosureEnvFreeOp {
 
 /// Closure drop operation.
 ///
+
 /// Drops a closure, cleaning up its environment.
 ///
+
 /// ```mlir
 /// verum.closure_drop %closure
 /// ```
@@ -416,8 +436,10 @@ impl ClosureDropOp {
 
 /// Function pointer create operation.
 ///
+
 /// Creates a function pointer from a function name.
 ///
+
 /// ```mlir
 /// %fn_ptr = verum.fn_ptr @my_function : !verum.fn_ptr<(i64) -> i64>
 /// ```
@@ -450,8 +472,10 @@ impl FnPtrCreateOp {
 
 /// Indirect call operation.
 ///
+
 /// Calls a function through a function pointer.
 ///
+
 /// ```mlir
 /// %result = verum.indirect_call %fn_ptr(%arg0, %arg1) : (i64, i64) -> i64
 /// ```
@@ -482,11 +506,13 @@ impl IndirectCallOp {
 
 /// Method call operation.
 ///
+
 /// Calls a method on an object (for trait objects/protocols).
 ///
+
 /// ```mlir
 /// %result = verum.method_call %obj, "method_name"(%arg0) {
-///     vtable_index = 3 : i32
+///  vtable_index = 3 : i32
 /// } : (i64) -> i64
 /// ```
 pub struct MethodCallOp;
@@ -528,8 +554,10 @@ impl MethodCallOp {
 
 /// VTable lookup operation.
 ///
+
 /// Looks up a method in a VTable.
 ///
+
 /// ```mlir
 /// %fn_ptr = verum.vtable_lookup %vtable, 3 : !verum.fn_ptr<(i64) -> i64>
 /// ```
@@ -574,6 +602,7 @@ impl<'c> ClosureTypeBuilder<'c> {
 
     /// Create a closure type.
     ///
+
     /// Closure = { fn_ptr, env_ptr, drop_fn }
     pub fn closure_type(&self) -> Result<Type<'c>> {
         Type::parse(self.context, "!llvm.struct<(ptr, ptr, ptr)>")

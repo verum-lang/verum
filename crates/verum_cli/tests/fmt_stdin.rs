@@ -1,10 +1,12 @@
 //! `verum fmt --stdin` contract tests.
 //!
+
 //! Editor format-on-save plumbing (LSP, vim plugins, VS Code
 //! extensions) all use the same pattern: spawn the formatter with
 //! `--stdin`, write the buffer, read the formatted output back. This
 //! file pins the contract:
 //!
+
 //! 1. Stdin → stdout works for syntactically valid input.
 //! 2. Whitespace deviations are normalised.
 //! 3. `--stdin --check` is rejected with a clear error.

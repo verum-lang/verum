@@ -1,9 +1,11 @@
 //! Enhanced Refinement Error Diagnostics
 //!
+
 //! Refinement type error diagnostics: generates detailed error messages for failed refinement
 //! checks including source locations, predicate details, and suggested fixes. Handles both
 //! compile-time (proof mode) and runtime validation failure reporting.
 //!
+
 //! This module implements production-grade error diagnostics for refinement type violations
 //! with the following features:
 //! - Actual value tracking and display
@@ -12,8 +14,10 @@
 //! - Multi-constraint breakdown with ✓/✗ markers
 //! - Nested refinement error reporting
 //!
+
 //! # Quality Standards (Spec §8.2)
 //!
+
 //! All refinement errors MUST provide:
 //! 1. Actual value that failed
 //! 2. Specific constraint violated

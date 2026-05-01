@@ -1,11 +1,14 @@
 //! Safe SQL interpolation handler
 //!
+
 //! Safe interpolation handler: receives template strings and expression lists,
 //! returns injection-safe parameterized output at compile-time.
 //!
+
 //! Provides SQL interpolation that prevents injection attacks by using
 //! parameterized queries.
 //!
+
 //! # Example
 //! ```verum
 //! let user_id = 42;
@@ -19,6 +22,7 @@ use verum_common::{List, Text};
 
 /// SQL interpolation handler
 ///
+
 /// # Security
 /// This handler PREVENTS SQL injection by:
 /// 1. Replacing all interpolations with placeholders (?)
@@ -38,18 +42,22 @@ pub struct SqlQuery {
 impl SqlInterpolationHandler {
     /// Handle SQL interpolation at compile-time
     ///
+
     /// Safe interpolation: `sql"SELECT * FROM users WHERE id = {user_id}"` converts
     /// {expr} placeholders to parameterized $1, $2, ... to prevent SQL injection.
     /// Desugars to SqlQuery.with_params(template, [args...]). Never uses string concat.
     ///
+
     /// # Arguments
     /// - `template`: The SQL template string with {expr} placeholders
     /// - `interpolations`: The expressions to interpolate
     /// - `span`: Source location for error reporting
     ///
+
     /// # Returns
     /// A SqlQuery with parameterized template and parameters
     ///
+
     /// # Safety
     /// This function generates SAFE parameterized queries that prevent SQL injection.
     /// All user input is treated as parameters, never as SQL code.
@@ -139,6 +147,7 @@ impl SqlInterpolationHandler {
 
     /// Validate that a SQL template doesn't contain dangerous patterns
     ///
+
     /// # Security
     /// This is an additional layer of defense that catches common SQL injection patterns
     /// even before parameter substitution.

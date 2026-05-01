@@ -14,9 +14,11 @@
 )]
 // Comprehensive Tests for Pattern-Based Quantifier Instantiation
 //
+
 // Tests verify that pattern generation improves dependent type verification
 // performance by 20-30% as specified.
 //
+
 // Test categories:
 // 1. Pattern generation for List, Map, Set types
 // 2. Pattern-guided quantifier instantiation

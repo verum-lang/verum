@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API — rbu.h
 //
+
 // sqlite3rbu_bp_progress writes two integers:
-//   * one  = number of update DB source rows processed
-//   * two  = number of target DB checkpoint pages
+//  * one = number of update DB source rows processed
+//  * two = number of target DB checkpoint pages
 //
+
 // Both are unbounded upward counters — they only monotonically
 // increase across resumes.
 // =============================================================================

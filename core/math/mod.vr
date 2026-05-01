@@ -3,53 +3,64 @@
 // =============================================================================
 // Layer: 0-9 (Mathematical Computing Stack)
 //
+
 // This module provides production-ready scientific computing organized into
 // hierarchical layers (L0-L9), from bare-metal IEEE 754 operations to
 // distributed tensor computations.
 //
+
 // # Architecture
 //
+
 // ```
-// Layer 9: Agent       - LLM integration, inference optimization, agents
+// Layer 9: Agent - LLM integration, inference optimization, agents
 // Layer 8: Distributed - Multi-node distributed compute, FSDP, DDP
-// Layer 8: SSM         - State Space Models, Mamba, MoE
+// Layer 8: SSM - State Space Models, Mamba, MoE
 // Layer 7: Neural Nets - Layers, optimizers, training
-// Layer 6: Autodiff    - Automatic differentiation, VJP/JVP
-// Layer 5: GPU         - Accelerator compute, device abstraction
-// Layer 4: Tensor      - N-dimensional arrays, static/dynamic shape
-// Layer 3: Analysis    - Numerical analysis, ODEs, calculus, random
-// Layer 2: Linear      - Linear algebra, BLAS operations
-// Layer 1: Scalar      - Elementary & special functions
-// Layer 0: Foundation  - IEEE 754, integers, bits, SIMD (→ core/simd, core/intrinsics)
+// Layer 6: Autodiff - Automatic differentiation, VJP/JVP
+// Layer 5: GPU - Accelerator compute, device abstraction
+// Layer 4: Tensor - N-dimensional arrays, static/dynamic shape
+// Layer 3: Analysis - Numerical analysis, ODEs, calculus, random
+// Layer 2: Linear - Linear algebra, BLAS operations
+// Layer 1: Scalar - Elementary & special functions
+// Layer 0: Foundation - IEEE 754, integers, bits, SIMD (→ core/simd, core/intrinsics)
 // ```
 //
+
 // # Usage
 //
+
 // ```verum
-// mount core.math.*;           // Full math library
-// mount core.math.simple.*;    // Simple API for prototyping
-// mount core.math.linalg.*;    // Linear algebra only
+// mount core.math.*; // Full math library
+// mount core.math.simple.*; // Simple API for prototyping
+// mount core.math.linalg.*; // Linear algebra only
 // ```
 //
+
 // # Refinement Types
 //
+
 // The math library uses refinement types to provide compile-time verification
 // of mathematical preconditions and postconditions:
 //
+
 // ```verum
 // fn sqrt(x: Float{>= 0.0}) -> Float{>= 0.0}
 // fn log(x: Float{> 0.0}) -> Float
 // fn asin(x: Float{it >= -1.0 && it <= 1.0}) -> Float
 // ```
 //
+
 // # Context System
 //
+
 // Mathematical operations use Verum's context system for cross-cutting concerns:
 // - Random: Pseudorandom number generation
 // - ComputeDevice: Device selection (CPU, GPU)
 // - PrecisionMode: Numerical precision control
 // - GradientTape: Autodiff recording
 //
+
 // Spec: docs/architecture/math-spec.md
 // =============================================================================
 
@@ -270,6 +281,7 @@ public module internal;
 // Diakrisis foundation modules (MSFS / VVA)
 // =============================================================================
 //
+
 // Sub-tree of foundational categorical / proof-theoretic infrastructure
 // shipped under `core.math` that the prior registration list omitted.
 // Each module shipped production code + downstream consumers but had

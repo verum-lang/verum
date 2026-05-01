@@ -6,38 +6,44 @@ module core.database.sqlite.native.l7_api.backup;
 // Layer: 7 — public API.
 // Spec: sqlite-native.md §13.4 (online_backup); SQLite sqlite3_backup_*.
 //
+
 // Online backup copies a source database to a destination *while the
-// source is being read or written by other transactions*.  The
+// source is being read or written by other transactions*. The
 // canonical SQLite C API:
 //
-//     handle = sqlite3_backup_init(pDest, "main", pSrc, "main");
-//     while (sqlite3_backup_step(handle, pages_per_step) == SQLITE_OK)
-//         /* poll progress, optionally sleep */;
-//     sqlite3_backup_finish(handle);
+
+//  handle = sqlite3_backup_init(pDest, "main", pSrc, "main");
+//  while (sqlite3_backup_step(handle, pages_per_step) == SQLITE_OK)
+//  /* poll progress, optionally sleep */;
+//  sqlite3_backup_finish(handle);
 //
+
 // Pure-Verum equivalent:
 //
-//     let mut session = backup_init(&mut dst_db, &src_db)?;
-//     loop {
-//         match backup_step(&mut session, pages_per_step) {
-//             BoOk      => { sleep_or_yield(); continue; }
-//             BoDone    => break;
-//             BoBusy | BoLocked => { backoff(); continue; }
-//             BoFailed { code, reason } => return Err(...);
-//         }
-//     }
-//     backup_finish(session);
+
+//  let mut session = backup_init(&mut dst_db, &src_db)?;
+//  loop {
+//  match backup_step(&mut session, pages_per_step) {
+//  BoOk => { sleep_or_yield(); continue; }
+//  BoDone => break;
+//  BoBusy | BoLocked => { backoff(); continue; }
+//  BoFailed { code, reason } => return Err(...);
+//  }
+//  }
+//  backup_finish(session);
 //
+
 // Concurrent-writer safety.
 //
+
 // SQLite's online backup tolerates concurrent writers on the source by
 // re-reading any page that was modified since the last `backup_step`
 // (the destination is written page-by-page; if a source page changes
-// before we copy it, the next step picks up the new image).  The v1
+// before we copy it, the next step picks up the new image). The v1
 // loom backup runs page-by-page through `pager_read` / `pager_write`
 // — both of which are actor-mediated single-writer operations on
 // their respective Pager instances, so the per-page copy is itself
-// race-free.  Multi-step concurrency story: every `backup_step` reads
+// race-free. Multi-step concurrency story: every `backup_step` reads
 // `total_pages` afresh from the source, so a source that grows
 // mid-backup has its tail picked up on the next step.
 // =============================================================================
@@ -74,24 +80,25 @@ mount core.database.sqlite.native.l6_session.{ ConnectionMode, CmAdmin };
 // BackupSession — affine handle binding the source / destination pair
 // -----------------------------------------------------------------------------
 
-/// A live backup operation.  `affine` so callers can't drop the
+/// A live backup operation. `affine` so callers can't drop the
 /// session without `backup_finish` (which closes the destination DB).
 ///
+
 /// Holds the destination Database (owned — no other writer should
 /// touch the destination during a backup) plus the source's resolved
-/// pager state at-init time.  Fresh pages added to the source after
+/// pager state at-init time. Fresh pages added to the source after
 /// init are picked up on each subsequent `backup_step` because
 /// `read_total_pages` is re-read every step.
 public type affine BackupSession is {
     /// The destination database (owned — backup writes pages directly
     /// into this Database's pager).
     dst: Database,
-    /// Page size locked in at init.  Source and destination share it;
+    /// Page size locked in at init. Source and destination share it;
     /// mismatched page sizes are rejected during init.
     page_size: Int,
     /// Progress tracking — total / remaining counters.
     progress: BackupHandle,
-    /// Next source page index to copy (1-based).  Walks through 1..N
+    /// Next source page index to copy (1-based). Walks through 1..N
     /// over successive `backup_step` calls.
     next_page_no: Int,
 }
@@ -123,6 +130,7 @@ fn read_total_pages(src: &Database) -> Int {
 /// Open a destination database at `dst_path` (admin mode, RWC) and
 /// initialise an online-backup session that will copy from `src` to it.
 ///
+
 /// Returns `Err(DbCannotOpen)` if the destination cannot be opened,
 /// `Err(DbReadonly)` if the destination opens but isn't writable, or
 /// `Err(DbCorrupt)` if the source page-size disagrees with what the
@@ -170,13 +178,14 @@ public fn backup_init_into(
     })
 }
 
-/// Copy up to `pages` source pages into the destination.  `pages` is
-/// clamped against the remaining count.  Use `BsrAll` (via
+/// Copy up to `pages` source pages into the destination. `pages` is
+/// clamped against the remaining count. Use `BsrAll` (via
 /// `from_n_pages(-1)`) to drain in one call.
 ///
+
 /// Returns `BoOk` while pages remain (the caller may then `sleep` and
 /// loop), `BoDone` when the source is exhausted, `BoFailed` on
-/// unrecoverable I/O.  `BoBusy` / `BoLocked` are reserved for future
+/// unrecoverable I/O. `BoBusy` / `BoLocked` are reserved for future
 /// VFS-locked source / destination scenarios.
 public fn backup_step(
     session: &mut BackupSession,
@@ -253,13 +262,14 @@ public fn backup_step(
     BoOk
 }
 
-/// Consume the session.  In v1 this releases the destination Database
+/// Consume the session. In v1 this releases the destination Database
 /// (whose `Drop` flushes any pending writes through the pager); the
 /// returned Database can then be reopened by the caller for inspection.
 ///
+
 /// Returns the destination Database to the caller for further use (a
 /// common pattern: backup, then continue using the dst as a working
-/// copy).  Affine consume guarantees the session is no longer
+/// copy). Affine consume guarantees the session is no longer
 /// referenced after this call.
 public fn backup_finish(session: BackupSession) -> Database {
     // Move the destination out of the session before it goes out of scope.
@@ -271,7 +281,7 @@ public fn backup_finish(session: BackupSession) -> Database {
 }
 
 /// Affine consume that abandons the backup, returning the destination
-/// for cleanup (e.g. unlink the partial file).  Equivalent to
+/// for cleanup (e.g. unlink the partial file). Equivalent to
 /// `backup_finish` semantically — naming preserved for symmetry with
 /// SQLite C API where `sqlite3_backup_finish` is the only terminator.
 public fn backup_abandon(session: BackupSession) -> Database {
@@ -283,9 +293,9 @@ public fn backup_abandon(session: BackupSession) -> Database {
 // -----------------------------------------------------------------------------
 
 /// Single-shot backup: open dst, copy *everything* in one step,
-/// finish, return the new database.  Suitable for tests and for
+/// finish, return the new database. Suitable for tests and for
 /// short-lived backups where you don't need to interleave progress
-/// reporting.  For long backups use `backup_init_to_path` +
+/// reporting. For long backups use `backup_init_to_path` +
 /// `backup_step` + `backup_finish` so the user can throttle / sleep
 /// between steps.
 public fn backup_to_path_in_one_go(

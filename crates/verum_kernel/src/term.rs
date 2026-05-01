@@ -1,6 +1,7 @@
 //! Core syntactic surface — `CoreTerm`, `CoreType`, `UniverseLevel`.
 //! Split per #198 V7 (final lib.rs sweep).
 //!
+
 //! These three types form the kernel's syntactic foundation: every
 //! other module (errors, depth, infer, support, etc.) builds on top
 //! of them. They live in their own module so the explicit calculus
@@ -14,16 +15,19 @@ use crate::{FrameworkId, SmtCertificate};
 
 /// A term in Verum-Core, the explicit typed calculus the kernel checks.
 ///
+
 /// This is the minimum syntactic surface the kernel needs in order to
 /// proof-check every Verum feature: dependent functions (Π), dependent
 /// pairs (Σ), cubical path types with [`HComp`] / [`Transp`] / [`Glue`],
 /// refinement types with SMT-discharged predicates, user / stdlib /
 /// higher inductive types, and framework axioms.
 ///
+
 /// Surface-level constructs (match expressions, structured Isar-style
 /// proofs, automated tactics, …) elaborate to these terms in
 /// `verum_types` before they reach the kernel.
 ///
+
 /// [`HComp`]: CoreTerm::HComp
 /// [`Transp`]: CoreTerm::Transp
 /// [`Glue`]: CoreTerm::Glue
@@ -93,6 +97,7 @@ pub enum CoreTerm {
     /// **dependent path-over**:
     /// `PathOver(motive, p, lhs, rhs)`.
     ///
+
     /// When a HIT path-constructor has endpoints whose motive
     /// images are not definitionally equal — e.g. the Suspension
     /// HIT's `merid : north ↝ south` where `motive(north) ≠
@@ -103,15 +108,18 @@ pub enum CoreTerm {
     /// motive: `PathOver(motive, p, lhs_image, rhs_image)` where
     /// `lhs_image : motive(lhs)` and `rhs_image : motive(rhs)`.
     ///
+
     /// **Typing rule (K-PathOver-Form):**
     ///
+
     /// ```text
-    ///   Γ ⊢ motive : B → U     Γ ⊢ p : Path<B>(b₀, b₁)
-    ///   Γ ⊢ lhs : motive(b₀)   Γ ⊢ rhs : motive(b₁)
-    ///   ───────────────────────────────────────────────
-    ///   Γ ⊢ PathOver(motive, p, lhs, rhs) : U
+    ///  Γ ⊢ motive : B → U Γ ⊢ p : Path<B>(b₀, b₁)
+    ///  Γ ⊢ lhs : motive(b₀) Γ ⊢ rhs : motive(b₁)
+    ///  ───────────────────────────────────────────────
+    ///  Γ ⊢ PathOver(motive, p, lhs, rhs) : U
     /// ```
     ///
+
     /// **Degenerate-case reduction:** when `lhs == rhs` structurally
     /// AND the endpoint-images of `p` coincide (e.g., closed loops
     /// like `Loop : Base ↝ Base` in S¹), `PathOver(motive, p, lhs,
@@ -120,6 +128,7 @@ pub enum CoreTerm {
     /// computes the conversion when the homogeneous shape is
     /// expected by a downstream check.
     ///
+
     /// References:
     /// * HoTT Book §6.2 (Function spaces over identifications).
     /// * Cubical Agda's `PathP A x y` (the same primitive).
@@ -176,6 +185,7 @@ pub enum CoreTerm {
 
     /// Refinement type: `{ x : base | predicate(x) }`.
     ///
+
     /// The kernel records the predicate but delegates decidability to
     /// the SMT backend via [`CoreTerm::SmtProof`].
     Refine {
@@ -189,12 +199,14 @@ pub enum CoreTerm {
 
     /// quotient type: `Quotient(base, equiv)`.
     ///
+
     /// Quotient types: a quotient `Q = T / ~` collapses elements
     /// of `T` related by the equivalence `~` into a single
     /// equivalence class. The kernel checks (a) `base` is a
     /// type, (b) `equiv` is a binary relation on `base`,
     /// (c) the eliminator's motive respects the equivalence.
     ///
+
     /// Setoid quotients (Z = ℕ²/~ where (a,b)~(c,d) iff a+d =
     /// b+c) and propositional truncation (||A|| = A / ⊤) both
     /// fall under this constructor; the difference lies in the
@@ -213,8 +225,9 @@ pub enum CoreTerm {
     /// value `t : T` into the quotient `T / ~` by taking its
     /// equivalence class. Per `K-Quot-Intro`:
     ///
+
     /// ```text
-    /// Γ ⊢ t : T   Γ ⊢ ~ : T → T → Prop
+    /// Γ ⊢ t : T Γ ⊢ ~ : T → T → Prop
     /// ──────────────────────────────────
     /// Γ ⊢ QuotIntro(t) : Quotient(T, ~)
     /// ```
@@ -231,6 +244,7 @@ pub enum CoreTerm {
     /// case)`. Eliminates a quotient by providing a value-level
     /// case that respects the equivalence:
     ///
+
     /// ```text
     /// Γ ⊢ q : Quotient(T, ~)
     /// Γ ⊢ motive : Quotient(T, ~) → U
@@ -240,6 +254,7 @@ pub enum CoreTerm {
     /// Γ ⊢ quot_elim(q, motive, case) : motive(q)
     /// ```
     ///
+
     /// The respect-of-equivalence obligation is discharged by
     /// the framework-axiom system or `@verify(proof)` — the
     /// kernel records the obligation but doesn't internally
@@ -256,6 +271,7 @@ pub enum CoreTerm {
     /// Reference to a named inductive / higher-inductive type (from
     /// the stdlib, from the user's project, or from a framework axiom).
     ///
+
     /// The kernel looks `path` up in its registry of declared type
     /// constructors; missing names are a kernel error, not silent
     /// pass-through.
@@ -284,6 +300,7 @@ pub enum CoreTerm {
     /// A trusted postulate registered via
     /// [`crate::AxiomRegistry::register`].
     ///
+
     /// Every `Axiom` node records the framework name + citation so the
     /// TCB can be enumerated by `verum audit --framework-axioms`.
     Axiom {
@@ -302,7 +319,8 @@ pub enum CoreTerm {
     /// kernel uses this constructor to track the natural-equivalence
     /// τ : ε ∘ M ≃ A ∘ ε of Proposition 5.1 / Corollary 5.10.
     ///
-    /// V0 ships the constructor + `K-Eps-Mu` skeleton (see
+
+    /// ships the constructor + `K-Eps-Mu` skeleton (see
     /// `Kernel::check_eps_mu_coherence`); the full naturality check
     /// is deferred to V1, where the τ-witness construction will be
     /// wired in.
@@ -338,6 +356,7 @@ pub enum CoreTerm {
     /// type) of a cohesive type, forgetting the geometric / modal
     /// structure and keeping only the homotopy data.
     ///
+
     /// Per the kernel admits the type former unconditionally
     /// (the cubical-set semantics interprets it via localisation at
     /// the discrete-type subuniverse); the **adjunction laws** (unit
@@ -345,6 +364,7 @@ pub enum CoreTerm {
     /// recorded as framework axioms in `core.math.frameworks.schreiber_dcct`
     /// and only become visible when that framework is loaded.
     ///
+
     /// Reference: Schreiber U. 2013. *Differential Cohomology in a
     /// Cohesive ∞-Topos.* §3.4 (cohesive modalities).
     Shape(Heap<CoreTerm>),
@@ -356,10 +376,12 @@ pub enum CoreTerm {
     /// connected." Plays the role of the necessity modality for
     /// crispness in cohesive HoTT.
     ///
+
     /// `♭A` is itself a (discrete) cohesive type, hence the kernel
     /// records it at the same universe level as `A`. Adjunction
     /// laws are framework-axiomatic per `schreiber_dcct`.
     ///
+
     /// Reference: Shulman M. 2018. *Brouwer's fixed-point theorem
     /// in real-cohesive homotopy type theory.* §3.
     Flat(Heap<CoreTerm>),
@@ -371,6 +393,7 @@ pub enum CoreTerm {
     /// `∫A` packaged with a maximal cohesive structure. Dual to
     /// `♭A` under the adjunction.
     ///
+
     /// Reference: Schreiber U. 2013. *Differential Cohomology in a
     /// Cohesive ∞-Topos.* §3.4.
     Sharp(Heap<CoreTerm>),
@@ -378,6 +401,7 @@ pub enum CoreTerm {
 
 /// A structural view of a type used by [`crate::check`] diagnostics.
 ///
+
 /// Internally, the kernel works directly with [`CoreTerm`] values in
 /// `Universe` position. This enum exists so that errors like
 /// "expected a Pi type, got Int" can be reported without copying large

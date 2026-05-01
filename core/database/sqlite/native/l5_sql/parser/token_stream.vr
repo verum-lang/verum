@@ -6,10 +6,12 @@ module core.database.sqlite.native.l5_sql.parser.token_stream;
 // Layer: 5
 // Spec: sqlite-native.md §12.2
 //
+
 // Thin wrapper around a List<Token> that every parser module (select,
 // insert, ddl, expr, ...) consumes. Keeps the parser machinery
 // lock-step: peek / advance / expect / expect_keyword / accept_*.
 //
+
 // Error construction is centralised so every parser emits the same
 // `SqlParseError` shape for the diagnostic layer to render.
 // =============================================================================

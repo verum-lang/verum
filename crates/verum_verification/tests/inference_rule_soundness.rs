@@ -1,18 +1,21 @@
 //! Soundness regression: an unknown inference rule must NOT silently pass.
 //!
+
 //! Pre-fix `apply_inference_rule` had an unsound fallback for any rule name
 //! it didn't have a hardcoded match for: if the user supplied at least one
 //! premise, it returned `Ok(expected.clone())`. That made the downstream
 //! `expr_eq(derived, expected)` check trivially true and let arbitrary
 //! "rule names" stand in for real proofs:
 //!
+
 //! ```ignore
 //! ProofTerm::Apply {
-//!     rule: "totally_made_up_rule",     // no such rule registered
-//!     premises: vec![any_well_typed_premise],
-//! }                                     // → validated as proof of ANY claim
+//!  rule: "totally_made_up_rule", // no such rule registered
+//!  premises: vec![any_well_typed_premise],
+//! } // → validated as proof of ANY claim
 //! ```
 //!
+
 //! Post-fix the apply branch routes through `register_inference_rule` and
 //! returns `ValidationError::ValidationFailed { "unknown inference rule" }`
 //! when the name is unknown.
@@ -153,6 +156,7 @@ fn registered_inference_rule_rejects_arity_mismatch() {
 // ============================================================================
 // Quantifier-rule soundness gates (forall_elim / exists_intro)
 //
+
 // Pre-fix `apply_inference_rule` returned `Ok(expected.clone())` for both
 // forall_elim and exists_intro WITHOUT verifying the premise / expected
 // was actually quantified. Same trust-the-user soundness leak as the

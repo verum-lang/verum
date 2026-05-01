@@ -6,31 +6,39 @@
 // Reference: https://github.com/aappleby/smhasher/wiki/MurmurHash3
 // =============================================================================
 //
+
 // MurmurHash3 — the hash behind Cassandra Murmur3Partitioner,
 // Guava BloomFilter, Apache Spark partitioning, Nessie content
 // addressing. Two variants shipped:
 //
-//   * `murmur3_32`    — 32-bit output; the minimal hash-table /
-//                       partition-key workhorse.
-//   * `murmur3_128`   — 128-bit output (x64 variant); the common
-//                       choice when 32 bits risks birthday
-//                       collisions at scale.
+
+//  * `murmur3_32` — 32-bit output; the minimal hash-table /
+//  partition-key workhorse.
+//  * `murmur3_128` — 128-bit output (x64 variant); the common
+//  choice when 32 bits risks birthday
+//  collisions at scale.
 //
+
 // Like XXH64, NOT cryptographic — adversarial inputs trivially
 // collide. Use SHA-256 / Blake2b for integrity checks against
 // untrusted peers.
 //
+
 // # Expected performance
 //
-//   Pure-Verum murmur3_32:  ~2.5 GB/s on a modern core.
-//   Pure-Verum murmur3_128: ~3 GB/s (wider lanes).
+
+//  Pure-Verum murmur3_32: ~2.5 GB/s on a modern core.
+//  Pure-Verum murmur3_128: ~3 GB/s (wider lanes).
 //
+
 // # Wire compatibility
 //
+
 // Output matches Apache Commons Codec, Guava `Hashing.murmur3_*`,
 // Cassandra `org.apache.cassandra.dht.Murmur3Partitioner.Token`,
 // and Rust's `fastmurmur3` / `murmur3` crates byte-exactly.
 //
+
 // =============================================================================
 
 module core.security.hash.murmur3;

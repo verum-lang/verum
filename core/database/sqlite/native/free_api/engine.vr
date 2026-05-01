@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The catalogue engine hands out increasing integer ids for each
 // malloc, tracks total outstanding bytes, and refuses on "nomem".
 // Real memory allocation goes through mem_methods / the platform
@@ -78,7 +79,7 @@ implement FreeEngine {
         self.frees = self.frees + 1_i64;
     }
 
-    /// Classical realloc semantics: free(old) + malloc(new).  On OOM
+    /// Classical realloc semantics: free(old) + malloc(new). On OOM
     /// return NULL *without* freeing the old handle (C-library contract).
     pub fn sqlite3_realloc(&mut self, old: &OpaqueHandle, new_size: Int) -> OpaqueHandle {
         if new_size <= 0 { self.sqlite3_free(old); return null_handle(); }

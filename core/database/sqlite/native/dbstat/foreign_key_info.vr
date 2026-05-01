@@ -3,16 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.4 / §17.4 (foreign keys)
 //
+
 // `pragma_foreign_key_list('t')` returns one row per (foreign key, column):
 //
-//   id        INTEGER  -- FK group id
-//   seq       INTEGER  -- column position within the FK
-//   table     TEXT     -- referenced table
-//   from      TEXT     -- referencing column in t
-//   to        TEXT     -- referenced column in `table`
-//   on_update TEXT     -- 'NO ACTION' / 'RESTRICT' / 'SET NULL' / 'SET DEFAULT' / 'CASCADE'
-//   on_delete TEXT     -- same enum
-//   match     TEXT     -- 'NONE' / 'PARTIAL' / 'FULL'
+
+//  id INTEGER -- FK group id
+//  seq INTEGER -- column position within the FK
+//  table TEXT -- referenced table
+//  from TEXT -- referencing column in t
+//  to TEXT -- referenced column in `table`
+//  on_update TEXT -- 'NO ACTION' / 'RESTRICT' / 'SET NULL' / 'SET DEFAULT' / 'CASCADE'
+//  on_delete TEXT -- same enum
+//  match TEXT -- 'NONE' / 'PARTIAL' / 'FULL'
 // =============================================================================
 
 module core.database.sqlite.native.dbstat.foreign_key_info;

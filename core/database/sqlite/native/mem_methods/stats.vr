@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // When SQLITE_CONFIG_MEMSTATUS is on, the default allocator keeps
 // these counters; custom allocators may mirror the shape.
 // =============================================================================

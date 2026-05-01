@@ -2,29 +2,36 @@
 // contracts_old.vr — Dependent Contracts with old() Pre-State References
 // =============================================================================
 //
+
 // Layer: Standard Library / Proof
 //
+
 // User-facing surface for the dependent-contracts analysis core
 // (`verum_types.contracts_old`). Postconditions in mutating
 // functions often need to refer to the *prior* value of state,
 // not the current value. Eiffel, JML, Dafny, and SPARK use
 // `old(expr)` for this.
 //
+
 // ## Example
 //
+
 // ```verum
 // fn increment(self: &mut Counter)
-//     ensures self.count == old(self.count) + 1
+//  ensures self.count == old(self.count) + 1
 // { self.count = self.count + 1; }
 // ```
 //
+
 // At verification time the analysis records which locations the
 // `old(...)` clauses reference, takes a snapshot of those locations
 // before the body runs, and substitutes the snapshot values into
 // the postcondition for evaluation.
 //
+
 // ## Architecture: Map / Set, not List<entry>
 //
+
 // The pre-state snapshot is keyed by location name and queried
 // per-postcondition-eval. Verification packages running a hundred
 // contract sites issue O(N) lookups; backing the snapshot with a
@@ -33,15 +40,18 @@
 // `Map<Text, Text>` for snapshots and `Set<Text>` for frames so
 // every lookup / contains-check is O(1) amortised.
 //
+
 // ## ContractsFrame property
 //
+
 // A function's *frame* is the set of locations it may modify.
 // A clean contract:
-//   * snapshots every location its postcondition references via
-//     `old(...)`
-//   * does not reference (via old) any location outside the frame
-//     (such references are tautologically the post-value)
+//  * snapshots every location its postcondition references via
+//  `old(...)`
+//  * does not reference (via old) any location outside the frame
+//  (such references are tautologically the post-value)
 //
+
 // =============================================================================
 
 module core.proof.contracts_old;
@@ -161,6 +171,7 @@ public type FrameAnalysis is {
 /// Compute snapshot obligations + soundness warnings from a
 /// postcondition and its declared frame.
 ///
+
 /// Complexity: O(|old_refs| + |modifies|), down from O(|old_refs| ×
 /// |modifies|) in the prior list-backed version. Backing structures
 /// are sets, so cross-membership checks short-circuit instead of

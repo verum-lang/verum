@@ -14,6 +14,7 @@
 )]
 //! Tests for capability attenuation parsing.
 //!
+
 //! Tests for the Verum Context System (capability-based DI, NOT algebraic effects) Section 10 - Capability Attenuation
 
 use verum_ast::{Expr, ExprKind, expr::Capability};

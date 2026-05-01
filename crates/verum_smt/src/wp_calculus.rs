@@ -1,20 +1,25 @@
 //! Weakest Precondition (WP) Calculus for Contract Verification
 //!
+
 //! This module implements Dijkstra's weakest precondition calculus for verifying
 //! function contracts (requires/ensures) and loop invariants.
 //!
+
 //! ## Theory
 //!
+
 //! For a statement S and postcondition Q, `wp(S, Q)` is the weakest condition
 //! such that if `wp(S, Q)` holds before executing S, then Q holds after.
 //!
+
 //! Key rules:
 //! - `wp(skip, Q) = Q`
-//! - `wp(x := e, Q) = Q[e/x]`  (substitution)
+//! - `wp(x := e, Q) = Q[e/x]` (substitution)
 //! - `wp(S1; S2, Q) = wp(S1, wp(S2, Q))`
 //! - `wp(if b then S1 else S2, Q) = (b => wp(S1, Q)) && (!b => wp(S2, Q))`
 //! - For loops: `wp(while b inv I, Q) = I && forall state. (I && !b => Q) && (I && b => wp(body, I))`
 //!
+
 //! Implements the contract literal verification pipeline: contract literals
 //! (`contract#"requires P; ensures Q;"`) on `@verify(proof)` functions are parsed
 //! into precondition/postcondition pairs, then WP calculus generates verification
@@ -70,6 +75,7 @@ pub enum WpError {
 
 /// WP calculus engine for computing weakest preconditions
 ///
+
 /// This engine translates Verum statements into Z3 constraints using
 /// Dijkstra's weakest precondition calculus.
 pub struct WpEngine<'ctx> {
@@ -118,6 +124,7 @@ impl<'ctx> WpEngine<'ctx> {
 
     /// Register a function contract for call summarization
     ///
+
     /// When the WP engine encounters a call to this function, it will use
     /// the contract instead of inlining the function body.
     pub fn register_contract(
@@ -132,6 +139,7 @@ impl<'ctx> WpEngine<'ctx> {
 
     /// Store old values for postcondition handling
     ///
+
     /// Call this before computing WP to capture pre-state values
     /// referenced by `old(expr)` in postconditions.
     pub fn capture_old_values(&mut self, var_names: &[Text]) {
@@ -144,6 +152,7 @@ impl<'ctx> WpEngine<'ctx> {
 
     /// Compute the weakest precondition of a function body
     ///
+
     /// Given a function body and postcondition, computes the weakest condition
     /// that must hold before execution for the postcondition to hold after.
     pub fn wp(&mut self, body: &Expr, postcondition: &Bool) -> WpResult<Bool> {
@@ -299,12 +308,14 @@ impl<'ctx> WpEngine<'ctx> {
                 // so the precondition just propagates the postcondition
                 // unchanged.
                 //
+
                 // Pre-fix this called `wp(errdefer_expr, postcondition)`,
                 // which is the semantics of `defer` (always runs) — that
                 // wrongly threaded the cleanup's effects through every
                 // normal exit, e.g. `errdefer free(buf)` made WP look as
                 // if `buf` was freed on success too.
                 //
+
                 // Error-path WP — what postcondition the cleanup must
                 // establish IF the function exits abnormally — is a
                 // separate phase that needs split normal/error path
@@ -907,6 +918,7 @@ impl<'a> DataflowAnalyzer<'a> {
 
 /// Extract loop body effects using comprehensive dataflow analysis
 ///
+
 /// This function analyzes a loop body expression and extracts all effects
 /// (assignments) that modify state variables.
 pub fn extract_loop_body_effects_enhanced(

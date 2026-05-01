@@ -1,27 +1,35 @@
 //! Where Clause Disambiguation
 //!
+
 //! Where clause disambiguation: value-level refinements vs type-level constraints (where type T: Protocol)
 //!
+
 //! Starting with Verum v1.2, the `where` keyword supports four distinct uses
 //! with explicit prefixes for LL(1) parsing and improved clarity:
 //!
+
 //! 1. **Type Constraints**: `where type T: Ord` - Generic protocol bounds
 //! 2. **Meta Constraints**: `where meta N > 0` - Compile-time meta constraints
 //! 3. **Value Refinements**: `where value it > 0` - Runtime value constraints
 //! 4. **Postconditions**: `where ensures result >= 0` - Return value guarantees
 //!
+
 //! # Examples
 //!
+
 //! ```verum
 //! // Type constraint
 //! fn sort<T>(list: List<T>) where type T: Ord { ... }
 //!
+
 //! // Meta constraint
 //! fn zeros<N>() -> [Int; N] where meta N > 0 { ... }
 //!
+
 //! // Value refinement
 //! type Positive is Int where value it > 0;
 //!
+
 //! // Postcondition
 //! fn abs(x: Int) -> Int where ensures result >= 0 { ... }
 //! ```
@@ -38,6 +46,7 @@ use verum_common::{List, Text};
 pub enum WhereClauseKind {
     /// Type constraint: `where type T: Ord`
     ///
+
     /// Used for generic type parameter protocol bounds.
     /// The type parameter must implement the specified protocols.
     TypeConstraint {
@@ -50,6 +59,7 @@ pub enum WhereClauseKind {
 
     /// Meta constraint: `where meta N > 0`
     ///
+
     /// Used for compile-time meta parameter constraints.
     /// The meta parameter must satisfy the compile-time predicate.
     MetaConstraint {
@@ -62,6 +72,7 @@ pub enum WhereClauseKind {
 
     /// Value refinement: `where value it > 0`
     ///
+
     /// Used for runtime value constraints in refinement types.
     /// The special identifier `it` refers to the refined value.
     ValueRefinement {
@@ -73,6 +84,7 @@ pub enum WhereClauseKind {
 
     /// Postcondition: `where ensures result >= 0`
     ///
+
     /// Used for function return value guarantees.
     /// The special identifier `result` refers to the return value.
     Postcondition {
@@ -180,6 +192,7 @@ impl DisambiguatedWhereClause {
 
     /// Validate that this where clause is used in the correct context
     ///
+
     /// - Type constraints: Only on generic functions/types
     /// - Meta constraints: Only on meta parameters
     /// - Value refinements: Only on refinement types

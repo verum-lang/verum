@@ -1,13 +1,16 @@
 //! Coinductive Analysis — productivity, bisimulation, observation traces.
 //!
+
 //! Where inductive types are *least* fixed points (built bottom-up
 //! by finite constructors), **coinductive** types are *greatest*
 //! fixed points — infinite objects defined by what we can observe
 //! about them. Streams, infinite trees, processes, and π-calculus
 //! processes are the classic examples.
 //!
+
 //! ## Productivity
 //!
+
 //! A corecursive definition is **productive** iff every prefix of
 //! its observable output is computed in finite time. The standard
 //! syntactic check is *guarded corecursion*: every recursive
@@ -15,16 +18,20 @@
 //! the coinductive type, never inside another function call or
 //! reduction.
 //!
+
 //! ## Bisimulation
 //!
+
 //! Two coinductive values are **bisimilar** iff every observation
 //! we can make about one we can make about the other, and the
 //! results are themselves bisimilar. This is the natural notion of
 //! equality for coinductive types — propositional equality is
 //! generally too strong for infinite objects.
 //!
+
 //! This module provides:
 //!
+
 //! * [`CorecursiveCall`] — describes a self-reference site
 //! * [`check_productivity`] — syntactic guarded-corecursion check
 //! * [`Observation`] — a single step of a coinductive value
@@ -228,11 +235,13 @@ pub struct ProductivityDiagnostic {
 
 /// Check productivity of a corecursive function definition.
 ///
+
 /// Called from the type checker when `is_cofix = true`.
 /// `body_calls` is a list of `(callee_name, guard_depth)` pairs extracted
 /// from the function body, where `guard_depth` counts how many coinductive
 /// constructors wrap each recursive call site.
 ///
+
 /// Returns a non-empty `Vec` of diagnostics when the definition is
 /// non-productive (i.e. at least one recursive call has `guard_depth == 0`).
 /// Returns an empty `Vec` when the definition is productive.

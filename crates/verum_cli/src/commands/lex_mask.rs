@@ -1,19 +1,22 @@
 //! Lex-mask: per-byte lexical classification for text-scan lint rules.
 //!
+
 //! Verum's text-scan lint passes used to read the raw bytes of a
 //! source file and look for substrings like `Box::new`, `println!`,
 //! `// TODO`, `mut x`, etc. That works for ~80 % of input but
 //! misfires on three classes of bytes that don't carry program
 //! semantics:
 //!
-//!   1. **String literals** — `let s = "panic!";` is not a Rust-ism;
-//!      the bytes inside the quotes are data, not code.
-//!   2. **Block comments** — `/* TODO: doesn't apply yet */` should
-//!      fire `todo-in-code` at the right column, but a `Box::new` in
-//!      a comment block must NOT fire `deprecated-syntax`.
-//!   3. **Raw strings** — `r#"struct"#` contains the keyword bytes
-//!      but is regular data.
+
+//!  1. **String literals** — `let s = "panic!";` is not a Rust-ism;
+//!  the bytes inside the quotes are data, not code.
+//!  2. **Block comments** — `/* TODO: doesn't apply yet */` should
+//!  fire `todo-in-code` at the right column, but a `Box::new` in
+//!  a comment block must NOT fire `deprecated-syntax`.
+//!  3. **Raw strings** — `r#"struct"#` contains the keyword bytes
+//!  but is regular data.
 //!
+
 //! `LexMask` solves this in a single linear pass: it allocates a
 //! one-byte-per-source-byte classification buffer and labels each
 //! byte as Code, LineComment, BlockComment, String, or RawString.
@@ -23,13 +26,16 @@
 //! `todo-in-code` finds TODOs in either kind of comment) use
 //! [`LexMask::is_code_or_comment`].
 //!
+
 //! The classifier is hand-rolled rather than driven by `verum_lexer`
 //! because we want a non-failing best-effort scan that still produces
 //! a usable mask even when the source has a syntax error — lint
 //! always needs to run even if the file is half-edited.
 //!
+
 //! # Performance
 //!
+
 //! Single pass, O(n) bytes, one Vec<u8> allocation. On a 1 MB file
 //! we measured 1.3 ms cold and 0.4 ms warm (criterion, M1 Pro). The
 //! mask is built once per file and shared across every text-scan
@@ -37,6 +43,7 @@
 
 /// Lexical class of a single source byte.
 ///
+
 /// Stored as `u8` in the mask buffer (the enum's repr is `u8` so
 /// `mem::transmute` round-trips cleanly through the buffer).
 #[repr(u8)]
@@ -63,6 +70,7 @@ pub enum ByteClass {
 
 /// Per-byte lexical classification of a source file.
 ///
+
 /// Length always equals `content.len()` (in bytes, not chars) so
 /// indexing by absolute byte offset is direct.
 pub struct LexMask {
@@ -72,6 +80,7 @@ pub struct LexMask {
 impl LexMask {
     /// Build a mask by scanning `content` once, left to right.
     ///
+
     /// The scanner is fault-tolerant: an unterminated string or
     /// block comment runs to end-of-file. We deliberately do not
     /// surface lex errors here — lint must keep running even on

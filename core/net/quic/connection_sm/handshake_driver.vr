@@ -3,35 +3,40 @@
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, collections,
-//               core.net.tls13.handshake.{client_sm, server_sm},
-//               core.net.quic.{frame, recovery}
+//  core.net.tls13.handshake.{client_sm, server_sm},
+//  core.net.quic.{frame, recovery}
 // =============================================================================
 //
+
 // QUIC runs the TLS 1.3 handshake over a dedicated per-PN-space stream
 // carried inside CRYPTO frames (RFC 9001 §4). Each PN space (Initial,
 // Handshake, Application) has its own crypto offset counter starting
 // at 0; the frames carry `(offset, data)` pairs and the receiver
 // reassembles them before feeding into the TLS SM.
 //
+
 // Per RFC 9001:
-//   * Initial-space CRYPTO  — ClientHello / server-side (ServerHello on
-//                             its own — the rest already moves to
-//                             Handshake keys).
-//   * Handshake-space CRYPTO — EncryptedExtensions / Certificate /
-//                              CertificateVerify / Finished.
-//   * Application-space CRYPTO — NewSessionTicket / KeyUpdate signals.
+//  * Initial-space CRYPTO — ClientHello / server-side (ServerHello on
+//  its own — the rest already moves to
+//  Handshake keys).
+//  * Handshake-space CRYPTO — EncryptedExtensions / Certificate /
+//  CertificateVerify / Finished.
+//  * Application-space CRYPTO — NewSessionTicket / KeyUpdate signals.
 //
+
 // HandshakeDriver maintains:
-//   * Inbound buffer per space (handles out-of-order CRYPTO frames).
-//   * Outbound offset counter per space.
-//   * An opaque role-specific TLS SM reference (client or server).
+//  * Inbound buffer per space (handles out-of-order CRYPTO frames).
+//  * Outbound offset counter per space.
+//  * An opaque role-specific TLS SM reference (client or server).
 //
+
 // Callers pump incoming CRYPTO frames via `on_crypto_chunk`, pull any
 // emitted outbound bytes via `take_outbound` (per-space CRYPTO frames
 // ready for wire assembly), and query `completion()` to know when the
 // handshake has produced 1-RTT traffic keys so the connection_sm can
 // promote to OneRtt.
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm.handshake_driver;
@@ -248,10 +253,10 @@ implement HandshakeDriver {
                 let (sm2, step) = sm.on_handshake(wire)?;
                 self.role = HandshakeRole.AsClient(sm2);
                 // Outbound flows into the next PN space by phase:
-                //   * Pre-ServerHello → we're in Initial (shouldn't emit
-                //     past CH; first on_handshake call receives SH).
-                //   * After ServerHello, client's next message is
-                //     client Finished in Handshake space.
+                //  * Pre-ServerHello → we're in Initial (shouldn't emit
+                //  past CH; first on_handshake call receives SH).
+                //  * After ServerHello, client's next message is
+                //  client Finished in Handshake space.
                 let target_space = self.client_out_space();
                 let connected: Maybe<HandshakeOutput> = match step.connected {
                     Some(c) => Some(HandshakeOutput.ClientHandshakeOutput(c)),

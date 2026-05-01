@@ -1,40 +1,52 @@
 //! Protocol-Based Method Resolution
 //!
+
 //! This module provides abstractions for resolving methods through protocol implementations,
 //! enabling a stdlib-agnostic type system architecture.
 //!
+
 //! ## Architecture
 //!
+
 //! The method resolution system is designed around two key principles:
 //!
+
 //! 1. **No Hardcoded Type Names**: Method resolution never checks for specific type names
-//!    like "List", "Text", or "Maybe". All methods are resolved through protocols.
+//!  like "List", "Text", or "Maybe". All methods are resolved through protocols.
 //!
+
 //! 2. **Pluggable Resolution**: The `MethodResolver` trait allows different implementations
-//!    for different compilation modes (stdlib bootstrap vs normal compilation).
+//!  for different compilation modes (stdlib bootstrap vs normal compilation).
 //!
+
 //! ## Resolution Order
 //!
+
 //! When resolving `receiver.method(args)`:
 //!
+
 //! 1. **Inherent Methods**: Check `implement Type { ... }` blocks for the receiver type
 //! 2. **Protocol Methods**: Check all protocols the receiver type implements
 //! 3. **Auto-Deref**: If receiver implements Deref, try resolving on `*receiver`
 //! 4. **Auto-Ref**: Try resolving with `&receiver` or `&mut receiver`
 //!
+
 //! ## Example
 //!
+
 //! ```ignore
 //! // Resolving: some_list.len()
 //!
+
 //! // 1. Check inherent methods on List<T>
-//! //    Found: implement List<T> { fn len(&self) -> Int { ... } }
-//! //    -> Returns MethodResolution
+//! // Found: implement List<T> { fn len(&self) -> Int { ... } }
+//! // -> Returns MethodResolution
 //!
+
 //! // Or if not found in inherent:
 //! // 2. Check protocol implementations
-//! //    implement Len for List<T> { ... }
-//! //    -> Returns MethodResolution with protocol source
+//! // implement Len for List<T> { ... }
+//! // -> Returns MethodResolution with protocol source
 //! ```
 
 use verum_ast::decl::ImplDecl;
@@ -247,20 +259,25 @@ impl std::error::Error for MethodError {}
 
 /// Trait for method resolution
 ///
+
 /// This trait abstracts away method resolution, allowing different implementations
 /// for different compilation contexts (stdlib bootstrap, normal build, etc.)
 pub trait MethodResolver {
     /// Resolve a method call
     ///
+
     /// # Arguments
     ///
+
     /// * `receiver_type` - The type of the receiver expression
     /// * `method_name` - The name of the method being called
     /// * `type_hints` - Optional type hints from the call site
     /// * `is_mut_receiver` - Whether the receiver is a mutable reference
     ///
+
     /// # Returns
     ///
+
     /// `Ok(resolution)` if the method was found, `Err(error)` otherwise
     fn resolve_method(
         &self,
@@ -332,6 +349,7 @@ struct StoredMethod {
 
 /// Default method resolver using the existing ProtocolChecker infrastructure
 ///
+
 /// This implementation wraps the current hardcoded approach but can be replaced
 /// with a stdlib-agnostic implementation during stdlib bootstrap.
 #[derive(Debug, Default)]
@@ -590,6 +608,7 @@ impl MethodResolver for DefaultMethodResolver {
 
 /// Determine the receiver kind and mutability from a function declaration's parameters.
 ///
+
 /// Inspects the first parameter to see if it's a self parameter and what kind.
 /// Returns `(ReceiverKind, requires_mut_receiver)`.
 fn receiver_info_from_decl(func: &verum_ast::decl::FunctionDecl) -> (ReceiverKind, bool) {

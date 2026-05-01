@@ -6,24 +6,29 @@ module core.database.sqlite.native.l1_pager.savepoint;
 // Layer: 1
 // Spec: sqlite-native.md §8.6, sqlite.org/lang_savepoint.html
 //
+
 // SQLite's SAVEPOINT / RELEASE / ROLLBACK TO is a named-marker
 // sub-transaction primitive. Implemented here as a stack of
 // `Savepoint` entries; each one records:
 //
-//   * name          — user-supplied identifier
-//   * wal_frame_idx — WAL frame count at savepoint creation
-//                     (the pager rolls back by truncating WAL to this
-//                     frame on ROLLBACK TO)
-//   * depth         — 0-based depth in the current transaction
+
+//  * name — user-supplied identifier
+//  * wal_frame_idx — WAL frame count at savepoint creation
+//  (the pager rolls back by truncating WAL to this
+//  frame on ROLLBACK TO)
+//  * depth — 0-based depth in the current transaction
 //
-// RELEASE "name"     → pop every entry from the top down until "name"
-//                       is popped too. If "name" isn't on the stack,
-//                       error.
+
+// RELEASE "name" → pop every entry from the top down until "name"
+//  is popped too. If "name" isn't on the stack,
+//  error.
 //
+
 // ROLLBACK TO "name" → pop every entry **above** "name" (leave "name"
-//                       itself in place); signal the pager to drop
-//                       WAL frames above `wal_frame_idx`.
+//  itself in place); signal the pager to drop
+//  WAL frames above `wal_frame_idx`.
 //
+
 // SQLite allows the same name twice — the inner shadows the outer.
 // RELEASE / ROLLBACK TO target the *innermost* occurrence; our stack
 // scan searches top-down and enforces the same semantics.

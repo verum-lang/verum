@@ -3,21 +3,24 @@
 // =============================================================================
 // Spec: sqlite-native.md §10.3, §21.3
 //
+
 // All B-tree operations (insert, delete, balance, split, merge) must
 // preserve four invariants per page:
 //
-//   I1  is_sorted             — each page's cells are in strict
-//                               monotone-ascending key order
-//   I2  height_uniform        — every root-to-leaf path has the
-//                               same length
-//   I3  parent_pointers_valid — every internal cell points to a
-//                               child whose first key is >= the cell's
-//                               separator and whose last key < the
-//                               next separator
-//   I4  no_orphans            — every page reachable from the root
-//                               via child pointers is the only
-//                               reference to itself (no aliasing)
+
+//  I1 is_sorted — each page's cells are in strict
+//  monotone-ascending key order
+//  I2 height_uniform — every root-to-leaf path has the
+//  same length
+//  I3 parent_pointers_valid — every internal cell points to a
+//  child whose first key is >= the cell's
+//  separator and whose last key < the
+//  next separator
+//  I4 no_orphans — every page reachable from the root
+//  via child pointers is the only
+//  reference to itself (no aliasing)
 //
+
 // I1 is checkable in O(cells_per_page) per page; I2 is O(log_b N);
 // I3+I4 are O(N) in the page count and are evaluated by
 // `integrity_check`.
@@ -128,6 +131,7 @@ public fn no_duplicate_child_pointers(child_pages: &List<Int64>) -> Bool {
 // core/database/sqlite/. See spec §10.3 / §21.3.
 // -----------------------------------------------------------------------------
 //
+
 // LBC-1 (cell-conservation): for any `Split` decision returned by
 // `plan_overflow`, `left_cells + right_cells == source.cell_count + 1`.
 // Load-bearing: a rebalance that loses or duplicates a cell silently
@@ -147,8 +151,8 @@ public theorem split_cell_conservation(d: &BalanceDecision, source: Int)
     proof {
         // Discharge by case analysis on `d`. For Split arms the claim
         // reduces to the planner's arithmetic identity in
-        // `plan_overflow`:  total = source+1; left = total/2;
-        // right = total - left  ⇒  left + right = total = source + 1.
+        // `plan_overflow`: total = source+1; left = total/2;
+        // right = total - left ⇒ left + right = total = source + 1.
         // Other arms satisfy the predicate trivially.
         match d {
             Split(_, l, r, _, _) => { let _ = l; let _ = r; }

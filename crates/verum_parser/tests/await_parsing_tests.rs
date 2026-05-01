@@ -14,17 +14,19 @@
 )]
 //! Comprehensive tests for .await postfix operator parsing
 //!
+
 //! This test suite verifies that the `.await` postfix operator is properly
 //! implemented according to the grammar specification in grammar/verum.ebnf:594
 //!
+
 //! postfix_op = '.' , identifier , [ call_args ]
-//!            | '?.' , identifier , [ call_args ]
-//!            | '.' , integer_lit
-//!            | '.' , 'await'      // <-- THIS IS TESTED HERE
-//!            | '[' , expression , ']'
-//!            | call_args
-//!            | '?'
-//!            | 'as' , type_expr ;
+//!  | '?.' , identifier , [ call_args ]
+//!  | '.' , integer_lit
+//!  | '.' , 'await' // <-- THIS IS TESTED HERE
+//!  | '[' , expression , ']'
+//!  | call_args
+//!  | '?'
+//!  | 'as' , type_expr ;
 
 use verum_ast::{Expr, ExprKind, FileId};
 use verum_parser::VerumParser;

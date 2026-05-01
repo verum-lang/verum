@@ -14,12 +14,14 @@
 )]
 // Error message quality tests
 //
+
 // Tests that error messages are:
 // - Clear and actionable
 // - Include context and suggestions
 // - Follow diagnostic format from spec
 // - Provide helpful hints
 //
+
 // Error handling: use Result<T, E> for recoverable errors, panic() for unrecoverable, no unwrap in library code
 
 use verum_ast::{

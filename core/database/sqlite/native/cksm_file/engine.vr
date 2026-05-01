@@ -3,10 +3,11 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The engine holds:
-//   * `reserve_bytes` — size of the trailer SQLite leaves on every page
-//                       (classically 0, 8 when checksumming is active).
-//   * `status`        — most recent verify result.
+//  * `reserve_bytes` — size of the trailer SQLite leaves on every page
+//  (classically 0, 8 when checksumming is active).
+//  * `status` — most recent verify result.
 // =============================================================================
 
 module core.database.sqlite.native.cksm_file.engine;
@@ -46,7 +47,7 @@ implement CksmEngine {
         self.reserve_bytes >= 8
     }
 
-    /// Drive a verify pass.  Returns the sqlite3 result code:
+    /// Drive a verify pass. Returns the sqlite3 result code:
     /// SQLITE_OK (0) on success, SQLITE_CORRUPT (11) on mismatch.
     pub fn sqlite3_file_control_cksm_file(
         &mut self,

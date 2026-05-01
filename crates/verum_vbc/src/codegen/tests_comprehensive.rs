@@ -1,8 +1,10 @@
 //! Comprehensive tests for VBC codegen.
 //!
+
 //! These tests verify correctness, stability, and security of the code generator.
 //! Test organization:
 //!
+
 //! - `context_tests`: CodegenContext functionality
 //! - `register_tests`: Register allocation and management
 //! - `error_tests`: Error handling and messages

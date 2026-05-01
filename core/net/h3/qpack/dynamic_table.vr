@@ -5,35 +5,43 @@
 // Dependencies: core, collections, .static_table
 // =============================================================================
 //
+
 // RFC 9204 §3.2: a QPACK dynamic table is a per-direction FIFO of
 // (name, value) entries maintained in parallel on the encoder and
 // decoder. Encoders add via Insert instructions (on the QPACK
 // encoder stream); decoders acknowledge via Section Acknowledgment
 // instructions (on the decoder stream).
 //
+
 // Size accounting (RFC 9204 §3.2.1):
 //
-//   entry_size = name.len() + value.len() + 32
+
+//  entry_size = name.len() + value.len() + 32
 //
+
 // The capacity limit bounds cumulative entry sizes. Eviction is
 // FIFO — when adding exceeds capacity, the oldest entries are
 // dropped from the front. Inserts that would require evicting an
 // entry still referenced by an unacknowledged section are forbidden
 // and surface as QPACK_ENCODER_STREAM_ERROR on the encoder side.
 //
+
 // # Absolute vs relative indexing
 //
+
 // Entries are addressed two ways:
-//   * Absolute index — monotonically-increasing ID assigned at insert
-//     time (0, 1, 2, …). Never decreases; used in decoder state.
-//   * Relative index — position from the current tail ("most-recently
-//     inserted"), with 0 meaning the newest. Relative = absolute -
-//     insert_count.
+//  * Absolute index — monotonically-increasing ID assigned at insert
+//  time (0, 1, 2, …). Never decreases; used in decoder state.
+//  * Relative index — position from the current tail ("most-recently
+//  inserted"), with 0 meaning the newest. Relative = absolute -
+//  insert_count.
 //
+
 // On the encoder stream, inserts use relative-from-base referencing
 // (Post-Base Index); on a request/response field section header,
 // inserts use absolute indexing tied to a per-section "base".
 //
+
 // =============================================================================
 
 module core.net.h3.qpack.dynamic_table;

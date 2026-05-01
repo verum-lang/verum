@@ -1,16 +1,21 @@
 //! Phase 3: Macro Expansion & Literal Processing
 //!
+
 //! Executes meta code and expands macros in a sandboxed environment.
 //!
+
 //! ## Multi-Pass Architecture
 //!
+
 //! This phase implements Pass 2 of the three-pass compilation:
 //! - Pass 1: Parse + Register (done in MetaRegistryPhase)
 //! - **Pass 2: Expand Macros** (this phase)
 //! - Pass 3: Semantic Analysis (done in type checking)
 //!
+
 //! ## Features
 //!
+
 //! - @derive macro expansion using DeriveRegistry
 //! - Tagged literal processing (d#"...", rx#"...", etc.)
 //! - Interpolation handler invocation (sql"...", html"...", etc.)
@@ -19,13 +24,16 @@
 //! - Compile-time code generation via quote!
 //! - Cross-file macro resolution via MetaRegistry
 //!
+
 //! ## Safety
 //!
+
 //! All meta code is validated by the MetaLinter before execution:
 //! - @safe functions must pass all safety checks
 //! - @unsafe functions emit warnings
 //! - I/O operations are forbidden (except via `using BuildAssets` context)
 //!
+
 //! Phase 3: Macro expansion and literal processing. Executes @derive macros
 //! in sandboxed const_eval, parses tagged literals, processes interpolated
 //! strings with safe injection prevention, validates numeric suffixes.
@@ -53,19 +61,22 @@ use crate::meta::linter::MetaLinter;
 
 /// Phase 3: Macro Expansion
 ///
+
 /// Processes all macro invocations and compile-time code generation.
 /// Integrates MetaLinter for safety validation before execution.
 ///
+
 /// # Architecture
 ///
+
 /// ```text
 /// MacroExpansionPhase
-/// ├── DeriveRegistry      - @derive(Debug, Clone, etc.)
-/// ├── MetaRegistry        - Cross-file meta function lookup
-/// ├── MetaLinter          - Safety validation (@safe/@unsafe)
-/// ├── LiteralRegistry     - Tagged literal handlers (d#, rx#, etc.)
-/// ├── MetaSandbox         - Execution isolation
-/// └── MetaContext         - Execution environment
+/// ├── DeriveRegistry - @derive(Debug, Clone, etc.)
+/// ├── MetaRegistry - Cross-file meta function lookup
+/// ├── MetaLinter - Safety validation (@safe/@unsafe)
+/// ├── LiteralRegistry - Tagged literal handlers (d#, rx#, etc.)
+/// ├── MetaSandbox - Execution isolation
+/// └── MetaContext - Execution environment
 /// ```
 pub struct MacroExpansionPhase {
     /// Registry of derive macros (Debug, Clone, Serialize, etc.)
@@ -234,6 +245,7 @@ impl MacroExpansionPhase {
         // for compile-time diagnostics — see
         // `RequiredContext::is_reflection()` for the canonical set).
         //
+
         // When `false`, the embedded `MetaContext.reflection_disabled`
         // flag is set: `MetaContext::get_builtin` then rejects any
         // reflection-tagged builtin call regardless of the function's
@@ -241,6 +253,7 @@ impl MacroExpansionPhase {
         // the global gate — a sandbox seal cannot be circumvented by
         // individual function declarations.
         //
+
         // Symmetric with `with_quote_syntax_enabled` (the AST-level
         // gate for `quote { ... }` syntax) — both flags translate
         // their `false` value into hard rejection of the gated
@@ -343,6 +356,7 @@ impl MacroExpansionPhase {
 
     /// Expand macros in a single item
     ///
+
     /// Processes:
     /// 1. @derive attributes on types
     /// 2. Meta functions (with linting)
@@ -370,6 +384,7 @@ impl MacroExpansionPhase {
 
     /// Process a function declaration
     ///
+
     /// 1. If meta function, lint it with MetaLinter
     /// 2. Process tagged literals in body
     /// 3. Process interpolations in body
@@ -439,6 +454,7 @@ impl MacroExpansionPhase {
 
     /// Lint a meta function before execution
     ///
+
     /// Uses MetaLinter to detect unsafe patterns like:
     /// - String concatenation (injection risk)
     /// - I/O operations (forbidden in meta context)
@@ -566,6 +582,7 @@ impl MacroExpansionPhase {
 
     /// Process an expression for tagged literals and interpolations
     ///
+
     /// This is the core of compile-time literal processing.
     fn process_expr(&mut self, expr: &Expr) -> Result<Expr, Diagnostic> {
         match &expr.kind {
@@ -698,6 +715,7 @@ impl MacroExpansionPhase {
 
     /// Process a tagged literal like d#"2024-01-15" or rx#"[a-z]+"
     ///
+
     /// 1. Look up handler in LiteralRegistry
     /// 2. Execute handler at compile-time
     /// 3. Replace with validated/parsed value
@@ -768,7 +786,7 @@ impl MacroExpansionPhase {
                         // diagnostics emitted from inside the handler
                         // at the user's invocation site (the literal
                         // span) by setting MetaContext.call_site_span
-                        // around the call.  Restored afterwards so
+                        // around the call. Restored afterwards so
                         // outer macro frames see their own call site.
                         // Closes #239 for tagged-literal handlers.
                         let prev_call_site = self.meta_context.call_site_span;
@@ -881,7 +899,7 @@ impl MacroExpansionPhase {
             ParsedLiteral::ShellCmd { parts, source } => {
                 // Lower `sh#"prog ${arg} more"` into a `sh(text)` call where
                 // `text` is the `+`-concatenation of literal segments and per-
-                // interpolation `Escaper.posix(&expr)` calls.  Plain literals
+                // interpolation `Escaper.posix(&expr)` calls. Plain literals
                 // (no interpolations) collapse to `sh("...")`.
                 return self.lower_shell_cmd(parts, &source, span);
             }
@@ -900,8 +918,10 @@ impl MacroExpansionPhase {
 
     /// Lower a parsed `sh#"..."` literal into a real Call AST node:
     ///
-    ///     sh(<lit0> + Escaper.posix(&<expr1>) + <lit1> + ...)
+
+    ///  sh(<lit0> + Escaper.posix(&<expr1>) + <lit1> + ...)
     ///
+
     /// Plain literals with no interpolations collapse to `sh("text")`.
     fn lower_shell_cmd(
         &self,
@@ -923,7 +943,7 @@ impl MacroExpansionPhase {
         );
 
         // Helper: parse expression source via VerumParser. Errors map to a
-        // structured Diagnostic pinning the literal location.  We pass the
+        // structured Diagnostic pinning the literal location. We pass the
         // dummy FileId — the resulting Expr inherits `span` from its
         // surrounding sh#"..." literal at use-site so source attribution
         // points back to the literal, not to the synthetic re-parse buffer.
@@ -1013,6 +1033,7 @@ impl MacroExpansionPhase {
 
     /// Convert a ConstValue (from meta function execution) to an AST Expr
     ///
+
     /// This is used when a user-defined tagged literal handler or interpolation
     /// handler returns a compile-time value that needs to be spliced back into
     /// the AST.
@@ -1096,6 +1117,7 @@ impl MacroExpansionPhase {
 
     /// Process interpolation expression like sql"SELECT * WHERE id = {id}"
     ///
+
     /// 1. Look up @interpolation_handler for the handler name
     /// 2. Execute handler at compile-time
     /// 3. Replace with generated code
@@ -1155,9 +1177,9 @@ impl MacroExpansionPhase {
                         // Anchor compile_error / compile_warning
                         // diagnostics from the handler at the user's
                         // invocation site (the interpolated-string
-                        // span).  Restore the prior call_site_span
+                        // span). Restore the prior call_site_span
                         // afterwards so outer frames keep their own
-                        // anchor.  Sibling to the tagged-literal
+                        // anchor. Sibling to the tagged-literal
                         // handler wrapping above; closes #239 for
                         // interpolation handlers.
                         let prev_call_site = self.meta_context.call_site_span;
@@ -1221,6 +1243,7 @@ impl MacroExpansionPhase {
 
     /// Process format string: f"Hello {name}!"
     ///
+
     /// Format strings are kept as InterpolatedString expressions.
     /// The type checker handles them directly, inferring Text type
     /// and type-checking embedded expressions.
@@ -1233,6 +1256,7 @@ impl MacroExpansionPhase {
         // Keep as InterpolatedString - the type checker handles this directly
         // No desugaring to format() function call needed
         //
+
         // The type checker at verum_types/src/infer.rs handles InterpolatedString:
         // - Type checks all embedded expressions
         // - Returns Type::text() as the result type
@@ -1255,17 +1279,19 @@ impl MacroExpansionPhase {
     /// with a string literal as first argument); any other call falls through
     /// to ordinary call processing.
     ///
+
     /// Supported format syntax:
-    ///   - `{}`          anonymous placeholder
-    ///   - `{:spec}`     anonymous with spec (spec is discarded in the parts
-    ///                   array — matches `strip_format_spec` behaviour of
-    ///                   literal f-strings for now)
-    ///   - `{{` / `}}`   escaped braces
+    ///  - `{}` anonymous placeholder
+    ///  - `{:spec}` anonymous with spec (spec is discarded in the parts
+    ///  array — matches `strip_format_spec` behaviour of
+    ///  literal f-strings for now)
+    ///  - `{{` / `}}` escaped braces
     /// Positional (`{0}`) and named (`{x}`) placeholders are deliberately
     /// unsupported in this MVP — they'd require either wiring a dedicated
     /// format-string AST or an auxiliary binding step, and the call sites in
     /// the stdlib/L2 test suite only use the anonymous form.
     ///
+
     /// On malformed format strings or a mismatch between `{}` count and
     /// supplied arg count, returns `None` so the typechecker can surface the
     /// usual "unknown function `format`" diagnostic instead of us inventing
@@ -1382,6 +1408,7 @@ impl MacroExpansionPhase {
 
     /// Process SQL interpolation: sql"SELECT * WHERE id = {id}"
     ///
+
     /// SECURITY: Generates parameterized query to prevent SQL injection
     fn process_sql_interpolation(
         &mut self,
@@ -1459,6 +1486,7 @@ impl MacroExpansionPhase {
 
     /// Process HTML interpolation: html"<h1>{title}</h1>"
     ///
+
     /// SECURITY: Auto-escapes interpolated values to prevent XSS
     fn process_html_interpolation(
         &mut self,
@@ -1624,6 +1652,7 @@ impl MacroExpansionPhase {
 
     /// Extract derive names from attributes
     ///
+
     /// Parses @derive(Debug, Clone, Serialize) style attributes
     fn extract_derive_names(&self, attributes: &[Attribute]) -> List<Text> {
         let mut derives = List::new();
@@ -1744,19 +1773,22 @@ impl CompilationPhase for MacroExpansionPhase {
         // the api.rs:762 path extends them onto the session
         // diagnostic stream. Two sources contribute:
         //
-        //   1. `phase.lint_warnings` — accumulated by the meta-fn
-        //      linter (`MetaLinter::lint_function`) on @unsafe meta
-        //      functions and unannotated meta functions with unsafe
-        //      patterns. Pre-fix these were collected on the phase
-        //      but discarded at the boundary.
+
+        //  1. `phase.lint_warnings` — accumulated by the meta-fn
+        //  linter (`MetaLinter::lint_function`) on @unsafe meta
+        //  functions and unannotated meta functions with unsafe
+        //  patterns. Pre-fix these were collected on the phase
+        //  but discarded at the boundary.
         //
-        //   2. `phase.meta_context.diagnostics` — accumulated by
-        //      `recheck_post_splice_hygiene` (M4xx hygiene
-        //      violations after splice substitution). Pre-fix
-        //      violations only reached `tracing::warn!` so user
-        //      macros with capture issues silently produced wrong
-        //      code.
+
+        //  2. `phase.meta_context.diagnostics` — accumulated by
+        //  `recheck_post_splice_hygiene` (M4xx hygiene
+        //  violations after splice substitution). Pre-fix
+        //  violations only reached `tracing::warn!` so user
+        //  macros with capture issues silently produced wrong
+        //  code.
         //
+
         // Both sets land in `PhaseOutput.warnings` — the consumer
         // (`api.rs::run_pipeline`) extends `all_diagnostics` with
         // them and the session emitter then routes them to
@@ -1789,6 +1821,7 @@ impl CompilationPhase for MacroExpansionPhase {
 /// finding ANY quote means hard-rejecting the module with a
 /// pointed diagnostic.
 ///
+
 /// The walker is fail-fast: it stops at the first hit so large
 /// modules with many quotes don't pay an O(N) walk cost when one
 /// span is enough to flag the violation. The walker handles every

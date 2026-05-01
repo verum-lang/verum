@@ -1,12 +1,15 @@
 //! Epistemic state propagation encoding for SMT verification.
 //!
+
 //! In the quantum-epistemic extension of `core/math/linalg.vr`, an
 //! `EpistemicState<N>` is a density matrix `ρ : Matrix<Complex, N, N>`
 //! satisfying:
 //!
-//!   * `is_positive_semidefinite(ρ)`
-//!   * `trace(ρ) = 1.0`
+
+//!  * `is_positive_semidefinite(ρ)`
+//!  * `trace(ρ) = 1.0`
 //!
+
 //! Projective measurement and partial trace operations preserve
 //! these invariants. This module encodes the constraint-satisfaction
 //! problem for verifying that a composite operation preserves the

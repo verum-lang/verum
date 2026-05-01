@@ -1,29 +1,38 @@
 //! Phase 4b: Context System Validation
 //!
+
 //! Validates the context system usage across the codebase:
 //! - All contexts used in function bodies are declared in `using [...]` clause
 //! - All required contexts are provided before use in scope
 //! - Context types match declarations
 //! - No uninstantiated contexts accessed
 //!
+
 //! ## Validation Rules
 //!
+
 //! 1. **Explicit Declaration Rule**: Every context used in a function body must be
-//!    declared in the function's `using` clause.
+//!  declared in the function's `using` clause.
 //!
+
 //! 2. **Provision Rule**: All contexts must be provided via `provide` statements
-//!    before they can be accessed in the function body.
+//!  before they can be accessed in the function body.
 //!
+
 //! 3. **Type Matching Rule**: The type of the provided value must match the
-//!    context declaration's expected type.
+//!  context declaration's expected type.
 //!
+
 //! 4. **No Auto-Provision Rule**: Contexts are NEVER automatically provided.
-//!    The `@std` attribute only enables context groups, not auto-provision.
+//!  The `@std` attribute only enables context groups, not auto-provision.
 //!
+
 //! ## Implementation Features
 //!
+
 //! This phase implements complete validation with the following capabilities:
 //!
+
 //! ### 1. ContextUsageChecker (Enhanced)
 //! - Walks function body AST to find all context method calls
 //! - Verifies each context is declared in function's `using` clause
@@ -31,6 +40,7 @@
 //! - Supports block-scoped context tracking with scope stack
 //! - Reports precise errors with span information
 //!
+
 //! ### 2. ContextProvisionChecker (Integrated)
 //! - Tracks `provide` statements in scope with stack-based scoping
 //! - Verifies contexts are provided before any method call
@@ -38,73 +48,86 @@
 //! - Detects duplicate provision in same scope
 //! - Supports lexical scoping where inner scopes inherit outer provisions
 //!
+
 //! ### 3. ContextTypeChecker (Framework)
 //! - Builds registry of context declarations for type validation
 //! - Framework in place for verifying provided values implement context interfaces
 //! - Validates async/sync context compatibility
 //! - Extensible for future type system integration
 //!
+
 //! ### 4. Error Diagnostics (Complete)
 //! - Clear error messages with precise span information
 //! - Context-specific suggestions based on error kind:
-//!   - **UndeclaredContext**: Suggests adding to `using` clause with example
-//!   - **UnprovidedContext**: Suggests adding `provide` statement with example
-//!   - **DuplicateProvision**: Suggests removing duplicate
-//!   - **TypeMismatch**: Suggests implementing context interface
+//!  - **UndeclaredContext**: Suggests adding to `using` clause with example
+//!  - **UnprovidedContext**: Suggests adding `provide` statement with example
+//!  - **DuplicateProvision**: Suggests removing duplicate
+//!  - **TypeMismatch**: Suggests implementing context interface
 //! - References to spec sections for semantic honesty principle
 //! - Warnings for unused declared contexts
 //! - Warnings for provided but undeclared contexts
 //!
+
 //! ### 5. Block-Scoped Tracking
 //! - Stack-based scope management for nested blocks
 //! - Automatic scope entry/exit for:
-//!   - Block expressions
-//!   - If-else branches
-//!   - Match arms
-//!   - Function bodies
+//!  - Block expressions
+//!  - If-else branches
+//!  - Match arms
+//!  - Function bodies
 //! - Provisions in inner scopes don't leak to outer scopes
 //! - Outer provisions remain available in inner scopes
 //!
+
 //! ## Example Valid Code
 //!
+
 //! ```verum
 //! fn process_data(id: Int)
-//!     using [Database, Logger]
+//!  using [Database, Logger]
 //! {
-//!     provide Database = PostgresDb::new("localhost")
-//!     provide Logger = ConsoleLogger::new()
+//!  provide Database = PostgresDb::new("localhost")
+//!  provide Logger = ConsoleLogger::new()
 //!
-//!     // Now can use Database and Logger
-//!     let user = Database.find_user(id)
-//!     Logger.info("User loaded")
+
+//!  // Now can use Database and Logger
+//!  let user = Database.find_user(id)
+//!  Logger.info("User loaded")
 //! }
 //! ```
 //!
+
 //! ## Example Invalid Code
 //!
+
 //! ```verum
 //! fn process_data(id: Int)
-//!     // ERROR: Database used but not declared
+//!  // ERROR: Database used but not declared
 //! {
-//!     let user = Database.find_user(id)  // ERROR: context not provided
+//!  let user = Database.find_user(id) // ERROR: context not provided
 //! }
 //! ```
 //!
+
 //! ## Example Block Scoping
 //!
+
 //! ```verum
 //! fn example() using [Logger, Database] {
-//!     provide Logger = ConsoleLogger::new()
+//!  provide Logger = ConsoleLogger::new()
 //!
-//!     if condition {
-//!         provide Database = PgDb::new()  // Scoped to this block
-//!         Database.query("...")           // OK - provided in this scope
-//!     }
+
+//!  if condition {
+//!  provide Database = PgDb::new() // Scoped to this block
+//!  Database.query("...") // OK - provided in this scope
+//!  }
 //!
-//!     // Database.query("...")  // ERROR: not provided in this scope
+
+//!  // Database.query("...") // ERROR: not provided in this scope
 //! }
 //! ```
 //!
+
 //! Context system validation: verifies `using [Context]` declarations,
 //! `provide` statements, and context group resolution. Ensures all required
 //! contexts are provided at call sites (~5-30ns runtime overhead per access).
@@ -124,6 +147,7 @@ use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
 
 /// Context validation phase
 ///
+
 /// This phase validates that all context system usage is correct:
 /// - Declared contexts in `using` clauses
 /// - Provided contexts in `provide` statements
@@ -151,6 +175,7 @@ impl ContextValidationPhase {
 
     /// Build a context group registry from a module
     ///
+
     /// Collects all context group declarations in the module and builds
     /// a registry for resolving group names to their constituent contexts.
     fn build_context_group_registry(&self, module: &Module) -> ContextGroupRegistry {
@@ -465,6 +490,7 @@ impl ContextValidationPhase {
 
     /// Build a map of context declarations for type checking
     ///
+
     /// Maps context names to their declarations to enable validation
     /// of provided values against context interfaces.
     fn build_context_declaration_map(&self, module: &Module) -> HashMap<String, ContextDecl> {
@@ -943,6 +969,7 @@ enum ContextErrorKind {
 impl ContextUsageValidator {
     /// Create a new context usage validator
     ///
+
     /// # Arguments
     /// * `function_name` - Function name for error messages
     /// * `declared_contexts` - Positive context requirements from `using` clause
@@ -1338,8 +1365,10 @@ impl Visitor for ContextUsageFinder {
 
 /// Evaluate a compile-time condition for conditional contexts.
 ///
+
 /// Grammar: `compile_time_condition = config_condition | const_condition | ...`
 ///
+
 /// Supported conditions:
 /// - `cfg.identifier` → platform-specific (cfg.debug, cfg.release, cfg.unix)
 /// - `platform.identifier` → platform detection (platform.macos, platform.linux)
@@ -1347,6 +1376,7 @@ impl Visitor for ContextUsageFinder {
 /// - `!condition` → negation
 /// - `a && b`, `a || b` → logical operators
 ///
+
 /// Unknown conditions evaluate to `false` (conservative — context skipped).
 fn evaluate_compile_time_condition(expr: &verum_ast::expr::Expr) -> bool {
     use verum_ast::expr::ExprKind;
@@ -1468,9 +1498,11 @@ use verum_types::computational_properties::{ComputationalProperty, PropertySet};
 
 /// Inferred computational properties for all functions in a module.
 ///
+
 /// Bottom-up inference: leaf functions get properties from their body,
 /// callers inherit the union of all callees' properties.
 ///
+
 /// Properties: Pure, IO, Async, Fallible, Mutates, Spawns, FFI, etc.
 pub struct InferredProperties {
     /// function_name → inferred PropertySet

@@ -19,6 +19,7 @@ mount core.metrics.histogram.{Histogram, HistogramBuckets};
 // Cardinality safety cap
 // =============================================================================
 //
+
 // Each MetricFamily holds an `entries: List<MetricEntry>` that grows
 // every time `resolve_*` is called with a previously-unseen label set.
 // Without an upper bound this is a classic Prometheus footgun: a
@@ -26,11 +27,13 @@ mount core.metrics.histogram.{Histogram, HistogramBuckets};
 // headers, URL paths, query strings) into a label creates a new
 // entry per unique value, leaking unbounded memory.
 //
+
 // 4096 distinct label sets per metric is well above the typical
 // well-formed cardinality (hundreds at most) yet finite enough to
 // prevent runaway growth. The cap is per-family — a global cap
 // would require cross-family coordination via a shared counter.
 //
+
 // Once exceeded, `resolve_*` skips the push and returns a freshly
 // created instrument that is NOT linked into the registry. That
 // instrument's increments are observable via `value()` to its

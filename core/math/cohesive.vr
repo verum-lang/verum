@@ -3,41 +3,50 @@
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
 // Spec: Schreiber "Differential cohomology in a cohesive ∞-topos" §3.4, §3.10
-//       Lawvere "Axiomatic cohesion" (TAC 2007)
-//       Schreiber "Cohesive Homotopy Type Theory" (2011)
+//  Lawvere "Axiomatic cohesion" (TAC 2007)
+//  Schreiber "Cohesive Homotopy Type Theory" (2011)
 //
+
 // A **cohesive ∞-topos** H over a base ∞-topos B is equipped with a
 // chain of adjoint ∞-functors
 //
-//     Π ⊣ Disc ⊣ Γ ⊣ coDisc  :  B  ⇄  H
+
+//  Π ⊣ Disc ⊣ Γ ⊣ coDisc : B ⇄ H
 //
+
 // The functors have the following geometric meaning:
-//   * Π   : H → B   shape / path components (homotopy quotient)
-//   * Disc : B → H  discrete inclusion (purely combinatorial)
-//   * Γ   : H → B   global sections (underlying point set)
-//   * coDisc : B → H codiscrete inclusion (purely continuous)
+//  * Π : H → B shape / path components (homotopy quotient)
+//  * Disc : B → H discrete inclusion (purely combinatorial)
+//  * Γ : H → B global sections (underlying point set)
+//  * coDisc : B → H codiscrete inclusion (purely continuous)
 //
+
 // From the adjunction chain three idempotent modalities arise on H:
-//   * ʃ  (shape)  =  Disc ∘ Π    (idempotent comonad)
-//   * ♭  (flat)   =  Disc ∘ Γ    (idempotent monad)
-//   * ♯  (sharp)  =  coDisc ∘ Γ  (idempotent monad)
+//  * ʃ (shape) = Disc ∘ Π (idempotent comonad)
+//  * ♭ (flat) = Disc ∘ Γ (idempotent monad)
+//  * ♯ (sharp) = coDisc ∘ Γ (idempotent monad)
 //
+
 // **Differential cohesion** (Schreiber §3.10) extends H with a second
 // adjunction triple of infinitesimal modalities
 //
-//     Im  ⊣  &  ⊣  Rh
+
+//  Im ⊣ & ⊣ Rh
 //
-// fitting inside the cohesive one:  ♭ ↪ &  and  Im ↪ ʃ.
+
+// fitting inside the cohesive one: ♭ ↪ & and Im ↪ ʃ.
 //
+
 // Key improvement over previous version: all functors are represented as
-// genuine GeometricMorphism values, not opaque Int handles.  Modalities
+// genuine GeometricMorphism values, not opaque Int handles. Modalities
 // are explicit compositions and carry their own unit/counit witnesses.
 //
+
 // Downstream:
-//   * core/math/sdg.vr          — infinitesimal analysis
-//   * core/math/infinity_topos.vr — ∞-topos foundations
-//   * core/theory_interop         — theory registry that
-//                                   consumes cohesive structure
+//  * core/math/sdg.vr — infinitesimal analysis
+//  * core/math/infinity_topos.vr — ∞-topos foundations
+//  * core/theory_interop — theory registry that
+//  consumes cohesive structure
 // =============================================================================
 
 module core.math.cohesive;
@@ -62,24 +71,25 @@ mount core.math.infinity_category.{
 
 /// A **modality** on an ∞-topos H is an idempotent (co)monad:
 /// an endofunctor M : H → H equipped with
-///   * a unit (or counit) natural transformation  η : Id → M  (or M → Id),
-///   * a multiplication  μ : M ∘ M → M,
-/// satisfying M-idempotency: μ is a natural equivalence  M ∘ M ≃ M.
+///  * a unit (or counit) natural transformation η : Id → M (or M → Id),
+///  * a multiplication μ : M ∘ M → M,
+/// satisfying M-idempotency: μ is a natural equivalence M ∘ M ≃ M.
 ///
+
 /// The Boolean `is_monad` distinguishes monads (colocalisations, "sharp-like")
 /// from comonads (localisations, "flat-like").
 public type Modality<H: InfinityTopos> is protocol {
     /// Apply the modality to an object handle.
     fn apply(&self, x: &Int) -> Int;
 
-    /// Unit (monad) or counit (comonad):  η_x : x → M(x)  or  ε_x : M(x) → x.
+    /// Unit (monad) or counit (comonad): η_x : x → M(x) or ε_x : M(x) → x.
     fn unit_or_counit(&self, x: &Int) -> Int;
 
     /// Whether this is a monad (true) or comonad (false).
     fn is_monad(&self) -> Bool;
 
     /// Idempotency: the canonical map M(M(x)) → M(x) (or M(x) → M(M(x)))
-    /// is a natural equivalence.  Discharged by the SMT back-end.
+    /// is a natural equivalence. Discharged by the SMT back-end.
     @verify(formal)
     fn idempotency(x: &Int) -> Bool;
 
@@ -90,7 +100,7 @@ public type Modality<H: InfinityTopos> is protocol {
 };
 
 /// Compose two endofunctors on H: given M₁ and M₂, produce M₁ ∘ M₂.
-/// This is used to build ʃ = Disc ∘ Π,  ♭ = Disc ∘ Γ,  ♯ = coDisc ∘ Γ.
+/// This is used to build ʃ = Disc ∘ Π, ♭ = Disc ∘ Γ, ♯ = coDisc ∘ Γ.
 public type ComposedModality<H: InfinityTopos> is {
     /// The outer functor (applied second), e.g. Disc.
     outer_apply: fn(&Int) -> Int,
@@ -115,13 +125,14 @@ public fn composed_apply(m: &ComposedModality, x: &Int) -> Int {
 /// consists of a unit η : Id_C → G ∘ F and a counit ε : F ∘ G → Id_D
 /// satisfying the triangle identities.
 ///
+
 /// Here both functors are represented as opaque `fn(&Int) -> Int` maps
 /// (their action on object handles), and the unit/counit are likewise
 /// handle-level morphisms.
 public type AdjunctionWitness is {
-    /// Left adjoint F : action on objects  (F(c) ∈ D).
+    /// Left adjoint F : action on objects (F(c) ∈ D).
     left_apply:   fn(&Int) -> Int,
-    /// Right adjoint G : action on objects  (G(d) ∈ C).
+    /// Right adjoint G : action on objects (G(d) ∈ C).
     right_apply:  fn(&Int) -> Int,
     /// Unit η_c : c → G(F(c)).
     unit:         fn(&Int) -> Int,
@@ -131,6 +142,7 @@ public type AdjunctionWitness is {
 
 /// Triangle identity (left): ε_{F(c)} ∘ F(η_c) = id_{F(c)}.
 ///
+
 /// Concretely: apply the left adjoint F to the unit η_c, yielding F(η_c) : F(c) → F(G(F(c))).
 /// Then apply the counit ε at F(c): ε_{F(c)} : F(G(F(c))) → F(c).
 /// The composition must equal the identity on F(c).
@@ -154,6 +166,7 @@ public fn adjunction_triangle_left(adj: &AdjunctionWitness, c: &Int) -> Bool {
 
 /// Triangle identity (right): G(ε_d) ∘ η_{G(d)} = id_{G(d)}.
 ///
+
 /// Concretely: apply the unit η at G(d), yielding η_{G(d)} : G(d) → G(F(G(d))).
 /// Then apply the right adjoint G to the counit ε_d, yielding G(ε_d) : G(F(G(d))) → G(d).
 /// The composition must equal the identity on G(d).
@@ -177,15 +190,17 @@ public fn adjunction_triangle_right(adj: &AdjunctionWitness, d: &Int) -> Bool {
 // =============================================================================
 
 /// A **cohesive ∞-topos** H is an ∞-topos equipped with the adjunction
-/// quadruple  Π ⊣ Disc ⊣ Γ ⊣ coDisc  satisfying Lawvere's cohesion axioms:
+/// quadruple Π ⊣ Disc ⊣ Γ ⊣ coDisc satisfying Lawvere's cohesion axioms:
 ///
-///   (C1) Π preserves finite products.
-///   (C2) Disc is fully faithful: Disc(Γ(x)) ≃ x for all Disc-objects x.
-///   (C3) coDisc is fully faithful: coDisc(Γ(x)) ≃ x for all coDisc-objects.
-///   (C4) Γ preserves small colimits (left-adjoint behaviour).
+
+///  (C1) Π preserves finite products.
+///  (C2) Disc is fully faithful: Disc(Γ(x)) ≃ x for all Disc-objects x.
+///  (C3) coDisc is fully faithful: coDisc(Γ(x)) ≃ x for all coDisc-objects.
+///  (C4) Γ preserves small colimits (left-adjoint behaviour).
 ///
+
 /// The four functors are represented as genuine GeometricMorphism values
-/// (or raw `fn` maps) rather than opaque integer handles.  The three
+/// (or raw `fn` maps) rather than opaque integer handles. The three
 /// modalities are explicit composed endofunctors on H.
 public type CohesiveStructure<H: InfinityTopos> is protocol extends InfinityTopos {
 
@@ -193,12 +208,12 @@ public type CohesiveStructure<H: InfinityTopos> is protocol extends InfinityTopo
     // 3.1 Base topos (usually ∞Grpd — the ∞-topos of ∞-groupoids)
     // ------------------------------------------------------------------
 
-    /// The base ∞-topos B.  In the canonical case this is ∞Grpd.
+    /// The base ∞-topos B. In the canonical case this is ∞Grpd.
     fn base_topos(&self) -> Int;
 
     // ------------------------------------------------------------------
     // 3.2 The four adjoint functors
-    //     (represented as GeometricMorphism components + raw maps)
+    //  (represented as GeometricMorphism components + raw maps)
     // ------------------------------------------------------------------
 
     /// **Shape functor** Π : H → B.
@@ -255,19 +270,19 @@ public type CohesiveStructure<H: InfinityTopos> is protocol extends InfinityTopo
     // ------------------------------------------------------------------
 
     /// **(C1)** Π preserves finite products:
-    ///   Π(x × y)  ≃  Π(x) × Π(y).
+    ///  Π(x × y) ≃ Π(x) × Π(y).
     @verify(formal)
     fn c1_pi_preserves_products(x: &Int, y: &Int) -> Bool;
 
     /// **(C2)** Disc is fully faithful:
-    ///   for every s ∈ B, the counit  Disc(Γ(Disc(s))) → Disc(s)  is an
-    ///   equivalence, equivalently the unit  s → Γ(Disc(s))  is an
-    ///   equivalence.
+    ///  for every s ∈ B, the counit Disc(Γ(Disc(s))) → Disc(s) is an
+    ///  equivalence, equivalently the unit s → Γ(Disc(s)) is an
+    ///  equivalence.
     @verify(formal)
     fn c2_disc_fully_faithful(s: &Int) -> Bool;
 
     /// **(C3)** coDisc is fully faithful:
-    ///   for every s ∈ B, the unit  s → Γ(coDisc(s))  is an equivalence.
+    ///  for every s ∈ B, the unit s → Γ(coDisc(s)) is an equivalence.
     @verify(formal)
     fn c3_codisc_fully_faithful(s: &Int) -> Bool;
 
@@ -275,7 +290,7 @@ public type CohesiveStructure<H: InfinityTopos> is protocol extends InfinityTopo
     @verify(formal)
     fn c4_gamma_preserves_colimits(diagram: &Int) -> Bool;
 
-    /// Full adjunction chain:  Π ⊣ Disc ⊣ Γ ⊣ coDisc  (combined triangle
+    /// Full adjunction chain: Π ⊣ Disc ⊣ Γ ⊣ coDisc (combined triangle
     /// identities).
     @verify(formal)
     fn adjunction_chain_coherence(x: &Int, s: &Int) -> Bool;
@@ -289,19 +304,24 @@ public type CohesiveStructure<H: InfinityTopos> is protocol extends InfinityTopo
 /// additionally equipped with an adjunction triple of **infinitesimal**
 /// modalities
 ///
-///     Im  ⊣  &  ⊣  Rh
+
+///  Im ⊣ & ⊣ Rh
 ///
+
 /// where
-///   * Im (infinitesimal shape / de Rham stack):   x ↦ x_dR
-///   * &  (infinitesimal flat / crystal):           formally étale discretisation
-///   * Rh (reduction):                              kills nilpotents; x_red
+///  * Im (infinitesimal shape / de Rham stack): x ↦ x_dR
+///  * & (infinitesimal flat / crystal): formally étale discretisation
+///  * Rh (reduction): kills nilpotents; x_red
 ///
+
 /// These sit *inside* the cohesive quadruple:
-///   ♭(x) ↪ &(x) ↪ x  and  Im(x) ↪ ʃ(x)
+///  ♭(x) ↪ &(x) ↪ x and Im(x) ↪ ʃ(x)
 ///
+
 /// **Differential cohesion axiom** (Schreiber §3.10):
-///   The comparison morphism  ♭(x) → &(x)  is a monomorphism for all x.
+///  The comparison morphism ♭(x) → &(x) is a monomorphism for all x.
 ///
+
 /// **Reduced subsite**: the infinitesimal modalities arise from the
 /// inclusion of the reduced sub-site (objects with no nilpotent thickening)
 /// into the full site.
@@ -338,27 +358,27 @@ public type DifferentiallyCohesive<H: InfinityTopos> is protocol
     // 4.3 Differential cohesion axioms
     // ------------------------------------------------------------------
 
-    /// **(DC1)** Infinitesimal adjunction chain:  Im ⊣ & ⊣ Rh.
+    /// **(DC1)** Infinitesimal adjunction chain: Im ⊣ & ⊣ Rh.
     @verify(formal)
     fn dc1_inf_adjunction_chain(x: &Int) -> Bool;
 
     /// **(DC2)** Differential cohesion axiom (Schreiber §3.10):
-    ///   The natural morphism  ♭(x) → &(x)  is a monomorphism.
+    ///  The natural morphism ♭(x) → &(x) is a monomorphism.
     @verify(formal)
     fn dc2_flat_mono_into_amp(x: &Int) -> Bool;
 
-    /// **(DC3)** Im is idempotent:  Im(Im(x)) ≃ Im(x).
+    /// **(DC3)** Im is idempotent: Im(Im(x)) ≃ Im(x).
     @verify(formal)
     fn dc3_im_idempotent(x: &Int) -> Bool;
 
     /// **(DC4)** Rh(x) ↪ x is a monomorphism (the reduced object maps
-    ///   into the original; the inclusion is not generally an equivalence).
+    ///  into the original; the inclusion is not generally an equivalence).
     @verify(formal)
     fn dc4_rh_mono_into_x(x: &Int) -> Bool;
 
     /// **(DC5)** Cohesion hierarchy:
-    ///   ♭-objects ⊂ &-objects ⊂ objects of H.
-    ///   Equivalently: for ♭-modal x, &(x) ≃ x.
+    ///  ♭-objects ⊂ &-objects ⊂ objects of H.
+    ///  Equivalently: for ♭-modal x, &(x) ≃ x.
     @verify(formal)
     fn dc5_cohesion_hierarchy(x: &Int) -> Bool;
 };
@@ -373,25 +393,25 @@ public type DifferentiallyCohesive<H: InfinityTopos> is protocol
 public type CohesiveToposData<H: InfinityTopos> is {
     /// The base ∞-topos B (handle into the universe of ∞-topoi).
     base_topos:          Int,
-    /// Shape functor  Π : H → B.
+    /// Shape functor Π : H → B.
     pi:                  fn(&Int) -> Int,
-    /// Discrete inclusion  Disc : B → H.
+    /// Discrete inclusion Disc : B → H.
     disc:                fn(&Int) -> Int,
-    /// Global sections  Γ : H → B.
+    /// Global sections Γ : H → B.
     gamma:               fn(&Int) -> Int,
-    /// Codiscrete inclusion  coDisc : B → H.
+    /// Codiscrete inclusion coDisc : B → H.
     codisc:              fn(&Int) -> Int,
-    /// Shape modality  ʃ = Disc ∘ Π.
+    /// Shape modality ʃ = Disc ∘ Π.
     shape_mod:           ComposedModality<H>,
-    /// Flat modality  ♭ = Disc ∘ Γ.
+    /// Flat modality ♭ = Disc ∘ Γ.
     flat_mod:            ComposedModality<H>,
-    /// Sharp modality  ♯ = coDisc ∘ Γ.
+    /// Sharp modality ♯ = coDisc ∘ Γ.
     sharp_mod:           ComposedModality<H>,
-    /// Adjunction witness  Π ⊣ Disc.
+    /// Adjunction witness Π ⊣ Disc.
     pi_disc_adj:         AdjunctionWitness,
-    /// Adjunction witness  Disc ⊣ Γ.
+    /// Adjunction witness Disc ⊣ Γ.
     disc_gamma_adj:      AdjunctionWitness,
-    /// Adjunction witness  Γ ⊣ coDisc.
+    /// Adjunction witness Γ ⊣ coDisc.
     gamma_codisc_adj:    AdjunctionWitness,
 };
 
@@ -406,9 +426,9 @@ public type DifferentiallyCohesiveData<H: InfinityTopos> is {
     amp_mod:             ComposedModality<H>,
     /// Rh modality (reduction).
     rh_mod:              ComposedModality<H>,
-    /// Adjunction witness  Im ⊣ &.
+    /// Adjunction witness Im ⊣ &.
     im_amp_adj:          AdjunctionWitness,
-    /// Adjunction witness  & ⊣ Rh.
+    /// Adjunction witness & ⊣ Rh.
     amp_rh_adj:          AdjunctionWitness,
 };
 
@@ -417,7 +437,7 @@ public type DifferentiallyCohesiveData<H: InfinityTopos> is {
 // =============================================================================
 
 /// Build the **shape modality** ʃ = Disc ∘ Π as a ComposedModality.
-/// The unit  η_x : x → ʃ(x)  witnesses the localisation at ʃ.
+/// The unit η_x : x → ʃ(x) witnesses the localisation at ʃ.
 public fn make_shape_modality<H: InfinityTopos>(
     disc_fn:  fn(&Int) -> Int,
     pi_fn:    fn(&Int) -> Int,
@@ -478,22 +498,25 @@ public fn make_adjunction(
 // 7. theory_cohesive_structure — concrete construction for the theory ∞-topos
 // =============================================================================
 //
+
 // The theory ∞-topos is the ∞-category of ∞-sheaves on the
 // locally contractible "theory site" — the site whose objects
 // are formally-represented theories and whose coverings are
 // collections of consistent sub-theories whose union
 // (colimit) recovers the original.
 //
+
 // * Π (shape) arises from the geometric morphism to ∞Grpd induced by
-//   local contractibility of the site.
+//  local contractibility of the site.
 // * Disc / Γ are the standard discrete-global-sections pair.
 // * coDisc is the codiscrete extension (right adjoint to Γ).
 //
+
 // Infinitesimal modalities:
-// * Im  — infinitesimal shape from the reduced sub-site (theories modulo
-//          infinitesimal / formal equivalences).
-// * &   — infinitesimal flat (crystal structure of formal thickenings).
-// * Rh  — reduction (kills nilpotent / redundant formal data).
+// * Im — infinitesimal shape from the reduced sub-site (theories modulo
+//  infinitesimal / formal equivalences).
+// * & — infinitesimal flat (crystal structure of formal thickenings).
+// * Rh — reduction (kills nilpotent / redundant formal data).
 
 /// Construct the cohesive structure for the theory ∞-topos.
 /// Returns a fully assembled CohesiveToposData.
@@ -513,11 +536,11 @@ public fn theory_cohesive_structure<H: InfinityTopos>(
 
     // -- Modality units / counits ------------------------------------------
 
-    // Unit  η : x → ʃ(x) = Disc(Π(x)):  localisation map.
+    // Unit η : x → ʃ(x) = Disc(Π(x)): localisation map.
     let shape_unit:  fn(&Int) -> Int = |x| shape_unit_map(x);
-    // Unit  η : x → ♭(x) = Disc(Γ(x)):  flat localisation map.
+    // Unit η : x → ♭(x) = Disc(Γ(x)): flat localisation map.
     let flat_unit:   fn(&Int) -> Int = |x| flat_unit_map(x);
-    // Unit  η : x → ♯(x) = coDisc(Γ(x)): sharp localisation map.
+    // Unit η : x → ♯(x) = coDisc(Γ(x)): sharp localisation map.
     let sharp_unit:  fn(&Int) -> Int = |x| sharp_unit_map(x);
 
     // -- Adjunction witnesses -----------------------------------------------
@@ -619,14 +642,16 @@ public fn theory_differentially_cohesive<H: InfinityTopos>(
 // 8. Concrete Example: Discrete/Codiscrete adjunction on finite sets
 // =============================================================================
 //
+
 // To make the abstract machinery tangible, we instantiate it on a toy model
 // where objects are integers representing the *cardinality* of finite sets.
 // In this model:
-//   * Disc(n) = n  (discrete topology: every subset of an n-element set is open)
-//   * Γ(x)   = x  (global sections: recover the underlying n-element set)
-//   * Π(x)   = x  (shape: each point is its own path-component for discrete spaces)
-//   * coDisc(n) = n  (codiscrete topology: only ∅ and the whole set are open)
+//  * Disc(n) = n (discrete topology: every subset of an n-element set is open)
+//  * Γ(x) = x (global sections: recover the underlying n-element set)
+//  * Π(x) = x (shape: each point is its own path-component for discrete spaces)
+//  * coDisc(n) = n (codiscrete topology: only ∅ and the whole set are open)
 //
+
 // These are degenerate (all functors are the identity) but they satisfy all
 // the adjunction axioms, providing a useful sanity-check and documentation.
 
@@ -635,7 +660,7 @@ public fn theory_differentially_cohesive<H: InfinityTopos>(
 /// Γ(Disc(n)) = n — global sections recover the original finite set.
 public fn discrete_space(points: Int) -> Int {
     // In the discrete topology, no additional structure beyond the point set
-    // is needed.  The handle IS the cardinality.
+    // is needed. The handle IS the cardinality.
     points
 }
 
@@ -648,32 +673,36 @@ public fn shape_of_discrete(space: Int) -> Int {
 
 /// Flat modality applied to a discrete space: ♭(Disc(n)) = Disc(n).
 /// Since Disc(n) is already discrete, ♭ acts as the identity.
-/// ♭(x) = Disc(Γ(x)).  For x = Disc(n): Γ(Disc(n)) = n, then Disc(n) = n.
+/// ♭(x) = Disc(Γ(x)). For x = Disc(n): Γ(Disc(n)) = n, then Disc(n) = n.
 public fn flat_of_discrete(space: Int) -> Int {
     discrete_space(space)   // ♭ = Disc ∘ Γ, and Γ ∘ Disc = id on discrete spaces
 }
 
 /// Verify: Π ⊣ Disc adjunction counit on discrete spaces.
 ///
-/// The counit of Π ⊣ Disc at a set s ∈ B is the map  Π(Disc(s)) → s.
+
+/// The counit of Π ⊣ Disc at a set s ∈ B is the map Π(Disc(s)) → s.
 /// For discrete spaces this is the identity: Π(Disc(n)) = n.
 ///
+
 /// This establishes half of the Disc-fully-faithful condition (C2):
-///   Hom(Π(X), s) ≅ Hom(X, Disc(s))  naturally in X ∈ H, s ∈ B.
+///  Hom(Π(X), s) ≅ Hom(X, Disc(s)) naturally in X ∈ H, s ∈ B.
 @verify(formal)
 public fn verify_shape_disc_adjunction(x: Int, s: Int) -> Bool
     ensures shape_of_discrete(discrete_space(s)) == s
 {
-    // Π(Disc(s)) = s  is the counit of the Π ⊣ Disc adjunction.
+    // Π(Disc(s)) = s is the counit of the Π ⊣ Disc adjunction.
     // On discrete spaces (cardinality model) this holds definitionally.
     shape_of_discrete(discrete_space(s)) == s
 }
 
 /// Verify: Disc ⊣ Γ adjunction unit on discrete spaces.
 ///
-/// The unit of Disc ⊣ Γ at x ∈ H is the map  x → Disc(Γ(x)).
+
+/// The unit of Disc ⊣ Γ at x ∈ H is the map x → Disc(Γ(x)).
 /// For discrete spaces x = Disc(n): Γ(Disc(n)) = n, so Disc(Γ(Disc(n))) = Disc(n) = n.
 ///
+
 /// This is the other half of C2: Disc is fully faithful.
 @verify(formal)
 public fn verify_disc_gamma_unit(s: Int) -> Bool
@@ -690,15 +719,19 @@ public fn verify_disc_gamma_unit(s: Int) -> Bool
 /// Verify that a `CohesiveToposData` satisfies Lawvere's three key cohesion
 /// axioms on a finite collection of test-object handles:
 ///
-///   **Axiom 1 (C2)**: Disc is fully faithful.
-///     For every base-object s:  Γ(Disc(s)) = s.
+
+///  **Axiom 1 (C2)**: Disc is fully faithful.
+///  For every base-object s: Γ(Disc(s)) = s.
 ///
-///   **Axiom 2**: Shape modality is idempotent.
-///     For every object x:  ʃ(ʃ(x)) = ʃ(x).
+
+///  **Axiom 2**: Shape modality is idempotent.
+///  For every object x: ʃ(ʃ(x)) = ʃ(x).
 ///
-///   **Axiom 3**: Flat modality is idempotent.
-///     For every object x:  ♭(♭(x)) = ♭(x).
+
+///  **Axiom 3**: Flat modality is idempotent.
+///  For every object x: ♭(♭(x)) = ♭(x).
 ///
+
 /// Returns `true` iff all three axioms hold on every supplied test object.
 /// This is a *computational* check on handles (not a formal proof), suitable
 /// for runtime sanity-testing of concrete cohesive-structure implementations.
@@ -759,8 +792,9 @@ public fn verify_cohesive_axioms<H: InfinityTopos>(
 // 10. Primitive declarations (intrinsic / FFI boundary)
 // =============================================================================
 //
+
 // These are the "implementation atoms" — declared here so the construction
-// functions above type-check.  Concrete implementations are supplied by the
+// functions above type-check. Concrete implementations are supplied by the
 // runtime or by downstream crates (verum_vbc intrinsics / verum_codegen).
 
 @extern
@@ -829,10 +863,10 @@ theorem shape_modality_idempotent(
     ensures composed_apply(data.shape_mod, composed_apply(data.shape_mod, x))
          == composed_apply(data.shape_mod, x)
     proof {
-        // ʃ = Disc ∘ Π.  Applying twice:
-        //   ʃ(ʃ(x)) = Disc(Π(Disc(Π(x)))).
+        // ʃ = Disc ∘ Π. Applying twice:
+        //  ʃ(ʃ(x)) = Disc(Π(Disc(Π(x)))).
         // By C2 (Disc fully faithful): Π(Disc(s)) ≃ s for any s in the base.
-        // Let s₀ = Π(x).  Then Π(Disc(s₀)) ≃ s₀ = Π(x).
+        // Let s₀ = Π(x). Then Π(Disc(s₀)) ≃ s₀ = Π(x).
         // Hence Disc(Π(Disc(Π(x)))) ≃ Disc(Π(x)) = ʃ(x).
         have pi_x: (data.shape_mod.inner_apply)(x) == (data.shape_mod.inner_apply)(x)
         by auto;
@@ -854,10 +888,10 @@ theorem flat_modality_idempotent(
     ensures composed_apply(data.flat_mod, composed_apply(data.flat_mod, x))
          == composed_apply(data.flat_mod, x)
     proof {
-        // ♭ = Disc ∘ Γ.  Applying twice:
-        //   ♭(♭(x)) = Disc(Γ(Disc(Γ(x)))).
+        // ♭ = Disc ∘ Γ. Applying twice:
+        //  ♭(♭(x)) = Disc(Γ(Disc(Γ(x)))).
         // By C2 (Disc fully faithful): Γ(Disc(s)) ≃ s for any s.
-        // Let s₀ = Γ(x).  Then Γ(Disc(s₀)) ≃ s₀ = Γ(x).
+        // Let s₀ = Γ(x). Then Γ(Disc(s₀)) ≃ s₀ = Γ(x).
         // Hence Disc(Γ(Disc(Γ(x)))) ≃ Disc(Γ(x)) = ♭(x).
         have gamma_x: (data.flat_mod.inner_apply)(x) == (data.flat_mod.inner_apply)(x)
         by auto;
@@ -879,10 +913,10 @@ theorem sharp_modality_idempotent(
     ensures composed_apply(data.sharp_mod, composed_apply(data.sharp_mod, x))
          == composed_apply(data.sharp_mod, x)
     proof {
-        // ♯ = coDisc ∘ Γ.  Applying twice:
-        //   ♯(♯(x)) = coDisc(Γ(coDisc(Γ(x)))).
+        // ♯ = coDisc ∘ Γ. Applying twice:
+        //  ♯(♯(x)) = coDisc(Γ(coDisc(Γ(x)))).
         // By C3 (coDisc fully faithful): Γ(coDisc(s)) ≃ s for any s.
-        // Let s₀ = Γ(x).  Then Γ(coDisc(s₀)) ≃ s₀ = Γ(x).
+        // Let s₀ = Γ(x). Then Γ(coDisc(s₀)) ≃ s₀ = Γ(x).
         // Hence coDisc(Γ(coDisc(Γ(x)))) ≃ coDisc(Γ(x)) = ♯(x).
         have gamma_x: (data.sharp_mod.inner_apply)(x) == (data.sharp_mod.inner_apply)(x)
         by auto;
@@ -899,7 +933,7 @@ theorem sharp_modality_idempotent(
 
 /// The flat modality ♭ is left adjoint to the sharp modality ♯.
 /// I.e. there is a natural bijection (in ∞-groupoids):
-///   Map_H(♭(x), y) ≃ Map_H(x, ♯(y))
+///  Map_H(♭(x), y) ≃ Map_H(x, ♯(y))
 /// This follows from the adjunction chain: both arise from Disc ⊣ Γ,
 /// with ♭ built from the left adjoint side and ♯ from the right.
 @verify(formal)
@@ -916,7 +950,7 @@ theorem flat_adjoint_sharp(
 // ---------------------------------------------------------------------------
 
 /// A **♭-modal** object x satisfies ♭(x) ≃ x (the unit η_x is an
-/// equivalence).  A **&-modal** object satisfies &(x) ≃ x.  The
+/// equivalence). A **&-modal** object satisfies &(x) ≃ x. The
 /// differential cohesion axiom (DC2) implies ♭-modal ⊆ &-modal:
 /// if ♭(x) ≃ x then &(x) ≃ x.
 @verify(formal)
@@ -930,7 +964,7 @@ theorem flat_modal_implies_amp_modal(
     proof by auto;
 
 // ---------------------------------------------------------------------------
-// T4: Im ∘ Im ≃ Im  (infinitesimal shape is idempotent)
+// T4: Im ∘ Im ≃ Im (infinitesimal shape is idempotent)
 // ---------------------------------------------------------------------------
 
 /// Im is idempotent: Im(Im(x)) ≃ Im(x).
@@ -947,8 +981,8 @@ theorem im_modality_idempotent(
         // Im is defined as the infinitesimal shape modality from the reduced subsite.
         // Applying Im twice: Im(Im(x)).
         // By DC3 (dc3_im_idempotent), & (infinitesimal flat) is fully faithful
-        // on Im-modal objects.  Concretely: for any s in the reduced subsite,
-        // Im(&(s)) ≃ s.  Since Im(x) already lives over the reduced subsite,
+        // on Im-modal objects. Concretely: for any s in the reduced subsite,
+        // Im(&(s)) ≃ s. Since Im(x) already lives over the reduced subsite,
         // Im(Im(x)) ≃ Im(x) by the same argument as for ♭ with Disc/Γ.
         have im_x: (dc.im_mod.inner_apply)(x) == (dc.im_mod.inner_apply)(x)
         by auto;
@@ -960,7 +994,7 @@ theorem im_modality_idempotent(
     };
 
 // ---------------------------------------------------------------------------
-// T5: Adjunction chain coherence  Π ⊣ Disc ⊣ Γ ⊣ coDisc
+// T5: Adjunction chain coherence Π ⊣ Disc ⊣ Γ ⊣ coDisc
 // ---------------------------------------------------------------------------
 
 /// The four-fold adjunction chain is self-consistent: all six triangle

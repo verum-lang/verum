@@ -14,6 +14,7 @@
 )]
 //! Comprehensive FFI Boundary Validation Tests
 //!
+
 //! Tests per CLAUDE.md standards:
 //! - All tests in tests/ directory
 //! - No #[cfg(test)] in src/
@@ -848,6 +849,7 @@ fn create_test_ffi_boundary() -> FFIBoundary {
 // - Integration: 20 tests
 // - Performance: 5 tests
 //
+
 // Coverage:
 // - ALL FFI-safe types validated
 // - ALL unsafe type combinations detected

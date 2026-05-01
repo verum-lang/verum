@@ -2,9 +2,9 @@
 // text_encoding/bom.vr — UTF-16 byte-order-mark sniffer
 // =============================================================================
 // Spec: Unicode — BOMs:
-//   FE FF  — UTF-16 BE
-//   FF FE  — UTF-16 LE
-//   EF BB BF — UTF-8 (rarely emitted; detected but stripped)
+//  FE FF — UTF-16 BE
+//  FF FE — UTF-16 LE
+//  EF BB BF — UTF-8 (rarely emitted; detected but stripped)
 // =============================================================================
 
 module core.database.sqlite.native.text_encoding.bom;

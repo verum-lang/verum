@@ -4,6 +4,7 @@
 // sqlite3_trace_v2 per-event payload shape.
 // Spec §22.4 — trace_v2.
 //
+
 // Event mask bits (already catalogued in trace_v2_api as an enum); this
 // catalogue carries the per-event payload record expected by the callback.
 // =============================================================================

@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: postgresql.org/docs/16/protocol-message-formats.html
 //
+
 // Two enum-like classifications: `FrontendMsgTag` (what we send) and
-// `BackendMsgTag` (what we receive).  Stored as bytes so they can be
+// `BackendMsgTag` (what we receive). Stored as bytes so they can be
 // passed straight through `frame()`.
 // =============================================================================
 
@@ -17,6 +18,7 @@ mount base.{Maybe, None, Some, Text};
 // Frontend (client → server) message tags.
 // -----------------------------------------------------------------------------
 //
+
 // Tags from postgresql.org/docs/16/protocol-message-formats.html.
 // Untagged messages (Startup, SSLRequest, CancelRequest) are NOT
 // listed here — they're built by `frame_untagged`.

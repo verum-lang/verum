@@ -46,8 +46,10 @@ impl<'c> Block<'c> {
 
     /// Detaches a block from a region and assumes its ownership.
     ///
+
     /// # Safety
     ///
+
     /// This function might invalidate existing references to the block if you
     /// drop it too early.
     /// A safe version would require BlockRefMut to enforce exclusive access.
@@ -63,8 +65,10 @@ impl<'c> Block<'c> {
 
     /// Creates a block from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirBlock) -> Self {
         Self {
@@ -142,8 +146,10 @@ pub struct BlockRef<'c, 'a> {
 impl BlockRef<'_, '_> {
     /// Creates a block reference from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirBlock) -> Self {
         Self {
@@ -154,8 +160,10 @@ impl BlockRef<'_, '_> {
 
     /// Creates an optional block reference from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub unsafe fn from_option_raw(raw: MlirBlock) -> Option<Self> {
         if raw.ptr.is_null() {

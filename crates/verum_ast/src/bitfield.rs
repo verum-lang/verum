@@ -1,65 +1,77 @@
 //! Bitfield types for the Verum AST.
 //!
+
 //! This module defines AST nodes for Verum's first-class bitfield system,
 //! which provides type-safe bit-level data manipulation for hardware drivers,
 //! network protocols, and embedded systems.
 //!
+
 //! # Design Philosophy
 //!
+
 //! Verum bitfields follow the language's core principles:
 //!
+
 //! - **Semantic Honesty**: Types describe meaning (`BitWidth`, `ByteOrder`)
-//!   rather than implementation details
+//!  rather than implementation details
 //! - **Type Safety**: Bit widths are validated at compile time
 //! - **Portability**: Explicit byte order specification eliminates undefined behavior
 //! - **Zero-Cost**: Compiles to optimal bit manipulation instructions
 //! - **Verifiable**: SMT integration for constraint verification
 //!
+
 //! # Grammar
 //!
+
 //! Per `grammar/verum.ebnf`, bitfield attributes use standard attribute syntax:
 //!
+
 //! ```text
-//! @bits(N)           - Field bit width
-//! @bitfield          - Type uses packed bitfield layout
-//! @endian(mode)      - Byte order specification (big, little, native)
-//! @offset(N)         - Explicit bit offset (optional)
+//! @bits(N) - Field bit width
+//! @bitfield - Type uses packed bitfield layout
+//! @endian(mode) - Byte order specification (big, little, native)
+//! @offset(N) - Explicit bit offset (optional)
 //! ```
 //!
+
 //! # Examples
 //!
+
 //! ```verum
 //! // Network packet header with explicit bit layout
 //! @bitfield
-//! @endian(big)  // Network byte order
+//! @endian(big) // Network byte order
 //! type IpHeader is {
-//!     @bits(4)  version: U8,
-//!     @bits(4)  ihl: U8,
-//!     @bits(8)  dscp_ecn: U8,
-//!     @bits(16) total_length: U16,
-//!     @bits(16) identification: U16,
-//!     @bits(3)  flags: U8,
-//!     @bits(13) fragment_offset: U16,
-//!     @bits(8)  ttl: U8,
-//!     @bits(8)  protocol: U8,
-//!     @bits(16) header_checksum: U16,
-//!     @bits(32) source_addr: U32,
-//!     @bits(32) dest_addr: U32,
+//!  @bits(4) version: U8,
+//!  @bits(4) ihl: U8,
+//!  @bits(8) dscp_ecn: U8,
+//!  @bits(16) total_length: U16,
+//!  @bits(16) identification: U16,
+//!  @bits(3) flags: U8,
+//!  @bits(13) fragment_offset: U16,
+//!  @bits(8) ttl: U8,
+//!  @bits(8) protocol: U8,
+//!  @bits(16) header_checksum: U16,
+//!  @bits(32) source_addr: U32,
+//!  @bits(32) dest_addr: U32,
 //! };
 //!
+
 //! // Hardware register with read-only and write-only fields
 //! @bitfield
 //! @endian(little)
 //! type StatusRegister is {
-//!     @bits(1)  busy: Bool,      // Read-only status
-//!     @bits(1)  error: Bool,     // Read-only status
-//!     @bits(6)  _reserved: U8,   // Padding
-//!     @bits(8)  error_code: U8,  // Read-only error code
+//!  @bits(1) busy: Bool, // Read-only status
+//!  @bits(1) error: Bool, // Read-only status
+//!  @bits(6) _reserved: U8, // Padding
+//!  @bits(8) error_code: U8, // Read-only error code
 //! };
 //! ```
 //!
+
 //! # Compile-Time Verification
 //!
+
 //! The type checker validates:
 //! - Field bit width does not exceed storage type width
 //! - Total bits fit within specified container size
@@ -72,21 +84,26 @@ use verum_common::Maybe;
 
 /// Bit width specification for a bitfield member.
 ///
+
 /// Represents the number of bits occupied by a field within a bitfield type.
 /// The width must be positive and cannot exceed the storage type's bit width.
 ///
+
 /// # Validation Rules
 ///
+
 /// - `width > 0` (zero-width fields are invalid)
 /// - `width <= storage_type.bits` (e.g., `@bits(9)` on `U8` is invalid)
 /// - For boolean fields, `width == 1` is enforced
 ///
+
 /// # Examples
 ///
+
 /// ```verum
-/// @bits(4) version: U8,   // Valid: 4 <= 8
-/// @bits(16) port: U16,    // Valid: 16 <= 16
-/// @bits(1) flag: Bool,    // Valid: boolean as single bit
+/// @bits(4) version: U8, // Valid: 4 <= 8
+/// @bits(16) port: U16, // Valid: 16 <= 16
+/// @bits(1) flag: Bool, // Valid: boolean as single bit
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BitWidth {
@@ -127,22 +144,27 @@ impl std::fmt::Display for BitWidth {
 
 /// Byte order specification for multi-byte bitfield types.
 ///
+
 /// Determines how multi-byte values are laid out in memory. This is critical
 /// for hardware interfaces and network protocols where byte order matters.
 ///
+
 /// # Semantic Naming
 ///
+
 /// Uses `ByteOrder` instead of "endianness" for clearer semantic meaning:
 /// - Big: Most significant byte first (network byte order)
 /// - Little: Least significant byte first (x86, ARM default)
 /// - Native: Platform-specific (use with caution for portability)
 ///
+
 /// # Examples
 ///
+
 /// ```verum
-/// @endian(big)     // Network protocols (TCP/IP, etc.)
-/// @endian(little)  // x86/ARM hardware registers
-/// @endian(native)  // Platform-specific (rarely recommended)
+/// @endian(big) // Network protocols (TCP/IP, etc.)
+/// @endian(little) // x86/ARM hardware registers
+/// @endian(native) // Platform-specific (rarely recommended)
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ByteOrder {
@@ -194,25 +216,31 @@ impl std::fmt::Display for ByteOrder {
 
 /// Complete specification for a bitfield member.
 ///
+
 /// Combines bit width with optional explicit offset for fields that
 /// require precise bit positioning within the container.
 ///
+
 /// # Layout Calculation
 ///
+
 /// If `offset` is `None`, the field is placed immediately after the
 /// previous field. If `offset` is `Some(n)`, the field starts at bit `n`
 /// from the beginning of the container (0-indexed).
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Automatic layout (sequential)
-/// @bits(4) version: U8,  // bits 0-3
-/// @bits(4) ihl: U8,      // bits 4-7
+/// @bits(4) version: U8, // bits 0-3
+/// @bits(4) ihl: U8, // bits 4-7
 ///
+
 /// // Explicit offset (for reserved gaps)
-/// @bits(8) @offset(0)  low_byte: U8,
-/// @bits(8) @offset(24) high_byte: U8,  // Skip bits 8-23
+/// @bits(8) @offset(0) low_byte: U8,
+/// @bits(8) @offset(24) high_byte: U8, // Skip bits 8-23
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BitSpec {
@@ -270,40 +298,49 @@ impl Spanned for BitSpec {
 
 /// Bitfield layout specification for a type.
 ///
+
 /// Marks a type as using packed bitfield layout rather than standard
 /// struct layout with natural alignment.
 ///
+
 /// # Layout Semantics
 ///
+
 /// When a type has `@bitfield` annotation:
 /// - Fields are packed according to their `@bits(N)` specifications
 /// - No implicit padding between fields (unless via `@offset`)
 /// - Byte order determined by `@endian` attribute
 /// - Total size is rounded up to byte boundary
 ///
+
 /// # Accessor Generation
 ///
+
 /// The compiler generates type-safe accessor methods:
 /// - `get_field() -> T`: Extract field value with proper masking/shifting
 /// - `set_field(value: T)`: Update field with bounds checking
 /// - `with_field(value: T) -> Self`: Builder pattern for immutable updates
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @bitfield
 /// @endian(big)
 /// type Flags is {
-///     @bits(1) enabled: Bool,
-///     @bits(3) priority: U8,
-///     @bits(4) mode: U8,
+///  @bits(1) enabled: Bool,
+///  @bits(3) priority: U8,
+///  @bits(4) mode: U8,
 /// };
 ///
+
 /// let f = Flags { enabled: true, priority: 5, mode: 2 };
 /// assert(f.get_enabled() == true);
 /// assert(f.get_priority() == 5);
 ///
-/// let f2 = f.with_priority(7);  // Immutable update
+
+/// let f2 = f.with_priority(7); // Immutable update
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BitLayout {
@@ -385,11 +422,14 @@ impl Default for BitLayout {
 
 /// Computed layout information for a resolved bitfield.
 ///
+
 /// This is produced by the type checker after validating all field
 /// specifications and computing the final layout.
 ///
+
 /// # Usage
 ///
+
 /// This struct is used during code generation to:
 /// - Generate correct accessor masks and shifts
 /// - Determine container type and alignment
@@ -443,6 +483,7 @@ impl ResolvedBitLayout {
 
 /// Resolved layout information for a single bitfield member.
 ///
+
 /// Contains all information needed to generate accessor code.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResolvedBitField {
@@ -472,6 +513,7 @@ impl ResolvedBitField {
 
     /// Compute the extraction mask for this field.
     ///
+
     /// The mask has `width` bits set starting at bit 0.
     /// To extract the field: `(value >> offset) & mask`
     pub fn mask(&self) -> u64 {
@@ -484,6 +526,7 @@ impl ResolvedBitField {
 
     /// Compute the in-place mask for this field.
     ///
+
     /// The mask has `width` bits set at the field's position.
     /// To clear the field: `value & !in_place_mask`
     pub fn in_place_mask(&self) -> u64 {

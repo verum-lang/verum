@@ -1,30 +1,33 @@
 //! Ratchet: count lenient `SKIP` warnings emitted during a stdlib-loading
 //! compile and fail CI if the count grows.
 //!
+
 //! Each `[lenient] SKIP <fn>: <reason>` is a body that VBC codegen
 //! could not compile and dropped silently — runtime calls to that
 //! function panic with `method 'X.Y' not found on value` or
-//! `FunctionNotFound(...)` far from the cause.  The lenient surface is
+//! `FunctionNotFound(...)` far from the cause. The lenient surface is
 //! the most direct measurement of stdlib hygiene.
 //!
+
 //! Earlier fixes drove the count from ~50 to 0 on a tiny bare-`None`
-//! fixture (#158, #161, #159).  This test pins that baseline at zero
+//! fixture (#158, #161, #159). This test pins that baseline at zero
 //! and forces any new stdlib bug that introduces a SKIP to land its
 //! own task / fix before the PR can merge.
 //!
+
 //! When this fails, look at the warning text:
-//!   * `undefined function: <name>` → real missing function or
-//!     mount-alias not propagating; add the function or de-alias the
-//!     mount (#159 pattern).
-//!   * `undefined variable: <Variant>` → cross-type variant collision
-//!     dropping the simple-name alias.  Either ensure the colliding
-//!     types have unique simple names (#160 / `stdlib_unique_type_names`)
-//!     or check `register_type_constructors` (#158 `prefer_existing`
-//!     save/restore guard).
-//!   * `wrong number of arguments for <name>` → arity-suffix
-//!     registration regression; check
-//!     `crates/verum_vbc/src/codegen/context.rs::register_function`
-//!     keeps both arities (#161).
+//!  * `undefined function: <name>` → real missing function or
+//!  mount-alias not propagating; add the function or de-alias the
+//!  mount (#159 pattern).
+//!  * `undefined variable: <Variant>` → cross-type variant collision
+//!  dropping the simple-name alias. Either ensure the colliding
+//!  types have unique simple names (#160 / `stdlib_unique_type_names`)
+//!  or check `register_type_constructors` (#158 `prefer_existing`
+//!  save/restore guard).
+//!  * `wrong number of arguments for <name>` → arity-suffix
+//!  registration regression; check
+//!  `crates/verum_vbc/src/codegen/context.rs::register_function`
+//!  keeps both arities (#161).
 
 mod stdlib_support;
 use stdlib_support::{vtest_run_capture, workspace_root};
@@ -46,7 +49,7 @@ fn main() {
 "#;
 
 /// Run vtest on `target_path` and return any `[lenient] SKIP`
-/// warning lines.  Thin wrapper over `vtest_run_capture`; kept here
+/// warning lines. Thin wrapper over `vtest_run_capture`; kept here
 /// because the line-predicate is specific to this test file.
 fn collect_lenient_skips(target_path: &std::path::Path) -> (Option<i32>, Vec<String>) {
     let out = vtest_run_capture(target_path);
@@ -70,16 +73,18 @@ const FAILURE_HINT: &str =
        was bypassed under `prefer_existing_functions`.  See \
        `register_function` in `codegen/context.rs` (#161).";
 
-/// Vcs-presence policy.  Two modes:
+/// Vcs-presence policy. Two modes:
 ///
-///   * Workspace has `vcs/specs/` — every fixture this test points at
-///     MUST exist; a missing one panics with a clear message so the
-///     spec moving / being deleted doesn't silently delete coverage.
-///   * Workspace lacks `vcs/specs/` (e.g. shallow checkout, embedded
-///     deployment) — every vcs-pointing test skips with a one-line
-///     `eprintln!` notice; CI logs make the whole-suite skip explicit
-///     instead of test-by-test silence.
+
+///  * Workspace has `vcs/specs/` — every fixture this test points at
+///  MUST exist; a missing one panics with a clear message so the
+///  spec moving / being deleted doesn't silently delete coverage.
+///  * Workspace lacks `vcs/specs/` (e.g. shallow checkout, embedded
+///  deployment) — every vcs-pointing test skips with a one-line
+///  `eprintln!` notice; CI logs make the whole-suite skip explicit
+///  instead of test-by-test silence.
 ///
+
 /// The decision is per-call (no module-level statics) so the tests
 /// stay parallel-safe.
 fn vcs_specs_present() -> bool {
@@ -87,16 +92,18 @@ fn vcs_specs_present() -> bool {
 }
 
 /// Run vtest on `spec` and assert it emits zero `[lenient] SKIP`
-/// warnings during stdlib loading.  `scenario` names the fixture in
+/// warnings during stdlib loading. `scenario` names the fixture in
 /// the failure message so a CI diff identifies which spec regressed.
 ///
+
 /// Behaviour on missing fixtures:
 ///
-///   * If `vcs/specs/` is absent altogether — emit a one-line notice
-///     and skip silently (legitimate environment lacks the corpus).
-///   * If `vcs/specs/` is present but the specific fixture isn't —
-///     panic.  A spec being deleted or moved without updating the
-///     test must surface immediately, not silently erase coverage.
+
+///  * If `vcs/specs/` is absent altogether — emit a one-line notice
+///  and skip silently (legitimate environment lacks the corpus).
+///  * If `vcs/specs/` is present but the specific fixture isn't —
+///  panic. A spec being deleted or moved without updating the
+///  test must surface immediately, not silently erase coverage.
 fn assert_no_lenient_skips(scenario: &str, spec: &std::path::Path) {
     if !vcs_specs_present() {
         eprintln!(
@@ -156,7 +163,7 @@ fn stdlib_loading_emits_no_lenient_skips_minimal() {
 
 /// Wider coverage check: run a real, dependency-heavy VCS spec through
 /// vtest and assert the stdlib body-compilation pass remains lenient-
-/// skip-free.  The minimal fixture above only loads the core slice;
+/// skip-free. The minimal fixture above only loads the core slice;
 /// this one transitively pulls in the SQLite VFS layer + collections +
 /// I/O — the historical hot-path for codegen-hygiene regressions.
 #[test]
@@ -171,7 +178,7 @@ fn stdlib_loading_emits_no_lenient_skips_sqlite() {
 /// Even-wider coverage: the L1 pager round-trip pulls in sys.time_ops
 /// (Instant.now / sleep_*), the rollback journal helpers, the WAL
 /// frame layout, plus the L0 VFS layer that the SQLite-VFS smoke
-/// already exercises.  Covers the historical hot-paths for both the
+/// already exercises. Covers the historical hot-paths for both the
 /// "missing FFI intrinsic" cluster (`__time_*_nanos_raw`) and the
 /// "rollback record helpers not exported" cluster.
 #[test]
@@ -202,7 +209,7 @@ fn stdlib_loading_emits_no_lenient_skips_l4_vdbe() {
     assert_no_lenient_skips("L4-VDBE", &target);
 }
 
-/// Cross-domain coverage: runtime/recovery + retry primitives.  This
+/// Cross-domain coverage: runtime/recovery + retry primitives. This
 /// fixture pulls in a different stdlib slice from the SQLite-heavy
 /// fixtures above — async/spawn_config, runtime/recovery (the
 /// supervisor-tree-side counterpart to async/spawn_config), the
@@ -211,6 +218,7 @@ fn stdlib_loading_emits_no_lenient_skips_l4_vdbe() {
 /// the foundational base/result and core.* infrastructure that
 /// async-related modules transitively need.
 ///
+
 /// Specifically guards against any regression that re-introduces a
 /// stdlib-loading SKIP in `core/runtime/recovery.vr`,
 /// `core/async/spawn_config.vr`, or any of the runtime/* siblings
@@ -228,7 +236,7 @@ fn stdlib_loading_emits_no_lenient_skips_runtime_retry() {
 /// / Octal / LowerExp / UpperExp), the `FormatSpec` / `FormatError`
 /// types, plus the foundational base/protocols::Formatter
 /// (Display/Debug) which is the canonical sibling kept under the
-/// disambiguation.  Catches regressions in any of the format-related
+/// disambiguation. Catches regressions in any of the format-related
 /// module entries that share their type registrations with
 /// core/text/format.vr or core/base/protocols.vr.
 #[test]
@@ -245,6 +253,7 @@ fn stdlib_loading_emits_no_lenient_skips_text_format() {
 /// after net/quic/path → QuicPath rename and math/hott → HottPath
 /// rename), and the ByteRepeat / Sink utility readers/writers.
 ///
+
 /// Sits alongside the runtime/retry and text/format fixtures as
 /// independent non-SQLite stdlib subgraph coverage — a regression
 /// in any io.* module that affects type-table population fails

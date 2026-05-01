@@ -1,12 +1,14 @@
 //! Direct SMT-LIB 2 file check — the library-layer entry point for
 //! `verum verify --check-smt-formula <FILE>`.
 //!
+
 //! Accepts a raw SMT-LIB 2 string and dispatches it to the
 //! configured solver (currently Z3 only; CVC5 support waits on
 //! parser-library linking). The handler is deliberately thin:
 //! no AST / type-checker / VC-generator involvement — the input
 //! is raw SMT-LIB, the output is the solver's verdict verbatim.
 //!
+
 //! Closes task #67's `--check-smt-formula` surface.
 
 /// Verdict returned by [`check_smtlib_string`].
@@ -46,15 +48,17 @@ pub enum CheckError {
 
 /// Dispatch a raw SMT-LIB 2 string to the configured solver.
 ///
+
 /// * `content` — the SMT-LIB source (must include
-///   `(check-sat)`).
+///  `(check-sat)`).
 /// * `solver` — `z3` | `auto` | `portfolio` | `capability`
-///   currently dispatch through Z3; `cvc5` returns
-///   `UnsupportedSolver` because CVC5 parser linking is
-///   optional. Unknown values surface as `UnsupportedSolver`.
+///  currently dispatch through Z3; `cvc5` returns
+///  `UnsupportedSolver` because CVC5 parser linking is
+///  optional. Unknown values surface as `UnsupportedSolver`.
 /// * `timeout_s` — per-query timeout in seconds. Forwarded to
-///   Z3 via `set_timeout`.
+///  Z3 via `set_timeout`.
 ///
+
 /// Returns the solver verdict on success.
 pub fn check_smtlib_string(
     content: &str,

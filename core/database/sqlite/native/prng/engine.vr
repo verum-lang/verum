@@ -3,12 +3,14 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.1
 //
+
 // `PrngEngine` wraps `Arc4State` + a `SeedSource` + a `ReseedPolicy`.
 // Public surface mirrors the SQLite C API:
 //
-//   * `random_int()`   — Int64 in [-2^63, 2^63 - 1]
-//   * `random_blob(n)` — n bytes
-//   * `randomness(n)`  — refill helper (returns n bytes)
+
+//  * `random_int()` — Int64 in [-2^63, 2^63 - 1]
+//  * `random_blob(n)` — n bytes
+//  * `randomness(n)` — refill helper (returns n bytes)
 // =============================================================================
 
 module core.database.sqlite.native.prng.engine;

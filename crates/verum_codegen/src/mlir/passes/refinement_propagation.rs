@@ -1,28 +1,36 @@
 //! Refinement Propagation Pass - Industrial-Grade Implementation.
 //!
+
 //! This pass propagates refinement type information through SSA values
 //! to eliminate redundant refinement checks at runtime.
 //!
+
 //! # Algorithm Overview
 //!
+
 //! The pass operates in multiple phases:
 //!
+
 //! 1. **Collection Phase**: Find all `refinement_check` operations
 //! 2. **Predicate Extraction**: Parse predicates from refinement operations
 //! 3. **SSA Flow Analysis**: Propagate predicates through def-use chains
 //! 4. **Redundancy Detection**: Identify checks implied by earlier checks
 //! 5. **Elimination Phase**: Remove provably redundant checks
 //!
+
 //! # Refinement Predicates
 //!
+
 //! Supported predicates:
 //! - Range: `x >= 0`, `x < len`, `x in 0..100`
 //! - Non-null: `x != null`
 //! - Type refinement: `x is SomeVariant`
 //! - Custom: User-defined predicates
 //!
+
 //! # Performance Impact
 //!
+
 //! - Typical redundancy rate: 20-40%
 //! - Enables further optimizations (bounds check elimination)
 //! - Zero runtime overhead for eliminated checks
@@ -830,6 +838,7 @@ impl Default for RefinementAnalysisEngine {
 
 /// Refinement propagation pass - Industrial-Grade Implementation.
 ///
+
 /// This pass eliminates redundant refinement checks by propagating
 /// predicate information through SSA values.
 pub struct RefinementPropagationPass {

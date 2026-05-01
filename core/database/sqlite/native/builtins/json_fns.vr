@@ -4,20 +4,23 @@
 // Layer: 4
 // Spec: sqlite-native.md §15.4
 //
+
 // JSON1 functions operate on TEXT values that contain JSON; we lean
 // on `core.encoding.json` for the heavy lifting (parse + serialise)
 // and expose the SQLite façade here.
 //
+
 // Functions implemented in v0.1:
-//   json(X)             — validate + canonicalise (strip whitespace)
-//   json_valid(X)       — 1 / 0
-//   json_type(X[, P])   — JSON type name at root or P
-//   json_extract(X, P)  — value at path (single-path form)
-//   json_array_length(X[, P])
-//   json_quote(X)       — wrap a SQL value as JSON-encoded TEXT
-//   json_array(X1, X2, ...)
-//   json_object(K1, V1, ...)
+//  json(X) — validate + canonicalise (strip whitespace)
+//  json_valid(X) — 1 / 0
+//  json_type(X[, P]) — JSON type name at root or P
+//  json_extract(X, P) — value at path (single-path form)
+//  json_array_length(X[, P])
+//  json_quote(X) — wrap a SQL value as JSON-encoded TEXT
+//  json_array(X1, X2, ...)
+//  json_object(K1, V1, ...)
 //
+
 // `json_set / json_replace / json_insert / json_remove / json_patch`
 // land in v0.2 once the path-grammar mutator in core.encoding.json
 // stabilises.

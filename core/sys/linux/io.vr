@@ -8,15 +8,18 @@ module sys.linux.io;
 // Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
+
 // This module provides completion-based I/O for Linux using:
 // - io_uring (Linux 5.1+): Primary, highest performance
 // - epoll: Fallback for older kernels, wrapped in completion semantics
 //
+
 // io_uring is a completion-based I/O interface that:
 // - Batches multiple operations in single syscall
 // - Provides async operation submission via shared memory rings
 // - Minimizes kernel/userspace transitions
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.5 (Cross-Platform IOEngine)
 // =============================================================================
 
@@ -305,6 +308,7 @@ implement Eq for LinuxIoDriverError {
 implement IoUringDriver {
     /// Create a new io_uring driver.
     ///
+
     /// # Arguments
     /// * `entries` - Number of SQ entries (power of 2, max 4096)
     public fn new(entries: UInt32) -> Result<IoUringDriver, LinuxIoDriverError> {
@@ -479,6 +483,7 @@ implement IoUringDriver {
 
     /// Wait for completions.
     ///
+
     /// # Arguments
     /// * `min_complete` - Minimum completions to wait for
     /// * `timeout_ns` - Timeout in nanoseconds (0 = no timeout)
@@ -631,6 +636,7 @@ implement IoUringDriver {
 
     /// Prepare a vectored read (readv) operation.
     ///
+
     /// Submits IORING_OP_READV which reads into multiple buffers
     /// described by the iovec array.
     public fn prep_readv(&mut self, fd: Int, iovecs: &[IOVec], user_data: UInt64) -> Result<(), LinuxIoDriverError> {
@@ -650,6 +656,7 @@ implement IoUringDriver {
 
     /// Prepare a vectored write (writev) operation.
     ///
+
     /// Submits IORING_OP_WRITEV which writes from multiple buffers
     /// described by the iovec array.
     public fn prep_writev(&mut self, fd: Int, iovecs: &[IOVec], user_data: UInt64) -> Result<(), LinuxIoDriverError> {
@@ -1286,6 +1293,7 @@ public fn is_io_uring_available() -> Bool {
 
 /// Create the best available IO driver for this system.
 ///
+
 /// Prefers io_uring (Linux 5.1+), falls back to epoll.
 public fn create_io_driver() -> Result<LinuxIoDriver, LinuxIoDriverError> {
     // Try io_uring first
@@ -1339,6 +1347,7 @@ implement LinuxIoDriver {
 // IOEngine Protocol Implementation
 // =============================================================================
 //
+
 // This section implements the unified IOEngine protocol from sys/io_engine.vr
 // for the Linux-specific LinuxIoDriver type.
 
@@ -1517,6 +1526,7 @@ implement IOEngine for IoUringDriver {
 
 /// Implement IOEngine for EpollDriver (completion wrapping over readiness)
 ///
+
 /// Epoll is readiness-based, so we wrap it in completion semantics:
 /// 1. submit() registers fd interest with epoll_ctl
 /// 2. wait() calls epoll_pwait and performs the actual I/O when fd is ready

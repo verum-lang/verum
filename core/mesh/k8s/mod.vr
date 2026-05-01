@@ -4,13 +4,14 @@
 // Layer: 5.5 (alongside xds)
 // Dependencies: core.net.http, core.net.tls, core.security.spiffe (optional)
 // Spec: https://gateway-api.sigs.k8s.io/
-//       https://kubernetes.io/docs/reference/using-api/
+//  https://kubernetes.io/docs/reference/using-api/
 //
+
 // Minimal talk-to-kube-apiserver client covering:
 // - kubeconfig + in-cluster auth resolution
 // - list / get / watch on arbitrary CRDs (typed via generics)
 // - Typed views of the core Gateway API v1 resources:
-//     Gateway, GatewayClass, HTTPRoute, TLSRoute, ReferenceGrant
+//  Gateway, GatewayClass, HTTPRoute, TLSRoute, ReferenceGrant
 // - Server-side-apply patch support
 // =============================================================================
 

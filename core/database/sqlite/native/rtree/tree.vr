@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.3
 //
+
 // Manages a forest of `RNode`s keyed by `node_id`. Insert routes
 // down via choose_subtree, leaf-inserts, then propagates split if
 // the leaf overflows. Search descends every subtree whose MBB
 // intersects the query box.
 //
+
 // Backing store is in-memory (List<RNode>). The host wires this to
 // the L3 B-tree for persistence.
 // =============================================================================

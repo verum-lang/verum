@@ -6,20 +6,23 @@ module core.database.sqlite.native.l5_sql.parser.expr;
 // Layer: 5
 // Spec: sqlite.org/lang_expr.html, sqlite-native.md §12.2
 //
+
 // SQLite operator precedence (tightest → loosest):
 //
-//   16  collate
-//   15  unary `-` `+` `~` `NOT`
-//   14  `||`
-//   13  `*` `/` `%`
-//   12  `+` `-`
-//   11  `<<` `>>` `&` `|`
-//   10  `<` `<=` `>` `>=`
-//    9  `=` `==` `!=` `<>` `IS` `IS NOT` `IN` `LIKE` `GLOB` `MATCH` `REGEXP`
-//    8  `NOT`
-//    7  `AND`
-//    6  `OR`
+
+//  16 collate
+//  15 unary `-` `+` `~` `NOT`
+//  14 `||`
+//  13 `*` `/` `%`
+//  12 `+` `-`
+//  11 `<<` `>>` `&` `|`
+//  10 `<` `<=` `>` `>=`
+//  9 `=` `==` `!=` `<>` `IS` `IS NOT` `IN` `LIKE` `GLOB` `MATCH` `REGEXP`
+//  8 `NOT`
+//  7 `AND`
+//  6 `OR`
 //
+
 // We implement precedence climbing rather than a full Pratt table —
 // each precedence level corresponds to one `parse_expr_level_N`
 // function. Right-associative operators (`||`, `COLLATE`) are handled

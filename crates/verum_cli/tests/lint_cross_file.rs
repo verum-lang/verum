@@ -1,5 +1,6 @@
 //! Cross-file rule tests.
 //!
+
 //! Each test stands up a small fixture project containing the
 //! specific topology a cross-file rule fires on, runs the binary,
 //! and asserts the expected diagnostic appears.

@@ -1,18 +1,21 @@
 //! Verification pipeline composer.
 //!
+
 //! `VerificationPipeline` runs an ordered list of [`VerificationPass`]
 //! implementations on a module, with **fail-fast** semantics: when
 //! any pass returns `result.success == false`, the pipeline records
 //! that failure and skips the remaining passes.
 //!
+
 //! Two built-in pipelines:
 //!
-//!   • [`VerificationPipeline::static_analysis_pipeline`] — 5
-//!     lightweight passes (level inference + kernel-recheck +
-//!     hygiene-recheck + boundary detection + transition
-//!     recommendation). No SMT.
-//!   • [`VerificationPipeline::full_verification_pipeline`] — adds
-//!     `SmtVerificationPass` after the static-analysis chain.
+
+//!  • [`VerificationPipeline::static_analysis_pipeline`] — 5
+//!  lightweight passes (level inference + kernel-recheck +
+//!  hygiene-recheck + boundary detection + transition
+//!  recommendation). No SMT.
+//!  • [`VerificationPipeline::full_verification_pipeline`] — adds
+//!  `SmtVerificationPass` after the static-analysis chain.
 
 use std::fmt;
 
@@ -31,21 +34,23 @@ use super::{
 
 /// pipeline-level halt policy.
 ///
+
 /// Mediates between the two valid contracts that the V0 pipeline
 /// could not separate:
 ///
-///   * **Default** — halt on `SoundnessCritical` failure; continue
-///     through `Informational` failures. This is the new V8 default
-///     and matches the practical separation between formation
-///     errors (which downstream passes depend on) and advisory
-///     diagnostics (which don't).
-///   * **StrictFailFast** — halt on *any* failure regardless of
-///     classification. Equivalent to pre-V8 behaviour. Useful for
-///     CI gates that want a single first-failure stop.
-///   * **Aggregate** — never halt. Run every pass, accumulate every
-///     diagnostic. Useful for IDE / batch-report workflows where
-///     surfacing all errors at once is more valuable than the
-///     short-circuit speedup.
+
+///  * **Default** — halt on `SoundnessCritical` failure; continue
+///  through `Informational` failures. This is the new V8 default
+///  and matches the practical separation between formation
+///  errors (which downstream passes depend on) and advisory
+///  diagnostics (which don't).
+///  * **StrictFailFast** — halt on *any* failure regardless of
+///  classification. Equivalent to pre-V8 behaviour. Useful for
+///  CI gates that want a single first-failure stop.
+///  * **Aggregate** — never halt. Run every pass, accumulate every
+///  diagnostic. Useful for IDE / batch-report workflows where
+///  surfacing all errors at once is more valuable than the
+///  short-circuit speedup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PipelineMode {
     /// V8 default — halt only on SoundnessCritical pass failure.
@@ -112,12 +117,14 @@ impl VerificationPipeline {
     /// Run all passes, halting per the configured
     /// [`PipelineMode`].
     ///
+
     /// Halt semantics by mode (V8, B7):
-    ///   * `Default` (V8 default) — halt on `SoundnessCritical`
-    ///     pass failure; continue through `Informational` ones.
-    ///   * `StrictFailFast` (pre-V8) — halt on any pass failure.
-    ///   * `Aggregate` — never halt; collect every diagnostic.
+    ///  * `Default` (V8 default) — halt on `SoundnessCritical`
+    ///  pass failure; continue through `Informational` ones.
+    ///  * `StrictFailFast` (pre-V8) — halt on any pass failure.
+    ///  * `Aggregate` — never halt; collect every diagnostic.
     ///
+
     /// The failed pass's result IS pushed into the returned list so
     /// callers can read the diagnostic; only the *subsequent*
     /// passes are skipped (or run, depending on mode).
@@ -148,6 +155,7 @@ impl VerificationPipeline {
     /// and not always available; callers that want the full
     /// pipeline should use [`Self::full_verification_pipeline`].
     ///
+
     /// Renamed from `default_pipeline`: the original name
     /// was misleading because users reasonably expected "default
     /// verification" to include SMT discharge. The 5-pass
@@ -155,6 +163,7 @@ impl VerificationPipeline {
     /// want kernel + hygiene + transition advice without paying
     /// the SMT round-trip cost.
     ///
+
     /// V8 backwards-compat shape: defaults the kernel-recheck
     /// VVA policy to [`crate::extension_policy::ExtensionPolicy::AllRulesActive`]
     /// (the pre-V8 always-on rule set). Callers wanting Year 0–2
@@ -170,19 +179,22 @@ impl VerificationPipeline {
     /// static-analysis pipeline with explicit
     /// kernel-recheck VVA governance policy.
     ///
+
     /// `kernel_policy` is propagated to the [`KernelRecheckPass`]
     /// via its [`KernelRecheckPass::with_policy`] builder, so
     /// VVA-gated rules (currently `vfe_7` =
     /// `K-Refine-omega`) only fire when the policy admits them
     /// for the surrounding scope.
     ///
+
     /// Per rollout calendar:
-    ///   * **Year 0–2** — `ExtensionPolicy::OptInOnly` (modules must
-    ///     `@require_extension(vfe_N)` to engage VVA rules).
-    ///   * **Year 2–4** — `ExtensionPolicy::OptOutOnly` (rules
-    ///     default-on; opt out via `@disable_extension(vfe_N)`).
-    ///   * **Year 4+** — `ExtensionPolicy::Mandatory` (no opt-out).
+    ///  * **Year 0–2** — `ExtensionPolicy::OptInOnly` (modules must
+    ///  `@require_extension(vfe_N)` to engage VVA rules).
+    ///  * **Year 2–4** — `ExtensionPolicy::OptOutOnly` (rules
+    ///  default-on; opt out via `@disable_extension(vfe_N)`).
+    ///  * **Year 4+** — `ExtensionPolicy::Mandatory` (no opt-out).
     ///
+
     /// V8 default remains `AllRulesActive` to avoid regressions
     /// in the existing test corpus + stdlib bring-up; the
     /// production CLI should select `OptInOnly` once the project
@@ -203,7 +215,7 @@ impl VerificationPipeline {
         pipeline.add_pass(Box::new(
             KernelRecheckPass::new().with_policy(kernel_policy),
         ));
-        // HygieneRecheckPass  — framework-author discipline
+        // HygieneRecheckPass — framework-author discipline
         // (R1 brand-prefix names, R2 ε-coordinate canonicalisable,
         // R3 meta-classifier uniqueness). R1/R2 are Warnings;
         // R3 is Error and triggers fail-fast. Runs after
@@ -236,6 +248,7 @@ impl VerificationPipeline {
     /// refinement obligations. Fail-fast applies (#187 contract):
     /// any pass returning `success == false` halts the rest.
     ///
+
     /// SMT verification is the default-on terminal pass; modules
     /// passing the static-analysis chain have their refinement
     /// types subjected to Z3 portfolio dispatch.

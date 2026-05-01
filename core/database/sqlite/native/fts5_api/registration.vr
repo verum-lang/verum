@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: fts5.h
 //
+
 // Tokenizer registration is (name, pUserData, pTokenizer) and bumps a
-// name-keyed registry.  Auxiliary-function registration similarly is
+// name-keyed registry. Auxiliary-function registration similarly is
 // (name, pUserData, xFunc).
 // =============================================================================
 

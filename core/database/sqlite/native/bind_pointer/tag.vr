@@ -1,8 +1,8 @@
 // =============================================================================
 // bind_pointer/tag.vr — well-known pointer-type tags
 // =============================================================================
-// Spec: SQLite C API.  The "type" C-string is conventionally a short
-// ASCII name.  A registry lets catalogue-aware code reserve tags to
+// Spec: SQLite C API. The "type" C-string is conventionally a short
+// ASCII name. A registry lets catalogue-aware code reserve tags to
 // prevent accidental collisions.
 // =============================================================================
 

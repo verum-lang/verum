@@ -6,32 +6,36 @@ module core.database.sqlite.native.l1_pager.journal.wal;
 // Layer: 1
 // Spec: sqlite-native.md §6.5, sqlite.org/walformat.html
 //
+
 // Wire layout:
 //
-//     +---------------- WAL header (32 B) ----------------+
-//     | 0  4 magic           (0x377f0682 LE / 0x377f0683 BE)
-//     | 4  4 format_version  (3007000)
-//     | 8  4 page_size
-//     |12  4 checkpoint_seq
-//     |16  4 salt_1
-//     |20  4 salt_2
-//     |24  4 checksum_1
-//     |28  4 checksum_2
-//     +--------------- frame i (header 24 B) -------------+
-//     | 0  4 page_number
-//     | 4  4 db_size_after_commit  (0 unless commit marker)
-//     | 8  4 salt_1                (copied from header; invalidates the
-//     |                            frame if they ever disagree)
-//     |12  4 salt_2
-//     |16  4 checksum_1
-//     |20  4 checksum_2
-//     +--------------- frame i payload (page_size bytes) -+
+
+//  +---------------- WAL header (32 B) ----------------+
+//  | 0 4 magic (0x377f0682 LE / 0x377f0683 BE)
+//  | 4 4 format_version (3007000)
+//  | 8 4 page_size
+//  |12 4 checkpoint_seq
+//  |16 4 salt_1
+//  |20 4 salt_2
+//  |24 4 checksum_1
+//  |28 4 checksum_2
+//  +--------------- frame i (header 24 B) -------------+
+//  | 0 4 page_number
+//  | 4 4 db_size_after_commit (0 unless commit marker)
+//  | 8 4 salt_1 (copied from header; invalidates the
+//  | frame if they ever disagree)
+//  |12 4 salt_2
+//  |16 4 checksum_1
+//  |20 4 checksum_2
+//  +--------------- frame i payload (page_size bytes) -+
 //
+
 // Checksums are computed by a **Fibonacci-based running 64-bit state**
 // (not CRC32 — CRC32 is for IEEE 802.3 links only, and CRC32C has a
 // different polynomial). The algorithm is simple, position-dependent,
 // and two-word; it matches the SQLite walformat.html spec §3.1.
 //
+
 // This module covers the *serialisation* surface only. The actor that
 // actually appends frames, drives fsync, and coordinates checkpoints
 // lives in `l1_pager/pager.vr`. Recovery (replay on open) lives in
@@ -257,15 +261,18 @@ public fn wal_frame_header_parse(buf: &[Byte]) -> Result<WalFrameHeader, Text> {
 /// multiple of 8 bytes — WAL buffers always are (page_size is a
 /// power-of-two ≥ 512, and headers are 24/32 bytes both multiples of 8).
 ///
+
 /// Per SQLite source `wal.c::walChecksumBytes` (NOT the public
 /// walformat.html prose, which is misleading):
 ///
-///     s1 += word_be32(x[i])     + s2
-///     s2 += word_be32(x[i+1])   + s1
+
+///  s1 += word_be32(x[i]) + s2
+///  s2 += word_be32(x[i+1]) + s1
 ///
+
 /// where word_be32 reads a big-endian u32 (or native-order under
 /// `WAL_MAGIC_BE`, which we don't yet emit). All arithmetic is
-/// wrapping 32-bit.  An earlier revision of this file used `^` (xor)
+/// wrapping 32-bit. An earlier revision of this file used `^` (xor)
 /// instead of `+ s2 / + s1` which produced WAL files that real SQLite
 /// would reject as torn — see the differential corpus regression in
 /// `vcs/specs/L2-standard/database/sqlite/l1_pager/wal_checksum.vr`.

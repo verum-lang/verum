@@ -1,5 +1,6 @@
 //! Benchmarks for array index analysis performance
 //!
+
 //! Measures performance of key operations:
 //! - Index extraction from CFG
 //! - Range analysis computation

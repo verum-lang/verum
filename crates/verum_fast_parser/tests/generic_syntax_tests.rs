@@ -14,9 +14,11 @@
 )]
 //! Tests for Verum generic syntax vs Rust turbofish syntax.
 //!
+
 //! Verum uses `foo<T>()` syntax for generic function calls,
 //! NOT Rust's turbofish `foo::<T>()` syntax.
 //!
+
 //! Tests for generic syntax with dot-separated paths (Verum uses `.` not `::`)
 
 use verum_ast::span::FileId;
@@ -131,6 +133,7 @@ fn test_generic_with_const_arg() {
 // SECTION 2: Rust-style turbofish (`::<T>`) — REJECTED in Verum
 // =============================================================================
 //
+
 // Per `grammar/verum.ebnf`, `::` is not a token: paths use `.` and generic
 // calls use the spaceless form `foo<T>(args)` / `obj.method<T>(args)`. Any
 // `::<…>` (or bare `::`) appearing in a Verum expression is grammar-illegal

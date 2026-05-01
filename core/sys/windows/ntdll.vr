@@ -8,13 +8,16 @@ module sys.windows.ntdll;
 // Platform: Windows (x86_64)
 // =============================================================================
 //
+
 // This module provides direct access to NT Native API functions from
 // ntdll.dll. These are the lowest-level userspace APIs on Windows.
 //
+
 // IMPORTANT: Uses IAT imports (@extern) not PEB walking, as specified
 // in the architecture spec. This avoids AV heuristics and is the
 // correct approach for non-malware code.
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // Reference: experiments/ntapi
 // =============================================================================
@@ -663,7 +666,7 @@ public fn NtRemoveIoCompletionEx(
 ) -> NtStatus;
 
 // `NtSetInformationFile` is declared earlier in this file (around
-// line 336) — keep a single canonical extern declaration.  The
+// line 336) — keep a single canonical extern declaration. The
 // second declaration here was a copy with an "Associate file handle
 // with completion port" comment; the canonical declaration covers
 // both use cases (the IOCP-association call passes a

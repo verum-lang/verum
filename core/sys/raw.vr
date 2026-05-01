@@ -7,15 +7,18 @@ module sys.raw;
 // Dependencies: None
 // =============================================================================
 //
+
 // These functions provide the absolute lowest-level interface to the OS.
 // Each is intercepted by LLVM lowering and compiled to the platform-appropriate
 // syscall or library call. No C runtime dependency.
 //
+
 // Platform abstraction:
-//   - Linux:  raw SYS_* syscalls via inline asm
-//   - macOS:  libSystem.B.dylib FFI calls
-//   - Windows: kernel32.dll FFI calls
+//  - Linux: raw SYS_* syscalls via inline asm
+//  - macOS: libSystem.B.dylib FFI calls
+//  - Windows: kernel32.dll FFI calls
 //
+
 // =============================================================================
 
 // =============================================================================
@@ -79,17 +82,19 @@ public fn __tcp_listen_raw(port: Int) -> Int;
 /// for the user-facing `core.net.tcp.TcpListener` surface — the older
 /// arity-1 form is preserved for the legacy `RawTcpListener` shim.
 ///
+
 /// Parameters:
-///   * `host`    — IP literal (`"0.0.0.0"`, `"127.0.0.1"`, `"::"`, `"::1"`).
-///                 No DNS; resolution is the caller's job.
-///   * `port`    — `0..65535`. `0` asks the kernel to assign — pair with
-///                 `__tcp_local_port_raw(fd)` to recover the bound port.
-///   * `backlog` — forwarded to `listen(2)` (kernel may cap to `somaxconn`).
-///   * `flags`   — bit-packed options:
-///                 * bit 0: `TCP_LISTEN_FLAG_REUSEPORT` (best-effort
-///                          per-platform; ignored on platforms without
-///                          SO_REUSEPORT).
+///  * `host` — IP literal (`"0.0.0.0"`, `"127.0.0.1"`, `"::"`, `"::1"`).
+///  No DNS; resolution is the caller's job.
+///  * `port` — `0..65535`. `0` asks the kernel to assign — pair with
+///  `__tcp_local_port_raw(fd)` to recover the bound port.
+///  * `backlog` — forwarded to `listen(2)` (kernel may cap to `somaxconn`).
+///  * `flags` — bit-packed options:
+///  * bit 0: `TCP_LISTEN_FLAG_REUSEPORT` (best-effort
+///  per-platform; ignored on platforms without
+///  SO_REUSEPORT).
 ///
+
 /// Returns `fd > 0` on success, or a negative `errno` on failure
 /// (e.g. `-EADDRINUSE`, `-EACCES`). Negative-errno encoding lets the
 /// `core/io/protocols.vr::from_raw_os_error` mapper produce a precise
@@ -104,6 +109,7 @@ public const TCP_LISTEN_FLAG_REUSEPORT: Int = 1;
 /// Recover the OS-assigned local port of a listening / connected fd
 /// (typically used after `__tcp_listen_v2_raw(host, 0, ...)`).
 ///
+
 /// Returns the port (`1..65535`) or `-1` for unknown fd / not bound.
 @intrinsic("tcp_local_port")
 public fn __tcp_local_port_raw(fd: Int) -> Int;

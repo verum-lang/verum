@@ -5,6 +5,7 @@
 // xBestIndex to describe WHERE-clause constraints offered to the vtab.
 // Spec §16.1 — virtual-table protocol.
 //
+
 // Values mirror the SQLite C header <sqlite3.h>.
 // =============================================================================
 

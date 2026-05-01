@@ -1,5 +1,6 @@
 // core.verify.attempt — proof-attempt outcome types.
 //
+
 // Mirror of `verum_verification.level.ProofAttempt` +
 // `VerificationOutcome`. Lets user code structure its own
 // dispatch on "prove / fall-back / hard-fail" in the same
@@ -17,17 +18,19 @@ type ProofAttempt is
 
 // The compiler's instruction to the VBC emitter.
 //
+
 // Every `(VerificationLevel, ProofAttempt)` pair maps to
 // exactly one `VerificationOutcome` via the table in
 // `verum_verification.level.evaluate_attempt`:
 //
-//   Runtime, _              → EmitRuntimeCheck
-//   Static,  Proven         → ElideCheck
-//   Static,  Failed(r)      → FallbackWithWarning(r)
-//   Static,  Unattempted    → FallbackWithWarning("no SMT")
-//   Proof,   Proven         → ElideCheck
-//   Proof,   Failed(r)      → HardFail(r)
-//   Proof,   Unattempted    → HardFail("no SMT")
+
+//  Runtime, _ → EmitRuntimeCheck
+//  Static, Proven → ElideCheck
+//  Static, Failed(r) → FallbackWithWarning(r)
+//  Static, Unattempted → FallbackWithWarning("no SMT")
+//  Proof, Proven → ElideCheck
+//  Proof, Failed(r) → HardFail(r)
+//  Proof, Unattempted → HardFail("no SMT")
 type VerificationOutcome is
     | ElideCheck
     | EmitRuntimeCheck
@@ -36,24 +39,27 @@ type VerificationOutcome is
 
 // Evaluate the outcome of a proof attempt at the given level.
 //
+
 // This is the user-space mirror of
 // `verum_verification.level.VerificationLevel::evaluate_attempt`
 // extended to the VVA §2.3 nine-strategy ladder.
 //
+
 // The dispatch table:
-//   Runtime              → EmitRuntimeCheck
-//   Static / Fast        → Elide on Proven; Fallback on Failed/Unattempted
-//                          (lax half of ladder — runtime fallback allowed)
-//   Formal               → Elide on Proven; HardFail on Failed/Unattempted
-//                          (first strict level)
-//   Proof                → Elide on Proven; HardFail on Failed/Unattempted
-//   Thorough / Reliable  → Same as Formal but with stricter Failed
-//                          rationale (requires invariant/cross-solver
-//                          agreement)
-//   Certified            → Same as Reliable + certificate re-check
-//   Synthesize           → Elide on Proven; HardFail with synthesis
-//                          rationale on Failed/Unattempted
+//  Runtime → EmitRuntimeCheck
+//  Static / Fast → Elide on Proven; Fallback on Failed/Unattempted
+//  (lax half of ladder — runtime fallback allowed)
+//  Formal → Elide on Proven; HardFail on Failed/Unattempted
+//  (first strict level)
+//  Proof → Elide on Proven; HardFail on Failed/Unattempted
+//  Thorough / Reliable → Same as Formal but with stricter Failed
+//  rationale (requires invariant/cross-solver
+//  agreement)
+//  Certified → Same as Reliable + certificate re-check
+//  Synthesize → Elide on Proven; HardFail with synthesis
+//  rationale on Failed/Unattempted
 //
+
 // User libraries that want "verify if possible, fall back gracefully"
 // semantics should call this exactly — the compiler's enforcement
 // table doesn't accept non-standard policies.

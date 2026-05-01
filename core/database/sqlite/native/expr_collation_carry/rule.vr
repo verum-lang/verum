@@ -45,9 +45,9 @@ public fn explicit_collation(k: &ExprNodeKind) -> Text {
 }
 
 // Compute the carried collation given:
-//   self_kind         — the expression's own node kind
-//   left_collation    — collation of left operand (for binary/concat/cast)
-//   column_collation  — column's declared collation (when EkColumn)
+//  self_kind — the expression's own node kind
+//  left_collation — collation of left operand (for binary/concat/cast)
+//  column_collation — column's declared collation (when EkColumn)
 public fn carried(
     self_kind: &ExprNodeKind,
     left_collation: &Text,

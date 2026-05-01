@@ -1,53 +1,58 @@
 //! Adversarial-input fuzz against the real `VerumParser` (R2-§1.1
 //! closure).
 //!
+
 //! The fundamental contract pinned here: the parser MUST NOT panic
 //! on any byte sequence — it may emit diagnostics, may bail out
 //! early on UTF-8 errors, may hit recursion caps and surface a
-//! typed error, but it must never bring down the host process.  A
+//! typed error, but it must never bring down the host process. A
 //! parser panic is a denial-of-service vector for every consumer
 //! (LSP, CLI, test runner, language server in editors, etc.).
 //!
+
 //! Pre-existing infrastructure: `vcs/fuzz/harnesses/parser_harness.rs`
 //! exists with a `ParserHarness::fuzz(&[u8])` API but its
 //! `simulate_parse` is a heuristic stub that counts parens/braces
-//! and pretends to parse — it never calls the real parser.  This
+//! and pretends to parse — it never calls the real parser. This
 //! test file is the primary behavioural guardrail until that
 //! harness is wired to the real parser too.
 //!
+
 //! Test corpus covers the empirical adversarial-input categories
 //! that have historically broken parsers in the wild:
 //!
-//!   - **Empty / trivial**: zero bytes, single whitespace, single
-//!     comment.
-//!   - **Unbalanced delimiters**: nested-open / nested-close /
-//!     interleaved nesting.
-//!   - **Deeply nested**: 256+ levels of generic angle brackets,
-//!     parentheses, braces.  Should hit the documented recursion
-//!     cap (`ast_to_type` at 64) and surface a typed error rather
-//!     than overflowing the host stack.
-//!   - **Mid-token EOF**: every keyword and structural form
-//!     truncated mid-token.
-//!   - **Multi-byte stress**: combining marks, emoji, CJK
-//!     identifiers in identifier position, comment position, string
-//!     literal position.
-//!   - **Adversarial encodings**: Non-UTF-8 byte sequences (the
-//!     parser hands these to the lexer which accepts via lossy
-//!     conversion at the harness layer; here we exercise valid
-//!     UTF-8 only).
-//!   - **Numeric overflow surfaces**: very long integer literals,
-//!     hex/octal/binary with adversarial digit counts.
-//!   - **Pathological identifiers**: long identifiers, identifiers
-//!     containing every legal char class.
-//!   - **Pseudo-random small inputs**: deterministic LCG-generated
-//!     short byte sequences (5-50 bytes) covering the byte alphabet.
+
+//!  - **Empty / trivial**: zero bytes, single whitespace, single
+//!  comment.
+//!  - **Unbalanced delimiters**: nested-open / nested-close /
+//!  interleaved nesting.
+//!  - **Deeply nested**: 256+ levels of generic angle brackets,
+//!  parentheses, braces. Should hit the documented recursion
+//!  cap (`ast_to_type` at 64) and surface a typed error rather
+//!  than overflowing the host stack.
+//!  - **Mid-token EOF**: every keyword and structural form
+//!  truncated mid-token.
+//!  - **Multi-byte stress**: combining marks, emoji, CJK
+//!  identifiers in identifier position, comment position, string
+//!  literal position.
+//!  - **Adversarial encodings**: Non-UTF-8 byte sequences (the
+//!  parser hands these to the lexer which accepts via lossy
+//!  conversion at the harness layer; here we exercise valid
+//!  UTF-8 only).
+//!  - **Numeric overflow surfaces**: very long integer literals,
+//!  hex/octal/binary with adversarial digit counts.
+//!  - **Pathological identifiers**: long identifiers, identifiers
+//!  containing every legal char class.
+//!  - **Pseudo-random small inputs**: deterministic LCG-generated
+//!  short byte sequences (5-50 bytes) covering the byte alphabet.
 //!
+
 //! Every test asserts:
-//!   - parser invocation does not panic;
-//!   - parser terminates within a generous timeout (proves the
-//!     parser does not hang on any adversarial input);
-//!   - the returned `ParseResult` is structurally well-formed
-//!     (either Ok(module) or Err(non-empty diagnostics)).
+//!  - parser invocation does not panic;
+//!  - parser terminates within a generous timeout (proves the
+//!  parser does not hang on any adversarial input);
+//!  - the returned `ParseResult` is structurally well-formed
+//!  (either Ok(module) or Err(non-empty diagnostics)).
 
 use verum_ast::FileId;
 use verum_fast_parser::VerumParser;
@@ -101,7 +106,7 @@ fn interleaved_unbalanced_no_panic() {
 fn deep_nesting_caps_gracefully_no_panic() {
     // 256 nested angle brackets — past the documented ast_to_type
     // recursion cap (64) but well within stack budget for the
-    // parser itself.  Must surface a typed error or compile, not
+    // parser itself. Must surface a typed error or compile, not
     // overflow.
     let mut s = String::with_capacity(4096);
     for _ in 0..256 {
@@ -231,7 +236,7 @@ fn long_identifier_no_panic() {
 
 #[test]
 fn embedded_nul_bytes_no_panic() {
-    // \0 mid-source is legal UTF-8 but lexer-rejected.  Must not panic.
+    // \0 mid-source is legal UTF-8 but lexer-rejected. Must not panic.
     parse("fn \0foo() {}");
     parse("let s = \"with\0nul\";");
     parse("\0\0\0\0\0\0\0\0");
@@ -240,7 +245,7 @@ fn embedded_nul_bytes_no_panic() {
 #[test]
 fn deterministic_random_short_inputs_no_panic() {
     // Linear-congruential generator deterministically produces 256
-    // pseudo-random byte sequences of length 5..50.  All bytes are
+    // pseudo-random byte sequences of length 5..50. All bytes are
     // restricted to ASCII so we don't trip the lexer's UTF-8 check
     // (covered separately by other tests above).
     let mut state: u64 = 0xCAFEBABE_DEADBEEF;
@@ -358,6 +363,7 @@ fn raw_string_adversarial_no_panic() {
 // R2-§1.2 Boundary cases — full 1000-level synthetic-generator sweep
 // ====================================================================
 //
+
 // The original boundary-cases guardrail at
 // `vcs/specs/L0-critical/parser/boundary_cases.vr` exercised four
 // surface forms (empty modules, 8-level nested mounts, mutual
@@ -367,6 +373,7 @@ fn raw_string_adversarial_no_panic() {
 // 1000+ instances of each boundary form and the parser must
 // survive every input without panic.
 //
+
 // The 1000-level scale is the documented CI ceiling for this
 // vector. Each test runs in <1s on a development machine; the
 // suite as a whole adds ~5s to the parser-fuzz check.
@@ -400,11 +407,12 @@ fn boundary_1000_chained_mounts() {
 #[test]
 fn boundary_1000_chained_type_aliases() {
     // 1000-element chain of type aliases:
-    //   type T0 is Int;
-    //   type T1 is T0;
-    //   ...
-    //   type T999 is T998;
+    //  type T0 is Int;
+    //  type T1 is T0;
+    //  ...
+    //  type T999 is T998;
     //
+
     // Stresses the resolver's transitive-alias following.
     // Parser must not blow the stack on the 1000-deep chain;
     // earlier `ast_to_type` recursion cap (64) applies during
@@ -535,6 +543,7 @@ fn boundary_2000_lcg_random_short_inputs() {
     // over 2000 fresh invocations without state leaking
     // between them.
     //
+
     // LCG params: standard Numerical Recipes constants
     // (a=1664525, c=1013904223). Period >> 2000 so each
     // sample is fresh.

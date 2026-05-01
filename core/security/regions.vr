@@ -2,33 +2,39 @@
 // regions.vr — Tofte-Talpin Region Calculus
 // =============================================================================
 //
+
 // Layer: Standard Library / Security
 //
+
 // User-facing surface for the region-calculus analysis core
 // (`verum_types.region_calculus`). Region-based memory: every
 // allocation is tagged with a *region* (named lifetime) and the
 // type system enforces that no value escapes its containing
 // region.
 //
+
 // Complements Verum's CBGR + lifetime system: regions give a
 // fully-static discipline (no run-time check, fully erased at
 // codegen) at the cost of stricter type discipline. Both
 // disciplines coexist via region-to-lifetime translation.
 //
+
 // ## Example
 //
+
 // ```verum
 // // letregion ρ in (allocate-into-ρ; use-locally; auto-deallocate)
 // let env: LifetimeEnv = region_env([region("ρ")]);
 // let returned: LifetimeType = region_type("List<Int>",
-//                                        region_set([region("ρ")]));
+//  region_set([region("ρ")]));
 // // Caller's env has ρ → no escape:
 // match check_no_escape(returned, env) {
-//     Verdict.Ok => print("safe"),
-//     Verdict.Escape { ... } => panic("region escape"),
+//  Verdict.Ok => print("safe"),
+//  Verdict.Escape { ... } => panic("region escape"),
 // }
 // ```
 //
+
 // =============================================================================
 
 module core.security.regions;

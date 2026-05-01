@@ -4,12 +4,14 @@
 // Layer: 3 (Database — postgres adapter)
 // Spec: internal/specs/database.md §4.3
 //
+
 // Thin vendor binding over `core.database.common.pool_impl.ConnectionPool<C>`.
 // PgPool clones the PgConfig once at launch and re-invokes the
 // adapter on each cold-acquire path; checked-out connections are
 // reused on the warm path so each PARSE / startup handshake amortises
 // across many queries.
 //
+
 // Postgres-specific note: the connection's BackendKeyData (process_id,
 // secret_key) is captured per-connection at startup and lives inside
 // the wrapped PgConnection, so a CancelRequest on a busy connection

@@ -288,6 +288,7 @@ implement<T> Maybe<T> {
 
     /// Insert a value, returning a mutable reference to it.
     ///
+
     /// **Drops the previous value if `self` was `Some`.** Callers
     /// that want to read the old value first should use
     /// [`replace`] (which returns the previous `Maybe<T>`)
@@ -303,6 +304,7 @@ implement<T> Maybe<T> {
 
     /// Get || insert a value.
     ///
+
     /// If `self` is already `Some`, returns the existing value
     /// unchanged and the supplied `value` is dropped without
     /// being read. If `self` is `None`, stores `Some(value)` and
@@ -350,10 +352,12 @@ implement<T> Maybe<T> {
 
     /// Flatten nested `Maybe<Maybe<U>>` to `Maybe<U>`.
     ///
+
     /// Acts as monadic `join` when `T = Maybe<U>`: outer `None` and
     /// `Some(None)` both collapse to `None`; `Some(Some(v))`
     /// collapses to `Some(v)`.
     ///
+
     /// **Bound caveat**: Verum's type system can't express
     /// `T = Maybe<U>` from within `implement<T> Maybe<T>`, so the
     /// constraint is widened to `T: Default`. This is sound for
@@ -590,6 +594,7 @@ implement<T, E> FromResidual<Result<Never, E>> for Maybe<T> {
 
 /// Strictly-typed flatten for `Maybe<Maybe<T>>` → `Maybe<T>`.
 ///
+
 /// Equivalent to [`Maybe.flatten`] when the receiver type is
 /// `Maybe<Maybe<T>>`, but with a tight signature that rejects
 /// non-nested calls at compile time. Useful when the call-site
@@ -598,15 +603,19 @@ implement<T, E> FromResidual<Result<Never, E>> for Maybe<T> {
 /// returns `Int` (acting as `unwrap_or_default`); the free
 /// function form can never confuse the two.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let outer: Maybe<Maybe<Int>> = Some(Some(7));
 /// assert_eq(flatten_maybe_maybe(outer), Some(7));
 ///
+
 /// let inner_none: Maybe<Maybe<Int>> = Some(None);
 /// assert_eq(flatten_maybe_maybe(inner_none), None);
 ///
+
 /// let outer_none: Maybe<Maybe<Int>> = None;
 /// assert_eq(flatten_maybe_maybe(outer_none), None);
 /// ```
@@ -620,12 +629,15 @@ public fn flatten_maybe_maybe<T>(m: Maybe<Maybe<T>>) -> Maybe<T> {
 /// Collects an iterator of Maybes into a Maybe of a List.
 /// Returns None if any element is None, or Some(List) if all are Some.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let items = [Some(1), Some(2), Some(3)];
 /// assert_eq(collect_maybe(items.iter()), Some([1, 2, 3]));
 ///
+
 /// let items = [Some(1), None, Some(3)];
 /// assert_eq(collect_maybe(items.iter()), None);
 /// ```
@@ -656,8 +668,10 @@ public fn collect_maybe<T, I: Iterator<Item = Maybe<T>>>(mut iter: I) -> Maybe<L
 
 /// Flattens a list of Maybes, keeping only the Some values.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let items = [Some(1), None, Some(2), None, Some(3)];
 /// assert_eq(flatten_maybe(items), [1, 2, 3]);
@@ -679,8 +693,10 @@ where T: Clone
 
 /// Flattens an iterator of Maybes, keeping only the Some values.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let items = [Some(1), None, Some(2)].iter();
 /// assert_eq(flatten_maybe_iter(items), [1, 2]);

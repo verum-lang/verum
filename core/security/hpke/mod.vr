@@ -5,44 +5,55 @@
 // Dependencies: core, core.security.{ecc.x25519, kdf.hkdf, aead.chacha20_poly1305}
 // =============================================================================
 //
+
 // RFC 9180 — HPKE is the modern primitive behind Encrypted ClientHello
 // (ECH, TLS 1.3 extension), MLS messaging, Privacy Pass, and ODoH.
 // It composes:
 //
-//   * KEM  — asymmetric key encapsulation (we ship DHKEM X25519)
-//   * KDF  — HKDF-SHA256 (extract + expand with labels)
-//   * AEAD — ChaCha20-Poly1305 (we ship the one common "base" suite)
+
+//  * KEM — asymmetric key encapsulation (we ship DHKEM X25519)
+//  * KDF — HKDF-SHA256 (extract + expand with labels)
+//  * AEAD — ChaCha20-Poly1305 (we ship the one common "base" suite)
 //
+
 // into four operations:
 //
-//   SetupBaseS(pkR, info) → (enc, sender_ctx)
-//   SetupBaseR(enc, skR, info) → receiver_ctx
-//   ctx.seal(aad, pt) → ct
-//   ctx.open(aad, ct) → pt
+
+//  SetupBaseS(pkR, info) → (enc, sender_ctx)
+//  SetupBaseR(enc, skR, info) → receiver_ctx
+//  ctx.seal(aad, pt) → ct
+//  ctx.open(aad, ct) → pt
 //
+
 // # Scope
 //
+
 // v0.1 ships ONE suite — the one every HPKE deployment supports:
 //
-//   KEM   = DHKEM(X25519, HKDF-SHA256)   (kem_id  = 0x0020)
-//   KDF   = HKDF-SHA256                  (kdf_id  = 0x0001)
-//   AEAD  = ChaCha20-Poly1305            (aead_id = 0x0003)
-//   Mode  = Base                         (no PSK, no auth)
+
+//  KEM = DHKEM(X25519, HKDF-SHA256) (kem_id = 0x0020)
+//  KDF = HKDF-SHA256 (kdf_id = 0x0001)
+//  AEAD = ChaCha20-Poly1305 (aead_id = 0x0003)
+//  Mode = Base (no PSK, no auth)
 //
+
 // The other three modes (Psk, Auth, AuthPsk) and the P-256/P-384
 // suites land in a follow-up; the APIs below are shaped so the
 // additional suites drop in behind the same `SenderContext` /
 // `ReceiverContext` facades.
 //
+
 // # Security notes
 //
-//   * All secrets are `SecretBytes` (zeroized on drop in Verum's
-//     secret layer — see core.security.secrets).
-//   * Sequence numbers monotonically increment; wrap-around is
-//     treated as a fatal condition per RFC 9180 §5.2.
-//   * Nonce = base_nonce XOR seq (big-endian right-padded) — the
-//     standard AEAD-construction nonce formula.
+
+//  * All secrets are `SecretBytes` (zeroized on drop in Verum's
+//  secret layer — see core.security.secrets).
+//  * Sequence numbers monotonically increment; wrap-around is
+//  treated as a fatal condition per RFC 9180 §5.2.
+//  * Nonce = base_nonce XOR seq (big-endian right-padded) — the
+//  standard AEAD-construction nonce formula.
 //
+
 // =============================================================================
 
 module core.security.hpke;
@@ -289,12 +300,14 @@ public fn setup_base_r(
 // KEM — DHKEM(X25519, HKDF-SHA256) §4.1
 // =============================================================================
 //
+
 // ExtractAndExpand(dh, pkE || pkR):
-//   suite_id_kem = "KEM" || I2OSP(kem_id, 2)    = "KEM" || 0x0020
-//   eae_prk = LabeledExtract(salt="", "eae_prk", dh, kem_suite_id)
-//   shared_secret = LabeledExpand(eae_prk, "shared_secret",
-//                                  pkE||pkR, Nsecret, kem_suite_id)
+//  suite_id_kem = "KEM" || I2OSP(kem_id, 2) = "KEM" || 0x0020
+//  eae_prk = LabeledExtract(salt="", "eae_prk", dh, kem_suite_id)
+//  shared_secret = LabeledExpand(eae_prk, "shared_secret",
+//  pkE||pkR, Nsecret, kem_suite_id)
 //
+
 // =============================================================================
 
 fn kem_extract_and_expand(
@@ -368,14 +381,17 @@ fn key_schedule_base(
 // Labeled KDF helpers (RFC 9180 §4)
 // =============================================================================
 //
+
 // LabeledExtract(salt, label, ikm):
-//   labeled_ikm = "HPKE-v1" || suite_id || label || ikm
-//   return HKDF-Extract(salt, labeled_ikm)
+//  labeled_ikm = "HPKE-v1" || suite_id || label || ikm
+//  return HKDF-Extract(salt, labeled_ikm)
 //
+
 // LabeledExpand(prk, label, info, L):
-//   labeled_info = I2OSP(L, 2) || "HPKE-v1" || suite_id || label || info
-//   return HKDF-Expand(prk, labeled_info, L)
+//  labeled_info = I2OSP(L, 2) || "HPKE-v1" || suite_id || label || info
+//  return HKDF-Expand(prk, labeled_info, L)
 //
+
 // =============================================================================
 
 fn labeled_extract(
@@ -394,12 +410,13 @@ fn labeled_extract(
     Ok(hkdf_extract_sha256(salt, labeled_ikm.as_slice()).to_list())
 }
 
-/// RFC 9180 §4 LabeledExpand.  Builds the HPKE-v1 labeled-info
+/// RFC 9180 §4 LabeledExpand. Builds the HPKE-v1 labeled-info
 /// envelope and forwards to the SHA-256 HKDF expander.
 ///
+
 /// SOUNDNESS: previous revision called `hkdf_expand_sha256(prk,
 /// info, length)` — three positional args returning
-/// `Result<List<Byte>, _>`.  The actual signature in
+/// `Result<List<Byte>, _>`. The actual signature in
 /// `core/security/kdf/hkdf.vr:82` is
 /// `(prk, info, length, out: &mut List<Byte>) -> Result<(), HkdfError>`.
 /// The arity mismatch was masked by the codegen lenient-SKIP class
@@ -408,9 +425,10 @@ fn labeled_extract(
 /// HPKE export and every key-schedule derivation produced empty
 /// secrets, breaking the entire HPKE pipeline.
 ///
+
 /// Also adds the I2OSP length-bound check: RFC 9180 §4 requires
 /// `length` fit in two bytes (UInt16); HKDF-SHA256's own cap
-/// (255 × 32 = 8160) is well below that.  Reject length > 0xFFFF
+/// (255 × 32 = 8160) is well below that. Reject length > 0xFFFF
 /// at this layer with a clear KdfFailure rather than truncating
 /// the encoded length silently.
 fn labeled_expand(

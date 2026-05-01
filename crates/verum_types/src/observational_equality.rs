@@ -1,5 +1,6 @@
 //! Observational Type Theory (OTT) — alternative to cubical.
 //!
+
 //! Where cubical type theory makes equality computational by
 //! reducing `transport` and `hcomp`, **observational** type
 //! theory takes a different route: equality is *defined by
@@ -9,30 +10,36 @@
 //! a coinductive type are equal iff every observation yields
 //! equal results (bisimilarity).
 //!
+
 //! This is type-directed — the equality relation depends on the
 //! *type* of the values being compared. The result is a system
 //! that retains UIP (uniqueness of identity proofs) while still
 //! supporting funext and propositional irrelevance, all without
 //! the cubical machinery.
 //!
+
 //! Verum's main equality story is cubical (with the EqTerm↔
 //! CubicalTerm bridge). This module provides OTT as a
 //! *complementary* alternative — useful for fragments where
 //! strict computability is desired without the cubical overhead,
 //! and for comparison/research purposes.
 //!
+
 //! ## Core rules
 //!
+
 //! ```text
-//!     Eq Bool b₁ b₂          ↦  b₁ ≡ b₂                   (decidable)
-//!     Eq Nat n₁ n₂           ↦  n₁ ≡ n₂                   (decidable)
-//!     Eq (A × B) (a, b) (c, d)  ↦  Eq A a c × Eq B b d   (component-wise)
-//!     Eq (A → B) f g         ↦  ∀x:A. Eq B (f x) (g x)    (funext)
-//!     Eq (Σ x:A. P x) (a, p) (b, q)  ↦  Eq A a b × Eq P[a/x] p q
+//!  Eq Bool b₁ b₂ ↦ b₁ ≡ b₂ (decidable)
+//!  Eq Nat n₁ n₂ ↦ n₁ ≡ n₂ (decidable)
+//!  Eq (A × B) (a, b) (c, d) ↦ Eq A a c × Eq B b d (component-wise)
+//!  Eq (A → B) f g ↦ ∀x:A. Eq B (f x) (g x) (funext)
+//!  Eq (Σ x:A. P x) (a, p) (b, q) ↦ Eq A a b × Eq P[a/x] p q
 //! ```
 //!
+
 //! ## Status
 //!
+
 //! Standalone algebraic core. No coupling to the cubical
 //! normalizer or the type checker — intended for opt-in use by
 //! fragments that prefer OTT semantics, and as a reference
@@ -153,12 +160,13 @@ impl EqGoal {
 /// The central type-directed equality reducer. Applies the OTT
 /// rules:
 ///
+
 /// * `Bool / Nat / Unit` decide directly.
 /// * `Product` decomposes into pair-of-equalities.
 /// * `Function` decomposes into pointwise equalities at the
-///   sampled inputs (a finitary approximation of funext).
+///  sampled inputs (a finitary approximation of funext).
 /// * `Sigma` decomposes into first-component equality plus an
-///   opaque second-component subgoal.
+///  opaque second-component subgoal.
 /// * Anything else is `Stuck`.
 pub fn equal_at(ty: &OttType, lhs: &OttValue, rhs: &OttValue) -> EqResult {
     match (ty, lhs, rhs) {
@@ -178,7 +186,7 @@ pub fn equal_at(ty: &OttType, lhs: &OttValue, rhs: &OttValue) -> EqResult {
         }
         (OttType::Unit, OttValue::UnitLit, OttValue::UnitLit) => EqResult::True,
 
-        // Product: (a, b) = (c, d)  ↦  a = c × b = d
+        // Product: (a, b) = (c, d) ↦ a = c × b = d
         (OttType::Product(ta, tb), OttValue::Pair(a, b), OttValue::Pair(c, d)) => {
             let mut goals = List::new();
             goals.push(EqGoal::new((**ta).clone(), (**a).clone(), (**c).clone()));
@@ -186,7 +194,7 @@ pub fn equal_at(ty: &OttType, lhs: &OttValue, rhs: &OttValue) -> EqResult {
             EqResult::Subgoals(goals)
         }
 
-        // Function: f = g  ↦  ∀ sampled inputs, f(x) = g(x)
+        // Function: f = g ↦ ∀ sampled inputs, f(x) = g(x)
         (
             OttType::Function(_, ret_ty),
             OttValue::Function {
@@ -242,6 +250,7 @@ pub fn equal_at(ty: &OttType, lhs: &OttValue, rhs: &OttValue) -> EqResult {
 /// Recursive evaluation: keep reducing until all subgoals are True
 /// or any subgoal becomes False/Stuck. Returns:
 ///
+
 /// * `EqResult::True` iff every subgoal eventually decides true
 /// * `EqResult::False` iff any subgoal decides false
 /// * `EqResult::Stuck` iff any subgoal stays stuck

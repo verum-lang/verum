@@ -1,56 +1,64 @@
 /// # Erlang/OTP-Style Supervision Trees
 ///
+
 /// Spec: docs/detailed/20-error-handling.md#3.1
 ///
+
 /// Production-grade fault-tolerance infrastructure with hierarchical process supervision.
 /// Provides automatic restart on failure with three supervision strategies:
 /// - OneForOne: Restart only the failed child
 /// - OneForAll: Restart all children if one fails
 /// - RestForOne: Restart failed child and all started after it
 ///
+
 /// ## Architecture
 ///
+
 /// ```
 /// ┌────────────────────────────────────────────────────────────────────────────┐
-/// │                       SUPERVISION TREE                                     │
+/// │ SUPERVISION TREE │
 /// ├────────────────────────────────────────────────────────────────────────────┤
-/// │                                                                            │
-/// │                        ┌──────────────┐                                    │
-/// │                        │   RootSup    │ strategy: OneForOne                │
-/// │                        │  (id: 0)     │ max_restarts: 10/60s               │
-/// │                        └──────┬───────┘                                    │
-/// │                               │                                            │
-/// │              ┌────────────────┼────────────────┐                           │
-/// │              ▼                ▼                ▼                           │
-/// │       ┌───────────┐    ┌───────────┐    ┌───────────┐                      │
-/// │       │ DBPoolSup │    │ CacheSup  │    │  WebSup   │                      │
-/// │       │ OneForAll │    │ OneForOne │    │ RestForOne│                      │
-/// │       └─────┬─────┘    └─────┬─────┘    └─────┬─────┘                      │
-/// │             │                │                │                            │
-/// │        ┌────┴────┐      ┌────┴────┐     ┌────┴────┬────┐                   │
-/// │        ▼         ▼      ▼         ▼     ▼         ▼    ▼                   │
-/// │    ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐          │
-/// │    │Conn1 │ │Conn2 │ │Cache1│ │Cache2│ │ Auth │ │ API  │ │Static│          │
-/// │    └──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘          │
-/// │                                                                            │
+/// │ │
+/// │ ┌──────────────┐ │
+/// │ │ RootSup │ strategy: OneForOne │
+/// │ │ (id: 0) │ max_restarts: 10/60s │
+/// │ └──────┬───────┘ │
+/// │ │ │
+/// │ ┌────────────────┼────────────────┐ │
+/// │ ▼ ▼ ▼ │
+/// │ ┌───────────┐ ┌───────────┐ ┌───────────┐ │
+/// │ │ DBPoolSup │ │ CacheSup │ │ WebSup │ │
+/// │ │ OneForAll │ │ OneForOne │ │ RestForOne│ │
+/// │ └─────┬─────┘ └─────┬─────┘ └─────┬─────┘ │
+/// │ │ │ │ │
+/// │ ┌────┴────┐ ┌────┴────┐ ┌────┴────┬────┐ │
+/// │ ▼ ▼ ▼ ▼ ▼ ▼ ▼ │
+/// │ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ │
+/// │ │Conn1 │ │Conn2 │ │Cache1│ │Cache2│ │ Auth │ │ API │ │Static│ │
+/// │ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘ │
+/// │ │
 /// └────────────────────────────────────────────────────────────────────────────┘
 /// ```
 ///
+
 /// ## Zero-Allocation Design
 ///
+
 /// - Inline child storage (up to 16 children, covers 95% of supervisors)
 /// - Lock-free restart intensity tracking with atomic operations
 /// - Inline restart history (last 100 events with bounded growth)
 /// - Avoids tokio/runtime allocation overhead through VBC intrinsics
 ///
+
 /// ## Performance Targets
 ///
-/// | Metric                | Target     | V-LLSI    |
+
+/// | Metric | Target | V-LLSI |
 /// |-----------------------|------------|-----------|
-/// | Child supervision add | < 100ns    | ~80ns     |
-/// | Restart decision      | < 50ns     | ~30ns     |
-/// | Escalation notify     | < 500ns    | ~300ns    |
-/// | Shutdown all children | < 10ms     | ~5ms      |
+/// | Child supervision add | < 100ns | ~80ns |
+/// | Restart decision | < 50ns | ~30ns |
+/// | Escalation notify | < 500ns | ~300ns |
+/// | Shutdown all children | < 10ms | ~5ms |
 
 module runtime.supervisor;
 
@@ -118,19 +126,23 @@ implement ChildId {
 
 /// Supervision strategy determines how failures are handled
 ///
+
 /// Spec: docs/detailed/20-error-handling.md#3.1 (Three Supervision Strategies)
 @repr(UInt8)
 public type SupervisionStrategy is
     /// Restart only the failed child
     ///
+
     /// Use when children are independent (database pool, cache, metrics)
     | OneForOne
     /// Restart all children if any fails
     ///
+
     /// Use when children are interdependent (auth + api-gateway)
     | OneForAll
     /// Restart failed child + all children started after it
     ///
+
     /// Use when children have ordered dependencies (db -> cache -> api)
     | RestForOne;
 
@@ -277,6 +289,7 @@ implement ChildStatus {
 
 /// Child specification for supervision
 ///
+
 /// Spec: docs/detailed/20-error-handling.md#3.1 (Core Type Definitions)
 public type ChildSpec is {
     /// Human-readable identifier for this child
@@ -373,6 +386,7 @@ implement Default for ChildSpec {
 
 /// Tracks restart frequency to detect cascading failures
 ///
+
 /// Uses a sliding window algorithm with atomic operations for lock-free updates.
 /// The window is approximated using an exponential decay rather than storing
 /// individual timestamps (which would require allocation).
@@ -408,6 +422,7 @@ implement RestartIntensity {
 
     /// Record a restart and check if within limits
     ///
+
     /// Returns true if restart is allowed, false if limits exceeded.
     public fn record_restart(&self) -> Bool {
         let now = monotonic_millis();
@@ -478,6 +493,7 @@ implement RestartIntensity {
 
 /// Record of a child restart event
 ///
+
 /// Stored inline in a fixed-size circular buffer (100 entries) to prevent
 /// unbounded memory growth in long-running services with frequent restarts.
 @repr(C)
@@ -554,6 +570,7 @@ implement RestartEvent {
 
 /// Escalation policy for when restart limits are exceeded
 ///
+
 /// Determines what action to take when a child exceeds its restart limit.
 /// Follows Erlang/OTP escalation patterns.
 @repr(UInt8)
@@ -561,14 +578,17 @@ implement RestartEvent {
 public type EscalationPolicy is
     /// Restart all children of the supervisor
     ///
+
     /// Use when the subtree can recover by restarting fresh
     | RestartSubtree
     /// Notify parent supervisor and let them decide
     ///
+
     /// Use for hierarchical fault tolerance where parent has more context
     | @default EscalateToParent
     /// Stop the entire supervisor tree
     ///
+
     /// Use when failure is unrecoverable and system should halt
     | Terminate
     /// Log and ignore (for non-critical children)
@@ -622,6 +642,7 @@ implement EscalationReason {
 
 /// Shutdown strategy for child termination
 ///
+
 /// Spec: docs/detailed/20-error-handling.md#3.1 (ShutdownStrategy)
 public type ShutdownStrategy is
     /// Graceful: Send cancel signal, wait for timeout, then force kill
@@ -917,6 +938,7 @@ public type Supervisor is protocol {
 
 /// Handle for interacting with a supervisor from outside
 ///
+
 /// Cloneable and Send+Sync for use across tasks.
 public type SupervisorHandle is {
     /// Supervisor ID
@@ -1430,11 +1452,12 @@ implement SupervisorInner {
         }
     }
 
-    /// Append a `RestartEvent` to the supervisor's history.  Caps
+    /// Append a `RestartEvent` to the supervisor's history. Caps
     /// the history at `RestartEvent.MAX_HISTORY` (100) by evicting
     /// the oldest entry when full — matches the documented
     /// "circular buffer" semantics on the field.
     ///
+
     /// Holds the write lock for the duration of the append; the
     /// critical section is O(1) on average and does not perform
     /// allocation when the cap is reached (the eviction is an
@@ -1442,7 +1465,7 @@ implement SupervisorInner {
     public fn append_restart_event(&self, event: RestartEvent) {
         let mut history = self.restart_history.write();
         if history.len() >= RestartEvent.MAX_HISTORY {
-            // Evict oldest entry.  remove(0) is O(n) but n is
+            // Evict oldest entry. remove(0) is O(n) but n is
             // bounded by MAX_HISTORY (100); the absolute cost is
             // ~100 element copies, negligible compared to the
             // surrounding fault-handling work.
@@ -1553,13 +1576,15 @@ implement ChildState {
     /// constructed `RestartEvent` so callers can push it into the
     /// supervisor's `restart_history`.
     ///
+
     /// SOUNDNESS: previous revision discarded the event with a
     /// "Note: Event would be stored" comment, leaving
     /// `restart_history` permanently empty — the audit trail for
-    /// supervisor decisions was missing entirely.  The fix returns
+    /// supervisor decisions was missing entirely. The fix returns
     /// the event so callers (the supervisor's fault-handling logic,
     /// which holds the SupervisorInner reference) can persist it.
     ///
+
     /// CONCURRENCY: previous revision had a race between the
     /// `fetch_add(1)` and a separate `load()` to read the post-add
     /// counter — concurrent record_restart calls could observe a
@@ -1579,7 +1604,7 @@ implement ChildState {
         // Cap attempt at UInt8.MAX (255) — the RestartEvent.attempt
         // field is intentionally narrow because individual children
         // shouldn't accumulate >255 restarts before the supervisor
-        // escalates.  Saturating cast preserves "many restarts"
+        // escalates. Saturating cast preserves "many restarts"
         // semantics without wrap-around to 0.
         let attempt = if attempt_count > 0xFF { 0xFF as UInt8 } else { attempt_count as UInt8 };
 

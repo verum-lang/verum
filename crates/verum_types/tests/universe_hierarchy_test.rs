@@ -208,19 +208,22 @@ fn test_universe_polymorphism() {
 // Extended tests (Phase A activation — reuse-first)
 // =============================================================================
 //
+
 // The following tests probe the existing UniverseContext / UniverseConstraint
 // solver in `crates/verum_types/src/context.rs:681-1174` beyond the basic
 // happy-path coverage above. They are regression guards for the dependent
 // type system's universe hierarchy, targeting:
 //
-//   1. Girard's paradox rejection (Type : Type must be inconsistent).
-//   2. Transitive cumulativity (Type₀ < Type₁ < Type₂ ⇒ Type₀ < Type₂).
-//   3. Concrete Max / Succ composition.
-//   4. Universe-polymorphic identity (fn id<u, T: Type(u)>(x: T) -> T).
-//   5. Chains of variable equalities propagated to concrete levels.
-//   6. Function type universe = max of param and return type levels.
-//   7. Negative cases (impossible constraints must fail to solve).
+
+//  1. Girard's paradox rejection (Type : Type must be inconsistent).
+//  2. Transitive cumulativity (Type₀ < Type₁ < Type₂ ⇒ Type₀ < Type₂).
+//  3. Concrete Max / Succ composition.
+//  4. Universe-polymorphic identity (fn id<u, T: Type(u)>(x: T) -> T).
+//  5. Chains of variable equalities propagated to concrete levels.
+//  6. Function type universe = max of param and return type levels.
+//  7. Negative cases (impossible constraints must fail to solve).
 //
+
 // Each test stands alone — no shared state between tests — so failures are
 // localised. All tests target the PUBLIC TypeContext API to ensure external
 // consumers of the dependent type system can rely on these properties.

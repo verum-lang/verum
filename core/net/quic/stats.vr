@@ -5,23 +5,27 @@
 // Dependencies: core, core.time
 // =============================================================================
 //
+
 // Production QUIC deployments need rich observability. This module
 // ships a single aggregated `QuicStats` struct fed by the rx/tx/
 // recovery/key-update hot paths. The fields mirror the well-trodden
 // set that appears in every production QUIC library (quiche, msquic,
 // gQUIC) so operators moving between stacks see familiar metrics.
 //
+
 // # Design
 //
-//   * Every field is a simple counter or gauge — no locks, no
-//     derived rates. Rate computation is the scraper's job.
-//   * Atomic-free: one struct per connection; the owning task updates
-//     it from its own path. Cross-thread reads get a snapshot via
-//     `QuicStats.clone()` at scrape time.
-//   * Endpoint-level aggregation is a sum of per-connection stats
-//     + a small set of `EndpointStats` counters (new connections,
-//     stateless resets emitted, version negotiations, etc.).
+
+//  * Every field is a simple counter or gauge — no locks, no
+//  derived rates. Rate computation is the scraper's job.
+//  * Atomic-free: one struct per connection; the owning task updates
+//  it from its own path. Cross-thread reads get a snapshot via
+//  `QuicStats.clone()` at scrape time.
+//  * Endpoint-level aggregation is a sum of per-connection stats
+//  + a small set of `EndpointStats` counters (new connections,
+//  stateless resets emitted, version negotiations, etc.).
 //
+
 // =============================================================================
 
 module core.net.quic.stats;

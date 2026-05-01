@@ -5,30 +5,36 @@
 // Dependencies: shell.{exec, result, context}, async.{channel, cancellation, generator}, io.process
 // =============================================================================
 //
+
 // Long-running commands (`tail -f`, `journalctl -f`, `tcpdump`, `cargo
 // watch`) emit a continuous stream of stdout. Naive `read-to-EOF` doesn't
 // work and naive `fn*` yields can flood memory if the producer outpaces
 // the consumer.
 //
+
 // This module provides:
-//   * `stream_lines` — simple `fn*` async generator over stdout lines
-//     (suitable for moderate rates and short-lived workloads)
-//   * `stream_lines_bounded` — bounded channel + cancellation; producer
-//     applies `OverflowPolicy` when the channel is saturated
-//   * `StreamConfig` knobs for buffer size, overflow policy, read chunk size
-//     and a hard memory ceiling
+//  * `stream_lines` — simple `fn*` async generator over stdout lines
+//  (suitable for moderate rates and short-lived workloads)
+//  * `stream_lines_bounded` — bounded channel + cancellation; producer
+//  applies `OverflowPolicy` when the channel is saturated
+//  * `StreamConfig` knobs for buffer size, overflow policy, read chunk size
+//  and a hard memory ceiling
 //
+
 // Producer thread / future structure:
 //
-//   Command spawn → BufReader on child.stdout_fd
-//      ┌─→ on each newline → enqueue token via OverflowPolicy
-//      └─→ on cancel → child.kill() and exit producer loop
+
+//  Command spawn → BufReader on child.stdout_fd
+//  ┌─→ on each newline → enqueue token via OverflowPolicy
+//  └─→ on cancel → child.kill() and exit producer loop
 //
-//   Consumer awaits `Receiver::recv()`. Backpressure is implicit: if buffer
-//   is full and policy is `Block`, the producer's `send_async` future stays
-//   pending until consumer drains, naturally throttling the kernel pipe and
-//   eventually the writing process.
+
+//  Consumer awaits `Receiver::recv()`. Backpressure is implicit: if buffer
+//  is full and policy is `Block`, the producer's `send_async` future stays
+//  pending until consumer drains, naturally throttling the kernel pipe and
+//  eventually the writing process.
 //
+
 // =============================================================================
 
 module stream;
@@ -175,6 +181,7 @@ implement LineStream {
 // stream_lines — simple async-generator API for moderate streams
 // =============================================================================
 //
+
 // Returns an async iterator (`fn*` generator) yielding lines as they arrive.
 // Easiest API. No bounded buffer — relies on the kernel pipe for natural
 // flow control. Use `stream_lines_bounded` for fast producers.
@@ -355,10 +362,10 @@ async fn route_via_policy(
             Err(_) => true,   // dropped silently
         },
         DropOldest => {
-            // Best-effort: drain one then send.  If channel was full, we
+            // Best-effort: drain one then send. If channel was full, we
             // poll once via try_send first; if it fails we don't have a
             // way to remove the head from a bounded channel without
-            // reading it.  Workaround: rely on the consumer to keep up,
+            // reading it. Workaround: rely on the consumer to keep up,
             // and degrade to Block when actually full.
             match tx.try_send(item) {
                 Ok(_)  => true,

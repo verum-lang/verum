@@ -1,10 +1,13 @@
 //! Attribute definitions for the Verum AST.
 //!
+
 //! This module defines special attributes that can be attached to items,
 //! including profile and feature attributes for module-level control.
 //!
+
 //! # Specification
 //!
+
 //! Language profiles control which language features are available (systems, application, etc.).
 
 use crate::span::{Span, Spanned};
@@ -13,30 +16,38 @@ use verum_common::{List, Maybe, Text};
 
 /// Language profile for module-level feature control.
 ///
+
 /// Profiles define different trade-off points in the language's safety/control spectrum:
 /// - Application: Safe, productive, async-first (default for web/app development)
 /// - Systems: Unsafe allowed, manual memory management (for low-level code)
 /// - Research: Formal verification enabled (for critical systems)
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @profile(application)
 /// module web_server { }
 ///
+
 /// @profile(systems)
 /// module low_level { }
 ///
+
 /// @profile(research)
 /// module verified_math { }
 ///
+
 /// // Multiple profiles
 /// @profile(systems, research)
 /// module runtime { }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// Language profiles control which features are available in a module..1
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Profile {
@@ -84,6 +95,7 @@ impl Profile {
 
     /// Check if this profile is more restrictive than another
     ///
+
     /// Restriction hierarchy: Application < Systems < Research
     /// Research is most restrictive (requires proofs)
     /// Application is least restrictive (most permissive features)
@@ -114,21 +126,27 @@ impl std::fmt::Display for Profile {
 
 /// Profile attribute: @profile(application|systems|research)
 ///
+
 /// Declares which language profiles a module supports.
 /// Multiple profiles can be specified.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @profile(application)
 /// module safe_code { }
 ///
+
 /// @profile(systems, research)
 /// module runtime { }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// Language profiles control which features are available in a module..1
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProfileAttr {
@@ -157,6 +175,7 @@ impl ProfileAttr {
 
     /// Check if this attribute is compatible with a parent's profile
     ///
+
     /// Child can be more restrictive, not less restrictive
     pub fn is_compatible_with(&self, parent: &ProfileAttr) -> bool {
         // Child must support at least one profile that parent supports
@@ -177,23 +196,29 @@ impl Spanned for ProfileAttr {
 
 /// Feature attribute: @feature(enable: ["unsafe", "inline_asm", ...])
 ///
+
 /// Enables specific language features beyond the base profile.
 /// Features are additive and must be compatible with the base profile.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @profile(application)
 /// @feature(enable: ["unsafe"])
 /// module ffi_bindings { }
 ///
+
 /// @profile(application)
 /// @feature(enable: ["unsafe", "inline_asm"])
 /// module crypto { }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// Language profiles control which features are available in a module..3
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeatureAttr {
@@ -248,29 +273,36 @@ impl Spanned for FeatureAttr {
 
 /// @std attribute for automatic context provisioning.
 ///
+
 /// The `@std` attribute provides automatic context provisioning for common use cases,
 /// particularly useful for scripts, entry points, and simple applications.
 ///
+
 /// # Syntax
 /// - `@std` - Uses ApplicationContext (default)
 /// - `@std(ContextGroup)` - Uses specified context group
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @std
 /// fn main() {
-///     // ApplicationContext is automatically provided
+///  // ApplicationContext is automatically provided
 /// }
 ///
+
 /// @std(ServerContext)
 /// fn run_server() {
-///     // ServerContext is automatically provided
+///  // ServerContext is automatically provided
 /// }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// @std attribute for automatic context provisioning using named context groups.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StdAttr {
@@ -312,37 +344,45 @@ impl Spanned for StdAttr {
 
 /// Specialization attribute: @specialize or @specialize(negative|rank=N|when(...))
 ///
+
 /// The `@specialize` attribute enables protocol implementation specialization,
 /// allowing more specific implementations to override more general ones.
 ///
+
 /// # Syntax Forms
 ///
+
 /// 1. **Basic Specialization:**
 /// ```verum
 /// @specialize
 /// implement<T: Clone> MyProtocol for List<T> { }
 /// ```
 ///
+
 /// 2. **Negative Specialization:**
 /// ```verum
 /// @specialize(negative)
 /// implement<T: !Clone> MyProtocol for List<T> { }
 /// ```
 ///
+
 /// 3. **Specialization with Rank:**
 /// ```verum
 /// @specialize(rank = 10)
 /// implement MyProtocol for Int { }
 /// ```
 ///
+
 /// 4. **Conditional Specialization:**
 /// ```verum
 /// @specialize(when(T: Clone + Send))
 /// implement<T> MyProtocol for Heap<T> { }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// @specialize attribute for protocol implementation specialization (v2.0+ planned).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpecializeAttr {
@@ -428,27 +468,35 @@ impl Spanned for SpecializeAttr {
 
 /// Lock level attribute: @lock_level(level: N)
 ///
+
 /// Declares the lock ordering level for a mutex type to enable
 /// compile-time deadlock detection.
 ///
+
 /// # Syntax
 ///
+
 /// ```verum
 /// @lock_level(level: 1)
 /// type DatabaseLock is AsyncMutex<Connection>
 ///
+
 /// @lock_level(level: 2)
 /// type CacheLock is AsyncMutex<Cache>
 /// ```
 ///
+
 /// # Semantics
 ///
+
 /// Lock levels form a strict partial order. A lock with level N can only
 /// be acquired while holding locks with levels < N. This prevents deadlock
 /// by ensuring a global acquisition order.
 ///
+
 /// # Specification
 ///
+
 /// Lock ordering attribute for static deadlock prevention.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockLevelAttr {
@@ -472,17 +520,22 @@ impl Spanned for LockLevelAttr {
 
 /// Deadlock detection attribute: @deadlock_detection(enabled: bool, timeout: Duration)
 ///
+
 /// Enables runtime deadlock detection for a function or module.
 ///
+
 /// # Syntax
 ///
+
 /// ```verum
 /// @deadlock_detection(enabled: true, timeout: 5_seconds)
 /// fn critical_section() { }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// Lock ordering attribute for static deadlock prevention.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeadlockDetectionAttr {
@@ -520,6 +573,7 @@ impl Spanned for DeadlockDetectionAttr {
 
 /// Generic attribute structure for items.
 ///
+
 /// Used for general-purpose attributes like @inline, @deprecated, etc.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Attribute {
@@ -561,6 +615,7 @@ impl Spanned for Attribute {
 
 /// Inline mode for @inline attribute
 ///
+
 /// Controls function inlining: always, never, release-only, or compiler-decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InlineMode {
@@ -598,24 +653,31 @@ impl InlineMode {
 
 /// Inline attribute: @inline, @inline(always), @inline(never), @inline(release)
 ///
+
 /// Controls function inlining behavior for optimal performance.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @inline(always)
 /// fn hot_path(x: i32) -> i32 { x * 2 }
 ///
+
 /// @inline(never)
 /// fn cold_error_handler(err: Error) -> ! { panic!("Fatal: {err}") }
 ///
+
 /// @inline(release)
 /// fn calculate(data: &[f64]) -> f64 { data.iter().sum() / data.len() as f64 }
 ///
+
 /// @inline
 /// fn maybe_inline(x: i32) -> i32 { x + 1 }
 /// ```
 ///
+
 /// Controls function inlining: always, never, release-only, or compiler-decided.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InlineAttr {
@@ -649,26 +711,32 @@ impl Spanned for InlineAttr {
 
 /// Cold attribute: @cold
 ///
+
 /// Marks functions or code paths that are rarely executed,
 /// allowing the optimizer to deprioritize them in favor of hot paths.
 ///
+
 /// # Performance Benefits
 ///
+
 /// - Improved hot path performance: 2-5% speedup from reduced instruction cache pressure
 /// - Better branch prediction: CPU predictors receive static hints
 /// - Reduced binary size: 1-3% through less aggressive cold path optimization
 /// - Faster compilation: 5-10% faster builds by skipping expensive optimizations
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @cold
 /// fn handle_parse_error(contents: &str) -> Error {
-///     log_error("Invalid config format")
-///     Error.InvalidFormat
+///  log_error("Invalid config format")
+///  Error.InvalidFormat
 /// }
 /// ```
 ///
+
 /// Marks function as cold (rarely called) -- optimizes for size, not speed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColdAttr {
@@ -689,18 +757,22 @@ impl Spanned for ColdAttr {
 
 /// Hot attribute: @hot
 ///
+
 /// Marks function as frequently called (hot path).
 /// Enables aggressive optimization for critical code paths.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @hot
 /// fn render_frame(ctx: &mut RenderContext) {
-///     // Critical path - optimize aggressively
+///  // Critical path - optimize aggressively
 /// }
 /// ```
 ///
+
 /// Marks function as hot (frequently called) -- optimizes aggressively for speed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HotAttr {
@@ -721,6 +793,7 @@ impl Spanned for HotAttr {
 
 /// Optimization level for @optimize attribute
 ///
+
 /// Loop unrolling hint: full, N times, or disabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OptimizationLevel {
@@ -757,21 +830,27 @@ impl OptimizationLevel {
 
 /// Optimize attribute: @optimize(size|speed|none|balanced)
 ///
+
 /// Override global optimization level for a specific function.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @optimize(size)
 /// fn rarely_used_large_function() { /* Complex but rarely executed */ }
 ///
+
 /// @optimize(speed)
 /// fn critical_inner_loop() { /* Hot path needing max performance */ }
 ///
+
 /// @optimize(none)
 /// fn debug_this() { /* Keep code exactly as written */ }
 /// ```
 ///
+
 /// Loop unrolling hint: full, N times, or disabled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OptimizeAttr {
@@ -793,6 +872,7 @@ impl Spanned for OptimizeAttr {
 
 /// Vectorization mode for @vectorize and @simd attributes
 ///
+
 /// Auto-vectorization hint for SIMD acceleration of loops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VectorizeMode {
@@ -829,21 +909,27 @@ impl VectorizeMode {
 
 /// Vectorize attribute: @vectorize, @vectorize(force), @simd, @no_vectorize
 ///
+
 /// Control loop auto-vectorization behavior.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @vectorize(force)
 /// for i in 0..data.len() { sum += data[i] }
 ///
+
 /// @no_vectorize
 /// fn precise_computation(data: &[f64]) -> f64 { strict_sum(data) }
 ///
+
 /// @simd(prefer)
 /// fn maybe_vectorized(a: &[Float]) -> Float { a.iter().sum() }
 /// ```
 ///
+
 /// Auto-vectorization hint for SIMD acceleration of loops.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VectorizeAttr {
@@ -898,21 +984,27 @@ pub enum UnrollMode {
 
 /// Unroll attribute: @unroll(N), @unroll(full), @no_unroll
 ///
+
 /// Control loop unrolling behavior explicitly.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @unroll(4)
 /// for i in 0..a.rows { /* Unroll loop 4 times */ }
 ///
+
 /// @unroll(full)
 /// for i in 0..8 { buffer[i] = source[i] }
 ///
+
 /// @no_unroll
 /// for item in large_collection { process(item) }
 /// ```
 ///
+
 /// Loop optimization hint controlling unrolling behavior.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnrollAttr {
@@ -964,27 +1056,33 @@ impl PrefetchAccess {
 
 /// Prefetch attribute: @prefetch(read|write, locality: N)
 ///
+
 /// Prefetch data into cache for improved memory access performance.
 ///
+
 /// # Locality Levels (0-3)
 ///
+
 /// - 0: No temporal locality (stream)
 /// - 1: Low temporal locality
 /// - 2: Moderate temporal locality
 /// - 3: High temporal locality (keep in all cache levels)
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @prefetch(read, locality: 3)
 /// fn process_array(data: &[u8]) {
-///     for chunk in data.chunks(64) {
-///         @prefetch(&chunk[64], write, locality: 2)
-///         process_chunk(chunk)
-///     }
+///  for chunk in data.chunks(64) {
+///  @prefetch(&chunk[64], write, locality: 2)
+///  process_chunk(chunk)
+///  }
 /// }
 /// ```
 ///
+
 /// Memory optimization hint for cache prefetching or alignment.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrefetchAttr {
@@ -1020,18 +1118,23 @@ impl Spanned for PrefetchAttr {
 
 /// Align attribute: @align(N)
 ///
+
 /// Specify memory alignment for types or variables.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @align(32)
 /// type AlignedBuffer is [f32; 1024]
 ///
-/// @align(64)  // Cache line alignment
+
+/// @align(64) // Cache line alignment
 /// type CacheOptimized is { hot_field: u64, hot_field2: u64 }
 /// ```
 ///
+
 /// Memory optimization hint for cache prefetching or alignment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AlignAttr {
@@ -1059,20 +1162,24 @@ impl Spanned for AlignAttr {
 
 /// Likelihood attribute: @likely, @unlikely
 ///
+
 /// Guide branch prediction and code layout.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// fn process_request(req: Request) -> Response {
-///     @likely if req.is_valid() {
-///         handle_valid_request(req)
-///     } else {
-///         @unlikely { Response.error(400) }
-///     }
+///  @likely if req.is_valid() {
+///  handle_valid_request(req)
+///  } else {
+///  @unlikely { Response.error(400) }
+///  }
 /// }
 /// ```
 ///
+
 /// Marks function as hot (frequently called) -- optimizes aggressively for speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Likelihood {
@@ -1112,6 +1219,7 @@ impl Spanned for LikelihoodAttr {
 
 /// Verification mode for @verify attribute
 ///
+
 /// Performance contract specifying expected latency/throughput
 /// guarantees and the ν-coordinate carried by the verification ladder.
 /// Ordered from cheapest (Runtime, ν=0) to most expensive
@@ -1195,23 +1303,29 @@ impl VerificationMode {
 
 /// Verify attribute: @verify(proof|static|runtime|assume)
 ///
+
 /// Contract verification hints to control verification behavior.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @verify(proof, timeout: 5s)
 /// fn divide(a: Float, b: Float{!= 0.0}) -> Float { a / b }
 ///
+
 /// @verify(runtime)
 /// fn safe_divide(a: Float, b: Float) -> Result<Float, DivisionByZero> {
-///     if b == 0.0 { Err(DivisionByZero) } else { Ok(a / b) }
+///  if b == 0.0 { Err(DivisionByZero) } else { Ok(a / b) }
 /// }
 ///
-/// @verify([proof, static, runtime])  // Chain strategies
+
+/// @verify([proof, static, runtime]) // Chain strategies
 /// fn complex_invariant(x: Int{> 0}, y: Int{> 0}) -> Int{> 0} { x + y }
 /// ```
 ///
+
 /// Performance contract specifying expected latency/throughput guarantees.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VerifyAttr {
@@ -1266,6 +1380,7 @@ impl Spanned for VerifyAttr {
 
 /// Well-founded relation types for termination proofs.
 ///
+
 /// Standard well-founded relations used to prove termination
 /// of recursive functions and loops.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -1307,38 +1422,46 @@ impl WellFoundedRelation {
 
 /// Measure attribute: @measure(expr)
 ///
+
 /// Specifies the termination measure for a recursive function.
 /// The measure expression must decrease on each recursive call
 /// according to a well-founded relation.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @measure(n)
 /// fn factorial(n: Int{>= 0}) -> Int {
-///     if n == 0 { 1 }
-///     else { n * factorial(n - 1) }
+///  if n == 0 { 1 }
+///  else { n * factorial(n - 1) }
 /// }
 ///
+
 /// @measure(list.len())
 /// fn sum(list: &List<Int>) -> Int {
-///     match list {
-///         [] => 0,
-///         [head, ..tail] => head + sum(tail)
-///     }
+///  match list {
+///  [] => 0,
+///  [head, ..tail] => head + sum(tail)
+///  }
 /// }
 ///
+
 /// @measure((fuel, depth), relation: lexicographic)
 /// fn search(fuel: Int{>= 0}, depth: Int{>= 0}) -> Maybe<Result> { ... }
 /// ```
 ///
+
 /// # Semantics
 ///
+
 /// 1. The measure expression is evaluated before each recursive call
 /// 2. The verifier proves that the measure strictly decreases
 /// 3. Multiple measures form a tuple with lexicographic ordering
 /// 4. For loops, use `decreases` instead of `@measure`
 ///
+
 /// Gradual verification attributes for incremental safety assurance..2
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeasureAttr {
@@ -1399,46 +1522,55 @@ impl Spanned for MeasureAttr {
 
 /// Decreases attribute: @decreases(expr)
 ///
+
 /// Specifies the decreasing expression for loop termination.
 /// This is the loop-level equivalent of `@measure` for functions.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// fn binary_search(arr: &[Int], target: Int) -> Maybe<Int> {
-///     let mut low = 0;
-///     let mut high = arr.len();
+///  let mut low = 0;
+///  let mut high = arr.len();
 ///
-///     @decreases(high - low)
-///     while low < high {
-///         let mid = low + (high - low) / 2;
-///         if arr[mid] == target { return Some(mid) }
-///         else if arr[mid] < target { low = mid + 1 }
-///         else { high = mid }
-///     }
-///     None
+
+///  @decreases(high - low)
+///  while low < high {
+///  let mid = low + (high - low) / 2;
+///  if arr[mid] == target { return Some(mid) }
+///  else if arr[mid] < target { low = mid + 1 }
+///  else { high = mid }
+///  }
+///  None
 /// }
 ///
+
 /// // Multiple decreasing expressions (lexicographic)
 /// @decreases(outer, inner)
 /// while outer > 0 {
-///     while inner > 0 {
-///         inner -= 1;
-///     }
-///     outer -= 1;
-///     inner = reset_value;
+///  while inner > 0 {
+///  inner -= 1;
+///  }
+///  outer -= 1;
+///  inner = reset_value;
 /// }
 /// ```
 ///
+
 /// # Semantics
 ///
+
 /// 1. The decreasing expression must be non-negative at loop entry
 /// 2. The expression must decrease with each iteration
 /// 3. Combined with `invariant`, proves total correctness
 ///
+
 /// Note: This is a function-level attribute. For inline syntax,
 /// use `decreases EXPR` within the loop (already supported by parser).
 ///
+
 /// Gradual verification attributes for incremental safety assurance..3
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DecreasesAttr {
@@ -1484,35 +1616,40 @@ impl Spanned for DecreasesAttr {
 
 /// Well-founded attribute: @well_founded(relation_name)
 ///
+
 /// Declares or references a well-founded relation for termination proofs.
 /// Used when the default natural number ordering is insufficient.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Reference a standard well-founded relation
 /// @well_founded(lexicographic)
 /// @measure((n, m))
 /// fn ackermann(n: Int{>= 0}, m: Int{>= 0}) -> Int {
-///     match (n, m) {
-///         (0, _) => m + 1,
-///         (_, 0) => ackermann(n - 1, 1),
-///         _ => ackermann(n - 1, ackermann(n, m - 1))
-///     }
+///  match (n, m) {
+///  (0, _) => m + 1,
+///  (_, 0) => ackermann(n - 1, 1),
+///  _ => ackermann(n - 1, ackermann(n, m - 1))
+///  }
 /// }
 ///
+
 /// // Define a custom well-founded relation
 /// @well_founded(tree_size)
 /// @measure(tree.size())
 /// fn fold_tree<T, R>(tree: &Tree<T>, f: fn(T) -> R, combine: fn(R, R) -> R) -> R {
-///     match tree {
-///         Leaf(v) => f(v),
-///         Node { left, right, .. } => combine(fold_tree(left, f, combine),
-///                                              fold_tree(right, f, combine))
-///     }
+///  match tree {
+///  Leaf(v) => f(v),
+///  Node { left, right, .. } => combine(fold_tree(left, f, combine),
+///  fold_tree(right, f, combine))
+///  }
 /// }
 /// ```
 ///
+
 /// Gradual verification attributes for incremental safety assurance..4
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WellFoundedAttr {
@@ -1559,38 +1696,44 @@ impl Spanned for WellFoundedAttr {
 
 /// Termination proof attribute: @termination_proof
 ///
+
 /// Marks a function or lemma as a termination proof for another function.
 /// This enables modular termination verification where the proof is
 /// separate from the implementation.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Function that needs termination proof
 /// @verify(proof)
 /// fn collatz(n: Int{> 0}) -> Int {
-///     if n == 1 { 1 }
-///     else if n % 2 == 0 { collatz(n / 2) }
-///     else { collatz(3 * n + 1) }
+///  if n == 1 { 1 }
+///  else if n % 2 == 0 { collatz(n / 2) }
+///  else { collatz(3 * n + 1) }
 /// }
 ///
+
 /// // Separate termination proof (assumes Collatz conjecture)
 /// @termination_proof(for: collatz)
-/// @assume(collatz_conjecture)  // Explicit assumption
+/// @assume(collatz_conjecture) // Explicit assumption
 /// lemma collatz_terminates(n: Int{> 0}) {
-///     // Proof that collatz terminates for all n > 0
-///     // (Currently assumed via Collatz conjecture)
+///  // Proof that collatz terminates for all n > 0
+///  // (Currently assumed via Collatz conjecture)
 /// }
 ///
+
 /// // Termination proof with explicit measure
 /// @termination_proof(for: factorial, measure: n)
 /// lemma factorial_terminates(n: Int{>= 0}) {
-///     // Proof: n decreases on each call, bounded below by 0
-///     assert n >= 0;
-///     assert n - 1 < n when n > 0;
+///  // Proof: n decreases on each call, bounded below by 0
+///  assert n >= 0;
+///  assert n - 1 < n when n > 0;
 /// }
 /// ```
 ///
+
 /// Gradual verification attributes for incremental safety assurance..5
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminationProofAttr {
@@ -1636,18 +1779,23 @@ impl Spanned for TerminationProofAttr {
 
 /// Target CPU attribute: @target_cpu(name)
 ///
+
 /// CPU-specific optimization target.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @target_cpu("native")
 /// fn platform_optimized() { /* Use all CPU features available */ }
 ///
+
 /// @target_cpu("x86-64-v3")
 /// fn modern_cpu_only() { /* Can use AVX, AVX2, BMI, etc. */ }
 /// ```
 ///
+
 /// Parallel execution hint for independent loop iterations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetCpuAttr {
@@ -1673,15 +1821,19 @@ impl Spanned for TargetCpuAttr {
 
 /// Target feature attribute: @target_feature(features)
 ///
+
 /// Enable specific target features for a function.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @target_feature("+avx2,+fma")
 /// fn simd_compute(data: &[f32]) -> f32 { /* Uses AVX2 and FMA instructions */ }
 /// ```
 ///
+
 /// No-alias assertion for pointer/reference disambiguation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetFeatureAttr {
@@ -1704,19 +1856,23 @@ impl Spanned for TargetFeatureAttr {
 
 /// Const evaluation attribute: @const_eval, @const_fold, @const_prop
 ///
+
 /// Force compile-time evaluation.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @const_eval
 /// fn lookup_table() -> [u8; 256] {
-///     let mut table = [0; 256]
-///     for i in 0..256 { table[i] = compute_value(i) }
-///     table
+///  let mut table = [0; 256]
+///  for i in 0..256 { table[i] = compute_value(i) }
+///  table
 /// }
 /// ```
 ///
+
 /// Profile-guided optimization data collection attribute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ConstEvalMode {
@@ -1752,21 +1908,27 @@ impl Spanned for ConstEvalAttr {
 
 /// Profile attribute for PGO: @profile, @frequency, @branch_probability
 ///
+
 /// Mark function for profiling or provide expected execution frequency.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @profile
 /// fn important_function() { /* Compiler instruments for PGO */ }
 ///
-/// @frequency(1000)  // Called ~1000 times per second
+
+/// @frequency(1000) // Called ~1000 times per second
 /// fn periodic_task() { /* Optimize for frequent execution */ }
 ///
+
 /// @branch_probability(0.95)
 /// if let Ok(value) = try_parse(s) { /* Success 95% of the time */ }
 /// ```
 ///
+
 /// Profile annotation for PGO-guided optimization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PgoAttr {
@@ -1803,21 +1965,27 @@ impl Spanned for PgoAttr {
 
 /// LTO attribute: @no_lto, @lto(always|thin)
 ///
+
 /// Control Link-Time Optimization behavior.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @no_lto
 /// fn plugin_interface() { /* Preserve exact ABI */ }
 ///
+
 /// @lto(always)
 /// fn performance_critical() { /* Need cross-module inlining */ }
 ///
+
 /// @lto(thin)
 /// module large_module { /* Use thin LTO for faster builds */ }
 /// ```
 ///
+
 /// Target CPU attribute for architecture-specific code generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LtoMode {
@@ -1853,19 +2021,24 @@ impl Spanned for LtoAttr {
 
 /// Visibility attribute: @visibility(hidden|default|protected)
 ///
+
 /// Control symbol visibility for optimization.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @visibility(hidden)
 /// fn internal_only() { /* Can be optimized more aggressively */ }
 ///
+
 /// @export("C")
 /// @visibility(default)
 /// fn public_api() { /* Preserve for external linkage */ }
 /// ```
 ///
+
 /// Target feature attribute enabling specific CPU instructions (SSE, AVX, etc.).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SymbolVisibility {
@@ -1916,29 +2089,37 @@ impl Spanned for VisibilityAttr {
 
 /// Alias attribute: @alias(target)
 ///
+
 /// Create a symbol alias that refers to another symbol.
 /// The alias has the same address as the target symbol.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @export("C")
 /// fn original_function() { }
 ///
+
 /// @alias(original_function)
 /// @export("C")
-/// fn legacy_name();  // Points to original_function
+/// fn legacy_name(); // Points to original_function
 ///
+
 /// @alias("malloc")
 /// fn verum_alloc(size: USize) -> *mut U8;
 /// ```
 ///
+
 /// # Use Cases
 ///
+
 /// - Backwards compatibility: provide old names for renamed functions
 /// - ABI compatibility: create C-compatible aliases for Verum functions
 /// - Symbol versioning: multiple entry points to same implementation
 ///
+
 /// Symbol aliasing attribute for providing alternative names to exported symbols.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AliasAttr {
@@ -1963,30 +2144,37 @@ impl Spanned for AliasAttr {
 
 /// Weak attribute: @weak
 ///
+
 /// Mark a symbol as weak, allowing it to be overridden by a strong definition.
 /// If no strong definition exists, the weak symbol is used.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Weak default implementation - can be overridden
 /// @weak
 /// fn panic_handler(info: &PanicInfo) {
-///     print("Default panic handler");
+///  print("Default panic handler");
 /// }
 ///
+
 /// // Weak static - can be overridden by linker script or other object
 /// @weak
 /// static DEFAULT_STACK_SIZE: USize = 1024 * 1024;
 /// ```
 ///
+
 /// # Semantics
 ///
+
 /// - Weak symbols have lower precedence than strong (normal) symbols
 /// - If multiple weak definitions exist, one is chosen arbitrarily
 /// - Useful for providing default implementations that can be customized
 /// - Commonly used in embedded/bare-metal for interrupt handlers
 ///
+
 /// Weak symbol attribute: symbol can be overridden by a strong definition at link time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WeakAttr {
@@ -2056,21 +2244,27 @@ impl LinkageKind {
 
 /// Linkage attribute: @linkage(kind)
 ///
+
 /// Explicitly control symbol linkage for advanced linking scenarios.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @linkage(internal)
 /// fn module_private_helper() { }
 ///
+
 /// @linkage(linkonce_odr)
 /// fn generic_instantiation<T>(x: T) -> T { x }
 ///
+
 /// @linkage(common)
 /// static mut UNINITIALIZED_GLOBAL: I32;
 /// ```
 ///
+
 /// Linkage control attribute for specifying symbol linkage (internal, external, weak).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkageAttr {
@@ -2104,25 +2298,32 @@ impl Spanned for LinkageAttr {
 
 /// Init priority attribute: @init_priority(N)
 ///
+
 /// Control initialization order for static constructors.
 /// Lower numbers run first. Valid range is 101-65535.
 /// (0-100 are reserved for system use.)
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @init_priority(200)
 /// static EARLY_INIT: Lazy<Database> = Lazy::new(|| init_database());
 ///
+
 /// @init_priority(500)
 /// static LATE_INIT: Lazy<Cache> = Lazy::new(|| init_cache());
 /// ```
 ///
+
 /// # Implementation
 ///
+
 /// Maps to `.init_array` section with priority on ELF platforms.
 /// On other platforms, uses constructor attribute with priority.
 ///
+
 /// Init section attribute: function runs during program initialization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InitPriorityAttr {
@@ -2151,21 +2352,27 @@ impl Spanned for InitPriorityAttr {
 
 /// Section attribute: @section(name)
 ///
+
 /// Place a function or static in a specific linker section.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @section(".text.hot")
 /// fn hot_path() { }
 ///
+
 /// @section(".rodata.config")
 /// static CONFIG: Config = Config::default();
 ///
+
 /// @section(".bss.large")
 /// static mut BUFFER: [U8; 1024 * 1024] = [0; 1024 * 1024];
 /// ```
 ///
+
 /// Section control attribute: places symbol in a specific linker section.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SectionAttr {
@@ -2189,21 +2396,27 @@ impl Spanned for SectionAttr {
 
 /// Export attribute: @export(abi)
 ///
+
 /// Export a symbol with the specified ABI for FFI.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @export("C")
 /// fn verum_init() { }
 ///
+
 /// @export("C", name = "my_custom_name")
 /// fn internal_name() { }
 ///
+
 /// @export("stdcall")
 /// fn win32_callback(hwnd: *const (), msg: U32) -> I32 { 0 }
 /// ```
 ///
+
 /// Export visibility control for shared library symbol tables.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExportAttr {
@@ -2249,37 +2462,44 @@ impl Spanned for ExportAttr {
 
 /// Naked attribute: @naked
 ///
+
 /// Create a function with no prologue or epilogue. Only inline assembly
 /// is allowed in the function body.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @naked
 /// @no_mangle
 /// fn _start() -> ! {
-///     @asm(
-///         "mov rdi, rsp",
-///         "call main",
-///         options(noreturn),
-///     );
+///  @asm(
+///  "mov rdi, rsp",
+///  "call main",
+///  options(noreturn),
+///  );
 /// }
 ///
+
 /// @naked
 /// fn context_switch(old: *mut Context, new: *const Context) {
-///     @asm(
-///         "mov [rdi], rsp",
-///         "mov rsp, [rsi]",
-///         "ret",
-///     );
+///  @asm(
+///  "mov [rdi], rsp",
+///  "mov rsp, [rsi]",
+///  "ret",
+///  );
 /// }
 /// ```
 ///
+
 /// # Safety
 ///
+
 /// Naked functions are inherently unsafe and require manual stack management.
 /// The compiler will not generate any code except for inline assembly.
 ///
+
 /// Naked function attribute: no prologue/epilogue, body must be inline assembly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NakedAttr {
@@ -2301,19 +2521,24 @@ impl Spanned for NakedAttr {
 
 /// Link name attribute: @link_name(name)
 ///
+
 /// Override the symbol name used by the linker.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @link_name("memcpy")
 /// @extern("C")
 /// fn verum_memcpy(dst: *mut Byte, src: *const Byte, n: USize) -> *mut Byte;
 ///
+
 /// @link_name("__verum_runtime_init")
 /// fn runtime_init() { }
 /// ```
 ///
+
 /// Used symbol attribute: prevents linker from stripping this symbol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkNameAttr {
@@ -2337,24 +2562,29 @@ impl Spanned for LinkNameAttr {
 
 /// No-return attribute: @noreturn
 ///
+
 /// Mark a function as never returning (diverging function).
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @noreturn
 /// fn panic(msg: Text) -> ! {
-///     print_error(msg);
-///     abort();
+///  print_error(msg);
+///  abort();
 /// }
 ///
+
 /// @noreturn
 /// @export("C")
 /// fn abort_handler() -> ! {
-///     loop { @asm("hlt"); }
+///  loop { @asm("hlt"); }
 /// }
 /// ```
 ///
+
 /// Naked function: compiler generates no prologue/epilogue.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NoReturnAttr {
@@ -2376,16 +2606,20 @@ impl Spanned for NoReturnAttr {
 
 /// No-mangle attribute: @no_mangle
 ///
+
 /// Prevent name mangling for a symbol.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @no_mangle
 /// @export("C")
 /// fn verum_malloc(size: USize) -> *mut Byte { }
 /// ```
 ///
+
 /// Used attribute: prevents linker dead-stripping of this symbol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NoMangleAttr {
@@ -2407,34 +2641,44 @@ impl Spanned for NoMangleAttr {
 
 /// LLVM-only attribute: @llvm_only or @llvm_only(reason = "...")
 ///
+
 /// Mark a function as requiring LLVM AOT compilation.
 /// Functions with this attribute cannot execute in the VBC interpreter.
 ///
+
 /// Use cases:
 /// - Functions containing inline assembly (`asm { }`)
 /// - Functions accessing privileged CPU registers (ring 0)
 /// - Functions using platform-specific hardware features
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @llvm_only(reason = "inline assembly")
 /// pub unsafe fn rdmsr(msr: UInt32) -> UInt64;
 ///
+
 /// @llvm_only(reason = "privileged CPU mode")
 /// pub unsafe fn write_cr3(value: UInt64);
 ///
-/// @llvm_only  // short form
+
+/// @llvm_only // short form
 /// pub unsafe fn inb(port: UInt16) -> UInt8;
 /// ```
 ///
+
 /// # Compiler Behavior
 ///
+
 /// In VBC interpreter mode, calling an @llvm_only function produces:
 /// "Cannot execute @llvm_only intrinsic '{name}' in interpreter mode. Use --tier aot."
 ///
+
 /// In AOT compilation mode, the attribute is informational only.
 ///
+
 /// Extended attribute position declarations for all syntactic elements.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlvmOnlyAttr {
@@ -2474,26 +2718,31 @@ impl Spanned for LlvmOnlyAttr {
 
 /// Ghost attribute: @ghost
 ///
+
 /// Mark a field or variable as ghost state for formal verification.
 /// Ghost state exists only at verification time and is erased at runtime.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// type VerifiedStack<T> is {
-///     data: List<T>,
-///     @ghost abstract_state: Seq<T>,  // Only for proofs
-///     @ghost count_history: List<USize>,
+///  data: List<T>,
+///  @ghost abstract_state: Seq<T>, // Only for proofs
+///  @ghost count_history: List<USize>,
 /// };
 ///
+
 /// implement<T> VerifiedStack<T> {
-///     @ensures(self.abstract_state == old(self.abstract_state).append(item))
-///     fn push(&mut self, item: T) {
-///         self.data.push(item);
-///     }
+///  @ensures(self.abstract_state == old(self.abstract_state).append(item))
+///  fn push(&mut self, item: T) {
+///  self.data.push(item);
+///  }
 /// }
 /// ```
 ///
+
 /// MMIO/register hardware access attribute.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GhostAttr {
@@ -2515,25 +2764,30 @@ impl Spanned for GhostAttr {
 
 /// Requires attribute: @requires(condition)
 ///
+
 /// Specify a precondition for a function. The condition must hold
 /// when the function is called.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @requires(index < array.len())
 /// fn get_unchecked<T>(array: &[T], index: USize) -> &T {
-///     // Safe because precondition guarantees bounds
-///     &array[index]
+///  // Safe because precondition guarantees bounds
+///  &array[index]
 /// }
 ///
+
 /// @requires(x > 0)
 /// @requires(y != 0)
 /// fn safe_divide(x: Int, y: Int) -> Int {
-///     x / y
+///  x / y
 /// }
 /// ```
 ///
+
 /// MMIO/register hardware access attribute.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RequiresAttr {
@@ -2560,28 +2814,35 @@ impl Spanned for RequiresAttr {
 
 /// Ensures attribute: @ensures(condition)
 ///
+
 /// Specify a postcondition for a function. The condition must hold
 /// when the function returns.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @ensures(result >= 0)
 /// fn abs(x: Int) -> Int {
-///     if x < 0 { -x } else { x }
+///  if x < 0 { -x } else { x }
 /// }
 ///
+
 /// @ensures(result.len() == old(self.len()) + 1)
 /// fn push<T>(&mut self, item: T) {
-///     // ...
+///  // ...
 /// }
 /// ```
 ///
+
 /// # Special Variables
 ///
+
 /// - `result`: The return value of the function
 /// - `old(expr)`: The value of expr at function entry
 ///
+
 /// MMIO/register hardware access attribute.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnsuresAttr {
@@ -2608,29 +2869,34 @@ impl Spanned for EnsuresAttr {
 
 /// Invariant attribute: @invariant(condition)
 ///
+
 /// Specify an invariant for loops or types.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// fn binary_search<T: Ord>(arr: &[T], target: &T) -> Maybe<USize> {
-///     let mut low = 0;
-///     let mut high = arr.len();
+///  let mut low = 0;
+///  let mut high = arr.len();
 ///
-///     @invariant(low <= high)
-///     @invariant(high <= arr.len())
-///     while low < high {
-///         let mid = low + (high - low) / 2;
-///         match arr[mid].cmp(target) {
-///             Less => low = mid + 1,
-///             Greater => high = mid,
-///             Equal => return Some(mid),
-///         }
-///     }
-///     None
+
+///  @invariant(low <= high)
+///  @invariant(high <= arr.len())
+///  while low < high {
+///  let mid = low + (high - low) / 2;
+///  match arr[mid].cmp(target) {
+///  Less => low = mid + 1,
+///  Greater => high = mid,
+///  Equal => return Some(mid),
+///  }
+///  }
+///  None
 /// }
 /// ```
 ///
+
 /// DMA buffer attribute for hardware direct memory access.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InvariantAttr {
@@ -2657,15 +2923,19 @@ impl Spanned for InvariantAttr {
 
 /// Used attribute: @used
 ///
+
 /// Prevent dead code elimination for a static value.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @used
 /// static KEEP_THIS: [u8; 1024] = [0; 1024]
 /// ```
 ///
+
 /// Optimization barrier preventing reordering across this point.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsedAttr {
@@ -2686,22 +2956,26 @@ impl Spanned for UsedAttr {
 
 /// Optimization barrier: @optimize_barrier
 ///
+
 /// Prevent optimization across this point.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// fn timing_attack_resistant(secret: &[u8], input: &[u8]) -> bool {
-///     let mut result = true
-///     @optimize_barrier
-///     for i in 0..secret.len() {
-///         result &= constant_time_eq(secret[i], input[i])
-///     }
-///     @optimize_barrier
-///     result
+///  let mut result = true
+///  @optimize_barrier
+///  for i in 0..secret.len() {
+///  result &= constant_time_eq(secret[i], input[i])
+///  }
+///  @optimize_barrier
+///  result
 /// }
 /// ```
 ///
+
 /// Optimization barrier preventing reordering across this point.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OptimizeBarrierAttr {
@@ -2722,19 +2996,23 @@ impl Spanned for OptimizeBarrierAttr {
 
 /// Black box: @black_box
 ///
+
 /// Prevent optimization of value - useful for benchmarks.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// fn benchmark<T>(compute: fn() -> T) {
-///     let start = time.now()
-///     let result = @black_box(compute())
-///     let elapsed = time.now() - start
-///     println!("Time: {elapsed}, Result: {result}")
+///  let start = time.now()
+///  let result = @black_box(compute())
+///  let elapsed = time.now() - start
+///  println!("Time: {elapsed}, Result: {result}")
 /// }
 /// ```
 ///
+
 /// Optimization barrier preventing reordering across this point.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlackBoxAttr {
@@ -2755,23 +3033,29 @@ impl Spanned for BlackBoxAttr {
 
 /// Performance contract: @constant_time, @max_time, @max_memory
 ///
+
 /// Declare performance guarantees.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @constant_time
 /// fn crypto_operation(key: &[u8], data: &[u8]) {
-///     /* Compiler ensures no timing variations */
+///  /* Compiler ensures no timing variations */
 /// }
 ///
+
 /// @max_time(100_us)
 /// fn realtime_response() { /* Compiler warns if might exceed */ }
 ///
+
 /// @max_memory(1_KB)
 /// fn embedded_function() { /* Compiler enforces memory limit */ }
 /// ```
 ///
+
 /// IVDEP (ignore vector dependencies) hint for loop vectorization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PerformanceContract {
@@ -2795,25 +3079,31 @@ impl Spanned for PerformanceContract {
 
 /// Memory access pattern hint: @access_pattern
 ///
+
 /// Hint the expected memory access pattern for optimization.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @access_pattern(sequential)
 /// fn scan_array(data: &[i32]) -> i32 { data.iter().sum() }
 ///
+
 /// @access_pattern(random)
 /// fn hash_lookup(table: &Map<K, V>, keys: &[K]) { /* ... */ }
 ///
+
 /// @access_pattern(streaming)
 /// fn process_large_file(file: &File) {
-///     for chunk in file.chunks(4096) {
-///         @non_temporal_store(process_chunk(chunk))
-///     }
+///  for chunk in file.chunks(4096) {
+///  @non_temporal_store(process_chunk(chunk))
+///  }
 /// }
 /// ```
 ///
+
 /// Black box optimization barrier preventing constant folding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AccessPattern {
@@ -2853,21 +3143,27 @@ impl Spanned for AccessPatternAttr {
 
 /// Repr attribute: @repr(packed|C|cache_optimal)
 ///
+
 /// Control type memory layout.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @repr(packed)
 /// type CompactStruct is { a: u8, b: u32, c: u16 }
 ///
+
 /// @repr(C)
 /// type CCompatible is { x: i32, y: i32 }
 ///
+
 /// @repr(cache_optimal)
 /// type CacheFriendly is { hot_field1: u64, hot_field2: u64 }
 /// ```
 ///
+
 /// Memory optimization hint for cache prefetching or alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Repr {
@@ -2935,23 +3231,27 @@ impl Spanned for ReprAttr {
 
 /// Differentiable attribute: @differentiable(wrt = "params")
 ///
+
 /// Enable automatic differentiation for tensor functions.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @differentiable(wrt = "weights, bias")
 /// fn dense_layer<N: meta usize, M: meta usize>(
-///     input: &Tensor<f32, [N]>,
-///     weights: &Tensor<f32, [N, M]>,
-///     bias: &Tensor<f32, [M]>
+///  input: &Tensor<f32, [N]>,
+///  weights: &Tensor<f32, [N, M]>,
+///  bias: &Tensor<f32, [M]>
 /// ) -> Tensor<f32, [M]>
-///     where N > 0 && M > 0
+///  where N > 0 && M > 0
 /// {
-///     matmul(input, weights) + bias
+///  matmul(input, weights) + bias
 /// }
 /// ```
 ///
+
 /// Memory representation control: C layout, packed, aligned, transparent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DifferentiableAttr {
@@ -2993,21 +3293,27 @@ impl Spanned for DifferentiableAttr {
 
 /// Assume attribute: @assume(condition)
 ///
+
 /// Provide optimization hints to the compiler.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
-/// @assume(data.len() % 8 == 0)  // Help optimizer vectorize
+/// @assume(data.len() % 8 == 0) // Help optimizer vectorize
 /// fn simd_compute(data: &[f32]) -> f32 { /* ... */ }
 ///
-/// @assume_no_alias  // Assert no pointer aliasing
+
+/// @assume_no_alias // Assert no pointer aliasing
 /// fn fast_copy(dst: &mut [u8], src: &[u8]) { /* ... */ }
 ///
-/// @assume_aligned(16)  // Assert alignment
+
+/// @assume_aligned(16) // Assert alignment
 /// fn aligned_access(ptr: *const f32) { /* ... */ }
 /// ```
 ///
+
 /// Alignment attribute for SIMD-friendly data layout.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AssumeAttr {
@@ -3045,24 +3351,30 @@ impl Spanned for AssumeAttr {
 
 /// CPU dispatch attribute: @cpu_dispatch
 ///
+
 /// Multi-versioning for different CPUs.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @cpu_dispatch
 /// fn compute(data: &[f64]) -> f64 {
-///     @target_cpu("x86-64-v4")
-///     default "avx512" { compute_avx512(data) }
+///  @target_cpu("x86-64-v4")
+///  default "avx512" { compute_avx512(data) }
 ///
-///     @target_cpu("x86-64-v3")
-///     default "avx2" { compute_avx2(data) }
+
+///  @target_cpu("x86-64-v3")
+///  default "avx2" { compute_avx2(data) }
 ///
-///     @target_cpu("generic")
-///     default "generic" { compute_scalar(data) }
+
+///  @target_cpu("generic")
+///  default "generic" { compute_scalar(data) }
 /// }
 /// ```
 ///
+
 /// Parallel execution hint for independent loop iterations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CpuDispatchAttr {
@@ -3083,33 +3395,40 @@ impl Spanned for CpuDispatchAttr {
 
 /// Multi-version attribute: @multiversion(...)
 ///
+
 /// Generates multiple function versions optimized for different CPU feature sets.
 /// The runtime automatically dispatches to the best available version.
 ///
+
 /// # Syntax
 ///
+
 /// ```verum
 /// @multiversion(
-///     avx512 = "avx512f,avx512vl",
-///     avx2 = "avx2,fma",
-///     sse4 = "sse4.2",
-///     default = "baseline"
+///  avx512 = "avx512f,avx512vl",
+///  avx2 = "avx2,fma",
+///  sse4 = "sse4.2",
+///  default = "baseline"
 /// )
 /// fn dot_product(a: &Vec<Float32, 8>, b: &Vec<Float32, 8>) -> Float32 {
-///     // Implementation works for all targets
-///     a.dot(b)
+///  // Implementation works for all targets
+///  a.dot(b)
 /// }
 /// ```
 ///
+
 /// # Behavior
 ///
+
 /// - Generates separate function versions for each specified target
 /// - Runtime dispatcher selects best version based on detected CPU features
 /// - Dispatch overhead is typically < 1ns (indirect call through resolved pointer)
 /// - Compatible with SIMD Vec<T, N> operations for automatic vectorization
 ///
+
 /// # Targets
 ///
+
 /// Common target feature sets:
 /// - `avx512f,avx512vl` - AVX-512 Foundation + Vector Length
 /// - `avx2,fma` - AVX2 with fused multiply-add
@@ -3117,23 +3436,26 @@ impl Spanned for CpuDispatchAttr {
 /// - `neon` - ARM NEON SIMD
 /// - `sve` - ARM Scalable Vector Extension
 ///
+
 /// # Example with explicit implementations
 ///
+
 /// ```verum
 /// @multiversion(
-///     avx512 = "avx512f",
-///     avx2 = "avx2",
-///     default = "sse4.2"
+///  avx512 = "avx512f",
+///  avx2 = "avx2",
+///  default = "sse4.2"
 /// )
 /// fn sum_array(data: &List<Float64>) -> Float64 {
-///     let mut acc = 0.0;
-///     for x in data {
-///         acc += x;
-///     }
-///     acc
+///  let mut acc = 0.0;
+///  for x in data {
+///  acc += x;
+///  }
+///  acc
 /// }
 /// ```
 ///
+
 /// Multi-version dispatch: generate multiple function versions for different CPU features.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MultiversionAttr {
@@ -3208,19 +3530,23 @@ impl Spanned for MultiversionVariant {
 
 /// Parallel attribute for loop parallelization: @parallel
 ///
+
 /// Mark a loop for parallel execution.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @reduce(+)
 /// fn parallel_sum(data: &[i32]) -> i32 {
-///     @parallel
-///     @simd
-///     for x in data { accumulate(x) }
+///  @parallel
+///  @simd
+///  for x in data { accumulate(x) }
 /// }
 /// ```
 ///
+
 /// Cache prefetch hint for data locality optimization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParallelAttr {
@@ -3241,8 +3567,10 @@ impl Spanned for ParallelAttr {
 
 /// Reduce attribute: @reduce(op)
 ///
+
 /// Specify reduction operation for parallel loops.
 ///
+
 /// Cache prefetch hint for data locality optimization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ReductionOp {
@@ -3294,15 +3622,19 @@ impl Spanned for ReduceAttr {
 
 /// No-alias attribute: @no_alias
 ///
+
 /// Assert that pointers in a loop don't alias.
 ///
+
 /// # Example
 ///
+
 /// ```verum
-/// @no_alias  // Assert no pointer aliasing
+/// @no_alias // Assert no pointer aliasing
 /// for k in 0..a.cols { result[i][j] += a[i][k] * b[k][j] }
 /// ```
 ///
+
 /// Loop optimization hint controlling unrolling behavior.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NoAliasAttr {
@@ -3323,18 +3655,22 @@ impl Spanned for NoAliasAttr {
 
 /// Independent vector dependency assertion: @ivdep
 ///
+
 /// Ignore vector dependencies in loop.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @simd
-/// @ivdep  // Ignore vector dependencies
+/// @ivdep // Ignore vector dependencies
 /// for i in 0..src.rows {
-///     dst[j][i] = src[i][j]
+///  dst[j][i] = src[i][j]
 /// }
 /// ```
 ///
+
 /// Cache prefetch hint for data locality optimization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IvdepAttr {
@@ -3355,6 +3691,7 @@ impl Spanned for IvdepAttr {
 
 /// Unified optimization attribute enum for codegen
 ///
+
 /// This enum represents all parsed optimization attributes in a unified form
 /// that can be efficiently processed during code generation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3433,18 +3770,23 @@ impl Spanned for OptimizationAttr {
 
 /// Tagged literal attribute: @tagged_literal("tag")
 ///
+
 /// Marks a meta function as a handler for tagged literals.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @tagged_literal("json")
 /// meta fn json_literal(source: &str) -> JsonValue { ... }
 ///
+
 /// // Usage:
 /// let data = json#"{ \"key\": \"value\" }";
 /// ```
 ///
+
 /// Meta-system attributes for compile-time code generation. Section 10
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaggedLiteralAttr {
@@ -3596,6 +3938,7 @@ impl OptimizationHints {
 
 /// Collection of termination verification attributes for a function
 ///
+
 /// This struct collects all termination-related attributes that can be
 /// attached to a function for verification purposes.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -3681,48 +4024,59 @@ impl Spanned for TerminationAttr {
 
 /// Transform attribute: @transform
 ///
+
 /// Marks a function as a custom context transform that can be used in
 /// `using [Context.transform_name()]` syntax. The function must:
 /// 1. Take a context type as input
 /// 2. Return a wrapper type implementing the context protocol
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @transform
 /// fn my_custom_transform<C: Database>(ctx: C) -> MyWrapper<C> {
-///     MyWrapper::new(ctx)
+///  MyWrapper::new(ctx)
 /// }
 ///
+
 /// // Usage in function signature:
 /// fn batch_update() using [Database.my_custom_transform()] {
-///     Database.execute("UPDATE ...");
+///  Database.execute("UPDATE ...");
 /// }
 /// ```
 ///
+
 /// # Custom Transform with Arguments
 ///
+
 /// ```verum
 /// @transform
 /// fn with_timeout<C: Database>(ctx: C, timeout: Duration) -> TimedWrapper<C> {
-///     TimedWrapper::new(ctx, timeout)
+///  TimedWrapper::new(ctx, timeout)
 /// }
 ///
+
 /// // Usage:
 /// fn query() using [Database.with_timeout(5_seconds)] {
-///     Database.execute("SELECT ...");
+///  Database.execute("SELECT ...");
 /// }
 /// ```
 ///
+
 /// # Semantics
 ///
+
 /// 1. Transform functions are registered in the TransformRegistry at compile time
 /// 2. When a function uses `using [Context.transform()]`, the transform is applied
 /// 3. Transforms can be composed: `using [Database.transactional().traced()]`
 /// 4. Custom transforms must implement the ContextTransform protocol
 ///
+
 /// # Specification
 ///
+
 /// Context transformation attribute (e.g., .transactional(), .scoped()).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransformAttr {
@@ -3806,28 +4160,35 @@ impl Default for TransformAttr {
 // Dependency Injection Attributes
 // ============================================================================
 //
+
 // These attributes enable compile-time dependency injection with zero runtime
 // overhead for singleton scope. The DI system validates scope hierarchies and
 // detects circular dependencies at compile time.
 //
+
 // Static dependency injection attributes: @injectable and @inject.
 
 /// Dependency injection scope.
 ///
+
 /// Defines the lifecycle of injectable services:
 /// - Singleton: Created once, shared across all uses (0ns overhead)
 /// - Request: Created per request scope (~3ns overhead)
 /// - Transient: Created fresh on each injection (~8ns overhead)
 ///
+
 /// # Scope Hierarchy
 ///
+
 /// Scope hierarchy must be respected:
 /// - Singleton cannot depend on Request or Transient
 /// - Request can only depend on Singleton
 /// - Transient can depend on Singleton or Request
 ///
+
 /// # Specification
 ///
+
 /// @inject attribute for field-level dependency injection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InjectionScope {
@@ -3861,6 +4222,7 @@ impl InjectionScope {
 
     /// Check if this scope can depend on another scope
     ///
+
     /// Scope hierarchy: Singleton → Request → Transient
     /// Lower scopes cannot depend on higher scopes
     pub fn can_depend_on(&self, other: &InjectionScope) -> bool {
@@ -3881,25 +4243,31 @@ impl InjectionScope {
 
 /// Marks a type as injectable with dependency injection.
 ///
+
 /// The `@injectable` attribute marks a type as a DI-managed service
 /// with a specific lifecycle scope.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @injectable(Singleton)
 /// type UserService is {
-///     users: Map<Int, User>,
+///  users: Map<Int, User>,
 /// }
 ///
+
 /// @injectable(Request)
 /// type RequestHandler is {
-///     user_service: UserService,
+///  user_service: UserService,
 /// }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// @injectable attribute for marking types as injectable with scope control.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InjectableAttr {
@@ -3939,37 +4307,45 @@ impl Spanned for InjectableAttr {
 
 /// Marks a function as the injection constructor.
 ///
+
 /// The `@inject` attribute marks a function (typically `new`) as the
 /// constructor to use when injecting dependencies. Dependencies are
 /// automatically resolved from the DI container.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @injectable(Singleton)
 /// type UserService is {
-///     db: Database,
-///     logger: Logger,
+///  db: Database,
+///  logger: Logger,
 /// }
 ///
+
 /// implement UserService {
-///     @inject
-///     fn new(db: Database, logger: Logger) -> Self {
-///         Self { db, logger }
-///     }
+///  @inject
+///  fn new(db: Database, logger: Logger) -> Self {
+///  Self { db, logger }
+///  }
 /// }
 /// ```
 ///
+
 /// # Semantics
 ///
+
 /// When `@inject` is used:
 /// 1. All parameters are resolved from the DI container
 /// 2. Parameters can use context with `using [...]` clause
 /// 3. Circular dependencies are detected at compile time
 /// 4. Scope violations are compile-time errors
 ///
+
 /// # Specification
 ///
+
 /// Injection scope: singleton, scoped, or transient lifetime.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InjectAttr {
@@ -4003,30 +4379,37 @@ impl Default for InjectAttr {
 
 /// Bit width attribute: @bits(N)
 ///
+
 /// Specifies the number of bits a field occupies within a bitfield type.
 /// Used in conjunction with `@bitfield` on the parent type.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @bitfield
 /// type Flags is {
-///     @bits(4) version: U8,    // 4 bits for version (0-15)
-///     @bits(4) ihl: U8,        // 4 bits for IHL (0-15)
-///     @bits(1) flag: Bool,     // 1 bit for boolean flag
-///     @bits(15) data: U16,     // 15 bits for data
+///  @bits(4) version: U8, // 4 bits for version (0-15)
+///  @bits(4) ihl: U8, // 4 bits for IHL (0-15)
+///  @bits(1) flag: Bool, // 1 bit for boolean flag
+///  @bits(15) data: U16, // 15 bits for data
 /// };
 /// ```
 ///
+
 /// # Validation
 ///
+
 /// The type checker validates:
 /// - Bit width is positive (> 0)
 /// - Bit width does not exceed storage type's bit width
 /// - For Bool fields, bit width must be 1
 ///
+
 /// # Code Generation
 ///
+
 /// The compiler generates accessor methods:
 /// - `get_field() -> T`: Extract with proper masking/shifting
 /// - `set_field(value: T)`: Update with bounds checking
@@ -4075,21 +4458,26 @@ impl std::fmt::Display for BitsAttr {
 
 /// Bit offset attribute: @offset(N)
 ///
+
 /// Specifies an explicit bit offset from the start of the container.
 /// Optional - if omitted, fields are placed sequentially.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @bitfield
 /// type SparseFlags is {
-///     @bits(8) @offset(0)  low: U8,   // Bits 0-7
-///     @bits(8) @offset(24) high: U8,  // Bits 24-31 (skip 8-23)
+///  @bits(8) @offset(0) low: U8, // Bits 0-7
+///  @bits(8) @offset(24) high: U8, // Bits 24-31 (skip 8-23)
 /// };
 /// ```
 ///
+
 /// # Use Cases
 ///
+
 /// - Hardware registers with reserved/unused bit ranges
 /// - Protocol fields at non-contiguous positions
 /// - Overlay patterns where fields share the same bits
@@ -4127,32 +4515,39 @@ impl std::fmt::Display for BitOffsetAttr {
 
 /// Bitfield type attribute: @bitfield
 ///
+
 /// Marks a record type as using packed bitfield layout instead of
 /// standard struct layout with natural alignment.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @bitfield
 /// @endian(big)
 /// type IpHeader is {
-///     @bits(4)  version: U8,
-///     @bits(4)  ihl: U8,
-///     @bits(8)  dscp_ecn: U8,
-///     @bits(16) total_length: U16,
+///  @bits(4) version: U8,
+///  @bits(4) ihl: U8,
+///  @bits(8) dscp_ecn: U8,
+///  @bits(16) total_length: U16,
 /// };
 /// ```
 ///
+
 /// # Layout Semantics
 ///
+
 /// When a type has `@bitfield`:
 /// - Fields are packed according to `@bits(N)` specifications
 /// - No implicit padding between fields
 /// - Byte order determined by `@endian` attribute
 /// - Total size is rounded up to byte boundary
 ///
+
 /// # Validation
 ///
+
 /// The type checker ensures:
 /// - All fields have `@bits(N)` specification
 /// - No fields overlap (unless `@allow_overlap` is present)
@@ -4209,33 +4604,42 @@ impl Spanned for BitfieldAttr {
 
 /// Endian attribute: @endian(big|little|native)
 ///
+
 /// Specifies byte order for multi-byte bitfield containers.
 /// Critical for hardware interfaces and network protocols.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @bitfield
-/// @endian(big)  // Network byte order
+/// @endian(big) // Network byte order
 /// type NetworkHeader is { ... };
 ///
+
 /// @bitfield
-/// @endian(little)  // x86/ARM hardware registers
+/// @endian(little) // x86/ARM hardware registers
 /// type HardwareRegister is { ... };
 ///
+
 /// @bitfield
-/// @endian(native)  // Platform-specific (use with caution)
+/// @endian(native) // Platform-specific (use with caution)
 /// type LocalData is { ... };
 /// ```
 ///
+
 /// # Byte Order Modes
 ///
+
 /// - `big`: Most significant byte at lowest address (network byte order)
 /// - `little`: Least significant byte at lowest address (x86, ARM)
 /// - `native`: Platform-specific (avoid for portable code)
 ///
+
 /// # Default Behavior
 ///
+
 /// If `@endian` is omitted, `little` is used as the default,
 /// matching common hardware platforms.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4305,28 +4709,34 @@ impl std::fmt::Display for EndianAttr {
 
 /// Register block attribute: @register_block(base = ADDRESS, stride = VALUE)
 ///
+
 /// Marks a struct type as a memory-mapped register block with a base address
 /// and optional stride for peripheral instances.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @repr(C)
 /// @register_block(base = 0x4002_0000, stride = 0x400)
 /// public type GpioRegisters is {
-///     @offset(0x00) moder: Register<UInt32, ReadWrite>,
-///     @offset(0x04) otyper: Register<UInt32, ReadWrite>,
-///     @offset(0x10) idr: Register<UInt32, ReadOnly>,
-///     @offset(0x18) bsrr: Register<UInt32, WriteOnly>,
+///  @offset(0x00) moder: Register<UInt32, ReadWrite>,
+///  @offset(0x04) otyper: Register<UInt32, ReadWrite>,
+///  @offset(0x10) idr: Register<UInt32, ReadOnly>,
+///  @offset(0x18) bsrr: Register<UInt32, WriteOnly>,
 /// };
 ///
+
 /// // Access via generated constants:
 /// public const GPIOA: &GpioRegisters = GpioRegisters.at(0x4002_0000);
 /// public const GPIOB: &GpioRegisters = GpioRegisters.at(0x4002_0400);
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// Register block attribute for memory-mapped hardware register groups.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RegisterBlockAttr {
@@ -4393,23 +4803,28 @@ impl std::fmt::Display for RegisterBlockAttr {
 
 /// Register offset attribute: @offset(N)
 ///
+
 /// Specifies the byte offset of a register field from the start of the
 /// register block. This is separate from BitOffsetAttr which specifies
 /// bit offset within a bitfield.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @register_block(base = 0x4002_0000)
 /// type GpioRegisters is {
-///     @offset(0x00) moder: Register<UInt32, ReadWrite>,   // At base + 0x00
-///     @offset(0x04) otyper: Register<UInt32, ReadWrite>,  // At base + 0x04
-///     @offset(0x10) idr: Register<UInt32, ReadOnly>,      // At base + 0x10
+///  @offset(0x00) moder: Register<UInt32, ReadWrite>, // At base + 0x00
+///  @offset(0x04) otyper: Register<UInt32, ReadWrite>, // At base + 0x04
+///  @offset(0x10) idr: Register<UInt32, ReadOnly>, // At base + 0x10
 /// };
 /// ```
 ///
+
 /// # Note
 ///
+
 /// This attribute uses the same name as BitOffsetAttr but serves a different
 /// purpose. Context determines which is applicable:
 /// - On @bitfield types: BitOffsetAttr (bit offset)
@@ -4448,27 +4863,35 @@ impl std::fmt::Display for RegisterOffsetAttr {
 
 /// Access mode for MMIO registers.
 ///
+
 /// Defines the read/write capabilities of a register, enabling compile-time
 /// enforcement of access restrictions.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Read-write register
 /// moder: Register<UInt32, ReadWrite>,
 ///
+
 /// // Read-only status register
 /// idr: Register<UInt32, ReadOnly>,
 ///
+
 /// // Write-only set/reset register
 /// bsrr: Register<UInt32, WriteOnly>,
 ///
+
 /// // Write-one-to-clear interrupt flags
 /// status: Register<UInt32, WriteOneToClear>,
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// Register access mode: read-only, write-only, or read-write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AccessMode {
@@ -4542,11 +4965,14 @@ impl std::fmt::Display for AccessMode {
 
 /// Types of interrupt handlers.
 ///
+
 /// Different interrupt types require different handling at the hardware level.
 /// The type affects prologue/epilogue generation and calling conventions.
 ///
+
 /// # Specification
 ///
+
 /// Interrupt handler attribute with handler type and priority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InterruptKind {
@@ -4610,46 +5036,54 @@ impl std::fmt::Display for InterruptKind {
 
 /// Interrupt handler attribute for marking functions as interrupt service routines.
 ///
+
 /// This attribute enables proper interrupt handler code generation including:
 /// - Saving/restoring registers according to the target ABI
 /// - Using the correct return instruction (iret, rfi, etc.)
 /// - Stack alignment requirements
 /// - Critical section handling
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @interrupt(regular)
 /// fn timer_isr() {
-///     // Handle timer interrupt
-///     TIMER.status.clear_bits(TIMER_OVERFLOW);
+///  // Handle timer interrupt
+///  TIMER.status.clear_bits(TIMER_OVERFLOW);
 /// }
 ///
+
 /// @interrupt(nmi)
 /// fn non_maskable_handler(frame: &ExceptionFrame) {
-///     // NMI cannot be disabled - handle critical errors
-///     panic("NMI occurred");
+///  // NMI cannot be disabled - handle critical errors
+///  panic("NMI occurred");
 /// }
 ///
+
 /// @interrupt(exception)
 /// fn divide_by_zero(frame: &ExceptionFrame) -> ! {
-///     panic(f"Division by zero at {frame.pc:x}");
+///  panic(f"Division by zero at {frame.pc:x}");
 /// }
 ///
+
 /// // Naked interrupt for custom prologue
 /// @interrupt(fast, naked: true)
 /// fn fast_irq() {
-///     @asm {
-///         // Custom fast path handling
-///         ldr r0, =GPIOA_BASE
-///         str r1, [r0, #ODR]
-///         bx lr
-///     }
+///  @asm {
+///  // Custom fast path handling
+///  ldr r0, =GPIOA_BASE
+///  str r1, [r0, #ODR]
+///  bx lr
+///  }
 /// }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// Naked function: compiler generates no prologue/epilogue. (Interrupt Handler Codegen)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterruptAttr {
@@ -4763,28 +5197,34 @@ impl std::fmt::Display for InterruptAttr {
 
 /// Critical section attribute for functions that disable interrupts.
 ///
+
 /// This attribute marks functions that must run atomically with interrupts
 /// disabled. The compiler ensures proper interrupt save/restore around
 /// the function body.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @critical_section
 /// fn update_shared_counter(delta: Int) {
-///     // Interrupts are disabled here
-///     SHARED_COUNTER += delta;
+///  // Interrupts are disabled here
+///  SHARED_COUNTER += delta;
 /// }
 ///
+
 /// @critical_section(priority_mask: 0x10)
 /// fn update_with_partial_mask() {
-///     // Only interrupts below priority 0x10 are masked
-///     LOW_PRIORITY_DATA += 1;
+///  // Only interrupts below priority 0x10 are masked
+///  LOW_PRIORITY_DATA += 1;
 /// }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// Critical section attribute: disables interrupts within the annotated scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CriticalSectionAttr {
@@ -4841,35 +5281,40 @@ impl std::fmt::Display for CriticalSectionAttr {
 // =============================================================================
 // FRAMEWORK-AXIOM ATTRIBUTION
 //
+
 // `@framework(name, "citation")` marks an axiom or theorem as a trusted
 // postulate coming from an external formal-mathematics framework (Lurie's
 // Higher Topos Theory, Schreiber's Differential Cohesion, Connes's
 // reconstruction theorem, Petz classification, Arnold–Mather catastrophe
 // normal forms, Baez–Dolan tricategory coherence, etc.).
 //
+
 // Every `@framework` marker produces a typed entry in the compiler's
 // framework-axiom registry (`verum_smt::framework_registry`). The registry
 // drives two downstream features:
-//   * `verum audit --framework-axioms` — enumerates the trusted boundary
-//     of any proof, so external reviewers see exactly which external
-//     results are relied on.
-//   * `.verum-cert` export — certificates carry their framework-axiom
-//     dependency list, allowing Coq / Lean / Isabelle / Dedukti / Metamath
-//     consumers to replay the proof under their own axioms.
+//  * `verum audit --framework-axioms` — enumerates the trusted boundary
+//  of any proof, so external reviewers see exactly which external
+//  results are relied on.
+//  * `.verum-cert` export — certificates carry their framework-axiom
+//  dependency list, allowing Coq / Lean / Isabelle / Dedukti / Metamath
+//  consumers to replay the proof under their own axioms.
 //
+
 // Grammar: the existing generic attribute production
-//   attribute = identifier , [ '(' , attribute_args , ')' ]
+//  attribute = identifier , [ '(' , attribute_args , ')' ]
 // already accepts `@framework(lurie_htt, "HTT 6.2.2.7")`. This typed
 // extractor pulls a structured pair out of the generic `Attribute`.
 // =============================================================================
 
 /// Typed form of `@framework(name, "citation")`.
 ///
+
 /// `name` is the framework identifier (e.g. `lurie_htt`, `schreiber_dcct`,
 /// `connes_reconstruction`, `petz_classification`, `arnold_catastrophe`,
 /// `baez_dolan`). `citation` is a free-form string literal pointing at the
 /// specific theorem / section / page in the cited work.
 ///
+
 /// Attached to `axiom` or `theorem` declarations — or to a user-defined
 /// lemma that depends transitively on one of these external results and
 /// wants to make the dependency explicit.
@@ -4894,6 +5339,7 @@ impl FrameworkAttr {
 
     /// Try to extract a `FrameworkAttr` from a generic `Attribute`.
     ///
+
     /// Returns `None` when the attribute name is not `"framework"` or the
     /// argument shape does not match `(identifier, string_literal)`. A
     /// shape mismatch on a `@framework(...)` is a user error — the caller
@@ -4952,6 +5398,7 @@ impl std::fmt::Display for FrameworkAttr {
 // =============================================================================
 // FRAMEWORK BRIDGE TRANSLATION (VVA Task C7b enabler, )
 //
+
 // `@framework_translate(source, target, "<bridge-citation>")` annotates a
 // trusted-boundary axiom that bridges two Standard frameworks. Used by
 // the OC bridges in `core/theory_interop/bridges/<source>_to_<target>.vr`
@@ -4959,21 +5406,25 @@ impl std::fmt::Display for FrameworkAttr {
 // inter-framework translation axioms separately from regular intra-
 // framework `@framework(name, "citation")` axioms.
 //
+
 // Replaces the V1 workaround of using `@framework(<source>, "Bridge ...")`
 // to mark cross-framework axioms — that overload conflated intra- and
 // inter-framework attribution. The typed `@framework_translate` makes
 // the source → target intent first-class.
 //
+
 // Grammar shape: `@framework_translate(<source-ident>, <target-ident>, "<citation>")`.
 // =============================================================================
 
 /// VVA Task C7b — typed cross-framework bridge attribution.
 ///
+
 /// Marks a trusted-boundary axiom whose role is to translate between
 /// two Standard frameworks. Both `source` and `target` are framework
 /// identifiers (matching files under `core/math/frameworks/<id>.vr`).
 /// `citation` is a free-form string explaining the bridge image.
 ///
+
 /// Used by the cross-framework bridges in
 /// `core/theory_interop/bridges/<source>_to_<target>.vr`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5069,18 +5520,21 @@ impl std::fmt::Display for FrameworkTranslateAttr {
 // =============================================================================
 // PROGRAM EXTRACTION (V2, )
 //
+
 // `@extract`, `@extract_witness`, `@extract_contract` annotate a constructive
 // proof / theorem / function with the program-extraction surface defined in
 // `verum_smt::program_extraction` (Curry-Howard correspondence). The
 // attributes carry the extraction target so the elaborator can dispatch
 // to the correct backend (Verum native code / OCaml / Lean / Coq).
 //
-//   @extract                      → extract the full constructive program
-//   @extract(verum)               → same, explicit Verum target
-//   @extract(lean)                → extract to Lean
-//   @extract_witness(coq)         → extract only the existential witness
-//   @extract_contract             → emit runtime contract from refinement
+
+//  @extract → extract the full constructive program
+//  @extract(verum) → same, explicit Verum target
+//  @extract(lean) → extract to Lean
+//  @extract_witness(coq) → extract only the existential witness
+//  @extract_contract → emit runtime contract from refinement
 //
+
 // V1 (statement-only): the attributes round-trip through the typed-attr
 // catalogue; the elaborator is responsible for invoking the backend.
 // V2 (`verum extract --to <lang>`) is a CLI follow-up tracked separately.
@@ -5089,6 +5543,7 @@ impl std::fmt::Display for FrameworkTranslateAttr {
 /// — target language for `@extract` / `@extract_witness` /
 /// `@extract_contract`.
 ///
+
 /// Mirrors `verum_smt::program_extraction::ExtractionTarget` shape so
 /// the elaborator can map directly when dispatching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5136,6 +5591,7 @@ impl std::fmt::Display for ExtractTarget {
 /// — `@extract` / `@extract(<target>)` / `@extract(realize="fn_name")`
 /// typed attribute.
 ///
+
 /// Marks a constructive proof or theorem for full program extraction
 /// per Curry-Howard. Default target is `Verum` when no argument is
 /// given. The optional `realize="<name>"` kwarg routes the extracted
@@ -5164,10 +5620,10 @@ impl ExtractAttr {
 
     /// Try to extract an `ExtractAttr` from a generic `Attribute`.
     /// Accepts:
-    ///   * `@extract` (defaults to Verum, no realize binding).
-    ///   * `@extract(<ident>)` where `<ident>` ∈ {verum,ocaml,lean,coq}.
-    ///   * `@extract(realize="fn_name")` — Verum target, native binding.
-    ///   * `@extract(<ident>, realize="fn_name")` — explicit target + native binding.
+    ///  * `@extract` (defaults to Verum, no realize binding).
+    ///  * `@extract(<ident>)` where `<ident>` ∈ {verum,ocaml,lean,coq}.
+    ///  * `@extract(realize="fn_name")` — Verum target, native binding.
+    ///  * `@extract(<ident>, realize="fn_name")` — explicit target + native binding.
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
         if !attr.is_named("extract") {
             return Maybe::None;
@@ -5200,6 +5656,7 @@ impl std::fmt::Display for ExtractAttr {
 /// — `@extract_witness` / `@extract_witness(<target>)` /
 /// `@extract_witness(realize="fn_name")`.
 ///
+
 /// Extracts the existential witness from a constructive existence
 /// proof. Body of the proof is discarded; only the witness term is
 /// materialised in the target language. The optional `realize=`
@@ -5256,6 +5713,7 @@ impl std::fmt::Display for ExtractWitnessAttr {
 /// — `@extract_contract` / `@extract_contract(<target>)` /
 /// `@extract_contract(realize="fn_name")`.
 ///
+
 /// Emits a runtime contract from a refinement-typed function so the
 /// extracted code preserves the refinement as a runtime check
 /// (rather than the static proof being erased entirely). The
@@ -5311,10 +5769,10 @@ impl std::fmt::Display for ExtractContractAttr {
 
 /// Shared helper: pull the `(ExtractTarget, realize-binding)` pair
 /// from an `@extract*` attribute's args. Accepted shapes:
-///   * `@extract` (no args) → `(Verum, None)`.
-///   * `@extract(<ident>)` → `(<target>, None)`.
-///   * `@extract(realize="name")` → `(Verum, Some("name"))`.
-///   * `@extract(<ident>, realize="name")` → `(<target>, Some("name"))`.
+///  * `@extract` (no args) → `(Verum, None)`.
+///  * `@extract(<ident>)` → `(<target>, None)`.
+///  * `@extract(realize="name")` → `(Verum, Some("name"))`.
+///  * `@extract(<ident>, realize="name")` → `(<target>, Some("name"))`.
 /// Anything else → `Maybe::None`.
 fn parse_extract_args(attr: &Attribute) -> Maybe<(ExtractTarget, Maybe<Text>)> {
     use crate::expr::{BinOp, Expr, ExprKind};
@@ -5431,8 +5889,9 @@ fn extract_target_from_attr_args(attr: &Attribute) -> Maybe<ExtractTarget> {
 }
 
 // =============================================================================
-// ENACTMENT ATTRIBUTION 
+// ENACTMENT ATTRIBUTION
 //
+
 // `@enact(epsilon = "ε_prove")` tags a function / theorem / lemma / axiom
 // declaration with a Diakrisis primitive act on the Actic (DC) side of
 // the OC/DC duality (108.T). Every proof assistant before Verum ships
@@ -5440,6 +5899,7 @@ fn extract_target_from_attr_args(attr: &Attribute) -> Maybe<ExtractTarget> {
 // exposes the dependency-centric (DC) coordinate of a function as
 // first-class audit data.
 //
+
 // The seven canonical primitives — ε_math, ε_compute, ε_observe,
 // ε_prove, ε_decide, ε_translate, ε_construct — are defined in
 // `core.action.primitives` and documented in User-defined
@@ -5447,19 +5907,22 @@ fn extract_target_from_attr_args(attr: &Attribute) -> Maybe<ExtractTarget> {
 // supported by this attribute in Phase 5 E3; they are tracked through
 // the per-function enactment inferred from the body.
 //
+
 // Grammar shape: `@enact(epsilon = <string-literal>)`.
 //
+
 // Downstream consumers:
-//   * `verum audit --epsilon` — enumerates the ε-distribution across
-//     the corpus, parallel to `verum audit --framework-axioms` for
-//     the OC side.
-//   * `core.action.verify.verify_epsilon` — compile-time consistency
-//     check that the declared ε matches the enactment inferred from
-//     the function body (Phase 5 E3b).
+//  * `verum audit --epsilon` — enumerates the ε-distribution across
+//  the corpus, parallel to `verum audit --framework-axioms` for
+//  the OC side.
+//  * `core.action.verify.verify_epsilon` — compile-time consistency
+//  check that the declared ε matches the enactment inferred from
+//  the function body (Phase 5 E3b).
 // =============================================================================
 
 /// Typed form of `@enact(epsilon = "<primitive>")`.
 ///
+
 /// The primitive is one of the seven Diakrisis ε-tags .
 /// Unicode (`ε_prove`) and ASCII (`epsilon_prove`) spellings are both
 /// accepted at parse time; the typed form stores the canonical Unicode
@@ -5483,6 +5946,7 @@ impl EnactAttr {
     /// returns the canonical Unicode form, or `None` if the input
     /// does not match a known primitive.
     ///
+
     /// Mirrors `core.action.primitives.primitive_from_text` but lives
     /// in AST-layer because the attribute needs to canonicalise at
     /// parse time before any stdlib fn has been compiled.
@@ -5507,17 +5971,20 @@ impl EnactAttr {
     /// canonical form for `@enact(epsilon = "...")`, complementing the
     /// 8 primitive names handled by `canonicalise_primitive`).
     ///
+
     /// Accepted ordinal-coordinate shapes (foundation-neutral, in
     /// Cantor-normal-form prefix below ε_0):
     ///
-    ///   • Pure finite      "0", "1", "2", …
-    ///   • Pure ω           "ω" or "omega"
-    ///   • ω-plus-finite    "ω+k", "ω + k", "omega+k", "omega + k"
-    ///   • ω·n              "ω·n", "ω*n", "omega*n"
-    ///   • ω·n+k            "ω·n+k", "omega*n+k", optional spaces
-    ///   • ω² / ω^2         "ω²", "ω^2", "omega_squared", "omega^2"
-    ///   • Ω                "Ω" or "Omega"
+
+    ///  • Pure finite "0", "1", "2", …
+    ///  • Pure ω "ω" or "omega"
+    ///  • ω-plus-finite "ω+k", "ω + k", "omega+k", "omega + k"
+    ///  • ω·n "ω·n", "ω*n", "omega*n"
+    ///  • ω·n+k "ω·n+k", "omega*n+k", optional spaces
+    ///  • ω² / ω^2 "ω²", "ω^2", "omega_squared", "omega^2"
+    ///  • Ω "Ω" or "Omega"
     ///
+
     /// White-space within the string is collapsed during validation.
     /// Returns the canonical (Unicode-spelled) form on success.
     pub fn canonicalise_ordinal(raw: &str) -> Option<String> {
@@ -5602,6 +6069,7 @@ impl EnactAttr {
 
     /// Try to extract an `EnactAttr` from a generic `Attribute`.
     ///
+
     /// Returns `None` when the attribute name is not `"enact"` or the
     /// argument shape does not match `epsilon = <string_literal>`. The
     /// parser accepts named-argument form `epsilon = "..."`; downstream
@@ -5620,10 +6088,10 @@ impl EnactAttr {
         use crate::expr::{BinOp, Expr, ExprKind};
         use crate::literal::{LiteralKind, StringLit};
         // Accepted shapes (all equivalent):
-        //   1. `@enact(epsilon: "ε_prove")` — parser lowers `key: value`
-        //      attribute named-args to `Binary(Assign, Path("epsilon"), Literal)`.
-        //   2. `@enact(epsilon = "ε_prove")` — same lowering via Binary Assign.
-        //   3. `@enact("ε_prove")` — bare positional string literal.
+        //  1. `@enact(epsilon: "ε_prove")` — parser lowers `key: value`
+        //  attribute named-args to `Binary(Assign, Path("epsilon"), Literal)`.
+        //  2. `@enact(epsilon = "ε_prove")` — same lowering via Binary Assign.
+        //  3. `@enact("ε_prove")` — bare positional string literal.
         // All three land in `args[0]`; walk the shape and pull the string.
         let raw_opt: Option<Text> = match args.get(0) {
             // Named form: `epsilon: "..."` or `epsilon = "..."`.
@@ -5697,12 +6165,14 @@ impl std::fmt::Display for EnactAttr {
 /// strategies / typed attributes. Without this annotation the kernel
 /// runs in VVA-baseline mode for the affected scope.
 ///
+
 /// Per the VVA rollout policy:
-///   • Year 0–2: opt-in only (`@require_extension(vfe_N)`).
-///   • Year 2–4: extensions become default; opt-out via
-///                `@disable_extension(vfe_N)`.
-///   • Year 4+:   opt-out is removed; extension is a hard requirement.
+///  • Year 0–2: opt-in only (`@require_extension(vfe_N)`).
+///  • Year 2–4: extensions become default; opt-out via
+///  `@disable_extension(vfe_N)`.
+///  • Year 4+: opt-out is removed; extension is a hard requirement.
 ///
+
 /// `kind` discriminates require vs disable; `extension` is the
 /// foundation-neutral identifier (`vfe_1`, `vfe_2`, …, `vfe_10`,
 /// `vfe_plus_1`, …) of the extension being toggled.
@@ -5768,8 +6238,9 @@ impl ExtensionRequirementAttr {
 
     /// Extract from a generic Attribute. Accepts both forms:
     ///
-    ///   @require_extension(vfe_1)
-    ///   @disable_extension(vfe_2)
+
+    ///  @require_extension(vfe_1)
+    ///  @disable_extension(vfe_2)
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
         let kind = match attr.name.as_str() {
             "require_extension" => ExtensionToggleKind::Require,
@@ -5832,6 +6303,7 @@ impl std::fmt::Display for ExtensionRequirementAttr {
 
 /// `@accessibility(λ)` typed attribute.
 ///
+
 /// Closes Diakrisis Axi-4's λ-accessibility premise per VVA
 /// §A.Z.1 defect inventory. The kernel cannot internally
 /// prove that the metaisation 2-functor M is λ-accessible
@@ -5841,15 +6313,17 @@ impl std::fmt::Display for ExtensionRequirementAttr {
 /// (`verum audit --accessibility`) cross-reference against
 /// the framework axiom registry.
 ///
+
 /// Surface forms:
-///   * `@accessibility(omega)` — λ = ω (countable accessibility,
-///     Adamek-Rosicky standard).
-///   * `@accessibility(omega_1)` — first uncountable.
-///   * `@accessibility("omega+1")` — string literal for any
-///     ordinal expression the parser admits.
-///   * `@accessibility(0)` — finite presentability (admits
-///     trivial λ-accessible structures).
+///  * `@accessibility(omega)` — λ = ω (countable accessibility,
+///  Adamek-Rosicky standard).
+///  * `@accessibility(omega_1)` — first uncountable.
+///  * `@accessibility("omega+1")` — string literal for any
+///  ordinal expression the parser admits.
+///  * `@accessibility(0)` — finite presentability (admits
+///  trivial λ-accessible structures).
 ///
+
 /// `lambda` carries the accessibility-cardinal expression as
 /// a canonical Text token. The kernel does NOT validate
 /// ordinal arithmetic here — that lives in the audit pass +
@@ -5869,9 +6343,9 @@ impl AccessibilityAttr {
     }
 
     /// Validate an accessibility ordinal token. Accepts:
-    ///   * `omega`, `omega_<digits>` (subscripted ordinal).
-    ///   * `omega+<digits>` / `omega_<digits>+<digits>` (sums).
-    ///   * Pure digits (finite cardinals).
+    ///  * `omega`, `omega_<digits>` (subscripted ordinal).
+    ///  * `omega+<digits>` / `omega_<digits>+<digits>` (sums).
+    ///  * Pure digits (finite cardinals).
     /// Returns the canonical lowercase form on success;
     /// `None` for malformed input.
     pub fn canonicalise_lambda(raw: &str) -> Option<String> {
@@ -5908,8 +6382,9 @@ impl AccessibilityAttr {
 
     /// Extract from a generic Attribute. Accepts both forms:
     ///
-    ///   @accessibility(omega)
-    ///   @accessibility("omega+1")
+
+    ///  @accessibility(omega)
+    ///  @accessibility("omega+1")
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
         if attr.name.as_str() != "accessibility" {
             return Maybe::None;
@@ -5966,23 +6441,27 @@ impl std::fmt::Display for AccessibilityAttr {
 // =============================================================================
 // OWL 2 ATTRIBUTION FAMILY (Phase 3 C8 V1)
 //
+
 // Vocabulary-preserving typed attributes for the OWL 2 Direct Semantics
 // surface. Each attribute installs (1) a `CoreTerm::FrameworkAxiom`
 // reference into `core.math.frameworks.owl2_fs.*`, (2) a `@verify(...)`
 // obligation Table, and (3) a round-trip marker consumed
 // by `verum export --to owl2-fs` (B5, deferred).
 //
-// V1 ships four attributes covering the most common OWL 2 surface forms;
+
+// ships four attributes covering the most common OWL 2 surface forms;
 // V2 adds the richer `@owl2_property(domain = ..., range = ...,
 // characteristic = [...], inverse_of = ...)` named-arg form per §21.6.
 //
-//   @owl2_class[(semantics = "OpenWorld" | "ClosedWorld")]
-//   @owl2_subclass_of(<class_name>)
-//   @owl2_disjoint_with([<class_name>, ...])
-//   @owl2_characteristic("Transitive" | "Symmetric" | "Asymmetric"
-//                       | "Reflexive" | "Irreflexive" | "Functional"
-//                       | "InverseFunctional")
+
+//  @owl2_class[(semantics = "OpenWorld" | "ClosedWorld")]
+//  @owl2_subclass_of(<class_name>)
+//  @owl2_disjoint_with([<class_name>, ...])
+//  @owl2_characteristic("Transitive" | "Symmetric" | "Asymmetric"
+//  | "Reflexive" | "Irreflexive" | "Functional"
+//  | "InverseFunctional")
 //
+
 // All four follow the FrameworkAttr / EnactAttr pattern: a struct with
 // a `from_attribute(attr: &Attribute) -> Maybe<Self>` parser. Syntax
 // errors (wrong arg count, unknown enum variant) return Maybe::None;
@@ -5990,7 +6469,7 @@ impl std::fmt::Display for AccessibilityAttr {
 // that case rather than silently dropping the attribute.
 // =============================================================================
 
-/// Open-world / closed-world semantics flag.  OWL 2 DS is normally
+/// Open-world / closed-world semantics flag. OWL 2 DS is normally
 /// open-world; Verum's typed refinement system is closed-world.
 /// picks CWA as the default and admits OWA only when
 /// the user explicitly opts in.
@@ -6074,7 +6553,7 @@ impl Spanned for Owl2ClassAttr {
 }
 
 /// `@owl2_subclass_of(<class_name>)` — marks the decorated type as a
-/// subclass of the named OWL 2 class.  The class name resolves through
+/// subclass of the named OWL 2 class. The class name resolves through
 /// the surrounding module's import graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Owl2SubClassOfAttr {
@@ -6115,7 +6594,7 @@ impl Spanned for Owl2SubClassOfAttr {
 }
 
 /// `@owl2_disjoint_with([<class_name>, ...])` — marks the decorated
-/// type as disjoint from each of the listed OWL 2 classes.  Lowers to
+/// type as disjoint from each of the listed OWL 2 classes. Lowers to
 /// a `DisjointClasses(self, c1, c2, ...)` axiom invocation per
 /// Shkotin Table 5.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6138,8 +6617,8 @@ impl Owl2DisjointWithAttr {
             Maybe::None    => return Maybe::None,
         };
         // Accept two equivalent shapes:
-        //   1. `@owl2_disjoint_with([Foo, Bar])` — single Array list arg
-        //   2. `@owl2_disjoint_with(Foo, Bar)`   — multiple positional args
+        //  1. `@owl2_disjoint_with([Foo, Bar])` — single Array list arg
+        //  2. `@owl2_disjoint_with(Foo, Bar)` — multiple positional args
         // The parser surfaces (1) as a single ExprKind::Array(ArrayExpr::List)
         // and (2) as multiple Path / Literal args; both lower to the
         // same disjoint_classes set. Repeat-form arrays `[x; n]` are
@@ -6339,14 +6818,17 @@ fn parse_class_name_arg(arg: &crate::expr::Expr) -> Option<Text> {
 // OWL 2 ATTRIBUTION FAMILY — Full §21.6 surface (Phase 3 C8 V1 closeout)
 // =============================================================================
 //
+
 // V1+ extension covering the three remaining attributes from the
 // catalogue:
 //
-//   @owl2_property(domain = ..., range = ...,
-//                  characteristic = [...], inverse_of = ...)
-//   @owl2_equivalent_class(<class_expr>)
-//   @owl2_has_key(<property>, ...)
+
+//  @owl2_property(domain = ..., range = ...,
+//  characteristic = [...], inverse_of = ...)
+//  @owl2_equivalent_class(<class_expr>)
+//  @owl2_has_key(<property>, ...)
 //
+
 // These complete the four-attribute V1 set (Owl2ClassAttr,
 // Owl2SubClassOfAttr, Owl2DisjointWithAttr, Owl2CharacteristicAttr)
 // shipped earlier in this file. Together the seven attributes round-trip
@@ -6355,6 +6837,7 @@ fn parse_class_name_arg(arg: &crate::expr::Expr) -> Option<Text> {
 
 /// `@owl2_property(domain = X, range = Y[, characteristic = [Trans, Sym, ...]][, inverse_of = Foo])`
 ///
+
 /// Marks a Verum function as an OWL 2 ObjectProperty (or DataProperty)
 /// with explicit domain and range types and an optional list of
 /// characteristic flags + an optional inverse-property reference.
@@ -6494,6 +6977,7 @@ impl Spanned for Owl2EquivalentClassAttr {
 /// composed of the listed properties; two NamedIndividuals agreeing on
 /// every key property must be the same individual.
 ///
+
 /// The NAMED restriction means this constraint applies only to
 /// `NamedIndividual`s, not anonymous individuals — a deliberate OWL 2
 /// design decision per Shkotin §2.3.5; routes HasKey
@@ -6639,21 +7123,24 @@ fn parse_named_characteristic_list_arg(
 // QUANTITATIVE TYPE THEORY (Atkey QTT — Phase 3 C5 V1)
 // =============================================================================
 //
+
 // Atkey 2018 / McBride 2016 QTT: every binder carries a **quantity**
 // `q ∈ {0, 1, ω}` controlling how many times its body may use the
 // bound variable. The three levels:
 //
-//   q = 0  — the variable is *erased* at runtime. Only type-level
-//            information; the variable may NOT appear in computational
-//            positions. Use case: phantom indices, ghost state,
-//            spec-only parameters.
-//   q = 1  — the variable is *linear*. Body must use it exactly once
-//            (no double-spend, no leak). Use case: file handles,
-//            mutexes, capabilities.
-//   q = ω  — the variable is *unrestricted*. Body may use it any
-//            number of times including zero. This is the standard
-//            functional-programming default.
+
+//  q = 0 — the variable is *erased* at runtime. Only type-level
+//  information; the variable may NOT appear in computational
+//  positions. Use case: phantom indices, ghost state,
+//  spec-only parameters.
+//  q = 1 — the variable is *linear*. Body must use it exactly once
+//  (no double-spend, no leak). Use case: file handles,
+//  mutexes, capabilities.
+//  q = ω — the variable is *unrestricted*. Body may use it any
+//  number of times including zero. This is the standard
+//  functional-programming default.
 //
+
 // chooses ω as the kernel default — without an explicit
 // quantity annotation a binder is unrestricted. The opt-in form is
 // `@quantity(0)` / `@quantity(1)` / `@quantity(omega)` per the
@@ -6661,11 +7148,13 @@ fn parse_named_characteristic_list_arg(
 // future extension once the parser accepts numeric and Greek-letter
 // attribute names.
 //
+
 // Diagnostics (issued by the linearity-tracking pass in verum_types):
-//   E_LINEAR_DOUBLE_USE    — q=1 var referenced more than once
-//   E_LINEAR_NEVER_USED    — q=1 var never referenced (must be exactly once)
-//   E_ERASED_AT_RUNTIME    — q=0 var appears in a computational position
+//  E_LINEAR_DOUBLE_USE — q=1 var referenced more than once
+//  E_LINEAR_NEVER_USED — q=1 var never referenced (must be exactly once)
+//  E_ERASED_AT_RUNTIME — q=0 var appears in a computational position
 //
+
 // V1 scope (this commit): typed AST surface (`Quantity` enum +
 // `QuantityAttr` typed attribute). The linearity-tracking pass that
 // raises the three diagnostics is a follow-up — V1 lets users
@@ -6803,41 +7292,47 @@ impl std::fmt::Display for QuantityAttr {
 /// **Documentation attribute** — `@doc("...")` carrying structured
 /// Markdown body + parsed cross-references.
 ///
+
 /// Verum's documentation infrastructure has historically lived in
 /// the `verum doc` CLI command, which parses `///` and `//!` comments
-/// from source at HTML-generation time.  Promoting documentation to
+/// from source at HTML-generation time. Promoting documentation to
 /// a first-class typed attribute unlocks:
 ///
-///   - **AST-level access**: doc generators read structured data
-///     instead of re-parsing source.
-///   - **Cross-reference resolution at compile time**: every `[Foo]`
-///     link is checked against the symbol table; broken refs are
-///     diagnostics, not silent HTML failures.
-///   - **LSP rich hover**: IDEs show parsed Markdown with resolved
-///     types instead of raw comment text.
-///   - **Doc-tests**: code blocks marked `@verum` extract as runnable
-///     test fixtures via the `verum test --doc` audit gate.
-///   - **Translatable docs**: `@doc(en, "...")` / `@doc(ru, "...")`
-///     carries language-tagged variants; doc generators select per
-///     user locale.
+
+///  - **AST-level access**: doc generators read structured data
+///  instead of re-parsing source.
+///  - **Cross-reference resolution at compile time**: every `[Foo]`
+///  link is checked against the symbol table; broken refs are
+///  diagnostics, not silent HTML failures.
+///  - **LSP rich hover**: IDEs show parsed Markdown with resolved
+///  types instead of raw comment text.
+///  - **Doc-tests**: code blocks marked `@verum` extract as runnable
+///  test fixtures via the `verum test --doc` audit gate.
+///  - **Translatable docs**: `@doc(en, "...")` / `@doc(ru, "...")`
+///  carries language-tagged variants; doc generators select per
+///  user locale.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @doc("Returns the factorial of `n`.")
 /// fn factorial(n: Int{>= 0}) -> Int { ... }
 ///
+
 /// @doc(
-///     "Verifies the substitution lemma.\n\
-///      \n\
-///      See [`subst_preserves_typing`] for the formal statement.\n\
-///      \n\
-///      ```verum\n\
-///      apply subst_preserves_typing(ctx, term, replacement);\n\
-///      ```"
+///  "Verifies the substitution lemma.\n\
+///  \n\
+///  See [`subst_preserves_typing`] for the formal statement.\n\
+///  \n\
+///  ```verum\n\
+///  apply subst_preserves_typing(ctx, term, replacement);\n\
+///  ```"
 /// )
 /// theorem subst_lemma_corollary() ensures true { ... }
 ///
+
 /// // Language-tagged form (future):
 /// @doc(en, "English summary")
 /// @doc(ru, "Русское описание")
@@ -6845,11 +7340,11 @@ impl std::fmt::Display for QuantityAttr {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocAttr {
-    /// Raw Markdown body of the documentation.  Pre-cross-reference
+    /// Raw Markdown body of the documentation. Pre-cross-reference
     /// resolution; structured rendering happens at doc-generation
     /// or LSP-hover time.
     pub markdown: Text,
-    /// Optional language tag for translated docs.  `None` for the
+    /// Optional language tag for translated docs. `None` for the
     /// canonical (English) form.
     pub language: Maybe<Text>,
     /// Source span of the `@doc(...)` attribute.
@@ -6894,10 +7389,12 @@ impl DocAttr {
 
     /// Try to construct from a generic `@doc(...)` attribute.
     ///
+
     /// Accepted shapes:
-    ///   - `@doc("text")` — canonical form, no language tag.
-    ///   - `@doc(lang, "text")` — language-tagged.
+    ///  - `@doc("text")` — canonical form, no language tag.
+    ///  - `@doc(lang, "text")` — language-tagged.
     ///
+
     /// Returns `Maybe::None` for non-doc attributes or malformed
     /// shapes (the caller's diagnostic pass surfaces malformed
     /// attributes separately).

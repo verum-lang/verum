@@ -3,19 +3,22 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.5 (DST)
 //
+
 // After a simulated power loss + recovery, the harness asks the
 // oracle: "given the op-stream we recorded and the schedule of
 // faults that fired, what state SHOULD the recovered database
 // hold?"
 //
+
 // Three invariant classes:
 //
-//   * `Durability`  — every op preceding the last successful Commit
-//                      MUST be visible after recovery.
-//   * `Atomicity`   — every op AFTER the last successful Commit
-//                      MUST NOT be visible (no torn writes).
-//   * `Isolation`   — readers SHOULD see snapshot-of-Commit, never
-//                      a partially-applied tx state.
+
+//  * `Durability` — every op preceding the last successful Commit
+//  MUST be visible after recovery.
+//  * `Atomicity` — every op AFTER the last successful Commit
+//  MUST NOT be visible (no torn writes).
+//  * `Isolation` — readers SHOULD see snapshot-of-Commit, never
+//  a partially-applied tx state.
 // =============================================================================
 
 module core.database.sqlite.native.dst.oracle;

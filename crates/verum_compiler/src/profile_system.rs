@@ -1,15 +1,19 @@
 //! Language Profile System
 //!
+
 //! Three profiles for progressive complexity:
 //! - **Application**: Safe, productive, full checks. VBC-interpretable.
 //! - **Systems**: Performance-critical, optional unsafe. NOT VBC-interpretable.
 //! - **Research**: Experimental features, dependent types. VBC-interpretable.
 //!
+
 //! # VBC Interpretability
 //!
+
 //! The **Application** and **Research** profiles produce code that can be executed
 //! by the VBC interpreter (Tier 0). This enables rapid development iteration.
 //!
+
 //! The **Systems** profile produces code that is **NOT interpretable** by VBC.
 //! VBC serves only as an intermediate representation for systems profile code.
 //! Systems code must be compiled to native code via AOT (Tier 1) before execution.
@@ -19,13 +23,16 @@
 //! - Device drivers
 //! - Low-level system programming
 //!
+
 //! # No-libc Linking
 //!
+
 //! All profiles use Verum's self-contained runtime without libc dependency:
 //! - **Linux**: Direct syscalls (stable ABI)
 //! - **macOS**: libSystem.B.dylib only
 //! - **Windows**: ntdll.dll + kernel32.dll only
 //!
+
 //! Language Profile System (Compilation Pipeline Phase):
 //! Three profiles control progressive complexity in the compilation pipeline.
 //! Application profile enables all safety checks and is VBC-interpretable for
@@ -85,17 +92,20 @@ impl Profile {
 
     /// Check if this profile allows VBC interpretation.
     ///
+
     /// # VBC Interpretability Rules
     ///
+
     /// - **Application**: VBC-interpretable (Tier 0 execution supported)
     /// - **Systems**: NOT interpretable (VBC is intermediate IR only, AOT required)
     /// - **Research**: VBC-interpretable (Tier 0 execution supported)
     ///
+
     /// Systems profile code cannot be interpreted because:
     /// 1. It may use raw pointers and unsafe operations not supported by interpreter
     /// 2. It may require direct hardware access (memory-mapped I/O, interrupts)
     /// 3. It is intended for embedded/OS kernel development where interpretation
-    ///    is not meaningful
+    ///  is not meaningful
     /// 4. VBC serves only as a portable IR for cross-compilation, not execution
     pub fn is_vbc_interpretable(&self) -> bool {
         match self {
@@ -107,6 +117,7 @@ impl Profile {
 
     /// Check if this profile requires AOT compilation for execution.
     ///
+
     /// Systems profile MUST use AOT compilation - VBC is only an intermediate
     /// representation for portable cross-compilation.
     pub fn requires_aot(&self) -> bool {
@@ -119,6 +130,7 @@ impl Profile {
 
     /// Check if this profile allows embedded/bare-metal targets.
     ///
+
     /// Only Systems profile is appropriate for embedded development.
     pub fn allows_embedded(&self) -> bool {
         match self {
@@ -130,6 +142,7 @@ impl Profile {
 
     /// Get the default execution tier for this profile.
     ///
+
     /// - Application/Research: Tier 0 (Interpreter) for fast iteration
     /// - Systems: Tier 1 (AOT) required - no interpreter support
     pub fn default_execution_tier(&self) -> ExecutionTier {
@@ -313,6 +326,7 @@ impl LinkingConfigExt for NoLibcConfig {
 pub trait PlatformExt {
     /// Check if platform supports VBC interpretation.
     ///
+
     /// Embedded platforms cannot support VBC interpretation because:
     /// - No OS to provide syscalls
     /// - Limited memory for interpreter overhead

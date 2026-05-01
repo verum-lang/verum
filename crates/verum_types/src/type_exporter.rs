@@ -1,10 +1,13 @@
 //! Type Exporter for VBC Generation
 //!
+
 //! This module exports type information from the TypeChecker to VBC format,
 //! enabling stdlib to be distributed as VBC with full type metadata.
 //!
+
 //! # VBC Type Metadata Format
 //!
+
 //! The VBC format includes:
 //! - Type definitions (structs, enums, protocols)
 //! - Generic type parameters and bounds
@@ -12,8 +15,10 @@
 //! - Protocol implementations
 //! - Exported names and visibility
 //!
+
 //! # Usage
 //!
+
 //! ```ignore
 //! let exporter = TypeExporter::new(&type_checker);
 //! let metadata = exporter.export_module("core/maybe")?;
@@ -480,6 +485,7 @@ impl<'a> TypeExporter<'a> {
 
     /// Extract documentation text from a list of attributes.
     ///
+
     /// Looks for `@doc("...")` attributes and concatenates their string arguments
     /// into a single doc string. Multiple `@doc` attributes are joined with newlines.
     fn extract_doc_from_attributes(attrs: &[verum_ast::decl::Attribute]) -> Maybe<Text> {
@@ -578,14 +584,16 @@ impl<'a> TypeExporter<'a> {
 // Binary Serialization for ModuleExports
 // =============================================================================
 //
+
 // Custom binary format (tag-based, self-contained, no serde needed):
-//   - Magic: b"VTYP" (4 bytes)
-//   - Version: u8
-//   - String: u32 length + UTF-8 bytes
-//   - List<T>: u32 count + items
-//   - Type: u8 tag + variant-specific data
-//   - Bool: u8 (0/1)
+//  - Magic: b"VTYP" (4 bytes)
+//  - Version: u8
+//  - String: u32 length + UTF-8 bytes
+//  - List<T>: u32 count + items
+//  - Type: u8 tag + variant-specific data
+//  - Bool: u8 (0/1)
 //
+
 // =============================================================================
 
 const VTYP_MAGIC: &[u8; 4] = b"VTYP";

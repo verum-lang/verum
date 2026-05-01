@@ -1,10 +1,13 @@
 //! Pretty-printing (formatting) support for the Verum AST.
 //!
+
 //! This module provides the infrastructure to convert parsed AST back to
 //! well-formatted source code. It's used by the `verum fmt` command.
 //!
+
 //! # Features
 //!
+
 //! - Complete AST-to-source conversion for all node types
 //! - Configurable indentation (spaces vs tabs)
 //! - Configurable line width
@@ -67,6 +70,7 @@ impl Default for PrettyConfig {
 
 /// Pretty printer for Verum AST.
 ///
+
 /// This printer converts AST nodes back to well-formatted source code.
 #[derive(Debug)]
 pub struct PrettyPrinter {
@@ -2974,12 +2978,13 @@ impl PrettyPrinter {
 
     /// Formats a list of quantifier bindings for forall/exists expressions.
     ///
+
     /// Output forms:
-    /// - `x: Int`                    - type-based
-    /// - `x in items`                - collection-based
-    /// - `x: Int in 0..100`          - combined
-    /// - `x in items where x > 0`    - with guard
-    /// - `x: Int, y: Int`            - multiple bindings
+    /// - `x: Int` - type-based
+    /// - `x in items` - collection-based
+    /// - `x: Int in 0..100` - combined
+    /// - `x in items where x > 0` - with guard
+    /// - `x: Int, y: Int` - multiple bindings
     fn format_quantifier_bindings(&mut self, bindings: &[crate::expr::QuantifierBinding]) {
         for (i, binding) in bindings.iter().enumerate() {
             if i > 0 {

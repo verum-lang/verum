@@ -1,5 +1,6 @@
 //! Smoke test for `verum_lsp::lint_diagnostics::lint_diagnostics`.
 //!
+
 //! Builds a temp fixture project that triggers a lint rule, asks
 //! the function to lint the fixture's main.vr, and asserts at
 //! least one Diagnostic comes back.

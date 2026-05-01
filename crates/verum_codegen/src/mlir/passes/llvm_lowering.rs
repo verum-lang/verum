@@ -1,5 +1,6 @@
 //! LLVM dialect lowering pass.
 //!
+
 //! Converts Verum dialect operations to LLVM dialect for final code generation.
 
 use crate::mlir::error::Result;
@@ -42,6 +43,7 @@ impl VerumPass for LlvmLoweringPass {
         // LLVM lowering is handled by melior's conversion passes
         // This pass is a placeholder for any Verum-specific lowering logic
         //
+
         // The actual conversion is done via:
         // verum_mlir::pass::conversion::create_to_llvm()
 

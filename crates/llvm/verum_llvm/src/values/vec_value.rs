@@ -23,8 +23,10 @@ pub struct VectorValue<'ctx> {
 impl<'ctx> VectorValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and of type vector.
     pub unsafe fn new(vector_value: LLVMValueRef) -> Self {
         assert!(!vector_value.is_null());
@@ -36,16 +38,20 @@ impl<'ctx> VectorValue<'ctx> {
 
     /// Determines whether or not a `VectorValue` is a constant.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_vec_type = i8_type.vec_type(3);
     /// let i8_vec_zero = i8_vec_type.const_zero();
     ///
+
     /// assert!(i8_vec_zero.is_const());
     /// ```
     pub fn is_const(self) -> bool {

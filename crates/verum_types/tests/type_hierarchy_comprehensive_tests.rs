@@ -14,6 +14,7 @@
 )]
 // Comprehensive Type Hierarchy Tests
 //
+
 // This test suite validates the complete type hierarchy including:
 // - Subtyping relationships
 // - Type coercion rules
@@ -21,6 +22,7 @@
 // - Variance rules
 // - Reference type hierarchies (CBGR, checked, unsafe)
 //
+
 // Complete Verum type system: HM inference + refinement types + protocols + dependent types
 // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — Three-tier reference model
 

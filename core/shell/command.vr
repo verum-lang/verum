@@ -5,23 +5,26 @@
 // Dependencies: core, shell.{exec, result, context}, async.cancellation
 // =============================================================================
 //
+
 // `ShellCommand` is the materialised type of `sh#"..."` tagged literals. The
 // type-inference layer (verum_types::infer) maps every `sh` tag to
 // `ShellCommand`; the macro-expansion layer lowers the literal into a
 // `ShellCommand { text: <concat> }` constructor. Together they give the
 // surface its load-bearing semantics:
 //
-//   1. Constructing a `ShellCommand` does NOT execute anything — it just
-//      captures the (auto-escaped) text that will be passed to `sh()`.
-//   2. Executing happens through `cmd.run().await` (or the explicit
-//      `cmd.run_check().await` / `cmd.run_with_cancel(token).await` /
-//      `cmd.run_streaming().await` variants).
-//   3. The pipeline algebra (`|>`) plus `.pipe_to()` composes commands at
-//      the shell layer (`a | b`) without re-spawning intermediate shells —
-//      the joined text is a single `<shell> -c "<a> | <b>"` invocation.
-//   4. Mutation methods (`with_env`, `with_cwd`, `with_stdin`) return new
-//      `ShellCommand` instances; the type is value-semantic and Clone.
+
+//  1. Constructing a `ShellCommand` does NOT execute anything — it just
+//  captures the (auto-escaped) text that will be passed to `sh()`.
+//  2. Executing happens through `cmd.run().await` (or the explicit
+//  `cmd.run_check().await` / `cmd.run_with_cancel(token).await` /
+//  `cmd.run_streaming().await` variants).
+//  3. The pipeline algebra (`|>`) plus `.pipe_to()` composes commands at
+//  the shell layer (`a | b`) without re-spawning intermediate shells —
+//  the joined text is a single `<shell> -c "<a> | <b>"` invocation.
+//  4. Mutation methods (`with_env`, `with_cwd`, `with_stdin`) return new
+//  `ShellCommand` instances; the type is value-semantic and Clone.
 //
+
 // The pre-fix state of the world: `sh` tag mapped to `ShellCommand` in the
 // type inferencer but NO `ShellCommand` type was declared anywhere in core/
 // shell, so every script using `sh#"..."` literals had a phantom type whose
@@ -44,14 +47,17 @@ mount core.time.duration.{Duration};
 
 /// `ShellCommand` — the canonical surface returned by `sh#"..."` literals.
 ///
+
 /// Captures the FINAL text that would be passed to `<shell> -c "<text>"`:
 /// every `${expr}` interpolation in the source literal has already been
 /// auto-escaped via `ShellEscape` at lowering time, so the contained text
 /// is shell-safe by construction. There is no escape-check at execution
 /// time — that boundary was crossed when the literal was parsed.
 ///
+
 /// Use:
 ///
+
 /// ```verum
 /// let cmd: ShellCommand = sh#"echo hello, ${name}";
 /// let result = cmd.run().await;
@@ -89,6 +95,7 @@ implement ShellCommand {
     /// non-zero exits, signals) surface in the result; call `.ok()?` to
     /// convert to a `Result`.
     ///
+
     /// Honours the active `ShellContext` for cwd, env, mock, permissions.
     public async fn run(&self) -> ShellResult {
         core.shell.exec.sh(&self.text).await
@@ -97,6 +104,7 @@ implement ShellCommand {
     /// Like `run()` but returns `Result<ShellResult, ShellError>` so the
     /// `?` operator works at the call site:
     ///
+
     /// ```verum
     /// let r: ShellResult = sh#"echo ${msg}".run_check().await?;
     /// ```
@@ -108,19 +116,22 @@ implement ShellCommand {
     /// child process receives SIGTERM (graceful) and after the
     /// `grace` period (default 5s) SIGKILL (forced).
     ///
+
     /// Returns `Ok(ShellResult)` on normal completion, `Err(Cancelled
     /// { reason })` if the token fired before the child exited, or
     /// `Err(SpawnFailed)` if the child couldn't even start. The
     /// returned signature matches `sh_with_cancel` 1:1 so the `?`
     /// operator threads cleanly:
     ///
+
     /// ```verum
     /// let token = CancellationToken.new();
     /// let result = sh#"sleep 60"
-    ///     .run_with_cancel(&token, Duration.from_secs(2))
-    ///     .await?;
+    ///  .run_with_cancel(&token, Duration.from_secs(2))
+    ///  .await?;
     /// ```
     ///
+
     /// Pass `Duration.from_millis(0)` for the default 5-second
     /// grace period; pass any positive duration to override.
     public async fn run_with_cancel(
@@ -136,11 +147,12 @@ implement ShellCommand {
     /// and forwards through `run_with_cancel`. Default grace
     /// (5s) is used for the SIGTERM-to-SIGKILL window.
     ///
+
     /// ```verum
     /// // Hard kill after 30s if not done.
     /// let r = sh#"./long-running-script.sh"
-    ///     .run_with_timeout(Duration.from_secs(30))
-    ///     .await;
+    ///  .run_with_timeout(Duration.from_secs(30))
+    ///  .await;
     /// ```
     public async fn run_with_timeout(
         &self,
@@ -150,23 +162,25 @@ implement ShellCommand {
         self.run_with_cancel(&token, Duration.from_millis(0)).await
     }
 
-    /// Stream stdout LINE-BY-LINE as an async generator.  Each yield is
+    /// Stream stdout LINE-BY-LINE as an async generator. Each yield is
     /// `Result<Text, ShellError>` carrying one line (newline stripped).
     /// Use with `for await` for ergonomic consumption:
     ///
+
     /// ```verum
     /// for await line in sh#"git log --oneline".stream_lines() {
-    ///     match line {
-    ///         Ok(text) => print(&text),
-    ///         Err(e)   => eprintln(f"stream error: {e}"),
-    ///     }
+    ///  match line {
+    ///  Ok(text) => print(&text),
+    ///  Err(e) => eprintln(f"stream error: {e}"),
+    ///  }
     /// }
     /// ```
     ///
-    /// Backpressure: relies on the kernel pipe buffer.  For
+
+    /// Backpressure: relies on the kernel pipe buffer. For
     /// fast-producer / slow-consumer scenarios prefer
     /// `stream_lines_bounded(config)` which adds an explicit channel
-    /// + cancellation surface.  Forwards to `core.shell.stream.
+    /// + cancellation surface. Forwards to `core.shell.stream.
     /// stream_lines` — same auto-escape invariant: `self.text` is
     /// shell-safe by construction.
     public async fn* stream_lines(&self) -> Result<Text, ShellError> {
@@ -176,23 +190,26 @@ implement ShellCommand {
     }
 
     /// Stream stdout line-by-line through a BOUNDED channel with
-    /// explicit cancellation handle.  The returned `LineStream`
+    /// explicit cancellation handle. The returned `LineStream`
     /// carries:
     ///
-    ///   * `receiver: Receiver<Result<Text, ShellError>>` — the
-    ///     consumer endpoint with bounded backpressure
-    ///   * `job: Job` — the spawned producer task; `job.kill()`
-    ///     terminates the child process AND closes the channel
+
+    ///  * `receiver: Receiver<Result<Text, ShellError>>` — the
+    ///  consumer endpoint with bounded backpressure
+    ///  * `job: Job` — the spawned producer task; `job.kill()`
+    ///  terminates the child process AND closes the channel
     ///
+
     /// Use this variant when:
-    ///   * the producer is much faster than the consumer (e.g.
-    ///     `cat huge.log` piped to a slow downstream parser);
-    ///   * you need to `select!` over multiple streams;
-    ///   * you need to cancel the producer on a timeout / signal.
+    ///  * the producer is much faster than the consumer (e.g.
+    ///  `cat huge.log` piped to a slow downstream parser);
+    ///  * you need to `select!` over multiple streams;
+    ///  * you need to cancel the producer on a timeout / signal.
     ///
+
     /// ```verum
     /// let stream = sh#"tail -F /var/log/syslog"
-    ///     .stream_lines_bounded(StreamConfig.default()).await?;
+    ///  .stream_lines_bounded(StreamConfig.default()).await?;
     /// // ... consume from stream.receiver ...
     /// stream.job.kill();
     /// ```
@@ -209,6 +226,7 @@ implement ShellCommand {
     /// and `other.text` are already auto-escaped by their respective
     /// `sh#"..."` literals, so the concatenation is shell-safe.
     ///
+
     /// ```verum
     /// let lines = sh#"git log --oneline".pipe_to(sh#"head -n 10").run().await;
     /// ```

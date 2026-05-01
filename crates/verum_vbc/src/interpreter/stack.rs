@@ -1,5 +1,6 @@
 //! Call stack management.
 //!
+
 //! The call stack tracks the execution context for nested function calls.
 //! Each call creates a new [`CallFrame`] that stores:
 //! - Function being executed
@@ -7,8 +8,10 @@
 //! - Register base offset
 //! - Return information
 //!
+
 //! # Stack Limits
 //!
+
 //! The default stack limit is 1024 frames, which is sufficient for most
 //! programs while preventing stack overflow attacks.
 
@@ -21,6 +24,7 @@ pub const DEFAULT_MAX_DEPTH: usize = 1024;
 
 /// Single call frame on the stack.
 ///
+
 /// Each frame represents a function invocation with its own:
 /// - Instruction pointer (pc)
 /// - Register window (base offset)
@@ -73,6 +77,7 @@ impl CallFrame {
 
 /// Call stack for managing function invocations.
 ///
+
 /// The call stack is a LIFO structure that tracks the execution context
 /// for nested function calls. It provides:
 /// - Push/pop for call/return
@@ -109,6 +114,7 @@ impl CallStack {
 
     /// Pushes a new call frame.
     ///
+
     /// Returns the register base for the new frame.
     pub fn push_frame(
         &mut self,
@@ -146,6 +152,7 @@ impl CallStack {
 
     /// Pops the current call frame.
     ///
+
     /// Returns the popped frame.
     pub fn pop_frame(&mut self) -> InterpreterResult<CallFrame> {
         self.frames.pop().ok_or(InterpreterError::StackUnderflow)

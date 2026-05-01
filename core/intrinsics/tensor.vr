@@ -4,11 +4,14 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // This module provides tensor operations that map to VBC tensor opcodes.
 // All operations work on opaque TensorHandle values managed by the runtime.
 //
+
 // # Operations
 //
+
 // - Creation: tensor_new, tensor_fill, tensor_from_slice, tensor_from_array
 // - Factory: tensor_arange, tensor_linspace, tensor_eye, tensor_rand
 // - Shape: tensor_reshape, tensor_transpose, tensor_permute, tensor_squeeze
@@ -21,6 +24,7 @@
 // - Normalization: tensor_softmax, tensor_layer_norm, tensor_batch_norm, tensor_rms_norm
 // - Utility: tensor_clone, tensor_cast, tensor_contiguous, tensor_get_scalar
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 

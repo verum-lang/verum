@@ -14,9 +14,11 @@
 )]
 //! Comprehensive tests for Context Polymorphism AST support.
 //!
+
 //! Tests for context polymorphism: higher-order functions propagating contexts.
 //! Verifies context parameter generic params and context-aware function types.
 //!
+
 //! Tests the `GenericParamKind::Context` variant for context polymorphism
 //! which enables higher-order functions to propagate contexts from callbacks.
 

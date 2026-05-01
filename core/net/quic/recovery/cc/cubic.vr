@@ -5,45 +5,57 @@
 // Dependencies: core, core.time
 // =============================================================================
 //
+
 // CUBIC is a loss-based CC algorithm originally for TCP, adapted to
 // QUIC per RFC 9438. More aggressive than NewReno under moderate
 // loss on high-BDP paths: the cubic window-growth function starts
 // slow near the last loss event (W_max) and accelerates as the
 // sending rate diverges from W_max.
 //
+
 // # Key equations (RFC 9438 §4)
 //
-//   W_cubic(t) = C × (t - K)^3 + W_max
-//   K          = cbrt(W_max × (1 - β) / C)
+
+//  W_cubic(t) = C × (t - K)^3 + W_max
+//  K = cbrt(W_max × (1 - β) / C)
 //
-//   Constants:
-//     C = 0.4          (window-growth rate)
-//     β = 0.7          (multiplicative-decrease factor)
+
+//  Constants:
+//  C = 0.4 (window-growth rate)
+//  β = 0.7 (multiplicative-decrease factor)
 //
-//   Friendly region (reno-compatible):
-//     W_est(t) = W_max × β + 3 × ((1 - β) / (1 + β)) × (t / RTT)
-//     cwnd = max(W_cubic(t), W_est(t))
+
+//  Friendly region (reno-compatible):
+//  W_est(t) = W_max × β + 3 × ((1 - β) / (1 + β)) × (t / RTT)
+//  cwnd = max(W_cubic(t), W_est(t))
 //
+
 // # State machine
 //
-//   slow_start ──(cwnd ≥ ssthresh)──▶ avoidance (CUBIC)
-//   avoidance  ──(loss detected)────▶ recovery
-//   recovery   ──(ack past recovery_start)─▶ avoidance
+
+//  slow_start ──(cwnd ≥ ssthresh)──▶ avoidance (CUBIC)
+//  avoidance ──(loss detected)────▶ recovery
+//  recovery ──(ack past recovery_start)─▶ avoidance
 //
+
 // # Fast convergence (RFC 9438 §4.6)
 //
+
 // When a new loss event occurs and the current W_max < the
 // previous W_max (indicating a new flow joined the path), we
 // reduce the target window faster by applying an additional
 // 0.85× factor.
 //
+
 // # Implementation notes
 //
+
 // Cubic math in fixed-point is fiddly; this module uses plain
 // Float64 for clarity. A future optimisation pass (Phase 7) can
 // swap to integer arithmetic with the standard Newton-iteration
 // cube root for tighter determinism.
 //
+
 // =============================================================================
 
 module core.net.quic.recovery.cc.cubic;
@@ -138,7 +150,7 @@ implement Cubic {
     fn w_est_mss(&self, now: Instant) -> Float {
         let t = self.t_from_epoch(now);
         // Standard RFC 9438 §4.3:
-        //   W_est(t) = Wmax × β + 3 × ((1 − β) / (1 + β)) × (t / RTT)
+        //  W_est(t) = Wmax × β + 3 × ((1 − β) / (1 + β)) × (t / RTT)
         // We don't have RTT here directly — estimate via ack_count as
         // a proxy; real RTT feeds via `on_ack_received`.
         let reno_factor = 3.0 * ((1.0 - CUBIC_BETA) / (1.0 + CUBIC_BETA));
@@ -199,7 +211,7 @@ implement CongestionCtrl for Cubic {
                 target_mss
             };
 
-            // Per-ACK increment: (target - cwnd_mss) / cwnd_mss  (in MSS),
+            // Per-ACK increment: (target - cwnd_mss) / cwnd_mss (in MSS),
             // converted back to bytes.
             let inc_mss = (target - cur_cwnd_mss) / cur_cwnd_mss;
             let inc_bytes = inc_mss * (MAX_DATAGRAM_SIZE as Float);
@@ -299,8 +311,8 @@ fn cbrt(x: Float) -> Float {
     if x <= 0.0 { return 0.0; }
 
     // Seed: x^(1/3) ≈ x / 4 + 1 for x ∈ [1, 8]; refine via Newton:
-    //   y_{n+1} = y_n − (y_n^3 − x) / (3 × y_n^2)
-    //           = (2 × y_n + x / y_n^2) / 3
+    //  y_{n+1} = y_n − (y_n^3 − x) / (3 × y_n^2)
+    //  = (2 × y_n + x / y_n^2) / 3
     let mut y: Float = if x < 1.0 { 1.0 } else { x / 4.0 + 1.0 };
 
     let mut i: Int = 0;

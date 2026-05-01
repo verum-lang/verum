@@ -1,35 +1,44 @@
 //! Quote Macro Implementation - quote! and unquote! procedural macros
 //!
+
 //! This module provides the implementation of the quote! and unquote! macros
 //! for generating Verum code at compile-time within meta functions.
 //!
+
 //! Procedural macro support: quote! macro for AST construction in meta functions.
 //! Meta functions use quote! to generate Verum code at compile-time.
 //!
+
 //! # Overview
 //!
+
 //! The quote! macro allows meta functions to generate Verum code using
 //! quasi-quotation syntax with interpolation support:
 //!
+
 //! ```verum
 //! meta fn generate_getter(field: Text) -> TokenStream {
-//!     quote! {
-//!         fn get_#field(&self) -> &Self::#field {
-//!             &self.#field
-//!         }
-//!     }
+//!  quote! {
+//!  fn get_#field(&self) -> &Self::#field {
+//!  &self.#field
+//!  }
+//!  }
 //! }
 //! ```
 //!
+
 //! # Interpolation Syntax
 //!
+
 //! - `#ident` - Single interpolation (substitutes a variable)
 //! - `#(#items),*` - Repetition with comma separator
 //! - `#(#items)*` - Repetition without separator
 //! - `#(#items);+` - Repetition with semicolon (at least one)
 //!
+
 //! # Implementation Strategy
 //!
+
 //! Since Rust procedural macros cannot be used directly in the compiler,
 //! this module provides runtime equivalents that can be called from
 //! meta function execution.
@@ -41,31 +50,40 @@ use verum_common::{List, Text as QuoteText};
 
 /// Execute a quote! invocation at compile time
 ///
+
 /// This function is called by the meta function evaluator when it encounters
 /// a quote! expression. It takes the quoted AST expression and converts it
 /// to a TokenStream.
 ///
+
 /// # Arguments
 ///
+
 /// * `expr` - The AST expression to quote
 ///
+
 /// # Returns
 ///
+
 /// A TokenStream representing the quoted code
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_compiler::quote_macro::quote_expr;
 /// use verum_ast::{Expr, Span, expr::ExprKind};
 ///
+
 /// let expr = Expr::new(
-///     ExprKind::Path(verum_ast::ty::Path::single(
-///         verum_ast::ty::Ident::new("x", Span::default())
-///     )),
-///     Span::default()
+///  ExprKind::Path(verum_ast::ty::Path::single(
+///  verum_ast::ty::Ident::new("x", Span::default())
+///  )),
+///  Span::default()
 /// );
 ///
+
 /// let ts = quote_expr(&expr);
 /// assert!(!ts.is_empty());
 /// ```
@@ -75,31 +93,40 @@ pub fn quote_expr(expr: &Expr) -> TokenStream {
 
 /// Execute a quote! invocation with a template string
 ///
+
 /// This parses the template string and expands it with the given context.
 ///
+
 /// # Arguments
 ///
+
 /// * `template` - The template string containing Verum code with interpolations
 /// * `context` - The context containing variable bindings for interpolation
 ///
+
 /// # Returns
 ///
+
 /// Result containing the expanded TokenStream or an error
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_compiler::quote_macro::quote_with_context;
 /// use verum_compiler::quote::MetaContext;
 /// use verum_compiler::quote::ident;
 /// use verum_ast::Span;
 ///
+
 /// let mut ctx = MetaContext::new();
 /// ctx.bind_single(
-///     "name".into(),
-///     ident("my_var", Span::default())
+///  "name".into(),
+///  ident("my_var", Span::default())
 /// );
 ///
+
 /// let result = quote_with_context("let #name = 42;", &ctx).unwrap();
 /// assert!(!result.is_empty());
 /// ```
@@ -113,31 +140,40 @@ pub fn quote_with_context(
 
 /// Execute an unquote! invocation at compile time
 ///
+
 /// This function is called by the meta function evaluator when it encounters
 /// an unquote! expression. It takes a TokenStream and parses it back into
 /// an AST expression.
 ///
+
 /// # Arguments
 ///
+
 /// * `stream` - The TokenStream to unquote
 ///
+
 /// # Returns
 ///
+
 /// Result containing the parsed AST expression or an error
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_compiler::quote_macro::{quote_expr, unquote_stream};
 /// use verum_ast::{Expr, Span, expr::ExprKind};
 ///
+
 /// let expr = Expr::new(
-///     ExprKind::Path(verum_ast::ty::Path::single(
-///         verum_ast::ty::Ident::new("x", Span::default())
-///     )),
-///     Span::default()
+///  ExprKind::Path(verum_ast::ty::Path::single(
+///  verum_ast::ty::Ident::new("x", Span::default())
+///  )),
+///  Span::default()
 /// );
 ///
+
 /// let ts = quote_expr(&expr);
 /// let result = unquote_stream(&ts).unwrap();
 /// ```
@@ -147,6 +183,7 @@ pub fn unquote_stream(stream: &TokenStream) -> Result<Expr, crate::quote::ParseE
 
 /// Convert a ConstValue containing a TokenStream to an Expr
 ///
+
 /// This is a helper for the meta evaluator to convert TokenStream values
 /// back into AST expressions.
 pub fn const_value_to_expr(value: &ConstValue) -> Result<Expr, MetaError> {
@@ -161,15 +198,20 @@ pub fn const_value_to_expr(value: &ConstValue) -> Result<Expr, MetaError> {
 
 /// Built-in quote! function for meta context
 ///
+
 /// This can be registered as a built-in meta function that generates
 /// a TokenStream from its arguments.
 ///
+
 /// # Arguments
 ///
+
 /// * `args` - List of ConstValues representing the code to quote
 ///
+
 /// # Returns
 ///
+
 /// Result containing a ConstValue::Expr with the quoted code
 pub fn meta_quote(args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.is_empty() {
@@ -215,15 +257,20 @@ pub fn meta_quote(args: List<ConstValue>) -> Result<ConstValue, MetaError> {
 
 /// Built-in unquote! function for meta context
 ///
+
 /// This can be registered as a built-in meta function that converts
 /// a TokenStream back into an AST expression.
 ///
+
 /// # Arguments
 ///
+
 /// * `args` - List containing a ConstValue::Expr (TokenStream wrapper)
 ///
+
 /// # Returns
 ///
+
 /// Result containing a ConstValue::Expr with the unquoted expression
 pub fn meta_unquote(args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.is_empty() {
@@ -251,21 +298,29 @@ pub fn meta_unquote(args: List<ConstValue>) -> Result<ConstValue, MetaError> {
 
 /// Create a TokenStream from a string of Verum code
 ///
+
 /// This is a convenience function for creating TokenStreams from code strings.
 ///
+
 /// # Arguments
 ///
+
 /// * `code` - The Verum code as a string
 ///
+
 /// # Returns
 ///
+
 /// Result containing the TokenStream or a parse error
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_compiler::quote_macro::tokenstream_from_str;
 ///
+
 /// let ts = tokenstream_from_str("let x = 42;").unwrap();
 /// assert!(!ts.is_empty());
 /// ```
@@ -276,6 +331,7 @@ pub fn tokenstream_from_str(code: &str) -> Result<TokenStream, crate::quote::Par
 
 /// Parse a type from a TokenStream
 ///
+
 /// This is a helper for meta functions that need to work with types.
 pub fn parse_type_from_stream(stream: &TokenStream) -> Result<Type, crate::quote::ParseError> {
     stream.parse_as_type()
@@ -283,21 +339,26 @@ pub fn parse_type_from_stream(stream: &TokenStream) -> Result<Type, crate::quote
 
 /// Helper to create a quote context with bindings
 ///
+
 /// This is a convenience function for creating contexts with pre-populated
 /// bindings for use in quote! expansion.
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_compiler::quote_macro::create_quote_context;
 /// use verum_compiler::quote::ident;
 /// use verum_ast::Span;
 ///
+
 /// let bindings = vec![
-///     ("name", ident("my_var", Span::default())),
-///     ("value", ident("42", Span::default())),
+///  ("name", ident("my_var", Span::default())),
+///  ("value", ident("42", Span::default())),
 /// ];
 ///
+
 /// let ctx = create_quote_context(&bindings);
 /// ```
 pub fn create_quote_context(bindings: &[(&str, TokenStream)]) -> MetaContext {
@@ -310,6 +371,7 @@ pub fn create_quote_context(bindings: &[(&str, TokenStream)]) -> MetaContext {
 
 /// Helper to create a quote context with repeated bindings
 ///
+
 /// This is useful for patterns like `#(#items),*`
 pub fn create_quote_context_with_repeats(
     singles: &[(&str, TokenStream)],
@@ -333,6 +395,7 @@ pub fn create_quote_context_with_repeats(
 
 /// Macro expansion context for procedural macros
 ///
+
 /// This provides the environment in which procedural macros execute,
 /// including access to the type system, error reporting, and code generation.
 #[derive(Debug, Clone)]

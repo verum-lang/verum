@@ -5,41 +5,51 @@
 // Dependencies: core, core.collections, core.encoding.json
 // =============================================================================
 //
+
 // RFC 6901 JSON Pointer — a string syntax for identifying a
 // specific sub-value within a JSON document. Used by JSON Patch
 // (RFC 6902), OpenAPI $ref, JSON Schema validators, and every
 // CRDT operational transform library.
 //
+
 // # Grammar (§3)
 //
-//   pointer      = *( "/" reference-token )
-//   reference-token = *( unescaped | escaped )
-//   unescaped    = %x00-2E | %x30-7D | %x7F-10FFFF
-//   escaped      = "~" ( "0" | "1" )       ; ~0 = "~", ~1 = "/"
+
+//  pointer = *( "/" reference-token )
+//  reference-token = *( unescaped | escaped )
+//  unescaped = %x00-2E | %x30-7D | %x7F-10FFFF
+//  escaped = "~" ( "0" | "1" ) ; ~0 = "~", ~1 = "/"
 //
+
 // # Examples
 //
-//   ""             → root of the document
-//   "/foo"         → the value of property "foo"
-//   "/foo/0"       → first element of array "foo"
-//   "/a~1b"        → property "a/b"
-//   "/m~0n"        → property "m~n"
-//   "/-"           → one-past-last array element (RFC 6902 append)
+
+//  "" → root of the document
+//  "/foo" → the value of property "foo"
+//  "/foo/0" → first element of array "foo"
+//  "/a~1b" → property "a/b"
+//  "/m~0n" → property "m~n"
+//  "/-" → one-past-last array element (RFC 6902 append)
 //
+
 // # API
 //
+
 // ```
 // // Parse.
 // let ptr: JsonPointer = parse(&Text.from("/users/0/name"))?;
 //
+
 // // Resolve — returns None if the path doesn't exist.
 // let v: Maybe<&JsonValue> = resolve(&ptr, &document);
 //
+
 // // Build from tokens directly.
 // let p = JsonPointer.from_tokens(&["users", "0", "name"]);
-// let s: Text = format(&p);      // "/users/0/name"
+// let s: Text = format(&p); // "/users/0/name"
 // ```
 //
+
 // =============================================================================
 
 module core.encoding.json_pointer;
@@ -94,10 +104,10 @@ implement Eq for JsonPointerError {
     }
 }
 
-/// Maximum permitted JSON Pointer string length in bytes.  RFC 6901
+/// Maximum permitted JSON Pointer string length in bytes. RFC 6901
 /// places no upper bound — hostile callers can construct multi-MB
 /// pointers that pin the parser walking byte-by-byte through the
-/// reference-token decoder.  64 KiB matches `MAX_URL_LENGTH_BYTES`
+/// reference-token decoder. 64 KiB matches `MAX_URL_LENGTH_BYTES`
 /// from `core/net/url.vr` (5c35083c) — pointers over 64 KiB are
 /// almost certainly DoS attempts or a misuse of the format.
 public const MAX_JSON_POINTER_BYTES: Int = 64 * 1024;
@@ -111,7 +121,7 @@ public fn parse(s: &Text) -> Result<JsonPointer, JsonPointerError> {
     if b.len() == 0 {
         return Ok(JsonPointer { tokens: [] });
     }
-    // SOUNDNESS: cap input length before the per-byte walk.  Without
+    // SOUNDNESS: cap input length before the per-byte walk. Without
     // this, a hostile caller could pin the parser O(N) on multi-MB
     // pointer strings.
     if b.len() > MAX_JSON_POINTER_BYTES {

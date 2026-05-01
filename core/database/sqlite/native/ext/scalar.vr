@@ -3,14 +3,17 @@
 // =============================================================================
 // Spec: sqlite-native.md §19.1
 //
+
 // A scalar function maps a row of `Register` arguments to a single
 // `Register` result. The protocol carries:
 //
-//   * `arity()`           — the function's expected argument count;
-//                           negative = varargs accepted
-//   * `flags()`           — planner-visible properties
-//   * `eval(args)`        — pure evaluation step
+
+//  * `arity()` — the function's expected argument count;
+//  negative = varargs accepted
+//  * `flags()` — planner-visible properties
+//  * `eval(args)` — pure evaluation step
 //
+
 // Built-in scalars in `core.database.sqlite.native.builtins` are
 // expressible as `ScalarFn` impls — the catalogue still carries them
 // as discriminator-coded ScalarKind for backwards compatibility with
@@ -102,6 +105,7 @@ public fn check_arity(declared: Int, actual: Int) -> Result<(), ScalarFnError> {
 // Closure-style adapter
 // -----------------------------------------------------------------------------
 //
+
 // Most users supply a free-function rather than a fresh type. The
 // adapter wraps such a function as a `ScalarFn` impl without writing
 // out a new type each time.

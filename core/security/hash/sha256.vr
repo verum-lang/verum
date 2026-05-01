@@ -6,17 +6,21 @@
 // Reference: FIPS 180-4 §6.2 SHA-256
 // =============================================================================
 //
+
 // Pure-Verum reference implementation of SHA-256. Designed for correctness
 // first, performance second; `@cfg(feature = "crypto-hacl-star")` and
 // `@cfg(feature = "crypto-openssl")` replace these entry points with
 // formally-verified / hardware-accelerated backends at link time.
 //
+
 // # Semantics
 //
+
 // ```verum
 // let digest = sha256(b"hello world");
 // assert_eq(digest, hex.decode("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")?);
 //
+
 // // Streaming
 // let mut state = Sha256.new();
 // state.update(chunk1);
@@ -24,28 +28,34 @@
 // let digest: [Byte; 32] = state.finalize();
 // ```
 //
+
 // # Performance
 //
+
 // The hot loop is the 64-round compression (`compress_block`). Under
 // @cfg(feature = "crypto-openssl"), `sha256_compress_asm` is substituted
 // via @intrinsic with hand-written AVX2/SSE4.1 for x86_64 and ARMv8-A
 // Crypto Extensions (SHA-NI on x86, FEAT_SHA2 on aarch64) — typical
 // 1-4 GB/s throughput on server CPUs.
 //
+
 // The reference implementation in this file achieves ~200-400 MB/s on
 // modern x86_64 with `@inline` rounds + const-folded constants. Good
 // enough for correctness tests and low-rate workloads (TLS handshake,
 // SCRAM auth exchange) but not bulk hashing. For bulk (>100 MB/s
 // sustained), enable an accelerated backend.
 //
+
 // # Safety / side-channels
 //
+
 // All operations are constant-time by construction (no data-dependent
 // branches, no memory accesses indexed by secret data). The reference
 // impl is safe against timing side-channels at the primitive level.
 // Higher-level protocols (e.g., HMAC comparison) must pair with
 // `core.security.util.constant_time_eq` to preserve this property.
 //
+
 // =============================================================================
 
 module core.security.hash.sha256;
@@ -87,6 +97,7 @@ public const OUTPUT_SIZE: Int = 32;
 
 /// SHA-256 streaming digest.
 ///
+
 /// Feed data via repeated `update()` calls, then `finalize()` to get
 /// the 32-byte digest. The value is consumed on `finalize()` — state
 /// cannot be reused.
@@ -263,6 +274,7 @@ fn small_sigma1(x: UInt32) -> UInt32 {
 /// Core compression: merge one 64-byte block into hash state.
 /// FIPS 180-4 §6.2.2 steps 1-4.
 ///
+
 /// When built with `@cfg(feature = "crypto-openssl")` or
 /// `"crypto-hacl-star"`, this symbol is replaced at link-time with a
 /// hardware-accelerated (SHA-NI / FEAT_SHA2) implementation. The
@@ -341,6 +353,7 @@ implement Sha256 {
     /// Hash a single byte slice and return the 32-byte digest.
     /// Convenience over new+update+finalize when all data is available.
     ///
+
     /// ```verum
     /// let d = Sha256.digest(b"hello");
     /// ```

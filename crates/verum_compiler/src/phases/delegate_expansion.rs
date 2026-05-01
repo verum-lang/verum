@@ -1,68 +1,79 @@
 //! # `@delegate(target)` attribute expansion
 //!
+
 //! Task #146 / MSFS-L4.14 — eliminates the corpus/stdlib duplication
 //! pattern observed across MSFS §9 + §10 where every corpus-side
 //! "anchor theorem" carries a hand-written proof body that is
 //! identical in shape: `proof { apply <stdlib_full_form>(args); }`.
 //!
+
 //! ## The pattern this phase eliminates
 //!
+
 //! Pre-#146 every delegating theorem looks like:
 //!
+
 //! ```verum
 //! public theorem msfs_theorem_9_3_meta_categoricity(
-//!     f1: &MetaClsTopWitness,
-//!     f2: &MetaClsTopWitness,
-//!     proof_witness: &MetaCategoricityWitness,
+//!  f1: &MetaClsTopWitness,
+//!  f2: &MetaClsTopWitness,
+//!  proof_witness: &MetaCategoricityWitness,
 //! )
-//!     requires <17-line requires clause>
-//!     ensures <2-line ensures clause>
-//!     proof {
-//!         apply msfs_theorem_9_3_meta_categoricity_full(f1, f2, proof_witness);
-//!     };
+//!  requires <17-line requires clause>
+//!  ensures <2-line ensures clause>
+//!  proof {
+//!  apply msfs_theorem_9_3_meta_categoricity_full(f1, f2, proof_witness);
+//!  };
 //! ```
 //!
+
 //! Post-#146 the manual `proof { apply … }` boilerplate disappears —
 //! the attribute carries the same information declaratively:
 //!
+
 //! ```verum
 //! @delegate(msfs_theorem_9_3_meta_categoricity_full)
 //! public theorem msfs_theorem_9_3_meta_categoricity(
-//!     f1: &MetaClsTopWitness,
-//!     f2: &MetaClsTopWitness,
-//!     proof_witness: &MetaCategoricityWitness,
+//!  f1: &MetaClsTopWitness,
+//!  f2: &MetaClsTopWitness,
+//!  proof_witness: &MetaCategoricityWitness,
 //! )
-//!     requires <17-line requires clause>
-//!     ensures <2-line ensures clause>;
+//!  requires <17-line requires clause>
+//!  ensures <2-line ensures clause>;
 //! ```
 //!
+
 //! This phase walks every theorem in every parsed module and, when the
 //! `@delegate(target)` attribute is present, synthesises the
 //! equivalent `proof { apply target(p1, p2, …); }` body — passing the
 //! theorem's parameters positionally as arguments, in declaration
 //! order.
 //!
+
 //! ## Architectural significance
 //!
+
 //! - Reduces ~100 LOC of boilerplate per delegating module across the
-//!   MSFS corpus (the §9 + §10 files lose ~90% of their proof-body
-//!   text).
+//!  MSFS corpus (the §9 + §10 files lose ~90% of their proof-body
+//!  text).
 //! - Makes the corpus's "anchor + delegate" pattern declarative rather
-//!   than hand-written — adding a new delegating theorem is one line
-//!   of attribute metadata, not a copy-pasted apply block.
+//!  than hand-written — adding a new delegating theorem is one line
+//!  of attribute metadata, not a copy-pasted apply block.
 //! - The synthesised body is structurally identical to the manual
-//!   form, so every downstream consumer (proof-honesty audit, bridge-
-//!   discharge check, apply-graph walker, cross-format gate) sees the
-//!   apply target without code changes.
+//!  form, so every downstream consumer (proof-honesty audit, bridge-
+//!  discharge check, apply-graph walker, cross-format gate) sees the
+//!  apply target without code changes.
 //! - Validation enforces that `@delegate` and an explicit `proof { … }`
-//!   body don't co-occur on the same theorem — the user picks one
-//!   surface form per theorem.
+//!  body don't co-occur on the same theorem — the user picks one
+//!  surface form per theorem.
 //!
+
 //! ## Recipe
 //!
+
 //! When a stdlib has both a "load-bearing form" and a "namespace
 //! anchor" version that differ only in proof body shape, promote the
-//! duplication to a single declarative attribute.  Recipe extension
+//! duplication to a single declarative attribute. Recipe extension
 //! to the existing meta-derives surface (#13): attribute-driven
 //! proof-body synthesis is a sibling of the @derive(Eq) pattern —
 //! both turn one declaration into a structurally complete artefact
@@ -83,25 +94,27 @@ const DELEGATE_ATTR: &str = "delegate";
 #[derive(Debug, Clone)]
 pub enum DelegateExpansion {
     /// Theorem carried `@delegate(target)` and its proof body was
-    /// synthesised.  The `target` field carries the apply-target's
+    /// synthesised. The `target` field carries the apply-target's
     /// rendered name for diagnostic context.
     Synthesised { theorem: Text, target: Text },
     /// Theorem carried `@delegate(target)` but ALSO had an explicit
-    /// `proof { … }` body.  This is rejected — the two forms can't
+    /// `proof { … }` body. This is rejected — the two forms can't
     /// co-occur, the user picks one.
     Rejected { theorem: Text, reason: Text },
 }
 
 /// Public entry: walk every theorem-shaped declaration in a module
 /// and expand `@delegate(target)` attributes into synthesised proof
-/// bodies in place.  Returns the per-theorem outcomes.
+/// bodies in place. Returns the per-theorem outcomes.
 ///
+
 /// Mutates `module` directly: each `Item::Theorem`/`Item::Lemma`/
 /// `Item::Corollary` whose attributes carry `@delegate(target)` and
 /// whose `proof` field is `Maybe::None` gets its `proof` populated
-/// with the synthesised body.  Theorems without the attribute pass
+/// with the synthesised body. Theorems without the attribute pass
 /// through unchanged.
 ///
+
 /// Idempotent: running the phase twice produces the same module.
 pub fn expand_delegates_in_module(module: &mut Module) -> Vec<DelegateExpansion> {
     let mut outcomes = Vec::new();
@@ -143,7 +156,7 @@ pub fn expand_delegates_in_module(module: &mut Module) -> Vec<DelegateExpansion>
 }
 
 /// Return `Some((target_name, span))` when the attribute list contains
-/// `@delegate(<ident>)`.  Returns `None` for an absent attribute, or
+/// `@delegate(<ident>)`. Returns `None` for an absent attribute, or
 /// when the attribute's argument shape isn't a single Path-ident
 /// (the only currently-supported form).
 fn find_delegate_target(
@@ -158,7 +171,7 @@ fn find_delegate_target(
             Maybe::None => continue,
         };
         // Exactly one argument expected: a Path expression naming the
-        // delegate target.  Multi-arg / non-path forms surface as
+        // delegate target. Multi-arg / non-path forms surface as
         // "no delegate" (no synthesis happens) so a typo / future
         // extension doesn't silently corrupt the proof body.
         let mut iter = args.iter();
@@ -177,7 +190,7 @@ fn find_delegate_target(
 
 /// Build the synthetic proof body for `@delegate(target)`: a single
 /// `Tactic(Apply { lemma: Path(target), args: <params as path
-/// exprs> })` step.  Parameters are passed positionally in
+/// exprs> })` step. Parameters are passed positionally in
 /// declaration order; non-Ident pattern-bound params (tuple, record,
 /// ...) are dropped from the args list (they don't have a single
 /// positional binding).
@@ -363,7 +376,7 @@ mod tests {
     #[test]
     fn delegate_with_explicit_proof_body_is_rejected() {
         // `@delegate(target) theorem foo() proof { … };` — both forms
-        // present.  Reject so the user picks one surface.
+        // present. Reject so the user picks one surface.
         let mut attrs: List<Attribute> = List::new();
         attrs.push(delegate_attr("target_full"));
         let mut params: List<FunctionParam> = List::new();
@@ -410,10 +423,10 @@ mod tests {
     fn expansion_is_idempotent() {
         // Run twice; second pass produces no outcomes (theorem already
         // has a proof body, so @delegate co-occurrence rule fires —
-        // but only if @delegate stays on the attribute list).  This
+        // but only if @delegate stays on the attribute list). This
         // pin documents the contract: callers are responsible for
         // running the phase exactly once before downstream code
-        // examines the proof body.  If it runs twice, the second
+        // examines the proof body. If it runs twice, the second
         // run rejects the (now-bodied) theorem.
         let mut attrs: List<Attribute> = List::new();
         attrs.push(delegate_attr("target_full"));
@@ -460,7 +473,7 @@ mod tests {
     #[test]
     fn delegate_attribute_with_non_ident_arg_is_skipped() {
         // `@delegate(42)` — invalid arg shape (literal, not path).
-        // No synthesis happens; the attribute is ignored.  The user
+        // No synthesis happens; the attribute is ignored. The user
         // is responsible for noticing the unbound theorem-without-
         // proof after a downstream pass.
         let bogus_attr = Attribute::new(

@@ -1,5 +1,6 @@
 //! Contract for the `fix.edits` field in `verum lint --format json`.
 //!
+
 //! CI fix-bots and LSP code-actions need precise edit ranges to
 //! apply fixes mechanically without re-running the parser. The
 //! field is additive — schema_version stays at 1, consumers that

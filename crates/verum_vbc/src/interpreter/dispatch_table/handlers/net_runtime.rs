@@ -1,10 +1,12 @@
 //! Real TCP / UDP intrinsics for the VBC interpreter (Tier 0).
 //!
+
 //! Backs the `__tcp_*_raw` and `__udp_*_raw` family declared in
 //! `core/sys/raw.vr`. The previous interpreter handler returned -1
 //! for all of them — script-mode + interpreter-mode networking was
 //! a documentation-only feature.
 //!
+
 //! Resource model: a thread-local `HashMap<i64, Resource>` keyed by a
 //! synthetic file-descriptor number. The number is a small monotonic
 //! counter (starts at 1) — NOT a kernel fd, so we never hand the
@@ -12,22 +14,25 @@
 //! removes the entry; `Drop` of the resource closes the underlying
 //! socket.
 //!
+
 //! The contract is the one declared in `core/sys/raw.vr`:
-//!   * `__tcp_listen_raw(port: Int) -> Int`             — bind 0.0.0.0:port, listen.
-//!   * `__tcp_accept_raw(fd: Int) -> Int`               — blocking accept.
-//!   * `__tcp_connect_raw(host: Text, port: Int) -> Int` — TCP connect.
-//!   * `__tcp_send_raw(fd: Int, data: Text) -> Int`     — send-all, returns bytes or -1.
-//!   * `__tcp_recv_raw(fd: Int, max_len: Int) -> Text`  — single read.
-//!   * `__tcp_close_raw(fd: Int) -> Int`                — drop registration.
-//!   * `__udp_bind_raw(port: Int) -> Int`               — bind 0.0.0.0:port.
-//!   * `__udp_send_raw(fd, data, host, port) -> Int`    — send_to.
-//!   * `__udp_recv_raw(fd: Int, max_len: Int) -> Text`  — recv (peer ignored).
-//!   * `__udp_close_raw(fd: Int) -> Int`
+//!  * `__tcp_listen_raw(port: Int) -> Int` — bind 0.0.0.0:port, listen.
+//!  * `__tcp_accept_raw(fd: Int) -> Int` — blocking accept.
+//!  * `__tcp_connect_raw(host: Text, port: Int) -> Int` — TCP connect.
+//!  * `__tcp_send_raw(fd: Int, data: Text) -> Int` — send-all, returns bytes or -1.
+//!  * `__tcp_recv_raw(fd: Int, max_len: Int) -> Text` — single read.
+//!  * `__tcp_close_raw(fd: Int) -> Int` — drop registration.
+//!  * `__udp_bind_raw(port: Int) -> Int` — bind 0.0.0.0:port.
+//!  * `__udp_send_raw(fd, data, host, port) -> Int` — send_to.
+//!  * `__udp_recv_raw(fd: Int, max_len: Int) -> Text` — recv (peer ignored).
+//!  * `__udp_close_raw(fd: Int) -> Int`
 //!
+
 //! Binary safety: `recv` returns Text via `String::from_utf8_lossy` —
 //! same caveat as the AOT runtime's TCP API. Truly binary protocols
 //! should use `core/net/tcp.vr` (syscall-driven, currently AOT-only).
 //!
+
 //! These intrinsics are deliberately blocking: they deliver the
 //! "raw FFI fallback" promised by `core/sys/net_ops.vr` and unlock
 //! `verum run --interp` HTTP demos at the cost of the executor
@@ -82,35 +87,42 @@ pub fn tcp_listen(port: i64) -> i64 {
 /// Flags accepted by [`tcp_listen_v2`] (matches the `flags` argument
 /// of `__tcp_listen_v2_raw` declared in `core/sys/raw.vr`).
 ///
+
 /// Bit 0 (`TCP_LISTEN_FLAG_REUSEPORT`): set SO_REUSEPORT on the
 /// listener — multiple listeners on the same `host:port` load-balance
 /// in the kernel. Linux ≥3.9 / macOS ≥10.7. Best-effort: silently
 /// ignored if the platform lacks the option (Windows).
 ///
+
 /// Higher bits are reserved.
 pub const TCP_LISTEN_FLAG_REUSEPORT: i64 = 1 << 0;
 
 /// Rich-signature TCP listen intrinsic.
 ///
+
 /// `host` parses as an IP literal (`"0.0.0.0"`, `"127.0.0.1"`,
 /// `"::"`, `"::1"`, …). DNS resolution is intentionally out of scope —
 /// the high-level `core.net.tcp.TcpListener.bind` already iterates a
 /// resolved address list and calls into us with one literal at a time.
 ///
+
 /// `port = 0` asks the kernel to choose. Use [`tcp_local_port`] to
 /// retrieve the actual port afterwards.
 ///
+
 /// `backlog` is forwarded to `listen(2)`. Kernels typically silently
 /// cap large values at `/proc/sys/net/core/somaxconn` (or similar).
 ///
+
 /// Returns:
 /// * `fd > 0` on success — the synthetic FD that other intrinsics
-///   accept (NOT a kernel fd; see module-level docs).
+///  accept (NOT a kernel fd; see module-level docs).
 /// * `-errno` on bind/listen failure — caller maps to IoErrorKind via
-///   `core/io/protocols.vr::from_raw_os_error`.
+///  `core/io/protocols.vr::from_raw_os_error`.
 /// * `-EINVAL` (`-22` Linux / `-22` macOS) for argument-validation
-///   failures (bad host, port out of range, negative backlog).
+///  failures (bad host, port out of range, negative backlog).
 ///
+
 /// The errno-preservation contract is the architectural promise that
 /// distinguishes v2 from v1 (which collapses everything to `-1`).
 pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
@@ -134,6 +146,7 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
     // sequence keeps interpreter-mode behaviour identical to AOT for
     // the common path (default flags) and limits the failure surface.
     //
+
     // SO_REUSEADDR is ALWAYS set — same default as the AOT
     // `verum_tcp_listen` helper and the user-facing `core.net.tcp`
     // surface. Quick rebind after process restart is the universally
@@ -186,23 +199,26 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
 
     // **Real-kernel-fd return** (#25 cascade closure).
     //
+
     // Pre-#25 v2 returned a synthetic fd via `register(...)` and the
     // std::net wrapper lived in the registry for resource lifetime
-    // tracking.  Synthetic fds are incompatible with the user-facing
+    // tracking. Synthetic fds are incompatible with the user-facing
     // `core.net.tcp.TcpListener` surface, which threads its `fd` field
     // through libc-bound operations (`accept`/`close`/`setsockopt`/
     // `getsockname`) — those operations are dispatched via libffi in
     // interpreter mode and require a real kernel fd.
     //
+
     // Resolution: `into_raw_fd()` consumes the std::net wrapper and
-    // returns the underlying kernel fd.  Ownership transfers to the
+    // returns the underlying kernel fd. Ownership transfers to the
     // caller — Verum-side `core/net/tcp.vr::TcpListener::Drop` calls
     // libc `close()` to free the fd at the right scope boundary,
-    // mirroring the AOT path's lifecycle.  No registry tracking is
+    // mirroring the AOT path's lifecycle. No registry tracking is
     // needed: the kernel itself is the source of truth for fd
     // existence, and the operating system reaps any leaked fds at
     // process exit.
     //
+
     // Companion `tcp_local_port` updated alongside to call
     // `getsockname(2)` directly on the raw fd (no registry lookup).
     #[cfg(unix)]
@@ -213,8 +229,8 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
     #[cfg(not(unix))]
     {
         // Windows: SOCKET handles are not directly compatible with
-        // libc fd APIs.  Keep the legacy registry path here and
-        // leave Windows fd-bridging as a follow-up.  Most weft
+        // libc fd APIs. Keep the legacy registry path here and
+        // leave Windows fd-bridging as a follow-up. Most weft
         // production paths target Unix.
         register(NetResource::Listener(listener))
     }
@@ -225,15 +241,17 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
 /// `tcp_listen_v2(_, 0, _, _)`. Returns `-1` on `getsockname(2)`
 /// failure (bad fd, unbound socket, …).
 ///
+
 /// **Real-fd path** (Unix): post-#25, `tcp_listen_v2` returns the raw
-/// kernel fd (no registry tracking).  We call `getsockname(2)`
+/// kernel fd (no registry tracking). We call `getsockname(2)`
 /// directly on the fd — works for any bound socket regardless of
 /// whether it was created via this intrinsic family or via a
-/// libffi-bridged libc `socket()` call.  This is the source of truth
+/// libffi-bridged libc `socket()` call. This is the source of truth
 /// for the bound port and matches the semantics the AOT
 /// `verum_tcp_local_port` LLVM helper provides
 /// (`crates/verum_codegen/src/llvm/runtime.rs`).
 ///
+
 /// **Legacy registry fallback**: pre-#25 listeners that were
 /// `register()`-ed with a synthetic fd still hit the registry path.
 /// The registry tries first, then falls through to `getsockname` if
@@ -264,7 +282,7 @@ pub fn tcp_local_port(fd: i64) -> i64 {
     unsafe {
         // sockaddr_in6 is the larger of v4/v6 — 28 bytes covers both
         // and the kernel writes the actual size into the in/out
-        // length.  sin_port lives at offset 2 in either layout.
+        // length. sin_port lives at offset 2 in either layout.
         let mut sa = [0u8; 28];
         let mut sa_len: libc::socklen_t = 28;
         let rc = libc::getsockname(
@@ -281,7 +299,7 @@ pub fn tcp_local_port(fd: i64) -> i64 {
     }
     #[cfg(not(unix))]
     {
-        // Windows: synthetic-fd flow only.  Real-fd query path falls
+        // Windows: synthetic-fd flow only. Real-fd query path falls
         // through to -1.
         -1
     }
@@ -289,9 +307,9 @@ pub fn tcp_local_port(fd: i64) -> i64 {
 
 /// Read the connected-peer address of a TCP fd via the registry's
 /// `peer_addr()` (synthetic-fd path) or `getpeername(2)` (real-fd
-/// path).  Returns the peer as a `(family, host_str, port)` tuple
-/// where family is 4 or 6.  None when the fd isn't tracked or the
-/// kernel call fails.  Used by VBC-NET-4 for peer_addr round-trip
+/// path). Returns the peer as a `(family, host_str, port)` tuple
+/// where family is 4 or 6. None when the fd isn't tracked or the
+/// kernel call fails. Used by VBC-NET-4 for peer_addr round-trip
 /// in `TcpStream` records.
 pub fn tcp_peer_addr(fd: i64) -> Option<(u8, String, i64)> {
     // Fast path: registry → std::net::TcpStream::peer_addr.
@@ -309,7 +327,7 @@ pub fn tcp_peer_addr(fd: i64) -> Option<(u8, String, i64)> {
             std::net::SocketAddr::V6(v6) => Some((6, v6.ip().to_string(), port)),
         };
     }
-    // Real-fd path: `getpeername(2)` on the kernel fd.  Mirrors the
+    // Real-fd path: `getpeername(2)` on the kernel fd. Mirrors the
     // shape used in `tcp_local_port`.
     #[cfg(unix)]
     unsafe {
@@ -323,8 +341,8 @@ pub fn tcp_peer_addr(fd: i64) -> Option<(u8, String, i64)> {
         if rc < 0 {
             return None;
         }
-        // sa_family at offset 0.  AF_INET = 2, AF_INET6 = 30 (BSD)
-        // or 10 (Linux).  The cross-family detection here uses the
+        // sa_family at offset 0. AF_INET = 2, AF_INET6 = 30 (BSD)
+        // or 10 (Linux). The cross-family detection here uses the
         // libc constants directly.
         let family = sa[0] as i32;
         let port_be = u16::from_be_bytes([sa[2], sa[3]]);
@@ -335,7 +353,7 @@ pub fn tcp_peer_addr(fd: i64) -> Option<(u8, String, i64)> {
             return Some((4, host, port));
         }
         if family == libc::AF_INET6 {
-            // sockaddr_in6: sin6_addr at offset 8 (16 bytes).  Build
+            // sockaddr_in6: sin6_addr at offset 8 (16 bytes). Build
             // the canonical hex representation; std::net::Ipv6Addr's
             // Display gives RFC 5952 with `::` compression.
             let octets: [u8; 16] = [
@@ -382,22 +400,23 @@ pub fn tcp_accept(listen_fd: i64) -> i64 {
     }
 
     // Real-kernel-fd path (`__tcp_listen_v2_raw` returns a real fd via
-    // `IntoRawFd::into_raw_fd()` — see commit c15df24b).  REGISTRY
+    // `IntoRawFd::into_raw_fd()` — see commit c15df24b). REGISTRY
     // lookup misses, so we wrap the raw fd into a `TcpListener` long
     // enough to call accept(2), then immediately surrender ownership
     // back via `into_raw_fd()` to keep the listener alive (`TcpListener::Drop`
-    // would close the kernel fd otherwise).  The accepted connection's
+    // would close the kernel fd otherwise). The accepted connection's
     // stream is registered in REGISTRY so subsequent recv/send/close
     // continue through the existing synthetic-fd machinery without
     // change.
     //
+
     // Cross-platform: Unix uses FromRawFd; Windows uses FromRawSocket.
     // Other platforms have no real-fd accept path — fall through to -1.
     #[cfg(unix)]
     {
         use std::os::unix::io::{FromRawFd, IntoRawFd};
         // SAFETY: `listen_fd` came from `__tcp_listen_v2_raw`'s
-        // `IntoRawFd::into_raw_fd()`.  The fd is valid and owned by
+        // `IntoRawFd::into_raw_fd()`. The fd is valid and owned by
         // the Verum runtime until `__tcp_close_raw` is called.
         // `TcpListener::from_raw_fd` takes ownership; we hand it back
         // via `into_raw_fd()` immediately after accept to keep the
@@ -460,7 +479,7 @@ pub fn tcp_send(fd: i64, data: &[u8]) -> i64 {
 
     // Real-kernel-fd path: a v2-listener-accepted connection that
     // somehow leaked into raw-fd form (or a future intrinsic that
-    // returns raw fds directly).  Wrap fd in a TcpStream long enough
+    // returns raw fds directly). Wrap fd in a TcpStream long enough
     // to call write_all, then surrender ownership.
     #[cfg(unix)]
     {
@@ -549,9 +568,9 @@ pub fn tcp_close(fd: i64) -> i64 {
         return 0;
     }
 
-    // Real-fd path (#25): call libc `close(2)` directly.  v2 listen
+    // Real-fd path (#25): call libc `close(2)` directly. v2 listen
     // returns raw kernel fds (no registry tracking), so close has to
-    // mirror that path.  Returns 0 on success, -errno on failure
+    // mirror that path. Returns 0 on success, -errno on failure
     // (matches the v2 errno-preserving convention).
     #[cfg(unix)]
     unsafe {
@@ -723,21 +742,23 @@ mod tests {
 // ============================================================================
 // VBC-NET-2 — high-level Tier-0 intercepts for `core.net.tcp`
 //
+
 // The intrinsics above (`__tcp_*_raw`) cover the synthetic-fd
 // network surface that script-mode users reach via the raw-FFI
-// fallback in `core/sys/net_ops.vr`.  The HIGH-LEVEL
+// fallback in `core/sys/net_ops.vr`. The HIGH-LEVEL
 // `core.net.tcp.TcpStream.connect` path goes through a different
 // chain (`safe_socket` + `errno`-driven sys_socket / sys_connect)
 // that fails in interpreter mode for the same FFI-brittleness
 // reason that motivated `shell_runtime` / `file_runtime` /
 // `process_runtime`.
 //
+
 // This intercept catches `TcpStream.connect_addr(&SocketAddr) ->
 // Result<TcpStream, IoError>` (the inner per-address worker the
 // polymorphic `connect<A: ToSocketAddrs>` calls), connects via
 // `std::net::TcpStream`, registers the fd in REGISTRY, and
 // constructs the full `TcpStream { fd: FileDesc, peer_addr:
-// SocketAddr }` record.  Subsequent reads/writes via the existing
+// SocketAddr }` record. Subsequent reads/writes via the existing
 // `__tcp_*_raw` intercepts share the same REGISTRY, so the stream
 // is fully usable end-to-end.
 // ============================================================================
@@ -761,7 +782,7 @@ pub(in super::super) fn try_intercept_net_runtime(
 ) -> InterpreterResult<Option<Value>> {
     // Disambiguate against unrelated stdlib functions by qualifying
     // on `core.net.{tcp,udp}` / `TcpStream.` / `TcpListener.` /
-    // `UdpSocket.`.  This file intercepts ONLY the high-level
+    // `UdpSocket.`. This file intercepts ONLY the high-level
     // network surface in `core.net`.
     if !func_name.contains("net.tcp")
         && !func_name.contains("net::tcp")
@@ -793,7 +814,7 @@ pub(in super::super) fn try_intercept_net_runtime(
         // Result<TcpListener, IoError>` — bypass the iterator-bound
         // path that crashes at `SocketAddr.ip` opcode 0x62 null-deref
         // (the iteration's yielded SocketAddr value carries a stale
-        // pointer for some shape variants).  Routes through
+        // pointer for some shape variants). Routes through
         // `net_runtime::tcp_listen_v2` and constructs a real
         // TcpListener record.
         "bind" if arg_count == 1 && is_listener => {
@@ -822,7 +843,7 @@ fn intercept_connect_text(
     if addr_text.is_empty() || !addr_text.contains(':') {
         return Ok(None);
     }
-    // Split host and port.  Bracketed IPv6 [::]:port works through
+    // Split host and port. Bracketed IPv6 [::]:port works through
     // std::net::TcpStream::connect(&str) directly, so we only need
     // basic validation here.
     let port_split = addr_text.rsplit_once(':');
@@ -842,15 +863,15 @@ fn intercept_connect_text(
             &format!("connect: tcp_connect({}:{}) failed", host, port),
         )?));
     }
-    // FileDesc is `is (Int)` — a transparent newtype.  At the value
+    // FileDesc is `is (Int)` — a transparent newtype. At the value
     // level it's just the Int with no wrapper record (verified by
     // tracing `stream.write(self)` — the receiver's field 0 reads
-    // back as `Value::is_int() == true`).  Store the fd directly.
+    // back as `Value::is_int() == true`). Store the fd directly.
     let fd_value = Value::from_i64(fd);
     // peer_addr: round-trip via `getpeername(2)` on the live fd
-    // for the truly-resolved peer.  Handles IPv4, IPv6, and
+    // for the truly-resolved peer. Handles IPv4, IPv6, and
     // DNS-resolved hosts uniformly — the kernel reports the actual
-    // family + address it ended up connecting to.  Falls back to
+    // family + address it ended up connecting to. Falls back to
     // the input host:port literal when the peer query fails (e.g.,
     // disconnected before we could query).
     let peer_addr = match tcp_peer_addr(fd) {
@@ -866,7 +887,7 @@ fn intercept_connect_text(
 /// listener via `net_runtime::tcp_listen_v2` (which already registers
 /// the fd in the REGISTRY), then construct a `TcpListener { fd,
 /// local_addr }` record so subsequent `accept()` / `local_addr()`
-/// calls work via the standard method-dispatch hook.  Bypasses
+/// calls work via the standard method-dispatch hook. Bypasses
 /// the iterator-bound bytecode path that crashes at SocketAddr.ip
 /// opcode 0x62 null-deref.
 fn intercept_listener_bind_text(
@@ -901,7 +922,7 @@ fn intercept_listener_bind_text(
         )?));
     }
     // Resolve the actually-bound port (handles port=0 / kernel-
-    // assigned).  `tcp_local_port` walks the registry first then
+    // assigned). `tcp_local_port` walks the registry first then
     // falls through to getsockname for real fds.
     let bound_port = tcp_local_port(fd);
     let bound_port = if bound_port > 0 { bound_port } else { port };
@@ -922,7 +943,7 @@ fn intercept_listener_bind_text(
 /// Intercept `UdpSocket.bind(&Text)` — bind via std::net::UdpSocket
 /// directly, register the fd in the shared net REGISTRY, and
 /// construct the full `UdpSocket { fd, local_addr, peer_addr }`
-/// record.  Bypasses the libSystem `socket(2)` + `bind(2)` chain.
+/// record. Bypasses the libSystem `socket(2)` + `bind(2)` chain.
 fn intercept_udp_bind_text(
     state: &mut InterpreterState,
     args_start_reg: u16,
@@ -957,7 +978,7 @@ fn intercept_udp_bind_text(
     // FileDesc transparent-newtype lowering — store fd as a bare Int.
     let fd_value = Value::from_i64(fd);
     // local_addr: best-effort SocketAddr.V4 reconstruction (matches
-    // TcpStream connect-text semantics).  IPv6 / DNS-resolved hosts
+    // TcpStream connect-text semantics). IPv6 / DNS-resolved hosts
     // fall back to Unit pending the V1 getsockname round-trip.
     let local_addr = build_peer_addr(state, &host, port).unwrap_or(Value::unit());
     // peer_addr: bind without connect leaves no peer — Maybe.None
@@ -972,9 +993,9 @@ fn intercept_udp_bind_text(
 }
 
 /// Best-effort `SocketAddr.V4(SocketAddrV4 { ip, port })`
-/// construction from a literal `host:port` pair.  Returns None when
+/// construction from a literal `host:port` pair. Returns None when
 /// `host` doesn't parse as a four-octet IPv4 literal — caller falls
-/// back to Unit.  IPv6 round-tripping is a V1 follow-up.
+/// back to Unit. IPv6 round-tripping is a V1 follow-up.
 fn build_peer_addr(
     state: &mut InterpreterState,
     host: &str,
@@ -1002,10 +1023,10 @@ fn build_peer_addr(
     wrap_in_variant(state, "SocketAddr", 0, &[v4]).ok()
 }
 
-/// IPv6 sibling to `build_peer_addr`.  Constructs
+/// IPv6 sibling to `build_peer_addr`. Constructs
 /// `SocketAddr.V6(SocketAddrV6 { ip: Ipv6Addr { (s0..s7) }, port,
 /// flowinfo: 0, scope_id: 0 })` from an IPv6 literal in any
-/// canonical form (`::1`, `2001:db8::1`, `[::]`).  Returns None
+/// canonical form (`::1`, `2001:db8::1`, `[::]`). Returns None
 /// when the literal doesn't parse — caller falls back to Unit.
 /// Used by VBC-NET-4 for IPv6 peer_addr round-trip.
 fn build_peer_addr_v6(
@@ -1075,6 +1096,7 @@ fn build_io_err(
 // ============================================================================
 // VBC-NET-2 method-call surface — TcpStream method intercepts
 //
+
 // Method calls on TcpStream values (`stream.read(&mut buf)`,
 // `stream.write(&data)`, `stream.flush()`, `stream.close()`)
 // dispatch via CallM and reach `method_dispatch::handle_call_method`.
@@ -1082,8 +1104,9 @@ fn build_io_err(
 // shared `net_runtime` REGISTRY, and bypass `sys_send` /
 // `sys_recv` / `sys_close` libSystem calls.
 //
+
 // `try_intercept_tcp_method` is gated on the receiver being a
-// `TcpStream` record AND the method being one we cover.  Any other
+// `TcpStream` record AND the method being one we cover. Any other
 // case returns None and the normal bytecode dispatch proceeds.
 // ============================================================================
 
@@ -1097,7 +1120,7 @@ pub(in super::super) fn try_intercept_tcp_method(
     arg_count: u8,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    // Receiver must be a TcpStream record.  Cheap check first:
+    // Receiver must be a TcpStream record. Cheap check first:
     // method_name should mention "TcpStream" OR the receiver heap
     // object's TypeId must resolve to a type named "TcpStream".
     // Receiver may arrive as a CBGR-ref (negative Int) when dispatch
@@ -1110,7 +1133,7 @@ pub(in super::super) fn try_intercept_tcp_method(
         receiver
     };
     // UdpSocket / TcpListener method dispatch — same shape as
-    // TcpStream (record with fd at field 0).  Detect via
+    // TcpStream (record with fd at field 0). Detect via
     // method_name OR receiver TypeId.
     let is_udp = method_name.contains("UdpSocket.")
         || is_record_typed_as(state, receiver, "UdpSocket");
@@ -1195,7 +1218,7 @@ pub(in super::super) fn try_intercept_tcp_method(
 }
 
 /// `listener.accept() -> Result<(TcpStream, SocketAddr), IoError>` —
-/// blocks until a client connects.  Returns the connected stream
+/// blocks until a client connects. Returns the connected stream
 /// (already registered in REGISTRY) plus the peer's resolved
 /// SocketAddr (V4 or V6 based on the kernel-reported family).
 fn intercept_listener_accept(
@@ -1223,7 +1246,7 @@ fn intercept_listener_accept(
     let fd_value = Value::from_i64(client_fd);
     let stream = alloc_record_n_fields(state, "TcpStream", &[fd_value, peer_addr])?;
     // Result<(TcpStream, SocketAddr), IoError> — Tuple wrapped in
-    // Result.Ok.  Build the 2-field tuple record.
+    // Result.Ok. Build the 2-field tuple record.
     let pair = alloc_record_n_fields(state, "Tuple", &[stream, peer_addr])?;
     Ok(Some(wrap_in_variant(state, "Result", 0, &[pair])?))
 }
@@ -1274,12 +1297,12 @@ fn intercept_udp_send_to(
 }
 
 /// `socket.recv_from(&mut [Byte]) -> Result<(Int, SocketAddr), IoError>`
-/// — recv into the buffer, return (bytes_recvd, source_addr).  The
+/// — recv into the buffer, return (bytes_recvd, source_addr). The
 /// source address is best-effort: we currently don't have peer
 /// info from net_runtime::udp_recv (returns Option<String> only),
 /// so peer_addr falls back to a synthetic
 /// `SocketAddr.V4(SocketAddrV4 { Ipv4Addr { 0,0,0,0 }, 0 })` —
-/// callers that only need the byte count are unaffected.  V1
+/// callers that only need the byte count are unaffected. V1
 /// follow-up: extend net_runtime::udp_recv to return the peer
 /// address.
 fn intercept_udp_recv_from(
@@ -1326,7 +1349,7 @@ fn intercept_udp_recv_from(
 }
 
 /// Decode a Verum SocketAddr (sum of V4 / V6) — variant payload at
-/// `[ObjectHeader][tag:u32][n_fields:u32][payload: Value]`.  The
+/// `[ObjectHeader][tag:u32][n_fields:u32][payload: Value]`. The
 /// payload pointer leads to a 2-field SocketAddrV4 record (ip,
 /// port) where the ip is a 4-byte tuple inlined as 4 Value slots.
 fn read_socket_addr_value(v: Value) -> Option<(String, i64)> {
@@ -1373,18 +1396,18 @@ fn read_socket_addr_value(v: Value) -> Option<(String, i64)> {
     } else {
         // V6 path — defer; the SocketAddrV6 layout is the same
         // 4-field record but ipv6 has 8 16-bit segments rather
-        // than 4 bytes.  Returning None falls through to
+        // than 4 bytes. Returning None falls through to
         // InvalidInput; covered by VBC-NET-4 follow-up.
         None
     }
 }
 
-/// Read the `fd` field of a TcpStream record.  TcpStream layout is
-/// `[ObjectHeader][fd: Value][peer_addr: Value]`.  fd may be either
+/// Read the `fd` field of a TcpStream record. TcpStream layout is
+/// `[ObjectHeader][fd: Value][peer_addr: Value]`. fd may be either
 /// a transparent-newtype Int (Verum's `is (Int)` newtype lowering)
 /// or a 1-field wrapper record — handle both.
 fn read_tcpstream_fd(v: Value) -> Option<i64> {
-    // Thin-ref (heap-pointer-to-Value) auto-deref.  CBGR-ref unwrap
+    // Thin-ref (heap-pointer-to-Value) auto-deref. CBGR-ref unwrap
     // is the caller's responsibility (needs `state.registers`).
     let v = if v.is_thin_ref() {
         let tr = v.as_thin_ref();
@@ -1459,7 +1482,7 @@ fn intercept_tcp_read(
     }
     // The `read(&mut [Byte])` arg is a mutable slice; the convention
     // for the high-level intercept is to recv up to `buf.len()` bytes
-    // and write them into the slice's backing storage.  For now, we
+    // and write them into the slice's backing storage. For now, we
     // recv into a Rust Vec and write back via the slice's FatRef
     // pointer — this matches the canonical `read` semantics.
     let buf_v = state.registers.get(caller_base, crate::instruction::Reg(args_start_reg));
@@ -1469,9 +1492,9 @@ fn intercept_tcp_read(
     } else {
         buf_v
     };
-    // Determine slice capacity to bound the recv.  FatRef carries
+    // Determine slice capacity to bound the recv. FatRef carries
     // (ptr, len) in `len` field; raw List<Byte> carries it in the
-    // List header.  Worst-case fallback: 4 KiB.
+    // List header. Worst-case fallback: 4 KiB.
     let cap = read_buffer_capacity(unwrapped).unwrap_or(4096);
     let cap = cap.min(1 << 20).max(1);
     let recvd = tcp_recv(fd, cap as i64);
@@ -1482,7 +1505,7 @@ fn intercept_tcp_read(
             // the returned Int = bytes-recv'd to size a follow-up
             // `from_utf8` call on the original buffer reference.
             // For correctness we ALSO need to write the bytes into
-            // the buffer storage.  Falls back gracefully if the
+            // the buffer storage. Falls back gracefully if the
             // slice shape isn't recognised.
             let bytes_len = s.as_bytes().len();
             write_into_byte_slice(unwrapped, s.as_bytes());

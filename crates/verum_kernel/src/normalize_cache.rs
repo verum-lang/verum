@@ -2,53 +2,62 @@
 //! [`normalize_with_axioms`] / [`normalize_with_inductives`] keyed
 //! on a stable structural hash of the input term (#100, task #42).
 //!
+
 //! Mirror of `verum_smt::tactics::TacticCache` (#103) and
 //! `verum_smt::capability_router::CvcStrategyCache` (#6) — same
 //! `DashMap + AtomicU64 hits/misses + blake3 sig` shape so per-pass
 //! telemetry is uniform across the verification stack.
 //!
+
 //! # Why caching pays off here
 //!
+
 //! `mount core.*` brings the entire stdlib (~thousands of
-//! refinement-typed functions) into scope.  Type-checking each
+//! refinement-typed functions) into scope. Type-checking each
 //! function calls `normalize` repeatedly on the SAME small set of
 //! constant types (`Int`, `Bool`, `Maybe<T>` for various `T`,
-//! refinement predicates like `it > 0` etc.).  Without memoisation
+//! refinement predicates like `it > 0` etc.). Without memoisation
 //! every occurrence re-walks the term recursively, with substitution,
-//! producing identical output each time.  Caching turns the second-
+//! producing identical output each time. Caching turns the second-
 //! and-onward visits into a single `blake3 hash + DashMap.get` —
 //! O(N) for the hash but with very small constant; in practice the
 //! dominant cost moves to hash computation, which is ~1 GiB/s.
 //!
+
 //! # Cache key — stable structural hash
 //!
+
 //! [`StructuralHash`] is computed via `blake3` over the term's
-//! `Debug` rendering.  `Debug` is `#[derive]`'d on `CoreTerm` and
+//! `Debug` rendering. `Debug` is `#[derive]`'d on `CoreTerm` and
 //! every constituent type, so the rendering is deterministic across
 //! processes and versions (modulo intentional struct evolution).
 //! Same approach as `tactics::FormulaSignature` and
 //! `capability_router::AssertionSetSignature`.
 //!
+
 //! # Cache invalidation
 //!
+
 //! The cache stores **pure normalization results** —
 //! `normalize(t) = t'` is a function of `t` alone (the axiom-aware
 //! variants take an `AxiomRegistry` snapshot, so when axioms change
 //! the cache key MUST include the axiom-set fingerprint; see
-//! [`AxiomAwareKey`]).  Per-session bounding via [`NormalizeCache::clear`]
+//! [`AxiomAwareKey`]). Per-session bounding via [`NormalizeCache::clear`]
 //! between top-level decls keeps working-set predictable.
 //!
+
 //! # Thread safety
 //!
+
 //! `Send + Sync` so the cache sits on a verification context shared
-//! across rayon workers.  `DashMap`'s sharded interior makes
+//! across rayon workers. `DashMap`'s sharded interior makes
 //! concurrent `get`/`insert` lock-free under typical contention.
 
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 use crate::term::CoreTerm;
 
-/// Stable structural signature of a `CoreTerm`.  Computed via
+/// Stable structural signature of a `CoreTerm`. Computed via
 /// blake3 over the term's `Debug` rendering — same approach as
 /// `tactics::FormulaSignature` for symmetric reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,17 +77,17 @@ impl StructuralHash {
     }
 }
 
-/// Composite key for the axiom-aware variant.  Carries the input
+/// Composite key for the axiom-aware variant. Carries the input
 /// term hash + a fingerprint of the axiom registry that was active
-/// when the cached result was computed.  Keys with different
+/// when the cached result was computed. Keys with different
 /// axiom-fingerprints are distinct entries — δ-reduction depends on
 /// the axiom set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AxiomAwareKey {
     /// Term structural hash.
     pub term_hash: StructuralHash,
-    /// Fingerprint of the axiom registry at compute-time.  Same
-    /// blake3-of-Debug strategy.  Caller-supplied because the kernel
+    /// Fingerprint of the axiom registry at compute-time. Same
+    /// blake3-of-Debug strategy. Caller-supplied because the kernel
     /// doesn't own the registry's identity.
     pub axiom_fingerprint: [u8; 32],
 }
@@ -100,8 +109,9 @@ pub struct NormalizeCacheStats {
 /// Concurrent, sharded cache for plain (axiom-free) normalization
 /// results.
 ///
+
 /// Construct via [`NormalizeCache::new`] (default capacity = 16K) or
-/// [`NormalizeCache::with_capacity`].  `Send + Sync` so it sits on
+/// [`NormalizeCache::with_capacity`]. `Send + Sync` so it sits on
 /// the verification context and can be shared across rayon workers.
 pub struct NormalizeCache {
     entries: dashmap::DashMap<StructuralHash, CoreTerm>,
@@ -118,12 +128,14 @@ impl Default for NormalizeCache {
 impl NormalizeCache {
     /// Default capacity hint = 16384 entries.
     ///
+
     /// Each entry is the 32-byte signature + the cached `CoreTerm`
     /// (variable size, typically tens-to-hundreds of bytes for
-    /// stdlib refinement predicates) + per-shard overhead.  At full
+    /// stdlib refinement predicates) + per-shard overhead. At full
     /// load the working-set is bounded by per-session `clear`
     /// (typically called between top-level decls).
     ///
+
     /// 16K vs `TacticCache`'s 8K — kernel normalization touches more
     /// distinct terms than Z3 probe characterisation because the
     /// kernel walks every refinement predicate body, not just the
@@ -141,7 +153,7 @@ impl NormalizeCache {
         }
     }
 
-    /// Look up cached normalisation by structural hash.  Increments
+    /// Look up cached normalisation by structural hash. Increments
     /// `hits` on Some, `misses` on None.
     pub fn get(&self, sig: &StructuralHash) -> Option<CoreTerm> {
         match self.entries.get(sig) {
@@ -161,7 +173,7 @@ impl NormalizeCache {
         self.entries.insert(sig, term);
     }
 
-    /// Drop all cached entries; reset stats.  Called between
+    /// Drop all cached entries; reset stats. Called between
     /// independent verification sessions to keep working-set
     /// bounded.
     pub fn clear(&self) {

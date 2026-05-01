@@ -14,6 +14,7 @@
 )]
 // Comprehensive integration tests for the Verum parser.
 //
+
 // This test suite focuses on:
 // - Complete program parsing (full modules with multiple declarations)
 // - Context system parsing (dependency injection with provide/using)
@@ -23,6 +24,7 @@
 // - Real-world code patterns
 // - Cross-feature interactions
 //
+
 // These tests complement the existing unit tests by testing how different
 // features interact when combined in realistic scenarios.
 
@@ -2052,6 +2054,7 @@ fn test_multiple_invariants_in_function() {
 // - Error recovery: 15 tests
 // - Real-world patterns: 10 tests
 //
+
 // Combined with existing tests (~8500 lines), this brings comprehensive
 // coverage to the parser with emphasis on integration testing and
 // real-world usage patterns.

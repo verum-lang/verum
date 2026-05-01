@@ -5,43 +5,54 @@
 // Dependencies: core, collections
 // =============================================================================
 //
+
 // QPACK reuses the RFC 7541 Huffman code from HTTP/2's HPACK. 256
 // codewords (one per byte) + one EOS symbol (value 256, not emitted;
 // recognised only as trailing padding).
 //
+
 // # Encode
 //
+
 // Concatenate codewords MSB-first into a bit stream, pad the last
 // byte with EOS prefix (all 1s) to round up to a byte boundary.
 //
+
 // # Decode
 //
+
 // Walk a packed decoding tree (256 root children → up to 5 levels
 // deep). A decoded value resets to the root; partial state at end
 // of input is only valid if the remaining bits are all 1 (i.e.
 // EOS padding ≤ 7 bits).
 //
+
 // Two deviations from RFC 7541 decode rules are REQUIRED for QPACK
 // (RFC 9204 §4.1.1.2):
 //
-//   * EOS symbol MUST NOT appear in the middle of a string —
-//     reject as decode error.
-//   * Padding MUST strictly be the EOS prefix (all-1s) of length
-//     0..7 bits — reject any other trailing pattern.
+
+//  * EOS symbol MUST NOT appear in the middle of a string —
+//  reject as decode error.
+//  * Padding MUST strictly be the EOS prefix (all-1s) of length
+//  0..7 bits — reject any other trailing pattern.
 //
+
 // # Performance
 //
+
 // Decode table is precomputed at module init time into a flat
 // `[u16; 65536]` (16-bit input → (symbol, state, flags)) — amortises
 // the tree walk into a single table lookup per two input bytes.
 // At a cost of 128KB RAM, throughput reaches ~2 GB/s on modern
 // x86_64 vs ~400 MB/s for tree-walking decoders.
 //
+
 // This v0.1 implementation ships the simpler byte-at-a-time decoder
 // so the codec is exercisable immediately; the fast table-driven
 // variant is a drop-in replacement wired behind a feature flag in
 // a Phase 7 optimisation commit.
 //
+
 // =============================================================================
 
 module core.net.h3.qpack.huffman;
@@ -150,14 +161,17 @@ public fn encode(input: &[Byte], out: &mut List<Byte>) {
 // Decode — straightforward bit-tree walk
 // =============================================================================
 //
+
 // The walker carries (state, flags). state encodes the current node
 // in the Huffman tree; flags bits signal whether we're at a leaf +
 // whether the leaf is the EOS symbol (which must never appear in a
 // valid string body).
 //
+
 // We use an integer "state" rather than a pointer-based tree —
 // maintains locality and lets us compute next-state via bit indexing.
 //
+
 // =============================================================================
 
 public fn decode(input: &[Byte]) -> Result<List<Byte>, HuffError> {
@@ -216,6 +230,7 @@ public fn decode(input: &[Byte]) -> Result<List<Byte>, HuffError> {
 // Huffman table (RFC 7541 Appendix B + RFC 9204 Appendix B)
 // =============================================================================
 //
+
 // 257 entries (0..=255 ASCII bytes + EOS=256). Each entry = (code, len).
 // Codes span 5..30 bits. For brevity we ship the most frequently
 // used entries as explicit rows and compute the rest via a compact
@@ -223,10 +238,12 @@ public fn decode(input: &[Byte]) -> Result<List<Byte>, HuffError> {
 // ~10KB for a flat array. The full RFC 7541 Appendix B values live
 // in `huffman_table.vr` as a sibling file in the production build.
 //
+
 // For correctness against interop tests we still need every entry;
 // this file ships the values inline for now to keep qpack self-
 // contained. 257 lines of code_value/code_bits pairs follow.
 //
+
 // =============================================================================
 
 fn code_value(sym: Int) -> UInt32 {
@@ -385,12 +402,14 @@ fn huffman_table() -> List<(UInt32, Int)> {
 // Decoder state machine — straightforward tree-walk
 // =============================================================================
 //
+
 // We implement the tree as an implicit mapping: at state `s`, on bit
 // `b`, consult a table that gives (next_state, output_symbol, is_leaf).
 // The state enum encodes a prefix already consumed. We precompute
 // the state-transition table at first invocation into a small
 // List<(UInt32, UInt32, Bool)> indexed by (state * 2 + bit).
 //
+
 // For the v0.1 ship we construct the table from the `huffman_table`
 // on demand — correctness first; the optimisation commit wires a
 // flat 64KB two-byte-input lookup table.

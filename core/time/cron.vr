@@ -5,43 +5,53 @@
 // Dependencies: core, core.time
 // =============================================================================
 //
+
 // Parses the 5-field crontab spec that every POSIX + Unix-like
 // system has consumed verbatim since 1978:
 //
-//   ┌───── minute        (0 - 59)
-//   │ ┌───── hour        (0 - 23)
-//   │ │ ┌───── day-of-month (1 - 31)
-//   │ │ │ ┌───── month       (1 - 12)
-//   │ │ │ │ ┌───── day-of-week (0 - 6; 0 = Sunday)
-//   │ │ │ │ │
-//   * * * * *
+
+//  ┌───── minute (0 - 59)
+//  │ ┌───── hour (0 - 23)
+//  │ │ ┌───── day-of-month (1 - 31)
+//  │ │ │ ┌───── month (1 - 12)
+//  │ │ │ │ ┌───── day-of-week (0 - 6; 0 = Sunday)
+//  │ │ │ │ │
+//  * * * * *
 //
+
 // Field syntax:
 //
-//   *           wildcard — every valid value
-//   n           literal
-//   a-b         inclusive range
-//   a-b/s       range with step
-//   */s         wildcard with step
-//   a,b,c       comma list (compose with ranges: "1,5-9")
+
+//  * wildcard — every valid value
+//  n literal
+//  a-b inclusive range
+//  a-b/s range with step
+//  */s wildcard with step
+//  a,b,c comma list (compose with ranges: "1,5-9")
 //
+
 // Month + day-of-week accept textual aliases:
-//   JAN..DEC    (case-insensitive, month fields only)
-//   SUN, MON .. SAT  (dow field only)
+//  JAN..DEC (case-insensitive, month fields only)
+//  SUN, MON .. SAT (dow field only)
 //
+
 // The module does NOT accept vixie-cron extensions (`@hourly`,
 // `W`, `L`, `#n`) in v0.1. Those land in a follow-up behind an
 // `extensions: bool` constructor flag.
 //
+
 // # API
 //
+
 // ```
 // let cron = CronExpr.parse(&Text.from("*/5 8-18 * * MON-FRI"))?;
 // let next: Instant = cron.next_after(now)?;
 // ```
 //
+
 // # Schedule semantics
 //
+
 // `next_after(t)` returns the earliest instant `t' > t` at which
 // every field constraint is satisfied. When both DOM and DOW are
 // explicitly constrained, the classic vixie-cron rule applies: a
@@ -49,6 +59,7 @@
 // That's the behaviour every widely-deployed cron implementation
 // has used since Paul Vixie's 1987 rewrite.
 //
+
 // =============================================================================
 
 module core.time.cron;

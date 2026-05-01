@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: SQLite file format §6.1
 //
+
 // Semantics:
-//   * schema_version is incremented by the engine on every DDL commit.
-//   * user_version is set explicitly via `PRAGMA user_version = N` —
-//     setting requires a writable DB.
-//   * application_id is set via `PRAGMA application_id = N`, and is
-//     persisted verbatim.
+//  * schema_version is incremented by the engine on every DDL commit.
+//  * user_version is set explicitly via `PRAGMA user_version = N` —
+//  setting requires a writable DB.
+//  * application_id is set via `PRAGMA application_id = N`, and is
+//  persisted verbatim.
 //
+
 // The engine records a readonly flag mirroring the connection state.
 // =============================================================================
 
@@ -44,8 +46,8 @@ implement VersionEngine {
     pub fn user_version(&self) -> Int { self.counters.user_version }
     pub fn application_id(&self) -> Int { self.counters.application_id }
 
-    /// Called by the DDL commit path — bumps schema_version.  Returns
-    /// the new value.  No-op (and returns unchanged value) when read-only.
+    /// Called by the DDL commit path — bumps schema_version. Returns
+    /// the new value. No-op (and returns unchanged value) when read-only.
     pub fn bump_schema_version(&mut self) -> Int {
         if self.readonly { return self.counters.schema_version; }
         self.counters.schema_version = self.counters.schema_version + 1;

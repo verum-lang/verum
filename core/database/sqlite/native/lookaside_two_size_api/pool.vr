@@ -1,8 +1,9 @@
 // SQLITE_CONFIG_LOOKASIDE2 — split-size lookaside per-connection pool.
 //
+
 // Each connection has two pools:
-//   * small slots (size = sz_small bytes)  — used for AST nodes, small lookups
-//   * large slots (size = sz_large bytes)  — used for VDBE programs, sorters
+//  * small slots (size = sz_small bytes) — used for AST nodes, small lookups
+//  * large slots (size = sz_large bytes) — used for VDBE programs, sorters
 // A request larger than sz_large bypasses lookaside entirely (heap malloc).
 
 module core.database.sqlite.native.lookaside_two_size_api.pool;

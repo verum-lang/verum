@@ -2,29 +2,37 @@
 // reflection.vr — Refinement Reflection
 // =============================================================================
 //
+
 // Layer: Standard Library / Proof
 //
+
 // User-facing surface for the refinement-reflection analysis core
 // (`verum_smt.refinement_reflection`). Pure, total user functions
 // can be reflected into the Z3 context as universally-quantified
 // equality axioms, so downstream proofs may *unfold* calls to
 // `f(x)` instead of treating `f` as an uninterpreted symbol.
 //
+
 // This is the same technique Liquid Haskell calls *refinement
 // reflection*: it makes user definitions visible to the SMT
 // solver, dramatically expanding what auto-tactics can prove.
 //
+
 // ## Soundness gate
 //
+
 // A function may be reflected only if it is:
 //
-//   * **Pure** — no Mutates/IO/Async/Fallible properties
-//   * **Total** — terminates on every input, no panic/unreachable
-//   * **Closed** — body uses only its parameters and other already-
-//     reflected functions
+
+//  * **Pure** — no Mutates/IO/Async/Fallible properties
+//  * **Total** — terminates on every input, no panic/unreachable
+//  * **Closed** — body uses only its parameters and other already-
+//  reflected functions
 //
+
 // The gate `is_reflectable` returns the appropriate verdict.
 //
+
 // =============================================================================
 
 module core.proof.reflection;
@@ -33,6 +41,7 @@ module core.proof.reflection;
 // 0. SMT-LIB identifier validation
 // =============================================================================
 //
+
 // `to_smtlib_axiom` and `to_smtlib_decl` substitute the function name
 // and parameter names directly into the emitted S-expression. If a
 // caller-supplied identifier contains parentheses, semicolons, the
@@ -42,18 +51,22 @@ module core.proof.reflection;
 // point the reflected axiom embeds attacker-controlled assertions
 // into every downstream proof.
 //
+
 // Refinement reflection is SOUNDNESS-CRITICAL: a wrong axiom poisons
 // every later verification. Pre-validate at the construction site so
 // rendering is provably safe for the value range that reaches the
 // renderer.
 //
+
 // SMT-LIB v2.6 simple-symbol grammar:
 //
-//     simple_symbol_first  ::= letter | "~" | "!" | "@" | "$" | "%"
-//                            | "^" | "&" | "*" | "_" | "+" | "="
-//                            | "<" | ">" | "." | "?" | "/" | "-"
-//     simple_symbol_rest   ::= simple_symbol_first | digit
+
+//  simple_symbol_first ::= letter | "~" | "!" | "@" | "$" | "%"
+//  | "^" | "&" | "*" | "_" | "+" | "="
+//  | "<" | ">" | "." | "?" | "/" | "-"
+//  simple_symbol_rest ::= simple_symbol_first | digit
 //
+
 // We accept this grammar literally; quoted-symbol form (|foo bar|)
 // is intentionally rejected because we do not need it for reflected
 // function names, and accepting it would re-open the injection
@@ -117,16 +130,18 @@ const MAX_SMT_SORT_LEN: Int = 256;
 /// S-expressions (`Int`, `(_ BitVec 32)`, `(Array Int Int)`, …) so
 /// the simple-symbol grammar is too restrictive. Instead enforce:
 ///
-///   * balanced `(` / `)` (depth never goes negative, ends at 0)
-///   * no `;` (SMT-LIB line comment — terminates the rest of the
-///     clause and lets the next axiom be smuggled in)
-///   * no `|` (quoted-symbol delimiter — closes any caller-supplied
-///     quoted symbol prematurely and reopens injection surface)
-///   * no `"` or `\` (string-literal delimiters / escapes — not
-///     used in sort syntax, accepting them re-opens injection)
-///   * no C0 control bytes (`< 0x20`) other than space / tab; no DEL
-///   * length capped at MAX_SMT_SORT_LEN
+
+///  * balanced `(` / `)` (depth never goes negative, ends at 0)
+///  * no `;` (SMT-LIB line comment — terminates the rest of the
+///  clause and lets the next axiom be smuggled in)
+///  * no `|` (quoted-symbol delimiter — closes any caller-supplied
+///  quoted symbol prematurely and reopens injection surface)
+///  * no `"` or `\` (string-literal delimiters / escapes — not
+///  used in sort syntax, accepting them re-opens injection)
+///  * no C0 control bytes (`< 0x20`) other than space / tab; no DEL
+///  * length capped at MAX_SMT_SORT_LEN
 ///
+
 /// This whitelist accepts every sort form Z3 / CVC5 emit in
 /// practice while rejecting every byte sequence that has been used
 /// historically to escape SMT-LIB rendering. Same defensive class
@@ -189,6 +204,7 @@ public type ReflectedFunction is {
 
 /// Build a reflected function record.
 ///
+
 /// Panics if `parameters.len() != parameter_sorts.len()` — the two
 /// lists must align position-for-position so `to_smtlib_axiom` can
 /// emit `(x_i sort_i)` pairs. Without this guard a mismatched
@@ -325,6 +341,7 @@ public fn is_reflectable(
 /// Render the universally-quantified axiom in SMT-LIB form:
 /// `(assert (forall ((x₁ S₁) ... (xₙ Sₙ)) (= (f x₁ ... xₙ) body)))`.
 ///
+
 /// Nullary functions (no parameters) emit a plain equality
 /// without the forall binder.
 public fn to_smtlib_axiom(f: ReflectedFunction) -> Text {

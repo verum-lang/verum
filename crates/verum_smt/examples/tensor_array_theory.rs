@@ -1,5 +1,6 @@
 //! Example demonstrating tensor support through Z3 Array theory.
 //!
+
 //! This example shows how Verum tensors are translated to nested Z3 Arrays
 //! and verified using the SMT solver.
 

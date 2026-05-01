@@ -1,41 +1,49 @@
 //! # `verum_kernel::soundness` — meta-circular kernel-soundness export
 //!
+
 //! This module implements the cross-export side of task #80
-//! (VERUM-TRUST-1).  The Verum-side soundness corpus lives in
+//! (VERUM-TRUST-1). The Verum-side soundness corpus lives in
 //! `core/verify/kernel_soundness/`; this module walks that corpus
 //! (well, its declarative skeleton — the rule set, lemma names,
 //! and admit-reasons) and produces parallel Coq + Lean theory files
 //! that an independent reviewer can run through `coqc` / `lean` to
 //! verify Verum is being honest.
 //!
+
 //! ## Architectural shape — protocol-driven, not per-format
 //!
+
 //! Every cross-export target implements one trait, [`SoundnessBackend`].
 //! Concrete instances ([`coq::CoqBackend`], [`lean::LeanBackend`]) are
 //! short — they just say "for this fragment of the corpus, render this
-//! syntax."  The corpus walk is shared in [`SoundnessExporter`], which
+//! syntax." The corpus walk is shared in [`SoundnessExporter`], which
 //! drives the trait methods in canonical order.
 //!
+
 //! Adding a third tool (Isabelle, Agda, Dedukti) is a single new
-//! implementation of [`SoundnessBackend`].  The exporter, the audit
+//! implementation of [`SoundnessBackend`]. The exporter, the audit
 //! gate, and the snapshot tests are all parameterised over the trait.
 //!
+
 //! ## Single source of truth
 //!
+
 //! The 35-rule list in this Rust module mirrors the
-//! `verum_kernel::proof_tree::KernelRule` enum.  The mirror is
+//! `verum_kernel::proof_tree::KernelRule` enum. The mirror is
 //! drift-detected at audit time: the exporter cross-checks the
 //! Rust enum's variant count against `KERNEL_RULE_COUNT` and against
-//! the `.vr` corpus's `corpus_rows()` length.  A one-sided edit
+//! the `.vr` corpus's `corpus_rows()` length. A one-sided edit
 //! (Rust grows a rule, .vr doesn't, or vice versa) fails the gate.
 //!
+
 //! ## Honest IOUs
 //!
+
 //! When a Verum-side lemma is admitted with reason "requires modal-
 //! depth ordinal arithmetic well-foundedness", the Coq emission ends
 //! in `Admitted. (* requires modal-depth ordinal arithmetic
 //! well-foundedness *)` and the Lean emission in `sorry -- requires
-//! modal-depth ordinal arithmetic well-foundedness`.  A foreign
+//! modal-depth ordinal arithmetic well-foundedness`. A foreign
 //! reviewer sees the same gap Verum sees.
 
 use serde::{Deserialize, Serialize};
@@ -53,6 +61,7 @@ mod tests;
 
 /// Canonical lemma-status as seen by the cross-export pipeline.
 ///
+
 /// Mirrors `core::verify::kernel_soundness::theorems::LemmaStatus`.
 /// The Verum corpus is the source of truth; this enum is the Rust-
 /// side carrier so [`SoundnessBackend`] implementations can render
@@ -60,7 +69,7 @@ mod tests;
 /// without reading `.vr` files at compile time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LemmaStatus {
-    /// The lemma is structurally proved in the corpus.  The
+    /// The lemma is structurally proved in the corpus. The
     /// `tactics` field carries the per-backend proof script the
     /// emitter should place between `Proof. ... Qed.` (Coq) or
     /// the `:= by ...` tactic block (Lean).
@@ -70,21 +79,22 @@ pub enum LemmaStatus {
         /// Tactic block to emit after `:= by` in Lean.
         lean_tactics: String,
     },
-    /// The lemma is admitted with a concrete cost-annotation.  The
+    /// The lemma is admitted with a concrete cost-annotation. The
     /// `reason` is preserved verbatim into the foreign-tool output.
     Admitted {
-        /// Concrete IOU naming the missing meta-theory.  Preserved
+        /// Concrete IOU naming the missing meta-theory. Preserved
         /// verbatim into the Coq `Admitted.` comment and the Lean
         /// `sorry --` comment.
         reason: String,
     },
     /// The lemma is discharged by citing a vetted upstream proof
-    /// (mathlib4 / Coq stdlib / ZFC-foundational).  Audit-acceptable
+    /// (mathlib4 / Coq stdlib / ZFC-foundational). Audit-acceptable
     /// at L4 because the citation pins a specific upstream file the
-    /// reviewer can independently verify.  Renders the same as
+    /// reviewer can independently verify. Renders the same as
     /// `Admitted` in foreign-tool output but carries structured
     /// citation metadata for the audit gate.
     ///
+
     /// Lifecycle (per IOU): `Admitted { reason } → DischargedByFramework
     /// → Proved { coq_tactics, lean_tactics }` once full proof-term
     /// replay lands (#162).
@@ -94,7 +104,7 @@ pub enum LemmaStatus {
         lemma_path: String,
         /// Upstream framework name (e.g. "mathlib4", "coq_stdlib", "zfc").
         framework: String,
-        /// Concrete citation string.  Example: `Mathlib.Computability.Lambda.ChurchRosser`.
+        /// Concrete citation string. Example: `Mathlib.Computability.Lambda.ChurchRosser`.
         citation: String,
     },
 }
@@ -105,13 +115,13 @@ impl LemmaStatus {
         matches!(self, LemmaStatus::Proved { .. })
     }
 
-    /// Project: is this status `DischargedByFramework`?  L4-acceptable
+    /// Project: is this status `DischargedByFramework`? L4-acceptable
     /// but downstream of a cited upstream proof.
     pub fn is_discharged_by_framework(&self) -> bool {
         matches!(self, LemmaStatus::DischargedByFramework { .. })
     }
 
-    /// Project: extract the admit-reason if any.  For
+    /// Project: extract the admit-reason if any. For
     /// `DischargedByFramework`, returns the citation string —
     /// callers that audit "what's the trust extension" treat both
     /// cases uniformly.
@@ -124,8 +134,8 @@ impl LemmaStatus {
     }
 }
 
-/// Categorisation of a kernel rule.  Mirrors
-/// `core::verify::kernel_soundness::rules::RuleCategory`.  Used
+/// Categorisation of a kernel rule. Mirrors
+/// `core::verify::kernel_soundness::rules::RuleCategory`. Used
 /// for grouping in foreign-tool outputs (sections / namespaces).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RuleCategory {
@@ -162,7 +172,7 @@ impl RuleCategory {
     }
 }
 
-/// One row of the kernel-soundness corpus.  The cross-export
+/// One row of the kernel-soundness corpus. The cross-export
 /// pipeline consumes a `Vec<RuleSpec>` produced by [`canonical_rules`]
 /// and dispatches each row through the active [`SoundnessBackend`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,14 +192,15 @@ pub struct RuleSpec {
 }
 
 /// The 35-rule canonical specification — single source of truth on
-/// the Rust side.  Mirrors the Verum corpus's `corpus_rows()` and
-/// `verum_kernel::proof_tree::KernelRule`.  Drift between the three
+/// the Rust side. Mirrors the Verum corpus's `corpus_rows()` and
+/// `verum_kernel::proof_tree::KernelRule`. Drift between the three
 /// is checked at audit time.
 ///
-/// **Why hand-written?**  The Verum-side definitions live in `.vr`
+
+/// **Why hand-written?** The Verum-side definitions live in `.vr`
 /// files that are loaded as bytecode at compile time of the
 /// compiler — they cannot be parsed inside this crate without
-/// circular-dependency hazards.  The audit-time drift check
+/// circular-dependency hazards. The audit-time drift check
 /// discovers any divergence loudly: the Rust list is hand-written
 /// here, parsed-from-`.vr`-corpus elsewhere, and the gate compares
 /// the two.
@@ -198,7 +209,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
     use RuleCategory::*;
 
     // Helper: build a `Proved` status with the per-backend tactic
-    // strings.  Keeps the table compact.
+    // strings. Keeps the table compact.
     fn proved(coq: &str, lean: &str) -> LemmaStatus {
         Proved {
             coq_tactics: coq.to_string(),
@@ -212,7 +223,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
     }
 
     // Helper: build a `DischargedByFramework` status citing an
-    // upstream proof.  The kernel_v0/lemmas/ stub at `lemma_path`
+    // upstream proof. The kernel_v0/lemmas/ stub at `lemma_path`
     // carries the matching `@framework(...)` annotation; the audit
     // gate enumerates these for the trust-extension report.
     fn discharged(lemma_path: &str, framework: &str, citation: &str) -> LemmaStatus {
@@ -392,38 +403,40 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
     ]
 }
 
-/// Expected number of kernel rules.  Drift-detection invariant: the
+/// Expected number of kernel rules. Drift-detection invariant: the
 /// Rust `KernelRule` enum at `proof_tree.rs:694-787` must have this
 /// many variants, the `.vr` corpus's `KERNEL_RULE_COUNT` constant
 /// must equal this, and `canonical_rules().len()` must equal this.
 ///
+
 /// **Distribution (verified by `rule_categories_partition_the_corpus`
 /// test):** Structural 9 + Cubical 6 + Refinement 4 + Quotient 3 +
 /// Inductive 3 + SmtAxiom 2 + Diakrisis 11 = **38**.
 pub const EXPECTED_KERNEL_RULE_COUNT: usize = 38;
 
-/// The protocol every cross-export backend implements.  See module
+/// The protocol every cross-export backend implements. See module
 /// docs for the architectural rationale (one trait, multiple instances).
 ///
+
 /// The trait is split by *concern* — preamble, inductive types,
 /// per-rule lemmas, top-level theorem, postscript — rather than by
-/// rule.  This means a new backend's implementation is small and
+/// rule. This means a new backend's implementation is small and
 /// uniform: render each section in the target's syntax.
 pub trait SoundnessBackend {
-    /// Stable identifier — `"coq"`, `"lean"`, `"isabelle"`, …  Used
+    /// Stable identifier — `"coq"`, `"lean"`, `"isabelle"`, … Used
     /// in audit reports and in output filenames.
     fn id(&self) -> &'static str;
 
-    /// Canonical foreign-system handle.  Default implementation
+    /// Canonical foreign-system handle. Default implementation
     /// resolves [`id`](Self::id) via [`ForeignSystem::from_name`];
     /// override when the backend's ID doesn't match the canonical
-    /// alias set.  Lets consumers dispatch by typed enum rather
+    /// alias set. Lets consumers dispatch by typed enum rather
     /// than string comparison.
     fn foreign_system(&self) -> Option<crate::foreign_system::ForeignSystem> {
         crate::foreign_system::ForeignSystem::from_name(self.id())
     }
 
-    /// Output filename for the emitted theory file.  Examples:
+    /// Output filename for the emitted theory file. Examples:
     /// `"kernel_soundness.v"` (Coq), `"KernelSoundness.lean"` (Lean).
     fn output_filename(&self) -> &'static str;
 
@@ -438,7 +451,7 @@ pub trait SoundnessBackend {
     /// Render the `Inductive CoreType := …` block.
     fn render_core_type_inductive(&self) -> String;
 
-    /// Render the `Inductive KernelRule := …` block.  All 35
+    /// Render the `Inductive KernelRule := …` block. All 35
     /// variants in canonical order.
     fn render_kernel_rule_inductive(&self, rules: &[RuleSpec]) -> String;
 
@@ -456,20 +469,21 @@ pub trait SoundnessBackend {
     fn render_postscript(&self) -> String;
 }
 
-/// The shared corpus walker.  Drives any [`SoundnessBackend`] over
+/// The shared corpus walker. Drives any [`SoundnessBackend`] over
 /// the canonical rule set and assembles the output file as text.
 ///
+
 /// The shape of every emitted file is identical:
 /// preamble · core-term-inductive · core-type-inductive ·
 /// kernel-rule-inductive · per-rule-lemmas (× 35) ·
-/// main-theorem · postscript.  Backends control only the rendering;
+/// main-theorem · postscript. Backends control only the rendering;
 /// the structure is enforced here.
 pub struct SoundnessExporter {
     rules: Vec<RuleSpec>,
 }
 
 impl SoundnessExporter {
-    /// Construct an exporter using the canonical rule list.  This is
+    /// Construct an exporter using the canonical rule list. This is
     /// the production path; tests can use [`Self::with_rules`] to
     /// drive a custom list.
     pub fn new() -> Self {
@@ -486,7 +500,7 @@ impl SoundnessExporter {
         &self.rules
     }
 
-    /// Emit the full theory file for `backend`.  The output is a
+    /// Emit the full theory file for `backend`. The output is a
     /// `String` ready to be written to disk; the audit gate then
     /// optionally invokes `coqc` / `lean` to re-check it.
     pub fn emit<B: SoundnessBackend + ?Sized>(&self, backend: &B) -> String {
@@ -510,7 +524,7 @@ impl SoundnessExporter {
         out
     }
 
-    /// Audit-side drift check.  Returns `Err(reason)` if the rule
+    /// Audit-side drift check. Returns `Err(reason)` if the rule
     /// list disagrees with [`EXPECTED_KERNEL_RULE_COUNT`] — the
     /// gate fails on this so a one-sided edit can't slip through.
     pub fn drift_check(&self) -> Result<(), String> {
@@ -526,8 +540,8 @@ impl SoundnessExporter {
     }
 
     /// Audit-side accountability surface: enumerate every admitted
-    /// lemma's `(rule_name, reason)` pair.  Renders into JSON via
-    /// the audit gate.  Includes both `Admitted` (open IOU) and
+    /// lemma's `(rule_name, reason)` pair. Renders into JSON via
+    /// the audit gate. Includes both `Admitted` (open IOU) and
     /// `DischargedByFramework` (closed IOU with citation) — the audit
     /// gate is the place to distinguish; the IOU list itself is the
     /// trust-extension surface.

@@ -5,22 +5,25 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // A WaitGroup waits for a collection of tasks to finish.
 // The main thread calls add() to set the number of tasks to wait for.
 // Each task calls done() when finished.
 // wait() blocks until all tasks have called done().
 //
+
 // Usage:
-//   let wg = WaitGroup.new();
-//   wg.add(3);
-//   for i in 0..3 {
-//       spawn {
-//           do_work(i);
-//           wg.done();
-//       };
-//   }
-//   wg.wait();  // Blocks until all 3 tasks are done
+//  let wg = WaitGroup.new();
+//  wg.add(3);
+//  for i in 0..3 {
+//  spawn {
+//  do_work(i);
+//  wg.done();
+//  };
+//  }
+//  wg.wait(); // Blocks until all 3 tasks are done
 //
+
 // =============================================================================
 
 module waitgroup;
@@ -48,9 +51,11 @@ fn __waitgroup_destroy_raw(wg: Int) -> Int;
 
 /// A synchronization barrier that waits for a group of tasks.
 ///
+
 /// Based on Go's `sync.WaitGroup`. Counter-based: add(N) increments,
 /// done() decrements, wait() blocks until counter reaches zero.
 ///
+
 /// Performance: ~50ns for add/done (single atomic op), wait uses
 /// futex-based condition variable (no spin-wait).
 public type WaitGroup is {
@@ -90,6 +95,7 @@ implement WaitGroup {
 
     /// Destroy the WaitGroup, freeing resources.
     ///
+
     /// Most callers should NOT need to call this directly — the
     /// `Drop` impl below releases the underlying handle when the
     /// `WaitGroup` value goes out of scope. The explicit method

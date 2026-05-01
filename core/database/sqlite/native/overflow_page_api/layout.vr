@@ -14,8 +14,8 @@ public fn usable_payload(page_size: Int, reserved_bytes: Int) -> Int {
 }
 
 // SQLite minimum-local / maximum-local payload rules (§12.3):
-//   max_local = ((usable_size - 12) * 64 / 255) - 23
-//   min_local = ((usable_size - 12) * 32 / 255) - 23
+//  max_local = ((usable_size - 12) * 64 / 255) - 23
+//  min_local = ((usable_size - 12) * 32 / 255) - 23
 // (using usable_size = page_size - reserved_bytes)
 public fn max_local(page_size: Int, reserved_bytes: Int) -> Int {
     let usable = page_size - reserved_bytes;

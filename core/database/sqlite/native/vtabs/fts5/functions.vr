@@ -3,15 +3,17 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 — FTS5 functions
 //
+
 // Three SQL functions ship out of the box:
 //
-//   * `highlight(table, col, open, close)` — bold-wrap matched
-//     tokens inside `col` with the open/close strings.
-//   * `snippet(table, col, open, close, ellipsis, nwords)` —
-//     return a contextual excerpt of length `nwords` around the
-//     matched tokens.
-//   * `bm25(table[, w1, w2, ...])` — return the BM25 relevance
-//     score of the current row, optionally weighted per column.
+
+//  * `highlight(table, col, open, close)` — bold-wrap matched
+//  tokens inside `col` with the open/close strings.
+//  * `snippet(table, col, open, close, ellipsis, nwords)` —
+//  return a contextual excerpt of length `nwords` around the
+//  matched tokens.
+//  * `bm25(table[, w1, w2, ...])` — return the BM25 relevance
+//  score of the current row, optionally weighted per column.
 // =============================================================================
 
 module core.database.sqlite.native.vtabs.fts5.functions;
@@ -78,6 +80,7 @@ public fn highlight(
 // snippet()
 // -----------------------------------------------------------------------------
 //
+
 // Returns a contextual excerpt: locate the densest cluster of matches,
 // expand symmetrically up to `nwords` tokens, prepend/append `ellipsis`
 // when the excerpt is shorter than the full text.

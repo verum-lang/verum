@@ -1,11 +1,14 @@
 //! Tensor data type definitions.
 //!
+
 //! This module provides the canonical `DType` enum used throughout VBC for
 //! tensor operations. It unifies the previously duplicated definitions in
 //! `metadata/shape.rs` (compile-time) and `interpreter/tensor.rs` (runtime).
 //!
+
 //! # Naming Convention
 //!
+
 //! Type names match `core/math/tensor.vr`:
 //! - Float types: F16, BF16, F32, F64
 //! - Signed integers: I8, I16, I32, I64
@@ -17,11 +20,14 @@ use serde::{Deserialize, Serialize};
 
 /// Tensor element data type.
 ///
+
 /// Represents the data type of tensor elements, supporting floating-point,
 /// integer, boolean, and complex number types.
 ///
+
 /// # Encoding
 ///
+
 /// Each variant has a fixed numeric value (0-14) used for serialization
 /// and bytecode encoding. The `from_byte` and `to_byte` methods provide
 /// conversion between the enum and its byte representation.
@@ -235,6 +241,7 @@ impl DType {
 
     /// Creates from a byte representation.
     ///
+
     /// Returns `None` if the byte doesn't correspond to a valid DType.
     #[inline]
     pub const fn from_byte(byte: u8) -> Option<Self> {
@@ -260,6 +267,7 @@ impl DType {
 
     /// Creates from a VBC type id.
     ///
+
     /// Type IDs match the enum discriminants for direct mapping.
     /// Returns F32 for unknown type IDs.
     #[inline]
@@ -276,6 +284,7 @@ impl DType {
 
     /// Returns the component type for complex dtypes.
     ///
+
     /// For Complex64, returns F32. For Complex128, returns F64.
     /// For non-complex types, returns self.
     #[inline]
@@ -293,6 +302,7 @@ impl DType {
 
     /// Returns type priority for promotion (higher = wins).
     ///
+
     /// Priority ordering: Complex > Float > Integer > Bool
     #[inline]
     const fn type_priority(&self) -> u8 {
@@ -349,6 +359,7 @@ impl DType {
 
     /// Returns the promoted type for binary operations (instance method).
     ///
+
     /// Follows NumPy-compatible type promotion rules:
     /// - Bool promotes to any numeric type
     /// - Integer promotes to float when mixed
@@ -361,6 +372,7 @@ impl DType {
 
     /// Returns the promoted dtype for binary operations (static method).
     ///
+
     /// Type promotion rules (NumPy-compatible):
     /// - Bool promotes to any numeric type
     /// - Integer promotes to float when mixed

@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §19.5
 //
+
 // Hooks are connection-bound observation/decision points. Each
 // surface is its own protocol so connection-state machinery can
 // store implementations behind a `Heap<dyn Hook>` slot without

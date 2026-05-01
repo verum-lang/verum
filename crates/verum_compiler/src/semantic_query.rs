@@ -1,50 +1,60 @@
 //! Semantic Query Layer for Content-Addressed Caching
 //!
+
 //! This module provides a content-addressed caching layer that uses semantic
 //! hashes instead of file paths. This enables:
 //!
+
 //! - **Deduplication**: Semantically identical items are cached once
 //! - **Cross-project reuse**: Share cached artifacts across projects
 //! - **Smart invalidation**: Only invalidate when semantic meaning changes
 //!
+
 //! ## Architecture
 //!
+
 //! ```text
 //! ┌──────────────────────────────────────────────────────────────────────────┐
-//! │                        Semantic Query Layer                              │
-//! │  ┌─────────────────┐   ┌──────────────────┐   ┌───────────────────────┐  │
-//! │  │  SemanticKey    │   │  SemanticIndex   │   │  SemanticQueryCache   │  │
-//! │  │ - type_hash     │   │ - by_signature   │   │ - content_store       │  │
-//! │  │ - signature_hash│   │ - by_protocol    │   │ - semantic_index      │  │
-//! │  │ - combined_hash │   │ - by_name        │   │ - lru_eviction        │  │
-//! │  └─────────────────┘   └──────────────────┘   └───────────────────────┘  │
+//! │ Semantic Query Layer │
+//! │ ┌─────────────────┐ ┌──────────────────┐ ┌───────────────────────┐ │
+//! │ │ SemanticKey │ │ SemanticIndex │ │ SemanticQueryCache │ │
+//! │ │ - type_hash │ │ - by_signature │ │ - content_store │ │
+//! │ │ - signature_hash│ │ - by_protocol │ │ - semantic_index │ │
+//! │ │ - combined_hash │ │ - by_name │ │ - lru_eviction │ │
+//! │ └─────────────────┘ └──────────────────┘ └───────────────────────┘ │
 //! └──────────────────────────────────────────────────────────────────────────┘
-//!                                   │
-//!           ┌───────────────────────┼───────────────────────┐
-//!           ▼                       ▼                       ▼
-//!    ┌─────────────┐       ┌──────────────┐        ┌──────────────┐
-//!    │ TypeCache   │       │ FunctionCache│        │ VerifyCache  │
-//!    │ (types,     │       │ (signatures, │        │ (verification│
-//!    │  protocols) │       │  bodies)     │        │  results)    │
-//!    └─────────────┘       └──────────────┘        └──────────────┘
+//!  │
+//!  ┌───────────────────────┼───────────────────────┐
+//!  ▼ ▼ ▼
+//!  ┌─────────────┐ ┌──────────────┐ ┌──────────────┐
+//!  │ TypeCache │ │ FunctionCache│ │ VerifyCache │
+//!  │ (types, │ │ (signatures, │ │ (verification│
+//!  │ protocols) │ │ bodies) │ │ results) │
+//!  └─────────────┘ └──────────────┘ └──────────────┘
 //! ```
 //!
+
 //! ## Content-Addressed Keys
 //!
+
 //! Unlike file-path based caching, semantic keys are computed from:
 //! - Type definition structure (fields, variants, constraints)
 //! - Function signature (params, return type, contexts, properties)
 //! - Protocol requirements (associated types, methods)
 //!
+
 //! This means identical definitions in different files share the same cache entry.
 //!
+
 //! ## Semantic Queries
 //!
+
 //! The index supports queries like:
 //! - Find functions by signature pattern: `fn(Int, _) -> Text`
 //! - Find types implementing a protocol: `Iterator<Item = T>`
 //! - Find items by name across all modules
 //!
+
 //! Multi-pass compilation pipeline: Parse → Meta Registry → Macro Expansion →
 //! Contract Verification → Semantic Analysis → HIR → MIR → Optimization → Codegen.
 
@@ -62,6 +72,7 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// A content-addressed key based on semantic hash.
 ///
+
 /// Unlike file-path keys, semantic keys are computed from the actual content's
 /// meaning, enabling deduplication across files and projects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -158,6 +169,7 @@ pub enum SemanticKind {
 
 /// A pattern for matching function signatures.
 ///
+
 /// Supports wildcards for flexible querying.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SignaturePattern {
@@ -261,6 +273,7 @@ impl Default for SignaturePattern {
 
 /// An index mapping semantic properties to cached items.
 ///
+
 /// Supports efficient queries by:
 /// - Function signature (exact or pattern)
 /// - Protocol implementation
@@ -581,11 +594,14 @@ impl SemanticCacheConfig {
 
 /// Thread-safe semantic query cache.
 ///
+
 /// Provides content-addressed caching with semantic indexing for efficient
 /// queries across the codebase.
 ///
+
 /// ## Persistence Integration
 ///
+
 /// When configured with persistence, the cache automatically loads from and saves
 /// to a content-addressed store (CAS). This enables:
 /// - Cross-session caching: Restart compilation without losing cache
@@ -1151,6 +1167,7 @@ impl SemanticQueryCache {
 
     /// Save all cached entries to persistent storage.
     ///
+
     /// Returns the number of entries saved.
     pub fn save_to_persistent(&self) -> std::io::Result<PersistenceResult> {
         let store = match &self.persistent_store {
@@ -1210,6 +1227,7 @@ impl SemanticQueryCache {
 
     /// Load type from persistent storage by name.
     ///
+
     /// Falls back to persistent storage if not in memory cache.
     pub fn get_type_with_fallback(&self, key: &SemanticKey, name: &str) -> Maybe<CachedTypeInfo> {
         // First check memory cache
@@ -1253,6 +1271,7 @@ impl SemanticQueryCache {
 
     /// Load function from persistent storage by name.
     ///
+
     /// Falls back to persistent storage if not in memory cache.
     pub fn get_function_with_fallback(
         &self,
@@ -1299,6 +1318,7 @@ impl SemanticQueryCache {
 
     /// Load verification result from persistent storage.
     ///
+
     /// Falls back to persistent storage if not in memory cache.
     pub fn get_verification_with_fallback(
         &self,

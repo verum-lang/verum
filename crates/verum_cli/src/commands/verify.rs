@@ -1,12 +1,15 @@
 //! Formal verification command with real Z3 SMT integration
 //!
+
 //! Verifies refinement types and contracts using the Z3 SMT solver via the
 //! verum_compiler compilation pipeline. Supports three modes:
 //!
+
 //! - **proof**: Full SMT verification at compile time (0ns runtime overhead)
 //! - **runtime**: Runtime checks only (0ns compile overhead)
 //! - **compare**: Run both modes and display cost/benefit analysis
 //!
+
 //! When the `verification` feature is not enabled (no Z3), the command
 //! clearly reports that Z3 is unavailable and suggests how to enable it.
 
@@ -115,6 +118,7 @@ impl VerificationStats {
 
 /// Profiler configuration plumbed from the CLI.
 ///
+
 /// Controls whether the per-function verification profiler runs, whether a
 /// total-time budget is enforced, whether results are exported as JSON for
 /// CI/CD, and whether a distributed cache URL is advertised. Held here so
@@ -154,11 +158,11 @@ pub struct ProfileConfig {
     /// Enable the closure-hash incremental verification cache (#79).
     /// When true, theorem proofs whose closure-hash + verdict are
     /// already cached are skipped without invoking the SMT/kernel
-    /// re-check.  See `verum_verification::closure_cache`.
+    /// re-check. See `verum_verification::closure_cache`.
     pub closure_cache_enabled: bool,
-    /// Override the closure-cache root directory.  When `None`, the
+    /// Override the closure-cache root directory. When `None`, the
     /// default `<project>/target/.verum_cache/closure-hashes/` is
-    /// used.  Implies `closure_cache_enabled = true` if set.
+    /// used. Implies `closure_cache_enabled = true` if set.
     pub closure_cache_root: Option<PathBuf>,
 }
 
@@ -166,20 +170,25 @@ pub struct ProfileConfig {
 /// git ref. Used by `--diff HEAD~N` / `--diff origin/main` to limit
 /// verification scope in CI.
 ///
+
 /// ## Semantics
 ///
+
 /// Runs `git diff --name-only <ref> --` and filters the output to
 /// paths ending in `.vr` that exist under the current working
 /// directory. The comparison is against the working tree (staged +
 /// unstaged + committed changes since the ref), matching the
 /// expected CI behaviour of "verify only what this PR touches".
 ///
+
 /// ## Error paths
 ///
+
 /// * `git` not installed / not on PATH → `Err("git: command not found")`.
 /// * Ref doesn't resolve → `Err("git diff <ref> failed: <stderr>")`.
 /// * Current directory not inside a git repo → same as above.
 ///
+
 /// Callers should treat the error as advisory (fall back to full-tree
 /// verification with a warning) rather than a hard build failure.
 fn compute_diff_filter(base: &str) -> std::result::Result<Vec<PathBuf>, String> {
@@ -210,6 +219,7 @@ fn compute_diff_filter(base: &str) -> std::result::Result<Vec<PathBuf>, String> 
 /// `verum.toml` declares under `[verify]`. CLI flags always win — the
 /// manifest only fills in the gaps left by the command line.
 ///
+
 /// Called from `execute` before we start iterating sources.
 fn merge_with_manifest(cli: ProfileConfig) -> ProfileConfig {
     let manifest_dir = match crate::config::Manifest::find_manifest_dir() {
@@ -226,6 +236,7 @@ fn merge_with_manifest(cli: ProfileConfig) -> ProfileConfig {
     // declared in `[verify.profiles.<name>]` overrides the matching
     // field in the base `[verify]` block; untouched fields inherit.
     //
+
     // On unknown-profile error, emit a warning and continue with the
     // base block — the verify run itself proceeds with declared CLI
     // flags, preserving the "don't silently swallow user intent"
@@ -279,6 +290,7 @@ fn merge_with_manifest(cli: ProfileConfig) -> ProfileConfig {
 
 /// Parse a human-readable duration string (e.g. `120s`, `2m`, `1h`).
 ///
+
 /// Accepts a bare number as seconds. Used by `--budget=...` at the CLI layer.
 pub fn parse_duration(s: &str) -> std::result::Result<Duration, String> {
     let s = s.trim();
@@ -309,6 +321,7 @@ pub fn parse_duration(s: &str) -> std::result::Result<Duration, String> {
 
 /// Execute verification command for a project (no specific file)
 ///
+
 /// This scans the project for .vr source files and runs the compilation
 /// pipeline with verification enabled, collecting real SMT results.
 pub fn execute(
@@ -482,6 +495,7 @@ fn collect_vr_files(dir: &PathBuf, out: &mut List<PathBuf>) {
 
 /// Run verification on a single file using the real Z3 SMT solver.
 ///
+
 /// Uses `verum_compiler::verify_cmd::VerifyCommand` which:
 /// 1. Parses and type-checks the source file
 /// 2. Extracts functions with refinement types / contracts

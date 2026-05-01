@@ -2,6 +2,7 @@
 //! (`shell_runtime`, `file_runtime`, `env_runtime`, `stdio_runtime`,
 //! `process_runtime`, `net_runtime`).
 //!
+
 //! Pre-extraction, every sibling module carried a verbatim copy of
 //! these primitives — `alloc_byte_list`, `alloc_record_n_fields`,
 //! `wrap_in_variant`, `lookup_type_id_by_name`, `extract_text_arg`,
@@ -11,24 +12,28 @@
 //! be applied THREE times after the same defect was originally
 //! introduced in three modules.
 //!
-//! This module is the single canonical source.  Sibling modules
+
+//! This module is the single canonical source. Sibling modules
 //! `use super::heap_helpers::{...}` — adding a new intercept module
 //! costs zero copy-paste of these primitives.
 //!
+
 //! # Layout invariants this module encodes
 //!
-//!   * **Variant heap-record**: `[ObjectHeader][tag:u32][n_fields:u32]
-//!     [Value;N]`.  Constructed via [`wrap_in_variant`].
-//!   * **Plain record**: `[ObjectHeader][Value;N]`.  Constructed via
-//!     [`alloc_record_n_fields`].
-//!   * **`List<T>` triple-header**: `[len:Value][cap:Value][backing:Value]`
-//!     where backing is `[ObjectHeader][Value;cap]` — one Value-slot
-//!     per element regardless of T.  `bytes[i]` reads via
-//!     `*(backing as *const Value).add(i)` (see
-//!     `memory_collections::handle_get_index` LIST arm).  Constructed
-//!     via [`alloc_byte_list`]; reverse-decoded via
-//!     [`extract_byte_slice`].
+
+//!  * **Variant heap-record**: `[ObjectHeader][tag:u32][n_fields:u32]
+//!  [Value;N]`. Constructed via [`wrap_in_variant`].
+//!  * **Plain record**: `[ObjectHeader][Value;N]`. Constructed via
+//!  [`alloc_record_n_fields`].
+//!  * **`List<T>` triple-header**: `[len:Value][cap:Value][backing:Value]`
+//!  where backing is `[ObjectHeader][Value;cap]` — one Value-slot
+//!  per element regardless of T. `bytes[i]` reads via
+//!  `*(backing as *const Value).add(i)` (see
+//!  `memory_collections::handle_get_index` LIST arm). Constructed
+//!  via [`alloc_byte_list`]; reverse-decoded via
+//!  [`extract_byte_slice`].
 //!
+
 //! Any change to these layouts must update BOTH this module AND the
 //! `memory_collections` GetE/SetE handlers in lockstep.
 
@@ -45,10 +50,11 @@ use super::string_helpers::extract_string;
 // ============================================================================
 
 /// Resolve a stdlib type name (e.g. `"Result"`, `"TcpStream"`) to its
-/// runtime [`TypeId`] in the loaded module's type table.  Filters out
+/// runtime [`TypeId`] in the loaded module's type table. Filters out
 /// `TypeKind::Protocol` to avoid name collisions with the protocol
 /// declarations (the impl-typed records are what we want to allocate).
 ///
+
 /// Returns `None` when the type isn't loaded — caller falls back to
 /// the synthetic-id pattern (`TypeId(0x9000)` for records,
 /// `TypeId(0x8000 + tag)` for variants) which the interpreter accepts
@@ -90,7 +96,7 @@ pub(super) fn alloc_record_n_fields(
 }
 
 /// Allocate a heap variant of a sum type — `[ObjectHeader][tag:u32]
-/// [n_fields:u32][Value;N]`.  `tag` is the variant index in the sum
+/// [n_fields:u32][Value;N]`. `tag` is the variant index in the sum
 /// type's declaration order (e.g. `Result.Ok = 0`, `Result.Err = 1`).
 pub(super) fn wrap_in_variant(
     state: &mut InterpreterState,
@@ -123,9 +129,10 @@ pub(super) fn wrap_in_variant(
 
 /// Allocate a `List<Byte>` heap value from a Rust byte slice.
 ///
+
 /// **Layout** — three-Value header `[len, cap, backing_ptr]` where
 /// backing is one Value-slot per element (each byte boxed as
-/// `Value::from_i64(b as i64)`).  Matches the canonical List<T>
+/// `Value::from_i64(b as i64)`). Matches the canonical List<T>
 /// shape from `method_dispatch::handle_call_method`'s empty-List
 /// path so script-side `bytes[i]` reads the actual byte rather than
 /// header bits.
@@ -151,7 +158,7 @@ pub(super) fn alloc_byte_list(state: &mut InterpreterState, bytes: &[u8]) -> Int
     Ok(Value::from_ptr(list.as_ptr() as *mut u8))
 }
 
-/// Decode a `&[Byte]` argument into an owned `Vec<u8>`.  Walks
+/// Decode a `&[Byte]` argument into an owned `Vec<u8>`. Walks
 /// either a FatRef-shaped slice (elem_size 0 = NaN-boxed Values, 1
 /// = packed bytes) or a `List<Byte>` Value-per-element backing.
 /// Empty Vec when the value isn't a byte container.
@@ -211,7 +218,7 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
 
 /// Capacity of a byte buffer for sizing `recv()` — the slice's
 /// declared length when it's a FatRef, the list's len when it's
-/// `List<Byte>`.  Returns None when the shape isn't recognised.
+/// `List<Byte>`. Returns None when the shape isn't recognised.
 pub(super) fn read_buffer_capacity(v: Value) -> Option<usize> {
     if v.is_fat_ref() {
         return Some(v.as_fat_ref().len() as usize);
@@ -234,7 +241,7 @@ pub(super) fn read_buffer_capacity(v: Value) -> Option<usize> {
 /// Best-effort no-op when the shape isn't recognised — the script's
 /// `Ok(n)` arm conveys the byte count regardless, so a partial
 /// write doesn't corrupt the caller's view of how many bytes
-/// arrived.  Updates the List header's `len` field to reflect
+/// arrived. Updates the List header's `len` field to reflect
 /// bytes actually written (so the script's subsequent `.len()` /
 /// `.iter()` see the new logical length).
 pub(super) fn write_into_byte_slice(v: Value, bytes: &[u8]) {
@@ -331,7 +338,7 @@ pub(super) fn unwrap_ref(state: &InterpreterState, v: Value) -> Value {
 
 /// Generic shape probe — returns true iff `v` is a heap pointer to
 /// an object whose TypeId resolves (in the loaded module's type
-/// table) to a type named `name`.  Used by the method-dispatch
+/// table) to a type named `name`. Used by the method-dispatch
 /// hooks to gate their intercepts on the receiver actually being
 /// the expected stdlib type.
 pub(super) fn is_record_typed_as(state: &InterpreterState, v: Value, name: &str) -> bool {

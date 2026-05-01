@@ -14,6 +14,7 @@
 )]
 //! Tests for postcondition validation
 //!
+
 //! This test file verifies that the contract system properly validates
 //! postconditions at compile-time.
 

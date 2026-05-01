@@ -1,10 +1,13 @@
 //! Source Map Intrinsics (Tier 1 - Requires SourceMap)
 //!
+
 //! Provides compile-time source map management for tracking generated code
 //! provenance. All functions require the `SourceMap` context.
 //!
+
 //! ## Scope Management
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `source_map_enter_generated(name)` | `(Text) -> ()` | Push name onto scope stack |
@@ -12,8 +15,10 @@
 //! | `source_map_current_scope()` | `() -> Text` | Current scope name |
 //! | `source_map_scope_path()` | `() -> Text` | Full dot-separated path |
 //!
+
 //! ## Span Mapping
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `source_map_map_span(gen, src)` | `(Span, Span) -> ()` | Record span mapping |
@@ -21,8 +26,10 @@
 //! | `source_map_synthetic_span(msg)` | `(Text) -> Span` | Create synthetic span |
 //! | `source_map_get_mappings()` | `() -> List<SpanMapping>` | All mappings |
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 1**: All functions require `using [SourceMap]` context.
 
 use verum_common::{Heap, List, Maybe, Text};

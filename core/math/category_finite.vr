@@ -2,28 +2,35 @@
 // category_finite.vr — Finite Category Presentation
 // =============================================================================
 //
+
 // Layer: Standard Library / Mathematics
 //
+
 // User-facing surface for the categorical-algebra analysis core
 // (`verum_types.category_algebra`). Concrete data structure for
 // finite category presentations, complementing the protocol-level
 // `core/math/category.vr` (which describes categories abstractly
 // via traits/protocols).
 //
+
 // Use this module when you need to:
-//   * Build a category as a value (objects, morphisms, identities,
-//     composition table) and verify the categorical laws hold
-//   * Implement diagram chasing or presheaf computations
-//   * Encode small categorical structures for SMT translation
+//  * Build a category as a value (objects, morphisms, identities,
+//  composition table) and verify the categorical laws hold
+//  * Implement diagram chasing or presheaf computations
+//  * Encode small categorical structures for SMT translation
 //
+
 // ## Categorical laws
 //
+
 // For all morphisms `f : A → B`, `g : B → C`, `h : C → D`:
 //
-//   * Left identity:  `id_B ∘ f = f`
-//   * Right identity: `f ∘ id_A = f`
-//   * Associativity:  `h ∘ (g ∘ f) = (h ∘ g) ∘ f`
+
+//  * Left identity: `id_B ∘ f = f`
+//  * Right identity: `f ∘ id_A = f`
+//  * Associativity: `h ∘ (g ∘ f) = (h ∘ g) ∘ f`
 //
+
 // =============================================================================
 
 module core.math.category_finite;
@@ -175,11 +182,13 @@ public fn morphism_count(c: FiniteCategory) -> Int {
 // 5. Graph view — canonical projection to core.math.graph
 // =============================================================================
 //
+
 // A finite category's objects + morphisms form a labelled directed
 // multigraph. Exposing it through `core.math.graph.Edge<CatObject, Text>`
 // — where the label is the morphism's name — makes BFS/DFS/reachable/
 // dijkstra directly applicable to the category's underlying graph.
 //
+
 // Graph homomorphisms, limit/colimit queries, and connectivity
 // analysis of presented categories all reduce to graph algorithms on
 // this view.

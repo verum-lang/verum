@@ -1,42 +1,52 @@
 //! Proof-body translator — Verum proof bodies → Coq tactics / Lean tactics.
 //!
+
 //! Sibling to [`super::expr_translate`] (which translates
 //! propositions); this module handles the load-bearing other half:
 //! translating the actual proof body that closes a Verum theorem.
 //!
+
 //! # The shape problem
 //!
+
 //! Pre-this-module, every proof-bearing theorem emitted to Coq/Lean
-//! ended in `Admitted.` / `:= by sorry`.  The proof body was
-//! ignored.  This is task #153 / Phase 2 — replace the placeholder
+//! ended in `Admitted.` / `:= by sorry`. The proof body was
+//! ignored. This is task #153 / Phase 2 — replace the placeholder
 //! with a real, foreign-tool-checkable proof.
 //!
+
 //! # Coverage strategy
 //!
-//! Translators land iteratively, smallest-shape-first.  V0 covers
+
+//! Translators land iteratively, smallest-shape-first. covers
 //! the two highest-frequency shapes in the corpus:
 //!
-//!   * **Term-mode** ([`ProofBody::Term`]): the proof is an explicit
-//!     expression (Curry-Howard).  Pass through the existing
-//!     [`super::expr_translate::ExprRenderer`].  Coq form:
-//!     `exact (<expr>).`  Lean form: `<expr>` (term-mode, no `by`).
+
+//!  * **Term-mode** ([`ProofBody::Term`]): the proof is an explicit
+//!  expression (Curry-Howard). Pass through the existing
+//!  [`super::expr_translate::ExprRenderer`]. Coq form:
+//!  `exact (<expr>).` Lean form: `<expr>` (term-mode, no `by`).
 //!
-//!   * **Single-apply tactic-mode** ([`ProofBody::Tactic`] with
-//!     [`TacticExpr::Apply`]): the proof is `apply <name>(args)`.
-//!     This is the shape produced by the `@delegate(target)`
-//!     attribute (#146) — every delegating MSFS theorem currently
-//!     synthesises this body.  Coq form: `apply <name>.`  Lean
-//!     form: `by apply <name>`.
+
+//!  * **Single-apply tactic-mode** ([`ProofBody::Tactic`] with
+//!  [`TacticExpr::Apply`]): the proof is `apply <name>(args)`.
+//!  This is the shape produced by the `@delegate(target)`
+//!  attribute (#146) — every delegating MSFS theorem currently
+//!  synthesises this body. Coq form: `apply <name>.` Lean
+//!  form: `by apply <name>`.
 //!
+
 //! Other shapes ([`ProofBody::Structured`], [`ProofBody::ByMethod`],
 //! complex tactic chains) fall back to [`TranslatedProofBody::Fallback`]
 //! and the renderer reverts to `Admitted.` / `sorry` — partial
 //! coverage is safe, no broken artefacts emitted.
 //!
+
 //! # Why this shape
 //!
+
 //! The MSFS corpus's @delegate-driven design (post-#146) makes
-//! single-apply the dominant proof-body shape.  Closing this case
+//! single-apply the dominant proof-body shape. Closing this case
 //! converts the largest cohort of `Admitted.` to `Qed.` in a
 //! single pass, materially shrinking the trust extension visible
 //! to `verum audit --proof-honesty`.
@@ -59,11 +69,11 @@ use super::expr_translate::{
 // TranslatedProofBody
 // =============================================================================
 
-/// One translation outcome.  Mirrors
+/// One translation outcome. Mirrors
 /// [`super::expr_translate::TranslatedExpr`] for proof bodies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TranslatedProofBody {
-    /// Translation succeeded.  `text` is ready to substitute into
+    /// Translation succeeded. `text` is ready to substitute into
     /// the renderer's proof slot — for Coq, the body of
     /// `Proof. <text> Qed.`; for Lean, the right-hand side of
     /// `theorem foo : T := <text>` (which may include a leading
@@ -100,16 +110,16 @@ impl TranslatedProofBody {
 // ProofBodyRenderer trait
 // =============================================================================
 
-/// Per-format translator interface.  Adding a new foreign format is
-/// one new instance.  Mirrors [`super::expr_translate::ExprRenderer`]
+/// Per-format translator interface. Adding a new foreign format is
+/// one new instance. Mirrors [`super::expr_translate::ExprRenderer`]
 /// — same shape, different surface.
 pub trait ProofBodyRenderer {
-    /// Stable backend identifier — `"coq"` / `"lean"`.  Matches the
+    /// Stable backend identifier — `"coq"` / `"lean"`. Matches the
     /// keys used by [`super::corpus_export::TheoremSpec::per_backend_proof_tactic`].
     fn id(&self) -> &'static str;
 
     /// Translate a Verum proof body into the backend's proof-text
-    /// syntax.  Returns
+    /// syntax. Returns
     /// [`TranslatedProofBody::Fallback`] for shapes outside the
     /// V0 coverage set.
     fn render(&self, body: &ProofBody) -> TranslatedProofBody;
@@ -120,7 +130,7 @@ pub trait ProofBodyRenderer {
 // =============================================================================
 
 /// If `expr` is `Path::Name(ident)` (single-segment path), return the
-/// ident text.  Used to detect bare-name lemma references in
+/// ident text. Used to detect bare-name lemma references in
 /// `apply <name>` tactics.
 fn single_segment_path_name(expr: &Expr) -> Option<&str> {
     match &expr.kind {
@@ -135,9 +145,10 @@ fn single_segment_path_name(expr: &Expr) -> Option<&str> {
 /// If `expr` is a multi-segment `Path` (e.g., `a::b::c`) OR a Field
 /// chain rooted at a single-segment Path (e.g., `mathlib4.lambda.ChurchRosser`,
 /// which the parser produces as nested `Field` expressions),
-/// return the dot-joined form.  Used to recognise mathlib4-cited
+/// return the dot-joined form. Used to recognise mathlib4-cited
 /// / framework-cited apply targets that the corpus uses extensively.
 ///
+
 /// Returns `None` for non-resolvable shapes (calls, closures,
 /// generic-arg segments, etc.) — those need their own classification.
 fn dotted_path_text(expr: &Expr) -> Option<String> {
@@ -158,7 +169,7 @@ fn dotted_path_text(expr: &Expr) -> Option<String> {
         return Some(parts.join("."));
     }
     // Field-chain form (Verum's `.` member access — the actual
-    // shape produced by the parser for `a.b.c` source).  Walk the
+    // shape produced by the parser for `a.b.c` source). Walk the
     // Field nesting, collect field names, ensure the innermost
     // receiver is a single-segment Path.
     field_chain_text(expr)
@@ -166,8 +177,9 @@ fn dotted_path_text(expr: &Expr) -> Option<String> {
 
 /// Walk a `Field { expr, field }` chain and produce the
 /// dot-joined dotted-path text when the innermost receiver is a
-/// single-segment `Path`.  Returns `None` otherwise.
+/// single-segment `Path`. Returns `None` otherwise.
 ///
+
 /// Example: `mathlib4.lambda.ChurchRosser` parses as
 /// `Field { expr: Field { expr: Path(mathlib4), field: lambda }, field: ChurchRosser }`
 /// and resolves to `"mathlib4.lambda.ChurchRosser"`.
@@ -199,7 +211,7 @@ fn field_chain_text(expr: &Expr) -> Option<String> {
 
 /// If `expr` is the parser's representation of `<name>(args)` —
 /// `Call { func: Path(<name>), args, type_args: [] }` — return the
-/// callee name and the call args.  The fast parser produces this
+/// callee name and the call args. The fast parser produces this
 /// shape inside `TacticExpr::Apply.lemma` for source like
 /// `apply foo(x, y);` (the Apply variant's own `args` list stays
 /// empty in this case).
@@ -215,7 +227,7 @@ fn call_with_single_segment_callee(expr: &Expr) -> Option<(&str, &[Expr])> {
     // V0: skip calls carrying explicit type arguments — Coq/Lean
     // unify implicits, so we can drop them safely, but recording
     // the choice as a future-V1 enhancement keeps the contract
-    // explicit.  For now, fall back so the renderer reverts to
+    // explicit. For now, fall back so the renderer reverts to
     // admitted; a future translator can render `apply (<name> @T)`.
     if !type_args.is_empty() {
         return None;
@@ -227,12 +239,14 @@ fn call_with_single_segment_callee(expr: &Expr) -> Option<(&str, &[Expr])> {
 /// If `tactic` is `Apply{lemma, args}` return the lemma name when the
 /// lemma expression resolves to either:
 ///
-///   * a bare single-segment path — e.g. `apply foo;`  (Apply.args
-///     carries the actual argument list); or
-///   * a single-segment-callee Call — e.g. `apply foo(x, y);`  (the
-///     fast parser places the entire `f(args)` inside Apply.lemma
-///     and leaves Apply.args empty).
+
+///  * a bare single-segment path — e.g. `apply foo;` (Apply.args
+///  carries the actual argument list); or
+///  * a single-segment-callee Call — e.g. `apply foo(x, y);` (the
+///  fast parser places the entire `f(args)` inside Apply.lemma
+///  and leaves Apply.args empty).
 ///
+
 /// Returned slice is the effective argument list — Apply.args for
 /// the bare-path shape, the call's own args for the Call shape.
 /// Helper so both `ProofBody::Tactic` and the structured-body
@@ -271,15 +285,17 @@ fn classify_apply_tactic(tactic: &TacticExpr) -> Option<(String, &[Expr])> {
 /// If `body` is one of the V0-recognised single-apply shapes, return
 /// the lemma name + args:
 ///
-///   * `ProofBody::Tactic(Apply{...})` — bare tactic-mode body.
-///   * `ProofBody::Structured` with exactly one `Tactic(Apply{...})`
-///     step and no `conclusion` — the shape produced by the parser
-///     for `proof { apply <name>(args); }` blocks.  This is the
-///     dominant @delegate-driven shape in the MSFS corpus (#146).
-///   * `ProofBody::Structured` with empty `steps` and a
-///     `conclusion: Some(Apply{...})` — alternative parser shape for
-///     the same source pattern.
+
+///  * `ProofBody::Tactic(Apply{...})` — bare tactic-mode body.
+///  * `ProofBody::Structured` with exactly one `Tactic(Apply{...})`
+///  step and no `conclusion` — the shape produced by the parser
+///  for `proof { apply <name>(args); }` blocks. This is the
+///  dominant @delegate-driven shape in the MSFS corpus (#146).
+///  * `ProofBody::Structured` with empty `steps` and a
+///  `conclusion: Some(Apply{...})` — alternative parser shape for
+///  the same source pattern.
 ///
+
 /// Args are returned alongside so future translators can render them
 /// as positional arguments to `apply`.
 fn classify_single_apply(body: &ProofBody) -> Option<(String, &[Expr])> {
@@ -288,7 +304,7 @@ fn classify_single_apply(body: &ProofBody) -> Option<(String, &[Expr])> {
         ProofBody::Structured(s) => {
             // `proof { apply foo(args); }` may parse either way:
             // the apply lands in the steps list (with conclusion=None)
-            // or as the conclusion (with steps=[]).  Cover both.
+            // or as the conclusion (with steps=[]). Cover both.
             let steps_count = s.steps.iter().count();
             match (steps_count, &s.conclusion) {
                 (1, Maybe::None) => {
@@ -311,7 +327,7 @@ fn classify_single_apply(body: &ProofBody) -> Option<(String, &[Expr])> {
 // CoqProofBodyRenderer
 // =============================================================================
 
-/// Coq backend.  Produces Coq tactic-mode proof-body text.
+/// Coq backend. Produces Coq tactic-mode proof-body text.
 pub struct CoqProofBodyRenderer;
 
 impl CoqProofBodyRenderer {
@@ -347,7 +363,7 @@ impl ProofBodyRenderer for CoqProofBodyRenderer {
     }
 }
 
-/// Coq term-mode proof: `exact (<expr>).`  Reuses the existing
+/// Coq term-mode proof: `exact (<expr>).` Reuses the existing
 /// proposition translator since term-mode proofs are just
 /// expressions.
 fn render_term_coq(body: &ProofBody) -> TranslatedProofBody {
@@ -365,11 +381,11 @@ fn render_term_coq(body: &ProofBody) -> TranslatedProofBody {
     }
 }
 
-/// Coq single-apply proof: `apply <name>.`  Args are not rendered
+/// Coq single-apply proof: `apply <name>.` Args are not rendered
 /// yet (Coq apply unification usually figures out the implicit
-/// arguments from the goal).  Covers both `ProofBody::Tactic(Apply)`
+/// arguments from the goal). Covers both `ProofBody::Tactic(Apply)`
 /// and the equivalent `ProofBody::Structured` shapes produced for
-/// `proof { apply <name>(args); }` blocks.  Also covers the simple
+/// `proof { apply <name>(args); }` blocks. Also covers the simple
 /// primitive tactics (Auto / Trivial / Reflexivity / Assumption /
 /// Ring / Field / Omega) — each translates to a single Coq tactic
 /// of the same name.
@@ -393,7 +409,7 @@ fn render_single_apply_coq(body: &ProofBody) -> TranslatedProofBody {
 // LeanProofBodyRenderer
 // =============================================================================
 
-/// Lean 4 backend.  Produces text that goes after `:=` in
+/// Lean 4 backend. Produces text that goes after `:=` in
 /// `theorem foo : T := <text>` — may be either term-mode (no leading
 /// `by `) or tactic-mode (`by ...`).
 pub struct LeanProofBodyRenderer;
@@ -442,8 +458,8 @@ fn render_term_lean(body: &ProofBody) -> TranslatedProofBody {
     }
 }
 
-/// Lean single-apply proof: `by apply <name>`.  Covers both bare
-/// tactic-mode and structured-with-single-apply shapes.  Also covers
+/// Lean single-apply proof: `by apply <name>`. Covers both bare
+/// tactic-mode and structured-with-single-apply shapes. Also covers
 /// the simple primitive tactics — each gets a `by <lean_name>`
 /// translation.
 fn render_single_apply_lean(body: &ProofBody) -> TranslatedProofBody {
@@ -466,21 +482,22 @@ fn render_single_apply_lean(body: &ProofBody) -> TranslatedProofBody {
 // AgdaProofBodyRenderer (#156 — third backend)
 // =============================================================================
 
-/// Agda 4 backend.  Agda has no tactic system in the vanilla
+/// Agda 4 backend. Agda has no tactic system in the vanilla
 /// language (the experimental `Reflection` library is out of scope
 /// for V0), so the translator's surface is necessarily smaller than
 /// Coq/Lean: only term-mode proofs and `apply <name>(args)` shapes
-/// translate cleanly.  Everything else falls back to `postulate` at
+/// translate cleanly. Everything else falls back to `postulate` at
 /// the corpus-emission layer.
 ///
+
 /// **Coverage**:
-///   * `ProofBody::Term(expr)` → `<expr>` (Agda accepts term-mode
-///     proofs as the right-hand side of `name = body`).
-///   * `ProofBody::Tactic(Apply{lemma})` / structured single-apply
-///     → `<lemma>` (Agda treats the apply as a bare-term proof).
-///   * Primitive tactics (`auto`, `omega`, `ring`, ...) → fall back.
-///     Agda has no built-in equivalents, and the experimental
-///     `simp`/`automation` ecosystem is library-dependent.
+///  * `ProofBody::Term(expr)` → `<expr>` (Agda accepts term-mode
+///  proofs as the right-hand side of `name = body`).
+///  * `ProofBody::Tactic(Apply{lemma})` / structured single-apply
+///  → `<lemma>` (Agda treats the apply as a bare-term proof).
+///  * Primitive tactics (`auto`, `omega`, `ring`, ...) → fall back.
+///  Agda has no built-in equivalents, and the experimental
+///  `simp`/`automation` ecosystem is library-dependent.
 pub struct AgdaProofBodyRenderer;
 
 impl AgdaProofBodyRenderer {
@@ -508,9 +525,9 @@ impl ProofBodyRenderer for AgdaProofBodyRenderer {
                 render_single_apply_agda(body)
             }
             // Agda has no tactic system — by-method proofs (induction
-            // / cases / contradiction) have no direct equivalent.  A
+            // / cases / contradiction) have no direct equivalent. A
             // future Agda backend could route to the experimental
-            // Reflection library, but V0 falls back to postulate.
+            // Reflection library, but falls back to postulate.
             ProofBodyKind::ByMethod => TranslatedProofBody::Fallback {
                 reason: "Agda: by-method proofs (induction/cases) have no term-mode equivalent in vanilla Agda".to_string(),
             },
@@ -534,9 +551,9 @@ fn render_term_agda(body: &ProofBody) -> TranslatedProofBody {
 
 /// Agda single-apply proof: `<name>` — Agda has no `apply` keyword
 /// and no tactic mode in vanilla form, so the translation is just
-/// the bare lemma name as a term.  The args are dropped — Agda's
+/// the bare lemma name as a term. The args are dropped — Agda's
 /// unification fills in implicit arguments when the proof is
-/// type-checked against the goal.  Also covers the small set of
+/// type-checked against the goal. Also covers the small set of
 /// primitive tactics that have direct term-mode equivalents in
 /// Agda's stdlib.
 fn render_single_apply_agda(body: &ProofBody) -> TranslatedProofBody {
@@ -560,12 +577,14 @@ fn render_single_apply_agda(body: &ProofBody) -> TranslatedProofBody {
 /// proof terms in Agda's stdlib translate; everything else falls
 /// back to postulate.
 ///
+
 /// Coverage:
-///   * `Reflexivity` → `refl` — the propositional-equality
-///     constructor from `Relation.Binary.PropositionalEquality`.
-///   * `Trivial` → `tt` — the unit constructor for `⊤`
-///     (the trivial proposition).
+///  * `Reflexivity` → `refl` — the propositional-equality
+///  constructor from `Relation.Binary.PropositionalEquality`.
+///  * `Trivial` → `tt` — the unit constructor for `⊤`
+///  (the trivial proposition).
 ///
+
 /// `Auto` / `Omega` / `Ring` etc. have no term-mode equivalents —
 /// they're decision procedures that only exist as tactics in
 /// Coq/Lean/Isabelle.
@@ -581,18 +600,19 @@ fn primitive_tactic_to_agda(tactic: &TacticExpr) -> Option<String> {
 // DeduktiProofBodyRenderer (#156 — fifth backend)
 // =============================================================================
 
-/// Dedukti backend.  Dedukti is a logical framework — it has no
-/// tactic system whatsoever, so the V0 surface is term-mode only.
+/// Dedukti backend. Dedukti is a logical framework — it has no
+/// tactic system whatsoever, so the current surface is term-mode only.
 /// Any proof body that doesn't reduce to a single term falls back
 /// to the postulate (axiom-declaration) form at the corpus-emission
 /// layer.
 ///
-/// **Coverage** (V0):
-///   * `ProofBody::Term(expr)` → `<expr>` (same as Lean / Agda).
-///   * Single-apply (Tactic + Structured) → bare lemma name as
-///     a term (Dedukti's β-reduction supplies any implicit args).
-///   * Primitive tactics — fall back; Dedukti has no built-in
-///     tactic vocabulary.
+
+/// **Coverage** :
+///  * `ProofBody::Term(expr)` → `<expr>` (same as Lean / Agda).
+///  * Single-apply (Tactic + Structured) → bare lemma name as
+///  a term (Dedukti's β-reduction supplies any implicit args).
+///  * Primitive tactics — fall back; Dedukti has no built-in
+///  tactic vocabulary.
 pub struct DeduktiProofBodyRenderer;
 
 impl DeduktiProofBodyRenderer {
@@ -620,7 +640,7 @@ impl ProofBodyRenderer for DeduktiProofBodyRenderer {
                 render_single_apply_dedukti(body)
             }
             // Dedukti is a logical framework — no tactics, so
-            // by-method proofs fall back.  Future encoding libraries
+            // by-method proofs fall back. Future encoding libraries
             // could supply Π-style induction principles as terms.
             ProofBodyKind::ByMethod => TranslatedProofBody::Fallback {
                 reason: "Dedukti: by-method proofs require an induction-principle library, not yet wired".to_string(),
@@ -659,16 +679,17 @@ fn render_single_apply_dedukti(body: &ProofBody) -> TranslatedProofBody {
 }
 
 /// Translate a primitive tactic to its Dedukti term-mode
-/// equivalent.  Dedukti has no tactic system; only tactics with
+/// equivalent. Dedukti has no tactic system; only tactics with
 /// direct term-form encodings in standard Dedukti libraries
 /// translate.
 ///
+
 /// Coverage:
-///   * `Reflexivity` → `refl` — the propositional-equality
-///     constructor (assumed to be present in the consumer's
-///     theory; encodings vary by library).
-///   * `Trivial` → `I` — the canonical inhabitant of `True`
-///     in Coq-flavoured Dedukti encodings (LF-style).
+///  * `Reflexivity` → `refl` — the propositional-equality
+///  constructor (assumed to be present in the consumer's
+///  theory; encodings vary by library).
+///  * `Trivial` → `I` — the canonical inhabitant of `True`
+///  in Coq-flavoured Dedukti encodings (LF-style).
 fn primitive_tactic_to_dedukti(tactic: &TacticExpr) -> Option<String> {
     Some(match tactic {
         TacticExpr::Reflexivity => "refl".to_string(),
@@ -681,17 +702,18 @@ fn primitive_tactic_to_dedukti(tactic: &TacticExpr) -> Option<String> {
 // IsabelleProofBodyRenderer (#156 — fourth backend)
 // =============================================================================
 
-/// Isabelle/HOL backend.  Isabelle's proof model is closer to Coq's
+/// Isabelle/HOL backend. Isabelle's proof model is closer to Coq's
 /// than Lean's — the `apply` keyword exists, classical-tactic
 /// names like `auto`, `simp`, `blast` are first-class, and proofs
 /// are typically structured as `proof - ... qed` blocks.
 ///
-/// **Coverage** (V0):
-///   * `ProofBody::Term(expr)` → `by (rule <expr>)` — Isabelle's
-///     reference-by-rule shape closest to Coq's `exact`.
-///   * Single-apply (Tactic + Structured) → `by (rule <name>)`.
-///   * Primitive tactics: Auto / Trivial / Reflexivity / Assumption /
-///     Ring / Field / Omega → Isabelle's stock tactic library.
+
+/// **Coverage** :
+///  * `ProofBody::Term(expr)` → `by (rule <expr>)` — Isabelle's
+///  reference-by-rule shape closest to Coq's `exact`.
+///  * Single-apply (Tactic + Structured) → `by (rule <name>)`.
+///  * Primitive tactics: Auto / Trivial / Reflexivity / Assumption /
+///  Ring / Field / Omega → Isabelle's stock tactic library.
 pub struct IsabelleProofBodyRenderer;
 
 impl IsabelleProofBodyRenderer {
@@ -760,11 +782,11 @@ fn render_single_apply_isabelle(body: &ProofBody) -> TranslatedProofBody {
 /// Translate a primitive tactic to its Isabelle/HOL equivalent.
 /// Isabelle's tactic vocabulary is close to Coq's but with subtle
 /// differences:
-///   * `reflexivity` → `by simp` (Isabelle uses simp for refl-
-///     equality goals; `(rule refl)` also works for bare `x = x`).
-///   * `omega` → `by linarith` (Isabelle uses linarith for linear
-///     arithmetic; `arith` is the older name).
-///   * `field` → `by algebra` (Mathlib's `field_simp` analogue).
+///  * `reflexivity` → `by simp` (Isabelle uses simp for refl-
+///  equality goals; `(rule refl)` also works for bare `x = x`).
+///  * `omega` → `by linarith` (Isabelle uses linarith for linear
+///  arithmetic; `arith` is the older name).
+///  * `field` → `by algebra` (Mathlib's `field_simp` analogue).
 fn primitive_tactic_to_isabelle(tactic: &TacticExpr) -> Option<String> {
     Some(match tactic {
         TacticExpr::Trivial => "by simp".to_string(),
@@ -787,7 +809,7 @@ fn primitive_tactic_to_isabelle(tactic: &TacticExpr) -> Option<String> {
 /// Extract the inner tactic from a body that's either
 /// `ProofBody::Tactic(t)` or `ProofBody::Structured` with exactly one
 /// `Tactic(t)` step (and no conclusion) or `Structured` with empty
-/// steps and `conclusion: Some(t)`.  Mirrors [`classify_single_apply`]
+/// steps and `conclusion: Some(t)`. Mirrors [`classify_single_apply`]
 /// but returns the raw tactic instead of the apply payload — the
 /// caller decides how to translate it.
 fn primitive_tactic(body: &ProofBody) -> Option<&TacticExpr> {
@@ -812,11 +834,12 @@ fn primitive_tactic(body: &ProofBody) -> Option<&TacticExpr> {
     }
 }
 
-/// Translate a primitive tactic to its Coq equivalent.  Returns `None`
+/// Translate a primitive tactic to its Coq equivalent. Returns `None`
 /// for non-primitive tactics (the caller falls back to admitted).
 ///
+
 /// **Why these tactics**: each is decidable enough that the foreign
-/// tool can re-discharge it with a single tactic invocation.  The
+/// tool can re-discharge it with a single tactic invocation. The
 /// translation is direct: the Verum tactic name matches the Coq
 /// tactic name (Coq has all of these in its built-in tactic library).
 fn primitive_tactic_to_coq(tactic: &TacticExpr) -> Option<String> {
@@ -834,13 +857,14 @@ fn primitive_tactic_to_coq(tactic: &TacticExpr) -> Option<String> {
     })
 }
 
-/// Translate a primitive tactic to its Lean 4 equivalent.  Returns
-/// `None` for non-primitive tactics.  Lean tactic names diverge
+/// Translate a primitive tactic to its Lean 4 equivalent. Returns
+/// `None` for non-primitive tactics. Lean tactic names diverge
 /// slightly from Coq:
 ///
-///   * `reflexivity` → `rfl`
-///   * `omega` → `omega` (Mathlib provides this)
-///   * `field` → `field_simp` (Mathlib)
+
+///  * `reflexivity` → `rfl`
+///  * `omega` → `omega` (Mathlib provides this)
+///  * `field` → `field_simp` (Mathlib)
 fn primitive_tactic_to_lean(tactic: &TacticExpr) -> Option<String> {
     Some(match tactic {
         TacticExpr::Trivial => "by trivial".to_string(),
@@ -860,17 +884,20 @@ fn primitive_tactic_to_lean(tactic: &TacticExpr) -> Option<String> {
 // ByMethod (induction / cases / contradiction) translation
 // =============================================================================
 //
+
 // `proof by induction n;` parses to `ProofBody::ByMethod(Induction
-// { on: Some(n), cases: [] })`.  When the cases list is empty (the
+// { on: Some(n), cases: [] })`. When the cases list is empty (the
 // theorem leaves the per-case bodies to the foreign tool's
 // automation), the translation is a single tactic:
 //
-//   Coq:      `induction <n>.`        / `destruct <e>.`
-//   Lean:     `by induction <n>`      / `by cases <e>`
-//   Isabelle: `by (induct <n>)`       / `by (cases <e>)`
+
+//  Coq: `induction <n>.` / `destruct <e>.`
+//  Lean: `by induction <n>` / `by cases <e>`
+//  Isabelle: `by (induct <n>)` / `by (cases <e>)`
 //
+
 // When the cases list is non-empty, Verum's per-case proof bodies
-// would need to be rendered alongside — that's V1.  V0 falls back
+// would need to be rendered alongside — that's V1. falls back
 // to `Admitted.` / `sorry` for the explicit-cases shape.
 
 fn classify_by_method(body: &ProofBody) -> Option<&ProofMethod> {
@@ -881,7 +908,7 @@ fn classify_by_method(body: &ProofBody) -> Option<&ProofMethod> {
 }
 
 /// Coq translation for `proof by induction <on>` / `proof by cases <on>`
-/// when the cases list is empty (auto-discharged).  Other shapes
+/// when the cases list is empty (auto-discharged). Other shapes
 /// (Contradiction, StrongInduction, WellFoundedInduction, or any
 /// non-empty cases list) fall back.
 fn render_by_method_coq(body: &ProofBody) -> TranslatedProofBody {
@@ -904,7 +931,7 @@ fn render_by_method_coq(body: &ProofBody) -> TranslatedProofBody {
         }
         ProofMethod::Cases { on, cases } if cases.iter().count() == 0 => {
             // Cases scrutinee is a Heap<Expr>; render it via the Coq
-            // expression translator.  When the expression doesn't
+            // expression translator. When the expression doesn't
             // translate cleanly (rare for typical scrutinees),
             // fall back.
             match CoqExprRenderer::new().render(on.as_ref()) {
@@ -919,7 +946,7 @@ fn render_by_method_coq(body: &ProofBody) -> TranslatedProofBody {
         ProofMethod::StrongInduction { on, cases } if cases.iter().count() == 0 => {
             // Coq's strong-induction tactic is `induction ... using
             // strong_induction.` (or `well_founded_induction`); the
-            // bare-name form is library-dependent.  Default emits the
+            // bare-name form is library-dependent. Default emits the
             // generic-induction form and lets Coq's automation
             // pick up the strong-induction principle from context.
             TranslatedProofBody::Translated {
@@ -927,7 +954,7 @@ fn render_by_method_coq(body: &ProofBody) -> TranslatedProofBody {
             }
         }
         // Contradiction: requires per-step rendering of the proof
-        // body. V0 falls back.
+        // body. falls back.
         ProofMethod::Contradiction { .. } => TranslatedProofBody::Fallback {
             reason: "Coq contradiction: multi-step body not yet rendered (V0)".to_string(),
         },
@@ -1062,7 +1089,7 @@ mod tests {
 
     /// Build the parser's actual representation of `apply foo(x, y);`:
     /// the lemma is `Call { func: Path(foo), args: [x, y] }` and
-    /// the outer Apply.args is empty.  This is what the fast parser
+    /// the outer Apply.args is empty. This is what the fast parser
     /// produces — see `crates/verum_fast_parser/src/proof.rs:2733`.
     fn apply_body_via_call(lemma_name: &str, call_args: Vec<Expr>) -> ProofBody {
         let call = Expr::new(
@@ -1126,8 +1153,8 @@ mod tests {
 
     #[test]
     fn coq_renders_apply_with_args_drops_args_in_v0() {
-        // V0 emits `apply <name>.` and lets Coq unification figure
-        // out the args.  Future V1 may emit `apply (<name> arg1 arg2).`
+        // emits `apply <name>.` and lets Coq unification figure
+        // out the args. Future V1 may emit `apply (<name> arg1 arg2).`
         let body = apply_body("h", vec![name_path_expr("x"), name_path_expr("y")]);
         let r = CoqProofBodyRenderer::new().render(&body);
         assert_eq!(r.text(), Some("apply h."));
@@ -1265,7 +1292,7 @@ mod tests {
 
     /// Helper: build the canonical `proof { apply <name>(args); }`
     /// shape — `ProofBody::Structured` with one `ProofStep::Tactic(Apply)`
-    /// step and no conclusion.  This is the shape produced by the
+    /// step and no conclusion. This is the shape produced by the
     /// MSFS @delegate(target) attribute (#146).
     fn structured_apply_step(name: &str, args: Vec<Expr>) -> ProofBody {
         use verum_ast::decl::{ProofStep, ProofStructure};
@@ -1499,7 +1526,7 @@ mod tests {
     #[test]
     fn primitive_tactic_via_structured_body_translates() {
         // `proof { trivial; }` parses as Structured with one Tactic(Trivial)
-        // step.  Should translate just like the bare Tactic form.
+        // step. Should translate just like the bare Tactic form.
         use verum_ast::decl::{ProofStep, ProofStructure};
         let step = ProofStep {
             kind: ProofStepKind::Tactic(TacticExpr::Trivial),
@@ -1553,7 +1580,7 @@ mod tests {
     #[test]
     fn agda_translates_term_mode_primitives() {
         // Reflexivity + Trivial have direct term-mode equivalents in
-        // Agda's stdlib (`refl` / `tt`).  Everything else still
+        // Agda's stdlib (`refl` / `tt`). Everything else still
         // falls back since Agda has no tactic system.
         assert_eq!(
             AgdaProofBodyRenderer::new()

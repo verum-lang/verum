@@ -32,8 +32,8 @@ public fn name_text(o: &BindNameOutcome) -> Text {
     }
 }
 
-// Reverse lookup.  BindNameSlot list is the same shape as in
-// `bind_parameter_index_api`.  An anonymous slot is encoded with name = "".
+// Reverse lookup. BindNameSlot list is the same shape as in
+// `bind_parameter_index_api`. An anonymous slot is encoded with name = "".
 public fn name_for(idx: Int, slots: &List<BindNameSlot>) -> BindNameOutcome {
     let n = slots.len() as Int;
     if idx < 1 || idx > n { return OkNullOutOfRange; }

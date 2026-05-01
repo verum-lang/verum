@@ -1,40 +1,49 @@
 //! Synthetic Differential Geometry (SDG) — nilpotent infinitesimals.
 //!
+
 //! Classical differential geometry defines derivatives through
 //! limits and ε-δ arguments. **Synthetic** differential geometry,
 //! pioneered by Lawvere and Kock in the 1970s, axiomatises the
 //! existence of *nilpotent infinitesimals* — non-zero quantities
 //! `d` such that `d² = 0` — and *defines* the derivative directly:
 //!
+
 //! ```text
-//!     f'(x) = the unique a such that  f(x + d) = f(x) + a·d  for all d ∈ D
+//!  f'(x) = the unique a such that f(x + d) = f(x) + a·d for all d ∈ D
 //! ```
 //!
+
 //! where `D = { d : d² = 0 }` is the object of first-order
 //! infinitesimals. The **Kock–Lawvere axiom** asserts this `a`
 //! exists and is unique.
 //!
+
 //! ## Why this matters for Verum
 //!
+
 //! SDG gives derivatives a *type-theoretic* foundation rather than
 //! relying on metalevel limit machinery. This integrates cleanly
 //! with the dependent-type infrastructure already in place and
 //! makes automatic differentiation a **language feature** rather
 //! than a separate compiler pass:
 //!
+
 //! * Forward-mode AD becomes evaluation `f(x + d)` with `d ∈ D`.
 //! * Higher-order derivatives use higher-order infinitesimals
-//!   `D_k = { d : d^(k+1) = 0 }`.
+//!  `D_k = { d : d^(k+1) = 0 }`.
 //! * The chain rule is a theorem about composition of polynomial
-//!   maps in `D`.
+//!  maps in `D`.
 //!
+
 //! ## API
 //!
+
 //! * [`Infinitesimal`] — a value paired with its nilpotency order
 //! * [`InfinitesimalRing`] — symbolic computation in `R[d]/(d^(k+1))`
 //! * [`derivative`] — extract f'(x) by polynomial expansion
 //! * [`PolynomialMap`] — finite-degree polynomial f: R → R
 //!
+
 //! This is the **standalone algebraic core**. Integration into the
 //! type system (typing `D` as a refinement of `Float`, allowing
 //! `f(x + d)` syntax) is a future step.
@@ -63,6 +72,7 @@ impl Infinitesimal {
 /// A polynomial in one variable with f64 coefficients,
 /// stored low-to-high (index = degree).
 ///
+
 /// `[3.0, 2.0, 5.0]` represents `3 + 2x + 5x²`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolynomialMap {
@@ -119,6 +129,7 @@ impl PolynomialMap {
     /// term with `d^k` for `k > inf.order` is dropped — that is
     /// the Kock–Lawvere quotient).
     ///
+
     /// Returns the resulting polynomial in `d`, with coefficients
     /// `[f(x), f'(x), f''(x)/2!, ..., f^(k)(x)/k!]`.
     pub fn evaluate_at_perturbation(
@@ -237,7 +248,7 @@ mod tests {
 
     #[test]
     fn polynomial_quadratic_evaluation() {
-        // f(x) = 3 + 2x + 5x²  →  f(2) = 3 + 4 + 20 = 27
+        // f(x) = 3 + 2x + 5x² → f(2) = 3 + 4 + 20 = 27
         let f = PolynomialMap::new([3.0, 2.0, 5.0]);
         assert!(approx_eq(f.evaluate(2.0), 27.0));
     }
@@ -257,7 +268,7 @@ mod tests {
 
     #[test]
     fn derivative_of_quadratic_is_linear() {
-        // f(x) = x²  →  f'(x) = 2x
+        // f(x) = x² → f'(x) = 2x
         let f = PolynomialMap::new([0.0, 0.0, 1.0]);
         assert!(approx_eq(f.derivative_at(0.0), 0.0));
         assert!(approx_eq(f.derivative_at(3.0), 6.0));
@@ -266,7 +277,7 @@ mod tests {
 
     #[test]
     fn derivative_of_cubic_at_x() {
-        // f(x) = x³  →  f'(x) = 3x²
+        // f(x) = x³ → f'(x) = 3x²
         let f = PolynomialMap::new([0.0, 0.0, 0.0, 1.0]);
         assert!(approx_eq(f.derivative_at(2.0), 12.0));
         assert!(approx_eq(f.derivative_at(-1.0), 3.0));
@@ -274,7 +285,7 @@ mod tests {
 
     #[test]
     fn derivative_polynomial_matches_synthetic() {
-        // f(x) = 3 + 2x + 5x²  →  f'(x) = 2 + 10x
+        // f(x) = 3 + 2x + 5x² → f'(x) = 2 + 10x
         let f = PolynomialMap::new([3.0, 2.0, 5.0]);
         let fprime = f.derivative_polynomial();
         assert!(approx_eq(fprime.evaluate(0.0), 2.0));
@@ -310,9 +321,9 @@ mod tests {
 
     #[test]
     fn perturbation_expansion_first_order() {
-        // f(x) = x²  at x=3 with d² = 0
+        // f(x) = x² at x=3 with d² = 0
         // (x + d)² = x² + 2xd + d² → x² + 2xd
-        // Expected: [9, 6]   (constant 9 = 3², d-coefficient 2*3 = 6)
+        // Expected: [9, 6] (constant 9 = 3², d-coefficient 2*3 = 6)
         let f = PolynomialMap::new([0.0, 0.0, 1.0]);
         let exp = f.evaluate_at_perturbation(3.0, Infinitesimal::first_order());
         assert_eq!(exp.len(), 2);

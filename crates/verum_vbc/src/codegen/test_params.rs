@@ -270,6 +270,7 @@ fn main() {
 
 /// Helper to compile a stdlib file and report any errors.
 ///
+
 /// Uses simple compile_module() without mount resolution.
 /// Cross-module functions/constants are pre-registered via
 /// register_stdlib_constants() and register_stdlib_intrinsics().
@@ -293,10 +294,11 @@ fn compile_stdlib_file(path: &str) -> Result<(), String> {
 
 /// Helper that compiles a stdlib file with mount resolution.
 ///
+
 /// Use this for files that bring cross-module symbols in via `mount`
 /// declarations — `compile_module_with_mounts` parses each mount source
 /// from `core_root` and registers its declarations before the main
-/// module is compiled.  Files that don't use `mount` should prefer the
+/// module is compiled. Files that don't use `mount` should prefer the
 /// cheaper `compile_stdlib_file` helper.
 #[cfg(test)]
 fn compile_stdlib_file_with_mounts(path: &str, core_root: &str) -> Result<(), String> {
@@ -352,9 +354,10 @@ fn test_compile_stdlib_iterator() {
 
 /// Tests compilation of core/collections/list.vr
 ///
+
 /// Uses `compile_stdlib_file_with_mounts` because `list.vr` brings
 /// the typed-OOM allocator primitives (`try_alloc` / `try_realloc`)
-/// in via `mount core.base.memory.{ … }`.  Without mount resolution
+/// in via `mount core.base.memory.{ … }`. Without mount resolution
 /// those references are undefined — a test-harness gap, not a real
 /// codegen bug.
 #[test]
@@ -398,6 +401,7 @@ fn test_compile_stdlib_primitives() {
 
 /// Tests compilation of core/text/text.vr
 ///
+
 /// Uses `compile_stdlib_file_with_mounts` (same rationale as
 /// `test_compile_stdlib_list`).
 #[test]
@@ -412,6 +416,7 @@ fn test_compile_stdlib_text() {
 
 /// Tests compilation of core/collections/map.vr
 ///
+
 /// Uses `compile_stdlib_file_with_mounts` for the same reason as
 /// `test_compile_stdlib_list`: `map.vr` mounts `try_alloc` /
 /// `try_realloc` from `core.base.memory`.
@@ -427,6 +432,7 @@ fn test_compile_stdlib_map() {
 
 /// Tests compilation of core/collections/set.vr
 ///
+
 /// Uses `compile_stdlib_file_with_mounts` (same rationale as
 /// `test_compile_stdlib_list`).
 #[test]
@@ -477,6 +483,7 @@ fn test_compile_stdlib_file() {
 
 /// Tests compilation of core/base/ops.vr.
 ///
+
 /// Exercises the bottom-type alias `public type Never is !;` end-to-end
 /// (parser → AST `TypeDeclBody::Alias(TypeKind::Never)` → codegen). Use
 /// `compile_stdlib_file` because `ops.vr` declares its operator-overloading
@@ -528,6 +535,7 @@ fn test_compile_stdlib_memory() {
 
 /// Tests compilation of core/collections/deque.vr
 ///
+
 /// Uses `compile_stdlib_file_with_mounts` (same rationale as
 /// `test_compile_stdlib_list`).
 #[test]
@@ -890,9 +898,10 @@ fn test_compile_stdlib_io_engine() {
 
 /// Tests compilation of core/io/fs.vr
 ///
+
 /// `fs.vr` mounts cross-module symbols from `io.protocols` (most
 /// notably `io_error_kind_from_os_code`, the per-platform errno-to-
-/// `IoErrorKind` mapping populated via @cfg).  The mount-aware test
+/// `IoErrorKind` mapping populated via @cfg). The mount-aware test
 /// helper parses each mounted module and pre-registers its
 /// declarations before compiling the main file — `compile_stdlib_file`
 /// would surface "undefined function: io_error_kind_from_os_code (in
@@ -909,6 +918,7 @@ fn test_compile_stdlib_io_fs() {
 
 /// Tests compilation of core/io/process.vr
 ///
+
 /// Currently fails on a stdlib/codegen binding error. Pre-existing
 /// (predates the production-readiness push). Re-enable once the
 /// underlying binding is fixed.
@@ -950,6 +960,7 @@ fn test_compile_stdlib_net_tcp() {
 
 /// Tests compilation of core/net/udp.vr
 ///
+
 /// Uses `compile_stdlib_file_with_mounts` because `udp.vr` brings
 /// platform-specific safe socket wrappers (`safe_set_ip_tos`,
 /// `safe_join_multicast_v4`, etc.) in via `mount sys.<os>.net.{ … }`.
@@ -994,6 +1005,7 @@ fn test_compile_stdlib_mem_epoch() {
 
 /// Tests compilation of core/mem/header.vr.
 ///
+
 /// Uses `compile_stdlib_file_with_mounts` because `header.vr` mounts
 /// the `cap_audit` writer helpers (record_revoke / record_attenuate /
 /// record_ref_incr / record_ref_decr / record_gen_bump) so every
@@ -1011,6 +1023,7 @@ fn test_compile_stdlib_mem_header() {
 
 /// Tests compilation of core/mem/heap.vr.
 ///
+
 /// Uses `compile_stdlib_file_with_mounts` because `heap.vr` brings
 /// `SEGMENT_HUGE`, `SEGMENT_NORMAL`, `MemSegment`, page-size constants and
 /// segment-allocator helpers in via `mount super.segment.{ … }`. Without
@@ -1029,6 +1042,7 @@ fn test_compile_stdlib_mem_heap() {
 
 /// Tests compilation of core/mem/thin_ref.vr.
 ///
+
 /// Uses `compile_stdlib_file_with_mounts` for the same reason as
 /// `test_compile_stdlib_mem_heap`: pulls cross-module CBGR symbols via
 /// `mount`.
@@ -1044,6 +1058,7 @@ fn test_compile_stdlib_mem_thin_ref() {
 
 /// Tests compilation of core/mem/fat_ref.vr.
 ///
+
 /// Uses `compile_stdlib_file_with_mounts` for the same reason as
 /// `test_compile_stdlib_mem_heap`.
 #[test]
@@ -1382,6 +1397,7 @@ fn test_compile_stdlib_math_topology() {
 
 /// Tests compilation of core/math/autodiff.vr
 ///
+
 /// Currently fails on a stdlib/codegen binding error. Pre-existing
 /// (predates the production-readiness push). Re-enable once the
 /// underlying binding is fixed.

@@ -6,19 +6,24 @@
 // Spec: docs/architecture/new-arch-spec.md Section 7 (Async AsyncRuntime)
 // =============================================================================
 //
+
 // This module provides a production-quality async executor using native V-LLSI
 // infrastructure. Key features:
 //
+
 // - Context propagation via native TLS context system (sys.common)
 // - Completion-based I/O via IOEngine (io_uring/kqueue/IOCP)
 // - Native monotonic time from sys platform layer
 // - Lock-free task queue with work-stealing support
 //
+
 // As of V-LLSI migration, this module no longer depends on verum_runtime FFI.
 // All async operations use the native sys layer.
 //
+
 // # Performance Targets
 //
+
 // | Operation | Target | V-LLSI Improvement |
 // |-----------|--------|-------------------|
 // | Task spawn | <200ns | ~150ns (no FFI) |
@@ -26,6 +31,7 @@
 // | Env fork | <70ns | ~50ns (memcpy) |
 // | Wake | <50ns | ~30ns (eventfd) |
 //
+
 // =============================================================================
 
 module core.async.executor;
@@ -105,11 +111,11 @@ public type AsyncRuntimeConfig is {
     task_stack_size: Int,
     /// Number of OS worker threads in the work-stealing scheduler.
     /// 0 = auto-detect via `num_cpus::get()` (the documented
-    /// default).  >0 = manifest-pinned override from
-    /// `[runtime].async_worker_threads` in Verum.toml.  Currently
+    /// default). >0 = manifest-pinned override from
+    /// `[runtime].async_worker_threads` in Verum.toml. Currently
     /// the executor is single-threaded cooperative — this field
     /// becomes load-bearing when the multi-threaded scheduler
-    /// lands (#258 follow-up).  The bridge to read the manifest
+    /// lands (#258 follow-up). The bridge to read the manifest
     /// value already exists (#261); only the consumer is
     /// forward-looking.
     async_worker_threads: Int,
@@ -123,21 +129,22 @@ public type AsyncRuntimeConfig is {
     poll_budget: Int,
 };
 
-// Manifest→runtime bridge (#261).  Each getter loads from a
+// Manifest→runtime bridge (#261). Each getter loads from a
 // const-initialised LLVM global emitted by
 // `platform_ir.rs::emit_runtime_globals` whose initial value flows
 // from `LanguageFeatures.runtime` in Verum.toml at codegen time.
 // Returning 0 means "use stdlib auto-detect" (num_cpus, platform
 // stack size); >0 overrides the historical default.
 //
+
 // The functions are emitted with internal linkage; LTO folds the
 // loads to constants at every call site after global-DCE — zero
 // runtime overhead vs hardcoded defaults.
 extern {
-    /// Manifest-driven `[runtime].async_worker_threads`.  0 ≡
+    /// Manifest-driven `[runtime].async_worker_threads`. 0 ≡
     /// auto-detect via `num_cpus::get()`; >0 overrides.
     fn verum_get_runtime_async_worker_threads() -> Int;
-    /// Manifest-driven `[runtime].task_stack_size` (bytes).  0 ≡
+    /// Manifest-driven `[runtime].task_stack_size` (bytes). 0 ≡
     /// platform default (~8 MiB on Unix, 1 MiB on Windows); >0
     /// overrides per-spawned-task stack size.
     fn verum_get_runtime_task_stack_size() -> Int;
@@ -146,16 +153,17 @@ extern {
 implement AsyncRuntimeConfig {
     /// Create default configuration optimized for general use.
     ///
+
     /// Honours the manifest-driven runtime bridge: when
     /// `[runtime].task_stack_size` in Verum.toml is non-zero the
     /// override flows through `verum_get_runtime_task_stack_size`
-    /// → this constructor → every spawned task.  Default 0 keeps
-    /// the historical 1 MiB stack.  Closes the manifest-side gap
+    /// → this constructor → every spawned task. Default 0 keeps
+    /// the historical 1 MiB stack. Closes the manifest-side gap
     /// in #259.
     public fn default() -> AsyncRuntimeConfig {
         let manifest_stack = verum_get_runtime_task_stack_size();
         let stack = if manifest_stack > 0 { manifest_stack } else { 1024 * 1024 };
-        // Read manifest worker-threads override.  0 stays in the
+        // Read manifest worker-threads override. 0 stays in the
         // config field as "auto-detect"; the future multi-threaded
         // scheduler resolves 0 via `num_cpus::get()` at startup.
         let workers = verum_get_runtime_async_worker_threads();
@@ -173,6 +181,7 @@ implement AsyncRuntimeConfig {
 
     /// Create configuration for CPU-bound workloads.
     ///
+
     /// Honours the manifest-driven runtime bridge for both
     /// `task_stack_size` and `async_worker_threads` — explicit
     /// overrides take precedence over the cpu-bound preset
@@ -198,6 +207,7 @@ implement AsyncRuntimeConfig {
 
     /// Create configuration for I/O-bound workloads.
     ///
+
     /// Same manifest-bridge consultation as `cpu_bound` /
     /// `default` — explicit `[runtime].task_stack_size` /
     /// `async_worker_threads` overrides take precedence over
@@ -287,51 +297,54 @@ implement<F: Future> TaskState<F> {
 // WorkerPool — Phase 1 of #271 (multi-threaded async scheduler)
 // =============================================================================
 //
+
 // Foundation data structure for the multi-threaded async scheduler.
 // Phase 1A (THIS commit): type definition + AsyncRuntime field +
-//                         `worker_pool_size()` accessor.  No threads
-//                         are actually spawned yet; `num_workers`
-//                         remains 0 even when the manifest configures
-//                         a non-zero `async_worker_threads`.
-// Phase 1B (followup):    `start_worker_pool()` actually spawns N
-//                         workers via `core.runtime.thread.Thread.spawn`,
-//                         workers loop on `process_ready_tasks` +
-//                         park via Condvar.
-// Phase 2:                Per-worker local deques + work-stealing
-//                         (see #278).
+//  `worker_pool_size()` accessor. No threads
+//  are actually spawned yet; `num_workers`
+//  remains 0 even when the manifest configures
+//  a non-zero `async_worker_threads`.
+// Phase 1B (followup): `start_worker_pool()` actually spawns N
+//  workers via `core.runtime.thread.Thread.spawn`,
+//  workers loop on `process_ready_tasks` +
+//  park via Condvar.
+// Phase 2: Per-worker local deques + work-stealing
+//  (see #278).
 //
+
 // Architecture: docs/architecture/multi-threaded-async-scheduler.md
 //
+
 // Zero-overhead default contract: when `async_worker_threads = 0`
 // (the manifest default) `worker_pool_size()` returns 0 and no
-// concurrent state is touched.  Programs see bit-identical
+// concurrent state is touched. Programs see bit-identical
 // behaviour to today's single-threaded loop.
 
-/// Multi-threaded worker-pool data structure.  Phase 1A foundation —
+/// Multi-threaded worker-pool data structure. Phase 1A foundation —
 /// holds the configured worker count + lifecycle flag without yet
 /// spawning real threads.
 public type WorkerPool is {
     /// Number of workers configured for this pool (resolved from
     /// manifest `async_worker_threads`, or `num_cpus()-1` when the
-    /// manifest sets 0 with explicit auto-detect intent).  Phase 1A:
+    /// manifest sets 0 with explicit auto-detect intent). Phase 1A:
     /// always 0 because no threads are spawned yet.
     num_workers: Int,
     /// True once `start_worker_pool` has actually spawned the
     /// `num_workers` worker threads and they're polling the
-    /// `task_queue` / `ready_queue`.  Phase 1A: always false.
+    /// `task_queue` / `ready_queue`. Phase 1A: always false.
     is_running: AtomicBool,
     /// Shutdown signal — set by `AsyncRuntime.shutdown()` to
-    /// terminate workers.  Phase 1A: present but unused (no
+    /// terminate workers. Phase 1A: present but unused (no
     /// workers exist to observe it).
     shutdown_flag: AtomicBool,
     /// Diagnostic counter — number of times a worker called
-    /// `park_worker()` because its queue was empty.  Phase 1A: 0.
+    /// `park_worker()` because its queue was empty. Phase 1A: 0.
     parked_count: AtomicInt,
 };
 
 implement WorkerPool {
     /// Construct an empty pool with the given configured worker
-    /// count.  Phase 1A: stores the count but does not spawn
+    /// count. Phase 1A: stores the count but does not spawn
     /// anything; future Phase 1B will spawn `num` workers when
     /// `start()` is called.
     public fn empty(num: Int) -> WorkerPool {
@@ -353,8 +366,8 @@ implement WorkerPool {
         self.shutdown_flag.load(MemoryOrdering.Acquire)
     }
 
-    /// Signal workers to terminate.  Phase 1A: no workers exist;
-    /// the call is a no-op (idempotent).  Phase 1B will pair this
+    /// Signal workers to terminate. Phase 1A: no workers exist;
+    /// the call is a no-op (idempotent). Phase 1B will pair this
     /// with `park_cv.notify_all()` to wake parked workers.
     public fn request_shutdown(&self) {
         self.shutdown_flag.store(true, MemoryOrdering.Release);
@@ -367,18 +380,20 @@ implement WorkerPool {
 
 /// Native async runtime using V-LLSI infrastructure.
 ///
+
 /// This runtime provides:
 /// - Context propagation via native TLS slots (~2ns access)
 /// - Completion-based I/O via IOEngine (io_uring/kqueue/IOCP)
 /// - Lock-free task scheduling
 /// - Native timer support
 ///
+
 /// # Example
 /// ```verum
 /// let rt = AsyncRuntime.new();
 /// rt.block_on(async {
-///     let res = some_async_operation().await;
-///     print(f"Result: {result}");
+///  let res = some_async_operation().await;
+///  print(f"Result: {result}");
 /// });
 /// ```
 public type AsyncRuntime is {
@@ -395,15 +410,17 @@ public type AsyncRuntime is {
     ready_queue: Mutex<List<Heap<TaskEntry>>>,
     /// Timer queue (pending timer-driven wakeups, sorted by deadline ascending).
     ///
+
     /// Replaces the busy-spin `cx.waker().wake_by_ref()` pattern that
     /// timer-bound futures (Sleep, SleepUntil, ExecutorTimeout,
-    /// RateLimitedStream) historically used.  When a future
+    /// RateLimitedStream) historically used. When a future
     /// registers a timer here, the event loop:
-    ///   1. Computes the IOEngine wait timeout as
-    ///      `min(default_io_timeout, time_until_next_timer)`.
-    ///   2. After `wait_for_events` returns, drains all entries
-    ///      whose `deadline_ns <= now_ns` and wakes their wakers.
+    ///  1. Computes the IOEngine wait timeout as
+    ///  `min(default_io_timeout, time_until_next_timer)`.
+    ///  2. After `wait_for_events` returns, drains all entries
+    ///  whose `deadline_ns <= now_ns` and wakes their wakers.
     ///
+
     /// Pre-fix every timer-bound poll burned ~1000 polls/sec on the
     /// brief_sleep loop; with this queue the loop parks for the
     /// exact remaining duration and wakes once.
@@ -424,7 +441,7 @@ public type AsyncRuntime is {
     total_completions: AtomicInt,
     /// Multi-threaded worker pool foundation (#271 Phase 1A).
     /// `Maybe.None` when `async_worker_threads = 0` (the default —
-    /// zero-overhead single-threaded behaviour).  `Maybe.Some(...)`
+    /// zero-overhead single-threaded behaviour). `Maybe.Some(...)`
     /// when the manifest configures a non-zero count; the pool is
     /// constructed but no threads are spawned yet (Phase 1B will
     /// add `start_worker_pool` that actually spawns the workers).
@@ -435,8 +452,9 @@ public type AsyncRuntime is {
 
 /// A pending timer registration.
 ///
+
 /// `deadline_ns` is the absolute monotonic instant (nanoseconds
-/// since boot) at which `waker` should be invoked.  Entries live in
+/// since boot) at which `waker` should be invoked. Entries live in
 /// `AsyncRuntime.timer_queue` sorted by deadline ascending.
 public type TimerEntry is {
     /// Absolute deadline in nanoseconds (monotonic clock).
@@ -484,7 +502,7 @@ implement AsyncRuntime {
             total_polls: AtomicInt.new(0),
             total_completions: AtomicInt.new(0),
             // Phase 1A foundation (#271): worker pool is `Maybe.None`
-            // until `start_worker_pool` is called.  Default
+            // until `start_worker_pool` is called. Default
             // `async_worker_threads = 0` keeps it None forever —
             // zero-overhead single-threaded path is bit-identical
             // to pre-#271 behaviour.
@@ -495,7 +513,7 @@ implement AsyncRuntime {
     /// Read the current worker-pool size — 0 when no pool is
     /// configured (the default), else the configured worker count.
     /// Phase 1A: always 0 because `start_worker_pool` is not yet
-    /// implemented.  Surfacing the accessor now lets diagnostic
+    /// implemented. Surfacing the accessor now lets diagnostic
     /// callers verify the manifest setting reaches the runtime
     /// without depending on Phase 1B's actual spawn logic.
     public fn worker_pool_size(&self) -> Int {
@@ -531,12 +549,14 @@ implement AsyncRuntime {
     }
 
     /// Snapshot the runtime's currently-tracked tasks as a List of
-    /// `TaskInfo` records.  Walks both the ready queue (Running)
+    /// `TaskInfo` records. Walks both the ready queue (Running)
     /// and the pending queue (Parked) under their respective locks
     /// to produce a consistent point-in-time view.
     ///
+
     /// # Concurrency
     ///
+
     /// Each queue lock is held only for the duration of the
     /// per-queue walk — no global runtime lock is held across both.
     /// A task that transitions between queues during the snapshot
@@ -544,19 +564,23 @@ implement AsyncRuntime {
     /// treat the result as a best-effort point-in-time view, not a
     /// linearisation point.
     ///
+
     /// # Format-stable boundary
     ///
+
     /// Returns `List<TaskInfo>` (re-exported via core.diagnostics)
     /// so observers code against the umbrella surface and aren't
-    /// coupled to TaskEntry's internal layout.  Per-task metadata
+    /// coupled to TaskEntry's internal layout. Per-task metadata
     /// the executor doesn't currently track (poll_count, name,
     /// last_error) defaults to zero / empty Text — promoted to
     /// load-bearing fields when the executor adds tracking.
     ///
+
     /// # Performance
     ///
+
     /// O(active_tasks) atomic copies + 2 lock acquisitions.
-    /// Typical: < 10 µs for 1000 tasks.  Not on the spawn / poll
+    /// Typical: < 10 µs for 1000 tasks. Not on the spawn / poll
     /// hot path — observers call this from monitoring dashboards or
     /// panic post-mortem dumps.
     public fn snapshot_tasks(&self) -> List<TaskInfo> {
@@ -618,20 +642,23 @@ implement AsyncRuntime {
 
     /// Spawn a future on the runtime.
     ///
+
     /// The spawned task inherits the current context via frame fork.
     /// This enables context propagation across task boundaries.
     ///
+
     /// # Performance
     /// - Target: <200ns spawn overhead (achieved: ~150ns without FFI)
     /// - Context fork: ~50ns (memcpy of 256 slots)
     ///
+
     /// # Example
     /// ```verum
     /// let handle = runtime.spawn(async {
-    ///     // This task has access to parent's contexts
-    ///     let logger = using Logger;
-    ///     logger.log("Child task running");
-    ///     42
+    ///  // This task has access to parent's contexts
+    ///  let logger = using Logger;
+    ///  logger.log("Child task running");
+    ///  42
     /// });
     /// let res = handle.await;
     /// ```
@@ -711,20 +738,23 @@ implement AsyncRuntime {
 
     /// Block on a future until it completes.
     ///
+
     /// This drives the future to completion on the current thread
     /// using the native V-LLSI event loop.
     ///
+
     /// # Warning
     /// Do NOT call this from within an async context - it will deadlock.
     ///
+
     /// # Example
     /// ```verum
     /// fn main() {
-    ///     let rt = AsyncRuntime.new();
-    ///     let res = rt.block_on(async {
-    ///         fetch_data().await
-    ///     });
-    ///     print(f"Got: {result}");
+    ///  let rt = AsyncRuntime.new();
+    ///  let res = rt.block_on(async {
+    ///  fetch_data().await
+    ///  });
+    ///  print(f"Got: {result}");
     /// }
     /// ```
     public fn block_on<F: Future>(&self, future: F) -> F.Output {
@@ -762,12 +792,14 @@ implement AsyncRuntime {
 
         // Event loop - poll until completion
         //
+
         // The cooperative scheduling model:
-        //   1. Poll the main future
-        //   2. If pending, process spawned tasks (up to poll_budget per tick)
-        //   3. Wait for I/O events or yield CPU
-        //   4. Repeat
+        //  1. Poll the main future
+        //  2. If pending, process spawned tasks (up to poll_budget per tick)
+        //  3. Wait for I/O events or yield CPU
+        //  4. Repeat
         //
+
         // Tasks yield at .await points. The executor never preempts a task
         // mid-execution -- cooperation is required for fairness.
         loop {
@@ -829,11 +861,13 @@ implement AsyncRuntime {
 
     /// Process ready tasks from the queue.
     ///
+
     /// Polls tasks from both the ready queue (woken by waker) and the
     /// pending queue (newly spawned). Enforces the cooperative poll budget:
     /// at most `config.poll_budget` tasks are polled per call to prevent
     /// starvation of the main future and I/O event processing.
     ///
+
     /// Returns the number of tasks that completed during this tick.
     fn process_ready_tasks(&self) -> Int {
         let budget = self.config.poll_budget;
@@ -909,6 +943,7 @@ implement AsyncRuntime {
 
     /// Drain and drop all tasks from both queues.
     ///
+
     /// Called during shutdown to clean up remaining tasks.
     fn drain_all_tasks(&self) {
         // Drain ready queue
@@ -938,12 +973,15 @@ implement AsyncRuntime {
 
     /// Run spawned tasks until no more tasks are ready.
     ///
+
     /// Unlike `block_on`, this does not drive a main future. It processes
     /// the ready and pending queues until all tasks are either completed
     /// or waiting for wakeup, then returns.
     ///
+
     /// Useful for testing and for manually stepping the executor.
     ///
+
     /// Returns the total number of tasks that completed.
     public fn run_until_idle(&self) -> Int {
         let mut total_completed = 0;
@@ -977,6 +1015,7 @@ implement AsyncRuntime {
 
     /// Wait for I/O events or briefly yield.
     ///
+
     /// Uses the IOEngine wait() if available for event-driven wakeups,
     /// otherwise falls back to a brief OS sleep to avoid busy-waiting.
     /// The platform-specific concrete-type cast is delegated to
@@ -992,7 +1031,7 @@ implement AsyncRuntime {
             // Compute the wait timeout: with a pending timer, park
             // for at most `time_until_next_timer` so the IOEngine
             // returns in time to drain expired entries; otherwise
-            // fall back to the default 1ms tick.  Closes the
+            // fall back to the default 1ms tick. Closes the
             // busy-spin gap that timer-bound futures historically
             // patched over with `cx.waker().wake_by_ref()`.
             let now_ns = time_now_ns();
@@ -1064,19 +1103,21 @@ implement AsyncRuntime {
 
     /// Register a timer-driven wakeup.
     ///
+
     /// `deadline_ns` is the absolute monotonic instant at which the
-    /// `waker` should fire.  The entry is inserted into
+    /// `waker` should fire. The entry is inserted into
     /// `self.timer_queue` at its sorted position (earliest first)
     /// so the event-loop head-peek is O(1) and the IOEngine wait
     /// timeout can be computed without sorting.
     ///
+
     /// Replaces the busy-spin `cx.waker().wake_by_ref()` pattern.
     /// Pre-fix every timer-bound poll burned ~1000 polls/sec on
     /// the brief_sleep loop; with this entry the runtime parks
     /// for the exact remaining duration.
     pub fn register_timer(&self, deadline_ns: UInt64, waker: Waker) {
         let mut queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
-        // Sorted insert by deadline_ns ascending.  Linear scan from
+        // Sorted insert by deadline_ns ascending. Linear scan from
         // the end is O(n) worst-case but the queue is typically
         // shallow (~1–10 timers) so a heap would be overkill.
         let mut idx = queue.len();
@@ -1096,6 +1137,7 @@ implement AsyncRuntime {
 
     /// Peek the earliest pending timer deadline, if any.
     ///
+
     /// Used by the event loop to size the IOEngine wait timeout —
     /// returns `Some(deadline_ns)` when at least one timer is
     /// queued, `None` otherwise (in which case the loop falls back
@@ -1111,8 +1153,9 @@ implement AsyncRuntime {
     /// Drain all timer entries whose deadline has passed and wake
     /// their wakers.
     ///
+
     /// Called by the event loop after `wait_for_events` returns —
-    /// processes every entry with `deadline_ns <= now_ns`.  Wakers
+    /// processes every entry with `deadline_ns <= now_ns`. Wakers
     /// are dropped after invocation; clones-on-register-time keep
     /// the original future's waker live.
     fn drain_expired_timers(&self, now_ns: UInt64) {
@@ -1173,17 +1216,19 @@ implement Drop for AsyncRuntime {
 
 /// Run a future to completion on the current thread.
 ///
+
 /// Creates a temporary runtime && blocks until the future completes.
 /// This is the simplest way to run async code from sync code.
 ///
+
 /// # Example
 /// ```verum
 /// fn main() {
-///     let res = block_on(async {
-///         let data = fetch_data().await;
-///         process(data)
-///     });
-///     print(f"Result: {result}");
+///  let res = block_on(async {
+///  let data = fetch_data().await;
+///  process(data)
+///  });
+///  print(f"Result: {result}");
 /// }
 /// ```
 public fn block_on<F: Future>(future: F) -> F.Output {
@@ -1273,22 +1318,27 @@ implement RuntimeBuilder {
 
 /// A lightweight single-threaded executor for `!Send` futures.
 ///
+
 /// Unlike `AsyncRuntime`, `LocalExecutor` does not use Mutex-protected queues.
 /// All operations happen on a single thread, making it suitable for:
 /// - `!Send` futures (e.g., futures capturing `Rc` or raw pointers)
 /// - Minimal overhead when multi-threading is not needed
 /// - Embedding an executor inside a library without global state
 ///
+
 /// # Design
 ///
+
 /// The executor maintains two lists:
 /// - `ready`: tasks that have been woken and need polling
 /// - `pending`: tasks waiting for external events
 ///
+
 /// Each call to `tick()` polls all ready tasks once. Tasks that return
 /// `Pending` are moved back to the pending list. Tasks that complete
 /// are dropped. Wakers move tasks from pending to ready.
 ///
+
 /// # Example
 /// ```verum
 /// let mut exec = LocalExecutor.new();
@@ -1324,6 +1374,7 @@ implement LocalExecutor {
 
     /// Spawn a future on this local executor.
     ///
+
     /// The future does not need to be `Send` since it will only
     /// be polled on the current thread.
     public fn spawn_local<F: Future>(&mut self, future: F) {
@@ -1372,6 +1423,7 @@ implement LocalExecutor {
 
     /// Perform one tick of the executor.
     ///
+
     /// Polls all ready tasks once. Returns the number of tasks that
     /// completed during this tick.
     public fn tick(&mut self) -> Int {
@@ -1421,10 +1473,12 @@ implement LocalExecutor {
 
     /// Run the executor until all tasks have completed.
     ///
+
     /// Repeatedly calls `tick()` until both the ready and pending
     /// queues are empty. For tasks that depend on external wakeup,
     /// this will poll pending tasks each iteration as a fallback.
     ///
+
     /// Returns the total number of tasks that completed.
     public fn run_until_complete(&mut self) -> Int {
         let mut total = 0;
@@ -1534,6 +1588,7 @@ fn time_now_ns() -> UInt64 {
 // Platform-specific IOEngine wait dispatch
 // =============================================================================
 //
+
 // `wait_for_events` previously embedded three near-identical inline
 // `@cfg(target_os)` blocks, each casting the io_engine_ptr to that
 // platform's concrete IOEngine implementation (KqueueDriver on
@@ -1542,11 +1597,13 @@ fn time_now_ns() -> UInt64 {
 // would fail with "type not found: IoDriver" because the linux
 // branch's mount + cast were still on the resolution path.
 //
+
 // The fix is to define one fn per target where the @cfg gates the
 // entire definition (signature + body). Verum then sees only the
 // active platform's helper at type-check time; the call site
 // (`wait_for_events`) is uniform.
 //
+
 // All three return a uniform `Result<Int, EngineIoError>` — Ok
 // carries the completion count, Err falls through to brief_sleep
 // in the caller.
@@ -1619,7 +1676,7 @@ implement<F: Future> Future for ExecutorTimeout<F> {
                 // Park until the deadline so the runtime re-polls
                 // exactly once when the timeout window closes — the
                 // inner future will wake us earlier through its own
-                // waker if it makes progress.  Closes the busy-spin
+                // waker if it makes progress. Closes the busy-spin
                 // gap (#243) for the timeout primitive: pre-fix the
                 // comment said "the runtime will poll periodically
                 // or use timer wheel" but neither was wired, so the
@@ -1642,16 +1699,18 @@ implement<F: Future> Future for ExecutorTimeout<F> {
 
 /// Wrap a future with a timeout (raw milliseconds overload).
 ///
+
 /// NOTE: Renamed from `timeout` to `timeout_ms_raw` to avoid collision with the
 /// idiomatic `timer.timeout(Duration, Future)` (which is re-exported by
 /// `core.async`). Prefer the Duration-based version for new code.
 ///
+
 /// # Example
 /// ```verum
 /// let res = timeout_ms_raw(fetch_data(), 5000).await;
 /// match result {
-///     Ok(data) => print(f"Got: {data}"),
-///     Err(ExecutorTimeoutError) => print("Request timed out"),
+///  Ok(data) => print(f"Got: {data}"),
+///  Err(ExecutorTimeoutError) => print("Request timed out"),
 /// }
 /// ```
 public fn timeout_ms_raw<F: Future>(future: F, timeout_ms: UInt64) -> ExecutorTimeout<F> {
@@ -1664,6 +1723,7 @@ public fn timeout_ms_raw<F: Future>(future: F, timeout_ms: UInt64) -> ExecutorTi
 
 /// Spawn a blocking operation on a dedicated thread pool.
 ///
+
 /// Use this for CPU-intensive || blocking I/O operations that would
 /// otherwise block the async runtime. Routes through
 /// `core.async.task::spawn_blocking` which submits to
@@ -1672,15 +1732,17 @@ public fn timeout_ms_raw<F: Future>(future: F, timeout_ms: UInt64) -> ExecutorTi
 /// underlying `BlockingFuture` polls a completion flag — async
 /// workers stay free between polls.
 ///
+
 /// Pre-fix this was the same `spawn(lazy(f))` placeholder as
 /// `task.vr::spawn_blocking` (closed in commit 14ba223f); both
 /// modules now share the same load-bearing implementation
 /// rather than maintaining parallel stubs.
 ///
+
 /// # Example
 /// ```verum
 /// let hash = spawn_blocking(|| {
-///     compute_expensive_hash(data)
+///  compute_expensive_hash(data)
 /// }).await;
 /// ```
 public fn spawn_blocking<T: Send, F: fn() -> T + Send>(f: F) -> JoinHandle<T> {
@@ -1754,38 +1816,43 @@ const RUNTIME_WAKER_VTABLE: RawWakerVTable = RawWakerVTable {
 // Current-Runtime Accessor (Native Context System)
 // =============================================================================
 //
+
 // Removed (2026-04-30): the `pub type AsyncExecutionEnv { id: Int,
 // parent_id: Maybe<Int> }` + its sibling `pub fn current_env() ->
 // Maybe<&AsyncExecutionEnv>` carried a latent UB landmine — the
 // SLOT_RUNTIME TLS slot is populated at `block_on` (line 537) with
 // `&AsyncRuntime` (a 13-field struct), but `current_env()` cast it
-// to `&AsyncExecutionEnv` (a 2-field unrelated struct).  Reading
+// to `&AsyncExecutionEnv` (a 2-field unrelated struct). Reading
 // any field of the result returned garbage memory.
 //
+
 // Verified zero production callers via grep across `core/` +
-// `crates/` before removal.  The actually-used environment
+// `crates/` before removal. The actually-used environment
 // accessor lives in `core/runtime/mod.rs::current_env() ->
 // &ExecutionEnv` (different namespace, different type — that's
-// the one `core/runtime/spawn.vr:823` consumes).  Async-side
+// the one `core/runtime/spawn.vr:823` consumes). Async-side
 // callers that need the runtime should use `current_runtime()`
 // below, which projects the correct type.
 
 /// Get the current `AsyncRuntime` from the TLS context slot.
 ///
+
 /// Returns `None` outside an active `block_on` window — async
 /// constructs that use this helper must already be running on a
 /// runtime, so callers can typically `unwrap_or_else(|| panic!(…))`.
 ///
+
 /// Use this from timer-bound futures (Sleep, SleepUntil,
 /// ExecutorTimeout, RateLimitedStream, etc.) to register a wakeup
 /// at a precise deadline:
 /// ```verum
 /// match current_runtime() {
-///     Some(rt) => rt.register_timer(deadline_ns, cx.waker().clone()),
-///     None => cx.waker().wake_by_ref(),  // fallback: busy-spin
+///  Some(rt) => rt.register_timer(deadline_ns, cx.waker().clone()),
+///  None => cx.waker().wake_by_ref(), // fallback: busy-spin
 /// }
 /// ```
 ///
+
 /// SAFETY: SLOT_RUNTIME is set in `AsyncRuntime::block_on` before
 /// any future polls, and cleared after the main future completes.
 /// The `&AsyncRuntime` is valid for the entire `block_on` body —
@@ -1800,9 +1867,11 @@ public fn current_runtime() -> Maybe<&AsyncRuntime> {
 
 /// Execute a closure with a forked context frame.
 ///
+
 /// The forked environment inherits all contexts from the parent
 /// but modifications don't affect the parent.
 ///
+
 /// # Performance
 /// - Fork: ~50ns (memcpy of context array)
 public fn with_forked_env<T, F: fn() -> T>(f: F) -> T {
@@ -1828,13 +1897,16 @@ public fn with_forked_env<T, F: fn() -> T>(f: F) -> T {
 // Select & Join — Defined in Dedicated Modules
 // =============================================================================
 //
+
 // Select expression support: see async/select.vr (612 LOC)
-//   - select_either(), select_all(), race(), try_first()
-//   - timeout(), select_with_default()
-//   - Full Future-based implementation, no compiler magic needed
+//  - select_either(), select_all(), race(), try_first()
+//  - timeout(), select_with_default()
+//  - Full Future-based implementation, no compiler magic needed
 //
+
 // Join combinators: see async/future.vr
-//   - Select2, Join2, Join3, join(), join3()
+//  - Select2, Join2, Join3, join(), join3()
 //
+
 // The `select { }` syntax expression is desugared by the compiler into
 // calls to select_either/select_all from async/select.vr.

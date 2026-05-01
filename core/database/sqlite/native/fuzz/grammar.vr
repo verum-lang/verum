@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.6 (fuzz harness — grammar surface)
 //
+
 // SQLancer-style. Emits one syntactically-valid SQL statement per
 // mutation cycle. The mutator does NOT understand semantics — its
 // goal is to drive the parser/planner/codegen path through every

@@ -1,8 +1,10 @@
 //! Visibility enforcement tests.
 //!
+
 //! Tests that visibility modifiers (public, private, public(crate), public(super))
 //! are correctly enforced across module boundaries.
 //!
+
 //! Tests the five visibility modifiers: private (default), public, public(crate),
 //! public(super), and public(in path), including struct field visibility.
 
@@ -112,8 +114,8 @@ public fn public_api() -> Int {
         "app.vr",
         r#"
 // Should NOT be able to import private items
-// import crate.internal.helper;  // Would cause error
-// import crate.internal.InternalState;  // Would cause error
+// import crate.internal.helper; // Would cause error
+// import crate.internal.InternalState; // Would cause error
 
 import crate.internal.public_api;
 
@@ -268,8 +270,8 @@ import crate.models.Transaction;
 public fn example() {
     let tx = Transaction.new(1, 100);
     let id = tx.id;  // OK: public field
-    // let amount = tx.amount;  // OK within crate: public(crate) field
-    // let state = tx.internal_state;  // ERROR: private field
+    // let amount = tx.amount; // OK within crate: public(crate) field
+    // let state = tx.internal_state; // ERROR: private field
 }
 "#,
     );

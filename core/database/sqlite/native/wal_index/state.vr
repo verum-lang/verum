@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §6.6
 //
+
 // Top-level WAL-index state: header (×2 dual copies) + reader marks +
 // hash groups. Mirrors the layout of the shm file at the byte level
 // (apart from byte ordering — we model it abstractly).

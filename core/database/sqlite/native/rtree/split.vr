@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.3
 //
+
 // On overflow we split a node's M+1 entries into two groups so that
 // the sum of their MBB areas is minimised. Two phases:
 //
-//   1. PickSeeds: pick the pair of entries that, if kept in the same
-//      group, would waste the most area. They become group seeds.
-//   2. PickNext: of the remaining entries, repeatedly pick the one
-//      whose enlargement preference is largest, and assign to its
-//      preferred group.
+
+//  1. PickSeeds: pick the pair of entries that, if kept in the same
+//  group, would waste the most area. They become group seeds.
+//  2. PickNext: of the remaining entries, repeatedly pick the one
+//  whose enlargement preference is largest, and assign to its
+//  preferred group.
 //
+
 // Pure data — no I/O. The caller turns the two groups into two
 // fresh nodes.
 // =============================================================================

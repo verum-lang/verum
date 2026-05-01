@@ -2,17 +2,20 @@
 // core.action.monads.exception — short-circuiting failure monad
 // =============================================================================
 //
+
 // `Exception<E, A>` — the canonical failure-by-throw monad. The Kleisli
 // shape is `Throw(E) | Done(A)`: every bind short-circuits on the first
 // `Throw(_)` and propagates the carried `E` value through the rest of
 // the chain unchanged.
 //
+
 // **NON-commutative** by design (Theorem 17.T1): two parallel programs
 // that both throw can be observably distinguished by which `E` value
 // surfaces first. Reordering `bind(throw(e1), _) ↔ bind(throw(e2), _)`
 // changes the user-visible error, even though both programs "fail".
 // Sits at ε-coordinate ω + 1 alongside `State` and `Io`.
 //
+
 // Closes one of three documented gaps in `core.action.monads.mod.vr`
 // (the V1.5 plan). The remaining gaps — `List` (commutative non-
 // determinism) and `Io` (the canonical real-world side-effect monad)
@@ -115,6 +118,7 @@ public fn exception_is_throw<E, A>(m: &Exception<E, A>) -> Bool {
 // Monad laws + negative commutativity (V2 — witness-parameterised theorems)
 // =============================================================================
 //
+
 // `Exception<E, A>` ≅ `Throw(E) | Done(A)`. The laws hold by structural
 // pattern-match on the two-variant sum: every theorem reduces by case
 // analysis on the input shape. Both variant arms are decidable, so all
@@ -138,6 +142,7 @@ public fn exception_eq<E, A>(p: Exception<E, A>, q: Exception<E, A>) -> Bool
 
 /// **Left identity** (Theorem 17.T1): `bind(unit(a), f) ≡ f(a)`.
 ///
+
 /// Decidable: `exception_unit(a) = Done(a)`. `exception_bind(Done(a), f)`
 /// reduces by the Done-arm to `f(a)`. Reflexive.
 @framework(diakrisis, "Theorem 17.T1 (Exception left-identity monad law)")
@@ -158,9 +163,10 @@ public theorem exception_left_identity<E, A, B>(
 
 /// **Right identity** (Theorem 17.T1): `bind(m, unit) ≡ m`.
 ///
+
 /// Decidable by case analysis on m:
-///   • Done(a):  bind(Done(a), unit) = unit(a) = Done(a) = m.
-///   • Throw(e): bind(Throw(e), unit) = Throw(e) = m         (short-circuit).
+///  • Done(a): bind(Done(a), unit) = unit(a) = Done(a) = m.
+///  • Throw(e): bind(Throw(e), unit) = Throw(e) = m (short-circuit).
 @framework(diakrisis, "Theorem 17.T1 (Exception right-identity monad law)")
 public theorem exception_right_identity<E, A>(m: Exception<E, A>) -> Bool
     requires true
@@ -175,9 +181,10 @@ public theorem exception_right_identity<E, A>(m: Exception<E, A>) -> Bool
 /// **Associativity** (Theorem 17.T1): `bind(bind(m, f), g) ≡
 /// bind(m, |x| bind(f(x), g))`.
 ///
+
 /// Decidable by case analysis on m:
-///   • Done(a):  LHS = bind(f(a), g) = RHS.
-///   • Throw(e): LHS = Throw(e) = RHS  (both short-circuit at first bind).
+///  • Done(a): LHS = bind(f(a), g) = RHS.
+///  • Throw(e): LHS = Throw(e) = RHS (both short-circuit at first bind).
 @framework(diakrisis, "Theorem 17.T1 (Exception associativity monad law)")
 public theorem exception_associativity<E, A, B, C>(
     m: Exception<E, A>,
@@ -207,10 +214,12 @@ public theorem exception_associativity<E, A, B, C>(
 /// BOTH throw, in opposite orders, produce different results. The
 /// Kleisli short-circuit law makes the FIRST throw win.
 ///
+
 /// Witness:
-///   prog1 = `bind(throw("e1"), |_| throw("e2"))` → `Throw("e1")`
-///   prog2 = `bind(throw("e2"), |_| throw("e1"))` → `Throw("e2")`
+///  prog1 = `bind(throw("e1"), |_| throw("e2"))` → `Throw("e1")`
+///  prog2 = `bind(throw("e2"), |_| throw("e1"))` → `Throw("e2")`
 ///
+
 /// `prog1 ≠ prog2` even though both fail — separating witness for
 /// non-commutativity.
 @framework(diakrisis, "Corollary 17.C2 (Exception NON-commutativity)")

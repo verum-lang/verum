@@ -14,21 +14,26 @@
 )]
 // Verification Condition Generation Tests
 //
+
 // Verification Condition Generation:
 //
+
 // VC generation converts function contracts into logical formulas whose validity
 // implies program correctness.
 //
+
 // Key rules:
 // - Functions: VC(f) = forall params. Precondition => wp(body, Postcondition)
 // - Loops (3 VCs): init (pre => inv), preserve (inv & cond => wp(body, inv)),
-//   exit (inv & !cond => post)
+//  exit (inv & !cond => post)
 // - Calls: VC(call f(args)) = Pre_f[args/params] & wp(cont, Post_f[args/params])
 // - Weakest precondition: wp(Skip,Q) = Q; wp(Assign(x,e),Q) = Q[x:=eval(e)];
-//   wp(Seq(c1,c2),Q) = wp(c1, wp(c2, Q)); wp(If(b,c1,c2),Q) = (b=>wp(c1,Q)) & (!b=>wp(c2,Q))
+//  wp(Seq(c1,c2),Q) = wp(c1, wp(c2, Q)); wp(If(b,c1,c2),Q) = (b=>wp(c1,Q)) & (!b=>wp(c2,Q))
 //
+
 // SMT encoding: negate the VC, check satisfiability. UNSAT = VC valid = proof succeeds.
 //
+
 // These tests verify the VCGen implementation including weakest precondition
 // calculus rules, formula substitution, SMT-LIB encoding, VC generation for
 // functions, and SMT solver integration.
@@ -682,8 +687,9 @@ fn test_complex_formula_construction() {
 #[test]
 fn test_increment_function_vc() {
     // Function: fn increment(x: Int) -> Int where x >= 0 ensures result > x
-    //   return x + 1
+    //  return x + 1
     //
+
     // VC: x >= 0 => (x + 1 > x)
     let x = SmtExpr::var("x");
     let result = SmtExpr::add(x.clone(), SmtExpr::int(1));
@@ -1180,7 +1186,7 @@ fn test_smt_verify_implication_chain() {
 fn test_full_vc_pipeline_with_smt() {
     // Create a complete VC and verify it end-to-end
     // Function: fn max(a: Int, b: Int) -> Int ensures result >= a && result >= b
-    //   if a >= b { a } else { b }
+    //  if a >= b { a } else { b }
 
     let a = SmtExpr::var("a");
     let b = SmtExpr::var("b");

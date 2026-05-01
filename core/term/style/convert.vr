@@ -4,6 +4,7 @@
 // Provides sRGB <-> linear, RGB <-> HSL conversions, and hex parsing.
 // Used by color.vr, profile.vr, and theme.vr.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6.1
 // =============================================================================
 

@@ -1,5 +1,6 @@
 //! Rename symbol support
 //!
+
 //! Provides comprehensive symbol renaming across documents with:
 //! - Cross-file rename support
 //! - Symbol kind detection (function, type, variable, parameter, field)
@@ -7,6 +8,7 @@
 //! - AST-based semantic rename (not just text matching)
 //! - Syntax tree-based rename for accurate source location
 //!
+
 //! Uses the lossless red-green syntax tree for accurate source location mapping,
 //! enabling AST-based semantic rename rather than text-based search/replace.
 
@@ -246,6 +248,7 @@ fn find_conflict(
 
 /// Prepare rename operation (check if renaming is valid)
 ///
+
 /// Returns the range and current name if renaming is possible,
 /// or None if the symbol cannot be renamed.
 pub fn prepare_rename(
@@ -387,6 +390,7 @@ pub fn rename_with_validation(
 
 /// Perform cross-file rename across the workspace
 ///
+
 /// This requires access to all documents in the workspace to find
 /// all references to the symbol across files.
 pub fn rename_cross_file(
@@ -444,6 +448,7 @@ pub fn rename_cross_file(
 
 /// Find the exact range of a word at a position.
 ///
+
 /// Delegates to `verum_common::text_utf8::find_word_bounds` for the
 /// UTF-8-safe walk; the previous implementation mixed byte offsets
 /// and char indices, silently mis-locating words in non-ASCII source

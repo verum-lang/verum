@@ -6,17 +6,21 @@ module core.database.sqlite.native.l5_sql.compile;
 // Layer: 5
 // Spec: sqlite-native.md §12 (overview)
 //
+
 // The entry point the L6 Connection.prepare() eventually calls:
 //
-//     compile(sql: &Text) -> Result<VdbeProgram, CompileError>
+
+//  compile(sql: &Text) -> Result<VdbeProgram, CompileError>
 //
+
 // Stages:
-//     1. lex       (core.database.sqlite.native.l5_sql.lexer.lex)
-//     2. parse     (parser.parse_one)
-//     3. plan      (planner.plan_statement)
-//     4. codegen   (codegen.codegen)
-//     5. optimize  (l4_vdbe.optimizer.optimize) — optional, on by default
+//  1. lex (core.database.sqlite.native.l5_sql.lexer.lex)
+//  2. parse (parser.parse_one)
+//  3. plan (planner.plan_statement)
+//  4. codegen (codegen.codegen)
+//  5. optimize (l4_vdbe.optimizer.optimize) — optional, on by default
 //
+
 // Any error in stages 1-4 surfaces as a tagged `CompileError` so the
 // caller can tell syntax errors from plan limitations from codegen
 // gaps.

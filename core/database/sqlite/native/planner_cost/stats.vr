@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.2
 //
+
 // Mirrors the data SQLite stores in `sqlite_stat1` and `sqlite_stat4`:
 //
-//   * row count per table / index
-//   * average column "width" (key prefix selectivity tuple from stat1)
-//   * per-column histogram buckets (stat4)
+
+//  * row count per table / index
+//  * average column "width" (key prefix selectivity tuple from stat1)
+//  * per-column histogram buckets (stat4)
 // =============================================================================
 
 module core.database.sqlite.native.planner_cost.stats;
@@ -35,6 +37,7 @@ public type HistogramBucket is {
 // IndexStats — per-index summary
 // -----------------------------------------------------------------------------
 //
+
 // `tuple_card` is the SQLite stat1 tuple — for an index over (a, b, c)
 // it stores [N, N1, N2, N3] where N is total rows and N_k is the
 // average number of rows that share the same value on the first k

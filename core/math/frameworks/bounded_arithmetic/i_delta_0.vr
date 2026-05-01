@@ -7,6 +7,7 @@
 /// (Δ_0). The largest weak-stratum system; sits *immediately below*
 /// the discrete jump to full arithmetic at ν = ω. ν^weak = ω-1.
 ///
+
 /// Provably total functions of IΔ_0 strictly extend the polynomial
 /// hierarchy (depending on whether IΔ_0 + Ω_1 / IΔ_0 + EXP) but
 /// remain inside the weak stratum: no L_Abs-realisation crosses into

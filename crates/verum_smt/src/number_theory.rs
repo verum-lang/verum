@@ -1,14 +1,18 @@
 //! Number Theory Library with Formal Verification
 //!
+
 //! Comprehensive industrial-grade number theory implementation with Z3-based
 //! formal proofs of fundamental theorems.
 //!
+
 //! Part of the formal mathematics library for Verum's proof system. Provides
 //! verified number-theoretic primitives: primality, divisibility, Euler's totient,
 //! and core theorems (Fermat's Little, Euler's, Wilson's, FTA) with SMT proofs.
 //!
+
 //! ## Features
 //!
+
 //! - **Primality Testing**: Miller-Rabin and deterministic algorithms
 //! - **Prime Factorization**: Complete factorization with trial division
 //! - **GCD/LCM**: Euclidean algorithm with extended GCD
@@ -16,8 +20,10 @@
 //! - **Number-Theoretic Functions**: Euler phi, divisor count/sum, Möbius
 //! - **Theorem Verification**: Fermat's Little Theorem, Euler's Theorem, Wilson's Theorem
 //!
+
 //! ## Performance Targets
 //!
+
 //! - Primality test: < 1ms for 64-bit integers
 //! - Prime factorization: < 10ms for 64-bit integers
 //! - GCD: < 100ns via Euclidean algorithm
@@ -73,9 +79,11 @@ pub enum NumberTheoryError {
 
 /// Check if a number is prime
 ///
+
 /// Uses deterministic Miller-Rabin for small numbers and probabilistic
 /// Miller-Rabin for larger numbers.
 ///
+
 /// Performance: < 1ms for 64-bit integers
 pub fn is_prime(n: i64) -> bool {
     if n < 2 {
@@ -145,6 +153,7 @@ fn miller_rabin_deterministic(n: i64, witnesses: &[i64]) -> bool {
 
 /// Find complete prime factorization of n
 ///
+
 /// Returns list of (prime, exponent) pairs.
 /// Performance: < 10ms for 64-bit integers
 pub fn prime_factorization(n: i64) -> NTResult<List<(i64, usize)>> {
@@ -224,6 +233,7 @@ pub fn prev_prime(n: i64) -> NTResult<i64> {
 
 /// Generate all primes up to n using Sieve of Eratosthenes
 ///
+
 /// Performance: O(n log log n)
 pub fn primes_up_to(n: i64) -> List<i64> {
     if n < 2 {
@@ -260,6 +270,7 @@ pub fn primes_up_to(n: i64) -> List<i64> {
 
 /// Compute greatest common divisor using Euclidean algorithm
 ///
+
 /// Performance: < 100ns
 pub fn gcd(mut a: i64, mut b: i64) -> i64 {
     // Make positive
@@ -276,6 +287,7 @@ pub fn gcd(mut a: i64, mut b: i64) -> i64 {
 
 /// Compute least common multiple
 ///
+
 /// LCM(a, b) = |a * b| / GCD(a, b)
 pub fn lcm(a: i64, b: i64) -> NTResult<i64> {
     if a == 0 || b == 0 {
@@ -289,6 +301,7 @@ pub fn lcm(a: i64, b: i64) -> NTResult<i64> {
 
 /// Extended Euclidean algorithm
 ///
+
 /// Returns (gcd, x, y) such that a*x + b*y = gcd(a, b)
 pub fn extended_gcd(a: i64, b: i64) -> (i64, i64, i64) {
     if b == 0 {
@@ -306,6 +319,7 @@ pub fn extended_gcd(a: i64, b: i64) -> (i64, i64, i64) {
 
 /// Fast modular exponentiation: base^exp mod m
 ///
+
 /// Uses binary exponentiation for O(log exp) performance.
 /// Performance: < 1μs
 pub fn mod_pow(mut base: i64, mut exp: i64, modulus: i64) -> i64 {
@@ -338,6 +352,7 @@ fn mod_mul(a: i64, b: i64, modulus: i64) -> i64 {
 
 /// Compute modular multiplicative inverse of a mod m
 ///
+
 /// Returns x such that (a * x) ≡ 1 (mod m)
 /// Only exists when gcd(a, m) = 1
 pub fn mod_inverse(a: i64, m: i64) -> NTResult<i64> {
@@ -354,6 +369,7 @@ pub fn mod_inverse(a: i64, m: i64) -> NTResult<i64> {
 
 /// Chinese Remainder Theorem
 ///
+
 /// Given system: x ≡ a_i (mod m_i) for i = 1..n
 /// Returns x that satisfies all congruences.
 /// Requires all m_i to be pairwise coprime.
@@ -399,6 +415,7 @@ pub fn chinese_remainder_theorem(residues: &[i64], moduli: &[i64]) -> NTResult<i
 
 /// Euler's totient function φ(n)
 ///
+
 /// Returns count of integers k in [1, n] where gcd(k, n) = 1
 pub fn euler_phi(n: i64) -> NTResult<i64> {
     if n < 1 {
@@ -455,6 +472,7 @@ pub fn divisor_sum(n: i64) -> NTResult<i64> {
 
 /// Möbius function μ(n)
 ///
+
 /// Returns:
 /// - 0 if n has a squared prime factor
 /// - 1 if n is a product of an even number of distinct primes
@@ -485,6 +503,7 @@ pub fn mobius_function(n: i64) -> NTResult<i64> {
 
 /// Number theory theorem verifier with Z3 integration
 ///
+
 /// Z3 0.19+ resolves Context via thread-local; this verifier holds no
 /// long-lived state and constructs Solver instances per query.
 pub struct NumberTheoryVerifier;
@@ -497,6 +516,7 @@ impl NumberTheoryVerifier {
 
     /// Verify Fermat's Little Theorem: a^(p-1) ≡ 1 (mod p) for prime p, gcd(a,p) = 1
     ///
+
     /// This is a fundamental theorem in number theory used in cryptography.
     pub fn verify_fermats_little_theorem(&mut self, a_val: i64, p_val: i64) -> NTResult<ProofTerm> {
         // Check preconditions
@@ -581,6 +601,7 @@ impl NumberTheoryVerifier {
 
     /// Verify Euler's Theorem: a^φ(n) ≡ 1 (mod n) when gcd(a,n) = 1
     ///
+
     /// Generalizes Fermat's Little Theorem to non-prime moduli.
     pub fn verify_eulers_theorem(&mut self, a_val: i64, n_val: i64) -> NTResult<ProofTerm> {
         // Check preconditions
@@ -617,6 +638,7 @@ impl NumberTheoryVerifier {
 
     /// Verify Wilson's Theorem: (p-1)! ≡ -1 (mod p) for prime p
     ///
+
     /// Note: Only practical for small primes due to factorial computation.
     pub fn verify_wilsons_theorem(&mut self, p_val: i64) -> NTResult<ProofTerm> {
         // Check precondition
@@ -662,6 +684,7 @@ impl NumberTheoryVerifier {
 
     /// Verify Fundamental Theorem of Arithmetic: unique prime factorization
     ///
+
     /// Verifies that a number's prime factorization is consistent and unique.
     pub fn verify_fundamental_theorem(&mut self, n: i64) -> NTResult<ProofTerm> {
         if n < 1 {

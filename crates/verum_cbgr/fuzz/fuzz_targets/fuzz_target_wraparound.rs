@@ -1,11 +1,13 @@
 //! Fuzz target for generation wraparound edge cases
 //!
+
 //! This fuzzer tests:
 //! - Generation counter edge cases (near GEN_MAX)
 //! - Force wraparound scenarios
 //! - Epoch transitions
 //! - Detection of: wraparound bugs, epoch mismatch
 //!
+
 //! The fuzzer creates scenarios that push generation counters to their limits
 //! and verifies correct behavior during wraparound events.
 

@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `sqlite3_column_int64(stmt, i)` casts the underlying value to Int64
 // regardless of its storage class. The C API documents the conversion
 // rules; we reproduce them here. NULL → 0/0.0/empty Text/empty Blob.

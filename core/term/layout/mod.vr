@@ -5,6 +5,7 @@
 // (rectangular area), Constraint solver (greedy 5-pass algorithm), and
 // CSS Flexbox Level 1 implementation adapted for terminal cell grids.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#8
 // =============================================================================
 

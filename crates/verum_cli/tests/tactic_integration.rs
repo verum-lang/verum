@@ -1,12 +1,15 @@
 //! End-to-end integration tests for `verum tactic`.
 //!
+
 //! Spawns the actual `verum` binary and validates the chain:
 //!
-//!   `verum tactic {list,explain,laws}` (clap) →
-//!     `commands::tactic::run_*` →
-//!       `verum_verification::tactic_combinator::DefaultTacticCatalog` →
-//!         ranked plain / JSON output
+
+//!  `verum tactic {list,explain,laws}` (clap) →
+//!  `commands::tactic::run_*` →
+//!  `verum_verification::tactic_combinator::DefaultTacticCatalog` →
+//!  ranked plain / JSON output
 //!
+
 //! Together with the 17 trait-level tests in
 //! `verum_verification::tactic_combinator::tests` and the 17 handler
 //! unit tests in `commands::tactic::tests`, this proves the
@@ -200,7 +203,7 @@ fn tactic_explain_solve_carries_law_resolution() {
 #[test]
 fn tactic_explain_seq_lists_three_laws() {
     // `seq` participates in left-identity / right-identity /
-    // associativity — three laws.  Pins the simplifier-relevant
+    // associativity — three laws. Pins the simplifier-relevant
     // count.
     let out = run(&["tactic", "explain", "seq", "--format", "json"]);
     assert!(out.status.success());
@@ -240,7 +243,7 @@ fn tactic_laws_plain_lists_all_twelve() {
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     // Pin the 12 canonical law names — this is the simplifier's
-    // normalisation set.  Adding or removing a law without
+    // normalisation set. Adding or removing a law without
     // updating the simplifier surface would break this test.
     for name in [
         "seq-left-identity",
@@ -335,7 +338,7 @@ fn list_and_explain_agree_on_signatures() {
 #[test]
 fn explain_law_names_subset_of_laws_endpoint() {
     // For every combinator, every law name listed in `explain` MUST
-    // resolve to a law in the `laws` endpoint.  Pins the
+    // resolve to a law in the `laws` endpoint. Pins the
     // single-source-of-truth contract between catalogue entries and
     // the algebraic-law inventory.
     let laws_out = run(&["tactic", "laws", "--format", "json"]);

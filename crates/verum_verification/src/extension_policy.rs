@@ -1,18 +1,22 @@
 //! # Extension governance gating
 //!
+
 //! The typed attribute
 //! [`verum_ast::attr::typed::ExtensionRequirementAttr`] is consumed
 //! here so kernel-rule extensions can be gated per scope rather
 //! than running unconditionally in every module.
 //!
+
 //! Rollout governance:
 //!
-//!   * **Year 0–2**: extension rules are *opt-in only* via
-//!     `@require_extension(vfe_N)`.
-//!   * **Year 2–4**: rules become default-on; opt-out via
-//!     `@disable_extension(vfe_N)`.
-//!   * **Year 4+**: opt-out is removed; rule is a hard requirement.
+
+//!  * **Year 0–2**: extension rules are *opt-in only* via
+//!  `@require_extension(vfe_N)`.
+//!  * **Year 2–4**: rules become default-on; opt-out via
+//!  `@disable_extension(vfe_N)`.
+//!  * **Year 4+**: opt-out is removed; rule is a hard requirement.
 //!
+
 //! This module ships the gating *infrastructure* — the policy enum,
 //! the attribute scanner, and the active-extension predicate — without
 //! flipping any production-pass default. Each extension-aware pass
@@ -24,8 +28,10 @@
 //! follow-up bump on the rollout calendar (tracked alongside
 //! `verum_kernel::VVA_VERSION` minor bumps).
 //!
+
 //! ## Module-level vs item-level scope
 //!
+
 //! `@require_extension` may appear at module level (`Module.attributes`)
 //! or on individual items. Both are read; the module-level scope
 //! establishes the baseline, and an item-level annotation is an
@@ -127,6 +133,7 @@ impl EnabledExtensions {
     /// unioned (a function can opt out of an extension its
     /// module didn't take a position on).
     ///
+
     /// Conflict resolution: `@require_extension(vfe_X)` always
     /// wins over `@disable_extension(vfe_X)` for the same X
     /// in the same scope (the item is being explicit that it

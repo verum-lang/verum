@@ -14,12 +14,14 @@
 )]
 //! Property-based tests for verum_types
 //!
+
 //! NOTE: Property-based testing for verum_types is already implemented in:
 //! - meta_param_tests.rs: Properties of meta parameter unification and substitution
 //! - refinement_tests.rs: Properties of refinement type operations
 //! - subtype_tests.rs: Properties of subtype transitivity and reflexivity
 //! - unify_tests.rs: Properties of unification (idempotence, commutativity where applicable)
 //!
+
 //! This file exists as a placeholder for future comprehensive proptest-based property testing.
 
 use proptest::prelude::*;

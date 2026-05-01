@@ -1,11 +1,13 @@
 //! Soundness regression: `validate_apply_def` requires `def_proof`
 //! to conclude an equality.
 //!
+
 //! Pre-fix the validator only checked
 //! `def_proof.conclusion() == expected`, with `_original` and
 //! `_name` ignored. A user could pair a proof of any expression
 //! with a claim about a "definition unfolding" — pre-fix passed.
 //!
+
 //! Post-fix `def_proof` must structurally conclude
 //! `Binary { op: Eq, .. }` (a definitional equality). Anything
 //! else fails the shape gate before the rule can fire.

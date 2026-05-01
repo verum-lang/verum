@@ -1,27 +1,36 @@
 //! Proof Validator for Verum's Formal Proof System
 //!
+
 //! This module implements complete proof term validation according to
 //! the Verum formal proof system. It validates that proof terms correctly prove
 //! their claimed propositions using the Curry-Howard correspondence and
 //! formal proof rules.
 //!
+
 //! ## Architecture
 //!
+
 //! The validator consists of three main components:
 //!
+
 //! 1. **ProofValidator** - Main validation engine that checks proof terms
-//!    against their propositions using formal proof rules
+//!  against their propositions using formal proof rules
 //!
+
 //! 2. **HypothesisContext** - Manages hypothesis scoping during proof validation,
-//!    tracking available assumptions and their types
+//!  tracking available assumptions and their types
 //!
+
 //! 3. **ProofCertificateGenerator** - Generates proof certificates in standard
-//!    formats (Dedukti, Coq, Lean) for external verification
+//!  formats (Dedukti, Coq, Lean) for external verification
 //!
+
 //! ## Validation Rules
 //!
+
 //! The validator implements all proof rules from the unified proof term system:
 //!
+
 //! - **Axiom**: Valid if axiom exists in the axiom database
 //! - **Assumption/Hypothesis**: Valid if assumption is in hypothesis context
 //! - **ModusPonens**: Given proofs of P and P→Q, validate proof of Q
@@ -33,18 +42,23 @@
 //! - **Apply**: Check function application is well-typed
 //! - **SmtProof**: Validate SMT-generated proofs match propositions
 //!
+
 //! ## Example Usage
 //!
+
 //! ```no_run
 //! use verum_verification::proof_validator::ProofValidator;
 //!
+
 //! // Create validator with axiom database
 //! let validator = ProofValidator::new();
 //!
+
 //! // Register axioms and validate proof terms
 //! // (Full example code omitted - see tests for complete examples)
 //! ```
 //!
+
 //! Formal Proofs System (Verum 2.0+ planned):
 //! Proof terms are first-class values (type Proof<P: Prop>). Core rules include
 //! Axiom, Assumption, ModusPonens, Rewrite, Symmetry, Transitivity, Reflexivity,
@@ -761,27 +775,34 @@ pub type ValidationResult<T> = Result<T, ValidationError>;
 // Type Variable Unification System
 // =============================================================================
 //
+
 // This module implements proper type variable tracking and unification for
 // pattern matching during proof validation. Unlike simple placeholder variables,
 // this system maintains unification constraints that can be solved incrementally.
 //
+
 // ## Design Principles
 //
+
 // 1. **Expression-Level Types**: Works with `Expr` representations of types since
-//    the proof validator operates at the AST level before full type checking.
+//  the proof validator operates at the AST level before full type checking.
 //
+
 // 2. **Deferred Unification**: Type variables are created with constraints that
-//    are solved when sufficient information becomes available.
+//  are solved when sufficient information becomes available.
 //
+
 // 3. **Structural Extraction**: For tuples, constructors, and arrays, type
-//    information is extracted structurally from the scrutinee expression.
+//  information is extracted structurally from the scrutinee expression.
 //
+
 // 4. **Robust Fallbacks**: When type information cannot be derived, the system
-//    creates proper type variables with documented constraints, not opaque
-//    placeholder strings.
+//  creates proper type variables with documented constraints, not opaque
+//  placeholder strings.
 
 /// A type variable identifier for unification.
 ///
+
 /// Type variables are created during pattern matching when the exact type
 /// of a binding cannot be immediately determined from the scrutinee.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -811,6 +832,7 @@ impl std::fmt::Display for TypeVarId {
 pub enum TypeVarState {
     /// Unbound type variable with optional constraints.
     ///
+
     /// The constraints describe what we know about the type:
     /// - `origin`: Where this type variable was created (e.g., "tuple element 0")
     /// - `scrutinee_span`: The span of the scrutinee expression
@@ -830,6 +852,7 @@ pub enum TypeVarState {
 
 /// Context for tracking type variables and their bindings during proof validation.
 ///
+
 /// This context maintains:
 /// - A mapping from type variable IDs to their current state
 /// - Deferred unification constraints that couldn't be solved immediately
@@ -884,6 +907,7 @@ impl ExprTypeContext {
 
     /// Create a fresh type variable with origin information.
     ///
+
     /// # Arguments
     /// * `origin` - Description of where this type variable originated
     /// * `scrutinee_span` - Span of the scrutinee expression
@@ -909,6 +933,7 @@ impl ExprTypeContext {
 
     /// Bind a type variable to a concrete type expression.
     ///
+
     /// # Returns
     /// `Ok(())` if binding succeeds, `Err` if the variable was already bound
     /// to an incompatible type.
@@ -946,6 +971,7 @@ impl ExprTypeContext {
 
     /// Look up the current binding for a type variable.
     ///
+
     /// Follows links and returns the final state.
     pub fn lookup(&self, var: TypeVarId) -> Maybe<&TypeVarState> {
         match self.bindings.get(&var) {
@@ -964,6 +990,7 @@ impl ExprTypeContext {
 
     /// Unify two type expressions.
     ///
+
     /// This performs structural unification on expression-level types.
     /// Type variables are bound as needed. Constraints that cannot be
     /// immediately solved are deferred.
@@ -1193,6 +1220,7 @@ impl Default for ExprTypeContext {
 
 /// Manages hypothesis scoping during proof validation
 ///
+
 /// Tracks available hypotheses and their types/propositions at each
 /// level of proof checking, supporting proper scoping for nested proofs.
 #[derive(Debug, Clone)]
@@ -1301,11 +1329,14 @@ pub struct RewriteRule {
 
 /// Main proof validator
 ///
+
 /// Validates that proof terms correctly prove their propositions according
 /// to formal proof rules and the Curry-Howard correspondence.
 ///
+
 /// ## Features
 ///
+
 /// - **Proof Caching**: Caches validation results to avoid redundant work
 /// - **Obligation Tracking**: Tracks proof obligations and their status
 /// - **Incremental Verification**: Re-verifies only changed obligations
@@ -1531,17 +1562,20 @@ impl ProofValidator {
 
     /// Try to prove a proposition using SMT solver
     ///
+
     /// This method uses Z3 to prove propositions by checking if the negation is unsatisfiable.
     /// If the negation is UNSAT, the proposition is proven. If SAT, a counterexample is extracted.
     ///
+
     /// # Algorithm
     /// 1. Convert the Verum proposition to a Z3 boolean formula
     /// 2. Assert the negation of the proposition
     /// 3. Check satisfiability:
-    ///    - UNSAT: Proposition is proven (negation is false, so proposition is true)
-    ///    - SAT: Extract counterexample from model
-    ///    - UNKNOWN: Return appropriate error with solver reason
+    ///  - UNSAT: Proposition is proven (negation is false, so proposition is true)
+    ///  - SAT: Extract counterexample from model
+    ///  - UNKNOWN: Return appropriate error with solver reason
     ///
+
     /// # Timeout
     /// Uses `config.smt_timeout_ms` for solver timeout to prevent unbounded proving attempts.
     fn prove_with_smt(&self, proposition: &Expr) -> ValidationResult<()> {
@@ -1660,6 +1694,7 @@ impl ProofValidator {
 
     /// Validate that a proof term proves the given proposition
     ///
+
     /// This is the main entry point for proof validation.
     /// Uses caching to avoid redundant validation of identical proofs.
     pub fn validate(&mut self, proof: &ProofTerm, expected: &Expr) -> ValidationResult<()> {
@@ -2075,15 +2110,17 @@ impl ProofValidator {
 
     /// Validate hypothesis proof term.
     ///
+
     /// A `Hypothesis { id, formula }` claims that `h{id}` proves
     /// `formula`. Soundness requires checking THREE things:
     /// 1. `formula` matches the user-supplied `expected` (sanity check).
     /// 2. `h{id}` is actually in scope (no dangling reference).
     /// 3. The hypothesis at `h{id}` has `formula` as its proposition —
-    ///    otherwise the user could claim anything that happens to
-    ///    syntactically match `expected`, even if `h{id}` proves
-    ///    something completely different.
+    ///  otherwise the user could claim anything that happens to
+    ///  syntactically match `expected`, even if `h{id}` proves
+    ///  something completely different.
     ///
+
     /// Pre-fix only (1) and (2) were checked. (3) was missing, so a
     /// hypothesis `h0 : P` could be re-labeled by the user as proving
     /// `Q` (with formula = expected = Q) and the validator silently
@@ -2159,20 +2196,25 @@ impl ProofValidator {
 
     /// Validate rewrite rule application
     ///
+
     /// This validates that applying a named rewrite rule to the source
     /// expression produces the target expression. The rewrite rule must
     /// either be a registered rule or a standard theory rule.
     ///
+
     /// ## Validation Process
     ///
+
     /// 1. Validate the source proof establishes its conclusion
     /// 2. Look up the rewrite rule by name
     /// 3. Check that the source matches the rule's LHS pattern
     /// 4. Verify that the target matches the rule's RHS with substitutions
     /// 5. Validate any conditions required by the rule
     ///
+
     /// ## Standard Theory Rules
     ///
+
     /// The following standard rewrite rules are recognized:
     /// - `simp`: Simplification rules (arithmetic, boolean)
     /// - `ring`: Ring normalization (associativity, commutativity, distributivity)
@@ -2182,6 +2224,7 @@ impl ProofValidator {
     /// - `eta`: Eta expansion/reduction
     /// - `unfold_*`: Definition unfolding
     ///
+
     /// Rewrite tactic: given a proof of an equality or a named rewrite rule
     /// (simp, arith, beta, eta, unfold_*), validate that applying the rewrite
     /// to the source produces the expected target expression.
@@ -2272,6 +2315,7 @@ impl ProofValidator {
 
     /// Discharge a single instantiated rewrite condition.
     ///
+
     /// Soundness gate for conditional rewrites — a conditional rule is
     /// only valid when its conditions actually hold at the rewrite site.
     /// We accept exactly the cases that can be checked syntactically
@@ -2280,11 +2324,13 @@ impl ProofValidator {
     /// proof author can either register an axiom, introduce a
     /// hypothesis, or use a different proof tactic.
     ///
+
     /// Pre-fix this was an empty trust-the-user path that accepted any
     /// condition without checking — a soundness leak: a malformed proof
     /// could apply `safe_div(a, b) → a/b` claiming `b ≠ 0` while it
     /// actually doesn't hold.
     ///
+
     /// Accepted shapes:
     /// 1. The literal `true`.
     /// 2. Reflexive equality (`x == x` for any x).
@@ -2329,8 +2375,8 @@ impl ProofValidator {
             }
         }
         // 4. Hypothesis match. `HypothesisContext.contains` is name-keyed;
-        //    here we need to recognise the proposition regardless of
-        //    which name it was bound to, so iterate across scopes.
+        //  here we need to recognise the proposition regardless of
+        //  which name it was bound to, so iterate across scopes.
         for (_name, prop) in self.hypotheses.iter_propositions() {
             if self.expr_eq(prop, condition) {
                 return Ok(());
@@ -2359,6 +2405,7 @@ impl ProofValidator {
         match rule_str {
             // Simplification - accepts any transformation that preserves logical equivalence
             //
+
             // Pre-fix this arm returned `Ok(())` unconditionally —
             // any source→target pair (even Forall→Path) would
             // validate under `simp`. Now gates on
@@ -2571,6 +2618,7 @@ impl ProofValidator {
 
     /// Check if two expressions are structurally compatible for rewriting.
     ///
+
     /// Compatibility means the rewrite is at least PLAUSIBLY a valid
     /// transformation: source and target share the same top-level
     /// `ExprKind` discriminant, OR they fall into one of the
@@ -2578,6 +2626,7 @@ impl ProofValidator {
     /// constants and named bindings can interchange under
     /// definition unfolding).
     ///
+
     /// Pre-fix the catch-all returned `true` for every pair, which
     /// made the "unknown rewrite rule" branch in
     /// `validate_apply_rewrite_rule` (line ~2360) accept any
@@ -2586,6 +2635,7 @@ impl ProofValidator {
     /// catch-all fixed in 8429bd4e and the quantifier rules in
     /// 80f43418.
     ///
+
     /// The new same-discriminant fallback uses
     /// `std::mem::discriminant` so EVERY ExprKind variant pair is
     /// covered uniformly: Binary/Unary check the operator on top of
@@ -2594,6 +2644,7 @@ impl ProofValidator {
     /// other same-kind pairs (Forall/Forall, Block/Block, etc.) get
     /// the structural-discriminant check; cross-kind pairs reject.
     ///
+
     /// Note: this is NOT semantic equivalence — it only confirms
     /// the rewrite isn't trivially malformed. A rewrite that
     /// transforms `2+3` → `2*3` has matching Binary discriminants
@@ -2820,13 +2871,16 @@ impl ProofValidator {
 
     /// Validate unit resolution (SAT reasoning)
     ///
+
     /// Unit resolution is a sound and complete SAT reasoning rule:
     /// Given a clause (L1 ∨ L2 ∨ ... ∨ Ln) and unit clauses containing
     /// negated literals, we can derive a smaller clause.
     ///
+
     /// Rule: If we have clause C = (L ∨ D) and unit clause ¬L,
-    ///       we can derive D (with L resolved away).
+    ///  we can derive D (with L resolved away).
     ///
+
     /// Unit Resolution proof rule: given clause C = (L v D) and unit clause ~L,
     /// derive D (with L resolved away). Used in SAT/SMT proof reconstruction.
     fn validate_unit_resolution(
@@ -3055,28 +3109,35 @@ impl ProofValidator {
 
     /// Validate quantifier instantiation
     ///
+
     /// This validates the elimination rule for universal quantification:
     /// From `forall x: T. P(x)` and a term `t: T`, we can derive `P(t)`.
     ///
+
     /// For dependent types, we also need to verify:
     /// 1. The witness term `t` has the correct type `T`
     /// 2. The instantiated formula `P(t)` is well-typed
     /// 3. Any type dependencies are properly substituted
     ///
+
     /// ## Dependent Type Considerations
     ///
+
     /// In dependent type theory, the type `T` may depend on earlier bindings,
     /// and the formula `P(x)` may contain type-level computations. For example:
     ///
+
     /// ```text
     /// forall (n: Nat). forall (v: Vec n). length(v) = n
     /// ```
     ///
+
     /// When instantiating `n` with `3`, we get:
     /// ```text
     /// forall (v: Vec 3). length(v) = 3
     /// ```
     ///
+
     /// Quantifier instantiation for dependent types: given a universally
     /// quantified proof (forall x: T. P(x)) and a substitution map,
     /// validate that applying the substitution produces the expected result.
@@ -3123,6 +3184,7 @@ impl ProofValidator {
 
     /// Extract the structure of a universally quantified formula
     ///
+
     /// Returns a list of (variable_name, variable_type) pairs and the body.
     fn extract_quantifier_structure(
         &self,
@@ -3182,15 +3244,18 @@ impl ProofValidator {
 
     /// Validate that a witness term has the expected type
     ///
+
     /// This is used in dependent type checking to ensure instantiations
     /// are well-typed. For existential elimination, the witness must have
     /// the correct type to instantiate the existentially quantified variable.
     ///
+
     /// # Type Inference Strategy
     /// 1. Infer the type of the witness expression from its structure
     /// 2. Normalize both inferred and expected types
     /// 3. Check structural compatibility with type coercion rules
     ///
+
     /// # Supported Type Forms
     /// - Literals: Int, Bool, Float, Text, Char
     /// - Paths: Named types and variables
@@ -3198,6 +3263,7 @@ impl ProofValidator {
     /// - Function applications: Result types
     /// - Binary operations: Result types based on operator
     ///
+
     /// Witness type validation for existential proofs and dependent types.
     /// Infers the type of the witness expression (literals, paths, tuples,
     /// function applications, binary operations) and checks compatibility
@@ -3223,6 +3289,7 @@ impl ProofValidator {
 
     /// Infer the type of a witness expression
     ///
+
     /// This performs local type inference on expressions without requiring
     /// a full type environment. It handles common expression forms used
     /// in proof witnesses.
@@ -3490,6 +3557,7 @@ impl ProofValidator {
 
     /// Extract type from a typing judgment proposition
     ///
+
     /// Typing judgments have the form `x : T` which may appear as
     /// hypotheses in proof contexts.
     fn extract_type_from_judgment(&self, prop: &Expr) -> Option<Expr> {
@@ -3513,6 +3581,7 @@ impl ProofValidator {
 
     /// Check if two types are compatible (with coercion rules)
     ///
+
     /// This implements structural type comparison with support for:
     /// - Alpha equivalence for bound variables
     /// - Unknown type wildcards
@@ -3646,10 +3715,12 @@ impl ProofValidator {
 
     /// Normalize types in an expression (beta reduction, etc.)
     ///
+
     /// This handles type-level computation that may occur after substitution
     /// in dependent types. Normalization reduces expressions to their simplest
     /// equivalent form for comparison.
     ///
+
     /// # Normalization Strategy (Weak Head Normal Form)
     /// 1. **Beta reduction**: `(λx. body)(arg)` → `body[arg/x]`
     /// 2. **Type family application**: Reduce type constructor applications
@@ -3657,10 +3728,12 @@ impl ProofValidator {
     /// 4. **Constant folding**: Simplify literal operations
     /// 5. **Structural recursion**: Normalize subexpressions
     ///
+
     /// # Termination
     /// Uses a depth limit to prevent infinite loops in recursive types.
     /// Maximum normalization depth is 100 steps.
     ///
+
     /// Type-level computation: normalize type expressions by expanding
     /// type aliases, reducing beta-redexes, and simplifying arithmetic.
     /// Uses a depth limit of 100 to prevent infinite loops in recursive types.
@@ -3922,10 +3995,12 @@ impl ProofValidator {
 
     /// Normalize a block by normalizing all statements and the trailing expression
     ///
+
     /// # Arguments
     /// * `block` - The block to normalize
     /// * `depth` - Current normalization recursion depth
     ///
+
     /// # Returns
     /// A new block with all expressions normalized
     fn normalize_block(&self, block: &verum_ast::Block, depth: usize) -> verum_ast::Block {
@@ -4214,14 +4289,17 @@ impl ProofValidator {
 
     /// Validate lambda abstraction (introduction rule)
     ///
+
     /// Lambda abstraction implements the introduction rules for:
     /// 1. Implication introduction: If Γ, P ⊢ Q then Γ ⊢ P → Q
     /// 2. Universal introduction: If Γ ⊢ P(x) for fresh x then Γ ⊢ ∀x. P(x)
     ///
+
     /// The expected result is either:
     /// - An implication (P → Q) where P is the assumed hypothesis type
     /// - A universal quantification (∀x: T. P(x)) where T is the variable type
     ///
+
     /// Lambda introduction rule: validates proof of implication (P -> Q) or
     /// universal quantification (forall x: T. P(x)) by introducing the
     /// variable/hypothesis into a new scope and validating the body.
@@ -4256,6 +4334,7 @@ impl ProofValidator {
         // For implication: body should prove Q (the conclusion of P → Q)
         // For universal: body should prove P(x) where x is the bound variable
         //
+
         // We need to check that body_conclusion matches expected_body
         // after accounting for the variable binding
         if !self.expr_eq_modulo_var(&body_conclusion, &expected_body, var) {
@@ -4342,18 +4421,21 @@ impl ProofValidator {
 
     /// Expression equality with one variable bound on both sides.
     ///
+
     /// Reuses [`expr_eq_impl`]'s binding-map machinery: we pre-populate
     /// each side's binding map with `bound_var ↦ depth 0`, so a Path
     /// referring to `bound_var` matches the corresponding Path on the
     /// other side as a bound-at-same-depth occurrence rather than a
     /// free variable.
     ///
+
     /// Pre-fix this just delegated to `expr_eq` and ignored the
     /// `bound_var` argument entirely — α-equivalence checking did not
     /// happen, so a `bound_var` Path appearing inside two different
     /// scopes would be wrongly equated even when only one of them was
     /// the actual bound occurrence.
     ///
+
     /// This single-binder variant covers the immediate caller in
     /// `validate_lambda`; multi-binder generalisation (different
     /// names on each side) would need a renaming map and is tracked
@@ -4413,16 +4495,20 @@ impl ProofValidator {
 
     /// Validate proof by induction
     ///
+
     /// Validates a proof by mathematical induction on a variable.
     /// The expected result should be a universally quantified property:
     /// ∀n: Nat. P(n)
     ///
+
     /// Induction requires:
     /// 1. Base case: P(0) or P(base_value)
     /// 2. Inductive case: ∀n. P(n) → P(n+1) or similar
     ///
+
     /// The inductive hypothesis IH is made available in the inductive case scope.
     ///
+
     /// Induction tactic: validates proof by structural induction.
     /// Requires: (1) base case P(0) or P(base_value),
     /// (2) inductive case forall n. P(n) -> P(n+1).
@@ -4716,11 +4802,13 @@ impl ProofValidator {
 
     /// Validate rule application
     ///
+
     /// Validates the application of a named inference rule to premises.
     /// Each rule has a specific signature that specifies:
     /// - Number and types of required premises
     /// - How the conclusion is derived from the premises
     ///
+
     /// Common rules supported:
     /// - "modus_ponens": P, P → Q ⊢ Q
     /// - "and_intro": P, Q ⊢ P ∧ Q
@@ -4733,6 +4821,7 @@ impl ProofValidator {
     /// - "forall_elim": ∀x. P(x), t ⊢ P(t)
     /// - "exists_intro": P(t), t ⊢ ∃x. P(x)
     ///
+
     /// Apply proof rule: validates application of standard logical rules.
     /// Supported rules: modus_ponens (P, P->Q |- Q), impl_intro ([P|-Q] |- P->Q),
     /// forall_intro ([x|-P(x)] |- forall x. P(x)), forall_elim (forall x. P(x), t |- P(t)),
@@ -4964,6 +5053,7 @@ impl ProofValidator {
 
             // Forall Elimination: ∀x. P(x) ⊢ P(t)
             //
+
             // Soundness gate: the premise MUST be syntactically a
             // universal quantifier. Pre-fix the rule accepted any
             // premise + any expected — `Ok(expected.clone())` made
@@ -4972,6 +5062,7 @@ impl ProofValidator {
             // soundness leak fixed in 8429bd4e for the catch-all
             // arm.
             //
+
             // Full instantiation checking (verifying expected = body[x := t]
             // for some t) requires higher-order matching that this
             // module does not implement; the unification check is
@@ -5020,6 +5111,7 @@ impl ProofValidator {
 
             // Exists Introduction: P(t) ⊢ ∃x. P(x)
             //
+
             // Symmetric soundness gate to forall_elim above: the
             // expected MUST be syntactically an existential
             // quantifier. Without this gate the rule accepted any
@@ -5158,11 +5250,13 @@ impl ProofValidator {
 
     /// Look up a user-defined inference rule by name.
     ///
+
     /// Returns the rule's schema as `(premise_patterns, conclusion)` so the
     /// caller can do an arity check and obtain the conclusion that the rule
     /// derives. Reads from `self.inference_rules`, which is populated via
     /// `register_inference_rule`.
     ///
+
     /// Returns `None` when the name isn't registered — soundness depends on
     /// the caller treating that as a hard error rather than falling back to
     /// "trust the user". Pre-fix, this was an unconditional `None` (stub),
@@ -5174,27 +5268,34 @@ impl ProofValidator {
 
     /// Validate SMT solver proof
     ///
+
     /// This validates a proof that was generated by an SMT solver. The validation
     /// has multiple levels of rigor:
     ///
+
     /// 1. **Basic validation** (always): Check that the formula matches expected
     /// 2. **Trace validation** (if trace provided): Parse and validate the SMT-LIB2 proof trace
     /// 3. **Re-checking** (if configured): Re-submit to SMT solver for verification
     ///
+
     /// ## Supported Solvers
     ///
+
     /// - `z3`: Z3 SMT solver with proof production
     /// - `cvc5`: CVC5 SMT solver with LFSC proofs
     /// - `vampire`: Vampire theorem prover
     /// - `e`: E theorem prover
     ///
+
     /// ## SMT Proof Trace Format
     ///
+
     /// When an SMT trace is provided, it should be in one of:
     /// - SMT-LIB2 proof format (for Z3)
     /// - LFSC proof format (for CVC5)
     /// - TSTP format (for first-order provers)
     ///
+
     /// SMT proof validation: verifies that an SMT solver (Z3/CVC5) correctly
     /// discharged the formula. Accepts traces in SMT-LIB2 (Z3), LFSC (CVC5),
     /// or TSTP (first-order provers) format. Formula must match expected proposition.
@@ -5244,6 +5345,7 @@ impl ProofValidator {
 
     /// Validate an SMT proof trace
     ///
+
     /// This parses and validates the proof trace from the SMT solver.
     /// The trace format depends on the solver used.
     fn validate_smt_trace(
@@ -5379,22 +5481,26 @@ impl ProofValidator {
 
     /// Re-check formula with SMT solver (for rigorous validation)
     ///
+
     /// This function integrates with Z3 via verum_smt to verify that a formula
     /// is valid (i.e., its negation is UNSAT). This provides an independent
     /// check of proof correctness.
     ///
+
     /// # Algorithm
     /// 1. Create a fresh SMT context with configured timeout
     /// 2. Translate the Verum Expr to Z3 AST
     /// 3. Assert the negation of the formula
     /// 4. Check satisfiability:
-    ///    - UNSAT => formula is valid, proof is correct
-    ///    - SAT => formula is invalid, found counterexample
-    ///    - UNKNOWN => solver timeout or undecidable
+    ///  - UNSAT => formula is valid, proof is correct
+    ///  - SAT => formula is invalid, found counterexample
+    ///  - UNKNOWN => solver timeout or undecidable
     ///
+
     /// # Solver Support
     /// Currently supports "z3" solver. CVC5 support is planned.
     ///
+
     /// Re-check a formula with SMT solver. Encodes the negation of the formula
     /// in SMT-LIB format and checks satisfiability. UNSAT = formula valid,
     /// SAT = counterexample found, UNKNOWN = solver timeout or undecidable.
@@ -5432,6 +5538,7 @@ impl ProofValidator {
         // bound to its translated value so the formula being rechecked
         // can refer to it by name.
         //
+
         // Pre-fix this loop bound a FRESH `Bool::new_const(name)` and
         // asserted that — completely discarding `prop`. Z3 then saw
         // every hypothesis as the opaque true boolean `h0 := true`,
@@ -5532,12 +5639,15 @@ impl ProofValidator {
 
     /// Validate proof by substitution
     ///
+
     /// Given an equality proof (a = b) and a property P containing a,
     /// validate that we can derive P[b/a] (P with b substituted for a).
     ///
+
     /// This implements Leibniz's law (indiscernibility of identicals):
     /// If a = b and P(a), then P(b).
     ///
+
     /// Substitution rule (Leibniz's law / indiscernibility of identicals):
     /// given proof of a = b and property P(a), derive P[b/a].
     fn validate_subst(
@@ -5557,6 +5667,7 @@ impl ProofValidator {
         // The property should contain occurrences of 'left' (a)
         // and expected should be the property with 'left' replaced by 'right' (b)
         //
+
         // We verify by checking:
         // 1. expected == property[right/left] (forward substitution)
         // OR
@@ -5637,8 +5748,10 @@ impl ProofValidator {
 
     /// Validate And Elimination: from (and l_1 ... l_n), derive l_i
     ///
+
     /// This rule extracts a specific conjunct from a conjunction.
     ///
+
     /// And Elimination: from (and l_1 ... l_n), derive l_i (extract i-th conjunct).
     fn validate_and_elim(
         &mut self,
@@ -5712,8 +5825,10 @@ impl ProofValidator {
 
     /// Validate Not-Or Elimination: from (not (or l_1 ... l_n)), derive (not l_i)
     ///
+
     /// This rule applies De Morgan's law to extract a negated disjunct.
     ///
+
     /// Not-Or Elimination (De Morgan): from (not (or l_1 ... l_n)), derive (not l_i).
     fn validate_not_or_elim(
         &mut self,
@@ -5791,8 +5906,10 @@ impl ProofValidator {
 
     /// Validate Iff-True: from p, derive (iff p true)
     ///
+
     /// If P is proven, then P <=> True.
     ///
+
     /// Iff-True rule: from proof of P, derive (iff P true). If P is proven, then P <=> True.
     fn validate_iff_true(
         &mut self,
@@ -5829,8 +5946,10 @@ impl ProofValidator {
 
     /// Validate Iff-False: from (not p), derive (iff p false)
     ///
+
     /// If ¬P is proven, then P <=> False.
     ///
+
     /// Iff-False rule: from proof of (not P), derive (iff P false). If ~P is proven, then P <=> False.
     fn validate_iff_false(
         &mut self,
@@ -5896,9 +6015,11 @@ impl ProofValidator {
 
     /// Validate Commutativity: derive (= (f a b) (f b a))
     ///
+
     /// Validates that a commutative operation produces equal results
     /// when arguments are swapped.
     ///
+
     /// Commutativity rule: derive (= (f a b) (f b a)) for commutative operations.
     fn validate_commutativity(
         &self,
@@ -5935,6 +6056,7 @@ impl ProofValidator {
 
     /// Check if two expressions are related by argument commutativity.
     ///
+
     /// Pre-fix this returned true whenever two expressions shared the
     /// SAME `BinOp` and had swapped operands — without checking that
     /// the operator is actually commutative. Result: `5 - 3 = 3 - 5`
@@ -5943,6 +6065,7 @@ impl ProofValidator {
     /// `Imply`, `Lt`/`Le`/`Gt`/`Ge`, `Concat`, `Shl`/`Shr`, `In`.
     /// The `Call` arm trusted any 2-arg function as commutative.
     ///
+
     /// Post-fix: only mathematically commutative operators flow
     /// through. For Call, no special-cased trust — a future extension
     /// can register specific commutative functions, but the default
@@ -5992,8 +6115,10 @@ impl ProofValidator {
 
     /// Validate Monotonicity: if a R a', b R b', then f(a,b) R f(a',b')
     ///
+
     /// Validates that a function is monotone with respect to a relation.
     ///
+
     /// Monotonicity rule: if a R a' and b R b', then f(a,b) R f(a',b') for monotone f.
     fn validate_monotonicity(
         &mut self,
@@ -6022,21 +6147,23 @@ impl ProofValidator {
     /// `a * (b + c) = a * b + a * c` (or any of its mirror /
     /// logical / bitwise equivalents).
     ///
+
     /// Pre-fix this only checked `formula == expected`, which made
     /// `Distributivity { formula }` a "trust me, this is a
     /// distributivity tautology" annotation: any equation
     /// (e.g. `2 * 3 = 1 + 2`, FALSE) was accepted as long as
     /// `formula == expected`.
     ///
+
     /// Post-fix the formula must structurally match one of the
     /// canonical distributivity shapes — `outer(a, inner(b, c)) =
     /// inner(outer(a, b), outer(a, c))` (left) or its mirror
     /// (right) — for one of the registered (outer, inner) pairs:
-    ///   * `Mul` over `Add`        (arithmetic)
-    ///   * `And` over `Or`         (logical)
-    ///   * `Or` over `And`         (logical, dual)
-    ///   * `BitAnd` over `BitOr`   (bitwise)
-    ///   * `BitOr` over `BitAnd`   (bitwise, dual)
+    ///  * `Mul` over `Add` (arithmetic)
+    ///  * `And` over `Or` (logical)
+    ///  * `Or` over `And` (logical, dual)
+    ///  * `BitAnd` over `BitOr` (bitwise)
+    ///  * `BitOr` over `BitAnd` (bitwise, dual)
     fn validate_distributivity(&self, formula: &Expr, expected: &Expr) -> ValidationResult<()> {
         if !self.expr_eq(formula, expected) {
             return Err(ValidationError::PropositionMismatch {
@@ -6225,8 +6352,10 @@ impl ProofValidator {
 
     /// Validate DefAxiom: Tseitin-style CNF transformation axiom
     ///
+
     /// Validates a definitional axiom introduced during CNF conversion.
     ///
+
     /// DefAxiom: Tseitin-style CNF transformation axiom (tautology by construction).
     fn validate_def_axiom(&self, formula: &Expr, expected: &Expr) -> ValidationResult<()> {
         // Definition axioms are tautologies by construction
@@ -6243,8 +6372,10 @@ impl ProofValidator {
 
     /// Validate DefIntro: Definition introduction
     ///
+
     /// Validates the introduction of a new definition.
     ///
+
     /// Definition introduction: establishes a definitional equality for a new name.
     fn validate_def_intro(
         &self,
@@ -6265,8 +6396,10 @@ impl ProofValidator {
 
     /// Validate ApplyDef: Apply a definition
     ///
+
     /// Validates the application of a definition to an expression.
     ///
+
     /// Apply a definition: unfold a named definition within an expression.
     fn validate_apply_def(
         &mut self,
@@ -6285,6 +6418,7 @@ impl ProofValidator {
         // step gating apply_def, and `def_proof` could conclude
         // anything as long as it equalled `expected`.
         //
+
         // Full apply-def soundness — verifying
         // `expected = original[name := body]` — requires
         // substitution machinery and is tracked separately.
@@ -6315,8 +6449,10 @@ impl ProofValidator {
 
     /// Validate IffOEq: Iff to oriented equality
     ///
+
     /// Converts a biconditional to an oriented equality.
     ///
+
     /// Iff to oriented equality: converts a biconditional (P <=> Q) to an oriented equality.
     fn validate_iff_oeq(
         &mut self,
@@ -6375,8 +6511,10 @@ impl ProofValidator {
 
     /// Validate NnfPos: Negation normal form (positive)
     ///
+
     /// Validates transformation to NNF for a positive formula.
     ///
+
     /// NNF positive: validates transformation to negation normal form for a positive formula.
     fn validate_nnf_pos(
         &self,
@@ -6399,8 +6537,10 @@ impl ProofValidator {
 
     /// Validate NnfNeg: Negation normal form (negative)
     ///
+
     /// Validates transformation to NNF for a negated formula.
     ///
+
     /// NNF negative: validates transformation to negation normal form for a negated formula.
     fn validate_nnf_neg(
         &self,
@@ -6422,6 +6562,7 @@ impl ProofValidator {
     /// Validate SkHack: Skolemization transforms `∃x. P(x)` into
     /// `P(f(free_vars))` where `f` is a fresh Skolem function.
     ///
+
     /// Soundness gate: the input `formula` MUST be syntactically
     /// existential. Pre-fix the parameter was bound to `_` and
     /// completely ignored — the validator only checked
@@ -6429,6 +6570,7 @@ impl ProofValidator {
     /// non-existential formula and as long as `skolemized`
     /// matched `expected` syntactically, the rule passed.
     ///
+
     /// Full Skolemization soundness (checking that
     /// `skolemized = body[x := f(free_vars)]` for some fresh `f`)
     /// requires higher-order substitution matching and is tracked
@@ -6465,8 +6607,10 @@ impl ProofValidator {
 
     /// Validate EqualityResolution: Resolve an equality
     ///
+
     /// Validates resolution using an equality.
     ///
+
     /// Equality resolution: resolve a literal using an equality proof.
     fn validate_equality_resolution(
         &mut self,
@@ -6494,8 +6638,10 @@ impl ProofValidator {
 
     /// Validate BindProof: Bind a quantified proof
     ///
+
     /// Validates binding a pattern to a quantified proof.
     ///
+
     /// Bind proof: bind a pattern to a quantified proof for instantiation.
     fn validate_bind_proof(
         &mut self,
@@ -6520,9 +6666,11 @@ impl ProofValidator {
 
     /// Validate PullQuantifier: Pull a quantifier outward
     ///
+
     /// Validates pulling a quantifier out of a formula.
     /// Example: (∀x.P) ∧ Q → ∀x.(P ∧ Q) when x not free in Q
     ///
+
     /// Pull quantifier outward: e.g., (forall x. P) & Q -> forall x. (P & Q) when x not free in Q.
     fn validate_pull_quantifier(
         &self,
@@ -6566,9 +6714,11 @@ impl ProofValidator {
 
     /// Validate PushQuantifier: Push a quantifier inward
     ///
+
     /// Validates pushing a quantifier into a formula.
     /// Example: ∀x.(P ∧ Q) → (∀x.P) ∧ (∀x.Q)
     ///
+
     /// Push quantifier inward: e.g., forall x. (P & Q) -> (forall x. P) & (forall x. Q).
     fn validate_push_quantifier(
         &self,
@@ -6609,10 +6759,12 @@ impl ProofValidator {
 
     /// Validate ElimUnusedVars: Eliminate unused variables
     ///
+
     /// Validates elimination of quantified variables that don't
     /// appear in the body.
     /// Example: ∀x.P → P (when x not in P)
     ///
+
     /// Eliminate unused quantified variables: forall x. P -> P when x not in P.
     fn validate_elim_unused_vars(
         &self,
@@ -6648,8 +6800,10 @@ impl ProofValidator {
 
     /// Validate DerElim: Der elimination
     ///
+
     /// Validates a derived rule elimination.
     ///
+
     /// Derived rule elimination: validate conclusion of a derived inference rule.
     fn validate_der_elim(&mut self, premise: &ProofTerm, expected: &Expr) -> ValidationResult<()> {
         let premise_conclusion = premise.conclusion();
@@ -6668,8 +6822,10 @@ impl ProofValidator {
 
     /// Validate QuickExplain: Unsat core extraction
     ///
+
     /// Validates that the unsat core is valid.
     ///
+
     /// QuickExplain: validates an unsat core extraction. The conjunction of
     /// the unsat core formulas should be inconsistent.
     fn validate_quick_explain(
@@ -6683,6 +6839,7 @@ impl ProofValidator {
         // gate enforces the conclusion shape uniformly for empty
         // AND non-empty cores.
         //
+
         // Pre-fix only the empty-core branch checked
         // `expected == False`. The non-empty branch fell through to
         // an unconditional `Ok(())`, so a user could supply
@@ -6690,6 +6847,7 @@ impl ProofValidator {
         // and silently pass — even though the rule must conclude
         // False, not arbitrary propositions.
         //
+
         // Full unsat-core soundness (re-checking the conjunction
         // with SMT to confirm it really is unsat) is tracked
         // separately.
@@ -6755,11 +6913,13 @@ impl ProofValidator {
 
     /// Extract bindings from a pattern and add them as hypotheses
     ///
+
     /// Pattern matching in proofs introduces variable bindings. For example:
     /// - `Some(x)` binds `x` to the inner value
     /// - `Pair(a, b)` binds `a` and `b` to the pair elements
     /// - `Left(x)` or `Right(y)` bind the sum type's payload
     ///
+
     /// # Arguments
     /// * `pattern` - The pattern expression (may contain variable bindings)
     /// * `scrutinee` - The value being matched (used to derive types)
@@ -6802,12 +6962,15 @@ impl ProofValidator {
 
     /// Helper: Add pattern bindings with tuple/constructor index context
     ///
+
     /// This method handles pattern matching by deriving the type of each binding
     /// from the scrutinee expression. For tuples, it extracts element types.
     /// For constructors/structs, it extracts field types.
     ///
+
     /// # Type Derivation Strategy
     ///
+
     /// 1. **Tuple patterns**: Extract type at index from tuple type signature
     /// 2. **Constructor patterns**: Extract field type from constructor definition
     /// 3. **Struct patterns**: Extract field type from struct definition
@@ -6832,13 +6995,16 @@ impl ProofValidator {
 
     /// Derive the element type at a given index from a scrutinee expression
     ///
+
     /// This method attempts to extract precise type information from the scrutinee
     /// expression's structure. When type information cannot be immediately derived,
     /// it creates a proper type variable in the type context that can be unified
     /// later when more information becomes available.
     ///
+
     /// # Type Derivation Strategy
     ///
+
     /// 1. **Tuple expressions**: `(a, b, c)` -> extract element at index
     /// 2. **Constructor applications**: `Some(x)`, `Point{x, y}` -> extract argument type
     /// 3. **Array/list expressions**: `[a, b, c]` -> element type (uniform)
@@ -6847,10 +7013,12 @@ impl ProofValidator {
     /// 6. **Cast expressions**: Extract the target type
     /// 7. **Fallback**: Create a tracked type variable with unification constraints
     ///
+
     /// # Arguments
     /// * `scrutinee` - The expression being matched against
     /// * `idx` - The index of the element (for tuples, constructors, etc.)
     ///
+
     /// # Returns
     /// An expression representing the derived type, or a type variable expression
     /// if the type cannot be immediately determined.
@@ -6994,10 +7162,12 @@ impl ProofValidator {
 
         // Fallback: Create a proper type variable tracked in the type context
         //
+
         // This is a legitimate fallback case where we cannot structurally derive
         // the type from the expression. The type variable is properly tracked and
         // can be unified later when more type information becomes available.
         //
+
         // Common cases that reach this fallback:
         // - Function calls where the return type is not visible from the expression
         // - Method calls where the receiver type determines the result
@@ -7007,9 +7177,11 @@ impl ProofValidator {
 
     /// Create a type variable expression for a pattern element.
     ///
+
     /// This creates a properly tracked type variable in the type context,
     /// with origin information for debugging and error reporting.
     ///
+
     /// # Arguments
     /// * `origin` - Description of where this type variable originated
     /// * `span` - Source location for error reporting
@@ -7027,6 +7199,7 @@ impl ProofValidator {
 
     /// Convert an AST type to an expression representation.
     ///
+
     /// This is used when we have type information from type annotations
     /// (like cast expressions) and need to use it in the expression domain.
     fn type_to_expr(&self, ty: &verum_ast::ty::Type) -> Expr {
@@ -7123,13 +7296,16 @@ impl ProofValidator {
 
     /// Apply variable instantiation to an expression
     ///
+
     /// Recursively substitutes all occurrences of variables in `instantiation`
     /// with their corresponding expressions, handling variable shadowing correctly.
     ///
+
     /// # Arguments
     /// * `expr` - The expression to substitute in
     /// * `instantiation` - Map from variable names to replacement expressions
     ///
+
     /// # Returns
     /// A new expression with all substitutions applied
     fn apply_instantiation(&self, expr: &Expr, instantiation: &Map<Text, Expr>) -> Expr {
@@ -7143,10 +7319,12 @@ impl ProofValidator {
 
     /// Instantiate an expression with the given variable substitutions
     ///
+
     /// # Arguments
     /// * `expr` - The expression to instantiate
     /// * `instantiation` - Map from variable names to replacement expressions
     ///
+
     /// # Returns
     /// A new expression with all variables in the instantiation map replaced
     fn instantiate(&self, expr: &Expr, instantiation: &Map<Text, Expr>) -> Expr {
@@ -7155,6 +7333,7 @@ impl ProofValidator {
 
     /// Internal recursive substitution with shadow tracking
     ///
+
     /// # Arguments
     /// * `expr` - The expression to substitute in
     /// * `instantiation` - Map from variable names to replacement expressions
@@ -7732,12 +7911,15 @@ impl ProofValidator {
 
     /// Check if two expressions are equal (with alpha-equivalence)
     ///
+
     /// This is the production implementation that performs proper structural
     /// equality checking with alpha-equivalence (treating bound variables as
     /// equivalent if they have the same binding structure).
     ///
+
     /// ## Algorithm
     ///
+
     /// 1. Compare expression kinds structurally
     /// 2. For bound variables, use de Bruijn indices or a renaming map
     /// 3. Recursively check sub-expressions
@@ -7981,11 +8163,13 @@ impl ProofValidator {
 
             // Universal quantifier: ∀x. P(x)
             //
+
             // Alpha-equivalence: two foralls are equal iff they bind
             // the same number of variables and their bodies are
             // equal under matching bound-variable depths. Mirrors the
             // closure arm above (line ~7488).
             //
+
             // Pre-fix this arm was missing — `expr_eq` returned false
             // for any Forall vs Forall pair (even structurally
             // identical ones). That made `validate_axiom`'s
@@ -8201,6 +8385,7 @@ impl ProofValidator {
 
     /// Public wrapper for normalize_types for testing
     ///
+
     /// This exposes the internal normalization function for unit tests.
     pub fn normalize_expr_for_test(&self, expr: &Expr) -> Expr {
         self.normalize_types(expr)
@@ -8208,6 +8393,7 @@ impl ProofValidator {
 
     /// Public wrapper for validate_witness_type for testing
     ///
+
     /// This exposes the internal witness validation function for unit tests.
     pub fn validate_witness_type_for_test(
         &self,
@@ -8219,6 +8405,7 @@ impl ProofValidator {
 
     /// Public wrapper for recheck_with_smt for testing
     ///
+
     /// This exposes the internal SMT re-checking function for unit tests.
     pub fn recheck_with_smt_for_test(&self, solver: &str, formula: &Expr) -> ValidationResult<()> {
         self.recheck_with_smt(solver, formula)
@@ -8233,6 +8420,7 @@ impl ProofValidator {
 
     /// Register a hypothesis for testing
     ///
+
     /// Adds a hypothesis to the current scope for testing purposes.
     pub fn register_hypothesis(&mut self, name: &str, prop: Expr) {
         self.hypotheses.add_hypothesis(Text::from(name), prop);
@@ -8240,6 +8428,7 @@ impl ProofValidator {
 
     /// Public wrapper for prove_with_smt for testing
     ///
+
     /// Attempts to prove a proposition using the Z3 SMT solver.
     /// The proposition is checked by asserting its negation and checking
     /// for unsatisfiability.
@@ -8258,6 +8447,7 @@ impl Default for ProofValidator {
 
 /// Generates proof certificates in standard formats
 ///
+
 /// Supports export to Dedukti, Coq, and Lean for independent verification.
 #[derive(Debug)]
 pub struct ProofCertificateGenerator {
@@ -8345,6 +8535,7 @@ impl ProofCertificateGenerator {
 
     /// Convert a proof term to Coq tactic script
     ///
+
     /// This is the production implementation that generates actual Coq tactics
     /// from proof terms.
     fn proof_to_coq(&self, proof: &ProofTerm) -> Text {
@@ -8445,6 +8636,7 @@ impl ProofCertificateGenerator {
 
     /// Convert a proof term to Lean tactic script
     ///
+
     /// This is the production implementation that generates actual Lean tactics
     /// from proof terms.
     fn proof_to_lean(&self, proof: &ProofTerm) -> Text {
@@ -8547,15 +8739,18 @@ impl ProofCertificateGenerator {
 
 /// SMT Prover for converting Verum expressions to Z3 formulas
 ///
+
 /// This struct handles the conversion of Verum AST expressions to Z3 SMT formulas,
 /// maintaining a mapping of variables and supporting various expression types.
 ///
+
 /// # Supported Expressions
 /// - Boolean literals and operations (and, or, not, implies)
 /// - Integer arithmetic and comparisons
 /// - Variable references
 /// - Universal and existential quantifiers
 ///
+
 /// # Example
 /// ```ignore
 /// let mut prover = SmtProver::new();
@@ -9315,7 +9510,7 @@ mod tests {
         let mut validator = ProofValidator::new();
 
         // Build a real distributivity-shaped formula:
-        //   a * (b + c) = a * b + a * c
+        //  a * (b + c) = a * b + a * c
         let a = Expr::new(
             ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("a", Span::dummy()))),
             Span::dummy(),

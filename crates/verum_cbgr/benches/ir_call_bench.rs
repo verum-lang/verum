@@ -1,5 +1,6 @@
 //! Benchmarks for IR-based call site extraction
 //!
+
 //! Validates O(instructions) linear performance target
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};

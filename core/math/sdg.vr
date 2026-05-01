@@ -2,34 +2,43 @@
 // sdg.vr — Synthetic Differential Geometry
 // =============================================================================
 //
+
 // Layer: Standard Library / Mathematics
 //
-// Comprehensive SDG surface over `verum_types.sdg`.  Derivatives arise
-// from nilpotent infinitesimals rather than ε-δ limits.  The whole tower:
+
+// Comprehensive SDG surface over `verum_types.sdg`. Derivatives arise
+// from nilpotent infinitesimals rather than ε-δ limits. The whole tower:
 //
-//   Infinitesimals → Tangent bundles → Jet spaces
-//   Differential forms → Connections → Curvature
-//   Cohesive modalities → de Rham cohomology
+
+//  Infinitesimals → Tangent bundles → Jet spaces
+//  Differential forms → Connections → Curvature
+//  Cohesive modalities → de Rham cohomology
 //
+
 // ## The Kock-Lawvere Axiom (KL)
 //
-//   For the line object R, the canonical map
-//       α : R × R  →  R^D,    (a, b) ↦ (d ↦ a + b·d)
-//   is an isomorphism.  Concretely: every function D → R is affine.
-//   This gives a synthetic, axiom-based account of differentiation.
+
+//  For the line object R, the canonical map
+//  α : R × R → R^D, (a, b) ↦ (d ↦ a + b·d)
+//  is an isomorphism. Concretely: every function D → R is affine.
+//  This gives a synthetic, axiom-based account of differentiation.
 //
+
 // ## Key design choices
 //
-//   - R is an abstract smooth ring (`SmoothRing` protocol).
-//   - D, D(k), Dk are *types*, not runtime values.
-//   - All geometric constructions are functorial over smooth maps.
-//   - `@verify(formal)` guards every non-trivial mathematical claim.
+
+//  - R is an abstract smooth ring (`SmoothRing` protocol).
+//  - D, D(k), Dk are *types*, not runtime values.
+//  - All geometric constructions are functorial over smooth maps.
+//  - `@verify(formal)` guards every non-trivial mathematical claim.
 //
+
 // References
-//   Kock, A. (2006). Synthetic Differential Geometry (2nd ed.). CUP.
-//   Moerdijk & Reyes (1991). Models for Smooth Infinitesimal Analysis.
-//   Lawvere (1967). Categorical Dynamics.
+//  Kock, A. (2006). Synthetic Differential Geometry (2nd ed.). CUP.
+//  Moerdijk & Reyes (1991). Models for Smooth Infinitesimal Analysis.
+//  Lawvere (1967). Categorical Dynamics.
 //
+
 // =============================================================================
 
 module core.math.sdg;
@@ -59,7 +68,7 @@ public type SmoothRing is protocol {
 // =============================================================================
 
 /// D = { d ∈ R | d² = 0 } — first-order infinitesimals (dual numbers).
-/// Elements are of the form  a + b·d  where d² = 0.
+/// Elements are of the form a + b·d where d² = 0.
 public type D is {
     real_part: Float,
     inf_part:  Float,   // coefficient of d
@@ -70,12 +79,12 @@ public fn dual(a: Float, b: Float) -> D {
     D { real_part: a, inf_part: b }
 }
 
-/// The canonical infinitesimal element  d  (real_part = 0, inf_part = 1).
+/// The canonical infinitesimal element d (real_part = 0, inf_part = 1).
 public fn inf_d() -> D {
     D { real_part: 0.0, inf_part: 1.0 }
 }
 
-/// Multiplication in D:  (a + b·d)(c + e·d) = ac + (ae + bc)·d.
+/// Multiplication in D: (a + b·d)(c + e·d) = ac + (ae + bc)·d.
 /// The d² term vanishes by the nilpotency axiom.
 @verify(formal)
 public fn d_mul(x: D, y: D) -> D {
@@ -86,7 +95,7 @@ public fn d_mul(x: D, y: D) -> D {
 }
 
 /// D(n) = { d ∈ R | d^(n+1) = 0 } — n-th order infinitesimal disk.
-/// Elements are truncated power series  a₀ + a₁·d + … + aₙ·dⁿ.
+/// Elements are truncated power series a₀ + a₁·d + … + aₙ·dⁿ.
 public type DOrder is {
     order:        Int{>= 1, <= 32},
     coefficients: List<Float>,   // coefficients[0] is the real part
@@ -150,7 +159,7 @@ public fn basis_inf(k: Int, i: Int{>= 0}) -> DiskK {
 // =============================================================================
 
 /// A polynomial in one variable, coefficients low-to-high.
-/// `[a₀, a₁, …, aₙ]` represents  a₀ + a₁x + … + aₙxⁿ.
+/// `[a₀, a₁, …, aₙ]` represents a₀ + a₁x + … + aₙxⁿ.
 public type Polynomial is {
     coefficients: List<Float>,
 };
@@ -168,7 +177,7 @@ public fn degree(p: Polynomial) -> Int {
 }
 
 /// Evaluate p at a dual number x + d (for x real).
-/// The result  p(x) + p'(x)·d  directly extracts the derivative.
+/// The result p(x) + p'(x)·d directly extracts the derivative.
 @verify(formal)
 public fn evaluate_dual(p: Polynomial, x: D) -> D {
     let mut acc: D = dual(0.0, 0.0);
@@ -189,8 +198,8 @@ public fn evaluate(p: Polynomial, x: Float) -> Float {
     evaluate_dual(p, dual(x, 0.0)).real_part
 }
 
-/// Synthetic derivative: extract the coefficient of d from  p(x + d).
-/// By KL, there is a UNIQUE a such that p(x + d) = p(x) + a·d.  That a = p'(x).
+/// Synthetic derivative: extract the coefficient of d from p(x + d).
+/// By KL, there is a UNIQUE a such that p(x + d) = p(x) + a·d. That a = p'(x).
 @verify(formal)
 public fn derivative_at(p: Polynomial, x: Float) -> Float {
     evaluate_dual(p, dual(x, 1.0)).inf_part
@@ -210,9 +219,11 @@ public fn derivative_polynomial(p: Polynomial) -> Polynomial {
 
 /// V8 (#246) — polynomial multiplication via convolution.
 ///
+
 /// Given p = Σ aᵢ xⁱ (degree m) and q = Σ bⱼ xʲ (degree n), the
 /// product p·q has degree m+n and coefficient cₖ = Σ_{i+j=k} aᵢ·bⱼ.
 ///
+
 /// Used by wedge_product's 0-form scalar-multiplication case.
 public fn poly_mul(p: Polynomial, q: Polynomial) -> Polynomial {
     if p.coefficients.len() == 0 || q.coefficients.len() == 0 {
@@ -253,20 +264,20 @@ public fn kock_lawvere_holds(p: Polynomial, x: Float, tolerance: Float) -> Bool 
 // =============================================================================
 
 /// TangentVector at a point p in a manifold M.
-/// Abstractly: a map  D → M  sending  0 ↦ p.
+/// Abstractly: a map D → M sending 0 ↦ p.
 public type TangentVector<M> is {
     base_point: M,
     direction:  M,   // the infinitesimal displacement
 };
 
 /// TangentBundle<M> = M^D — the space of all tangent vectors.
-/// This is the internal hom  [D, M]  in the smooth topos.
+/// This is the internal hom [D, M] in the smooth topos.
 public type TangentBundle<M> is {
     vectors: List<TangentVector<M>>,
 };
 
-/// Pushforward of a smooth map  f : M → N  along a tangent vector.
-/// Tf : TM → TN  sends  (p, v) ↦ (f(p), Df_p(v)).
+/// Pushforward of a smooth map f : M → N along a tangent vector.
+/// Tf : TM → TN sends (p, v) ↦ (f(p), Df_p(v)).
 @verify(formal)
 public fn pushforward<M, N>(
     f:  fn(M) -> N,
@@ -278,7 +289,7 @@ public fn pushforward<M, N>(
     }
 }
 
-/// JetBundle<M> — the k-jet bundle  M^{D(k)}.
+/// JetBundle<M> — the k-jet bundle M^{D(k)}.
 /// A k-jet at p encodes all derivatives of a curve through p up to order k.
 public type JetBundle<M> is {
     order: Int{>= 0},
@@ -286,7 +297,7 @@ public type JetBundle<M> is {
 };
 
 /// Compute the k-jet of a polynomial at a point x.
-/// The j-th component is  f^(j)(x) / j!  (Taylor coefficient).
+/// The j-th component is f^(j)(x) / j! (Taylor coefficient).
 @verify(formal)
 public fn jet_extension(p: Polynomial, k: Int{>= 0}, x: Float) -> JetBundle<Float> {
     let mut jets: List<Float> = [];
@@ -307,7 +318,7 @@ public fn jet_extension(p: Polynomial, k: Int{>= 0}, x: Float) -> JetBundle<Floa
 // =============================================================================
 
 /// A k-form on a smooth space of dimension n.
-/// Abstractly: an alternating multilinear map  (TM)^k → R.
+/// Abstractly: an alternating multilinear map (TM)^k → R.
 /// Represented as a list of coefficient polynomials, one per basis k-index.
 public type DifferentialForm is {
     degree:       Int{>= 0},
@@ -333,14 +344,16 @@ fn binom(n: Int, k: Int) -> Int {
 
 /// V8 (#248) — enumerate the lex-sorted k-subsets of {0..n-1}.
 ///
+
 /// Returns a list of length C(n, k); each entry is a sorted
 /// strictly-increasing length-k tuple over {0..n-1}. The
 /// ordering is **lexicographic on the tuples** so that
 /// `combinations(n, k)[i]` is the i-th basis multi-index
 /// in the canonical Λ^k(R^n) presentation.
 ///
-///   combinations(3, 2) = [[0,1], [0,2], [1,2]]
-///   combinations(4, 2) = [[0,1], [0,2], [0,3], [1,2], [1,3], [2,3]]
+
+///  combinations(3, 2) = [[0,1], [0,2], [1,2]]
+///  combinations(4, 2) = [[0,1], [0,2], [0,3], [1,2], [1,3], [2,3]]
 public fn combinations(n: Int{>= 0}, k: Int{>= 0, <= n}) -> List<List<Int>> {
     let mut out: List<List<Int>> = [];
     if k == 0 {
@@ -391,10 +404,12 @@ fn clone_int_list(xs: &List<Int>) -> List<Int> {
 
 /// V8 (#248) — index of a sorted k-subset in the lex enumeration.
 ///
+
 /// Inverse of [`combinations`]: for a sorted strictly-increasing
 /// list `combo` over {0..n-1}, returns the position `i` such that
 /// `combinations(n, combo.len())[i] == combo`.
 ///
+
 /// Implementation: combinatorial number system / unranking. For
 /// position p in the combo with value v, contribute Σ_{j < v,
 /// j unconsumed} C(remaining_slots - 1, k - 1 - p). Equivalent
@@ -439,6 +454,7 @@ fn disjoint(a: &List<Int>, b: &List<Int>) -> Bool {
 /// shuffle permutation that brings the concatenation `a ++ b` into
 /// lex-sorted order; +1 if even, -1 if odd.
 ///
+
 /// This is the core of the wedge product's anti-symmetry: when
 /// we lift two basis multi-indices `dx_I` and `dx_J` and reorder
 /// to canonical sorted form `dx_K`, the sign records how many
@@ -498,23 +514,25 @@ fn poly_add(a: Polynomial, b: Polynomial) -> Polynomial {
     polynomial(out)
 }
 
-/// Wedge product  α ∧ β  of a p-form and a q-form.
+/// Wedge product α ∧ β of a p-form and a q-form.
 /// Degree of result is p + q; zero form if p + q > n.
 ///
+
 /// V8 (#246 + #248) — full implementation:
 ///
-///   • **Out-of-rank** (p + q > n): result is the zero (p+q)-form.
-///     Always correct because Λ^{p+q}(R^n) = 0 for p+q > n.
-///   • **0-form ∧ k-form** (or symmetric): scalar multiplication.
-///     If α is a 0-form with single coefficient `f`, then α ∧ β is
-///     the k-form whose i-th coefficient is `f · βᵢ`. Symmetric
-///     for β a 0-form. (V8 #246)
-///   • **General p-form ∧ q-form** (p, q ≥ 1, p + q ≤ n): full
-///     multi-index Leibniz expansion (V8 #248):
-///         α ∧ β = Σ_{I,J: I∩J=∅} sgn(I,J) · a_I · b_J · dx_{I∪J}
-///     where sgn(I,J) = ±1 is the parity of the shuffle that
-///     brings I++J into sorted order. Anti-symmetry α∧β = (-1)^{pq} β∧α
-///     follows definitionally from this construction.
+
+///  • **Out-of-rank** (p + q > n): result is the zero (p+q)-form.
+///  Always correct because Λ^{p+q}(R^n) = 0 for p+q > n.
+///  • **0-form ∧ k-form** (or symmetric): scalar multiplication.
+///  If α is a 0-form with single coefficient `f`, then α ∧ β is
+///  the k-form whose i-th coefficient is `f · βᵢ`. Symmetric
+///  for β a 0-form. (V8 #246)
+///  • **General p-form ∧ q-form** (p, q ≥ 1, p + q ≤ n): full
+///  multi-index Leibniz expansion (V8 #248):
+///  α ∧ β = Σ_{I,J: I∩J=∅} sgn(I,J) · a_I · b_J · dx_{I∪J}
+///  where sgn(I,J) = ±1 is the parity of the shuffle that
+///  brings I++J into sorted order. Anti-symmetry α∧β = (-1)^{pq} β∧α
+///  follows definitionally from this construction.
 @verify(formal)
 public fn wedge_product(
     alpha: DifferentialForm,
@@ -561,10 +579,12 @@ public fn wedge_product(
 
     // V8 (#248) — full multi-index Leibniz wedge for p, q ≥ 1.
     //
-    //   α = Σ_I a_I dx_I  (length-p sorted multi-index I)
-    //   β = Σ_J b_J dx_J  (length-q sorted multi-index J)
-    //   α ∧ β = Σ_{I, J: I ∩ J = ∅} sgn(I, J) · a_I · b_J · dx_{I ∪ J}
+
+    //  α = Σ_I a_I dx_I (length-p sorted multi-index I)
+    //  β = Σ_J b_J dx_J (length-q sorted multi-index J)
+    //  α ∧ β = Σ_{I, J: I ∩ J = ∅} sgn(I, J) · a_I · b_J · dx_{I ∪ J}
     //
+
     // Where sgn(I, J) = ±1 is the parity of the shuffle that
     // brings the concatenation I++J into sorted order — captures
     // the anti-symmetry of the underlying basis 1-forms.
@@ -604,10 +624,11 @@ public fn wedge_product(
     DifferentialForm { degree: new_degree, coefficients: coeffs, dimension: n }
 }
 
-/// Exterior derivative  d : Ω^k(M) → Ω^(k+1)(M).
+/// Exterior derivative d : Ω^k(M) → Ω^(k+1)(M).
 ///
+
 /// For a 0-form (function) f: df = Σᵢ (∂f/∂xᵢ) dxᵢ.
-/// For a k-form  α = Σ_I fᵢ dx_I:  dα = Σ_I (dfᵢ) ∧ dx_I.
+/// For a k-form α = Σ_I fᵢ dx_I: dα = Σ_I (dfᵢ) ∧ dx_I.
 @verify(formal)
 public fn exterior_derivative(alpha: DifferentialForm) -> DifferentialForm {
     let new_degree = alpha.degree + 1;
@@ -629,7 +650,7 @@ public fn exterior_derivative(alpha: DifferentialForm) -> DifferentialForm {
     DifferentialForm { degree: new_degree, coefficients: new_coeffs, dimension: n }
 }
 
-/// The de Rham complex  0 → Ω⁰ → Ω¹ → … → Ωⁿ → 0.
+/// The de Rham complex 0 → Ω⁰ → Ω¹ → … → Ωⁿ → 0.
 public type DeRhamComplex is {
     dimension: Int{>= 1},
     forms:     List<DifferentialForm>,   // forms[k] = prototype Ω^k generator
@@ -661,8 +682,8 @@ public fn d_squared_zero(alpha: DifferentialForm) -> Bool {
 // 5. Connections and Curvature
 // =============================================================================
 
-/// A connection ∇ on a vector bundle  E → M.
-/// Encoded by Christoffel symbols:  Γ^k_{ij}  (shape [n][n][n]).
+/// A connection ∇ on a vector bundle E → M.
+/// Encoded by Christoffel symbols: Γ^k_{ij} (shape [n][n][n]).
 public type SdgConnection is {
     dimension:   Int{>= 1},
     christoffel: List<List<List<Float>>>,   // Γ^k_{ij}
@@ -688,9 +709,9 @@ public fn flat_connection(n: Int{>= 1}) -> SdgConnection {
     SdgConnection { dimension: n, christoffel: gamma }
 }
 
-/// Curvature 2-form  R(X, Y)Z = ∇_X ∇_Y Z − ∇_Y ∇_X Z − ∇_{[X,Y]} Z.
+/// Curvature 2-form R(X, Y)Z = ∇_X ∇_Y Z − ∇_Y ∇_X Z − ∇_{[X,Y]} Z.
 /// For a flat connection all components vanish.
-/// General formula:  R^l_{kij} = ∂_i Γ^l_{jk} − ∂_j Γ^l_{ik} + Γ^l_{im} Γ^m_{jk} − Γ^l_{jm} Γ^m_{ik}.
+/// General formula: R^l_{kij} = ∂_i Γ^l_{jk} − ∂_j Γ^l_{ik} + Γ^l_{im} Γ^m_{jk} − Γ^l_{jm} Γ^m_{ik}.
 @verify(formal)
 public fn curvature(conn: SdgConnection) -> DifferentialForm {
     let n = conn.dimension;
@@ -718,7 +739,7 @@ public fn straight_path(start: List<Float>, end_pt: List<Float>) -> SmoothPath {
 }
 
 /// Parallel transport of a vector `initial` along `path` using `conn`.
-/// Solves  dVᵢ/dt + Γⁱ_{jk} (dxʲ/dt) Vᵏ = 0  with V(0) = initial.
+/// Solves dVᵢ/dt + Γⁱ_{jk} (dxʲ/dt) Vᵏ = 0 with V(0) = initial.
 /// For a flat connection V is constant (holonomy trivial).
 @verify(formal)
 public fn parallel_transport(
@@ -733,7 +754,7 @@ public fn parallel_transport(
 // 6. Cohesive Modalities and the de Rham Stack
 // =============================================================================
 
-/// The infinitesimal shape modality  ℑ (im modality).
+/// The infinitesimal shape modality ℑ (im modality).
 /// ℑ X identifies infinitesimally close points of X.
 /// Key property: ℑ(M^D) ≅ ℑ(M) — no new infinitesimal data survives.
 public type ImModality<X> is {
@@ -745,7 +766,7 @@ public fn im_of<X>(x: X) -> ImModality<X> {
     ImModality { underlying: x }
 }
 
-/// The de Rham modality  ℜ (rh modality).
+/// The de Rham modality ℜ (rh modality).
 /// ℜ X = Π_{D(∞)} X is the de Rham stack of X.
 /// H*(X; R) ≅ H*(ℜX; R_disc) — cohomology computed on the discrete stack.
 public type RhModality<X> is {
@@ -757,12 +778,12 @@ public fn rh_of<X>(x: X) -> RhModality<X> {
     RhModality { underlying: x }
 }
 
-/// Natural transformation  ℑ X → ℜ X: the de Rham comparison map.
+/// Natural transformation ℑ X → ℜ X: the de Rham comparison map.
 public fn im_to_rh<X>(imx: ImModality<X>) -> RhModality<X> {
     RhModality { underlying: imx.underlying }
 }
 
-/// Full cohesive tower:  ʃ X → X → ♭ X → ℑ X → ℜ X.
+/// Full cohesive tower: ʃ X → X → ♭ X → ℑ X → ℜ X.
 public type CohesiveTower<X> is {
     shape:    cohesive.ShapeModality<X>,
     flat:     cohesive.FlatModality<X>,
@@ -775,7 +796,7 @@ public type CohesiveTower<X> is {
 // =============================================================================
 
 /// THEOREM (Kock-Lawvere Axiom, categorical form).
-/// α : R × R → R^D,  α(a,b) = (d ↦ a + b·d)  is an isomorphism.
+/// α : R × R → R^D, α(a,b) = (d ↦ a + b·d) is an isomorphism.
 /// Every f : D → R is uniquely affine; its linear coefficient is f'(0).
 @verify(formal)
 public fn theorem_kock_lawvere() -> Bool {
@@ -794,7 +815,7 @@ public fn theorem_d_squared_zero(alpha: DifferentialForm) -> Bool {
 
 /// THEOREM (Stokes' Theorem).
 /// For a compact oriented n-manifold M with boundary ∂M and (n-1)-form α:
-///     ∫_{∂M} α = ∫_M dα.
+///  ∫_{∂M} α = ∫_M dα.
 /// In SDG: derivable from KL + oriented microlinear integration.
 @verify(formal)
 public fn theorem_stokes_statement() -> Text {
@@ -811,8 +832,8 @@ public fn theorem_poincare_lemma_statement() -> Text {
 }
 
 /// THEOREM (Tangent bundle as internal hom).
-/// In the smooth topos:  TM ≅ M^D.
-/// A tangent vector at p is exactly a map  γ : D → M  with  γ(0) = p.
+/// In the smooth topos: TM ≅ M^D.
+/// A tangent vector at p is exactly a map γ : D → M with γ(0) = p.
 @verify(formal)
 public fn theorem_tangent_bundle_as_hom() -> Text {
     "TM ≅ M^D in the smooth topos; v ∈ T_p M ↔ γ : D → M with γ(0) = p."
@@ -828,12 +849,12 @@ public type CotangentVector<M> is DifferentialForm;
 /// Alias: volume form = top-degree form (degree = n).
 public type VolumeForm is DifferentialForm;
 
-/// Standard orientation form  dx¹ ∧ … ∧ dxⁿ  on R^n.
+/// Standard orientation form dx¹ ∧ … ∧ dxⁿ on R^n.
 public fn standard_volume_form(n: Int{>= 1}) -> VolumeForm {
     DifferentialForm { degree: n, coefficients: [poly_constant(1.0)], dimension: n }
 }
 
-/// Lie derivative  L_X α = i_X(dα) + d(i_X α)  (Cartan magic formula).
+/// Lie derivative L_X α = i_X(dα) + d(i_X α) (Cartan magic formula).
 /// Returns a form of the same degree as α.
 @verify(formal)
 public fn lie_derivative(
@@ -843,7 +864,7 @@ public fn lie_derivative(
     zero_form(alpha.degree, alpha.dimension)
 }
 
-/// Interior product (contraction)  ι_X α.
+/// Interior product (contraction) ι_X α.
 /// Returns a (k-1)-form; if α has degree 0, returns the zero 0-form.
 @verify(formal)
 public fn interior_product(

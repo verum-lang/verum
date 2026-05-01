@@ -1,5 +1,6 @@
 //! Integration tests for `verum audit --framework-conflicts` (V1, #205).
 //!
+
 //! End-to-end coverage of the CLI surface introduced as the V1
 //! shipping-target for the framework-compat module. The plain
 //! formatter and the JSON formatter are both exercised; clean

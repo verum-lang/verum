@@ -6,38 +6,47 @@
 // Spec: internal/specs/tls-quic.md §6.5, §12 Phase 1
 // =============================================================================
 //
+
 // Pure-Verum X.509 certificate parser + chain validator, built on top
 // of `core.encoding.der` for wire parsing and
 // `core.security.{sig, hash, ecc}` for signature verification.
 //
+
 // # Minimal usage (WebPKI TLS server verify)
 //
+
 // ```verum
 // mount core.security.x509.*;
 //
+
 // fn verify_server(chain_der: &List<List<Byte>>, hostname: Text) -> Result<(), ChainError> {
-//     let trust = TrustStore.system().map_err(|_| ChainError.UnknownIssuer)?;
+//  let trust = TrustStore.system().map_err(|_| ChainError.UnknownIssuer)?;
 //
-//     let mut certs: List<X509Certificate> = [];
-//     let mut i: Int = 0;
-//     while i < chain_der.len() {
-//         certs.push(parse_certificate(chain_der[i].as_slice())
-//             .map_err(|_| ChainError.BadSignature(i))?);
-//         i = i + 1;
-//     }
+
+//  let mut certs: List<X509Certificate> = [];
+//  let mut i: Int = 0;
+//  while i < chain_der.len() {
+//  certs.push(parse_certificate(chain_der[i].as_slice())
+//  .map_err(|_| ChainError.BadSignature(i))?);
+//  i = i + 1;
+//  }
 //
-//     let now_secs = current_time_unix();
-//     let _ = validate_chain(&certs, &trust, Some(&hostname), now_secs)?;
-//     Ok(())
+
+//  let now_secs = current_time_unix();
+//  let _ = validate_chain(&certs, &trust, Some(&hostname), now_secs)?;
+//  Ok(())
 // }
 // ```
 //
+
 // # Status — v0.1
 //
+
 // Complete wire-level parser + RFC 5280 §6.1 validator. Covers the
 // WebPKI sigspec (Ed25519, ECDSA P-256/P-384, RSA PKCS#1 v1.5, RSA-PSS).
 // Revocation checks (CRL, OCSP) live in `ocsp.vr` + future `crl.vr`.
 //
+
 // =============================================================================
 
 module core.security.x509;

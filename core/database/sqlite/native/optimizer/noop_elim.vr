@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.5
 //
+
 // Noops accumulate from earlier passes (placeholder slots that the
 // codegen back-fills, jump targets that lost their need-to-jump,
 // dead-code-elimination scaffolding). Every removed Noop must

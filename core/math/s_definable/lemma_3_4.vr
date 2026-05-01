@@ -2,27 +2,33 @@
 // MSFS — Lemma 3.4: S-definability lemma (CRITICAL)
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §3.4 — Lemma 3.4. This is THE
 // pivotal technical lemma of MSFS — it makes Theorem 5.1 (AFN-T
 // α-part) into a one-paragraph proof.
 //
+
 // Statement (paper):
 //
-//     Let S ∈ R-S and let X be a mathematical object. If X is
-//     formally S-definable — i.e. there exists a formula φ_X in
-//     some sub-theory F ⊆ S that presents X as an object of
-//     Syn(F) — then X ∈ S_S<S>.
+
+//  Let S ∈ R-S and let X be a mathematical object. If X is
+//  formally S-definable — i.e. there exists a formula φ_X in
+//  some sub-theory F ⊆ S that presents X as an object of
+//  Syn(F) — then X ∈ S_S<S>.
 //
+
 // Proof outline (paper §3.4, four steps):
 //
-//   1. φ_X presents X ∈ Ob(Syn(F)) for some F ⊆ S.
-//   2. By (R2) and (R5a), Syn(F) is the Grothendieck construction
-//      over Mod(F). [Lurie HTT 5.1.4 / Lurie HA + (R5b)]
-//   3. Hence Syn(F) ∈ S_S_global<S> by closure under O1–O6 of
-//      Definition 3.3 — specifically O2 (Grothendieck) on the
-//      Mod(F) ∈ S_S_local input.
-//   4. Therefore X ∈ Ob(Syn(F)) ⊆ S_S_global<S> ⊆ S_S<S>.
+
+//  1. φ_X presents X ∈ Ob(Syn(F)) for some F ⊆ S.
+//  2. By (R2) and (R5a), Syn(F) is the Grothendieck construction
+//  over Mod(F). [Lurie HTT 5.1.4 / Lurie HA + (R5b)]
+//  3. Hence Syn(F) ∈ S_S_global<S> by closure under O1–O6 of
+//  Definition 3.3 — specifically O2 (Grothendieck) on the
+//  Mod(F) ∈ S_S_local input.
+//  4. Therefore X ∈ Ob(Syn(F)) ⊆ S_S_global<S> ⊆ S_S<S>.
 //
+
 // All four steps cite results from outside Verum (R-S structure,
 // HTT 5.1.4, the closure operations of Definition 3.3). At the
 // Verum framework layer the lemma lands as a single axiom that
@@ -30,12 +36,15 @@
 // theorem citing Lemma 3.4 has its full framework footprint
 // recorded by `verum audit --framework-axioms`.
 //
+
 // Three flagship downstream consumers:
 //
-//   • Theorem 5.1 (AFN-T α-part)        — `theorems/msfs/05_afnt_alpha/`.
-//   • Theorem 6.1 (AFN-T β-part)        — `theorems/msfs/06_afnt_beta/`.
-//   • Theorem 7.1 (horizontal axis)     — `theorems/msfs/07_five_axis/`.
+
+//  • Theorem 5.1 (AFN-T α-part) — `theorems/msfs/05_afnt_alpha/`.
+//  • Theorem 6.1 (AFN-T β-part) — `theorems/msfs/06_afnt_beta/`.
+//  • Theorem 7.1 (horizontal axis) — `theorems/msfs/07_five_axis/`.
 //
+
 // Each cites Lemma 3.4 directly; the lemma's framework footprint
 // (msfs + lurie_htt + adamek_rosicky) propagates transitively.
 // =============================================================================
@@ -61,6 +70,7 @@ mount core.math.syn_mod.{
 /// there exists a sub-theory F ⊆ S and a formula φ_X in F such
 /// that φ_X presents X as an object of Syn(F).
 ///
+
 /// MSFS §3.4 introduces this notion as a precondition for Lemma
 /// 3.4. The protocol records the existence of (F, φ_X); the
 /// concrete formula and sub-theory are opaque at this layer.
@@ -80,15 +90,18 @@ public type FormallySDefinable is protocol {
 
 /// **MSFS Lemma 3.4 — S-definability** (constructor form).
 ///
+
 /// If `X` is formally S-definable then `X ∈ S_S<S>` (i.e. `X` is
 /// in the global S-definable class). The lemma constructs a fresh
 /// `SSMembership` witness from the formal-S-definability premise.
 ///
+
 /// This axiom is the CRITICAL technical lemma of MSFS; it is the
 /// one piece of structural machinery that makes Theorem 5.1
 /// (AFN-T α-part) a one-paragraph proof. Every theorem in §§5–7
 /// + §§9–10 cites it transitively.
 ///
+
 /// **Architectural strengthening (M1.C).** Pre-M1.C the constructor
 /// returned `&SSMembership` without `ensures` — callers had to chain
 /// through `msfs_lemma_3_4_outputs_in_s_s_global` (operational
@@ -102,13 +115,14 @@ public type FormallySDefinable is protocol {
 /// (it just asserts what the constructor already ensures). Theorem 5.1's
 /// proof body can drop the operational-corollary apply step.
 ///
+
 /// Proof in paper (now reflected in ensures):
-///   1. φ_X presents X ∈ Ob(Syn(F)) for some F ⊆ S.
-///   2. By (R2) and (R5a), Syn(F) is Grothendieck construction
-///      over Mod(F).  [HTT 5.1.4]
-///   3. Hence Syn(F) ∈ S_S_global<S> by O2 (Grothendieck closure)
-///      with closure_depth ≥ 1 (one O2 application beyond the base).
-///   4. Therefore X ∈ Ob(Syn(F)) ⊆ S_S_global<S> ⊆ S_S<S>.
+///  1. φ_X presents X ∈ Ob(Syn(F)) for some F ⊆ S.
+///  2. By (R2) and (R5a), Syn(F) is Grothendieck construction
+///  over Mod(F). [HTT 5.1.4]
+///  3. Hence Syn(F) ∈ S_S_global<S> by O2 (Grothendieck closure)
+///  with closure_depth ≥ 1 (one O2 application beyond the base).
+///  4. Therefore X ∈ Ob(Syn(F)) ⊆ S_S_global<S> ⊆ S_S<S>.
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")
 @framework(msfs, "MSFS Lemma 3.4 — S-definability (CRITICAL: formally S-definable ⟹ X ∈ S_S^global, depth ≥ 1)")
@@ -122,19 +136,22 @@ public axiom msfs_lemma_3_4_s_definability(
 // Step-2/3 intermediate axiom for Lemma 3.4's operational corollary
 // =============================================================================
 //
+
 // The paper §3.4 four-step argument decomposes:
 //
-//   Step 1 — propositional: `x.has_phi_x_witness()` ⟹ X ∈ Ob(Syn(F))
-//            for some F ⊆ S. Pure unfolding of the protocol witness.
-//   Step 2 — Lurie HTT 5.1.4: Syn(F) is the Grothendieck construction
-//            over Mod(F) under (R2) + (R5a). External authoritative
-//            citation; captured as the bridge axiom below.
-//   Step 3 — Definition 3.3 closure O2: Grothendieck construction over
-//            Mod(F) ∈ S_S_local lands Syn(F) ∈ S_S_global. Same external
-//            authoritative citation; the closure depth bumps by ≥ 1.
-//   Step 4 — propositional: X ∈ Ob(Syn(F)) ⊆ S_S_global ⊆ S_S. Pure
-//            inclusion unfolding.
+
+//  Step 1 — propositional: `x.has_phi_x_witness()` ⟹ X ∈ Ob(Syn(F))
+//  for some F ⊆ S. Pure unfolding of the protocol witness.
+//  Step 2 — Lurie HTT 5.1.4: Syn(F) is the Grothendieck construction
+//  over Mod(F) under (R2) + (R5a). External authoritative
+//  citation; captured as the bridge axiom below.
+//  Step 3 — Definition 3.3 closure O2: Grothendieck construction over
+//  Mod(F) ∈ S_S_local lands Syn(F) ∈ S_S_global. Same external
+//  authoritative citation; the closure depth bumps by ≥ 1.
+//  Step 4 — propositional: X ∈ Ob(Syn(F)) ⊆ S_S_global ⊆ S_S. Pure
+//  inclusion unfolding.
 //
+
 // Steps 2+3 are the substantive content of Lemma 3.4 — they invoke
 // HTT 5.1.4 + the closure-O2 admission. M0.7 captures both as a
 // single bridge axiom (`msfs_lemma_3_4_grothendieck_o2_bridge`); the
@@ -143,6 +160,7 @@ public axiom msfs_lemma_3_4_s_definability(
 /// **Lemma 3.4 Steps 2+3** — Grothendieck construction over Mod(F)
 /// + closure O2 (intermediate bridge axiom).
 ///
+
 /// Given a FormallySDefinable witness `x` and any candidate
 /// SSMembership witness `membership`, `membership` lands in
 /// `S_S_global` with closure depth ≥ 1 because Lurie HTT 5.1.4
@@ -150,6 +168,7 @@ public axiom msfs_lemma_3_4_s_definability(
 /// and Definition 3.3's O2 closure operation lands the result in
 /// S_S_global.
 ///
+
 /// The bridge axiom is paper-cited (HTT 5.1.4 + Definition 3.3 O2).
 /// When kernel V3 (T0.1) lands the constructive HTT 5.1.4
 /// re-statement, this axiom is promoted to a @theorem.
@@ -166,12 +185,14 @@ public axiom msfs_lemma_3_4_grothendieck_o2_bridge(
 /// **Lemma 3.4 operational corollary** (now a @theorem with 3-step
 /// structural proof body, M-INFRA Phase 1 promotion).
 ///
+
 /// Given a formally-S-definable witness and a candidate SSMembership
 /// witness, the membership lands in `S_S_global` with closure depth ≥ 1.
 /// This is Theorem 5.1's load-bearing input — the membership witness
 /// is precisely what id_X then violates against (Π_4) (per the
 /// `msfs_id_x_violates_pi_4` step-2 axiom in `core/math/absolute_layer.vr`).
 ///
+
 /// **Architectural note (M-INFRA Phase 1, 2026-04-28).** Pre-M-INFRA the
 /// proof body delegated to a single tautological-shape bridge axiom
 /// `msfs_lemma_3_4_grothendieck_o2_bridge` whose ensures was identical to
@@ -180,21 +201,24 @@ public axiom msfs_lemma_3_4_grothendieck_o2_bridge(
 /// proof body now invokes `syn_mod_lemma_3_4_steps_2_3` which itself
 /// has a 3-step body:
 ///
-///   Step 1:  formally_s_definable_to_inclusion(x)   → SubTheoryInclusion
-///   Step 2:  lurie_htt_5_1_4_syn_is_grothendieck(.) → GrothendieckOverMod
-///   Step 3:  msfs_definition_3_3_o2_lands_in_global(...) → SSMembership lands in global
+
+///  Step 1: formally_s_definable_to_inclusion(x) → SubTheoryInclusion
+///  Step 2: lurie_htt_5_1_4_syn_is_grothendieck(.) → GrothendieckOverMod
+///  Step 3: msfs_definition_3_3_o2_lands_in_global(...) → SSMembership lands in global
 ///
+
 /// Each step is a witness-parameterised paper-citation axiom (HTT 5.1.4
 /// for Step 2; Definition 3.3 O2 for Step 3) — none is `() -> Bool ensures
 /// true`. The kernel-recheck stack now walks 3 named structural steps
 /// instead of 1 fused axiom citation.
 ///
+
 /// **Promotion ladder (tracked task #6, M-PROOFS-C):**
-///   v1 (this commit): @theorem with 3-step body, axioms remain witness-typed.
-///   v2 (after M-INFRA MVP for n_F = 1): Step 2 axiom becomes @theorem
-///       built on constructive (∞,1)-categorical straightening for
-///       first-order R-S (covers ZFC, NBG, PA cases).
-///   v3 (after M-INFRA full): Step 2 generalizes to (∞, n_F) at all n_F.
+///  v1 (this commit): @theorem with 3-step body, axioms remain witness-typed.
+///  v2 (after M-INFRA MVP for n_F = 1): Step 2 axiom becomes @theorem
+///  built on constructive (∞,1)-categorical straightening for
+///  first-order R-S (covers ZFC, NBG, PA cases).
+///  v3 (after M-INFRA full): Step 2 generalizes to (∞, n_F) at all n_F.
 @verify(formal)
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")

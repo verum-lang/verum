@@ -14,6 +14,7 @@
 )]
 //! Grammar coverage tests for Verum parser.
 //!
+
 //! Tests grammar productions from grammar/verum.ebnf that lack dedicated
 //! test coverage. Each test references the specific EBNF production it covers.
 
@@ -1669,7 +1670,7 @@ mod reference_types {
 // ============================================================================
 // Section 2.8: Array and Slice Types
 // Grammar: array_type = '[' , type_expr , ';' , expression , ']' ;
-//          slice_type = '[' , type_expr , ']' ;
+//  slice_type = '[' , type_expr , ']' ;
 // ============================================================================
 
 mod array_slice_types {
@@ -3213,7 +3214,7 @@ mod range_patterns {
 // ============================================================================
 // Section 2.10: Bitwise and Shift Operators
 // Grammar: bitwise_expr = shift_expr , { ( '&' | '|' | '^' ) , shift_expr } ;
-//          shift_expr = additive_expr , { ( '<<' | '>>' ) , additive_expr } ;
+//  shift_expr = additive_expr , { ( '<<' | '>>' ) , additive_expr } ;
 // ============================================================================
 
 mod bitwise_operators {

@@ -14,6 +14,7 @@
 )]
 // Variance Inference and Checking Tests
 //
+
 // Variance inference: determining covariant/contravariant/invariant usage of type parameters from their positions
 
 use verum_ast::span::{FileId, Span};

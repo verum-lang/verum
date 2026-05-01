@@ -2,31 +2,37 @@
 // core/net/weft/health.vr — /_health/live and /_health/ready
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §7.4
+// Spec: internal/specs/net-framework.md §7.4
 // =============================================================================
 //
+
 // Kubernetes-idiomatic liveness and readiness endpoints.
 //
-//   * `/_health/live` — always returns 200 "ok" while the process is
-//     alive enough to handle requests. Does no downstream checks; this
-//     is the kubelet "is the container worth restarting?" probe.
+
+//  * `/_health/live` — always returns 200 "ok" while the process is
+//  alive enough to handle requests. Does no downstream checks; this
+//  is the kubelet "is the container worth restarting?" probe.
 //
-//   * `/_health/ready` — returns 200 only when every registered
-//     `ReadinessCheck` signals ready. Used by the kubelet + load
-//     balancers to decide whether to route traffic to this pod.
-//     During graceful shutdown (§7.8 phase 1 "Signal") the readiness
-//     handler auto-fails even before checks run so LBs stop routing
-//     new traffic while in-flight requests drain.
+
+//  * `/_health/ready` — returns 200 only when every registered
+//  `ReadinessCheck` signals ready. Used by the kubelet + load
+//  balancers to decide whether to route traffic to this pod.
+//  During graceful shutdown (§7.8 phase 1 "Signal") the readiness
+//  handler auto-fails even before checks run so LBs stop routing
+//  new traffic while in-flight requests drain.
 //
+
 // Both handlers are thin `Handler` implementations so they register via
 // the normal router API:
 //
-//     let (live, ready) = health_handlers(readiness);
-//     let app = Router.new()
-//         .get("/_health/live",  live)
-//         .get("/_health/ready", ready)
-//         .get("/api/...",       my_handler);
+
+//  let (live, ready) = health_handlers(readiness);
+//  let app = Router.new()
+//  .get("/_health/live", live)
+//  .get("/_health/ready", ready)
+//  .get("/api/...", my_handler);
 //
+
 // =============================================================================
 
 module core.net.weft.health;
@@ -48,6 +54,7 @@ mount core.net.weft.error.{WeftError};
 /// and NON-BLOCKING: the /_health/ready endpoint is called repeatedly
 /// by kubelet and must not spawn connections of its own.
 ///
+
 /// Typical pattern: a long-running task updates a `ReadinessFlag` via
 /// `.set(true/false)`; the handler reads it.
 public type ReadinessCheck is protocol {
@@ -127,18 +134,20 @@ implement Readiness {
 
     /// True iff NOT draining AND every registered check is ready.
     ///
+
     /// CRITICAL #318 fix — the previous implementation held
     /// `self.checks.lock()` ACROSS the `c.is_ready().await` boundary
-    /// inside the loop.  Holding a non-async Mutex across `.await`
+    /// inside the loop. Holding a non-async Mutex across `.await`
     /// is a classic deadlock pattern: any task that called
     /// `Readiness::add()` while a check's future was suspended
-    /// would deadlock the runtime.  Under the multi-threaded
+    /// would deadlock the runtime. Under the multi-threaded
     /// scheduler (#271) this becomes a true cross-thread deadlock.
     ///
+
     /// The fix: clone the Heap<dyn ReadinessCheck> handles under
-    /// the lock, drop the lock, then iterate the clones.  Each
+    /// the lock, drop the lock, then iterate the clones. Each
     /// `Heap<T>` clone is a refcount bump (CBGR-tracked), so the
-    /// snapshot is cheap.  Holding-pattern is now lock-acquire →
+    /// snapshot is cheap. Holding-pattern is now lock-acquire →
     /// clone N handles → lock-release → await on each.
     pub async fn is_ready(&self) -> Bool {
         if self.draining.load(MemoryOrdering.Acquire) {
@@ -164,9 +173,10 @@ implement Readiness {
     /// as the response body when readiness fails so operators can see
     /// which dependency is blocking traffic.
     ///
+
     /// CRITICAL #318 fix — symmetric to is_ready: snapshot the
     /// checks list under the lock, drop the lock, then iterate
-    /// the awaits.  Eliminates the held-Mutex-across-await
+    /// the awaits. Eliminates the held-Mutex-across-await
     /// deadlock pattern.
     pub async fn diagnostic_body(&self) -> Text {
         let mut out = Text.builder();
@@ -242,15 +252,17 @@ implement Handler for ReadinessHandler {
 /// Build a `(live, ready)` handler pair sharing one Readiness aggregator.
 /// Typical use:
 ///
+
 /// ```verum
 /// let readiness = Readiness.new();
 /// readiness.add(ReadinessFlag.new(Text.from_str("db")));
 /// readiness.bind_to_shutdown(&server.shutdown_token());
 ///
+
 /// let (live, ready) = health_handlers(readiness.clone_handle());
 /// let app = Router.new()
-///     .get("/_health/live",  live)
-///     .get("/_health/ready", ready);
+///  .get("/_health/live", live)
+///  .get("/_health/ready", ready);
 /// ```
 public fn health_handlers(readiness: Readiness)
     -> (LivenessHandler, ReadinessHandler)

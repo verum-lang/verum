@@ -1,5 +1,6 @@
 //! Binary encoding primitives for VBC format.
 //!
+
 //! This module provides utilities for encoding and decoding:
 //! - Variable-length integers (VarInt)
 //! - Signed variable-length integers (SignedVarInt)
@@ -7,17 +8,20 @@
 //! - Floating point numbers
 //! - Registers and register ranges
 //!
+
 //! # VarInt Encoding
 //!
+
 //! Uses continuation bit encoding:
 //! - Each byte has 7 data bits and 1 continuation bit (MSB)
 //! - If continuation bit is 1, more bytes follow
 //! - Values 0-127 encode in 1 byte
 //!
+
 //! ```text
-//! 0xxxxxxx                    - 7 bits  (0-127)
-//! 1xxxxxxx 0xxxxxxx           - 14 bits (128-16383)
-//! 1xxxxxxx 1xxxxxxx 0xxxxxxx  - 21 bits
+//! 0xxxxxxx - 7 bits (0-127)
+//! 1xxxxxxx 0xxxxxxx - 14 bits (128-16383)
+//! 1xxxxxxx 1xxxxxxx 0xxxxxxx - 21 bits
 //! ... up to 9 bytes for 64-bit values
 //! ```
 
@@ -32,6 +36,7 @@ use crate::instruction::{Reg, RegRange};
 
 /// Encodes a u64 as a variable-length integer.
 ///
+
 /// Returns the number of bytes written.
 #[inline]
 pub fn encode_varint(value: u64, output: &mut Vec<u8>) -> usize {
@@ -66,6 +71,7 @@ pub fn write_varint<W: Write>(value: u64, writer: &mut W) -> std::io::Result<usi
 
 /// Decodes a variable-length integer from a byte slice.
 ///
+
 /// Returns the value and the number of bytes consumed.
 #[inline]
 pub fn decode_varint(data: &[u8], offset: &mut usize) -> VbcResult<u64> {
@@ -83,10 +89,10 @@ pub fn decode_varint(data: &[u8], offset: &mut usize) -> VbcResult<u64> {
 
         // At shift=63 only bit 0 of the payload is meaningful — bits
         // 1..6 represent positions 64..69 of the conceptual u70, which
-        // are NOT representable in u64.  The naive `result |= (...) << 63`
+        // are NOT representable in u64. The naive `result |= (...) << 63`
         // silently drops those bits via Rust's shift-out-of-range
         // semantics, accepting adversarial varint encodings that
-        // smuggle invalid u64 values.  Mirrors the protobuf
+        // smuggle invalid u64 values. Mirrors the protobuf
         // `read_varint` Google-reference fix landed in
         // `core/protobuf/wire.vr`.
         if shift == 63 && (byte & 0x7E) != 0 {
@@ -150,6 +156,7 @@ pub fn read_varint<R: Read>(reader: &mut R) -> std::io::Result<u64> {
 
 /// Encodes a signed i64 using ZigZag encoding + VarInt.
 ///
+
 /// ZigZag maps signed integers to unsigned:
 /// - 0 -> 0, -1 -> 1, 1 -> 2, -2 -> 3, 2 -> 4, ...
 #[inline]
@@ -288,6 +295,7 @@ pub fn decode_u8(data: &[u8], offset: &mut usize) -> VbcResult<u8> {
 
 /// Encodes a register reference.
 ///
+
 /// - r0-r127: Single byte (0x00-0x7F)
 /// - r128-r16383: Two bytes (0x80 | high7, low8)
 #[inline]
@@ -344,12 +352,12 @@ pub fn encode_string(s: &str, output: &mut Vec<u8>) {
 pub fn decode_string(data: &[u8], offset: &mut usize) -> VbcResult<String> {
     let len = decode_varint(data, offset)? as usize;
     // `*offset + len` can wrap usize when `len` decodes from a
-    // hostile varint near `usize::MAX`.  In release builds the
+    // hostile varint near `usize::MAX`. In release builds the
     // overflow wraps silently, producing a small wrapped value
     // that *passes* the bounds check `... > data.len()` while
     // the slice `data[*offset..*offset + len]` would then read
     // from the wrong region (or, for a wrap that lands on a
-    // valid offset, alias previously-read bytes).  Use
+    // valid offset, alias previously-read bytes). Use
     // `checked_add` to surface the overflow as `eof`.
     let end = offset.checked_add(len).ok_or_else(|| VbcError::eof(*offset, len))?;
     if end > data.len() {
@@ -605,12 +613,13 @@ mod tests {
     #[test]
     fn test_decode_string_rejects_offset_overflow() {
         // Hostile encoding: a varint length near usize::MAX followed
-        // by a tiny payload.  Pre-fix `*offset + len` wraps usize and
+        // by a tiny payload. Pre-fix `*offset + len` wraps usize and
         // the wrapped value passes the `> data.len()` check, opening
-        // a path to read from the wrong region.  Post-fix
+        // a path to read from the wrong region. Post-fix
         // `checked_add` rejects via `Eof`.
         //
-        // u64::MAX encodes as [0xff×9, 0x01].  Decoded as usize this
+
+        // u64::MAX encodes as [0xff×9, 0x01]. Decoded as usize this
         // is u64::MAX → adding any positive *offset overflows.
         let mut data: Vec<u8> = vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
         // Advance offset by some amount before the decode, so that
@@ -628,9 +637,9 @@ mod tests {
     #[test]
     fn test_decode_varint_byte9_bits_1_to_6_must_be_zero() {
         // The 10-byte varint encoding of u64::MAX is:
-        //   [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]
+        //  [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]
         // Byte[9] must be exactly 0x01 — only bit 0 is meaningful at
-        // shift=63.  Any value with bits 1..6 set claims a position
+        // shift=63. Any value with bits 1..6 set claims a position
         // past u64::MAX and must be rejected, even though byte[9]'s
         // continuation bit is clear (which would otherwise terminate
         // the varint and silently drop the high bits).

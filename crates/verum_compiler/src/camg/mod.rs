@@ -1,48 +1,55 @@
 //! Content-Addressed Module Graph (CAMG) — fundamental rewrite of
 //! module loading.
 //!
+
 //! # Why CAMG
 //!
+
 //! The pre-CAMG `ModuleRegistry` (`crates/verum_modules`) is a flat
 //! `Map<ModuleId, Shared<ModuleInfo>>` keyed by an opaque, session-
 //! local `ModuleId`. That design has four documented limits:
 //!
-//!   1. **No content addressing.** Identical sources in two cogs get
-//!      different `ModuleId`s; the type-checker can't share work
-//!      across cogs even when the modules are byte-equal.
-//!   2. **Eager artifact production.** Every module loaded means its
-//!      AST, export table, and type-info are computed up front (or
-//!      cloned from cache). Lazy evaluation requires per-tier
-//!      bookkeeping the registry doesn't expose.
-//!   3. **Single-process lifetime.** ModuleId numbers don't survive
-//!      across sessions; persistent caches must store everything by
-//!      path string, not by content. Stale entries silently become
-//!      "fresh" if a cog is renamed.
-//!   4. **Parallelism hostility.** The registry is `Shared<RwLock<…>>`;
-//!      every reader takes the read lock. With per-module independence
-//!      (audit findings 1.2 / 1.3), we want lock-free reads of
-//!      individual nodes — which means the *graph* must be lock-free
-//!      at the node-key level (DashMap), not just at the outer wrapper.
+
+//!  1. **No content addressing.** Identical sources in two cogs get
+//!  different `ModuleId`s; the type-checker can't share work
+//!  across cogs even when the modules are byte-equal.
+//!  2. **Eager artifact production.** Every module loaded means its
+//!  AST, export table, and type-info are computed up front (or
+//!  cloned from cache). Lazy evaluation requires per-tier
+//!  bookkeeping the registry doesn't expose.
+//!  3. **Single-process lifetime.** ModuleId numbers don't survive
+//!  across sessions; persistent caches must store everything by
+//!  path string, not by content. Stale entries silently become
+//!  "fresh" if a cog is renamed.
+//!  4. **Parallelism hostility.** The registry is `Shared<RwLock<…>>`;
+//!  every reader takes the read lock. With per-module independence
+//!  (audit findings 1.2 / 1.3), we want lock-free reads of
+//!  individual nodes — which means the *graph* must be lock-free
+//!  at the node-key level (DashMap), not just at the outer wrapper.
 //!
+
 //! CAMG addresses each of these:
 //!
-//!   * **Content-addressed.** Each module is identified by a
-//!     blake3 hash of its source. Two modules with byte-equal source
-//!     share the same `ModuleNodeId`, regardless of cog boundary or
-//!     mount path.
-//!   * **Lazy artifacts.** `ModuleArtifacts` wraps each derived
-//!     output (parsed AST, export table, type-info, VBC bytecode, …)
-//!     in `OnceLock<Arc<…>>`. The first reader computes it; the rest
-//!     get a cheap `Arc::clone`.
-//!   * **Persistent.** ContentHash is a 32-byte blake3 digest;
-//!     identical across machines, sessions, compiler versions (with a
-//!     version-tag prefix). Disk cache keyed by hash.
-//!   * **Lock-free per-node access.** `nodes`, `edges`, `by_hash`,
-//!     `by_path` are all `DashMap`s. Reads never contend with reads;
-//!     writes shard by hash so independent insertions don't serialise.
+
+//!  * **Content-addressed.** Each module is identified by a
+//!  blake3 hash of its source. Two modules with byte-equal source
+//!  share the same `ModuleNodeId`, regardless of cog boundary or
+//!  mount path.
+//!  * **Lazy artifacts.** `ModuleArtifacts` wraps each derived
+//!  output (parsed AST, export table, type-info, VBC bytecode, …)
+//!  in `OnceLock<Arc<…>>`. The first reader computes it; the rest
+//!  get a cheap `Arc::clone`.
+//!  * **Persistent.** ContentHash is a 32-byte blake3 digest;
+//!  identical across machines, sessions, compiler versions (with a
+//!  version-tag prefix). Disk cache keyed by hash.
+//!  * **Lock-free per-node access.** `nodes`, `edges`, `by_hash`,
+//!  `by_path` are all `DashMap`s. Reads never contend with reads;
+//!  writes shard by hash so independent insertions don't serialise.
 //!
+
 //! # Migration plan
 //!
+
 //! This commit lands the **foundational types and a no-op graph
 //! constructor**. Subsequent commits migrate the existing
 //! `ModuleRegistry` consumers one tier at a time, then delete the
@@ -70,6 +77,7 @@ impl ContentHash {
     /// Compute the content hash of a source string with a metadata
     /// tag.
     ///
+
     /// The tag is mixed into the digest so otherwise-equal sources
     /// from different "lifecycles" (e.g. parsed-with-meta-expansion
     /// vs raw-source) don't collide. Use `"raw"` for verbatim source,
@@ -146,6 +154,7 @@ impl ModuleNodeId {
 /// `OnceLock` discipline means computation runs at most once per
 /// process per artifact, regardless of contention.
 ///
+
 /// The artifact slots are intentionally generic over the concrete
 /// types so CAMG can stay architecture-only: the type-checker, parser,
 /// codegen, etc. each know which artifact slot they own and supply
@@ -163,6 +172,7 @@ pub struct ModuleArtifacts {
     /// `Arc<dyn Any + Send + Sync>` so consumers downcast to their
     /// expected concrete type.
     ///
+
     /// `DashMap` for lock-free per-tag insertion / read; `OnceLock`
     /// inside guards "compute once" semantics on the first access.
     pub slots: DashMap<Text, Arc<OnceLock<Arc<dyn std::any::Any + Send + Sync>>>>,
@@ -178,6 +188,7 @@ impl ModuleArtifacts {
     /// runs at most once per slot per process; subsequent callers
     /// receive a cheap `Arc::clone` of the cached value.
     ///
+
     /// Type-erasure happens at the storage boundary: the closure
     /// returns the concrete type, this method downcasts on read.
     /// Callers that pass the wrong concrete type for an existing tag

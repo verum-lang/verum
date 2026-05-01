@@ -129,12 +129,15 @@ implement SpanId {
 // Generation — per-thread monotonic counter xor'd with a per-process seed
 // =============================================================================
 //
+
 // Random uniqueness is not required by W3C — only "unique within a trace
 // with sufficiently high probability". We use:
 //
-//   seed_hi  = process-start wall-clock-nanos (constant per process)
-//   seed_lo  = atomic counter (incremented per ID)
+
+//  seed_hi = process-start wall-clock-nanos (constant per process)
+//  seed_lo = atomic counter (incremented per ID)
 //
+
 // This yields ~2^64 unique ids per process lifetime with no syscall per
 // emission (the seed is read once at module init; counter is a single
 // CAS), totalling ~20ns per TraceId.

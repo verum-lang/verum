@@ -4,12 +4,15 @@
 // Layer: 4
 // Spec: sqlite-native.md §17.1
 //
+
 // Helpers used by the L4 interpreter at every DML hook to:
 //
-//   1. Build the (NEW, OLD) row binding context for a fired trigger.
-//   2. Evaluate the optional WHEN clause; skip body if false.
-//   3. Resolve and gosub into the trigger's compiled sub-program.
+
+//  1. Build the (NEW, OLD) row binding context for a fired trigger.
+//  2. Evaluate the optional WHEN clause; skip body if false.
+//  3. Resolve and gosub into the trigger's compiled sub-program.
 //
+
 // The actual `Gosub` opcode emission lives in the codegen; this file
 // is the runtime façade. Currently the helpers only build the
 // binding context — the codegen wire-up will land once the AST node

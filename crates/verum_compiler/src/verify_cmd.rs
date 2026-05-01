@@ -1,20 +1,25 @@
 //! Verification Command with Cost Reporting
 //!
+
 //! P0 Feature for v1.0: Show verification costs and suggest optimizations
 //!
+
 //! # Example Output
 //!
+
 //! ```text
 //! $ verum verify app.vr --show-costs
 //!
+
 //! Verification Report:
-//!   ✓ algorithm(): Proved in 1.2s (Z3)
-//!   ⚠ complex_fn(): Timeout after 30s, falling back to runtime
-//!   ✗ invalid_fn(): Counterexample found: n = 0
+//!  ✓ algorithm(): Proved in 1.2s (Z3)
+//!  ⚠ complex_fn(): Timeout after 30s, falling back to runtime
+//!  ✗ invalid_fn(): Counterexample found: n = 0
 //!
+
 //! Suggestions:
-//!   - Use @verify(runtime) for complex_fn (30s → 0s)
-//!   - Add precondition n > 0 to invalid_fn
+//!  - Use @verify(runtime) for complex_fn (30s → 0s)
+//!  - Add precondition n > 0 to invalid_fn
 //! ```
 
 use anyhow::{Context as AnyhowContext, Result};
@@ -274,7 +279,7 @@ impl<'s> VerifyCommand<'s> {
         // Pre-build a refinement-reflection registry so `proof by auto`
         // / `by smt` can unfold calls to user-defined pure functions.
         // Without this, a theorem like
-        //     theorem double_is_2x(x: Int) ensures double_it(x) == 2 * x
+        //  theorem double_is_2x(x: Int) ensures double_it(x) == 2 * x
         // failed because `double_it` was an uninterpreted Z3 symbol
         // with no defining axiom — the CLI verification path had
         // never been wired into the reflection pipeline that
@@ -323,7 +328,7 @@ impl<'s> VerifyCommand<'s> {
         // Variant disjointness axioms: for every `type T is A | B
         // | C;`, emit `T.A != T.B`, `T.A != T.C`, `T.B != T.C`.
         // These are asserted on the solver so claims like
-        //     theorem variants_distinct(): T.A != T.B
+        //  theorem variants_distinct(): T.A != T.B
         // close automatically.
         let variant_axioms =
             crate::phases::proof_verification::variant_disjointness_axioms(module);
@@ -514,6 +519,7 @@ impl<'s> VerifyCommand<'s> {
 
     /// Verify a theorem/lemma/corollary using the proof verification engine
     ///
+
     /// This verifies:
     /// 1. The proposition is well-formed
     /// 2. The proof body (if present) correctly proves the proposition
@@ -572,7 +578,7 @@ impl<'s> VerifyCommand<'s> {
         // those without a body or those that `try_reflect_function`
         // rejected. Without this, calls to Bool-returning declared
         // functions translate as Int-UFs and goals like
-        //   theorem t(): exists p: Nat. is_prime(p)
+        //  theorem t(): exists p: Nat. is_prime(p)
         // fail with "exists body must be a boolean expression".
         for (name, ps, r) in callee_signatures_for_module {
             proof_engine.register_callee_signature(
@@ -585,7 +591,7 @@ impl<'s> VerifyCommand<'s> {
         // Register variant-disjointness axioms (computed once per
         // module, passed in via `variant_axioms`). Each pair of
         // variants `T.A` / `T.B` gets an axiom `T.A != T.B` so
-        //     theorem variants_distinct(): T.A != T.B
+        //  theorem variants_distinct(): T.A != T.B
         // closes by SMT.
         for ax in variant_axioms {
             proof_engine.register_axiom(ax.clone());
@@ -651,6 +657,7 @@ impl<'s> VerifyCommand<'s> {
 
     /// Verify a single function using Z3 SMT solver
     ///
+
     /// This performs real verification of:
     /// 1. Preconditions (requires clauses) - must be satisfiable
     /// 2. Postconditions (ensures clauses) - must hold given preconditions
@@ -743,18 +750,21 @@ impl<'s> VerifyCommand<'s> {
         // Reflection registry + module-level callee signatures wired
         // identically to the theorem-path (verify_theorem above).
         //
+
         // Theorem-path (`ProofSearchEngine::set_reflection_registry`
         // + `register_callee_signature`) routes these into the same
         // translator API. Function-path calls the translator API
         // directly — no engine wrapper is needed because function
         // verification is a single SMT query, not a structured proof.
         //
+
         // For every `@logic` function in the module, the translator
         // now knows both the sort signature AND the SMT-LIB defining
         // block, so calls like `safe_div(a, b)` unfold their body
         // during solve — instead of becoming an opaque Int-returning
         // UF symbol that defeats any non-trivial postcondition.
         //
+
         // Body-less or unreflected functions still get their sort
         // signature registered, so Bool-returning declared-only
         // functions (e.g. `fn is_prime(n: Int) -> Bool;`) translate
@@ -762,8 +772,9 @@ impl<'s> VerifyCommand<'s> {
         // making `exists n: Nat. is_prime(n)`-style ensures clauses
         // fail with "exists body must be a boolean expression."
         //
+
         // Pinned by:
-        //   vcs/specs/L1-core/verification_phase/reflection_function_level.vr
+        //  vcs/specs/L1-core/verification_phase/reflection_function_level.vr
         for rf in reflection_registry.iter() {
             let param_sorts: Vec<String> = rf
                 .parameter_sorts
@@ -866,6 +877,7 @@ impl<'s> VerifyCommand<'s> {
         // and `synthesize_alias_refinement_requires`), so they are now
         // visible as SMT hypotheses during the postcondition check.
         //
+
         // The obsolete "step 3" used to call `verify_refinement(ty, None)`
         // on each refined parameter, but with `value_expr = None` that
         // asserts "the predicate holds for some/all unconstrained value"
@@ -876,6 +888,7 @@ impl<'s> VerifyCommand<'s> {
         // callee, and type-checking handles it via standard refinement
         // subtyping.
         //
+
         // Removing the standalone parameter-refinement check silences a
         // cascade of spurious counterexamples for every refined-param
         // function without losing any soundness: the predicate is still
@@ -891,6 +904,7 @@ impl<'s> VerifyCommand<'s> {
         // if the return-type refinement was exposed through the
         // postcondition translation layer.
         //
+
         // Rather than double-check via a broken `verify_refinement`
         // call, we accept that the postcondition pipeline with the
         // body→result binding is sufficient: a real violation surfaces
@@ -1051,6 +1065,7 @@ impl<'s> VerifyCommand<'s> {
 
     /// Extract file location (path, line, column) from a span
     ///
+
     /// Converts a byte-offset Span to a human-readable FileLocation
     /// by looking up the source file and computing line/column positions.
     fn extract_file_location(&self, span: Span) -> FileLocation {
@@ -1162,6 +1177,7 @@ impl<'s> VerifyCommand<'s> {
 
         // Bind `result` to the function body's return expression.
         //
+
         // Without this step, `result` is an unconstrained Z3 variable and
         // every postcondition of shape `result <op> expr` finds a
         // spurious counterexample. For functions whose body is a single
@@ -1530,6 +1546,7 @@ impl<'s> VerifyCommand<'s> {
 
     /// Render the per-obligation breakdown ("Slowest obligations").
     ///
+
     /// Sorts every verified function by its elapsed time descending and
     /// prints the top 10 as a ranked table. At current instrumentation
     /// obligation-level timing is not yet collected separately from
@@ -1648,14 +1665,17 @@ impl<'s> VerifyCommand<'s> {
     /// `textDocument/publishDiagnostics` payload that an external
     /// JSON-RPC adapter can forward directly to the IDE.
     ///
+
     /// Schema per line:
     ///
-    ///   { "function": "<name>",
-    ///     "severity": "error" | "warning",
-    ///     "message": "<one-line summary>",
-    ///     "elapsed_ms": <number>,
-    ///     "counterexample": "<string>" | null }
+
+    ///  { "function": "<name>",
+    ///  "severity": "error" | "warning",
+    ///  "message": "<one-line summary>",
+    ///  "elapsed_ms": <number>,
+    ///  "counterexample": "<string>" | null }
     ///
+
     /// We deliberately emit a Verum-flavored JSON object rather than a
     /// verbatim LSP `Diagnostic` — the LSP shape needs `range`
     /// (start/end line+column), which the verifier doesn't track at
@@ -1814,6 +1834,7 @@ pub struct VerificationReport {
     start_time: Instant,
     /// Optional per-obligation timings keyed by function name.
     ///
+
     /// Populated when the verifier has obligation-level
     /// instrumentation available (currently: none of the
     /// in-tree verify paths — this is the slot a future
@@ -1822,6 +1843,7 @@ pub struct VerificationReport {
     /// `--profile-obligation` renderer falls back to
     /// aggregate-per-function rows in that case.
     ///
+
     /// The key is the function name (matching `results`'s
     /// first tuple element); the value is
     /// `[(obligation_label, elapsed), …]` in order of
@@ -1846,12 +1868,14 @@ impl VerificationReport {
 
     /// Record per-obligation timings for a function.
     ///
+
     /// Called by instrumentation-aware verifiers after
     /// discharging each obligation. Labels are caller-chosen
     /// (typical: `"pre"`, `"post"`, `"refinement(x)"`,
     /// `"loop_inv(i)"`, `"termination"`) — the renderer
     /// displays them verbatim.
     ///
+
     /// Multiple calls for the same function name append to
     /// the existing timing list, preserving discharge order.
     pub fn add_obligation_timings(
@@ -1987,6 +2011,7 @@ impl VerificationReport {
 
 /// Internal error type for verification.
 ///
+
 /// `Failed` carries both a human-readable description and an
 /// optional structured [`CounterExample`]. The structured form
 /// lets the outer `VerificationError::CannotProve` thread the

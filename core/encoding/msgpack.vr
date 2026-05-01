@@ -5,31 +5,40 @@
 // Dependencies: core, core.collections
 // =============================================================================
 //
+
 // MessagePack — compact binary alternative to JSON. Used by Redis
 // RESP3, Pinterest MySQL adapter, PyPy RPython, Erlang msgpack,
 // Ruby msgpack, AsyncAPI streaming, and every "we need JSON but
 // smaller + faster" deployment.
 //
+
 // # Type coverage
 //
-//   nil, bool, int (u64 / i64 range), float32, float64,
-//   str, bin, array, map, ext (user-defined)
+
+//  nil, bool, int (u64 / i64 range), float32, float64,
+//  str, bin, array, map, ext (user-defined)
 //
+
 // All positive ints encoded in the smallest format that fits;
 // negative ints use the negative-fixint / intN family.
 //
+
 // # API
 //
+
 // ```
 // // Encode
 // let wire: List<Byte> = msgpack.encode(&value);
 //
+
 // // Decode
 // let value: MsgPackValue = msgpack.decode(&wire)?;
 // ```
 //
+
 // # Spec: https://github.com/msgpack/msgpack/blob/master/spec.md
 //
+
 // =============================================================================
 
 module core.encoding.msgpack;

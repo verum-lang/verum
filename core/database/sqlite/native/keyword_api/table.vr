@@ -2,7 +2,7 @@
 // keyword_api/table.vr — canonical keyword table
 // =============================================================================
 // Spec: SQLite C API — the ~145 words SQLite treats as reserved in
-// its grammar (see mkkeywordhash.c in the SQLite source).  The
+// its grammar (see mkkeywordhash.c in the SQLite source). The
 // catalogue ships a compact uppercase list; sqlite3_keyword_check
 // matches case-insensitively.
 // =============================================================================
@@ -13,7 +13,7 @@ mount core.*;
 mount base.{Bool, Text};
 mount collections.List;
 
-/// Canonical uppercase keyword list.  Order is stable — callers of
+/// Canonical uppercase keyword list. Order is stable — callers of
 /// sqlite3_keyword_name iterate by index.
 public fn keywords() -> List<Text> {
     let mut out: List<Text> = List.new();

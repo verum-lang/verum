@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.2
 //
+
 // `Cost` is the planner's currency: every candidate plan node is
 // scored by setup + per-row cost, and the cheapest one wins.
 // `AccessMethod` enumerates the four shapes a leaf access can take;
@@ -137,6 +138,7 @@ public fn estimate_access(
 // Sort cost (used by ORDER BY / DISTINCT)
 // -----------------------------------------------------------------------------
 //
+
 // External-merge sort: O(n log n) comparisons + pages-read passes.
 // =============================================================================
 

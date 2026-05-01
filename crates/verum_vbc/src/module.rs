@@ -1,5 +1,6 @@
 //! VBC module and function structures.
 //!
+
 //! This module defines the high-level structures for VBC modules:
 //! - [`VbcModule`]: Complete compiled module
 //! - [`VbcFunction`]: Individual function with bytecode
@@ -37,6 +38,7 @@ pub struct ConstId(pub u32);
 
 /// Complete VBC module.
 ///
+
 /// A VbcModule contains all compiled code and metadata for a Verum module,
 /// ready for interpretation, JIT compilation, or AOT compilation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +169,7 @@ impl Default for VbcModule {
 impl VbcModule {
     /// Creates a new empty module.
     ///
+
     /// The module name is automatically interned in the string table.
     pub fn new(name: String) -> Self {
         let mut strings = StringTable::new();
@@ -244,9 +247,11 @@ impl VbcModule {
 
     /// Renders a `TypeRef` as a human-readable string.
     ///
+
     /// Handles all Verum type constructs including generics, references,
     /// function types, tuples, and CBGR tiers.
     ///
+
     /// # Examples
     /// - `TypeRef::Concrete(TypeId::INT)` → `"Int"`
     /// - `Instantiated { base: List, args: [INT] }` → `"List<Int>"`
@@ -346,6 +351,7 @@ impl VbcModule {
     /// FunctionId for chaining or None if no function with that name
     /// exists in this module.
     ///
+
     /// First tries exact match. If exact match fails AND the queried name
     /// looks qualified (contains `.`), falls back to suffix-match against
     /// the queried name preceded by `.` — so `find_function_by_name("Result.unwrap")`
@@ -397,17 +403,21 @@ impl VbcModule {
 
     /// Sets profile-related flags based on the compilation profile.
     ///
+
     /// This method sets the following flags based on the profile:
     /// - `NOT_INTERPRETABLE`: Systems profile modules cannot be interpreted
     /// - `SYSTEMS_PROFILE`: Marks modules compiled with Systems profile
     /// - `EMBEDDED_TARGET`: Marks modules for embedded/bare-metal targets
     ///
+
     /// # Arguments
     ///
+
     /// * `is_interpretable` - Whether the module can be executed by VBC interpreter
     /// * `is_systems_profile` - Whether this is a Systems profile build (low-level code)
     /// * `is_embedded` - Whether this targets embedded/bare-metal
     ///
+
     /// V-LLSI (Verum Low-Level System Interface): Sets execution profile flags that control
     /// bytecode layout and feature availability. Systems profile enables raw pointers, inline
     /// assembly, and interrupt handlers. Embedded profile disables heap allocation and OS APIs.
@@ -556,6 +566,7 @@ impl VbcModule {
 
 /// Deduplicated string table.
 ///
+
 /// Strings are stored once and referenced by [`StringId`].
 /// The ID is the byte offset in the serialized form.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -577,6 +588,7 @@ impl StringTable {
 
     /// Interns a string, returning its ID.
     ///
+
     /// If the string already exists, returns the existing ID.
     pub fn intern(&mut self, s: &str) -> StringId {
         if let Some(&id) = self.index.get(s) {
@@ -685,6 +697,7 @@ pub struct LoopHints {
 
 /// Function-level optimization hints extracted from AST attributes.
 ///
+
 /// These flow through the pipeline: AST @attributes -> VBC OptimizationHints -> LLVM attributes.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OptimizationHints {
@@ -716,6 +729,7 @@ pub struct OptimizationHints {
 
 /// Function descriptor in the function table.
 ///
+
 /// Contains all metadata about a function including signature,
 /// bytecode location, and optimization hints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -804,9 +818,11 @@ pub struct FunctionDescriptor {
 
     /// Debug variable info for DWARF emission.
     ///
+
     /// Maps register indices to variable names and scopes for debugger variable
     /// inspection. Populated by VBC codegen when `source_map` is enabled.
     ///
+
     /// Each entry describes a local variable:
     /// - `name`: Variable name (index into string table)
     /// - `register`: VBC register holding this variable's value
@@ -824,6 +840,7 @@ pub struct FunctionDescriptor {
 
 /// Debug information for a local variable or parameter.
 ///
+
 /// Used to emit DWARF `DW_TAG_variable` / `DW_TAG_formal_parameter` entries
 /// in the AOT compilation path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -924,6 +941,7 @@ impl Default for ParamDescriptor {
 
 /// High-level function representation with decoded instructions.
 ///
+
 /// Used during codegen and interpretation. For serialization,
 /// use [`FunctionDescriptor`] with raw bytecode.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1021,6 +1039,7 @@ impl Constant {
 
 /// Pre-computed specialization entry.
 ///
+
 /// Maps a generic function with specific type arguments to
 /// specialized bytecode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1129,6 +1148,7 @@ impl FfiPlatform {
 
     /// Infer the platform an FFI library targets from its name.
     ///
+
     /// Used when the codegen sees `@ffi("kernel32.dll")` or
     /// `@ffi("libSystem.B.dylib")` and needs to tag the library with the
     /// platform it actually belongs to — rather than blindly tagging every
@@ -1137,6 +1157,7 @@ impl FfiPlatform {
     /// runtime `load_module_libraries` filter can't skip
     /// cross-platform libraries (e.g. `kernel32.dll` on macOS).
     ///
+
     /// Falls back to `Any` when the name has no obvious platform
     /// signature — correct for genuinely cross-platform libraries and
     /// user-provided `@ffi("mylib")` names.
@@ -1209,6 +1230,7 @@ pub enum CallingConvention {
     /// - Uses iret for return (x86/x86_64)
     /// - First parameter is InterruptStackFrame reference
     ///
+
     /// Interrupt handler calling convention: all registers are saved/restored automatically,
     /// uses iret for return on x86/x86_64, first parameter is InterruptStackFrame reference.
     /// Annotated with `@interrupt` attribute in Verum source.
@@ -1341,6 +1363,7 @@ pub enum CType {
 impl CType {
     /// Returns true if this C type is a pointer type.
     ///
+
     /// Pointer types include: Ptr, CStr, StructPtr, ArrayPtr, FnPtr.
     /// These types represent raw FFI pointers that bypass CBGR validation.
     pub fn is_pointer(&self) -> bool {
@@ -1417,6 +1440,7 @@ impl FfiSignature {
 
 /// FFI library descriptor.
 ///
+
 /// Describes a native library that can be loaded for FFI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FfiLibrary {
@@ -1444,6 +1468,7 @@ impl FfiLibrary {
 
 /// FFI symbol descriptor.
 ///
+
 /// Describes a single FFI symbol (function or variable).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FfiSymbol {
@@ -1493,6 +1518,7 @@ pub enum FfiOwnership {
 
 /// FFI contract: pre/postconditions for an FFI function.
 ///
+
 /// `requires` expressions are checked before the call (debug mode only).
 /// `ensures` expressions are checked after the call (debug mode only).
 /// Stored as stringified expressions — compiled to asserts at call sites.
@@ -1544,6 +1570,7 @@ pub struct FfiStructField {
 
 /// FFI struct layout descriptor.
 ///
+
 /// Describes the memory layout of a C struct for marshalling.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FfiStructLayout {

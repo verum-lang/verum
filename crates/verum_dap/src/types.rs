@@ -1,8 +1,10 @@
 //! DAP protocol types.
 //!
+
 //! Implements the core message types for the Debug Adapter Protocol:
 //! requests, responses, events, and supporting data structures.
 //!
+
 //! Reference: <https://microsoft.github.io/debug-adapter-protocol/specification>
 
 use serde::{Deserialize, Serialize};

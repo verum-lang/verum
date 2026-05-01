@@ -14,8 +14,10 @@
 )]
 // Tests for Deref/DerefMut protocol implementation
 //
+
 // Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — .4 - Deref/DerefMut Protocols
 //
+
 // This test file validates:
 // 1. Deref protocol is registered and has correct structure
 // 2. DerefMut protocol extends Deref

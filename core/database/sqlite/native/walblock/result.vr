@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API — out parameters of sqlite3_wal_checkpoint_v2
 //
+
 // SQLite returns:
 //
-//   pnLog  — total number of frames in the WAL after checkpoint
-//   pnCkpt — number of frames actually checkpointed (transferred to db)
+
+//  pnLog — total number of frames in the WAL after checkpoint
+//  pnCkpt — number of frames actually checkpointed (transferred to db)
 // =============================================================================
 
 module core.database.sqlite.native.walblock.result;

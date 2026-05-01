@@ -1,11 +1,13 @@
 //! T1-K Compilation speed contract
 //!
+
 //! Guards the published parse + VBC-codegen throughput targets against
 //! regression. The values embedded here are the floor — actual
 //! performance on `main` is routinely 15–30× higher but that leaves
 //! enough headroom that a real regression of 30–70 % will still trip
 //! the contract and fail CI instead of silently rotting the target.
 //!
+
 //! Measurement shape: reuse the same 1 K-LOC Verum program the
 //! Criterion bench uses, time N iterations with `std::time::Instant`,
 //! compute throughput in elements-per-second, assert it exceeds the
@@ -14,6 +16,7 @@
 //! not a precision-style measurement. For precision numbers run the
 //! `compilation_regression` Criterion bench.
 //!
+
 //! The 1 K-LOC program generator lives in the bench file, so we
 //! inline a compatible minimal variant here to keep this test crate
 //! self-contained. The two generators produce the same kinds of
@@ -30,6 +33,7 @@ use verum_ast::span::FileId;
 // ============================================================================
 // Published throughput floors (LOC/sec).
 //
+
 // These are the public promise. Bumping them up when actual
 // performance clears the new floor is a welcome change; bumping them
 // down is a regression and must be justified in the commit message

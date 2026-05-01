@@ -4,11 +4,14 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // This module provides atomic operation intrinsics that map directly to
 // LLVM/CPU instructions. All operations are zero-allocation and VBC-compatible.
 //
+
 // # Memory Ordering
 //
+
 // All atomic operations require a memory ordering parameter:
 // - Relaxed: No ordering constraints
 // - Acquire: Subsequent loads see writes before matching Release
@@ -16,14 +19,17 @@
 // - AcqRel: Both Acquire and Release
 // - SeqCst: Full sequential consistency
 //
+
 // # Operations
 //
+
 // - Load/Store: atomic_load, atomic_store
 // - Read-Modify-Write: atomic_add, atomic_sub, atomic_and, atomic_or, atomic_xor
 // - Compare-and-Swap: atomic_cmpxchg, atomic_cmpxchg_weak
 // - Exchange: atomic_xchg
 // - Fences: atomic_fence, compiler_fence
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 
@@ -157,6 +163,7 @@ public fn compiler_fence(order: MemoryOrder) { @intrinsic("compiler_fence", orde
 // These are retained for VBC bytecode compatibility where size-specific
 // opcodes are needed. For generic atomic operations, use the generic functions above.
 //
+
 // VBC Opcodes: AtomicLoad (0x48), AtomicStore (0x49), AtomicCas (0x4A)
 // =============================================================================
 
@@ -339,6 +346,7 @@ public fn atomic_exchange_i32(ptr: *mut Int32, value: Int32, ordering: UInt8) ->
 // -----------------------------------------------------------------------------
 // 64-bit signed atomics (#100, task #24)
 //
+
 // Closes the asymmetry where signed 64-bit code rounded
 // through `_u64` with `as UInt64` cast — the bit-pattern
 // survived but the static type information was lost at
@@ -386,6 +394,7 @@ public fn atomic_exchange_i64(ptr: *mut Int64, value: Int64, ordering: UInt8) ->
 // -----------------------------------------------------------------------------
 // u8 atomic counters (#100, task #24)
 //
+
 // Enables race-hardening of single-byte counters such as
 // the CBGR slot-generation rotation in heap.vr's
 // free_block_xthread (currently uses non-atomic load+store
@@ -405,10 +414,11 @@ public fn atomic_fetch_sub_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) ->
 // -----------------------------------------------------------------------------
 // u8 RMW closure (#100, task #34) — bitwise + xchg + cas.
 //
+
 // Closes the gap that core/sync/atomic.vr's AtomicU8 was
 // papering over with u32-aligned CAS-loop emulation
 // (structurally unsound in mixed-field layouts — see
-// commit 228ea664 for the full rationale).  Same compiler-
+// commit 228ea664 for the full rationale). Same compiler-
 // side pattern as task #24's fetch_add_u8/sub_u8 closure.
 // -----------------------------------------------------------------------------
 
@@ -467,6 +477,7 @@ public fn atomic_fetch_xor_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8)
 // =============================================================================
 // Convenience wrappers that delegate to size-specific atomics.
 //
+
 // **Pointer-width assumption**: every helper here delegates
 // to the `_u64` family, which is sound iff `Int` is 64-bit
 // (i.e. `target_pointer_width = "64"`). Verum currently

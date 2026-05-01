@@ -1,14 +1,16 @@
 //! Trivia types for non-semantic source elements.
 //!
+
 //! Trivia represents whitespace, comments, and other elements that don't affect
 //! program semantics but are essential for lossless source reconstruction.
 //!
+
 //! Trivia Preservation Rules:
 //! Trivia is attached to tokens (not stored as separate tree nodes):
 //! - Leading trivia: all whitespace/comments from start of line up to the token
 //! - Trailing trivia: whitespace/comments after token up to (not including) newline
 //! - Newlines become leading trivia of the next token
-//!   This enables perfect source reconstruction: reconstruct(tokenize(source)) == source
+//!  This enables perfect source reconstruction: reconstruct(tokenize(source)) == source
 
 use smallvec::SmallVec;
 use std::fmt;
@@ -17,6 +19,7 @@ use crate::SyntaxKind;
 
 /// Trivia represents non-semantic source elements.
 ///
+
 /// These are attached to tokens (leading or trailing) rather than stored
 /// as separate nodes in the syntax tree.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -44,6 +47,7 @@ pub enum DocCommentKind {
 
 /// Compact text storage for trivia content.
 ///
+
 /// For short trivia (most whitespace), we inline the text.
 /// For longer trivia (comments), we use heap allocation.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -232,6 +236,7 @@ impl fmt::Debug for Trivia {
 
 /// Compact storage for trivia lists.
 ///
+
 /// Most tokens have 0-2 trivia items attached, so we use SmallVec
 /// to avoid heap allocation for common cases.
 pub type TriviaList = SmallVec<[Trivia; 2]>;
@@ -282,9 +287,11 @@ impl TriviaListExt for TriviaList {
 
 /// Trivia attachment rules following Swift-style ownership.
 ///
+
 /// - Token owns TRAILING trivia up to (not including) next newline
 /// - Token owns LEADING trivia starting from first newline sequence
 ///
+
 /// This ensures that:
 /// - Comments on the same line stay with their token
 /// - Indentation belongs to the following token
@@ -299,6 +306,7 @@ pub enum TriviaPosition {
 
 /// Classifies a sequence of trivia characters into structured trivia items.
 ///
+
 /// This function parses raw source text and produces a list of trivia items.
 pub fn classify_trivia(text: &str) -> TriviaList {
     let mut result = TriviaList::new();
@@ -426,6 +434,7 @@ pub fn classify_trivia(text: &str) -> TriviaList {
 
 /// Split trivia into leading and trailing based on newline boundaries.
 ///
+
 /// Trailing trivia: everything up to (not including) the first newline
 /// Leading trivia: everything from the first newline onward
 pub fn split_trivia(trivia: TriviaList) -> (TriviaList, TriviaList) {

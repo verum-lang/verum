@@ -1,8 +1,10 @@
 //! Resource Limits for Meta Sandbox
 //!
+
 //! Manages execution limits (iterations, recursion, memory, timeout)
 //! and provides RAII guards for tracking.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -107,27 +109,30 @@ impl ResourceLimiter {
     /// Reserve `bytes` from the memory budget, returning Err if the
     /// reservation would exceed the configured maximum.
     ///
+
     /// SOUNDNESS: this method tentatively adds `bytes` via fetch_add,
-    /// then checks whether the post-add total exceeds the limit.  If
+    /// then checks whether the post-add total exceeds the limit. If
     /// it does, the bytes are rolled back via fetch_sub before
     /// returning Err — otherwise the bytes would leak in the counter
     /// (the caller does not build a MemoryGuard on Err, so Drop
     /// never fires the corresponding sub_memory call).
     ///
+
     /// Two bugs were closed by this revision:
-    ///   1. The pre-revision condition `current >= max` compared the
-    ///      pre-add value against max, allowing post-add over-budget
-    ///      states (e.g. max=100, prev=80, request=50 → counter=130
-    ///      but check passed because 80 < 100).  Now compares the
-    ///      post-add total.
-    ///   2. The pre-revision Err path leaked the tentatively-added
-    ///      bytes forever — every memory-limit-exceeded request
-    ///      permanently reduced the available budget.
+    ///  1. The pre-revision condition `current >= max` compared the
+    ///  pre-add value against max, allowing post-add over-budget
+    ///  states (e.g. max=100, prev=80, request=50 → counter=130
+    ///  but check passed because 80 < 100). Now compares the
+    ///  post-add total.
+    ///  2. The pre-revision Err path leaked the tentatively-added
+    ///  bytes forever — every memory-limit-exceeded request
+    ///  permanently reduced the available budget.
     ///
+
     /// The fetch_add + conditional fetch_sub pattern accepts a brief
     /// over-counting window between the two ops; this is acceptable
     /// for sandbox bookkeeping (concurrent requests get conservative
-    /// rejections, never over-allocations).  A CAS-loop alternative
+    /// rejections, never over-allocations). A CAS-loop alternative
     /// avoids the window but adds spin retries under contention; for
     /// the meta-system sandbox use case (compile-time evaluation,
     /// low contention) the simpler rollback is preferred.
@@ -248,6 +253,7 @@ impl Default for ResourceLimiter {
 
 /// RAII guard for tracking recursion depth
 ///
+
 /// Automatically increments recursion counter on creation and decrements on drop.
 /// This ensures accurate recursion tracking even in the presence of early returns
 /// or panics.
@@ -258,6 +264,7 @@ pub struct RecursionGuard<'a> {
 impl<'a> RecursionGuard<'a> {
     /// Create a new recursion guard
     ///
+
     /// Increments the recursion counter and checks against the limit.
     pub fn new(limiter: &'a ResourceLimiter) -> Result<Self, SandboxError> {
         let depth = limiter.increment_recursion();
@@ -287,6 +294,7 @@ impl<'a> Drop for RecursionGuard<'a> {
 
 /// RAII guard for tracking memory allocation
 ///
+
 /// Automatically adds to memory counter on creation and subtracts on drop.
 pub struct MemoryGuard<'a> {
     limiter: &'a ResourceLimiter,
@@ -296,6 +304,7 @@ pub struct MemoryGuard<'a> {
 impl<'a> MemoryGuard<'a> {
     /// Create a new memory guard
     ///
+
     /// Adds bytes to the memory counter and checks against the limit.
     pub fn new(limiter: &'a ResourceLimiter, bytes: usize) -> Result<Self, SandboxError> {
         limiter.check_memory_limit(bytes)?;

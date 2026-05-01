@@ -1,14 +1,17 @@
 //! Build script for verum_compiler
 //!
+
 //! Embeds the Verum standard library (core/*.vr) into the compiler binary
 //! as a zstd-compressed archive. This enables single-binary distribution
 //! without external stdlib dependencies.
 //!
+
 //! Archive format:
-//!   [file_count: u32]
-//!   [index: (path_len: u16, path: utf8, content_offset: u32, content_len: u32) × file_count]
-//!   [data: concatenated .vr source texts]
+//!  [file_count: u32]
+//!  [index: (path_len: u16, path: utf8, content_offset: u32, content_len: u32) × file_count]
+//!  [data: concatenated .vr source texts]
 //!
+
 //! At runtime, the archive is decompressed once into memory (~2ms for 4.7MB)
 //! and provides instant access to all stdlib source files via path lookup.
 
@@ -58,14 +61,17 @@ fn main() {
 
     // === Mount dependency graph =============================================
     //
+
     // For each stdlib file, extract the set of `mount`/`public mount` paths
     // it references. The graph lets the runtime walk only the modules
     // transitively reachable from a user entry point's mount set, instead
     // of registering all 2266 stdlib modules upfront.
     //
+
     // Cost at build time: ~150-300ms scan + ~50KB compressed archive.
     // Cost at runtime: ~5ms decompress + ~1ms BFS for typical entry point.
     //
+
     // The scanner is regex-light (line-oriented match on `mount …;`); the
     // grammar is constrained enough that this avoids dragging the full
     // verum_fast_parser into the build script (which would create a build
@@ -84,6 +90,7 @@ fn main() {
 
     // === Symbol manifest (#102) ============================================
     //
+
     // Per-module table of top-level declarations: `type X`, `public fn Y`,
     // `public const Z`, `public theorem W`. Target-independent (no AST,
     // no platform-specific lowering) — just a textual scan that records
@@ -92,6 +99,7 @@ fn main() {
     // WITHOUT actually parsing the file. Critical for the on-demand
     // loader's late-resolution path.
     //
+
     // Build-time cost: ~50-100ms textual scan, ~80KB compressed archive.
     // Runtime cost: ~1ms decompress + O(1) HashMap lookup per symbol.
     let manifest_archive = build_symbol_manifest(&files);
@@ -117,15 +125,17 @@ fn main() {
 // Mount dependency graph extraction
 // =============================================================================
 //
+
 // Archive layout (mirrors stdlib_archive but smaller):
-//   [module_count: u32]
-//   per module:
-//     [path_len: u16] [path: utf8]
-//     [edge_count: u16]
-//     per edge:
-//       [edge_kind: u8]   // 0=Path, 1=Glob, 2=Nested-leaf
-//       [path_len: u16] [path: utf8]
+//  [module_count: u32]
+//  per module:
+//  [path_len: u16] [path: utf8]
+//  [edge_count: u16]
+//  per edge:
+//  [edge_kind: u8] // 0=Path, 1=Glob, 2=Nested-leaf
+//  [path_len: u16] [path: utf8]
 //
+
 // All paths are pre-normalised to module-path form (`core.shell.exec`).
 // The archive is consumed by `crate::stdlib_dep_graph::DepGraph` at runtime.
 
@@ -205,6 +215,7 @@ struct Edges {
 
 /// Walk `mount … ;` statements in a single source.
 ///
+
 /// Only `mount` statements are recorded as edges. `module X;` submodule
 /// declarations are deliberately NOT recorded: they declare that a
 /// child `X.vr` exists, but importing the parent should NOT pull in
@@ -214,6 +225,7 @@ struct Edges {
 /// parent's `public mount .child.{Item}` re-exports, which DO appear
 /// as edges.
 ///
+
 /// `current_module` is the module path of the file being scanned. It
 /// is currently unused but reserved for future relative-path edges
 /// (e.g. resolving a stray `super` reference inside a stdlib module).
@@ -244,6 +256,7 @@ fn extract_mounts(src: &str, current_module: &str) -> Edges {
 /// Parse the body of a `mount` statement: everything between `mount`
 /// and `;`, with leading/trailing whitespace already stripped.
 ///
+
 /// `current_module` is used to resolve relative-leading-dot imports
 /// (`public mount .submodule.{Item}` inside `core/foo/mod.vr` resolves
 /// to `core.foo.submodule.Item`). Without this, the relative form
@@ -292,6 +305,7 @@ fn parse_mount_body(body: &str, current_module: &str, edges: &mut Edges) {
         let resolved = resolve_path(p, current_module);
         // Suppress prelude-style globs.
         //
+
         // `mount core.*;` is the canonical "import the implicit prelude"
         // pattern in stdlib + user code (~1019 occurrences). The
         // compiler always preloads the prelude subset, so emitting an
@@ -315,12 +329,14 @@ fn parse_mount_body(body: &str, current_module: &str, edges: &mut Edges) {
 
 /// Resolve a possibly-relative mount path to its absolute module path.
 ///
+
 /// `public mount .list.List` inside `core/collections/mod.vr` (current
 /// module = `core.collections`) resolves to `core.collections.list.List`.
 /// `public mount super.base.X` inside `core/mod.vr` (current = `core`)
 /// resolves to `core.base.X` (the `super` form is rewritten the same
 /// way; pragma-level `super` refers to the same crate root).
 ///
+
 /// Absolute paths (no leading `.` and no `super.`) pass through
 /// unchanged.
 fn resolve_path(raw: &str, current_module: &str) -> String {
@@ -373,11 +389,12 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
 /// Whether a glob path should be treated as the implicit prelude (and
 /// therefore NOT emitted as a graph edge — see `parse_mount_body`).
 ///
+
 /// Three forms are recognised:
-///   * `core` — `mount core.*` from user code
-///   * `super` — `mount super.*` from inside a stdlib module
-///   * the empty string — defensive guard; `mount .*;` would be
-///     malformed but should not crash the scanner.
+///  * `core` — `mount core.*` from user code
+///  * `super` — `mount super.*` from inside a stdlib module
+///  * the empty string — defensive guard; `mount .*;` would be
+///  malformed but should not crash the scanner.
 fn is_prelude_glob(p: &str) -> bool {
     matches!(p, "core" | "super" | "")
 }
@@ -502,16 +519,18 @@ fn build_archive(files: &[(String, Vec<u8>)]) -> Vec<u8> {
 // Symbol manifest extraction (#102)
 // =============================================================================
 //
+
 // Archive layout:
-//   [module_count: u32]
-//   per module:
-//     [path_len: u16] [path: utf8]
-//     [symbol_count: u16]
-//     per symbol:
-//       [kind: u8]            // 0=type, 1=fn, 2=const, 3=theorem, 4=axiom, 5=lemma, 6=protocol
-//       [visibility: u8]      // 0=private, 1=public
-//       [name_len: u16] [name: utf8]
+//  [module_count: u32]
+//  per module:
+//  [path_len: u16] [path: utf8]
+//  [symbol_count: u16]
+//  per symbol:
+//  [kind: u8] // 0=type, 1=fn, 2=const, 3=theorem, 4=axiom, 5=lemma, 6=protocol
+//  [visibility: u8] // 0=private, 1=public
+//  [name_len: u16] [name: utf8]
 //
+
 // Consumed at runtime by `verum_compiler::stdlib_symbol_manifest`.
 
 const SYM_TYPE: u8 = 0;
@@ -534,11 +553,13 @@ struct Symbol {
 
 /// Scan a stdlib source for top-level declarations.
 ///
+
 /// Recognises the seven canonical declaration shapes in the Verum
 /// grammar: `type X is`, `fn Y`, `const Z`, `theorem W`, `axiom A`,
 /// `lemma L`, `protocol P` (the last via `type X is protocol`).
 /// Visibility is taken from the leading `public ` modifier.
 ///
+
 /// Comment-aware (line + block comments stripped). String-literal-aware
 /// (skips `"..."` content). Multi-line declarations handled by reading
 /// only the first line of each declaration — sufficient because the

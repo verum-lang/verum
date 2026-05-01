@@ -1,94 +1,116 @@
 //! Attribute system for the Verum AST.
 //!
+
 //! This module provides comprehensive support for Verum's attribute system,
 //! including typed attributes, target specifications, and metadata.
 //!
+
 //! # Overview
 //!
+
 //! Verum attributes follow the `@attribute` syntax and can be applied to
 //! various syntactic elements:
 //!
+
 //! ```verum
-//! @profile(systems)                         // Module attribute
+//! @profile(systems) // Module attribute
 //! module kernel {
-//!     @derive(Clone, Serialize)             // Type attribute
-//!     type Config is {
-//!         @serialize(rename = "configId")   // Field attribute
-//!         @validate(min_length = 1)
-//!         id: Text,
+//!  @derive(Clone, Serialize) // Type attribute
+//!  type Config is {
+//!  @serialize(rename = "configId") // Field attribute
+//!  @validate(min_length = 1)
+//!  id: Text,
 //!
-//!         @deprecated(since = "2.0")
-//!         legacy_field: Int,
-//!     };
+
+//!  @deprecated(since = "2.0")
+//!  legacy_field: Int,
+//!  };
 //!
-//!     @inline(always)                        // Function attribute
-//!     @verify(static)
-//!     fn process(
-//!         @unused _ctx: &Context,            // Parameter attribute
-//!     ) -> Result<Config> {
-//!         match result {
-//!             @cold Err(e) => handle(e),     // Match arm attribute
-//!             Ok(config) => config,
-//!         }
-//!     }
+
+//!  @inline(always) // Function attribute
+//!  @verify(static)
+//!  fn process(
+//!  @unused _ctx: &Context, // Parameter attribute
+//!  ) -> Result<Config> {
+//!  match result {
+//!  @cold Err(e) => handle(e), // Match arm attribute
+//!  Ok(config) => config,
+//!  }
+//!  }
 //! }
 //! ```
 //!
+
 //! # Module Structure
 //!
+
 //! - [`target`]: `AttributeTarget` bitflags for valid attribute positions
 //! - [`args`]: Argument specifications (`ArgSpec`, `ArgType`)
 //! - [`metadata`]: Complete attribute metadata with builder pattern
 //! - [`typed`]: All typed attribute structs (`InlineAttr`, `ColdAttr`, etc.)
 //!
+
 //! # Design Principles
 //!
+
 //! 1. **Type Safety**: Typed attribute structs for compile-time safety
 //! 2. **Extensibility**: Generic `Attribute` for unknown/custom attributes
 //! 3. **Validation**: `ArgSpec` enables argument validation
 //! 4. **Documentation**: `AttributeMetadata` captures full attribute info
 //!
+
 //! # Example Usage
 //!
+
 //! ## Creating Typed Attributes
 //!
+
 //! ```rust
 //! use verum_ast::attr::{InlineAttr, InlineMode, ColdAttr};
 //! use verum_ast::span::Span;
 //!
+
 //! let inline = InlineAttr::new(InlineMode::Always, Span::default());
 //! let cold = ColdAttr::new(Span::default());
 //! ```
 //!
+
 //! ## Defining Attribute Metadata
 //!
+
 //! ```rust
 //! use verum_ast::attr::{
-//!     AttributeMetadata, AttributeTarget, AttributeCategory,
-//!     ArgSpec, ArgType,
+//!  AttributeMetadata, AttributeTarget, AttributeCategory,
+//!  ArgSpec, ArgType,
 //! };
 //!
+
 //! let meta = AttributeMetadata::new("inline")
-//!     .targets(AttributeTarget::Function)
-//!     .args(ArgSpec::Optional(ArgType::Ident))
-//!     .category(AttributeCategory::Optimization)
-//!     .doc("Control function inlining behavior")
-//!     .conflicts_with(["cold"])
-//!     .build();
+//!  .targets(AttributeTarget::Function)
+//!  .args(ArgSpec::Optional(ArgType::Ident))
+//!  .category(AttributeCategory::Optimization)
+//!  .doc("Control function inlining behavior")
+//!  .conflicts_with(["cold"])
+//!  .build();
 //! ```
 //!
+
 //! ## Checking Attribute Targets
 //!
+
 //! ```rust
 //! use verum_ast::attr::AttributeTarget;
 //!
+
 //! let targets = AttributeTarget::Function | AttributeTarget::Type;
 //! assert!(targets.contains(AttributeTarget::Function));
 //! assert!(!targets.contains(AttributeTarget::Field));
 //! ```
 //!
+
 //! # Attribute Positions and Registry
 //!
+
 //! Verum supports attributes on functions, types, modules, impl blocks, constants,
 //! statics, contexts, protocols (item-level), fields, variants (member-level),
 //! parameters, match arms, loops, expressions, and statements (code-level).
@@ -285,17 +307,21 @@ use verum_common::{List, Maybe, Text};
 
 /// Trait for converting a generic `Attribute` to a typed attribute struct.
 ///
+
 /// This trait enables type-safe extraction of attribute data from the AST.
 ///
+
 /// # Examples
 ///
+
 /// ```rust
 /// use verum_ast::attr::{Attribute, InlineAttr, FromAttribute};
 ///
+
 /// fn process_inline(attr: &Attribute) {
-///     if let Ok(inline) = InlineAttr::from_attribute(attr) {
-///         println!("Inline mode: {:?}", inline.mode);
-///     }
+///  if let Ok(inline) = InlineAttr::from_attribute(attr) {
+///  println!("Inline mode: {:?}", inline.mode);
+///  }
 /// }
 /// ```
 pub trait FromAttribute: Sized {
@@ -304,8 +330,10 @@ pub trait FromAttribute: Sized {
 
     /// Convert from a generic `Attribute` to this typed struct.
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if the attribute name doesn't match or
     /// the arguments are invalid.
     fn from_attribute(attr: &Attribute) -> Result<Self, AttributeConversionError>;
@@ -430,6 +458,7 @@ impl AttributeListExt for List<Attribute> {
 
 /// Common imports for working with attributes.
 ///
+
 /// ```rust
 /// use verum_ast::attr::prelude::*;
 /// ```

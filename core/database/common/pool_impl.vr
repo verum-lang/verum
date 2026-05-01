@@ -5,30 +5,33 @@
 // Spec: internal/specs/database.md §4.3
 // =============================================================================
 //
+
 // Generic connection pool implementation parameterised over a
 // connection type `C` and a factory closure that produces fresh
 // connections on demand. Per-vendor `SqlitePool` / `PgPool` /
 // `MysqlPool` are thin wrappers that pin `C` and inject the
 // vendor-specific factory.
 //
+
 // Internals:
-//   * `Mutex<PoolInner<C>>` guards the idle queue and bookkeeping.
-//   * `idle: List<C>` is a LIFO stack — recent connections are
-//     served first so warm sockets stay warm and TCP RST'd ones get
-//     evicted on the next health-check.
-//   * `outstanding` counts checked-out connections; the pool refuses
-//     to allocate beyond `max_connections`.
-//   * `acquire_timeout_ms` bounds the wait for an available slot.
-//     We poll-and-sleep rather than condvar-await for portability;
-//     the production runtime swaps in `core.async.notify` when the
-//     async-pool variant lands.
+//  * `Mutex<PoolInner<C>>` guards the idle queue and bookkeeping.
+//  * `idle: List<C>` is a LIFO stack — recent connections are
+//  served first so warm sockets stay warm and TCP RST'd ones get
+//  evicted on the next health-check.
+//  * `outstanding` counts checked-out connections; the pool refuses
+//  to allocate beyond `max_connections`.
+//  * `acquire_timeout_ms` bounds the wait for an available slot.
+//  We poll-and-sleep rather than condvar-await for portability;
+//  the production runtime swaps in `core.async.notify` when the
+//  async-pool variant lands.
 //
+
 // Returned `PoolHandle` is affine — drop after use to release the
 // connection. The vendor-specific façade owns the recycle / discard
 // decision via `release_kind`:
-//   * `Healthy`        — return to idle pool.
-//   * `Discard(reason)` — close + decrement outstanding (the next
-//                         acquire reopens via the factory).
+//  * `Healthy` — return to idle pool.
+//  * `Discard(reason)` — close + decrement outstanding (the next
+//  acquire reopens via the factory).
 // =============================================================================
 
 module core.database.common.pool_impl;

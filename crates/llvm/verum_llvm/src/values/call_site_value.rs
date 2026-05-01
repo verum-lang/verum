@@ -103,6 +103,7 @@ impl<'ctx> ValueKind<'ctx> {
 
 /// A value resulting from a function call. It may have function attributes applied to it.
 ///
+
 /// This struct may be removed in the future in favor of an `InstructionValue<CallSite>` type.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub struct CallSiteValue<'ctx>(Value<'ctx>);
@@ -110,8 +111,10 @@ pub struct CallSiteValue<'ctx>(Value<'ctx>);
 impl<'ctx> CallSiteValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and of type call site.
     pub unsafe fn new(value: LLVMValueRef) -> Self {
         CallSiteValue(Value::new(value))
@@ -119,11 +122,14 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Sets whether or not this call is a tail call.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -132,10 +138,13 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.set_tail_call(true);
     /// ```
     pub fn set_tail_call(self, tail_call: bool) {
@@ -144,11 +153,14 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Determines whether or not this call is a tail call.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -157,12 +169,16 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.set_tail_call(true);
     ///
+
     /// assert!(call_site_value.is_tail_call());
     /// ```
     pub fn is_tail_call(self) -> bool {
@@ -171,11 +187,14 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Returns tail, musttail, and notail attributes.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::values::LLVMTailCallKind::*;
     ///
+
     /// let context = verum_llvm::context::Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -184,10 +203,13 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// assert_eq!(call_site.get_tail_call_kind(), LLVMTailCallKindNone);
     /// ```
     pub fn get_tail_call_kind(self) -> super::LLVMTailCallKind {
@@ -196,11 +218,14 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Sets tail, musttail, and notail attributes.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::values::LLVMTailCallKind::*;
     ///
+
     /// let context = verum_llvm::context::Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -209,10 +234,13 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site.set_tail_call_kind(LLVMTailCallKindTail);
     /// assert_eq!(call_site.get_tail_call_kind(), LLVMTailCallKindTail);
     /// ```
@@ -222,11 +250,14 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Try to convert this `CallSiteValue` to a `BasicValueEnum` if not a void return type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -235,10 +266,13 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// assert!(call_site_value.try_as_basic_value().is_instruction());
     /// ```
     pub fn try_as_basic_value(self) -> ValueKind<'ctx> {
@@ -252,12 +286,15 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Adds an `Attribute` to this `CallSiteValue`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -269,10 +306,13 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let enum_attribute = context.create_enum_attribute(1, 0);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// call_site_value.add_attribute(AttributeLoc::Return, enum_attribute);
     /// ```
@@ -284,14 +324,18 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Gets the `FunctionValue` this `CallSiteValue` is based on.
     ///
+
     /// Returns [`None`] if the call this value bases on is indirect or the retrieved function
     /// value doesn't have the same type as the underlying call instruction.
     ///
+
     /// # Example
     ///
+
     /// ```
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -303,10 +347,13 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let enum_attribute = context.create_enum_attribute(1, 0);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// assert_eq!(call_site_value.get_called_fn_value(), Some(fn_value));
     /// ```
     pub fn get_called_fn_value(self) -> Option<FunctionValue<'ctx>> {
@@ -331,11 +378,14 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Gets the type of the function called by the instruction this `CallSiteValue` is based on.
     ///
+
     /// # Example
     ///
+
     /// ```
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -343,12 +393,15 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let fn_type = i32_type.fn_type(&[], false);
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     ///
+
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     /// builder.position_at_end(entry_bb);
     ///
+
     /// // Recursive call.
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// assert_eq!(call_site_value.get_called_fn_type(), fn_type);
     /// ```
     pub fn get_called_fn_type(self) -> FunctionType<'ctx> {
@@ -362,12 +415,15 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Counts the number of `Attribute`s on this `CallSiteValue` at an index.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -379,13 +435,17 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let enum_attribute = context.create_enum_attribute(1, 0);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// call_site_value.add_attribute(AttributeLoc::Return, enum_attribute);
     ///
+
     /// assert_eq!(call_site_value.count_attributes(AttributeLoc::Return), 2);
     /// ```
     pub fn count_attributes(self, loc: AttributeLoc) -> u32 {
@@ -396,12 +456,15 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Get all `Attribute`s on this `CallSiteValue` at an index.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -413,13 +476,17 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let enum_attribute = context.create_enum_attribute(1, 0);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// call_site_value.add_attribute(AttributeLoc::Return, enum_attribute);
     ///
+
     /// assert_eq!(call_site_value.attributes(AttributeLoc::Return), vec![ string_attribute, enum_attribute ]);
     /// ```
     pub fn attributes(self, loc: AttributeLoc) -> Vec<Attribute> {
@@ -455,12 +522,15 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Gets an enum `Attribute` on this `CallSiteValue` at an index and kind id.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -472,13 +542,17 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let enum_attribute = context.create_enum_attribute(1, 0);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// call_site_value.add_attribute(AttributeLoc::Return, enum_attribute);
     ///
+
     /// assert_eq!(call_site_value.get_enum_attribute(AttributeLoc::Return, 1).unwrap(), enum_attribute);
     /// ```
     // SubTypes: -> Attribute<Enum>
@@ -496,12 +570,15 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Gets a string `Attribute` on this `CallSiteValue` at an index and key.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -513,13 +590,17 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let enum_attribute = context.create_enum_attribute(1, 0);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// call_site_value.add_attribute(AttributeLoc::Return, enum_attribute);
     ///
+
     /// assert_eq!(call_site_value.get_string_attribute(AttributeLoc::Return, "my_key").unwrap(), string_attribute);
     /// ```
     // SubTypes: -> Attribute<String>
@@ -544,12 +625,15 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Removes an enum `Attribute` on this `CallSiteValue` at an index and kind id.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -561,14 +645,18 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let enum_attribute = context.create_enum_attribute(1, 0);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// call_site_value.add_attribute(AttributeLoc::Return, enum_attribute);
     /// call_site_value.remove_enum_attribute(AttributeLoc::Return, 1);
     ///
+
     /// assert_eq!(call_site_value.get_enum_attribute(AttributeLoc::Return, 1), None);
     /// ```
     pub fn remove_enum_attribute(self, loc: AttributeLoc, kind_id: u32) {
@@ -579,12 +667,15 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Removes a string `Attribute` on this `CallSiteValue` at an index and key.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -596,14 +687,18 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let enum_attribute = context.create_enum_attribute(1, 0);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.add_attribute(AttributeLoc::Return, string_attribute);
     /// call_site_value.add_attribute(AttributeLoc::Return, enum_attribute);
     /// call_site_value.remove_string_attribute(AttributeLoc::Return, "my_key");
     ///
+
     /// assert_eq!(call_site_value.get_string_attribute(AttributeLoc::Return, "my_key"), None);
     /// ```
     pub fn remove_string_attribute(self, loc: AttributeLoc, key: &str) {
@@ -621,12 +716,15 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Counts the number of arguments this `CallSiteValue` was called with.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -638,10 +736,13 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let enum_attribute = context.create_enum_attribute(1, 0);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// assert_eq!(call_site_value.count_arguments(), 0);
     /// ```
     pub fn count_arguments(self) -> u32 {
@@ -652,11 +753,14 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Gets the calling convention for this `CallSiteValue`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -665,10 +769,13 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// assert_eq!(call_site_value.get_call_convention(), 0);
     /// ```
     pub fn get_call_convention(self) -> u32 {
@@ -677,11 +784,14 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Sets the calling convention for this `CallSiteValue`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -690,12 +800,16 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.set_call_convention(2);
     ///
+
     /// assert_eq!(call_site_value.get_call_convention(), 2);
     /// ```
     pub fn set_call_convention(self, conv: u32) {
@@ -704,16 +818,21 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Shortcut for setting the alignment `Attribute` for this `CallSiteValue`.
     ///
+
     /// # Panics
     ///
+
     /// When the alignment is not a power of 2.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::attributes::AttributeLoc;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -722,10 +841,13 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_bb = context.append_basic_block(fn_value, "entry");
     ///
+
     /// builder.position_at_end(entry_bb);
     ///
+
     /// let call_site_value = builder.build_call(fn_value, &[], "my_fn").unwrap();
     ///
+
     /// call_site_value.set_alignment_attribute(AttributeLoc::Param(0), 2);
     /// ```
     pub fn set_alignment_attribute(self, loc: AttributeLoc, alignment: u32) {
@@ -736,35 +858,43 @@ impl<'ctx> CallSiteValue<'ctx> {
 
     /// Iterate over operand bundles.
     ///
+
     /// # Example
     ///
+
     /// ```
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::OperandBundle;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("op_bundles");
     /// let builder = context.create_builder();
     ///
+
     /// let void_type = context.void_type();
     /// let i32_type = context.i32_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// let fn_value = module.add_function("func", fn_type, None);
     ///
+
     /// let basic_block = context.append_basic_block(fn_value, "entry");
     /// builder.position_at_end(basic_block);
     ///
+
     /// // Recursive call
     /// let callinst = builder.build_direct_call_with_operand_bundles(
-    ///   fn_value,
-    ///   &[],
-    ///   &[OperandBundle::create("tag0", &[i32_type.const_zero().into()]), OperandBundle::create("tag1", &[])],
-    ///   "call"
+    ///  fn_value,
+    ///  &[],
+    ///  &[OperandBundle::create("tag0", &[i32_type.const_zero().into()]), OperandBundle::create("tag1", &[])],
+    ///  "call"
     /// ).unwrap();
     ///
+
     /// builder.build_return(None).unwrap();
     /// # module.verify().unwrap();
     ///
+
     /// let mut op_bundles_iter = callinst.get_operand_bundles();
     /// assert_eq!(op_bundles_iter.len(), 2);
     /// let tags: Vec<String> = op_bundles_iter.map(|ob| ob.get_tag().unwrap().into()).collect();

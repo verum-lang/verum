@@ -1,10 +1,13 @@
 //! Debugging Builtins for @meta_trace
 //!
+
 //! This module provides builtin functions for macro debugging during
 //! compile-time execution. These are Tier 0 functions (always available).
 //!
+
 //! ## Functions
 //!
+
 //! - `meta_trace_on()` - Enable tracing
 //! - `meta_trace_off()` - Disable tracing
 //! - `meta_trace_log(message)` - Log a trace message
@@ -13,22 +16,26 @@
 //! - `meta_trace_is_enabled()` - Check if tracing is enabled
 //! - `meta_trace_depth()` - Get current call depth
 //!
+
 //! ## Usage in Verum
 //!
+
 //! ```verum
 //! @meta fn debug_example() {
-//!     meta_trace_on();
-//!     meta_trace_log("Starting computation");
-//!     let result = compute_something();
-//!     meta_trace_log(f"Result: {result}");
-//!     meta_trace_off();
+//!  meta_trace_on();
+//!  meta_trace_log("Starting computation");
+//!  let result = compute_something();
+//!  meta_trace_log(f"Result: {result}");
+//!  meta_trace_off();
 //!
-//!     // Get all trace output
-//!     let trace = meta_trace_dump();
-//!     compile_warning(trace);
+
+//!  // Get all trace output
+//!  let trace = meta_trace_dump();
+//!  compile_warning(trace);
 //! }
 //! ```
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

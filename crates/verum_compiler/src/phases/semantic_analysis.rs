@@ -1,11 +1,14 @@
 //! Phase 4: Semantic Analysis
 //!
+
 //! Bidirectional type checking with refinement types.
 //!
+
 //! This phase supports two modes:
 //! 1. **StdlibBootstrap**: Compiling stdlib itself (uses minimal context with builtins only)
 //! 2. **NormalBuild**: Compiling user code (loads stdlib types from embedded stdlib.vbca)
 //!
+
 //! Phase 4: Semantic analysis. Name resolution with profile awareness,
 //! bidirectional type checking, refinement subsumption (syntactic + SMT),
 //! reference validation (&mut exclusive, & shared), context resolution.
@@ -44,26 +47,26 @@ pub struct SemanticAnalysisPhase {
     instance_search_enabled: bool,
     coherence_check_depth: u32,
     /// `[protocols].resolution_strategy` — most_specific (default) /
-    /// first_declared / error.  Routed to ProtocolChecker.
+    /// first_declared / error. Routed to ProtocolChecker.
     protocol_resolution_strategy: verum_common::Text,
     /// `[protocols].blanket_impls` — when false, ProtocolChecker
     /// excludes type-variable for_types (blanket impls) from
     /// candidate sets.
     protocol_blanket_impls: bool,
     /// `[protocols].coherence` — strict (default) | lenient |
-    /// unchecked.  Routed to ProtocolChecker.coherence_mode at
+    /// unchecked. Routed to ProtocolChecker.coherence_mode at
     /// the start of `execute()`.
     protocol_coherence_mode: verum_common::Text,
     /// `[protocols].higher_kinded_protocols` — when false (the
     /// manifest default), a protocol declaring an HKT generic
     /// parameter (e.g. `protocol Functor<F<_>>`) is rejected at
-    /// registration time.  Routed to TypeChecker.higher_kinded_
+    /// registration time. Routed to TypeChecker.higher_kinded_
     /// protocols_enabled at the start of `execute()`.
     protocol_higher_kinded_protocols: bool,
     /// `[protocols].generic_associated_types` — when false (the
     /// manifest default), a protocol declaring a generic
     /// associated type (`type Item<T>`) is rejected at
-    /// registration time.  Routed to TypeChecker.generic_
+    /// registration time. Routed to TypeChecker.generic_
     /// associated_types_enabled at the start of `execute()`.
     protocol_generic_associated_types: bool,
 }
@@ -71,6 +74,7 @@ pub struct SemanticAnalysisPhase {
 impl SemanticAnalysisPhase {
     /// Create a new semantic analysis phase in StdlibBootstrap mode.
     ///
+
     /// Uses minimal context with builtins only (no external stdlib).
     pub fn new() -> Self {
         Self {
@@ -95,6 +99,7 @@ impl SemanticAnalysisPhase {
 
     /// Create a new semantic analysis phase in NormalBuild mode.
     ///
+
     /// Uses pre-compiled stdlib types from the provided metadata.
     pub fn with_core(stdlib: Arc<CoreMetadata>) -> Self {
         Self {
@@ -301,6 +306,7 @@ impl CompilationPhase for SemanticAnalysisPhase {
 
         // Create a new type checker for this phase
         //
+
         // Mode selection:
         // - StdlibBootstrap (stdlib_metadata = None): Uses minimal context + builtins only
         // - NormalBuild (stdlib_metadata = Some): Loads stdlib types from pre-compiled metadata
@@ -345,7 +351,7 @@ impl CompilationPhase for SemanticAnalysisPhase {
         phase_checker.set_coherence_check_depth(self.coherence_check_depth);
 
         // Apply `[protocols].*` manifest gates to the embedded
-        // ProtocolChecker.  Pre-fix the resolver hardcoded
+        // ProtocolChecker. Pre-fix the resolver hardcoded
         // "most_specific" + blanket=true regardless of manifest;
         // these calls thread the user's `[protocols].resolution_
         // strategy` and `[protocols].blanket_impls` settings into
@@ -391,6 +397,7 @@ impl CompilationPhase for SemanticAnalysisPhase {
         // Pass 3: Register protocol implementations
         // Pass 4: Type check functions and expressions
         //
+
         // When core sources are prepended (e.g., by run_common_pipeline), the first
         // N-1 modules are stdlib and the last module is user code. Stdlib registration
         // errors are non-fatal (logged as debug) to match pipeline.rs behavior.
@@ -482,6 +489,7 @@ impl CompilationPhase for SemanticAnalysisPhase {
 
         // Pass 4: Type check each item
         //
+
         // Only type-check USER modules, not stdlib modules. Stdlib modules
         // are registered for their type/function/protocol declarations but
         // their function bodies are not checked here (they were validated

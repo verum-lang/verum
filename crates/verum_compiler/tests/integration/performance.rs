@@ -1,17 +1,21 @@
 //! Execution Tier Performance Comparison Tests
 //!
+
 //! Compares performance across the three execution tiers:
 //!
+
 //! - Interpreter: AST walking, slowest but always available
 //! - JIT: Just-in-time compilation via LLVM, 10-100x faster
 //! - AOT: Ahead-of-time compilation, maximum performance
 //!
+
 //! Tests validate:
 //! - Correct functionality across all tiers
 //! - Performance targets met (JIT 10-100x faster than interpreter)
 //! - Graceful fallback when tier unavailable
 //! - Compilation time vs execution time tradeoffs
 //!
+
 //! Performance targets: compilation > 50K LOC/sec, type inference < 100ms/10K LOC,
 //! CBGR overhead < 15ns, runtime 0.85-0.95x native C, memory overhead < 5%.
 //! Two execution tiers: Tier 0 (interpreter, fastest startup, ~100ns CBGR),

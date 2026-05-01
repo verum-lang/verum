@@ -3,10 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §17
 //
+
 // State sequence:
 //
-//   Init → Validating → GeneratingSql → Executing → ApplyingDelta → Done
+
+//  Init → Validating → GeneratingSql → Executing → ApplyingDelta → Done
 //
+
 // On validation failure → `Failed(AlterValidationError)`. On execution
 // failure → `Failed(ExecutionError(message))`.
 // =============================================================================
@@ -84,7 +87,8 @@ implement AlterEngine {
     /// `validate_against` (snapshot) + `sql_runner` (executor). The
     /// loop in the L7 façade is:
     ///
-    ///   while !engine.is_terminal() { engine.step(snap, runner); }
+
+    ///  while !engine.is_terminal() { engine.step(snap, runner); }
     pub fn step(
         &mut self,
         snap: &AlterSchemaSnapshot,

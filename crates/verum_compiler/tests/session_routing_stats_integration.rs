@@ -1,6 +1,7 @@
 //! End-to-end integration test for the `Session → RoutingStats → SMT
 //! switcher` wiring (Task #42).
 //!
+
 //! Constructs a `Session`, extracts its shared `RoutingStats` handle,
 //! feeds that handle into a `SmtBackendSwitcher`, runs a trivial SMT
 //! query, and asserts that the update is visible through the session

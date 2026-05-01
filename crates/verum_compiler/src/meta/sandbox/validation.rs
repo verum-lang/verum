@@ -1,7 +1,9 @@
 //! Expression Validation for Meta Sandbox
 //!
+
 //! Validates expressions and function declarations for sandbox compliance.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -227,6 +229,7 @@ impl ExpressionValidator {
 
     /// Validate an async meta function for I/O operations
     ///
+
     /// CRITICAL: meta async fn is allowed for parallelism but FORBIDS all I/O
     pub fn validate_async_meta_fn(&self, func: &FunctionDecl) -> Result<(), SandboxError> {
         if !func.is_async || !func.is_meta {

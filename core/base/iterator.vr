@@ -156,10 +156,11 @@ public type Iterator is protocol {
 
     /// Get the nth element (0-indexed).
     ///
+
     /// **Negative `n`** returns `None` (no element exists at a
-    /// negative index).  Earlier impl folded into the
+    /// negative index). Earlier impl folded into the
     /// `range(0, n)` loop which is empty for `n < 0` — silently
-    /// returning the FIRST element.  Audit #12 fix.
+    /// returning the FIRST element. Audit #12 fix.
     fn nth(&mut self, n: Int) -> Maybe<Self.Item> {
         if n < 0 {
             return None;
@@ -172,12 +173,13 @@ public type Iterator is protocol {
 
     /// Advance by n elements && return the iterator.
     ///
+
     /// **Negative `n`** is treated as 0 (advance by zero).
     /// Earlier impl had `range(0, n)` empty for `n < 0` and
     /// silently returned `Ok(())` without conveying that the
     /// caller's intent (advance backwards) was unreachable.
     /// `Err(0)` would be misleading too — explicit `Ok(())` for
-    /// the no-op IS the truthful result.  Audit #12 fix
+    /// the no-op IS the truthful result. Audit #12 fix
     /// documents the contract.
     fn advance_by(&mut self, n: Int) -> Result<(), Int> {
         if n <= 0 {
@@ -306,6 +308,7 @@ public type Iterator is protocol {
 
     /// Copy each element from an iterator over references to Copy types.
     ///
+
     /// Similar to `cloned()` but specifically for types that implement `Copy`.
     /// Semantically equivalent but conveys that the copy is trivial (bitwise).
     fn copied<T: Copy>(self) -> Copied<Self>
@@ -315,7 +318,8 @@ public type Iterator is protocol {
 
     /// Group elements into fixed-size chunks.
     ///
-    /// Panics if `size <= 0`.  Same precondition as `step_by` —
+
+    /// Panics if `size <= 0`. Same precondition as `step_by` —
     /// a non-positive chunk size has no sensible semantic and
     /// the underlying ChunksIter::next would either silently
     /// return None forever (size <= 0 → empty chunk → None) or
@@ -328,12 +332,13 @@ public type Iterator is protocol {
 
     /// Sliding window over elements.
     ///
-    /// Panics if `size <= 0`.  Earlier impl with `size = 0`
+
+    /// Panics if `size <= 0`. Earlier impl with `size = 0`
     /// produced an INFINITE stream of empty Lists — the next()
     /// loop never filled the buffer, the buffer-empty branch
     /// returned `Some([])`, then on the next call the buffer
     /// was still empty (we returned a clone, not the original)
-    /// so the same Some([]) flowed forever.  Audit #12 fix.
+    /// so the same Some([]) flowed forever. Audit #12 fix.
     fn windows(self, size: Int) -> WindowsIter<Self> {
         assert(size > 0, "windows size must be positive");
         WindowsIter { iter: self, size: size, buffer: [], done: false }
@@ -456,6 +461,7 @@ public type Iterator is protocol {
     /// Sum elements by extracting a numeric key from each item.
     /// Equivalent to `.map(f).sum()` but reads more naturally.
     ///
+
     /// # Example
     /// ```verum
     /// let total_age = people.iter().sum_by(|p| p.age);
@@ -711,10 +717,12 @@ public type Iterator is protocol {
     /// Returns the index of the partition point: the first index where the
     /// predicate returns `false`.
     ///
+
     /// Assumes the iterator is partitioned: all elements where the predicate
     /// returns `true` come before all elements where it returns `false`.
     /// Consumes the iterator and returns the count of `true` elements.
     ///
+
     /// This is analogous to binary search on a sorted sequence, but works
     /// on any Iterator by linear scan (O(n)).
     fn partition_point<P: fn(&Self.Item) -> Bool>(mut self, predicate: P) -> Int {
@@ -845,19 +853,21 @@ public type Iterator is protocol {
 
     /// Borrow this iterator, allowing partial consumption.
     ///
+
     /// Returns a `ByRef` wrapper that delegates to this iterator.
     /// When the `ByRef` is dropped, the original iterator resumes
     /// from where the borrowing left off.
     ///
+
     /// # Example
     /// ```verum
     /// let mut iter = [1, 2, 3, 4, 5].iter();
     /// // Take the first 2 via by_ref
     /// let mut borrowed = iter.by_ref();
-    /// let first = borrowed.next();  // Some(1)
+    /// let first = borrowed.next(); // Some(1)
     /// let second = borrowed.next(); // Some(2)
     /// // Original iterator continues from 3
-    /// let third = iter.next();      // Some(3)
+    /// let third = iter.next(); // Some(3)
     /// ```
     fn by_ref(&mut self) -> ByRef<Self> {
         ByRef { inner: self }
@@ -869,6 +879,7 @@ public type Iterator is protocol {
 
     /// Split an iterator of pairs into two collections.
     ///
+
     /// # Example
     /// ```verum
     /// let (keys, values) = [(1, "a"), (2, "b")].iter().unzip();
@@ -892,14 +903,16 @@ public type Iterator is protocol {
 
 /// Protocol for iterators that can be traversed from both ends.
 ///
+
 /// A DoubleEndedIterator can yield elements from either the front || the back.
 /// This enables the `rev()` method && algorithms that need to iterate in reverse.
 ///
+
 /// # Example
 /// ```verum
 /// let v = [1, 2, 3, 4, 5];
 /// for x in v.iter().rev() {
-///     print(x);  // 5, 4, 3, 2, 1
+///  print(x); // 5, 4, 3, 2, 1
 /// }
 /// ```
 public type DoubleEndedIterator is protocol extends Iterator {
@@ -943,6 +956,7 @@ public type DoubleEndedIterator is protocol extends Iterator {
 
     /// Find position of matching element from the back.
     ///
+
     /// Returns the index from the front (not from back), consistent with `position()`.
     fn rposition<P: fn(&Self.Item) -> Bool>(&mut self, predicate: P) -> Maybe<Int>
     where Self: ExactSizeIterator {
@@ -973,6 +987,7 @@ public type DoubleEndedIterator is protocol extends Iterator {
 
 /// Reversed iterator adapter.
 ///
+
 /// Created by calling `rev()` on a `DoubleEndedIterator`.
 public type Rev<I> is { iter: I };
 
@@ -1025,6 +1040,7 @@ implement<I: DoubleEndedIterator> IntoIterator for Rev<I> {
 
 /// Protocol for iterators that know their exact remaining length.
 ///
+
 /// Implementors must ensure that `len()` returns the exact number of
 /// remaining elements and that `size_hint()` returns `(len, Some(len))`.
 public type ExactSizeIterator is protocol extends Iterator {
@@ -1043,6 +1059,7 @@ public type ExactSizeIterator is protocol extends Iterator {
 
 /// Marker protocol for iterators that always return `None` after first `None`.
 ///
+
 /// This is a semantic guarantee: once `next()` returns `None`, all
 /// subsequent calls will also return `None`.
 public type FusedIterator is protocol extends Iterator {};
@@ -1182,19 +1199,22 @@ implement FusedIterator for RangeInclusive<USize> {}
 // Clone Implementations for Iterator Adapters
 // =============================================================================
 //
+
 // Iterator adapters are pure record wrappers — they delegate to their
-// inner iterator + closure / state.  Cloning an adapter is therefore
+// inner iterator + closure / state. Cloning an adapter is therefore
 // well-defined when both the inner iterator and any captured fields
 // are themselves Clone, and the resulting clone iterates from the same
 // position as the original.
 //
+
 // Without these implementations any code path that captures an
 // adapter into a closure / `Maybe` / record field and later needs a
 // fresh copy hits the runtime "method 'X.clone' not found on value"
-// panic.  Historical example: the L7 SQLite facade tripped this on
+// panic. Historical example: the L7 SQLite facade tripped this on
 // `FilterMapIter` while compiling stdlib bytecode through the
 // supervisor / pager actor wiring (task #143 / #151).
 //
+
 // Coverage matches the forward-declared adapter set in this module.
 // `CycleIter` already declares `I: Clone` on its forward-declaration
 // (see top of this file) — its element-clone semantics are encoded
@@ -3419,19 +3439,22 @@ implement<T: Clone, F: fn(&T) -> Maybe<T>> Iterator for Successors<T, F> {
 // Spec: docs/improvements.md Section 17.3
 // =============================================================================
 //
+
 // Transducers provide a way to compose sequence transformations that:
 // 1. Execute in a single pass (no intermediate collections)
 // 2. Are independent of input/output sources
 // 3. Can be reused across different data structures
 //
+
 // Example:
 // ```verum
 // let xform = Transducer.compose([
-//     Transducer.filter(|x| x > 0),
-//     Transducer.map(|x| x * 2),
-//     Transducer.take(10),
+//  Transducer.filter(|x| x > 0),
+//  Transducer.map(|x| x * 2),
+//  Transducer.take(10),
 // ]);
 //
+
 // // Apply to any iterator - single pass, no intermediates
 // let result = data.iter().transduce(xform).collect();
 // ```
@@ -3439,6 +3462,7 @@ implement<T: Clone, F: fn(&T) -> Maybe<T>> Iterator for Successors<T, F> {
 
 /// A reducing function that accumulates values.
 ///
+
 /// The core abstraction for transducers. A reducing function takes
 /// an accumulator and an input value, returning an updated accumulator.
 public type Reducer<A, R> is fn(R, A) -> ReduceResult<R>;
@@ -3474,28 +3498,34 @@ implement<R> ReduceResult<R> {
 
 /// A transducer transforms one reducing function into another.
 ///
+
 /// Transducers are the composable units of transformation. They describe
 /// how to transform the step function of a fold operation, enabling:
 /// - Single-pass execution (no intermediate collections)
 /// - Composition of multiple transformations
 /// - Source/sink independence
 ///
+
 /// # Type Parameters
 /// - `A`: Input element type
 /// - `B`: Output element type
 ///
+
 /// The transformation function is rank-2 polymorphic: it works with any
 /// accumulator type R. This enables transducers to be composed and reused
 /// across different reduction contexts without loss of type information.
 ///
+
 /// # Example
 /// ```verum
 /// // A transducer can be applied to any accumulator type:
 /// let xform: Transducer<Int, Int> = Transducer.map(|x| x * 2);
 ///
+
 /// // Use with a List accumulator
 /// let result1: List<Int> = data.iter().transduce(xform).collect();
 ///
+
 /// // Use with a sum accumulator
 /// let result2: Int = data.iter().transduce_fold(xform, 0, |acc, x| acc + x);
 /// ```
@@ -3510,8 +3540,10 @@ public type Transducer<A, B> is {
 public module Transducer {
     /// Create a mapping transducer.
     ///
+
     /// Transforms each input element using the provided function.
     ///
+
     /// # Example
     /// ```verum
     /// let double = Transducer.map(|x| x * 2);
@@ -3526,8 +3558,10 @@ public module Transducer {
 
     /// Create a filtering transducer.
     ///
+
     /// Only passes through elements that satisfy the predicate.
     ///
+
     /// # Example
     /// ```verum
     /// let evens = Transducer.filter(|x| x % 2 == 0);
@@ -3548,8 +3582,10 @@ public module Transducer {
 
     /// Create a filter-map transducer.
     ///
+
     /// Maps and filters in one step - None values are filtered out.
     ///
+
     /// # Example
     /// ```verum
     /// let parse_valid = Transducer.filter_map(|s| s.parse_int().ok());
@@ -3569,8 +3605,10 @@ public module Transducer {
 
     /// Create a take transducer.
     ///
+
     /// Takes only the first n elements, then signals early termination.
     ///
+
     /// # Example
     /// ```verum
     /// let first_10 = Transducer.take(10);
@@ -3598,8 +3636,10 @@ public module Transducer {
 
     /// Create a drop transducer.
     ///
+
     /// Skips the first n elements, passes through the rest.
     ///
+
     /// # Example
     /// ```verum
     /// let skip_header = Transducer.drop(1);
@@ -3622,8 +3662,10 @@ public module Transducer {
 
     /// Create a take-while transducer.
     ///
+
     /// Takes elements while predicate is true, then terminates.
     ///
+
     /// # Example
     /// ```verum
     /// let while_positive = Transducer.take_while(|x| *x > 0);
@@ -3644,6 +3686,7 @@ public module Transducer {
 
     /// Create a drop-while transducer.
     ///
+
     /// Drops elements while predicate is true, passes rest.
     public fn drop_while<A, P: fn(&A) -> Bool>(pred: P) -> StatefulTransducer<A, A, Bool> {
         StatefulTransducer {
@@ -3663,6 +3706,7 @@ public module Transducer {
 
     /// Create a deduplicating transducer.
     ///
+
     /// Removes consecutive duplicates.
     public fn dedupe<A: Eq + Clone>() -> StatefulTransducer<A, A, Maybe<A>> {
         StatefulTransducer {
@@ -3686,14 +3730,16 @@ public module Transducer {
 
     /// Compose two transducers into one.
     ///
+
     /// The resulting transducer first applies `first`, then `second`.
     /// Composition is associative: (a ∘ b) ∘ c = a ∘ (b ∘ c)
     ///
+
     /// # Example
     /// ```verum
     /// let pipeline = Transducer.compose2(
-    ///     Transducer.filter(|x| *x > 0),
-    ///     Transducer.map(|x| x * 2)
+    ///  Transducer.filter(|x| *x > 0),
+    ///  Transducer.map(|x| x * 2)
     /// );
     /// ```
     public fn compose2<A, B, C>(
@@ -3710,14 +3756,16 @@ public module Transducer {
 
     /// Compose a list of transducers.
     ///
+
     /// Applies transducers left-to-right in the list.
     ///
+
     /// # Example
     /// ```verum
     /// let pipeline = Transducer.compose([
-    ///     Transducer.filter(|x| *x > 0),
-    ///     Transducer.map(|x| x * 2),
-    ///     Transducer.take(10),
+    ///  Transducer.filter(|x| *x > 0),
+    ///  Transducer.map(|x| x * 2),
+    ///  Transducer.take(10),
     /// ]);
     /// ```
     public fn compose<A>(transducers: List<Transducer<A, A>>) -> Transducer<A, A> {
@@ -3736,6 +3784,7 @@ public module Transducer {
 
     /// Create an inspect transducer for debugging.
     ///
+
     /// Calls the function on each element without modifying it.
     public fn inspect<A, F: fn(&A)>(f: F) -> Transducer<A, A> {
         Transducer {
@@ -3750,6 +3799,7 @@ public module Transducer {
 
     /// Create an enumerate transducer.
     ///
+
     /// Pairs each element with its index.
     public fn enumerate<A>() -> StatefulTransducer<A, (Int, A), Int> {
         StatefulTransducer {
@@ -3767,9 +3817,11 @@ public module Transducer {
 
 /// Stateful transducer that maintains state across elements.
 ///
+
 /// Used for transducers like `take`, `drop`, `dedupe` that need
 /// to track state between invocations.
 ///
+
 /// The transformation function is rank-2 polymorphic with additional
 /// mutable state access, enabling stateful transformations that work
 /// with any accumulator type.
@@ -3782,19 +3834,22 @@ public type StatefulTransducer<A, B, S> is {
 implement<I: Iterator> I {
     /// Apply a transducer to this iterator.
     ///
+
     /// Returns a new iterator that applies the transducer's transformations
     /// in a single pass without intermediate collections.
     ///
+
     /// # Example
     /// ```verum
     /// let xform = Transducer.compose([
-    ///     Transducer.filter(|x| *x > 0),
-    ///     Transducer.map(|x| x * 2),
+    ///  Transducer.filter(|x| *x > 0),
+    ///  Transducer.map(|x| x * 2),
     /// ]);
     ///
+
     /// let result = numbers.iter()
-    ///     .transduce(xform)
-    ///     .collect();
+    ///  .transduce(xform)
+    ///  .collect();
     /// ```
     fn transduce<B>(self, xform: Transducer<Self.Item, B>) -> TransducedIter<Self, B> {
         TransducedIter {
@@ -3820,6 +3875,7 @@ implement<I: Iterator> I {
 
     /// Fold with early termination support.
     ///
+
     /// Like regular fold, but the reducer can signal early termination
     /// by returning `Reduced(acc)`.
     fn reduce_with<R, F: fn(R, Self.Item) -> ReduceResult<R>>(
@@ -3840,6 +3896,7 @@ implement<I: Iterator> I {
 
 /// Iterator adapter for transduced iteration.
 ///
+
 /// Stores the rank-2 transformation function and applies it lazily
 /// as elements are pulled from the iterator.
 type TransducedIter<I: Iterator, B> is {
@@ -3889,6 +3946,7 @@ implement<I: Iterator, B> Iterator for TransducedIter<I, B> {
 
 /// Iterator adapter for stateful transduced iteration.
 ///
+
 /// Like TransducedIter but with additional mutable state for
 /// transformations that need to track state across elements.
 type StatefulTransducedIter<I: Iterator, B, S> is {

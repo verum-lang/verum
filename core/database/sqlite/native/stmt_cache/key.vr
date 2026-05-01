@@ -3,17 +3,20 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.1
 //
+
 // `CacheKey` is a value-type identity for a prepared statement. Two
 // SQL strings that differ only in whitespace / case (outside string
 // literals) and have the same parameter shape produce the same key.
 //
+
 // Normalisation rules:
-//   * collapse runs of ASCII whitespace into a single space
-//   * fold keyword bytes to lowercase OUTSIDE string + quoted-name
-//     literals (recognised by `'`, `"`, `[…]`, `\`…\``)
-//   * strip leading / trailing whitespace
-//   * drop trailing semicolon
+//  * collapse runs of ASCII whitespace into a single space
+//  * fold keyword bytes to lowercase OUTSIDE string + quoted-name
+//  literals (recognised by `'`, `"`, `[…]`, `\`…\``)
+//  * strip leading / trailing whitespace
+//  * drop trailing semicolon
 //
+
 // Parameter shape: count of `?` + count of `:name` / `@name` / `$name`
 // occurrences (each sequence with the same name counted once).
 // =============================================================================

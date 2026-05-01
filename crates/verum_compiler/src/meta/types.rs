@@ -1,10 +1,13 @@
 //! Core type definitions for meta system
 //!
+
 //! This module provides the fundamental type definition structures for
 //! struct/enum field and variant lookup during compile-time execution.
 //!
+
 //! ## Industrial-Grade Features
 //!
+
 //! This module supports comprehensive type introspection:
 //! - Field and variant lookup
 //! - Attribute retrieval with values
@@ -13,6 +16,7 @@
 //! - Super types (protocol inheritance)
 //! - Method signatures
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -24,6 +28,7 @@ use verum_common::{List, Maybe, Text};
 
 /// Attribute definition with optional value
 ///
+
 /// Represents a compile-time attribute like `@derive(Debug)` or `@deprecated("use X instead")`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeAttribute {
@@ -74,11 +79,14 @@ pub struct MethodSignature {
 
 /// Type definition for struct/enum field and variant lookup
 ///
+
 /// This enables `fields_of` and `variants_of` to work with named types
 /// by storing their definitions at compile time.
 ///
+
 /// ## Industrial-Grade Features
 ///
+
 /// Each type definition now includes:
 /// - Attributes (`@derive`, `@repr`, etc.)
 /// - Documentation strings
@@ -307,6 +315,7 @@ impl TypeDefinition {
 
 /// Protocol implementation record
 ///
+
 /// Tracks which types implement which protocols and with what methods.
 #[derive(Debug, Clone)]
 pub struct ProtocolImplementation {

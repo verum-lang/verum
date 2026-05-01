@@ -1,5 +1,6 @@
 //! Termination checking for recursive functions.
 //!
+
 //! This module ensures that recursive functions terminate by checking that:
 //! 1. Recursive calls are on structurally smaller arguments
 //! 2. At least one argument decreases in size on each recursive call
@@ -7,10 +8,13 @@
 //! 4. Size-change termination for complex recursive patterns
 //! 5. Productivity for coinductive types
 //!
+
 //! Termination checking: ensuring recursive functions terminate via structural recursion on well-founded orderings — Termination and Totality
 //!
+
 //! # Design
 //!
+
 //! The termination checker operates in several phases:
 //! 1. **Call graph construction** - Identify all function calls and recursion
 //! 2. **Structural analysis** - Track which parameters are structurally smaller
@@ -20,24 +24,27 @@
 //! 6. **Mutual recursion** - Analyze strongly connected components
 //! 7. **Productivity checking** - Ensure coinductive definitions are productive
 //!
+
 //! # Examples
 //!
+
 //! ```verum
 //! // Structural recursion - automatically checked
 //! fn length<A>(xs: List<A>) -> Nat =
-//!     match xs {
-//!         Nil => Zero,
-//!         Cons(_, tail) => Succ(length(tail))  // OK: tail smaller than xs
-//!     }
+//!  match xs {
+//!  Nil => Zero,
+//!  Cons(_, tail) => Succ(length(tail)) // OK: tail smaller than xs
+//!  }
 //!
+
 //! // General recursion needs proof
 //! fn ackermann(m: Nat, n: Nat) -> Nat
-//!     decreasing (m, n) by lex_order = {
-//!     match (m, n) {
-//!         (Zero, n) => Succ(n),
-//!         (Succ(m'), Zero) => ackermann(m', Succ(Zero)),
-//!         (Succ(m'), Succ(n')) => ackermann(m', ackermann(Succ(m'), n'))
-//!     }
+//!  decreasing (m, n) by lex_order = {
+//!  match (m, n) {
+//!  (Zero, n) => Succ(n),
+//!  (Succ(m'), Zero) => ackermann(m', Succ(Zero)),
+//!  (Succ(m'), Succ(n')) => ackermann(m', ackermann(Succ(m'), n'))
+//!  }
 //! }
 //! ```
 
@@ -419,10 +426,10 @@ impl TerminationChecker {
         // If the function body has if/match control flow where at least one branch
         // does NOT recurse, treat the function as having a base case (guarded recursion).
         // This handles common patterns like:
-        //   fn gamma(x: Float) -> Float {
-        //       if x < 0.5 { ... gamma(1.0 - x) ... }  // recursive branch
-        //       else { ... }  // base case (no recursion)
-        //   }
+        //  fn gamma(x: Float) -> Float {
+        //  if x < 0.5 { ... gamma(1.0 - x) ... } // recursive branch
+        //  else { ... } // base case (no recursion)
+        //  }
         if self.has_guarded_recursion(block, func_name) {
             return Ok(());
         }
@@ -1281,9 +1288,11 @@ impl TerminationChecker {
 
     /// Extract the context around a call (pattern matching, etc.)
     ///
+
     /// Tracks which parameters are matched against patterns, what constructors
     /// were matched, and which fields/subcomponents are being used.
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Termination Checking
     fn extract_call_context(&self, call: &RecursiveCall) -> CallContext {
         // Start with an empty context

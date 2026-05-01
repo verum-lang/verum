@@ -1,5 +1,6 @@
 //! Expression nodes in the AST.
 //!
+
 //! This module defines all expression types in Verum, including:
 //! - Literals and identifiers
 //! - Arithmetic and logical operations
@@ -84,9 +85,11 @@ impl Spanned for Expr {
 
 /// Capability set for context attenuation
 ///
+
 /// Represents a set of capabilities that a context can provide.
 /// Used with the `attenuate()` method to create restricted sub-contexts.
 ///
+
 /// Capability expression for context-based access control.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CapabilitySet {
@@ -177,9 +180,11 @@ impl Spanned for CapabilitySet {
 
 /// Individual capability that can be granted or restricted
 ///
+
 /// Capabilities follow common patterns across different contexts.
 /// Context implementations can define custom capabilities beyond these standard ones.
 ///
+
 /// Capability expression for context-based access control.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Capability {
@@ -280,19 +285,21 @@ impl Capability {
 
 /// Type property for compile-time type introspection.
 ///
+
 /// Type properties provide zero-overhead access to type metadata at compile time.
 /// These replace deprecated intrinsic functions like `size_of<T>()` with a cleaner
 /// postfix syntax: `T.size` instead of `size_of::<T>()`.
 ///
+
 /// # Examples
 /// ```verum
-/// Int.size          // Size of Int in bytes (8)
-/// Float.alignment   // Alignment requirement of Float (8)
-/// List<Int>.stride  // Memory stride for iteration
-/// i8.min            // Minimum value (-128)
-/// i8.max            // Maximum value (127)
-/// u32.bits          // Bit width (32)
-/// T.name            // Type name as string
+/// Int.size // Size of Int in bytes (8)
+/// Float.alignment // Alignment requirement of Float (8)
+/// List<Int>.stride // Memory stride for iteration
+/// i8.min // Minimum value (-128)
+/// i8.max // Maximum value (127)
+/// u32.bits // Bit width (32)
+/// T.name // Type name as string
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TypeProperty {
@@ -388,6 +395,7 @@ pub enum ExprKind {
 
     /// Named argument in function calls: name: value
     ///
+
     /// Used for keyword arguments in function/method calls:
     /// - `foo(x: 1, y: 2)` - named positional args
     /// - `tensor.sum(axis: 0)` - named method args
@@ -440,53 +448,63 @@ pub enum ExprKind {
 
     /// Plain try block without recover or finally: try { ... }
     ///
+
     /// Grammar: try_expr = 'try' , block ;
     ///
+
     /// A plain try block creates a Result<T, E> from the block's value,
     /// auto-wrapping the final expression in Ok() and capturing any errors
     /// from ? operators within the block.
     ///
+
     /// Example:
     /// ```verum
     /// let result: Result<Int, Text> = try {
-    ///     let x = some_fallible_op()?;
-    ///     x + 1  // Auto-wrapped in Ok(x + 1)
+    ///  let x = some_fallible_op()?;
+    ///  x + 1 // Auto-wrapped in Ok(x + 1)
     /// };
     /// ```
     ///
+
     /// The error type E is inferred from the ? operators used in the block.
     /// If no ? operators are present, E defaults to Never (infallible).
     ///
+
     /// Throws clause for typed error boundaries (Swift 6-inspired).
     TryBlock(Heap<Expr>),
 
     /// Try-recover expression: try { ... } recover { pattern => expr, ... }
     ///
+
     /// Grammar: try_recovery = 'recover' , '{' , match_arms , '}' ;
-    ///          try_recovery = 'recover' , '|' , pattern , '|' , expr ;
+    ///  try_recovery = 'recover' , '|' , pattern , '|' , expr ;
     ///
+
     /// The recover block can use either match arms or closure syntax.
     ///
+
     /// Match arms example:
     /// ```verum
     /// try {
-    ///     // code that may fail
+    ///  // code that may fail
     /// } recover {
-    ///     SomeError(msg) => print(f"Error: {msg}"),
-    ///     OtherError => print(f"Other error"),
-    ///     _ => print(f"Unknown error"),
+    ///  SomeError(msg) => print(f"Error: {msg}"),
+    ///  OtherError => print(f"Other error"),
+    ///  _ => print(f"Unknown error"),
     /// }
     /// ```
     ///
+
     /// Closure example:
     /// ```verum
     /// try {
-    ///     // code that may fail
+    ///  // code that may fail
     /// } recover |e| {
-    ///     log(f"Error occurred: {e}")
+    ///  log(f"Error occurred: {e}")
     /// }
     /// ```
     ///
+
     /// try/recover/finally structured error handling with pattern matching on error types.
     TryRecover {
         try_block: Heap<Expr>,
@@ -502,34 +520,39 @@ pub enum ExprKind {
 
     /// Try-recover-finally expression: try { ... } recover { pattern => expr, ... } finally { ... }
     ///
+
     /// Grammar: try_handlers = try_recovery , [ try_finally ]
-    ///          try_recovery = 'recover' , '{' , match_arms , '}' ;
-    ///          try_recovery = 'recover' , '|' , pattern , '|' , expr ;
+    ///  try_recovery = 'recover' , '{' , match_arms , '}' ;
+    ///  try_recovery = 'recover' , '|' , pattern , '|' , expr ;
     ///
+
     /// Combines recover (match arms or closure) with finally block for resource cleanup.
     ///
+
     /// Match arms example:
     /// ```verum
     /// try {
-    ///     // code that may fail
+    ///  // code that may fail
     /// } recover {
-    ///     FileError(msg) => log(f"File error: {msg}"),
-    ///     _ => log("Unknown error"),
+    ///  FileError(msg) => log(f"File error: {msg}"),
+    ///  _ => log("Unknown error"),
     /// } finally {
-    ///     cleanup()
+    ///  cleanup()
     /// }
     /// ```
     ///
+
     /// Closure example:
     /// ```verum
     /// try {
-    ///     // code that may fail
+    ///  // code that may fail
     /// } recover |e| log(f"Error: {e}")
     /// finally {
-    ///     cleanup()
+    ///  cleanup()
     /// }
     /// ```
     ///
+
     /// try/recover/finally structured error handling with pattern matching on error types.
     TryRecoverFinally {
         try_block: Heap<Expr>,
@@ -559,15 +582,17 @@ pub enum ExprKind {
     /// Stream literal: stream[1, 2, 3, ...] or stream[0..100]
     /// Lazy stream comprehension expression for deferred evaluation.
     ///
+
     /// Creates lazy streams from:
     /// - Element list with optional ellipsis for infinite cycle
     /// - Range expressions for lazy ranges
     ///
+
     /// Examples:
-    /// - stream[1, 2, 3, ...]  -> cycles [1, 2, 3] infinitely
-    /// - stream[0, 1, 2, ...]  -> count_from(0) pattern detected
-    /// - stream[0..100]        -> lazy range [0, 100)
-    /// - stream[0..]           -> infinite range from 0
+    /// - stream[1, 2, 3, ...] -> cycles [1, 2, 3] infinitely
+    /// - stream[0, 1, 2, ...] -> count_from(0) pattern detected
+    /// - stream[0..100] -> lazy range [0, 100)
+    /// - stream[0..] -> infinite range from 0
     StreamLiteral(StreamLiteralExpr),
 
     /// Record expression: Point { x: 1, y: 2 }
@@ -580,6 +605,7 @@ pub enum ExprKind {
 
     /// Interpolated string: f"Hello {name}" or sql"SELECT * FROM {table}"
     ///
+
     /// This represents string interpolation with embedded expressions.
     /// The handler specifies how to process the interpolation (e.g., "f" for format, "sql" for SQL injection protection).
     InterpolatedString {
@@ -594,13 +620,15 @@ pub enum ExprKind {
     /// Tensor literal with compile-time shape validation: tensor<2, 3> Int { [[1, 2, 3], [4, 5, 6]] }
     /// Tensor literal with compile-time shape validation and SIMD acceleration.
     ///
+
     /// This is the PRIMARY approach (P0) for tensor literals with compile-time shape validation.
     /// Shape is encoded in the type system for SIMD/GPU optimization.
     ///
+
     /// Examples:
-    /// - tensor<4> f32 { 1.0, 2.0, 3.0, 4.0 }  // 1D vector
-    /// - tensor<2, 3> Int { [[1, 2, 3], [4, 5, 6]] }  // 2D matrix
-    /// - tensor<3, 224, 224> u8 { ... }  // 3D RGB image
+    /// - tensor<4> f32 { 1.0, 2.0, 3.0, 4.0 } // 1D vector
+    /// - tensor<2, 3> Int { [[1, 2, 3], [4, 5, 6]] } // 2D matrix
+    /// - tensor<3, 224, 224> u8 { ... } // 3D RGB image
     TensorLiteral {
         /// Shape dimensions (compile-time constants)
         shape: List<u64>,
@@ -612,6 +640,7 @@ pub enum ExprKind {
 
     /// Map literal: { "key": value, "key2": value2 }
     ///
+
     /// Distinguished from records by having key-value pairs where keys are expressions (not identifiers).
     MapLiteral {
         /// Key-value pairs
@@ -620,6 +649,7 @@ pub enum ExprKind {
 
     /// Set literal: { 1, 2, 3 }
     ///
+
     /// Distinguished from maps by having single expressions (not key-value pairs).
     SetLiteral {
         /// Set elements
@@ -629,9 +659,11 @@ pub enum ExprKind {
     /// Map comprehension: {k: v for (k, v) in pairs if condition}
     /// Pipeline operator (|>) for left-to-right function chaining.
     ///
+
     /// Produces Map<K, V> from key-value expressions with iteration.
     /// Disambiguated from map literal by 'for' keyword after value expression.
     ///
+
     /// Examples:
     /// - {x: x * x for x in 1..10}
     /// - {name: len for name in names if name.len() > 0}
@@ -648,9 +680,11 @@ pub enum ExprKind {
     /// Set comprehension: set{x for x in items if condition}
     /// State machine expression with compile-time state transition verification.
     ///
+
     /// Produces Set<T> with unique elements from iteration.
     /// Uses 'set' keyword prefix for explicit disambiguation.
     ///
+
     /// Examples:
     /// - set{user.id for user in users}
     /// - set{n for n in 2..100 if is_prime(n)}
@@ -665,11 +699,13 @@ pub enum ExprKind {
     /// Generator expression: gen{x for x in items if condition}
     /// Label block expression for named break targets in nested control flow.
     ///
+
     /// Produces lazy Iterator<T> evaluated on demand.
     /// Memory-efficient for large/infinite sequences.
     ///
+
     /// Examples:
-    /// - gen{x * x for x in 0..}  // infinite squares
+    /// - gen{x * x for x in 0..} // infinite squares
     /// - gen{expensive(x) for x in items if predicate(x)}
     /// - gen{(x, y) for x in xs for y in ys if x != y}
     GeneratorComprehension {
@@ -731,22 +767,26 @@ pub enum ExprKind {
 
     /// For-await loop: for await item in async_stream { ... }
     ///
+
     /// Asynchronously iterates over an async iterable (stream).
     /// This is only valid in async contexts (async fn, async block).
     /// The async_iterable must implement AsyncIterator.
     ///
+
     /// Grammar: for_await_loop = 'for' , 'await' , pattern , 'in' , expression
-    ///                         , { loop_annotation } , block_expr ;
+    ///  , { loop_annotation } , block_expr ;
     ///
+
     /// Example:
     /// ```verum
     /// async fn process_stream(stream: AsyncStream<Item>) {
-    ///     for await item in stream {
-    ///         process(item);
-    ///     }
+    ///  for await item in stream {
+    ///  process(item);
+    ///  }
     /// }
     /// ```
     ///
+
     /// Spec: grammar/verum.ebnf - for_await_loop production (v2.10)
     ForAwait {
         /// Optional label: 'label: for await item in stream { ... }
@@ -777,16 +817,18 @@ pub enum ExprKind {
 
     /// Throw expression: throw error_value
     ///
+
     /// Throws an error value in a function with a `throws` clause.
     /// The error value must match one of the declared error types.
     ///
+
     /// Example:
     /// ```verum
     /// fn validate(s: Text) throws(ValidationError) -> Bool {
-    ///     if s.is_empty() {
-    ///         throw ValidationError.Empty;
-    ///     }
-    ///     true
+    ///  if s.is_empty() {
+    ///  throw ValidationError.Empty;
+    ///  }
+    ///  true
     /// }
     /// ```
     Throw(Heap<Expr>),
@@ -816,9 +858,11 @@ pub enum ExprKind {
 
     /// Await expression: expr.await
     ///
+
     /// Suspends the current async context until the future completes.
     /// Can only be used within async functions or blocks.
     ///
+
     /// Example:
     /// ```verum
     /// let result = fetch_data().await
@@ -827,10 +871,12 @@ pub enum ExprKind {
 
     /// Spawn expression: spawn expr with context requirements
     ///
+
     /// Spawns a new concurrent task with specified context requirements.
     /// The task runs independently and returns a handle that can be awaited.
     /// Contexts provide dependency injection (NOT algebraic effects).
     ///
+
     /// Example:
     /// ```verum
     /// let handle = spawn { compute_value() } using [Database, Logger]
@@ -844,9 +890,11 @@ pub enum ExprKind {
 
     /// Inject expression: `inject TypeName`
     ///
+
     /// Level 1 static dependency injection. Resolves a type from the DI container.
     /// Cost: 0ns for Singleton (field access), ~3ns for Request, ~8ns for Transient.
     ///
+
     /// Grammar: inject_expr = 'inject' , type_path ;
     /// Spec: docs/detailed/16-context-system.md Section 1A
     Inject {
@@ -856,18 +904,21 @@ pub enum ExprKind {
 
     /// Async select expression: `select [biased] { arm1 => expr1, arm2 => expr2, default => expr3 }`
     ///
+
     /// Waits for one of multiple futures to complete and executes the corresponding arm.
     /// Similar to Go's select or Tokio's select! macro, but as a first-class expression.
     ///
+
     /// Spec: grammar/verum.ebnf - select_expr production
     /// Select expression for multiplexing over channels or async operations.
     ///
+
     /// Example:
     /// ```verum
     /// let result = select {
-    ///     data = fetch_data().await => process(data),
-    ///     _ = timeout(1000).await => Err("timeout"),
-    ///     default => cached_value,
+    ///  data = fetch_data().await => process(data),
+    ///  _ = timeout(1000).await => Err("timeout"),
+    ///  default => cached_value,
     /// };
     /// ```
     Select {
@@ -882,38 +933,44 @@ pub enum ExprKind {
 
     /// Nursery expression: structured concurrency with guaranteed task completion
     ///
+
     /// Implements structured concurrency where all spawned tasks MUST complete
     /// before the nursery scope exits. If any task panics, all others are cancelled.
     ///
+
     /// Nursery block for structured concurrency with bounded task lifetimes.
     /// Grammar: grammar/verum.ebnf Section 2.12.3 - nursery_expr
     ///
+
     /// # Semantics
     /// - All tasks spawned within nursery must complete before nursery exits
     /// - If any task panics/errors, all other tasks are cancelled
     /// - Supports optional timeout and error recovery
     /// - Task results are collected and available after nursery
     ///
+
     /// # Examples
     /// ```verum
     /// // Basic nursery - all tasks complete before scope exits
     /// nursery {
-    ///     let a = spawn fetch_a();
-    ///     let b = spawn fetch_b();
+    ///  let a = spawn fetch_a();
+    ///  let b = spawn fetch_b();
     /// }
     ///
+
     /// // Nursery with timeout
     /// nursery(timeout: 5.seconds) {
-    ///     let result = spawn fetch_data();
+    ///  let result = spawn fetch_data();
     /// } on_cancel {
-    ///     cleanup();
+    ///  cleanup();
     /// }
     ///
+
     /// // Nursery with error recovery
     /// nursery {
-    ///     let a = spawn fetch_a();
+    ///  let a = spawn fetch_a();
     /// } recover {
-    ///     TimeoutError => default_value,
+    ///  TimeoutError => default_value,
     /// }
     /// ```
     Nursery {
@@ -937,37 +994,43 @@ pub enum ExprKind {
 
     /// Quote expression for code generation: quote { token_tree } or quote(N) { token_tree }
     ///
+
     /// Quote expressions are used in meta functions to generate code at compile-time.
     /// The optional stage parameter specifies the target stage for N-level staged compilation.
     ///
+
     /// Syntax:
     /// - `quote { token_tree }` - Generate code for the default stage (N-1)
     /// - `quote(N) { token_tree }` - Generate code for stage N
     ///
+
     /// Within the token tree, interpolation is supported:
     /// - `$ident` - Splice the value of identifier
     /// - `${expr}` - Splice the result of expression
     /// - `$[for pattern in expr { ... }]` - Repetition
     /// - `$(stage N){ expr }` - Stage-specific escape
     ///
+
     /// Examples:
     /// ```verum
     /// meta fn generate_impl<T>() -> TokenStream {
-    ///     quote {
-    ///         implement Display for $T {
-    ///             fn fmt(&self, f: &mut Formatter) -> FormatResult {
-    ///                 f.write_str(stringify!($T))
-    ///             }
-    ///         }
-    ///     }
+    ///  quote {
+    ///  implement Display for $T {
+    ///  fn fmt(&self, f: &mut Formatter) -> FormatResult {
+    ///  f.write_str(stringify!($T))
+    ///  }
+    ///  }
+    ///  }
     /// }
     ///
+
     /// // Stage-specific quote for multi-level staging
     /// meta(2) fn gen_stage_1() -> TokenStream {
-    ///     quote(1) { fn generated() -> Int { 42 } }
+    ///  quote(1) { fn generated() -> Int { 42 } }
     /// }
     /// ```
     ///
+
     /// Spec: grammar/verum.ebnf - quote_expr production
     /// Staged meta-programming expression for compile-time code generation.
     Quote {
@@ -979,30 +1042,35 @@ pub enum ExprKind {
 
     /// Stage escape expression: $(stage N){ expr }
     ///
+
     /// Used within quote blocks to escape to a specific stage and evaluate
     /// an expression at that stage. The result is spliced back into the
     /// surrounding quoted code.
     ///
+
     /// This enables multi-stage computation where values computed at higher
     /// stages can be injected into lower-stage code generation.
     ///
+
     /// Syntax: `$(stage N){ expr }`
     ///
+
     /// Examples:
     /// ```verum
     /// // In a stage-2 function, generate stage-1 code with computed values
     /// meta(2) fn generate_family() -> TokenStream {
-    ///     let count = compute_member_count();  // Evaluated at stage 2
-    ///     quote {
-    ///         meta fn derive_member() -> TokenStream {
-    ///             // count is evaluated at stage 2 and injected here
-    ///             let field_count = $(stage 2){ count };
-    ///             quote { }
-    ///         }
-    ///     }
+    ///  let count = compute_member_count(); // Evaluated at stage 2
+    ///  quote {
+    ///  meta fn derive_member() -> TokenStream {
+    ///  // count is evaluated at stage 2 and injected here
+    ///  let field_count = $(stage 2){ count };
+    ///  quote { }
+    ///  }
+    ///  }
     /// }
     /// ```
     ///
+
     /// Spec: grammar/verum.ebnf - quote_stage_escape production
     /// Staged meta-programming expression for compile-time code generation.
     StageEscape {
@@ -1014,31 +1082,36 @@ pub enum ExprKind {
 
     /// Lift expression: `lift(expr)` - syntactic sugar for `$(stage current){ expr }`
     ///
+
     /// Lifts a compile-time value into the generated code at the current stage.
     /// This is a convenience syntax for stage escapes where the stage level is
     /// the current stage (most common use case).
     ///
+
     /// ## Syntax
     /// ```verum
     /// lift(expr)
     /// ```
     ///
+
     /// ## Equivalent to
     /// ```verum
     /// $(stage current){ expr }
     /// ```
     ///
+
     /// ## Example
     /// ```verum
     /// meta fn generate_constant() -> Ast {
-    ///     let value = 42;
-    ///     quote {
-    ///         let x = lift(value);  // Lifts compile-time value into generated code
-    ///         x
-    ///     }
+    ///  let value = 42;
+    ///  quote {
+    ///  let x = lift(value); // Lifts compile-time value into generated code
+    ///  x
+    ///  }
     /// }
     /// ```
     ///
+
     /// Spec: grammar/verum.ebnf - quote_lift production
     /// Compile-time evaluation of meta expressions with staging support.
     Lift {
@@ -1048,23 +1121,27 @@ pub enum ExprKind {
 
     /// Meta-level function expression: @file, @line, @cfg(debug), @const expr, etc.
     ///
+
     /// These are compile-time intrinsics that provide source location information,
     /// configuration checks, compile-time evaluation, and other meta-level features.
     ///
+
     /// Syntax: `@name` or `@name(args)`
     ///
+
     /// Examples:
     /// ```verum
-    /// let file = @file;           // Source file name
-    /// let line = @line;           // Source line number
-    /// let col = @column;          // Source column
-    /// if @cfg(debug) { ... }      // Configuration check
-    /// const X = @const expr;      // Compile-time evaluation
-    /// @stringify(identifier)      // Token stringification
-    /// @concat("a", "b")           // Compile-time concatenation
-    /// @warning("deprecated")      // Compile-time warning
+    /// let file = @file; // Source file name
+    /// let line = @line; // Source line number
+    /// let col = @column; // Source column
+    /// if @cfg(debug) { ... } // Configuration check
+    /// const X = @const expr; // Compile-time evaluation
+    /// @stringify(identifier) // Token stringification
+    /// @concat("a", "b") // Compile-time concatenation
+    /// @warning("deprecated") // Compile-time warning
     /// ```
     ///
+
     /// Spec: grammar/verum.ebnf Section 2.20.6 - Meta-Level Functions
     MetaFunction {
         /// Name of the meta-function (file, line, column, cfg, const, stringify, etc.)
@@ -1075,11 +1152,14 @@ pub enum ExprKind {
 
     /// Macro invocation: path!(args)
     ///
+
     /// Represents compile-time macro expansion with token tree arguments.
     /// The macro system processes this during parsing/compilation.
     ///
+
     /// Syntax: `macro_name!(args)` or `path::to::macro!(args)`
     ///
+
     /// Examples:
     /// ```verum
     /// println!("Hello, world!")
@@ -1087,6 +1167,7 @@ pub enum ExprKind {
     /// assert_eq!(x, 42)
     /// ```
     ///
+
     /// Spec: grammar/verum.ebnf - meta_call production
     MacroCall {
         /// Path to the macro (e.g., println, vec, std::assert_eq)
@@ -1097,16 +1178,19 @@ pub enum ExprKind {
 
     /// Context handler binding: use C = handler in expr
     ///
+
     /// This binds a context handler for context C within the scope of expr.
     /// The handler expression is invoked when the context C is triggered,
     /// and the body expression executes with the bound handler in scope.
     ///
+
     /// Syntax: `use ContextName = handler_expr in body_expr`
     ///
+
     /// Example:
     /// ```verum
     /// use State = state_handler in {
-    ///     get() + 1
+    ///  get() + 1
     /// }
     /// ```
     UseContext {
@@ -1120,9 +1204,11 @@ pub enum ExprKind {
 
     /// Type bound condition for compile-time context requirements: T: Bound
     ///
+
     /// Used in conditional context requirements like:
     /// `using [Validator if T: Validatable]`
     ///
+
     /// This is evaluated at compile-time to determine if the context is required.
     TypeBound {
         /// The type parameter (e.g., T)
@@ -1140,14 +1226,17 @@ pub enum ExprKind {
 
     /// Universal quantifier: ∀x: T. predicate(x)
     ///
+
     /// Used in dependent types and formal verification (v2.0+).
     /// Expresses that a predicate holds for all values of a type.
     ///
+
     /// Example:
     /// ```verum
     /// forall (x: Int) => x + 0 == x
     /// ```
     ///
+
     /// Type-level computation (v2.0+ planned): types that depend on values.
     /// Universal/existential quantifiers for proof terms (v2.0+ planned).
     Forall {
@@ -1160,16 +1249,19 @@ pub enum ExprKind {
 
     /// Existential quantifier: ∃x: T. predicate(x) or ∃x ∈ S. predicate(x)
     ///
+
     /// Used in dependent types and formal verification (v2.0+).
     /// Expresses that there exists at least one value satisfying a predicate.
     ///
+
     /// Examples:
     /// ```verum
-    /// exists (x: Int) => x * x == 4           // type-based
-    /// exists x in items. x > 0               // collection-based
-    /// exists x in items where x > 0. x < 10  // with guard
+    /// exists (x: Int) => x * x == 4 // type-based
+    /// exists x in items. x > 0 // collection-based
+    /// exists x in items where x > 0. x < 10 // with guard
     /// ```
     ///
+
     /// Type-level computation (v2.0+ planned): types that depend on values.
     /// Universal/existential quantifiers for proof terms (v2.0+ planned).
     /// Quantifier expression for dependent types and proofs.
@@ -1186,19 +1278,23 @@ pub enum ExprKind {
 
     /// Destructuring assignment expression
     ///
+
     /// Allows assignment to tuple, record, or array patterns:
     /// - `(a, b) = (b, a);` - tuple swap
     /// - `Point { x, y } = compute_point();` - record destructuring
     /// - `[first, second, ..] = items;` - array destructuring
     /// - `(x, y) += (dx, dy);` - compound destructuring
     ///
+
     /// The pattern on the LHS is validated to only contain assignable targets:
     /// - Identifiers (must be mutable variables in scope)
     /// - Place expressions (field access, index, deref, tuple index)
     /// - Wildcards (values discarded)
     ///
+
     /// Nested destructuring is supported: `((a, b), c) = nested_tuple();`
     ///
+
     /// Algebraic effect handler expression (experimental).
     DestructuringAssign {
         /// The destructuring pattern (tuple, record, array with places)
@@ -1211,9 +1307,11 @@ pub enum ExprKind {
 
     /// Pattern test expression: `value is Pattern` or `value is not Pattern`
     ///
+
     /// Tests whether a value matches a pattern, returning a boolean.
     /// This replaces Rust's `matches!(x, P)` macro with cleaner syntax.
     ///
+
     /// Examples:
     /// ```verum
     /// if x is Some(value) { ... }
@@ -1221,6 +1319,7 @@ pub enum ExprKind {
     /// let valid = response is Ok { status: 200 };
     /// ```
     ///
+
     /// Built-in function call: print, panic, assert, assert_eq, unreachable, join, select.
     Is {
         /// The expression to test
@@ -1233,17 +1332,20 @@ pub enum ExprKind {
 
     /// Context capability attenuation: context.attenuate(capabilities)
     ///
+
     /// Context access expression: reads from the current task-local context environment.
     ///
+
     /// Creates a restricted sub-context with reduced capabilities.
     /// The attenuated context can be used with `using [attenuated as OriginalType]`.
     ///
+
     /// Example:
     /// ```verum
     /// let read_only = Database.attenuate(Capability.ReadOnly);
     /// using [read_only as Database] {
-    ///     db.query("SELECT * FROM users")  // OK
-    ///     db.execute("DELETE FROM users")  // COMPILE ERROR
+    ///  db.query("SELECT * FROM users") // OK
+    ///  db.execute("DELETE FROM users") // COMPILE ERROR
     /// }
     /// ```
     Attenuate {
@@ -1255,18 +1357,20 @@ pub enum ExprKind {
 
     /// Type property access: T.size, T.alignment, T.stride, T.min, T.max, T.bits, T.name
     ///
+
     /// Provides compile-time access to type metadata. This is the modern syntax
     /// that replaces the deprecated size_of<T>() function-style syntax.
     ///
+
     /// Example:
     /// ```verum
-    /// let sz = Int.size;       // Size of Int in bytes
-    /// let align = f64.alignment;  // Alignment requirement
-    /// let name = MyType.name;  // Type name as Text
-    /// let bits = u32.bits;     // Bit width (32)
-    /// let min_val = i8.min;    // Minimum value (-128)
-    /// let max_val = i8.max;    // Maximum value (127)
-    /// let stride = [Int; 10].stride;  // Element stride in arrays
+    /// let sz = Int.size; // Size of Int in bytes
+    /// let align = f64.alignment; // Alignment requirement
+    /// let name = MyType.name; // Type name as Text
+    /// let bits = u32.bits; // Bit width (32)
+    /// let min_val = i8.min; // Minimum value (-128)
+    /// let max_val = i8.max; // Maximum value (127)
+    /// let stride = [Int; 10].stride; // Element stride in arrays
     /// ```
     TypeProperty {
         /// The type whose property is being accessed
@@ -1277,20 +1381,24 @@ pub enum ExprKind {
 
     /// Type expression in expression position: List<Int>, Repository<User>
     ///
+
     /// This allows using a generic type in expression position, enabling patterns like:
     /// - Context method calls: `Repository<User>.find(id)`
     /// - Static method calls: `List<Int>.new()`
     /// - Associated function calls: `Map<Text, Int>.with_capacity(10)`
     ///
+
     /// The type checker resolves these to the appropriate method dispatch.
     ///
+
     /// # Examples
     /// ```verum
     /// // Context method call with generic context
     /// fn uses_user_repo() using [Repository<User>] {
-    ///     Repository<User>.find(1)
+    ///  Repository<User>.find(1)
     /// }
     ///
+
     /// // Static method on generic type
     /// let list = List<Int>.new();
     /// ```
@@ -1298,31 +1406,38 @@ pub enum ExprKind {
 
     /// Inline assembly expression: @asm("template", operands, options)
     ///
+
     /// Provides escape hatch for platform-specific operations while maintaining
     /// type safety through operand constraints.
     ///
+
     /// # Syntax
     ///
+
     /// ```verum
     /// @asm(
-    ///     "assembly template with {0}, {1}",
-    ///     [
-    ///         out("=r", result),
-    ///         in("r", input),
-    ///         inout("=r", &mut value),
-    ///     ],
-    ///     volatile, preserves_flags
+    ///  "assembly template with {0}, {1}",
+    ///  [
+    ///  out("=r", result),
+    ///  in("r", input),
+    ///  inout("=r", &mut value),
+    ///  ],
+    ///  volatile, preserves_flags
     /// )
     /// ```
     ///
+
     /// # Template Syntax
     ///
+
     /// - `{0}`, `{1}`, etc. - positional operand references
     /// - `{name}` - named operand references
     /// - `{{` / `}}` - literal braces
     ///
+
     /// # Operand Constraints
     ///
+
     /// - `in("constraint", expr)` - input operand
     /// - `out("constraint", lvalue)` - output operand
     /// - `inout("constraint", lvalue)` - input/output operand
@@ -1330,14 +1445,17 @@ pub enum ExprKind {
     /// - `sym(symbol)` - symbolic operand
     /// - `const(expr)` - constant expression
     ///
+
     /// # Common Constraints
     ///
+
     /// - `"r"` - general purpose register
     /// - `"m"` - memory location
     /// - `"i"` - immediate integer
     /// - `"x"` - SSE register (x86)
     /// - `"v"` - vector register (ARM)
     ///
+
     /// Inline assembly expression for direct hardware access in systems programming.
     InlineAsm {
         /// Assembly template string with operand placeholders
@@ -1350,30 +1468,35 @@ pub enum ExprKind {
 
     /// Calculational proof block: calc { expr == { by justification } expr ... }
     ///
+
     /// Enables equational reasoning chains in both proof and regular contexts.
     /// Each step relates expressions via a relation (==, <, <=, etc.) with a justification.
     CalcBlock(crate::decl::CalculationChain),
 
     /// Copattern body: defines a coinductive value by observation.
     ///
+
     /// Used as the body of a `cofix fn` to specify what each observation/destructor returns.
     /// Each arm maps an observation name to the expression that is returned when the
     /// observation is applied to the coinductive value.
     ///
+
     /// # Syntax
     /// ```verum
     /// cofix fn nats_from(n: Int) -> Stream<Int> {
-    ///     .head => n,
-    ///     .tail => nats_from(n + 1),
+    ///  .head => n,
+    ///  .tail => nats_from(n + 1),
     /// }
     /// ```
     ///
+
     /// # Semantics
     /// A copattern body defines an element of a coinductive type by exhaustively
     /// specifying the result of every destructor/observation. The productivity
     /// checker (`verum_types::coinductive_analysis`) verifies that each recursive
     /// call is guarded by at least one observation (ensuring the stream is productive).
     ///
+
     /// Spec: grammar/verum.ebnf - copattern_body production
     CopatternBody {
         arms: List<CopatternArm>,
@@ -1383,14 +1506,17 @@ pub enum ExprKind {
 
 /// A single arm in a copattern body.
 ///
+
 /// Binds an observation name (destructor) to the expression to evaluate when
 /// that observation is applied to the coinductive value being defined.
 ///
+
 /// # Syntax
 /// ```text
 /// .observation_name => expression
 /// ```
 ///
+
 /// # Example
 /// `.head => n` — the `head` observation returns `n`
 /// `.tail => nats_from(n + 1)` — the `tail` observation returns `nats_from(n + 1)`
@@ -1416,6 +1542,7 @@ impl Spanned for CopatternArm {
 
 /// Inline assembly operand.
 ///
+
 /// Represents a single operand in an @asm expression, specifying how
 /// data flows between Verum and the assembly code.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1477,6 +1604,7 @@ pub enum AsmOperandKind {
 
 /// Assembly operand constraint.
 ///
+
 /// Constraints specify which registers or memory locations can be used
 /// for an operand.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1826,18 +1954,22 @@ pub enum ComprehensionClauseKind {
 
 /// Quantifier binding for forall/exists expressions.
 ///
+
 /// Supports three forms of quantification:
-/// 1. Type-based:       `x: Int`           - variable ranges over type
-/// 2. Collection-based: `x in items`       - variable ranges over collection elements
-/// 3. Combined:         `x: Int in 0..100` - explicit type with bounded domain
+/// 1. Type-based: `x: Int` - variable ranges over type
+/// 2. Collection-based: `x in items` - variable ranges over collection elements
+/// 3. Combined: `x: Int in 0..100` - explicit type with bounded domain
 ///
+
 /// Optional guard condition filters the domain: `x in items where x > 0`
 ///
+
 /// Mathematical correspondence:
-/// - `forall x: T. P(x)`              ≡ ∀x:T. P(x)
-/// - `forall x in S. P(x)`            ≡ ∀x∈S. P(x)
+/// - `forall x: T. P(x)` ≡ ∀x:T. P(x)
+/// - `forall x in S. P(x)` ≡ ∀x∈S. P(x)
 /// - `forall x in S where Q(x). P(x)` ≡ ∀x∈S. Q(x) → P(x)
 ///
+
 /// Quantifier expression for dependent types and proofs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QuantifierBinding {
@@ -1962,15 +2094,17 @@ impl Spanned for FieldInit {
 /// Stream literal expression for lazy stream construction.
 /// Lazy stream comprehension expression for deferred evaluation.
 ///
+
 /// Creates lazy streams from either:
 /// - Elements with optional infinite cycle marker (...)
 /// - Range expressions for lazy ranges
 ///
+
 /// Examples:
 /// - `stream[1, 2, 3, ...]` -> cycles [1, 2, 3] infinitely
 /// - `stream[0, 1, 2, ...]` -> count_from(0) if arithmetic sequence detected
-/// - `stream[0..100]`       -> lazy range [0, 100)
-/// - `stream[0..]`          -> infinite range from 0
+/// - `stream[0..100]` -> lazy range [0, 100)
+/// - `stream[0..]` -> infinite range from 0
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StreamLiteralExpr {
     /// The kind of stream literal
@@ -2030,9 +2164,11 @@ impl Spanned for StreamLiteralExpr {
 
 /// A single arm in a select expression.
 ///
+
 /// Represents either a future arm (`pattern = future.await [if guard] => body`)
 /// or a default arm (`else => body`).
 ///
+
 /// Select expression for multiplexing over channels or async operations.
 /// Grammar: grammar/verum.ebnf v2.9 - select_arm
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2056,6 +2192,7 @@ pub struct SelectArm {
 impl SelectArm {
     /// Create a new future arm: `pattern = future.await [if guard] => body`
     ///
+
     /// # Arguments
     /// * `attributes` - Optional attributes on the arm (e.g., `@cold`, `@likely`)
     /// * `pattern` - Pattern to bind the awaited value
@@ -2083,6 +2220,7 @@ impl SelectArm {
 
     /// Create an else/default arm: `else => body`
     ///
+
     /// The else arm has no attributes, pattern, future, or guard.
     pub fn else_arm(body: Heap<Expr>, span: Span) -> Self {
         Self {
@@ -2097,6 +2235,7 @@ impl SelectArm {
 
     /// Create an else arm with attributes: `@attr else => body`
     ///
+
     /// Allows attributes on else arms for optimization hints.
     pub fn else_arm_with_attrs(
         attributes: List<crate::attr::Attribute>,
@@ -2136,13 +2275,15 @@ impl Spanned for SelectArm {
 
 /// Options for nursery expression configuration.
 ///
+
 /// Nursery block for structured concurrency with bounded task lifetimes.
 /// Grammar: grammar/verum.ebnf Section 2.12.3 - nursery_options
 ///
+
 /// # Example
 /// ```verum
 /// nursery(timeout: 5.seconds, on_error: cancel_all, max_tasks: 10) {
-///     // ...
+///  // ...
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2206,8 +2347,10 @@ impl NurseryOptions {
 
 /// Error handling behavior for nursery.
 ///
+
 /// Determines what happens when a task within the nursery fails.
 ///
+
 /// Nursery block for structured concurrency with bounded task lifetimes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[derive(Default)]
@@ -2287,10 +2430,12 @@ impl Spanned for ClosureParam {
 
 /// Body of a recover block - either match arms or closure syntax.
 ///
+
 /// The recover block can use two syntaxes:
 /// 1. Match arms: `recover { pattern => expr, ... }`
 /// 2. Closure: `recover |e| expr` or `recover |e: ErrorType| { ... }`
 ///
+
 /// try/recover/finally structured error handling with pattern matching on error types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RecoverBody {
@@ -2318,9 +2463,11 @@ impl Spanned for RecoverBody {
 
 /// Parameter for recover closure syntax: `|e|` or `|e: ErrorType|`
 ///
+
 /// Similar to `ClosureParam` but specific to recover closures.
 /// The pattern can be a simple identifier or a more complex destructuring pattern.
 ///
+
 /// try/recover/finally structured error handling with pattern matching on error types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecoverClosureParam {
@@ -2346,6 +2493,7 @@ impl Spanned for RecoverClosureParam {
 
 /// Reference kind for CBGR tier selection
 ///
+
 /// CBGR (Capability-Based Generational References) expression for memory safety.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ReferenceKind {
@@ -2360,9 +2508,11 @@ pub enum ReferenceKind {
 
 /// Macro invocation arguments with delimiter type.
 ///
+
 /// Represents the token tree arguments to a macro invocation,
 /// along with the delimiter used (parentheses, brackets, or braces).
 ///
+
 /// Spec: grammar/verum.ebnf - meta_call_args production
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MacroArgs {
@@ -2392,6 +2542,7 @@ impl Spanned for MacroArgs {
 
 /// Delimiter type for macro arguments.
 ///
+
 /// Spec: grammar/verum.ebnf - meta_call_args production
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MacroDelimiter {
@@ -2405,10 +2556,12 @@ pub enum MacroDelimiter {
 
 /// A single element in a token tree.
 ///
+
 /// Token trees are the fundamental structure for macro arguments in Verum.
 /// They preserve the structure of the source code while allowing macros
 /// to process tokens at a lower level than the parsed AST.
 ///
+
 /// Spec: grammar/verum.ebnf - token_tree production
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TokenTree {
@@ -2470,6 +2623,7 @@ impl TokenTree {
 
 /// A single token within a token tree.
 ///
+
 /// This is a simplified representation of tokens that preserves
 /// the essential information needed for macro processing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2513,6 +2667,7 @@ pub enum TokenTreeKind {
 
 /// Extended macro arguments with full token tree support.
 ///
+
 /// This structure holds both the raw text and the parsed token tree,
 /// allowing macros to work with either representation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

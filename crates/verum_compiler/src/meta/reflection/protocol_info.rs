@@ -1,5 +1,6 @@
 //! Protocol information for compile-time reflection
 //!
+
 //! Provides protocol/trait metadata matching core/meta/reflection.vr ProtocolInfo.
 
 use verum_common::{List, Maybe, Text};
@@ -9,6 +10,7 @@ use super::generic_param::GenericParam;
 
 /// Associated type information
 ///
+
 /// Matches: core/meta/reflection.vr AssociatedTypeInfo
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssociatedTypeInfo {
@@ -50,6 +52,7 @@ impl AssociatedTypeInfo {
 
 /// Information about a protocol (trait)
 ///
+
 /// Matches: core/meta/reflection.vr ProtocolInfo
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolInfo {

@@ -1,56 +1,68 @@
 //! # Capability-Based SMT Solver Router
 //!
+
 //! Intelligent dispatcher that routes each proof goal to the most capable
 //! SMT solver, using the complementary strengths of Z3 and CVC5.
 //!
+
 //! ## Design Philosophy
 //!
+
 //! Z3 and CVC5 are both top-tier SMT solvers, but they excel at different
 //! theories:
 //!
-//! | Theory                      | Winner | Rationale                              |
+
+//! | Theory | Winner | Rationale |
 //! |-----------------------------|--------|----------------------------------------|
-//! | Linear Integer Arithmetic   | Z3     | Faster LIA decision procedure          |
-//! | Bit-vectors                 | Z3     | Aggressive bit-blasting                |
-//! | Arrays                      | Z3     | Optimized McCarthy axiom engine        |
-//! | E-matching quantifiers      | Z3     | More sophisticated pattern matching    |
-//! | Interpolation               | Z3     | CVC5 has no interpolation              |
-//! | Optimization (MaxSMT)       | Z3     | Production-grade optimizer             |
-//! | Nonlinear Real Arithmetic   | CVC5   | CAD (cylindrical algebraic decomp.)    |
-//! | Strings / Regex             | CVC5   | Native string theory                   |
-//! | Sequences                   | CVC5   | Z3 has no sequence theory              |
-//! | Inductive datatypes         | CVC5   | Coq-inspired datatype reasoning        |
-//! | Finite model finding        | CVC5   | Specialized mode                       |
-//! | Higher-order logic          | CVC5   | Experimental HOL support               |
+//! | Linear Integer Arithmetic | Z3 | Faster LIA decision procedure |
+//! | Bit-vectors | Z3 | Aggressive bit-blasting |
+//! | Arrays | Z3 | Optimized McCarthy axiom engine |
+//! | E-matching quantifiers | Z3 | More sophisticated pattern matching |
+//! | Interpolation | Z3 | CVC5 has no interpolation |
+//! | Optimization (MaxSMT) | Z3 | Production-grade optimizer |
+//! | Nonlinear Real Arithmetic | CVC5 | CAD (cylindrical algebraic decomp.) |
+//! | Strings / Regex | CVC5 | Native string theory |
+//! | Sequences | CVC5 | Z3 has no sequence theory |
+//! | Inductive datatypes | CVC5 | Coq-inspired datatype reasoning |
+//! | Finite model finding | CVC5 | Specialized mode |
+//! | Higher-order logic | CVC5 | Experimental HOL support |
 //!
+
 //! ## Routing Strategy
 //!
+
 //! Given a goal, the router analyzes its structure and chooses one of:
 //!
+
 //! 1. **`Z3Only`** — Goal matches a theory where Z3 clearly dominates.
 //! 2. **`Cvc5Only`** — Goal matches a theory where CVC5 clearly dominates.
 //! 3. **`Portfolio`** — Both solvers run in parallel; first result wins.
-//!    Used for mixed-theory goals, large goals, or when no clear winner.
+//!  Used for mixed-theory goals, large goals, or when no clear winner.
 //! 4. **`CrossValidate`** — Both solvers must independently agree. Used for
-//!    security-critical verification and proof certificate generation.
+//!  security-critical verification and proof certificate generation.
 //!
+
 //! ## Integration
 //!
+
 //! The router is invoked from `BackendSwitcher::solve()` as the first
 //! dispatch stage, before any fallback or portfolio logic. It operates on
 //! `ProblemCharacteristics` extracted by the `StrategySelector`.
 //!
+
 //! ## Example
 //!
+
 //! ```rust,ignore
 //! use verum_smt::capability_router::{CapabilityRouter, RouterConfig};
 //!
+
 //! let router = CapabilityRouter::new(RouterConfig::default());
 //! match router.route(&characteristics) {
-//!     SolverChoice::Z3Only => /* dispatch to Z3 */,
-//!     SolverChoice::Cvc5Only => /* dispatch to CVC5 */,
-//!     SolverChoice::Portfolio { timeout_ms } => /* run both in parallel */,
-//!     SolverChoice::CrossValidate { strictness } => /* cross-validate */,
+//!  SolverChoice::Z3Only => /* dispatch to Z3 */,
+//!  SolverChoice::Cvc5Only => /* dispatch to CVC5 */,
+//!  SolverChoice::Portfolio { timeout_ms } => /* run both in parallel */,
+//!  SolverChoice::CrossValidate { strictness } => /* cross-validate */,
 //! }
 //! ```
 
@@ -66,14 +78,16 @@ use crate::strategy_selection::ProblemCharacteristics;
 // CvcStrategyCache (#103 follow-up — task #6 dual-backend cache parity)
 // ----------------------------------------------------------------------------
 //
+
 // Mirror of `tactics::TacticCache` for the CVC5 / capability-router side.
 // The Z3 cache memoises `FormulaCharacteristics` keyed on a Z3-formula
 // signature; this cache memoises `ExtendedCharacteristics` keyed on a
-// stable signature of the assertion-set's text rendering.  Both caches
+// stable signature of the assertion-set's text rendering. Both caches
 // share the same shape (DashMap + AtomicU64 hit/miss counters + capacity
 // hint) so per-backend telemetry is symmetric and can be reported in
 // the same `routing-stats` view.
 //
+
 // Why not reuse `TacticCache` directly? — `FormulaCharacteristics` and
 // `ExtendedCharacteristics` carry DIFFERENT theory-detection state and
 // the CVC5 path runs heuristic AST walks that don't exist on the Z3
@@ -84,15 +98,15 @@ use crate::strategy_selection::ProblemCharacteristics;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 /// Stable structural signature of an assertion set, used as the
-/// [`CvcStrategyCache`] key.  Computed via blake3 over the text
-/// rendering of the assertions in their original order.  The same
+/// [`CvcStrategyCache`] key. Computed via blake3 over the text
+/// rendering of the assertions in their original order. The same
 /// signature shape (`[u8; 32]`) is used by `tactics::FormulaSignature`
 /// so the two cache surfaces stay symmetric.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AssertionSetSignature([u8; 32]);
 
 impl AssertionSetSignature {
-    /// Compute the signature of an assertion set.  Caller renders
+    /// Compute the signature of an assertion set. Caller renders
     /// each assertion to its canonical text form (typically the AST
     /// `Debug` representation; for SMT-LIB-bound paths the SMT-LIB
     /// rendering is more compact and equally stable).
@@ -118,8 +132,8 @@ pub struct CvcStrategyCacheStats {
 }
 
 /// Concurrent, sharded cache mapping [`AssertionSetSignature`] →
-/// cached [`ExtendedCharacteristics`].  Lock-free reads under
-/// rayon-parallel verification (DashMap interior).  `Send + Sync` so
+/// cached [`ExtendedCharacteristics`]. Lock-free reads under
+/// rayon-parallel verification (DashMap interior). `Send + Sync` so
 /// it sits on `SmtBackendSwitcher` and can be cloned by Arc across
 /// every solve attempt.
 pub struct CvcStrategyCache {
@@ -148,7 +162,7 @@ impl CvcStrategyCache {
         }
     }
 
-    /// Look up cached characteristics by signature.  Increments
+    /// Look up cached characteristics by signature. Increments
     /// `hits` on Some, `misses` on None.
     pub fn get(&self, sig: &AssertionSetSignature) -> Option<ExtendedCharacteristics> {
         match self.entries.get(sig) {
@@ -169,7 +183,7 @@ impl CvcStrategyCache {
     }
 
     /// Drop all cached entries (e.g. between independent verification
-    /// sessions to keep working-set bounded).  Resets stats.
+    /// sessions to keep working-set bounded). Resets stats.
     pub fn clear(&self) {
         self.entries.clear();
         self.hits.store(0, AtomicOrdering::Relaxed);
@@ -198,6 +212,7 @@ impl CvcStrategyCache {
 /// Extended problem characteristics including theory-specific flags needed
 /// for fine-grained routing decisions.
 ///
+
 /// This extends the base `ProblemCharacteristics` from `strategy_selection`
 /// with additional theory detection not exposed by Z3 probes alone.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -350,6 +365,7 @@ pub struct CapabilityRouter {
 impl CapabilityRouter {
     /// Create a new router with the given configuration.
     ///
+
     /// Automatically detects CVC5 availability at construction time.
     pub fn new(config: RouterConfig) -> Self {
         Self {
@@ -393,6 +409,7 @@ impl CapabilityRouter {
 
     /// Main entry point: decide which solver to use for a goal.
     ///
+
     /// Priority order:
     /// 1. If CVC5 is unavailable → Z3 only
     /// 2. If security-critical → cross-validate
@@ -465,6 +482,7 @@ impl CapabilityRouter {
 
     /// Determine if there's a clear theory winner for this goal.
     ///
+
     /// Returns `Some(winner)` when the goal falls into a theory where one
     /// solver is objectively better. Returns `None` when both solvers are
     /// competitive.

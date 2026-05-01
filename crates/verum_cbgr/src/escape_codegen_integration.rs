@@ -1,28 +1,36 @@
 //! Escape Analysis Integration with CBGR Codegen
 //!
+
 //! When escape analysis proves NoEscape, CBGR codegen replaces ThinRef/FatRef
 //! structures with direct pointers, eliminating the generation check against
 //! AllocationHeader. This saves ~15ns per dereference on hot paths by bypassing
 //! the atomic load + compare of generation and epoch fields.
 //!
+
 //! This module integrates escape analysis results with CBGR code generation,
 //! enabling automatic elimination of CBGR checks for `NoEscape` references.
 //!
+
 //! # Purpose
 //!
+
 //! When escape analysis proves a reference doesn't escape (`NoEscape` state),
 //! we can safely skip CBGR generation checks and use direct pointers instead,
 //! achieving 0ns overhead instead of ~15ns.
 //!
+
 //! # Integration Points
 //!
+
 //! 1. **Reference Dereference**: Skip `cbgr_check()` for `NoEscape` refs
 //! 2. **Reference Creation**: Use direct pointers instead of ThinRef/FatRef
 //! 3. **Function Calls**: Pass raw pointers for `NoEscape` params
 //! 4. **IDE Hints**: Show `[0ns - escape analysis]` for optimized refs
 //!
+
 //! # Safety
 //!
+
 //! All optimizations are conservative:
 //! - Only apply when escape analysis **proves** safety
 //! - Fall back to CBGR if any uncertainty
@@ -34,6 +42,7 @@ use verum_common::{Map, Maybe, Text};
 
 /// Escape-aware codegen optimizer
 ///
+
 /// This component consults escape analysis results during code generation
 /// to eliminate unnecessary CBGR checks.
 #[derive(Debug)]
@@ -155,10 +164,13 @@ impl EscapeAwareCodegen {
 
     /// Check if CBGR checks can be skipped for a reference
     ///
+
     /// This is the main decision point during code generation.
     ///
+
     /// # Returns
     ///
+
     /// - `true`: Skip CBGR checks (0ns overhead)
     /// - `false`: Keep CBGR checks (~15ns overhead)
     pub fn can_skip_cbgr_check(&mut self, reference: RefId) -> bool {
@@ -168,6 +180,7 @@ impl EscapeAwareCodegen {
 
     /// Get optimization decision for a reference
     ///
+
     /// Uses cached result if available, otherwise consults escape analyzer.
     pub fn get_optimization_decision(&mut self, reference: RefId) -> OptimizationDecision {
         // Check cache first
@@ -213,6 +226,7 @@ impl EscapeAwareCodegen {
 
     /// Get IDE hint for reference dereference
     ///
+
     /// Provides user-facing cost transparency in IDE
     pub fn get_ide_hint(&mut self, reference: RefId) -> Text {
         let decision = self.get_optimization_decision(reference);
@@ -292,6 +306,7 @@ impl Default for EscapeAwareCodegen {
 
 /// LLVM IR generation helpers for escape-aware codegen
 ///
+
 /// These functions integrate with the LLVM codegen pipeline to emit
 /// optimized code based on escape analysis.
 pub mod llvm_helpers {
@@ -299,16 +314,18 @@ pub mod llvm_helpers {
 
     /// Generate CBGR check or skip based on escape analysis
     ///
+
     /// # Pseudocode
     ///
+
     /// ```text
     /// fn generate_reference_deref(ref_id, codegen):
-    ///     if codegen.can_skip_cbgr_check(ref_id):
-    ///         // NoEscape: Direct pointer access (0ns)
-    ///         return emit_direct_load(ref_id)
-    ///     else:
-    ///         // Escapes: Full CBGR check (~15ns)
-    ///         return emit_cbgr_deref(ref_id)
+    ///  if codegen.can_skip_cbgr_check(ref_id):
+    ///  // NoEscape: Direct pointer access (0ns)
+    ///  return emit_direct_load(ref_id)
+    ///  else:
+    ///  // Escapes: Full CBGR check (~15ns)
+    ///  return emit_cbgr_deref(ref_id)
     /// ```
     pub fn should_emit_cbgr_check(codegen: &mut EscapeAwareCodegen, reference: RefId) -> bool {
         !codegen.can_skip_cbgr_check(reference)
@@ -316,6 +333,7 @@ pub mod llvm_helpers {
 
     /// Get optimization annotation for LLVM metadata
     ///
+
     /// This can be used to add optimization metadata to LLVM IR for
     /// better debugging and profiling.
     pub fn get_llvm_annotation(codegen: &mut EscapeAwareCodegen, reference: RefId) -> Text {

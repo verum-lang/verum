@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §13
 //
+
 // We can't touch `l5_sql/codegen.vr` (the gated authoritative
 // `PlanNode` lives there). Passes operate on a *view*: a small set
 // of variants covering exactly the rewrites the passes implement.
 //
+
 // Each `PvNode` carries an opaque `id` so post-pass we can map
 // edits back into the codegen's PlanNode tree.
 // =============================================================================

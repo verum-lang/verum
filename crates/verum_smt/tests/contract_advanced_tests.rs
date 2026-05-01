@@ -14,11 +14,13 @@
 )]
 // Advanced contract verification tests
 //
+
 // Tests for:
 // - Loop invariant verification
 // - Termination verification
 // - Frame conditions
 //
+
 // FIXED (Session 24): VerificationCost.category field added
 
 use verum_ast::literal::IntLit;
@@ -126,7 +128,7 @@ fn test_loop_invariant_with_condition() {
     let ten = int_literal(10);
     let exit_condition = binary_expr(i_var.clone(), BinOp::Ge, ten);
 
-    // Postcondition: i >= 0  (should follow from invariant)
+    // Postcondition: i >= 0 (should follow from invariant)
     let postcondition = binary_expr(i_var, BinOp::Ge, zero);
 
     let result = verify_loop_invariant(

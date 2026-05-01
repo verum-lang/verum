@@ -26,7 +26,7 @@ use verum_types::ty::Type;
 fn test_object_safe_simple_protocol() {
     // Object-safe protocol:
     // protocol Draw {
-    //     fn draw(&self);
+    //  fn draw(&self);
     // }
 
     let mut methods = Map::new();
@@ -74,7 +74,7 @@ fn test_object_safe_simple_protocol() {
 fn test_not_object_safe_returns_self() {
     // NOT object-safe:
     // protocol Clone {
-    //     fn clone(&self) -> Self;  // ERROR: returns Self
+    //  fn clone(&self) -> Self; // ERROR: returns Self
     // }
 
     let mut methods = Map::new();
@@ -134,7 +134,7 @@ fn test_not_object_safe_returns_self() {
 fn test_not_object_safe_generic_method() {
     // NOT object-safe:
     // protocol Generic {
-    //     fn method<T>(&self, x: T);  // ERROR: generic method
+    //  fn method<T>(&self, x: T); // ERROR: generic method
     // }
 
     let mut methods = Map::new();
@@ -198,7 +198,7 @@ fn test_not_object_safe_generic_method() {
 fn test_not_object_safe_no_self_parameter() {
     // NOT object-safe:
     // protocol Static {
-    //     fn new() -> Self;  // ERROR: no self parameter
+    //  fn new() -> Self; // ERROR: no self parameter
     // }
 
     let mut methods = Map::new();
@@ -266,7 +266,7 @@ fn test_not_object_safe_no_self_parameter() {
 fn test_not_object_safe_takes_self_by_value() {
     // NOT object-safe:
     // protocol Consume {
-    //     fn consume(self);  // ERROR: takes self by value
+    //  fn consume(self); // ERROR: takes self by value
     // }
 
     let mut methods = Map::new();
@@ -322,8 +322,8 @@ fn test_not_object_safe_takes_self_by_value() {
 fn test_not_object_safe_has_associated_const() {
     // NOT object-safe:
     // protocol WithConst {
-    //     const MAX: Int;
-    //     fn get_max(&self) -> Int;
+    //  const MAX: Int;
+    //  fn get_max(&self) -> Int;
     // }
 
     let mut methods = Map::new();
@@ -388,9 +388,9 @@ fn test_not_object_safe_has_associated_const() {
 fn test_object_safe_multiple_methods() {
     // Object-safe protocol with multiple methods:
     // protocol Shape {
-    //     fn area(&self) -> Float;
-    //     fn perimeter(&self) -> Float;
-    //     fn draw(&mut self);
+    //  fn area(&self) -> Float;
+    //  fn perimeter(&self) -> Float;
+    //  fn draw(&mut self);
     // }
 
     let mut methods = Map::new();

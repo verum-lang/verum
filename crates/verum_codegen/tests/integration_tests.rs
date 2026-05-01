@@ -1,10 +1,12 @@
 //! Integration tests for VBC → MLIR GPU lowering.
 //!
+
 //! These tests verify that VBC bytecode is correctly lowered to MLIR for GPU execution.
 //! Compilation paths:
-//!   - CPU Path: AST → VBC → LLVM IR (via VbcToLlvmLowering)
-//!   - GPU Path: AST → VBC → MLIR (via VbcToMlirGpuLowering)
+//!  - CPU Path: AST → VBC → LLVM IR (via VbcToLlvmLowering)
+//!  - GPU Path: AST → VBC → MLIR (via VbcToMlirGpuLowering)
 //!
+
 //! This file tests the GPU path (VBC → MLIR).
 
 use verum_codegen::{MlirContext, MlirCodegen, MlirConfig, GpuTarget};

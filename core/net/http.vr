@@ -5,20 +5,25 @@
 // Dependencies: core, io, net/tcp, net/dns, text
 // =============================================================================
 //
+
 // Defines the protocols and types for HTTP communication. This module
 // provides the protocol definitions and basic types; actual HTTP/1.1
 // and HTTP/2 implementations are built on top of these abstractions.
 //
+
 // # Design Philosophy
 //
+
 // Verum's HTTP module follows the protocol-first approach:
 // 1. Define protocols (HttpClient, HttpHandler) for extensibility
 // 2. Provide concrete types (Request, Response, Headers) for data
 // 3. Leave implementation details to cog libraries (like verum-http)
 //
+
 // This allows different HTTP implementations (HTTP/1.1, HTTP/2, HTTP/3)
 // to share the same type system while differing in transport details.
 //
+
 // # Example - Simple GET Request (with HttpClient implementation)
 // ```verum
 // let client = HttpClient.new();
@@ -27,6 +32,7 @@
 // print(f"Body: {response.body_text()}");
 // ```
 //
+
 // =============================================================================
 
 module core.net.http;
@@ -35,8 +41,8 @@ mount core.*;
 mount core.collections.map.{Map};
 mount core.collections.list.{List};
 mount core.io.protocols.{Read, Write};
-// mount .tcp.{TcpStream};  // disabled: module core.net.http.tcp not found
-// mount .addr.{SocketAddr};  // disabled: module core.net.http.addr not found
+// mount .tcp.{TcpStream}; // disabled: module core.net.http.tcp not found
+// mount .addr.{SocketAddr}; // disabled: module core.net.http.addr not found
 
 // =============================================================================
 // HTTP Method
@@ -44,6 +50,7 @@ mount core.io.protocols.{Read, Write};
 
 /// HTTP request method.
 ///
+
 /// Represents the standard HTTP methods as defined in RFC 7231 and RFC 5789.
 public type Method is
     | Get
@@ -143,6 +150,7 @@ implement Display for Method {
 
 /// HTTP response status code.
 ///
+
 /// Stores the numeric status code (100-599) and provides convenience
 /// methods for checking status categories.
 public type StatusCode is {
@@ -315,18 +323,21 @@ implement Display for Version {
 
 /// HTTP headers collection.
 ///
+
 /// Headers are stored as a list of (name, value) pairs to preserve
 /// ordering and support duplicate headers. Header names are stored
 /// in lowercase for case-insensitive comparison.
 ///
+
 /// # Example
 /// ```verum
 /// let mut headers = Headers.new();
 /// headers.set("Content-Type", "application/json");
 /// headers.set("Authorization", "Bearer token123");
 ///
+
 /// if let Some(ct) = headers.get("content-type") {
-///     print(f"Content type: {ct}");
+///  print(f"Content type: {ct}");
 /// }
 /// ```
 public type Headers is {
@@ -445,13 +456,15 @@ implement Clone for Headers {
 
 /// An HTTP request.
 ///
+
 /// Contains the method, URL, headers, and optional body.
 ///
+
 /// # Example
 /// ```verum
 /// let req = Request.get("https://api.example.com/users")
-///     .header("Accept", "application/json")
-///     .build();
+///  .header("Accept", "application/json")
+///  .build();
 /// ```
 public type Request is {
     method: Method,
@@ -547,6 +560,7 @@ implement Display for Request {
 
 /// An HTTP response.
 ///
+
 /// Contains the status code, headers, and body.
 public type Response is {
     status: StatusCode,
@@ -606,18 +620,21 @@ implement Display for Response {
 
 /// Protocol for HTTP client implementations.
 ///
+
 /// This protocol defines the interface that all HTTP client
 /// implementations must satisfy. Different implementations can
 /// provide HTTP/1.1, HTTP/2, or HTTP/3 transport.
 ///
+
 /// # Example Implementation
 /// ```verum
 /// type SimpleHttpClient is { ... };
 ///
+
 /// implement HttpClient for SimpleHttpClient {
-///     async fn send(&self, request: Request) -> Result<Response, HttpError> {
-///         // ... implementation ...
-///     }
+///  async fn send(&self, request: Request) -> Result<Response, HttpError> {
+///  // ... implementation ...
+///  }
 /// }
 /// ```
 public type HttpClient is protocol {
@@ -627,6 +644,7 @@ public type HttpClient is protocol {
 
 /// Protocol for HTTP request handlers (server-side).
 ///
+
 /// Implementations of this protocol handle incoming HTTP requests
 /// and produce responses.
 public type HttpHandler is protocol {
@@ -730,6 +748,7 @@ implement Eq for HttpError {
 
 /// Parsed URL components.
 ///
+
 /// A minimal URL parser for HTTP client use. For full RFC 3986 compliance,
 /// use a dedicated URL parsing cog.
 public type HttpUrl is {
@@ -744,6 +763,7 @@ public type HttpUrl is {
 implement HttpUrl {
     /// Parse a URL string.
     ///
+
     /// Supports http:// and https:// schemes.
     public fn parse(s: &Text) -> Result<HttpUrl, HttpError> {
         // Extract scheme
@@ -869,14 +889,16 @@ implement Eq for HttpUrl {
 
 /// An HTTP cookie.
 ///
+
 /// Represents a single cookie with name, value, and optional attributes.
 ///
+
 /// # Example
 /// ```verum
 /// let cookie = Cookie.new("session_id", "abc123")
-///     .with_path("/")
-///     .with_secure(true)
-///     .with_http_only(true);
+///  .with_path("/")
+///  .with_secure(true)
+///  .with_http_only(true);
 /// ```
 public type Cookie is {
     name: Text,
@@ -1008,15 +1030,17 @@ implement Display for Cookie {
 
 /// Configuration for HTTP connection pooling.
 ///
+
 /// Connection pooling reuses TCP connections across multiple requests
 /// to the same host, reducing latency and resource usage.
 ///
+
 /// # Example
 /// ```verum
 /// let pool_config = HttpPoolConfig.new()
-///     .with_max_idle(100)
-///     .with_max_per_host(10)
-///     .with_idle_timeout(Duration.secs(90));
+///  .with_max_idle(100)
+///  .with_max_per_host(10)
+///  .with_idle_timeout(Duration.secs(90));
 /// ```
 public type HttpPoolConfig is {
     /// Maximum number of total idle connections.
@@ -1127,12 +1151,13 @@ implement Clone for PoolKey {
 
 /// Configuration for an HTTP client.
 ///
+
 /// # Example
 /// ```verum
 /// let config = ClientConfig.new()
-///     .with_timeout_ms(30_000)
-///     .with_max_redirects(10)
-///     .with_pool(HttpPoolConfig.new().with_max_idle(50));
+///  .with_timeout_ms(30_000)
+///  .with_max_redirects(10)
+///  .with_pool(HttpPoolConfig.new().with_max_idle(50));
 /// ```
 public type ClientConfig is {
     /// Request timeout in milliseconds (0 = no timeout).

@@ -8,11 +8,14 @@ module sys.windows.kernel32;
 // Platform: Windows (x86_64)
 // =============================================================================
 //
+
 // This module provides access to Windows API functions from kernel32.dll.
 // These are higher-level APIs built on top of ntdll.dll.
 //
+
 // IMPORTANT: Uses IAT imports (@extern) for stable, supported API access.
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -278,9 +281,9 @@ public fn CreateFileA(
 
 /// Watch a directory for changes. Used by `core.sys.fs_watch` Windows backend.
 /// C: `BOOL ReadDirectoryChangesW(HANDLE hDirectory, LPVOID lpBuffer, DWORD nBufferLength,
-///                                BOOL bWatchSubtree, DWORD dwNotifyFilter,
-///                                LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped,
-///                                LPOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);`
+///  BOOL bWatchSubtree, DWORD dwNotifyFilter,
+///  LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped,
+///  LPOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);`
 @extern("kernel32.dll")
 public fn ReadDirectoryChangesW(
     directory: Handle,
@@ -679,6 +682,7 @@ public fn CreateProcessA(
 
 /// Create an anonymous pipe.
 ///
+
 /// Returns read and write handles. `inherit_handles` in SecurityAttributes
 /// controls whether the handles are inherited by child processes.
 @extern("kernel32.dll")
@@ -882,10 +886,12 @@ public fn WakeAllConditionVariable(condition_variable: &unsafe Byte);
 
 /// Block until the value at the address changes.
 ///
+
 /// Compares *address with *compare_address (of `address_size` bytes).
 /// If equal, blocks until WakeByAddressSingle/All is called on the address,
 /// or the timeout expires. Returns true if woken, false on timeout/error.
 ///
+
 /// This is the Windows equivalent of Linux futex(FUTEX_WAIT).
 @extern("kernel32.dll")
 public fn WaitOnAddress(
@@ -897,12 +903,14 @@ public fn WaitOnAddress(
 
 /// Wake a single thread waiting on the address.
 ///
+
 /// This is the Windows equivalent of Linux futex(FUTEX_WAKE, 1).
 @extern("kernel32.dll")
 public fn WakeByAddressSingle(address: &unsafe Byte);
 
 /// Wake all threads waiting on the address.
 ///
+
 /// This is the Windows equivalent of Linux futex(FUTEX_WAKE, INT_MAX).
 @extern("kernel32.dll")
 public fn WakeByAddressAll(address: &unsafe Byte);
@@ -1258,6 +1266,7 @@ public fn ScrollConsoleScreenBufferW(
 
 /// Set an environment variable (ANSI version).
 ///
+
 /// If value is null, the variable is deleted.
 /// Returns true on success.
 @extern("kernel32.dll")
@@ -1268,6 +1277,7 @@ public fn SetEnvironmentVariableA(
 
 /// Get an environment variable (ANSI version).
 ///
+
 /// Returns the number of characters written (excluding null),
 /// or 0 on failure. If the buffer is too small, returns the
 /// required size including the null terminator.

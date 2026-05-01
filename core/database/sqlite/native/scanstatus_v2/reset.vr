@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Resets the per-opcode scan counters on a prepared statement without
-// finalizing or rewinding the VM.  Useful between EXPLAIN ANALYZE
+// finalizing or rewinding the VM. Useful between EXPLAIN ANALYZE
 // measurement passes.
 // =============================================================================
 

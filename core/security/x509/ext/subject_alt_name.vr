@@ -2,24 +2,27 @@
 // security/x509/ext/subject_alt_name.vr — RFC 5280 §4.2.1.6
 // =============================================================================
 //
+
 // SubjectAltName ::= GeneralNames
 // GeneralNames ::= SEQUENCE SIZE (1..MAX) OF GeneralName
 // GeneralName ::= CHOICE {
-//     otherName                       [0]     OtherName,
-//     rfc822Name                      [1]     IA5String,
-//     dNSName                         [2]     IA5String,
-//     x400Address                     [3]     ORAddress,
-//     directoryName                   [4]     Name,
-//     ediPartyName                    [5]     EDIPartyName,
-//     uniformResourceIdentifier       [6]     IA5String,
-//     iPAddress                       [7]     OCTET STRING,
-//     registeredID                    [8]     OBJECT IDENTIFIER
+//  otherName [0] OtherName,
+//  rfc822Name [1] IA5String,
+//  dNSName [2] IA5String,
+//  x400Address [3] ORAddress,
+//  directoryName [4] Name,
+//  ediPartyName [5] EDIPartyName,
+//  uniformResourceIdentifier [6] IA5String,
+//  iPAddress [7] OCTET STRING,
+//  registeredID [8] OBJECT IDENTIFIER
 // }
 //
+
 // For TLS 1.3 / HTTPS identity matching (RFC 6125), only `dNSName`
 // and `iPAddress` matter. We parse the rest enough to skip; the
 // discriminated values we care about are kept as typed variants.
 //
+
 // =============================================================================
 
 module core.security.x509.ext.subject_alt_name;

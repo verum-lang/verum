@@ -6,21 +6,24 @@ module core.database.sqlite.native.l3_btree.integrity;
 // Layer: 3
 // Spec: sqlite-native.md §10.7, sqlite.org/pragma.html#pragma_integrity_check
 //
+
 // `PRAGMA integrity_check[(N)]` walks every page in every B-tree in
 // the database and reports structural violations. The spec invariants:
 //
-//   I1. Every page of a B-tree has flags from the known set
-//       (0x02, 0x05, 0x0A, 0x0D).
-//   I2. Cell keys are in sorted order within each page.
-//   I3. All leaves are at the same depth (height-balanced).
-//   I4. The free-list is self-consistent — every freelist page is
-//       reachable exactly once, no loops, no dangling pointers.
-//   I5. Every overflow chain is self-consistent: finite length, no
-//       cycles, tail page carries the trailing payload length.
-//   I6. `db_size_pages` (DB header) matches the actual file length.
-//   I7. Each page appears in exactly ONE btree or the freelist —
-//       no shared pages, no orphans.
+
+//  I1. Every page of a B-tree has flags from the known set
+//  (0x02, 0x05, 0x0A, 0x0D).
+//  I2. Cell keys are in sorted order within each page.
+//  I3. All leaves are at the same depth (height-balanced).
+//  I4. The free-list is self-consistent — every freelist page is
+//  reachable exactly once, no loops, no dangling pointers.
+//  I5. Every overflow chain is self-consistent: finite length, no
+//  cycles, tail page carries the trailing payload length.
+//  I6. `db_size_pages` (DB header) matches the actual file length.
+//  I7. Each page appears in exactly ONE btree or the freelist —
+//  no shared pages, no orphans.
 //
+
 // This module runs the checks *given* a page-fetcher. The pager
 // supplies the fetcher; the integrity code is pure over it.
 // =============================================================================
@@ -177,9 +180,11 @@ fn walk(
     // the Pager actor's `Read` path drops bytes into this module's
     // fetcher closure. For now `check_tree` covers:
     //
-    //   * per-page structural checks (kinds, header, pointer array)
-    //   * "page reached twice" detection via `seen`
+
+    //  * per-page structural checks (kinds, header, pointer array)
+    //  * "page reached twice" detection via `seen`
     //
+
     // Tree-depth balance and sibling-ordering checks will come with
     // the L3.6 phase-2 patch.
 }
@@ -219,9 +224,9 @@ public fn check_freelist(
             return;
         }
         // The free-list trunk page lays out:
-        //   bytes 0..4   — next trunk page (0 = end)
-        //   bytes 4..8   — number of leaf page numbers that follow
-        //   bytes 8..    — leaf page numbers (u32 each)
+        //  bytes 0..4 — next trunk page (0 = end)
+        //  bytes 4..8 — number of leaf page numbers that follow
+        //  bytes 8.. — leaf page numbers (u32 each)
         let buf = pages.get(current);
         if buf.len() < 8 {
             report.violations.push(ShortPage(current));

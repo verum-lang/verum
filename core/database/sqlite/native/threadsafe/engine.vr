@@ -3,9 +3,10 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The compile-time mode is fixed; sqlite3_config may request a
 // DOWNGRADE (Serialized → MultiThread → SingleThread) but never an
-// UPGRADE.  The engine records both the compile-time floor and the
+// UPGRADE. The engine records both the compile-time floor and the
 // currently-effective mode.
 // =============================================================================
 
@@ -28,8 +29,8 @@ public fn new_engine(compile_time: TsMode) -> ThreadsafeEngine {
     ThreadsafeEngine { compile_time: compile_time, effective: eff }
 }
 
-/// Rank: Serialized(2) > MultiThread(1) > SingleThread(0).  Higher
-/// rank = stronger safety guarantee.  Downgrades (lower rank than
+/// Rank: Serialized(2) > MultiThread(1) > SingleThread(0). Higher
+/// rank = stronger safety guarantee. Downgrades (lower rank than
 /// compile-time) are accepted; upgrades are rejected.
 fn rank(m: &TsMode) -> Int {
     match m {

@@ -1,7 +1,9 @@
 //! Unique Identifier Generation (Gensym)
 //!
+
 //! Generates unique identifiers for hygienic macro expansion.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -42,6 +44,7 @@ impl GensymGenerator {
 
     /// Generate a new unique identifier
     ///
+
     /// The generated identifier is guaranteed to never conflict with
     /// user-written code.
     pub fn gensym(&self, base: &str) -> Text {
@@ -108,6 +111,7 @@ impl Clone for GensymGenerator {
 
 /// Suffix-based hygiene generator (legacy, for backward compatibility)
 ///
+
 /// This generates identifiers using the simpler `name__id` format
 /// used by the original HygieneContext.
 #[derive(Debug)]

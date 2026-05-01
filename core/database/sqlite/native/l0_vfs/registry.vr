@@ -6,11 +6,13 @@ module core.database.sqlite.native.l0_vfs.registry;
 // Layer: 0
 // Spec: sqlite-native.md §7.7
 //
+
 // SQLite lets callers pick between multiple VFS backends by name (the
 // `vfs=` query parameter on a `file:` URI). The registry keeps a list
 // of known backends, remembers a default (per platform), and resolves
 // a URI into `(kind, path, flags)` for `Database.open` to consume.
 //
+
 // Design note — associated-type protocols and dyn dispatch in Verum do
 // not currently combine well (VfsProtocol's `type File` prevents a
 // single `&dyn VfsProtocol` from being held). The registry therefore
@@ -69,9 +71,10 @@ public fn vfs_kind_from_name(name: &Text) -> Maybe<VfsKind> {
 
 /// Result of parsing a `file:` URI / raw path.
 ///
-/// * `kind`   — which backend to use
-/// * `path`   — filesystem path (empty for `:memory:`)
-/// * `flags`  — open-flag overrides extracted from the URI
+
+/// * `kind` — which backend to use
+/// * `path` — filesystem path (empty for `:memory:`)
+/// * `flags` — open-flag overrides extracted from the URI
 public type VfsParsedUri is {
     kind: VfsKind,
     path: Text,
@@ -80,14 +83,16 @@ public type VfsParsedUri is {
 
 /// Parse a path (or `file:` URI) into a `VfsParsedUri`. Supported forms:
 ///
-///   `"/abs/path"`                  → Posix default, no flag override
-///   `":memory:"`                    → Memory, path "", rwc flags
-///   `"file:/abs/path"`              → Posix, rwc default
-///   `"file:/abs/path?mode=ro"`      → Posix, ro flags
-///   `"file.memory:"`               → Memory
-///   `"file.memory:?cache=shared"`  → Memory with cache=shared (ignored for v1)
-///   `"file:/p?vfs=unix"`            → explicit backend selection
+
+///  `"/abs/path"` → Posix default, no flag override
+///  `":memory:"` → Memory, path "", rwc flags
+///  `"file:/abs/path"` → Posix, rwc default
+///  `"file:/abs/path?mode=ro"` → Posix, ro flags
+///  `"file.memory:"` → Memory
+///  `"file.memory:?cache=shared"` → Memory with cache=shared (ignored for v1)
+///  `"file:/p?vfs=unix"` → explicit backend selection
 ///
+
 /// Matches SQLite's URI rules (sqlite.org/uri.html) up to query-string
 /// options; anything unrecognised is preserved but ignored. Returns a
 /// `VfsError { kind: InvalidArgument }` on empty / malformed input.

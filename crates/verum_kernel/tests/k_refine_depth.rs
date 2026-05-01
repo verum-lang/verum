@@ -1,5 +1,6 @@
 //! K-Refine depth-check integration tests (/ §4.4).
 //!
+
 //! Diakrisis axiom T-2f* ported to the Verum kernel: a refinement type
 //! `{ x : base | P(x) }` is well-formed only when the predicate's
 //! M-iteration depth is strictly less than the base's depth + 1.
@@ -8,6 +9,7 @@
 //! equality `dp(α) = dp(T^α)` that Russell / Curry / Gödel-type
 //! diagonals require.
 //!
+
 //! This file exercises the kernel rule end-to-end — both the valid
 //! refinement paths that must keep type-checking cleanly AND the
 //! paradox-shape refinements that must be rejected with the precise

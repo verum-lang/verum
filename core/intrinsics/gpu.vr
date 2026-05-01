@@ -4,12 +4,15 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // This module provides GPU operations that map to VBC GPU opcodes.
 // On the interpreter, all operations use CPU fallback (malloc/free for memory,
 // no-ops for synchronization, direct function calls for kernel launch).
 //
+
 // # Operations
 //
+
 // - Device: gpu_get_device, gpu_set_device, gpu_device_reset, gpu_mem_info
 // - Memory: gpu_malloc, gpu_free, gpu_memcpy, gpu_memset, gpu_pin_memory
 // - Streams: gpu_stream_create, gpu_stream_destroy, gpu_sync
@@ -17,6 +20,7 @@
 // - Kernel: gpu_launch
 // - Enumeration: gpu_enumerate_cuda, gpu_enumerate_metal, gpu_enumerate_rocm
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 

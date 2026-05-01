@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §7.4
 //
+
 // Transition matrix (rows = current state, cols = target state):
 //
-//                NONE  SHARED  RESERVED  PENDING  EXCLUSIVE
-//   NONE         ✓     ✓       ✗         ✗        ✗
-//   SHARED       ✓     ✓       ✓         ✓        ✓ (via PENDING)
-//   RESERVED     ✓     ✓       ✓         ✓        ✓ (via PENDING)
-//   PENDING      ✓     ✓       ✓         ✓        ✓
-//   EXCLUSIVE    ✓     ✓       ✗         ✗        ✓
+
+//  NONE SHARED RESERVED PENDING EXCLUSIVE
+//  NONE ✓ ✓ ✗ ✗ ✗
+//  SHARED ✓ ✓ ✓ ✓ ✓ (via PENDING)
+//  RESERVED ✓ ✓ ✓ ✓ ✓ (via PENDING)
+//  PENDING ✓ ✓ ✓ ✓ ✓
+//  EXCLUSIVE ✓ ✓ ✗ ✗ ✓
 //
+
 // Each transition emits a sequence of byte-range operations the VFS
 // must perform (acquire/release on PENDING_BYTE / RESERVED_BYTE /
 // SHARED region).

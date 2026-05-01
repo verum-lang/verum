@@ -1,44 +1,55 @@
 //! # Portfolio SMT Solver Executor
 //!
+
 //! Runs Z3 and CVC5 concurrently on the same goal and returns the first
 //! result, or cross-validates both results for security-critical goals.
 //!
+
 //! ## Design
 //!
+
 //! The executor uses `std::thread` with `crossbeam::channel` for coordination:
 //!
+
 //! ```text
-//!       goal                 goal
-//!        │                    │
-//!        ▼                    ▼
-//!   ┌────────┐           ┌────────┐
-//!   │   Z3   │           │  CVC5  │
-//!   └───┬────┘           └───┬────┘
-//!       │ result              │ result
-//!       └──────► channel ◄────┘
-//!                  │
-//!                  ▼
-//!            (first wins)
+//!  goal goal
+//!  │ │
+//!  ▼ ▼
+//!  ┌────────┐ ┌────────┐
+//!  │ Z3 │ │ CVC5 │
+//!  └───┬────┘ └───┬────┘
+//!  │ result │ result
+//!  └──────► channel ◄────┘
+//!  │
+//!  ▼
+//!  (first wins)
 //! ```
 //!
+
 //! For cross-validation, both solvers run to completion and results are
 //! compared. Divergent results (one says SAT, the other UNSAT) indicate a
 //! solver bug or an encoding issue and are reported as a hard error.
 //!
+
 //! ## Cancellation
 //!
+
 //! Z3 and CVC5 support cooperative cancellation via their C APIs
 //! (`Z3_interrupt`, `cvc5_solver_interrupt`). After one solver returns, the
 //! other is interrupted to release resources promptly.
 //!
+
 //! ## Thread Safety
 //!
+
 //! - Each solver instance is used by exactly one thread.
 //! - Results are passed via channels (no shared mutable state).
 //! - The `PortfolioExecutor` itself is `Send + Sync`.
 //!
+
 //! ## Performance
 //!
+
 //! Portfolio execution typically achieves 1.5–3x speedup on hard goals
 //! where the winning solver varies by problem structure. For bread-and-butter
 //! goals where Z3 is consistently fastest, portfolio adds ~20% overhead,
@@ -85,6 +96,7 @@ impl SolverVerdict {
 
     /// Create a verdict from a simple string result label and optional message.
     ///
+
     /// This is a helper for bridging between legacy result types (like
     /// `BackendSwitcher::SolveResult`) and the portfolio verdict format.
     /// Accepted labels (case-insensitive): "sat", "unsat", "unknown", "error".
@@ -184,14 +196,17 @@ impl CrossValidateResult {
 
 /// Abstract interface for a solver that can be run in a portfolio.
 ///
+
 /// This trait decouples the portfolio executor from the concrete backend
 /// implementations, enabling mocking in tests and future solver integrations.
 ///
+
 /// Implementations must:
 /// - Be `Send + 'static` (so they can be moved into worker threads).
 /// - Support cooperative cancellation via a shared `AtomicBool` flag.
 /// - Return a `SolverVerdict` from `check_sat()`.
 ///
+
 /// Note: `Sync` is NOT required because each solver instance is owned by
 /// exactly one worker thread — there is no concurrent access to the same
 /// instance. Interruption is the only cross-thread communication, and that
@@ -212,6 +227,7 @@ pub trait PortfolioSolver: Send {
 
 /// Executes Z3 and CVC5 in parallel, returning the first result.
 ///
+
 /// Use `solve_portfolio` for first-wins semantics or `solve_cross_validate`
 /// for strict agreement.
 pub struct PortfolioExecutor;
@@ -219,18 +235,23 @@ pub struct PortfolioExecutor;
 impl PortfolioExecutor {
     /// Run both solvers in parallel; return the first definitive result.
     ///
+
     /// If one solver produces SAT/UNSAT first, the other is interrupted.
     /// If one solver produces Unknown/Error, the other is allowed to continue
     /// (so a partial result doesn't cancel a potentially better answer).
     ///
+
     /// ## Timeout
     ///
+
     /// Each solver is given up to `timeout` to complete. If neither finishes
     /// in that window, both return `Unknown`, and the portfolio returns the
     /// faster of the two.
     ///
+
     /// ## Tie-breaker
     ///
+
     /// If both solvers produce definitive results within ~1 ms of each other,
     /// the `tie_breaker` policy selects which one wins.
     pub fn solve_portfolio<Z, C>(
@@ -351,10 +372,12 @@ impl PortfolioExecutor {
 
     /// Run both solvers to completion and require them to agree.
     ///
+
     /// Unlike `solve_portfolio`, this does NOT short-circuit on the first result.
     /// Both solvers must produce definitive verdicts, and those verdicts must
     /// match.
     ///
+
     /// Divergence is treated as a hard error: it indicates a solver bug or
     /// encoding issue, and the caller should investigate (not silently accept).
     pub fn solve_cross_validate<Z, C>(

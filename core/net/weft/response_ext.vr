@@ -4,11 +4,13 @@
 // Layer: 6 (Weft)
 // =============================================================================
 //
+
 // Server-side `core.net.http.Response` constructors exposed as free
 // functions. Methods on externally-defined types live in the owning
 // module only; rather than add these to `core/net/http.vr`, Weft keeps
 // them local under a clear `resp_*` naming scheme.
 //
+
 // =============================================================================
 
 module core.net.weft.response_ext;

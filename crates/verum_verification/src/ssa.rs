@@ -1,36 +1,43 @@
 //! Static Single Assignment (SSA) Construction Module
 //!
+
 //! Implements SSA form construction for Verum's verification system.
 //! Each variable is assigned exactly once in SSA form, which simplifies
 //! dataflow analysis and enables efficient verification.
 //!
+
 //! # Algorithm (Cytron et al. 1991)
 //!
+
 //! 1. Compute dominance frontiers
 //! 2. Insert phi nodes at join points
 //! 3. Rename variables to SSA form
 //!
+
 //! # Example
 //!
+
 //! ```verum
 //! // Original code:
 //! if condition {
-//!     x = 1;
+//!  x = 1;
 //! } else {
-//!     x = 2;
+//!  x = 2;
 //! }
 //! y = x + 3;
 //!
+
 //! // SSA form:
 //! if condition {
-//!     x1 = 1;
+//!  x1 = 1;
 //! } else {
-//!     x2 = 2;
+//!  x2 = 2;
 //! }
 //! x3 = phi(x1, x2);
 //! y1 = x3 + 3;
 //! ```
 //!
+
 //! SSA form is crucial for efficient verification: each variable is assigned
 //! exactly once, simplifying dataflow analysis and enabling precise weakest
 //! precondition computation. The standard Cytron et al. (1991) algorithm is used:
@@ -48,6 +55,7 @@ use verum_common::{List, Map, Set, Text};
 
 /// Unique identifier for a basic block in the CFG.
 ///
+
 /// Basic blocks are the nodes in the control flow graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BlockId(pub u32);
@@ -77,6 +85,7 @@ impl fmt::Display for BlockId {
 
 /// A variable in the SSA representation.
 ///
+
 /// In SSA form, each assignment creates a new version (e.g., x_0, x_1, x_2).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Variable {
@@ -120,6 +129,7 @@ impl fmt::Display for Variable {
 
 /// SSA version number for a variable.
 ///
+
 /// Tracks the assignment history of a variable through the program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Version {
@@ -146,6 +156,7 @@ impl Version {
 
 /// A value in the SSA representation.
 ///
+
 /// Represents operands in SSA instructions: variable references, constants, or expressions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Value {
@@ -210,6 +221,7 @@ impl fmt::Display for Value {
 
 /// A statement in a basic block.
 ///
+
 /// A straight-line instruction within a basic block (no branches).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
@@ -393,6 +405,7 @@ impl fmt::Display for UnaryOp {
 
 /// Block terminator - how control leaves a basic block.
 ///
+
 /// How control leaves a basic block: goto, conditional branch, return, or switch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Terminator {
@@ -440,10 +453,12 @@ impl Terminator {
 
 /// A basic block in the Control Flow Graph (CFG).
 ///
+
 /// A basic block is a straight-line sequence of statements with:
 /// - One entry point (no jumps into the middle)
 /// - One exit point (the terminator)
 ///
+
 /// Straight-line sequence with one entry point (no jumps in) and one exit (terminator).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BasicBlock {
@@ -525,10 +540,12 @@ impl BasicBlock {
 
 /// Phi node for merging values at join points.
 ///
+
 /// A phi node selects a value based on which predecessor block control
 /// came from. This is essential for SSA form at points where control
 /// flow merges.
 ///
+
 /// Selects a value based on which predecessor block control came from.
 /// Example: `x3 = phi(x1, x2)` where x1 from true branch, x2 from false branch.
 /// Phi nodes are inserted at dominance frontiers where variable definitions merge.
@@ -578,10 +595,12 @@ impl fmt::Display for PhiNode {
 
 /// Control Flow Graph (CFG) representation.
 ///
+
 /// The CFG is a directed graph where:
 /// - Nodes are basic blocks
 /// - Edges represent possible control flow between blocks
 ///
+
 /// Directed graph where nodes are basic blocks and edges represent possible control flow.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ControlFlowGraph {
@@ -639,6 +658,7 @@ impl ControlFlowGraph {
 
     /// Update predecessor/successor relationships.
     ///
+
     /// Call this after modifying block terminators to ensure
     /// predecessor lists are up to date.
     pub fn compute_predecessors(&mut self) {
@@ -709,11 +729,13 @@ impl Default for ControlFlowGraph {
 
 /// Static Single Assignment (SSA) form representation.
 ///
+
 /// In SSA form:
 /// - Each variable is assigned exactly once
 /// - Phi nodes merge values at control flow join points
 /// - Variable versions track the assignment history
 ///
+
 /// Each variable is assigned exactly once; phi nodes merge values at join points.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SSAForm {
@@ -798,13 +820,17 @@ impl SSAForm {
 
 /// Compute immediate dominators for all blocks in the CFG.
 ///
+
 /// Block A dominates block B if every path from the entry to B must go through A.
 /// The immediate dominator of B is the closest dominator of B (other than B itself).
 ///
+
 /// Uses the Cooper-Harvey-Kennedy algorithm (simple iterative approach).
 ///
+
 /// Complexity: O(n^2) where n = number of basic blocks
 ///
+
 /// Cooper-Harvey-Kennedy iterative algorithm. Complexity: O(n^2) where n = number
 /// of basic blocks. Computes the immediate dominator for each block.
 pub fn compute_dominators(cfg: &ControlFlowGraph) -> Map<BlockId, BlockId> {
@@ -916,12 +942,15 @@ fn intersect_dominators(
 
 /// Compute dominance frontiers for all blocks in the CFG.
 ///
+
 /// The dominance frontier of block B is the set of blocks where B's
 /// dominance ends - that is, blocks that B dominates a predecessor of
 /// but does not strictly dominate.
 ///
+
 /// Complexity: O(n^2) where n = number of basic blocks
 ///
+
 /// Block Y is in the dominance frontier of block X if X does not strictly dominate Y
 /// but X dominates some predecessor of Y. This identifies where phi nodes are needed.
 /// Complexity: O(n^2) where n = number of basic blocks.
@@ -994,11 +1023,14 @@ pub fn compute_dominance_frontiers(
 
 /// Insert phi nodes at dominance frontiers.
 ///
+
 /// For each variable v and each block B in v's dominance frontier,
 /// insert a phi node for v at B.
 ///
+
 /// Complexity: O(n * m) where n = blocks, m = variables
 ///
+
 /// For each variable v and each block B in v's dominance frontier, insert
 /// `v_new = phi(v_1, v_2, ..., v_n)` where v_i are versions reaching B from each
 /// predecessor. Uses iterative worklist algorithm. Complexity: O(n * m).
@@ -1044,13 +1076,16 @@ pub fn insert_phi_nodes(
 
 /// Rename variables to SSA form.
 ///
+
 /// This converts the CFG to true SSA form by:
 /// 1. Giving each definition a unique version number
 /// 2. Updating uses to reference the correct version
 /// 3. Filling in phi node operands
 ///
+
 /// Complexity: O(n * m) where n = blocks, m = variables
 ///
+
 /// Walk the dominator tree, assigning fresh SSA versions to each definition,
 /// updating uses to the correct version, and filling in phi node operands.
 /// Complexity: O(n * m) where n = blocks, m = variables.
@@ -1306,34 +1341,45 @@ fn rename_statement_target(stmt: &mut Statement, version: u32) {
 
 /// Convert a Control Flow Graph to SSA form.
 ///
+
 /// This is the main entry point for SSA construction. It performs:
 /// 1. Dominance computation
 /// 2. Phi node insertion
 /// 3. Variable renaming
 ///
+
 /// # Arguments
 ///
+
 /// * `cfg` - The control flow graph to convert
 ///
+
 /// # Returns
 ///
+
 /// The CFG in SSA form with phi nodes and renamed variables.
 ///
+
 /// # Complexity
 ///
+
 /// O(n^2 + n*m) where n = number of basic blocks, m = number of variables.
 /// This is linear in practice for structured programs.
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_verification::ssa::{ControlFlowGraph, to_ssa};
 ///
+
 /// let cfg = ControlFlowGraph::new();
 /// let ssa = to_ssa(cfg);
 /// assert!(ssa.is_valid());
 /// ```
 ///
+
 /// Complete SSA construction pipeline: compute predecessors, compute dominators,
 /// compute dominance frontiers, insert phi nodes, rename variables. Returns
 /// the CFG in SSA form with all variables assigned exactly once.
@@ -1358,6 +1404,7 @@ pub fn to_ssa(mut cfg: ControlFlowGraph) -> SSAForm {
 
 /// Builder for constructing Control Flow Graphs programmatically.
 ///
+
 /// This provides a convenient API for creating CFGs for testing
 /// and from the Verum AST.
 #[derive(Debug)]

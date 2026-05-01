@@ -1,5 +1,6 @@
 //! Range Pattern Arithmetic
 //!
+
 //! This module provides utilities for analyzing range patterns and determining
 //! coverage for numeric types.
 

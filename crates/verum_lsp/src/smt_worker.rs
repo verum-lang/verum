@@ -1,7 +1,9 @@
 //! Thread-isolated SMT worker for the LSP server.
 //!
+
 //! # Why this exists
 //!
+
 //! `verum_smt::RefinementVerifier` transitively holds a Z3 context
 //! (`Rc<z3::ContextInternal>` plus `NonNull<_Z3_pattern>`) that is neither
 //! `Send` nor `Sync`. The LSP server's custom `verum/*` methods are
@@ -11,22 +13,27 @@
 //! captures that `!Send` state across an `.await` point, and the whole
 //! future becomes non-Send — so the method can't be registered.
 //!
+
 //! The fix is to isolate all Z3 work behind a dedicated OS thread:
 //!
+
 //! - [`SmtWorker`] owns the verifier and runs a loop on a thread it
-//!   spawns at startup. The verifier never leaves that thread.
+//!  spawns at startup. The verifier never leaves that thread.
 //! - [`SmtWorkerHandle`] is the `Send + Sync + Clone` handle the rest of
-//!   the LSP server talks to. It sends typed requests over a synchronous
-//!   channel and awaits the response through a `tokio::sync::oneshot`.
+//!  the LSP server talks to. It sends typed requests over a synchronous
+//!  channel and awaits the response through a `tokio::sync::oneshot`.
 //! - The request / response payloads only carry `Send` types (AST
-//!   `Type` / `Expr`, `VerifyMode`, enums), so every step of the
-//!   round-trip is `Send`.
+//!  `Type` / `Expr`, `VerifyMode`, enums), so every step of the
+//!  round-trip is `Send`.
 //!
+
 //! After the async handler awaits the oneshot, the resulting future
 //! captures only Send types — tower-lsp's router accepts it.
 //!
+
 //! # Scope
 //!
+
 //! The worker is a compatibility shim today: one request type
 //! (`VerifyRefinement`) covers the validate / promote / infer flows that
 //! were previously inlined in `SmtRefinementChecker`. New SMT-backed
@@ -44,6 +51,7 @@ use verum_smt::{RefinementVerifier, VerificationError, VerifyMode};
 
 /// Outcome of a single SMT refinement check.
 ///
+
 /// Mirrors the `SmtCheckResult` used by the legacy `SmtRefinementChecker`
 /// so callers can switch over without refactoring downstream matching.
 #[derive(Debug, Clone)]
@@ -75,6 +83,7 @@ enum SmtRequest {
 /// Handle to the SMT worker thread. Clone freely — all clones talk to
 /// the same worker. `Send + Sync`.
 ///
+
 /// Internal channel is a `SyncSender` with a small bound so a runaway
 /// flood of validation requests applies back-pressure on the UI thread
 /// rather than growing memory.
@@ -87,6 +96,7 @@ impl SmtWorkerHandle {
     /// Spawn a dedicated OS thread that owns a `RefinementVerifier` and
     /// services `SmtRequest`s from the returned handle.
     ///
+
     /// The thread is named `verum-smt-worker` for visibility in profiler
     /// / `ps` output. It panics only if `std::thread::spawn` fails (OOM);
     /// the worker loop itself swallows verifier panics and returns
@@ -107,6 +117,7 @@ impl SmtWorkerHandle {
 
     /// Run an SMT refinement check against the worker.
     ///
+
     /// Returns [`SmtCheckResult::Unknown`] when the worker is gone
     /// (shutdown, panic) — the LSP server stays alive even if SMT dies.
     pub async fn verify_refinement(
@@ -134,6 +145,7 @@ impl SmtWorkerHandle {
 
     /// Run an SMT refinement check with an outer timeout.
     ///
+
     /// Distinct from the solver's own `smt_timeout`: this bounds the
     /// round-trip including queueing, so an unresponsive solver can't
     /// block `on-type` validation.

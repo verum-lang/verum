@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — quotas)
 //
+
 // Three enforcement modes:
 //
-//   * `Permissive`  — record breaches in the journal but allow the
-//                      operation (audit-only)
-//   * `SoftWarn`    — emit a warning span on first cross, allow once;
-//                      hard-deny subsequent crosses
-//   * `Strict`      — deny on first cross
+
+//  * `Permissive` — record breaches in the journal but allow the
+//  operation (audit-only)
+//  * `SoftWarn` — emit a warning span on first cross, allow once;
+//  hard-deny subsequent crosses
+//  * `Strict` — deny on first cross
 // =============================================================================
 
 module core.database.sqlite.native.limits.policy;

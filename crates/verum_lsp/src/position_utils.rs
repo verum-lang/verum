@@ -1,5 +1,6 @@
 //! Position and range conversion utilities for LSP
 //!
+
 //! This module re-exports span utilities from `verum_common` for backward compatibility.
 //! All new code should import from `verum_common::span_utils` directly.
 
@@ -12,8 +13,10 @@ use verum_common::span::{LineColSpan, Span};
 
 /// Converts a verum_ast::Span to LSP Range (backward compatibility)
 ///
+
 /// # Arguments
 ///
+
 /// * `span` - AST span with byte offsets
 /// * `text` - Source text to calculate positions from
 pub fn ast_span_to_range(span: &Span, text: &str) -> Range {
@@ -22,8 +25,10 @@ pub fn ast_span_to_range(span: &Span, text: &str) -> Range {
 
 /// Converts a verum_diagnostics::Span to LSP Range (backward compatibility)
 ///
+
 /// # Arguments
 ///
+
 /// * `span` - Diagnostic span with line/column info
 /// * `_text` - Source text (unused but kept for API consistency)
 pub fn verum_span_to_range(span: &LineColSpan, _text: &str) -> Range {

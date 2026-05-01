@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 — fts5/index.vr
 //
+
 // An `Index` is a stack of segments organised into levels (level-N
 // segments are the result of merging level-(N-1) segments). Reads
 // scan every segment + union the postings; writes append a fresh
 // level-0 segment.
 //
+
 // The actual segment-file format is the responsibility of the
 // `segment` module; this module is the in-memory orchestration view.
 // =============================================================================

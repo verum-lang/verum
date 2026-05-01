@@ -3,22 +3,26 @@
 // =============================================================================
 // Spec: sqlite-native.md §19.6
 //
+
 // loom does NOT support C shared-library extensions. Instead, an
 // extension is a Verum cog that exports a `@extension_entry`
 // function:
 //
-//   @extension_entry
-//   public fn my_init(db: &mut Connection<Admin>) -> Result<(), DbError> {
-//       db.register_scalar(my_scalar_fn())?;
-//       db.set_busy_handler(constant_busy(50))?;
-//       Ok(())
-//   }
+
+//  @extension_entry
+//  public fn my_init(db: &mut Connection<Admin>) -> Result<(), DbError> {
+//  db.register_scalar(my_scalar_fn())?;
+//  db.set_busy_handler(constant_busy(50))?;
+//  Ok(())
+//  }
 //
+
 // The host application links the cog at build time (or via the
 // dynamic-cog mechanism described in the cog distribution spec).
 // `Connection.load_extension(entry)` simply runs the entry function
 // inside an Admin-mode session — it does NOT shell out to dlopen.
 //
+
 // `PRAGMA load_extension = 0/1` is honoured: an Admin-mode session
 // with the flag off rejects every load_extension call.
 // =============================================================================
@@ -124,6 +128,7 @@ implement LoadGate {
 // Decision helper for the L7 façade
 // -----------------------------------------------------------------------------
 //
+
 // The host calls `try_load(gate, info)` BEFORE running the entry
 // function. It returns the decision; on `Ok`, the host runs the
 // entry function (which may itself fail). On `Err(LoadDisabled)`,

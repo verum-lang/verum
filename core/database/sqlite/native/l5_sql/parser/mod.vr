@@ -7,15 +7,17 @@ module core.database.sqlite.native.l5_sql.parser;
 // Dependencies: l5_sql.lexer, l5_sql.ast
 // =============================================================================
 //
+
 // Hand-written recursive-descent parser, split by statement kind so
 // each grammar production lives in its own file:
 //
-//   * token_stream — shared SqlTokenStream + ParseError
-//   * expr         — operator-precedence expression parser
-//   * select       — SELECT with compound, ORDER BY, LIMIT, FROM+JOIN
-//   * insert/update/delete (upcoming)
-//   * ddl          (upcoming)
-//   * pragma       (upcoming)
+
+//  * token_stream — shared SqlTokenStream + ParseError
+//  * expr — operator-precedence expression parser
+//  * select — SELECT with compound, ORDER BY, LIMIT, FROM+JOIN
+//  * insert/update/delete (upcoming)
+//  * ddl (upcoming)
+//  * pragma (upcoming)
 // =============================================================================
 
 public module token_stream;

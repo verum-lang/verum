@@ -1,16 +1,19 @@
 //! `@device(gpu)` annotation detection.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 22). A pair of free
 //! helpers that scan a parsed module for `@device(gpu)` /
 //! `@device(GPU)` attributes on functions, enabling automatic
 //! GPU-compilation routing without an explicit `--gpu` flag.
 //!
+
 //! Surface:
 //!
-//!   * `detect_gpu_kernels` — module-level scan; checks both
-//!     item-level attributes and module-decl-level attributes.
-//!   * `has_device_gpu_attr` — single-attribute predicate
-//!     (matches `@device(gpu)` and `@device(GPU)` shapes).
+
+//!  * `detect_gpu_kernels` — module-level scan; checks both
+//!  item-level attributes and module-decl-level attributes.
+//!  * `has_device_gpu_attr` — single-attribute predicate
+//!  (matches `@device(gpu)` and `@device(GPU)` shapes).
 
 use verum_ast::{decl::ItemKind, Module};
 use verum_common::{List, Maybe};
@@ -22,6 +25,7 @@ impl<'s> CompilationPipeline<'s> {
     /// functions. Returns true if any GPU kernel annotation is found, enabling
     /// automatic GPU compilation without an explicit `--gpu` flag.
     ///
+
     /// This runs after Phase 2 (parsing) and before type checking so that the
     /// backend selection (CPU-only vs CPU+GPU) can be informed early.
     pub(super) fn detect_gpu_kernels(module: &Module) -> bool {

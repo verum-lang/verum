@@ -14,6 +14,7 @@
 )]
 //! Comprehensive test suite for the Verum parser.
 //!
+
 //! This module contains tests for all grammar constructs including:
 //! - All statement types (let, return, break, continue, loop, while, for, match)
 //! - All expression types (binary ops, unary ops, calls, member access, indexing)

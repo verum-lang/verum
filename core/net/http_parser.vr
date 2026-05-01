@@ -6,63 +6,73 @@
 // Reference: RFC 7230 Message Syntax + RFC 7231 Semantics
 // =============================================================================
 //
+
 // Zero-copy, resumable, SIMD-accelerated HTTP/1.1 parser. Designed for the
 // Weft listener hot-path (net-framework.md §4.4 / §6.1) with target budget
 // < 150 ns / request on modern x86_64 and zero heap allocation during
 // parsing — header key/value pairs are `(offset, len)` tuples into the
 // input buffer.
 //
+
 // # Usage
 //
+
 // ```verum
 // // Streaming parse — feed input incrementally:
 // let mut parser = HttpParser.request();
 // loop {
-//     let n = tcp.read_async(&mut buf).await?;
-//     if n == 0 { return Err(Unexpected.Eof); }
-//     match parser.feed(&buf[..n]) {
-//         ParseProgress.NeedMore              => continue,
-//         ParseProgress.Done { consumed, .. } => break,
-//         ParseProgress.Error(e)              => return Err(e),
-//     }
+//  let n = tcp.read_async(&mut buf).await?;
+//  if n == 0 { return Err(Unexpected.Eof); }
+//  match parser.feed(&buf[..n]) {
+//  ParseProgress.NeedMore => continue,
+//  ParseProgress.Done { consumed, .. } => break,
+//  ParseProgress.Error(e) => return Err(e),
+//  }
 // }
-// let req = parser.finish(&buf)?;   // Request<'arena>
+// let req = parser.finish(&buf)?; // Request<'arena>
 // ```
 //
+
 // # State machine
 //
+
 // ```
-//                       ┌──────────────┐
-//                       │  StartLine   │
-//                       └──────┬───────┘
-//                       CRLF   │
-//                              ▼
-//                       ┌──────────────┐  empty line
-//                       │   Headers    │───────────────►┌───────────┐
-//                       └──────┬───────┘                │   Body    │
-//                       header │                        │(CL|chunked)
-//                              └────────── loop ────────┤           │
-//                                                       └─────┬─────┘
-//                                                             │ complete
-//                                                             ▼
-//                                                       ┌──────────┐
-//                                                       │   Done   │
-//                                                       └──────────┘
+//  ┌──────────────┐
+//  │ StartLine │
+//  └──────┬───────┘
+//  CRLF │
+//  ▼
+//  ┌──────────────┐ empty line
+//  │ Headers │───────────────►┌───────────┐
+//  └──────┬───────┘ │ Body │
+//  header │ │(CL|chunked)
+//  └────────── loop ────────┤ │
+//  └─────┬─────┘
+//  │ complete
+//  ▼
+//  ┌──────────┐
+//  │ Done │
+//  └──────────┘
 // ```
 //
+
 // # Zero-copy contract
 //
+
 // Pointers returned via `HeaderView { key_start, key_len, value_start, value_len }`
 // are offsets into the original input buffer. Callers must keep the buffer
 // alive until they copy-out or drop the Request. Weft uses its per-request
 // arena (§4.3) to bound this lifetime structurally.
 //
+
 // # SIMD acceleration
 //
+
 // Header-separator scans use `core.simd.bytes.find_byte(b'\r')` which
 // @multiversion-dispatches to SSE2/AVX2/NEON per CPU. Scalar fallback
 // produces identical results at reduced throughput.
 //
+
 // =============================================================================
 
 module core.net.http_parser;
@@ -93,6 +103,7 @@ const MAX_HEADER_COUNT: Int = 128;
 // the parser accept the value, and any caller pre-allocating a body
 // buffer based on body_len() would request ~4 GiB — trivial DoS.
 //
+
 // 32 MiB matches nginx-default `client_max_body_size` ballpark and
 // is appropriate for general API request bodies. Applications that
 // need larger uploads (file servers, multimedia pipelines) should
@@ -715,6 +726,7 @@ fn parse_decimal_u32(bytes: &[Byte]) -> Maybe<UInt32> {
 /// case-insensitive per RFC 7230 §3.2; the SIMD-scan does the lookup
 /// cheaply because we tolower both sides during compare.
 ///
+
 /// Folds only when the byte is in the A-Z range. Naively OR'ing 0x20
 /// into every byte folds non-letter ASCII too — `\r` (0x0D) | 0x20 ==
 /// `-` (0x2D), `@` (0x40) | 0x20 == `` ` `` (0x60), etc. — producing
@@ -746,10 +758,12 @@ fn ends_with_ci(haystack: &[Byte], suffix: &[Byte]) -> Bool {
 // Chunked-encoding decoder (RFC 7230 §4.1)
 // =============================================================================
 //
+
 // Independent from the header parser — consumers who detect
 // `Transfer-Encoding: chunked` from the header parse feed the body bytes
 // into a ChunkedDecoder that emits reassembled payload.
 //
+
 // Frame:
 // ```
 // chunk-size [";" chunk-ext] CRLF

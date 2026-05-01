@@ -1,17 +1,19 @@
 //! Platform-native LLVM IR generation — all runtime functions emitted as pure LLVM IR.
 //!
+
 //! ALL runtime functions are emitted as LLVM IR. No C compilation needed.
 //! This enables:
-//!   - Full LTO across runtime + user code
-//!   - Embedded/OS-kernel compilation (bare-metal)
-//!   - Zero C toolchain dependency
+//!  - Full LTO across runtime + user code
+//!  - Embedded/OS-kernel compilation (bare-metal)
+//!  - Zero C toolchain dependency
 //!
+
 //! Platform strategy:
-//!   Linux x86_64:  inline asm syscalls (syscall instruction)
-//!   Linux aarch64: inline asm syscalls (svc #0)
-//!   macOS arm64:   libSystem FFI (Apple requires this)
-//!   Windows x64:   kernel32/ntdll FFI
-//!   Embedded:      no runtime, bare LLVM IR
+//!  Linux x86_64: inline asm syscalls (syscall instruction)
+//!  Linux aarch64: inline asm syscalls (svc #0)
+//!  macOS arm64: libSystem FFI (Apple requires this)
+//!  Windows x64: kernel32/ntdll FFI
+//!  Embedded: no runtime, bare LLVM IR
 
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
@@ -24,32 +26,34 @@ use super::target_triple::{target_is_aarch64, target_is_darwin, target_is_linux,
 
 /// Manifest-driven runtime configuration values that flow from
 /// `LanguageFeatures.runtime` through `LoweringConfig` into
-/// LLVM-IR globals.  Each field corresponds to a `[runtime].*`
+/// LLVM-IR globals. Each field corresponds to a `[runtime].*`
 /// manifest knob whose runtime-side consumer (the stdlib's
 /// `AsyncRuntimeConfig::default()` etc.) reads it via a
 /// `verum_get_runtime_*` getter function.
 ///
+
 /// Default 0 for numeric fields is the documented "auto / use
 /// platform default" value — keeps the historical behaviour
-/// when the manifest is untouched.  Non-zero overrides cascade
+/// when the manifest is untouched. Non-zero overrides cascade
 /// into every spawned runtime object (worker pool, task stacks)
 /// at construction time.
 ///
+
 /// **Architectural prerequisite (#261)**: this struct + the
 /// globals + getters it emits are the reusable bridge for any
 /// future manifest-driven runtime wire (GC thresholds, async
-/// backpressure, panic-at-runtime details).  Adding a new
+/// backpressure, panic-at-runtime details). Adding a new
 /// runtime knob is one field here + one global + one getter +
 /// one stdlib intrinsic call site.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RuntimeBridgeValues {
     /// `[runtime].async_worker_threads` — when > 0, overrides
-    /// `num_cpus::get()` at `AsyncRuntime::with_config`.  0 keeps
+    /// `num_cpus::get()` at `AsyncRuntime::with_config`. 0 keeps
     /// auto-detection.
     pub async_worker_threads: u32,
     /// `[runtime].task_stack_size` — when > 0, overrides the
     /// platform-default thread stack at `thread::Builder::new()
-    /// .stack_size(...)` for spawned tasks.  0 keeps platform
+    /// .stack_size(...)` for spawned tasks. 0 keeps platform
     /// default (typically 8 MiB on Unix, 1 MiB on Windows).
     pub task_stack_size: u64,
 }
@@ -59,26 +63,28 @@ pub struct PlatformIR<'ctx> {
     context: &'ctx Context,
     /// Panic-handling strategy — drives the body shape of
     /// `verum_panic` (Unwind: route through verum_exception_throw;
-    /// Abort: stderr + _exit(1)).  Threaded from
+    /// Abort: stderr + _exit(1)). Threaded from
     /// `LoweringConfig.panic_strategy`, ultimately sourced from
     /// `[runtime].panic` in Verum.toml.
     panic_strategy: super::vbc_lowering::PanicStrategy,
-    /// Manifest-driven runtime bridge values.  Each field is
+    /// Manifest-driven runtime bridge values. Each field is
     /// emitted as a const-initialized LLVM global plus a
-    /// `verum_get_runtime_*` getter function.  Stdlib reads the
+    /// `verum_get_runtime_*` getter function. Stdlib reads the
     /// values via the getters (or via the equivalent VBC intrinsic
-    /// at Tier-0).  Threaded from `LoweringConfig.runtime_bridge`.
+    /// at Tier-0). Threaded from `LoweringConfig.runtime_bridge`.
     runtime_bridge: RuntimeBridgeValues,
 }
 
 impl<'ctx> PlatformIR<'ctx> {
     /// Direct Linux syscall — libc-free emission of the kernel trap.
     ///
+
     /// Identical contract to `RuntimeLowering::emit_linux_syscall`:
     /// inline-asm with target-triple-driven arch dispatch
-    /// (`syscall` on x86_64, `svc #0` on aarch64).  Always 6-arg
+    /// (`syscall` on x86_64, `svc #0` on aarch64). Always 6-arg
     /// shape — pads with i64 zeros for unused args.
     ///
+
     /// Cross-compilation correct: reads `module.get_triple()`, never
     /// host `#[cfg]`.
     fn emit_linux_syscall(
@@ -152,7 +158,7 @@ impl<'ctx> PlatformIR<'ctx> {
     }
 
     /// Create a new platform-IR emitter with the documented-default
-    /// panic strategy (Unwind).  Most call sites should use
+    /// panic strategy (Unwind). Most call sites should use
     /// [`PlatformIR::with_panic_strategy`] to thread the user's
     /// `[runtime].panic` setting through.
     pub fn new(context: &'ctx Context) -> Self {
@@ -179,7 +185,7 @@ impl<'ctx> PlatformIR<'ctx> {
     }
 
     /// Builder method to install the manifest-driven runtime
-    /// bridge values.  Threaded from `LoweringConfig.runtime_bridge`
+    /// bridge values. Threaded from `LoweringConfig.runtime_bridge`
     /// at the codegen entry point in `pipeline/native_codegen.rs`.
     /// Architectural prerequisite #261 — the reusable bridge for
     /// every `[runtime].*` manifest knob with a runtime-side
@@ -301,7 +307,7 @@ impl<'ctx> PlatformIR<'ctx> {
         // Time functions
         self.emit_time_functions(module)?;
 
-        // Platform-specific declarations.  TARGET-triple dispatch.
+        // Platform-specific declarations. TARGET-triple dispatch.
         if target_is_darwin(module) {
             self.emit_macos_declarations(module)?;
         }
@@ -392,6 +398,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_raw_open3(path: ptr, flags: i32, mode: i32) -> i64
     ///
+
     /// Wraps the POSIX `open(path, flags, mode)` call. The key issue is that `open`
     /// is variadic (`int open(const char*, int, ...)`), and on ARM64 the variadic
     /// calling convention puts extra args on the stack instead of registers.
@@ -449,33 +456,38 @@ impl<'ctx> PlatformIR<'ctx> {
     // Allocator — pure LLVM IR (replaces C verum_alloc)
     // ========================================================================
     //
+
     // Arena allocator with spinlock + free-lists.
     // Same algorithm as verum_platform.c but in LLVM IR.
     //
+
     // Global state:
-    //   @verum_arena_ptr    = global ptr null    ; current arena block
-    //   @verum_arena_used   = global i64 0       ; bytes used in current arena
-    //   @verum_arena_size   = global i64 0       ; total size of current arena
-    //   @verum_alloc_lock   = global i32 0       ; spinlock (0=free, 1=locked)
-    //   @verum_free_lists   = global [8 x ptr] zeroinitializer
+    //  @verum_arena_ptr = global ptr null ; current arena block
+    //  @verum_arena_used = global i64 0 ; bytes used in current arena
+    //  @verum_arena_size = global i64 0 ; total size of current arena
+    //  @verum_alloc_lock = global i32 0 ; spinlock (0=free, 1=locked)
+    //  @verum_free_lists = global [8 x ptr] zeroinitializer
 
     /// Emit the full allocator as LLVM IR — no C code needed.
     ///
+
     /// Algorithm: Thread-safe bump allocator with mmap-backed arenas.
     ///
+
     /// Global state (LLVM global variables):
-    ///   @__verum_arena_base  : ptr    — base of current arena block
-    ///   @__verum_arena_ptr   : ptr    — next free byte in arena
-    ///   @__verum_arena_end   : ptr    — end of current arena block
-    ///   @__verum_alloc_lock  : i32    — spinlock (0=free, 1=locked)
+    ///  @__verum_arena_base : ptr — base of current arena block
+    ///  @__verum_arena_ptr : ptr — next free byte in arena
+    ///  @__verum_arena_end : ptr — end of current arena block
+    ///  @__verum_alloc_lock : i32 — spinlock (0=free, 1=locked)
     ///
+
     /// verum_alloc(size):
-    ///   1. Align size to 16 bytes
-    ///   2. Acquire spinlock (cmpxchg loop)
-    ///   3. Try bump: new_ptr = arena_ptr + size
-    ///   4. If new_ptr <= arena_end: store new_ptr, release lock, return old arena_ptr
-    ///   5. Else: call verum_os_alloc(2MB), update arena, retry
-    ///   6. Release spinlock
+    ///  1. Align size to 16 bytes
+    ///  2. Acquire spinlock (cmpxchg loop)
+    ///  3. Try bump: new_ptr = arena_ptr + size
+    ///  4. If new_ptr <= arena_end: store new_ptr, release lock, return old arena_ptr
+    ///  5. Else: call verum_os_alloc(2MB), update arena, retry
+    ///  6. Release spinlock
     fn emit_allocator(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -657,9 +669,10 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_os_alloc(size: i64) -> ptr
     ///
+
     /// Platform-specific memory allocation without libc:
-    ///   Unix:    mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0)
-    ///   Windows: VirtualAlloc(NULL, size, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
+    ///  Unix: mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0)
+    ///  Windows: VirtualAlloc(NULL, size, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
     fn emit_verum_os_alloc(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         if module.get_function("verum_os_alloc").map_or(false, |f| f.count_basic_blocks() > 0) {
             return Ok(());
@@ -763,9 +776,10 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_os_free(ptr: ptr, size: i64) -> void
     ///
+
     /// Platform-specific memory deallocation without libc:
-    ///   Unix:    munmap(ptr, size)
-    ///   Windows: VirtualFree(ptr, 0, MEM_RELEASE)
+    ///  Unix: munmap(ptr, size)
+    ///  Windows: VirtualFree(ptr, 0, MEM_RELEASE)
     fn emit_verum_os_free(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         if module.get_function("verum_os_free").map_or(false, |f| f.count_basic_blocks() > 0) {
             return Ok(());
@@ -832,9 +846,10 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_os_write(fd: i64, buf: ptr, count: i64) -> i64
     ///
+
     /// Platform-specific write without libc:
-    ///   Unix:    write(fd, buf, count) syscall
-    ///   Windows: WriteFile(GetStdHandle(fd_to_handle), buf, count, &written, NULL)
+    ///  Unix: write(fd, buf, count) syscall
+    ///  Windows: WriteFile(GetStdHandle(fd_to_handle), buf, count, &written, NULL)
     fn emit_verum_os_write(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         if module.get_function("verum_os_write").map_or(false, |f| f.count_basic_blocks() > 0) {
             return Ok(());
@@ -861,8 +876,8 @@ impl<'ctx> PlatformIR<'ctx> {
         // TARGET-triple dispatch.
         if target_is_windows(module) {
             // GetStdHandle(nStdHandle) -> HANDLE
-            //   STD_OUTPUT_HANDLE = -11 (0xFFFFFFF5)
-            //   STD_ERROR_HANDLE  = -12 (0xFFFFFFF4)
+            //  STD_OUTPUT_HANDLE = -11 (0xFFFFFFF5)
+            //  STD_ERROR_HANDLE = -12 (0xFFFFFFF4)
             // Map fd: 1→stdout, 2→stderr
             let get_std_handle = module.get_function("GetStdHandle").unwrap_or_else(|| {
                 let gsh_type = ptr_type.fn_type(&[i32_type.into()], false);
@@ -901,16 +916,17 @@ impl<'ctx> PlatformIR<'ctx> {
             // GUI-subsystem degradation: when the process has no
             // console (Win32 app launched with `/SUBSYSTEM:WINDOWS`),
             // `GetStdHandle` returns NULL or `INVALID_HANDLE_VALUE`
-            // (-1 cast to HANDLE).  Calling `WriteFile` on either
-            // would block / fail.  Short-circuit to "wrote count
+            // (-1 cast to HANDLE). Calling `WriteFile` on either
+            // would block / fail. Short-circuit to "wrote count
             // bytes" so library code that incidentally `print()`s
             // (logging, telemetry) does not block the GUI thread.
             //
+
             // We branch on `handle == NULL` only — `INVALID_HANDLE_VALUE`
             // (= 0xFFFF...FFFF) is also a non-NULL pointer in LLVM IR
             // terms, but Microsoft documents both NULL and
             // INVALID_HANDLE_VALUE as failure modes for
-            // `GetStdHandle`.  We test both: NULL via `is_null`,
+            // `GetStdHandle`. We test both: NULL via `is_null`,
             // INVALID_HANDLE_VALUE via ptr-to-int compare against -1.
             let handle_ptr = match handle {
                 BasicValueEnum::PointerValue(p) => p,
@@ -942,7 +958,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 .build_conditional_branch(bad_handle, bb_skip, bb_write)
                 .or_llvm_err()?;
 
-            // No-console branch: pretend the write succeeded.  The
+            // No-console branch: pretend the write succeeded. The
             // caller treats the return value as bytes-written, so
             // returning `count` makes `print()` look like it wrote
             // everything (which is the correct semantics for a UI
@@ -985,9 +1001,10 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_os_exit(code: i32) -> noreturn
     ///
+
     /// Platform-specific process exit without libc:
-    ///   Unix:    _exit(code) syscall
-    ///   Windows: ExitProcess(code) from kernel32.dll
+    ///  Unix: _exit(code) syscall
+    ///  Windows: ExitProcess(code) from kernel32.dll
     fn emit_verum_os_exit(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         if module.get_function("verum_os_exit").map_or(false, |f| f.count_basic_blocks() > 0) {
             return Ok(());
@@ -1123,14 +1140,17 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// On Windows without CRT, emit `mainCRTStartup` as the PE entry point.
     ///
+
     /// Unlike Unix `_start`, Windows entry point receives no argc/argv on the
     /// stack. We call `GetCommandLineW` + `CommandLineToArgvW` to obtain them,
     /// then forward to `main(argc, argv)`.
     ///
+
     /// For the initial V-LLSI implementation we emit a minimal entry that
     /// passes argc=0, argv=NULL — command-line parsing is handled by the
     /// Verum runtime (`verum_store_args` reads `GetCommandLineW` directly).
     ///
+
     /// **Cross-compilation note**: this method is ALWAYS available
     /// regardless of host OS — the caller (`emit_main_entry`'s
     /// dispatch site) gates the call on `target_is_windows(module)`,
@@ -1220,14 +1240,16 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // Manifest-driven runtime bridge globals (#261).
         //
+
         // Each global is const-initialised at codegen time from
         // the `runtime_bridge` field threaded through
-        // `LoweringConfig`.  Stdlib code reads them via the
+        // `LoweringConfig`. Stdlib code reads them via the
         // `verum_get_runtime_*` getter functions emitted by
-        // `emit_runtime_bridge_getters` below.  Globals carry
+        // `emit_runtime_bridge_getters` below. Globals carry
         // `Internal` linkage so LTO can constant-fold the
         // getter loads through the entire program.
         //
+
         // i64 is the documented runtime-bridge wire type — wide
         // enough to carry u32 thread counts, u64 byte sizes, and
         // any future fixed-point or bitfield knob without growing
@@ -1266,8 +1288,9 @@ impl<'ctx> PlatformIR<'ctx> {
     /// every call site after global-DCE — zero runtime overhead vs
     /// hardcoded values.
     ///
+
     /// Adding a new manifest-driven runtime knob: emit the global
-    /// in `emit_runtime_globals` + add a getter call here.  The
+    /// in `emit_runtime_globals` + add a getter call here. The
     /// stdlib accesses the getter via @intrinsic registration in
     /// `crates/verum_vbc/src/intrinsics/registry.rs` (separate
     /// step, but the LLVM-side surface is uniform).
@@ -2026,10 +2049,12 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// CBGR memory safety stubs — always return true (valid).
     ///
+
     /// ThinRef layout: { ptr: ptr, generation: u32, epoch_caps: u32 } = 16 bytes
-    /// FatRef layout:  { ptr: ptr, generation: u32, epoch_caps: u32, len: u64 } = 24 bytes
+    /// FatRef layout: { ptr: ptr, generation: u32, epoch_caps: u32, len: u64 } = 24 bytes
     /// AllocationHeader: 8 bytes before pointer (generation u32 + caps u32 packed).
     ///
+
     /// These are performance stubs — real CBGR checks will be re-enabled when
     /// the full header layout is migrated.
     fn emit_cbgr_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
@@ -2278,18 +2303,22 @@ impl<'ctx> PlatformIR<'ctx> {
         // Real CBGR validation — generational + epoch checks
         // ====================================================================
         //
+
         // AllocationHeader layout (32 bytes before user pointer):
-        //   offset 0: generation (i32)
-        //   offset 4: epoch (i16) + capabilities (i16)
+        //  offset 0: generation (i32)
+        //  offset 4: epoch (i16) + capabilities (i16)
         //
+
         // ThinRef layout: { ptr: i64, generation: i32, epoch_and_caps: i32 }
 
         // verum_cbgr_validate_ref(user_ptr: i64, expected_gen_epoch: i64) -> i1
         //
+
         // expected_gen_epoch packing:
-        //   bits  0..31 = expected generation (i32)
-        //   bits 32..47 = expected epoch (i16)
+        //  bits 0..31 = expected generation (i32)
+        //  bits 32..47 = expected epoch (i16)
         //
+
         // Returns (actual_gen == expected_gen) && (actual_epoch == expected_epoch)
         {
             let fn_type = i1_type.fn_type(&[i64_type.into(), i64_type.into()], false);
@@ -2368,6 +2397,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_cbgr_panic(user_ptr: i64, expected: i64, actual: i64) -> void
         //
+
         // Cold-path abort when a CBGR validation fails.
         // Calls _exit(134) which is the SIGABRT equivalent exit code.
         {
@@ -2411,15 +2441,18 @@ impl<'ctx> PlatformIR<'ctx> {
         // Shared<T> reference counting
         // ====================================================================
         //
+
         // AllocationHeader layout (32 bytes before user pointer):
-        //   offset 12: ref_count (i32, atomic)
+        //  offset 12: ref_count (i32, atomic)
         //
+
         // verum_shared_inc_ref(ptr: i64) -> void
-        //   Atomically increments ref_count. No-op if ptr == 0.
+        //  Atomically increments ref_count. No-op if ptr == 0.
         //
+
         // verum_shared_dec_ref(ptr: i64) -> i1
-        //   Atomically decrements ref_count. Returns true if it reached 0.
-        //   No-op (returns false) if ptr == 0.
+        //  Atomically decrements ref_count. Returns true if it reached 0.
+        //  No-op (returns false) if ptr == 0.
 
         // ---- verum_shared_inc_ref(ptr: i64) -> void ----
         {
@@ -2472,7 +2505,7 @@ impl<'ctx> PlatformIR<'ctx> {
         }
 
         // ---- verum_shared_dec_ref(ptr: i64) -> i1 ----
-        //   Returns true (1) if ref_count reached 0, false (0) otherwise.
+        //  Returns true (1) if ref_count reached 0, false (0) otherwise.
         {
             let fn_type = i1_type.fn_type(&[i64_type.into()], false);
             let func = self.get_or_declare_fn(module, "verum_shared_dec_ref", fn_type);
@@ -2587,6 +2620,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Ensure common I/O syscalls are declared with Verum ABI (all i64 types).
     ///
+
     /// IMPORTANT: All syscalls use i64 parameter/return types to match VBC's uniform
     /// type convention. VBC-compiled FFI declarations from core/sys/*.vr also use i64.
     /// Using i32 would cause LLVM type conflicts when both are in the same module.
@@ -3218,34 +3252,39 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Declare libc-free wrappers for the BSD socket family.
     ///
+
     /// **Libc-free**: each declared function is an internal-linkage
     /// wrapper named `socket`, `bind`, `listen`, etc. (Verum keeps
     /// these public-looking names so VBC-compiled FFI declarations
-    /// in `core/sys/**.vr` resolve against them).  The wrapper body
+    /// in `core/sys/**.vr` resolve against them). The wrapper body
     /// dispatches per-target:
     ///
-    ///   * **Linux**: direct syscall via `emit_linux_syscall` with
-    ///     the arch-correct number (x86_64 / aarch64 differ).
-    ///   * **macOS / other Unix**: libSystem call (acceptable per
-    ///     the no-libc rule — Apple requires libSystem as the system
-    ///     boundary; libSystem provides socket(), bind(), etc.).
-    ///     We tag the indirection with a `verum.libsys` attribute
-    ///     so the linker driver can route through `-lSystem`.
+
+    ///  * **Linux**: direct syscall via `emit_linux_syscall` with
+    ///  the arch-correct number (x86_64 / aarch64 differ).
+    ///  * **macOS / other Unix**: libSystem call (acceptable per
+    ///  the no-libc rule — Apple requires libSystem as the system
+    ///  boundary; libSystem provides socket(), bind(), etc.).
+    ///  We tag the indirection with a `verum.libsys` attribute
+    ///  so the linker driver can route through `-lSystem`.
     ///
+
     /// All names use the i64 ABI shape to match VBC-compiled FFI
     /// declarations from `core/sys/*.vr` — narrowing/widening to
     /// kernel-shape happens inside the wrapper body.
     ///
+
     /// Pre-fix this method declared `extern "C"` libc symbols
     /// directly, forcing every Verum AOT binary to drag in
-    /// `libc.so.6` for the socket family on Linux.  Post-fix the
+    /// `libc.so.6` for the socket family on Linux. Post-fix the
     /// produced binary references zero libc symbols on the
     /// networking path; `ldd <bin>` shows only the dynamic linker.
     ///
+
     /// See `docs/architecture/no-libc-architecture.md`.
     fn ensure_networking_syscalls(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         // Per-syscall configuration: name + signature + Linux syscall
-        // numbers (x86_64, aarch64).  None when the syscall doesn't
+        // numbers (x86_64, aarch64). None when the syscall doesn't
         // exist on that arch — the caller emits a libSystem fallback.
         struct SocketSyscall {
             name: &'static str,
@@ -3276,12 +3315,14 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Emit a libc-free wrapper for one BSD-socket family symbol.
     ///
+
     /// Dispatches on `target_is_linux(module)` to pick between the
     /// direct-syscall path (Linux) and a libSystem indirection
-    /// (macOS / other-Unix).  The wrapper retains the historical
+    /// (macOS / other-Unix). The wrapper retains the historical
     /// libc symbol name so VBC-compiled FFI callers don't need
     /// updating; the function body dispatches under the hood.
     ///
+
     /// All wrappers use the i64-everywhere Verum ABI shape — the
     /// kernel ABI (i32 for fd, sockaddr ptrs, etc.) is constructed
     /// inside the body via truncation / `ptr_to_int` as needed by
@@ -3308,9 +3349,9 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         // Per-symbol signature: parameter list matches what callers
-        // expect (i64 fd, i64 args, ptr buffers).  The historical
+        // expect (i64 fd, i64 args, ptr buffers). The historical
         // declarations in `ensure_networking_syscalls` are reproduced
-        // here.  Each signature is mapped to the syscall by the
+        // here. Each signature is mapped to the syscall by the
         // dispatch table below.
         let fn_type = match name {
             "socket"     => i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
@@ -3330,7 +3371,7 @@ impl<'ctx> PlatformIR<'ctx> {
         };
 
         // Either reuse the existing pre-declaration (declared earlier
-        // by a caller) or add a new one.  Either way, set linkage to
+        // by a caller) or add a new one. Either way, set linkage to
         // External so VBC-compiled FFI calls (which look up the name
         // by symbol) can resolve.
         let wrapper = module.get_function(name).unwrap_or_else(|| {
@@ -3342,8 +3383,8 @@ impl<'ctx> PlatformIR<'ctx> {
         builder.position_at_end(entry);
 
         if target_is_linux(module) {
-            // Direct syscall path.  Build i64 args by reading params
-            // and converting pointer params via `ptr_to_int`.  All
+            // Direct syscall path. Build i64 args by reading params
+            // and converting pointer params via `ptr_to_int`. All
             // syscalls in this set fit in 6 args.
             let n_params = wrapper.count_params();
             let mut args_i64: Vec<verum_llvm::values::IntValue<'ctx>> = Vec::with_capacity(n_params as usize);
@@ -3370,9 +3411,9 @@ impl<'ctx> PlatformIR<'ctx> {
             builder.build_return(Some(&ret))
                 .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
         } else {
-            // libSystem indirection.  Declare a Verum-named alias of
+            // libSystem indirection. Declare a Verum-named alias of
             // the libSystem symbol with the same signature, route the
-            // call through it.  The linker resolves
+            // call through it. The linker resolves
             // `__verum_libsys_<name>` against libSystem's `<name>`
             // via the manifest-driven `verum.libsys` attribute.
             let libsys_name = format!("__verum_libsys_{}", name);
@@ -4218,7 +4259,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context; let i64_type = ctx.i64_type();
         let func = self.get_or_declare_fn(module, "verum_socket_set_nonblocking", i64_type.fn_type(&[i64_type.into()], false));
         if func.count_basic_blocks() > 0 { return Ok(()); }
-        // O_NONBLOCK: Darwin/BSD=0x0004, Linux=0x800.  TARGET-triple dispatch.
+        // O_NONBLOCK: Darwin/BSD=0x0004, Linux=0x800. TARGET-triple dispatch.
         let o_nonblock: u64 = if target_is_linux(module) { 0x800 } else { 0x0004 };
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry"); let getfl_ok = ctx.append_basic_block(func, "getfl_ok"); let ret_fail = ctx.append_basic_block(func, "ret_fail");
@@ -4270,7 +4311,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_socket_set_reuseaddr(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         // SOL_SOCKET / SO_REUSEADDR — TARGET-dependent.
         // Darwin: SOL_SOCKET=0xFFFF, SO_REUSEADDR=0x0004
-        // Linux:  SOL_SOCKET=1,      SO_REUSEADDR=2
+        // Linux: SOL_SOCKET=1, SO_REUSEADDR=2
         // Other (BSD-derived): use Darwin layout as best-fit fallback.
         let (s, o) = if target_is_linux(module) {
             (1u64, 2u64)
@@ -4296,7 +4337,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let func = self.get_or_declare_fn(module, "verum_socket_get_error", i64_type.fn_type(&[i64_type.into()], false));
         if func.count_basic_blocks() > 0 { return Ok(()); }
         // SO_ERROR: Darwin SOL_SOCKET=0xFFFF / SO_ERROR=0x1007;
-        // Linux SOL_SOCKET=1 / SO_ERROR=4.  TARGET-triple dispatch.
+        // Linux SOL_SOCKET=1 / SO_ERROR=4. TARGET-triple dispatch.
         let (sol, soe) = if target_is_linux(module) {
             (1u64, 4u64)
         } else {
@@ -4352,16 +4393,17 @@ impl<'ctx> PlatformIR<'ctx> {
     // Channels — full LLVM IR (replaces C verum_chan_*)
     // ========================================================================
     //
+
     // VerumChanHeader layout (64 bytes):
-    //   offset  0: mutex       (i32 atomic — VerumMutex)
-    //   offset  4: not_empty   (i32 — VerumCondVar)
-    //   offset  8: not_full    (i32 — VerumCondVar)
-    //   offset 16: capacity    (i64)
-    //   offset 24: len         (i64)
-    //   offset 32: head        (i64)
-    //   offset 40: tail        (i64)
-    //   offset 48: closed      (i64)
-    //   offset 56: data_ptr    (i64 — pointer to i64 array)
+    //  offset 0: mutex (i32 atomic — VerumMutex)
+    //  offset 4: not_empty (i32 — VerumCondVar)
+    //  offset 8: not_full (i32 — VerumCondVar)
+    //  offset 16: capacity (i64)
+    //  offset 24: len (i64)
+    //  offset 32: head (i64)
+    //  offset 40: tail (i64)
+    //  offset 48: closed (i64)
+    //  offset 56: data_ptr (i64 — pointer to i64 array)
 
     fn ensure_sync_helpers_declared(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
@@ -4522,7 +4564,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let slot = unsafe { builder.build_gep(i8_type, dp, &[tail_off], "slot").or_llvm_err()? };
         builder.build_store(slot, value).or_llvm_err()?;
 
-        // tail = (tail + 1) % cap  (unsigned rem)
+        // tail = (tail + 1) % cap (unsigned rem)
         let cap2 = builder.build_load(i64_type, cap_p, "cap2").or_llvm_err()?.into_int_value();
         let tail_inc = builder.build_int_add(tail, i64_type.const_int(1, false), "ti").or_llvm_err()?;
         let new_tail = builder.build_int_unsigned_rem(tail_inc, cap2, "nt").or_llvm_err()?;
@@ -4875,19 +4917,21 @@ impl<'ctx> PlatformIR<'ctx> {
     // Nursery + WaitGroup — full LLVM IR
     // ========================================================================
     //
+
     // Nursery layout (56 bytes):
-    //   offset  0: threads_ptr   (i64 — ptr to array of thread handles)
-    //   offset  8: thread_count  (i64)
-    //   offset 16: max_tasks     (i64)
-    //   offset 24: timeout_ns    (i64)
-    //   offset 32: error_behavior(i64)
-    //   offset 40: error_flag    (i64 atomic)
-    //   offset 48: error_value   (i64)
+    //  offset 0: threads_ptr (i64 — ptr to array of thread handles)
+    //  offset 8: thread_count (i64)
+    //  offset 16: max_tasks (i64)
+    //  offset 24: timeout_ns (i64)
+    //  offset 32: error_behavior(i64)
+    //  offset 40: error_flag (i64 atomic)
+    //  offset 48: error_value (i64)
     //
+
     // WaitGroup layout (32 bytes):
-    //   offset  0: counter (i64)
-    //   offset  8: mutex   (4 bytes i32)
-    //   offset 12: condvar (4 bytes i32)
+    //  offset 0: counter (i64)
+    //  offset 8: mutex (4 bytes i32)
+    //  offset 12: condvar (4 bytes i32)
 
     fn emit_nursery_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         self.ensure_sync_helpers_declared(module)?;
@@ -4909,13 +4953,13 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_nursery_new(max: i64) -> i64
     /// Nursery struct layout (56 bytes):
-    ///   0: handles_ptr (i64) — array of pool handles (i64 each)
-    ///   8: count (i64)       — current number of spawned tasks
-    ///  16: max_tasks (i64)   — 0 = unlimited
-    ///  24: timeout_ms (i64)  — 0 = no timeout
+    ///  0: handles_ptr (i64) — array of pool handles (i64 each)
+    ///  8: count (i64) — current number of spawned tasks
+    ///  16: max_tasks (i64) — 0 = unlimited
+    ///  24: timeout_ms (i64) — 0 = no timeout
     ///  32: error_behavior (i64) — 0=cancel_all, 1=wait_all, 2=fail_fast
     ///  40: cancel_flag (i64) — set to 1 to cancel
-    ///  48: mutex (i32)       — protects count increment
+    ///  48: mutex (i32) — protects count increment
     fn emit_nursery_new(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -5038,9 +5082,9 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_nursery_await_all(nursery: i64) -> i64
     /// Awaits all spawned pool handles. Implements:
-    ///   - Timeout enforcement (via clock_gettime + non-blocking check)
-    ///   - Cancel flag checking (skip remaining on cancel)
-    ///   - Error behavior policy (cancel_all=0, wait_all=1, fail_fast=2)
+    ///  - Timeout enforcement (via clock_gettime + non-blocking check)
+    ///  - Cancel flag checking (skip remaining on cancel)
+    ///  - Error behavior policy (cancel_all=0, wait_all=1, fail_fast=2)
     /// Returns 0 on success, 1 on timeout, negative on error.
     fn emit_nursery_await_all(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
@@ -6110,11 +6154,11 @@ impl<'ctx> PlatformIR<'ctx> {
         let pool_ptr = builder.build_int_to_ptr(pool_i64, ptr_type, "pool_ptr").or_llvm_err()?;
 
         // Field offsets in pool struct:
-        //   0: task_queue_ptr (i64)   8: capacity (i64)
-        //  16: head (i64)            24: tail (i64)
-        //  32: len (i64)             40: mutex (i32)
-        //  44: condvar (i32)         48: thread_ptrs (i64)
-        //  56: num_workers (i64)     64: shutdown (i64)
+        //  0: task_queue_ptr (i64) 8: capacity (i64)
+        //  16: head (i64) 24: tail (i64)
+        //  32: len (i64) 40: mutex (i32)
+        //  44: condvar (i32) 48: thread_ptrs (i64)
+        //  56: num_workers (i64) 64: shutdown (i64)
         // SAFETY: GEP into the pool struct at offset 40 (mutex)
         let mtx_p = unsafe { builder.build_gep(i8_type, pool_ptr, &[i64_type.const_int(40, false)], "mtx_p").or_llvm_err()? };
         // SAFETY: GEP into the pool struct at offset 44 (condvar)
@@ -6178,7 +6222,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let dp_p = unsafe { builder.build_gep(i8_type, task_p, &[i64_type.const_int(24, false)], "dp_p").or_llvm_err()? };
         let done_ptr_val = builder.build_load(i64_type, dp_p, "done_ptr").or_llvm_err()?.into_int_value();
 
-        // head = (head + 1) % cap  (unsigned rem — head/cap are always non-negative)
+        // head = (head + 1) % cap (unsigned rem — head/cap are always non-negative)
         let head_inc = builder.build_int_add(head, i64_type.const_int(1, false), "hi").or_llvm_err()?;
         let new_head = builder.build_int_unsigned_rem(head_inc, cap, "nh").or_llvm_err()?;
         builder.build_store(head_p, new_head).or_llvm_err()?;
@@ -6249,8 +6293,8 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // Alloc pool struct (80 bytes), zero-init
         // Layout: queue_ptr(0), cap(8), head(16), tail(24), len(32),
-        //   mutex(40:i32), not_empty_cv(44:i32), thread_ptrs(48), num_workers(56),
-        //   shutdown(64), not_full_cv(72:i32), pad(76)
+        //  mutex(40:i32), not_empty_cv(44:i32), thread_ptrs(48), num_workers(56),
+        //  shutdown(64), not_full_cv(72:i32), pad(76)
         let pool_ptr = builder.build_call(alloc_fn, &[i64_type.const_int(80, false).into()], "pool").or_llvm_err()?
             .try_as_basic_value().basic().or_internal("expected basic value")?.into_pointer_value();
         builder.build_memset(pool_ptr, 1, i8_type.const_zero(), i64_type.const_int(80, false)).or_llvm_err()?;
@@ -6436,7 +6480,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let dp_p = unsafe { builder.build_gep(i8_type, task_p, &[i64_type.const_int(24, false)], "dp_p").or_llvm_err()? };
         builder.build_store(dp_p, done_i64).or_llvm_err()?;
 
-        // tail = (tail + 1) % cap  (unsigned rem — always non-negative)
+        // tail = (tail + 1) % cap (unsigned rem — always non-negative)
         let tail_inc = builder.build_int_add(tail, i64_type.const_int(1, false), "ti").or_llvm_err()?;
         let new_tail = builder.build_int_unsigned_rem(tail_inc, cap, "nt").or_llvm_err()?;
         builder.build_store(tail_p, new_tail).or_llvm_err()?;
@@ -6900,17 +6944,18 @@ impl<'ctx> PlatformIR<'ctx> {
     // Generators — stackful coroutines via threads + mutex/condvar
     // ========================================================================
     //
+
     // VerumGenerator layout (112 bytes):
-    //   offset  0: gen_func (i64 — function pointer)
-    //   offset  8: gen_arg (i64)
-    //   offset 16: num_args (i64)
-    //   offset 24: args_ptr (i64 — ptr to args array)
-    //   offset 32: value (i64 — yielded/returned value)
-    //   offset 40: status (i64 — 0=created, 1=running, 2=yielded, 3=completed)
-    //   offset 48: GenMutex lock (i32 atomic)
-    //   offset 52: GenCondVar cv_caller (i32)
-    //   offset 56: GenCondVar cv_gen (i32)
-    //   offset 64: thread_handle (i64 — pthread/thread id)
+    //  offset 0: gen_func (i64 — function pointer)
+    //  offset 8: gen_arg (i64)
+    //  offset 16: num_args (i64)
+    //  offset 24: args_ptr (i64 — ptr to args array)
+    //  offset 32: value (i64 — yielded/returned value)
+    //  offset 40: status (i64 — 0=created, 1=running, 2=yielded, 3=completed)
+    //  offset 48: GenMutex lock (i32 atomic)
+    //  offset 52: GenCondVar cv_caller (i32)
+    //  offset 56: GenCondVar cv_gen (i32)
+    //  offset 64: thread_handle (i64 — pthread/thread id)
 
     fn emit_generators_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         self.emit_gen_create(module)?;
@@ -6963,8 +7008,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let args = func.get_nth_param(2).or_internal("missing param 2")?.into_pointer_value();
 
         // VerumGenerator: 64 bytes (verified with sizeof)
-        //   0: func_ptr, 8: num_args, 16: args, 24: yielded_value,
-        //   32: status, 40: mtx(i32), 44: cv_caller(i32), 48: cv_gen(i32), 56: thread(ptr)
+        //  0: func_ptr, 8: num_args, 16: args, 24: yielded_value,
+        //  32: status, 40: mtx(i32), 44: cv_caller(i32), 48: cv_gen(i32), 56: thread(ptr)
 
         // Alloc 64 bytes, zero-init
         let gen_ptr = builder.build_call(alloc_fn, &[i64_type.const_int(64, false).into()], "gen").or_llvm_err()?
@@ -7080,8 +7125,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let gen_ptr = builder.build_int_to_ptr(handle, ptr_type, "gen").or_llvm_err()?;
 
         // VerumGenerator offsets (verified with offsetof):
-        //   0: func_ptr, 8: num_args, 16: args, 24: yielded_value,
-        //   32: status, 40: mtx, 44: cv_caller, 48: cv_gen, 56: thread
+        //  0: func_ptr, 8: num_args, 16: args, 24: yielded_value,
+        //  32: status, 40: mtx, 44: cv_caller, 48: cv_gen, 56: thread
 
         // Lock GenMutex at offset 40
         // SAFETY: GEP into the generator struct at offset 40 (mutex)
@@ -7310,14 +7355,15 @@ impl<'ctx> PlatformIR<'ctx> {
     // Threading — LLVM IR bodies for spawn/join/is_done
     // ========================================================================
     //
+
     // VerumThread layout (48 bytes used, full struct ~80 bytes):
-    //   offset  0: func_ptr (i64)
-    //   offset  8: arg (i64)
-    //   offset 16: result (i64)
-    //   offset 24: done (i64 atomic — 0=running, 1=done)
-    //   offset 32: VerumMutex (i32)
-    //   offset 36: VerumCondVar (i32)
-    //   offset 40: thread_id (i64 — platform thread handle)
+    //  offset 0: func_ptr (i64)
+    //  offset 8: arg (i64)
+    //  offset 16: result (i64)
+    //  offset 24: done (i64 atomic — 0=running, 1=done)
+    //  offset 32: VerumMutex (i32)
+    //  offset 36: VerumCondVar (i32)
+    //  offset 40: thread_id (i64 — platform thread handle)
 
     fn emit_threading_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         self.emit_thread_spawn_ir(module)?;
@@ -7361,13 +7407,13 @@ impl<'ctx> PlatformIR<'ctx> {
         let arg = func.get_nth_param(1).or_internal("missing param 1")?.into_int_value();
 
         // VerumThread struct layout (verified with offsetof):
-        //   offset 0:  done (i32 atomic, 4 bytes)
-        //   offset 8:  result (i64, 8 bytes)
-        //   offset 16: join_mutex (i32, 4 bytes)
-        //   offset 20: join_cond (i32, 4 bytes)
-        //   offset 24: func (i64/ptr, 8 bytes)
-        //   offset 32: arg (i64, 8 bytes)
-        //   Total: 40 bytes
+        //  offset 0: done (i32 atomic, 4 bytes)
+        //  offset 8: result (i64, 8 bytes)
+        //  offset 16: join_mutex (i32, 4 bytes)
+        //  offset 20: join_cond (i32, 4 bytes)
+        //  offset 24: func (i64/ptr, 8 bytes)
+        //  offset 32: arg (i64, 8 bytes)
+        //  Total: 40 bytes
 
         // Alloc 40 bytes, zero-init
         let th_ptr = builder.build_call(alloc_fn, &[i64_type.const_int(40, false).into()], "th").or_llvm_err()?
@@ -7584,9 +7630,10 @@ impl<'ctx> PlatformIR<'ctx> {
     }
 
     /// verum_process_spawn(program: ptr, argv: ptr, argc: i64,
-    ///                     cap_stdout: i64, cap_stderr: i64,
-    ///                     out_stdout_fd: ptr, out_stderr_fd: ptr) -> i64 (pid or -1)
+    ///  cap_stdout: i64, cap_stderr: i64,
+    ///  out_stdout_fd: ptr, out_stderr_fd: ptr) -> i64 (pid or -1)
     ///
+
     /// Forks a child process. If cap_stdout/cap_stderr are non-zero, creates pipes
     /// and redirects child stdout/stderr. Stores read-end fds via out pointers.
     fn emit_verum_process_spawn(&self, module: &Module<'ctx>) -> super::error::Result<()> {
@@ -7766,8 +7813,9 @@ impl<'ctx> PlatformIR<'ctx> {
     }
 
     /// verum_process_run(program: ptr, argv: ptr, argc: i64,
-    ///                   out_status: ptr, out_stdout: ptr, out_stderr: ptr) -> i64
+    ///  out_status: ptr, out_stdout: ptr, out_stderr: ptr) -> i64
     ///
+
     /// Spawns process with stdout+stderr capture, waits for it, reads output.
     /// Returns 0 on success, -1 on failure.
     fn emit_verum_process_run(&self, module: &Module<'ctx>) -> super::error::Result<()> {
@@ -7852,8 +7900,9 @@ impl<'ctx> PlatformIR<'ctx> {
     }
 
     /// verum_process_spawn_cmd(program: ptr, args_list: i64,
-    ///                         cap_stdout: i64, cap_stderr: i64) -> i64 (pid or -1)
+    ///  cap_stdout: i64, cap_stderr: i64) -> i64 (pid or -1)
     ///
+
     /// Parses List<Text> header to build argv, then calls verum_process_spawn.
     /// List layout (NewG): header at i64* with [obj_hdr(3), ptr(3), len(4), cap(5)]
     /// Offsets: ptr at byte 24, len at byte 32.
@@ -7987,6 +8036,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_process_exec(program: ptr, args_list: i64) -> i64 (exit status or -1)
     ///
+
     /// Spawns process, captures stdout+stderr, waits, returns WEXITSTATUS.
     fn emit_verum_process_exec(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
@@ -8133,9 +8183,11 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Emit verum_futex_wait and verum_futex_wake as LLVM IR.
     ///
+
     /// macOS uses __ulock_wait/__ulock_wake (private but stable API).
     /// UL_COMPARE_AND_WAIT = 1, ULF_WAKE_ALL = 0x100.
     ///
+
     /// verum_futex_wait(addr: i64, expected: i64, timeout_ns: i64) -> i64
     /// verum_futex_wake(addr: i64, count: i64) -> i64
     fn emit_futex_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
@@ -8659,7 +8711,7 @@ impl<'ctx> PlatformIR<'ctx> {
             }
         }
 
-        // 3. verum_tls_get(slot: i64) -> i64  (override with EC-based impl)
+        // 3. verum_tls_get(slot: i64) -> i64 (override with EC-based impl)
         {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
             let func = self.get_or_declare_fn(module, "verum_tls_get", fn_type);
@@ -8683,7 +8735,7 @@ impl<'ctx> PlatformIR<'ctx> {
             builder.build_return(Some(&val)).or_llvm_err()?;
         }
 
-        // 4. verum_tls_set(slot: i64, value: i64)  (override with EC-based impl)
+        // 4. verum_tls_set(slot: i64, value: i64) (override with EC-based impl)
         {
             let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
             let func = self.get_or_declare_fn(module, "verum_tls_set", fn_type);
@@ -8798,22 +8850,26 @@ impl<'ctx> PlatformIR<'ctx> {
     }
 
     // 7. verum_panic(msg: ptr, len: i64, …) — body shape selected by
-    //    `self.panic_strategy` (sourced from `[runtime].panic`).
+    //  `self.panic_strategy` (sourced from `[runtime].panic`).
     //
+
     // Both branches first emit "PANIC: " + msg + "\n" to stderr so
     // the user always sees the failure reason regardless of
-    // strategy.  The branches diverge on what follows:
+    // strategy. The branches diverge on what follows:
     //
-    //  - Unwind: call verum_exception_throw(0).  That function
-    //    longjmps to the topmost installed handler if one exists
-    //    (running defers via verum_defer_run_to on the way), or
-    //    falls through to _exit(134) when no handler is on the
-    //    stack.  Closes #(unfinished) — pre-fix the body always
-    //    took the abort path regardless of `[runtime].panic`.
+
+    //  - Unwind: call verum_exception_throw(0). That function
+    //  longjmps to the topmost installed handler if one exists
+    //  (running defers via verum_defer_run_to on the way), or
+    //  falls through to _exit(134) when no handler is on the
+    //  stack. Closes #(unfinished) — pre-fix the body always
+    //  took the abort path regardless of `[runtime].panic`.
     //
+
     //  - Abort: skip exception infrastructure entirely, call
-    //    _exit(1) immediately.  Defers do NOT run.
+    //  _exit(1) immediately. Defers do NOT run.
     //
+
     // The choice between the two is honest: `[runtime].panic =
     // "abort"` callers get smaller binaries (no exception-table
     // emission triggered by reachable verum_exception_throw) and
@@ -8857,9 +8913,9 @@ impl<'ctx> PlatformIR<'ctx> {
             super::vbc_lowering::PanicStrategy::Unwind => {
                 // Route through verum_exception_throw — longjmps to
                 // the topmost handler if one exists, else falls
-                // through to _exit(134) inside that function.  Pass
+                // through to _exit(134) inside that function. Pass
                 // value=0; user-visible diagnostics already went to
-                // stderr above.  noreturn attribute on
+                // stderr above. noreturn attribute on
                 // verum_exception_throw means LLVM treats the call
                 // as a terminator.
                 let throw_fn = self.get_or_declare_fn(
@@ -10134,7 +10190,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
         let void_type = ctx.void_type();
 
-        // New signature: (i64) -> i64  (single packed arg, returns result)
+        // New signature: (i64) -> i64 (single packed arg, returns result)
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
         let func = self.get_or_declare_fn(module, "verum_thread_spawn_multi", fn_type);
         if func.count_basic_blocks() > 0 { return Ok(()); }
@@ -10359,6 +10415,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Emit WASI (WebAssembly System Interface) function declarations.
     ///
+
     /// These are imported from the host environment when running as a WASI module.
     /// Provides I/O, filesystem, clocks, and random number generation.
     pub fn emit_wasi_declarations(&self, module: &Module<'ctx>) -> super::error::Result<()> {
@@ -10408,6 +10465,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Emit WASM memory.grow wrapper for the allocator.
     ///
+
     /// In WASM, memory can only grow via the `memory.grow` instruction.
     /// This function wraps it as a callable function for the bump allocator.
     /// Returns the old memory size in pages (64KB each), or -1 on failure.
@@ -10455,24 +10513,27 @@ impl<'ctx> PlatformIR<'ctx> {
 // =============================================================================
 // Manifest→runtime bridge zero-overhead pin tests (task #275).
 //
+
 // The architectural claim of #261 is that the runtime-bridge globals +
 // getter functions emit IR that LLVM can constant-fold under LTO,
-// producing zero-overhead access from stdlib code.  These tests pin
+// producing zero-overhead access from stdlib code. These tests pin
 // the IR-level invariants that *enable* that constant-folding:
 //
-//   1. Globals carry `Internal` linkage (not externally visible →
-//      LLVM's GlobalOpt pass can prove no foreign module mutates).
-//   2. Globals are const-initialized (initializer is a ConstantInt
-//      → LLVM's ConstantPropagation pass can fold loads to constants).
-//   3. Getters have a body consisting of a single `load` from the
-//      const global followed by `ret` → InstSimplify folds the load
-//      to the initializer at every call site under LTO.
-//   4. The numeric value reaches the global initializer verbatim
-//      (no truncation, no re-encoding).
+
+//  1. Globals carry `Internal` linkage (not externally visible →
+//  LLVM's GlobalOpt pass can prove no foreign module mutates).
+//  2. Globals are const-initialized (initializer is a ConstantInt
+//  → LLVM's ConstantPropagation pass can fold loads to constants).
+//  3. Getters have a body consisting of a single `load` from the
+//  const global followed by `ret` → InstSimplify folds the load
+//  to the initializer at every call site under LTO.
+//  4. The numeric value reaches the global initializer verbatim
+//  (no truncation, no re-encoding).
 //
+
 // These properties together are *sufficient* to guarantee LLVM can
 // constant-fold getter calls under LTO + GlobalOpt + ConstProp +
-// InstSimplify.  The pin tests therefore verify the IR-level inputs
+// InstSimplify. The pin tests therefore verify the IR-level inputs
 // to those passes; testing the actual constant-folding outcome
 // requires running the LLVM pass manager which adds heavy dependencies
 // without strengthening the architectural guarantee.
@@ -10486,7 +10547,7 @@ mod runtime_bridge_zero_overhead_tests {
     #[test]
     fn bridge_global_async_worker_threads_default_zero() {
         // Pin: under default RuntimeBridgeValues (all-zero), the
-        // global is emitted with const-zero initializer.  This is
+        // global is emitted with const-zero initializer. This is
         // the input that LLVM constant-folds to a zero return at
         // every getter call site.
         let ctx = Context::create();
@@ -10513,7 +10574,7 @@ mod runtime_bridge_zero_overhead_tests {
     #[test]
     fn bridge_global_async_worker_threads_carries_manifest_value() {
         // Pin: a non-zero manifest value lands in the global
-        // initializer verbatim.  This is the single architectural
+        // initializer verbatim. This is the single architectural
         // invariant that lets the user's `[runtime].
         // async_worker_threads = 4` setting reach the stdlib.
         let ctx = Context::create();
@@ -10566,7 +10627,7 @@ mod runtime_bridge_zero_overhead_tests {
     fn bridge_globals_have_internal_linkage() {
         // Pin: the architectural claim "LTO can constant-fold"
         // requires Internal linkage so LLVM's GlobalOpt can prove
-        // no foreign module mutates the value.  External linkage
+        // no foreign module mutates the value. External linkage
         // would defeat constant-folding.
         let ctx = Context::create();
         let module = ctx.create_module("test_bridge_linkage");
@@ -10594,7 +10655,7 @@ mod runtime_bridge_zero_overhead_tests {
     fn bridge_getters_are_emitted_with_body() {
         // Pin: the getter functions must have at least one basic
         // block with a body — without it, callers from stdlib
-        // would link-fail.  The body is a single load + ret which
+        // would link-fail. The body is a single load + ret which
         // InstSimplify folds under LTO.
         let ctx = Context::create();
         let module = ctx.create_module("test_bridge_getters");
@@ -10619,7 +10680,7 @@ mod runtime_bridge_zero_overhead_tests {
     fn bridge_getters_re_emission_is_idempotent() {
         // Pin: emit_runtime_bridge_getters can be called more than
         // once (multi-module link path) without producing duplicate
-        // bodies or panicking.  The implementation skips bodies
+        // bodies or panicking. The implementation skips bodies
         // that already exist.
         let ctx = Context::create();
         let module = ctx.create_module("test_bridge_idempotent");

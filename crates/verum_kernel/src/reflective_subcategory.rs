@@ -1,53 +1,63 @@
-//! Reflective subcategories (HTT 5.2.7) — V0 algorithmic kernel rule.
+//! Reflective subcategories (HTT 5.2.7) — algorithmic kernel rule.
 //!
+
 //! ## What this delivers
 //!
+
 //! A *reflective subcategory* `D ⊆ C` is a fully-faithful inclusion
 //! `ι : D ↪ C` that admits a left adjoint `r : C → D` (the
-//! *reflector*).  Equivalently (HTT 5.2.7.4): `D` is the essential
+//! *reflector*). Equivalently (HTT 5.2.7.4): `D` is the essential
 //! image of an idempotent monad on `C`.
 //!
+
 //! Reflective subcategories are the load-bearing abstraction for:
 //!
-//!   * **MSFS Lemma 10.3** — the `(ι, r)` construction lands `S_S`
-//!     into `cF` as a reflective subcategory.
-//!   * **Diakrisis 16.3** — `ι ⊣ r` reflective-subcategory existence
-//!     claim, currently admitted via `msfs_aft_iota_r` framework axiom.
-//!   * **Localisation / sheafification** — every left-Bousfield
-//!     localisation of an ∞-category is a reflective subcategory of it.
-//!   * **OWL2 → DL bridge** — the OWL2 Hilbert-style fragment is a
-//!     reflective subcategory of the full DL signature.
+
+//!  * **MSFS Lemma 10.3** — the `(ι, r)` construction lands `S_S`
+//!  into `cF` as a reflective subcategory.
+//!  * **Diakrisis 16.3** — `ι ⊣ r` reflective-subcategory existence
+//!  claim, currently admitted via `msfs_aft_iota_r` framework axiom.
+//!  * **Localisation / sheafification** — every left-Bousfield
+//!  localisation of an ∞-category is a reflective subcategory of it.
+//!  * **OWL2 → DL bridge** — the OWL2 Hilbert-style fragment is a
+//!  reflective subcategory of the full DL signature.
 //!
+
 //! ## V0 algorithmic surface
 //!
-//! V0 ships the **algorithmic skeleton**:
+
+//! ships the **algorithmic skeleton**:
 //!
-//!   1. [`ReflectiveSubcategory`] — first-class record with the data
-//!      `(D, C, ι, r, η)` plus idempotency / fully-faithful / adjoint
-//!      witnesses.
-//!   2. [`is_reflective`] — decidable predicate per HTT 5.2.7.2.
-//!   3. [`build_reflective_subcategory`] — algorithmic builder under
-//!      HTT 5.2.7.4 preconditions (fully-faithful inclusion + SAFT
-//!      preconditions on the proposed reflector).
-//!   4. [`idempotency_witness`] — verify `(ι ∘ r) ∘ (ι ∘ r) ≃ ι ∘ r`
-//!      (the reflector is idempotent on `C`).
-//!   5. [`reflector_unit_is_localisation`] — HTT 5.2.7.4 (iv): the
-//!      adjunction unit `η : id_C ⇒ ι ∘ r` exhibits `r` as a
-//!      localisation at the class of η-equivalences.
+
+//!  1. [`ReflectiveSubcategory`] — first-class record with the data
+//!  `(D, C, ι, r, η)` plus idempotency / fully-faithful / adjoint
+//!  witnesses.
+//!  2. [`is_reflective`] — decidable predicate per HTT 5.2.7.2.
+//!  3. [`build_reflective_subcategory`] — algorithmic builder under
+//!  HTT 5.2.7.4 preconditions (fully-faithful inclusion + SAFT
+//!  preconditions on the proposed reflector).
+//!  4. [`idempotency_witness`] — verify `(ι ∘ r) ∘ (ι ∘ r) ≃ ι ∘ r`
+//!  (the reflector is idempotent on `C`).
+//!  5. [`reflector_unit_is_localisation`] — HTT 5.2.7.4 (iv): the
+//!  adjunction unit `η : id_C ⇒ ι ∘ r` exhibits `r` as a
+//!  localisation at the class of η-equivalences.
 //!
-//! V1 promotion: explicit unit/idempotency natural-transformation
+
+//! Future work: explicit unit/idempotency natural-transformation
 //! cells with full pentagonal coherence between the localisation and
 //! the underlying adjunction.
 //!
+
 //! ## What this UNBLOCKS in MSFS
 //!
-//!   - **Lemma 10.3 (`(ι, r)` construction)** — the host-stdlib axiom
-//!     `msfs_aft_iota_r` is replaced by a direct invocation of
-//!     [`build_reflective_subcategory`]; the resulting value is
-//!     kernel-checkable.
-//!   - **Diakrisis 16.3** — direct construction.
-//!   - **§7 OC/AC duality** — both directions of the Galois duality
-//!     are reflective subcategories of the full classifier.
+
+//!  - **Lemma 10.3 (`(ι, r)` construction)** — the host-stdlib axiom
+//!  `msfs_aft_iota_r` is replaced by a direct invocation of
+//!  [`build_reflective_subcategory`]; the resulting value is
+//!  kernel-checkable.
+//!  - **Diakrisis 16.3** — direct construction.
+//!  - **§7 OC/AC duality** — both directions of the Galois duality
+//!  are reflective subcategories of the full classifier.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -103,7 +113,7 @@ impl ReflectiveSubcategory {
 // =============================================================================
 
 /// Decide whether the data `(D, C, ι, r, η)` constitutes a reflective
-/// subcategory (HTT 5.2.7.2).  V0 algorithmic surface returns the
+/// subcategory (HTT 5.2.7.2). V0 algorithmic surface returns the
 /// conjunction of the three structural witnesses.
 pub fn is_reflective(rs: &ReflectiveSubcategory) -> bool {
     rs.is_coherent()
@@ -115,19 +125,24 @@ pub fn is_reflective(rs: &ReflectiveSubcategory) -> bool {
 
 /// Build a reflective subcategory under HTT 5.2.7.4 preconditions.
 ///
+
 /// **Preconditions** (kernel-checked):
 ///
-///   1. The inclusion `ι : D → C` is fully faithful (witness flag).
-///   2. SAFT preconditions hold for `ι` (so its left adjoint
-///      `r : C → D` exists per HTT 5.5.2.9).
+
+///  1. The inclusion `ι : D → C` is fully faithful (witness flag).
+///  2. SAFT preconditions hold for `ι` (so its left adjoint
+///  `r : C → D` exists per HTT 5.5.2.9).
 ///
+
 /// **Algorithm**:
 ///
-///   1. Verify fully-faithfulness flag.
-///   2. Build the adjunction `r ⊣ ι` via [`build_adjunction`].
-///   3. Idempotency follows automatically from fully-faithful
-///      inclusion: `r ∘ ι ≃ id_D` makes `ι ∘ r ∘ ι ∘ r ≃ ι ∘ r`.
+
+///  1. Verify fully-faithfulness flag.
+///  2. Build the adjunction `r ⊣ ι` via [`build_adjunction`].
+///  3. Idempotency follows automatically from fully-faithful
+///  inclusion: `r ∘ ι ≃ id_D` makes `ι ∘ r ∘ ι ∘ r ≃ ι ∘ r`.
 ///
+
 /// Returns `None` if any precondition fails.
 pub fn build_reflective_subcategory(
     name: impl Into<Text>,
@@ -141,7 +156,7 @@ pub fn build_reflective_subcategory(
         return None;
     }
     let inclusion_text = inclusion_name.into();
-    // Build the adjunction r ⊣ ι using the SAFT machinery.  Direction:
+    // Build the adjunction r ⊣ ι using the SAFT machinery. Direction:
     // we have ι (the right adjoint), so we build its left adjoint r.
     let adj: Adjunction = build_adjunction(
         inclusion_text.clone(),
@@ -172,7 +187,7 @@ pub fn build_reflective_subcategory(
 // =============================================================================
 
 /// Verify the idempotency property of the reflector composite
-/// `ι ∘ r` (HTT 5.2.7.4 (iii)).  V0 surface: returns the witness flag.
+/// `ι ∘ r` (HTT 5.2.7.4 (iii)). current surface: returns the witness flag.
 pub fn idempotency_witness(rs: &ReflectiveSubcategory) -> bool {
     rs.is_idempotent
 }
@@ -180,7 +195,8 @@ pub fn idempotency_witness(rs: &ReflectiveSubcategory) -> bool {
 /// HTT 5.2.7.4 (iv): the adjunction unit `η : id_C ⇒ ι ∘ r` exhibits
 /// `r` as the *localisation* of `C` at the class of η-equivalences.
 ///
-/// V0 surface: returns `true` when the underlying reflective
+
+/// current surface: returns `true` when the underlying reflective
 /// subcategory is coherent (the localisation property is automatic
 /// from HTT 5.2.7.4 (iv)).
 pub fn reflector_unit_is_localisation(rs: &ReflectiveSubcategory) -> bool {

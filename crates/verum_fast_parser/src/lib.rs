@@ -13,17 +13,22 @@
 #![allow(clippy::if_same_then_else)]
 //! Fast, direct-to-AST parser for Verum compiler.
 //!
+
 //! This is an optimized parser specifically designed for compilation use cases.
 //! It builds AST directly without intermediate lossless syntax trees, providing
 //! faster parsing with lower memory overhead.
 //!
+
 //! For IDE features (incremental parsing, lossless syntax trees, formatting),
 //! use `verum_parser` instead.
 //!
+
 //! # Architecture
 //!
+
 //! The parser is organized into several modules:
 //!
+
 //! - [`expr`]: Expression parsing (binary ops, pipelines, comprehensions, etc.)
 //! - [`ty`]: Type parsing (primitives, refinements, generics, references)
 //! - [`pattern`]: Pattern parsing (wildcards, tuples, records, variants, etc.)
@@ -32,39 +37,46 @@
 //! - [`error`]: Error recovery and reporting
 //! - [`parser`]: Core recursive descent infrastructure
 //!
+
 //! # Example
 //!
+
 //! ```rust
 //! use verum_fast_parser::FastParser;
 //! use verum_lexer::Lexer;
 //! use verum_ast::span::FileId;
 //!
+
 //! let source = r#"
-//!     fn factorial(n: Int{>= 0}) -> Int {
-//!         match n {
-//!             0 => 1,
-//!             n => n * factorial(n - 1)
-//!         }
-//!     }
+//!  fn factorial(n: Int{>= 0}) -> Int {
+//!  match n {
+//!  0 => 1,
+//!  n => n * factorial(n - 1)
+//!  }
+//!  }
 //! "#;
 //!
+
 //! let file_id = FileId::new(0);
 //! let lexer = Lexer::new(source, file_id);
 //! let parser = FastParser::new();
 //! let result = parser.parse_module(lexer, file_id);
 //!
+
 //! match result {
-//!     Ok(module) => println!("Parsed successfully: {} items", module.items.len()),
-//!     Err(errors) => {
-//!         for error in errors {
-//!             eprintln!("Parse error: {}", error);
-//!         }
-//!     }
+//!  Ok(module) => println!("Parsed successfully: {} items", module.items.len()),
+//!  Err(errors) => {
+//!  for error in errors {
+//!  eprintln!("Parse error: {}", error);
+//!  }
+//!  }
 //! }
 //! ```
 //!
+
 //! # Performance
 //!
+
 //! This parser is optimized for compilation speed:
 //! - Direct AST construction (no intermediate green tree)
 //! - No trivia preservation (comments/whitespace discarded)
@@ -108,6 +120,7 @@ pub use parser::{RecursiveParser, TokenStream, merge_spans, span_from_tokens};
 
 /// Fast parser for Verum compiler (direct AST construction).
 ///
+
 /// This parser is optimized for compilation speed, building AST directly
 /// without intermediate lossless syntax trees.
 pub struct FastParser {
@@ -130,6 +143,7 @@ impl FastParser {
 
     /// Parse a complete module from source text.
     ///
+
     /// This method provides better error diagnostics than `parse_module` because
     /// it can analyze the source text to determine specific lexer error types.
     pub fn parse_module_str(&self, source: &str, file_id: FileId) -> ParseResult<Module> {
@@ -139,6 +153,7 @@ impl FastParser {
 
     /// Parse a complete module in **script mode** (P1.2).
     ///
+
     /// In script mode, top-level statements (let-bindings, expression
     /// statements, defer / errdefer / provide) are accepted alongside
     /// regular items. Every collected statement is folded into a
@@ -373,15 +388,20 @@ impl FastParser {
 
     /// Parse multiple items from tokens (for staged metaprogramming).
     ///
+
     /// This is used when a meta function generates multiple items (e.g., a function
     /// and a type definition). It parses all items in the token stream until EOF.
     ///
+
     /// # Arguments
     ///
+
     /// * `tokens` - Token stream containing the generated code
     ///
+
     /// # Returns
     ///
+
     /// A list of parsed items, or an error if parsing fails.
     pub fn parse_items_tokens(&self, tokens: &List<Token>) -> Result<List<Item>, Text> {
         if tokens.is_empty() {
@@ -735,6 +755,7 @@ pub type VerumParser = FastParser;
 
 /// Simple parser wrapper for testing.
 ///
+
 /// This provides a simplified interface that takes just a source string,
 /// automatically creating the lexer and using a default file ID.
 pub struct Parser {
@@ -745,6 +766,7 @@ pub struct Parser {
 impl Parser {
     /// Create a new parser from source code.
     ///
+
     /// Uses a default file ID of 0. For production use with proper file tracking,
     /// use `FastParser::parse_module` directly.
     pub fn new(source: &str) -> Self {

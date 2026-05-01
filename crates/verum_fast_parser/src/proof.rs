@@ -1,5 +1,6 @@
 //! Proof parsing for Verum formal proofs system.
 //!
+
 //! This module implements parsing for:
 //! - Theorem, axiom, lemma, corollary declarations
 //! - Proof bodies (term, tactic, structured, by-method)
@@ -7,6 +8,7 @@
 //! - Calculation chains (equational reasoning)
 //! - Proof methods (induction, cases, contradiction)
 //!
+
 //! Verum formal proofs (v2.0+ extension) enable machine-checkable mathematical
 //! proofs. Theorems/lemmas/corollaries use syntax: `theorem name(params): proposition { proof }`.
 //! Proof bodies can be term-mode, tactic-mode (`proof { ... }`), structured, or `by method`.
@@ -63,6 +65,7 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a theorem declaration.
     /// Syntax: [pub] theorem name<T>(params): proposition { proof }
     ///
+
     /// Theorem syntax: `[pub] theorem name<T>(params): proposition { proof_body }`
     /// Propositions are type expressions. Proof bodies are term/tactic/structured/by-method.
     pub fn parse_theorem(
@@ -97,6 +100,7 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a lemma declaration.
     /// Syntax: [pub] lemma name<T>(params): proposition { proof }
     ///
+
     /// Lemma syntax: `[pub] lemma name<T>(params): proposition { proof_body }`
     /// Same structure as theorem but indicates a helper result.
     pub fn parse_lemma(
@@ -123,6 +127,7 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a corollary declaration.
     /// Syntax: [pub] corollary name<T>(params): proposition { proof }
     ///
+
     /// Corollary syntax: `[pub] corollary name<T>(params): proposition { proof_body }`
     /// A consequence derived from a previously proven theorem.
     pub fn parse_corollary(
@@ -140,6 +145,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse theorem-like declarations (theorem, lemma, corollary).
     ///
+
     /// Supports two syntax forms:
     /// 1. Contract-based: `theorem name(params) requires ... ensures ... { proof by tactic }`
     /// 2. Proposition-based: `theorem name(params): proposition { tactic }`
@@ -235,10 +241,10 @@ impl<'a> RecursiveParser<'a> {
                     // Skip bare `@attr` / `@attr(args)` attributes sprinkled
                     // between the parameter list and the contract clauses —
                     // the stdlib (e.g. `core/math/day_convolution.vr`) writes
-                    //     theorem foo(…)
-                    //         @verify(formal)
-                    //         ensures …
-                    //         proof by auto;
+                    //  theorem foo(…)
+                    //  @verify(formal)
+                    //  ensures …
+                    //  proof by auto;
                     // The attribute is a documentation/tactic hint here, not
                     // a decl attribute, so we discard it rather than fail.
                     if self.stream.check(&TokenKind::At) {
@@ -460,6 +466,7 @@ impl<'a> RecursiveParser<'a> {
     /// Parse an axiom declaration.
     /// Syntax: [pub] axiom name<T>(params): proposition;
     ///
+
     /// Axiom syntax: `[pub] axiom name<T>(params): proposition;`
     /// Axioms are unproven assumptions — accepted as true without proof body.
     pub fn parse_axiom(
@@ -500,6 +507,7 @@ impl<'a> RecursiveParser<'a> {
 
         // Optional [@ghost] requires and ensures clauses (in any order).
         //
+
         // Semantics in model theory: an axiom is a universally-quantified
         // proposition over its parameters. `requires R ensures E` states
         // `forall params. R → E`. `ensures E` alone states `forall params. E`.
@@ -547,10 +555,10 @@ impl<'a> RecursiveParser<'a> {
 
         // Optional proposition after colon: `: assertion` — explicit form.
         // Otherwise synthesize the proposition from the clauses:
-        //   * with ensures E₁, …, Eₙ      → E₁ ∧ … ∧ Eₙ   (the canonical form)
-        //   * with requires R₁, …, Rₖ     → R₁ ∧ … ∧ Rₖ   (legacy, pre-T1-Q)
-        //   * with both                   → (R₁ ∧ …) → (E₁ ∧ …)
-        //   * neither                     → `true`
+        //  * with ensures E₁, …, Eₙ → E₁ ∧ … ∧ Eₙ (the canonical form)
+        //  * with requires R₁, …, Rₖ → R₁ ∧ … ∧ Rₖ (legacy, pre-T1-Q)
+        //  * with both → (R₁ ∧ …) → (E₁ ∧ …)
+        //  * neither → `true`
         let proposition = if self.stream.consume(&TokenKind::Colon).is_some() {
             self.parse_expr()?
         } else if !ensures_clauses.is_empty() {
@@ -573,7 +581,7 @@ impl<'a> RecursiveParser<'a> {
                 ensures_body
             } else {
                 let requires_body = conj(requires_clauses);
-                // requires → ensures  ≡  !requires || ensures
+                // requires → ensures ≡ !requires || ensures
                 let span = Span::new(
                     requires_body.span.start,
                     ensures_body.span.end,
@@ -650,8 +658,10 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a tactic declaration.
     /// Syntax: tactic name(params) { body }
     ///
+
     /// Grammar: tactic_decl = 'tactic' , identifier , '(' , [ param_list ] , ')' , block_expr ;
     ///
+
     /// Tactic declarations define reusable proof strategies. Built-in tactics include:
     /// simp (simplify), ring (normalize ring exprs), field (normalize field exprs),
     /// omega (linear arithmetic), blast (tableau prover). User tactics compose these.
@@ -808,6 +818,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a single tactic parameter.
     ///
+
     /// Tactic parameters are typed bindings — either one of the classical
     /// tactic-DSL kinds (`Expr`, `Type`, `Tactic`, `Hypothesis`, `Int`,
     /// `Prop`) or an arbitrary concrete type (`Float`, `List<T>`,
@@ -956,14 +967,15 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a proof body.
     /// Can be: { term }, proof { ... }, by method { ... }
     ///
+
     /// Proof bodies come in four forms:
     /// 1. Term-mode: direct expression `{ proof_term }`
     /// 2. Tactic-mode: `proof { have h1: ...; suffices ...; ... }`
     /// 3. By-method: `by induction on x { case ... }` / `by contradiction { ... }`
     /// 4. Structured: step-by-step with `have`, `suffices`, `show`, `cases`
-    ///    Expect closing brace or accept at top-level keyword boundary.
-    ///    Used in proof bodies where the closing `}` may be omitted when the proof
-    ///    ends with a tactic and the next item is a top-level declaration.
+    ///  Expect closing brace or accept at top-level keyword boundary.
+    ///  Used in proof bodies where the closing `}` may be omitted when the proof
+    ///  ends with a tactic and the next item is a top-level declaration.
     fn expect_rbrace_or_top_level(&mut self) -> ParseResult<()> {
         if self.stream.consume(&TokenKind::RBrace).is_some() {
             return Ok(());
@@ -1159,8 +1171,8 @@ impl<'a> RecursiveParser<'a> {
                 }
                 // Handle named proof methods like `strong_induction on n { ... }`
                 // Also handles: well_founded_induction on (m, n) ordered_by ... { ... }
-                //               mutual_induction on is_even, is_odd { ... }
-                //               contrapositive { ... }
+                //  mutual_induction on is_even, is_odd { ... }
+                //  contrapositive { ... }
                 Some(TokenKind::Ident(_)) => {
                     // Check if the identifier is followed by "on" (induction-like method)
                     // or directly by `{` (contradiction-like method)
@@ -1340,7 +1352,7 @@ impl<'a> RecursiveParser<'a> {
                 }
             }
 
-            // let pattern = value  OR  let vars such that expr
+            // let pattern = value OR let vars such that expr
             Some(TokenKind::Let) => {
                 self.stream.advance();
                 let pattern = self.parse_pattern()?;
@@ -1521,10 +1533,10 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Proof steps that look like identifiers but need special handling:
-            // take x: Type;        -- introduce universally quantified variable
-            // witness expr;        -- provide existential witness
-            // conclude by tactic;  -- conclude the current goal
-            // assume expr;         -- assume a hypothesis
+            // take x: Type; -- introduce universally quantified variable
+            // witness expr; -- provide existential witness
+            // conclude by tactic; -- conclude the current goal
+            // assume expr; -- assume a hypothesis
             Some(TokenKind::Ident(name))
                 if matches!(
                     name.as_str(),
@@ -1565,7 +1577,7 @@ impl<'a> RecursiveParser<'a> {
                         })
                     }
                     "conclude" => {
-                        // conclude by tactic;  OR  conclude by tactic1, tactic2;
+                        // conclude by tactic; OR conclude by tactic1, tactic2;
                         let justification = if self.stream.consume(&TokenKind::By).is_some() {
                             self.parse_tactic_expr_with_commas()?
                         } else {
@@ -1734,14 +1746,17 @@ impl<'a> RecursiveParser<'a> {
                 // step (`bound_run == direct_run`, `lhs.value == rhs.value &&
                 // lhs.output == rhs.output`, etc.).
                 //
+
                 // Pre-fix `parse_tactic_expr` consumed the leading path
                 // as a Named tactic and then the proof-step loop failed
                 // when it hit `==` / `!=` / `<` / `<=` / `>` / `>=` /
                 // `&&` / `||` — surfacing as
                 //
-                //   "expected proof step (have, show, suffices, let,
-                //    obtain, calc, cases, or tactic)"
+
+                //  "expected proof step (have, show, suffices, let,
+                //  obtain, calc, cases, or tactic)"
                 //
+
                 // for stdlib monad-law theorems like
                 // `core.action.monads.reader::reader_left_identity`
                 // (proof tail `bound_run_at_env == direct_run_at_env`)
@@ -1750,6 +1765,7 @@ impl<'a> RecursiveParser<'a> {
                 // rhs.output`). Lenient-skip codegen swallowed the
                 // warnings at stdlib load time.
                 //
+
                 // Strategy: speculatively try `optional(parse_expr)`.
                 // If it succeeds AND consumes a binary
                 // comparison/logical operator anywhere in its span,
@@ -1761,6 +1777,7 @@ impl<'a> RecursiveParser<'a> {
                 // tokens than parse_tactic_expr would have (a path
                 // followed by optional args), it's an expression.
                 //
+
                 // Simplest mechanical proxy: scan from current
                 // position forward looking for a top-level binop
                 // before the next `;` / `}` / proof-step keyword.
@@ -2180,6 +2197,7 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a calculation chain.
     /// Syntax: calc { start = expr by justification; = expr by justification; ... }
     ///
+
     /// Calculation chains enable equational reasoning:
     /// `calc { start = expr by justification; = expr by justification; ... }`
     /// Relations: = (equality), != (inequality), <, <=, >, >=, => (implication), iff.
@@ -2205,6 +2223,7 @@ impl<'a> RecursiveParser<'a> {
             // 1. == { by justification } target_expr
             // 2. == target_expr by justification
             //
+
             // Target expressions use binding power 7 to stop at comparison operators,
             // allowing the next step's relation to be recognized correctly.
             let (justification, target) = if self.stream.check(&TokenKind::LBrace) {
@@ -2301,6 +2320,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a tactic expression.
     ///
+
     /// Tactic expressions: simp, ring, field, omega, blast, trivial, assumption,
     /// exact(term), apply(term), rewrite[lemma], unfold(def), intro(names),
     /// specialize(term, args), norm_num, decide, ext, funext, congr, and more.
@@ -2466,7 +2486,7 @@ impl<'a> RecursiveParser<'a> {
     pub(crate) fn parse_tactic_primary(&mut self) -> ParseResult<TacticExpr> {
         match self.stream.peek_kind() {
             // Let-binding inside a tactic body:
-            //   `let x: T = expr;` or `let x = expr;`
+            //  `let x: T = expr;` or `let x = expr;`
             // The semicolon after the expression is consumed by the caller
             // (`parse_tactic_seq`/`parse_tactic_body`), which treats `;` as
             // the tactic-sequence separator.
@@ -2489,7 +2509,7 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Conditional tactic execution:
-            //   `if cond { t1 } else { t2 }`
+            //  `if cond { t1 } else { t2 }`
             // Both branches are tactic expressions; the else branch is
             // optional. Desugars `else if` chains through nested `If`.
             // Use `parse_expr_no_struct` so `if x { ... }` doesn't get
@@ -2524,7 +2544,7 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Pattern-match inside a tactic body:
-            //   `match scrutinee { P1 => t1, P2 => t2, ... }`
+            //  `match scrutinee { P1 => t1, P2 => t2, ... }`
             Some(TokenKind::Match) if self.stream.peek_nth_kind(1) != Some(&TokenKind::LParen) => {
                 self.stream.advance();
                 // Use `parse_expr_no_struct` so that `match x {` does not
@@ -2562,11 +2582,11 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Explicit failure with an optional diagnostic message:
-            //   `fail`                — bare, empty message (identity element
-            //                           for OrElse; used in stdlib combinators)
-            //   `fail("reason")`      — parenthesised message
-            //   `fail(f"tmpl {x}")`   — formatted message
-            //   `fail msg`            — prefix form
+            //  `fail` — bare, empty message (identity element
+            //  for OrElse; used in stdlib combinators)
+            //  `fail("reason")` — parenthesised message
+            //  `fail(f"tmpl {x}")` — formatted message
+            //  `fail msg` — prefix form
             Some(TokenKind::Ident(name)) if name.as_str() == "fail" => {
                 self.stream.advance();
                 let span = self.stream.current_span();
@@ -2936,12 +2956,12 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // First/alternative tactics. Grammar allows three forms:
-            //   `first [ t1, t2, t3 ]`  — comma-separated, Lean/Coq list syntax
-            //   `first { t1; t2; t3 }`  — block form, verum.ebnf §2.19.7
-            //   `first(xs)`              — dynamic list argument (user-defined
-            //                              wrapper in stdlib), falls through to
-            //                              the generic Named-tactic path so it
-            //                              can carry a runtime `List<Tactic>`.
+            //  `first [ t1, t2, t3 ]` — comma-separated, Lean/Coq list syntax
+            //  `first { t1; t2; t3 }` — block form, verum.ebnf §2.19.7
+            //  `first(xs)` — dynamic list argument (user-defined
+            //  wrapper in stdlib), falls through to
+            //  the generic Named-tactic path so it
+            //  can carry a runtime `List<Tactic>`.
             // Literal forms desugar to TacticExpr::Alt; the dynamic form stays
             // as Named so the tactic runtime can unpack the list at apply-time.
             Some(TokenKind::Ident(name)) if name.as_str() == "first"
@@ -2975,10 +2995,11 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.advance();
 
                 // Optional generic arguments for polymorphic tactics:
-                //   category_law<C>()
-                //   functor_law<Identity>()
-                //   category_law<F.Source>()
+                //  category_law<C>()
+                //  functor_law<Identity>()
+                //  category_law<F.Source>()
                 //
+
                 // We only commit to consuming the `<...>` when the parse
                 // succeeds — otherwise we roll back so that tactic bodies
                 // using `<` as a comparison operator keep working. Only

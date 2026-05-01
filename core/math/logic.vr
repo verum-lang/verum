@@ -4,6 +4,7 @@
 // Layer: Foundations (Mathematical Structures)
 // Spec: docs/detailed/13-formal-proofs.md
 //
+
 // Defines propositions, proof terms (Curry-Howard correspondence),
 // logical connectives, quantifiers, decidability, and fundamental
 // axioms and inference rules of classical and constructive logic.
@@ -28,10 +29,12 @@ public type Proof<P> is {
 
 /// The empty type (absurdity / bottom / ⊥).
 ///
+
 /// `Void` has no constructors and therefore no inhabitants.
 /// Under Curry-Howard, `Void` corresponds to falsity (⊥).
 /// A function `fn(A) -> Void` is a refutation of A.
 ///
+
 /// This is the type-theoretic foundation of proof by contradiction:
 /// `Not<P> = |P| Void`.
 public type Void is ();  // unit stand-in; true Void requires uninhabited type support
@@ -39,6 +42,7 @@ public type Void is ();  // unit stand-in; true Void requires uninhabited type s
 /// Absurdity elimination: from a proof of Void, derive anything.
 /// (ex falso quodlibet / principle of explosion)
 ///
+
 /// Reaching this body means someone constructed an inhabitant of
 /// `Void` — currently a unit stand-in until proper uninhabited
 /// types ship. The descriptive message helps debug that semantic
@@ -188,6 +192,7 @@ public type LogicMode is
 // 8. Concrete proof utilities on Int propositions
 // =============================================================================
 //
+
 // These concrete helpers witness the Curry-Howard correspondence at a
 // shallow level: they construct proofs of propositions about integers
 // from their constructive evidence. The theorem block below then
@@ -275,6 +280,7 @@ theorem int_de_morgan_or(a: Bool, b: Bool)
 // 10. Substantive logical computational theorems
 // =============================================================================
 //
+
 // These theorems state concrete facts about Curry-Howard witnesses
 // that the SMT backend must actually verify.
 

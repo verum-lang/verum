@@ -18,6 +18,7 @@ pub struct VoidType<'ctx> {
 impl<'ctx> VoidType<'ctx> {
     /// Create `VoidType` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't void type
     pub unsafe fn new(void_type: LLVMTypeRef) -> Self {
@@ -32,14 +33,18 @@ impl<'ctx> VoidType<'ctx> {
     /// Gets whether or not this `VoidType` is sized or not. This may always
     /// be false and as such this function may be removed in the future.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let void_type = context.void_type();
     ///
+
     /// assert!(void_type.is_sized());
     /// ```
     pub fn is_sized(self) -> bool {
@@ -48,14 +53,18 @@ impl<'ctx> VoidType<'ctx> {
 
     /// Gets a reference to the `Context` this `VoidType` was created in.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let void_type = context.void_type();
     ///
+
     /// assert_eq!(void_type.get_context(), context);
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {
@@ -65,11 +74,14 @@ impl<'ctx> VoidType<'ctx> {
     /// Creates a `FunctionType` with this `VoidType` for its return type.
     /// This means the function does not return.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);

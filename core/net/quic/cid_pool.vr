@@ -5,36 +5,44 @@
 // Dependencies: core, core.net.quic.{connection_id, stateless_reset}
 // =============================================================================
 //
+
 // RFC 9000 §5.1.1 — each endpoint maintains a pool of peer-issued
 // connection IDs plus the tokens the peer supplied for stateless
 // reset (§10.3). The pool is managed by:
 //
-//   * NEW_CONNECTION_ID frames (§19.15) — peer advertises a fresh
-//     (seq, cid, reset_token) and a `retire_prior_to` low-water
-//     mark. Any local CID with seq < retire_prior_to MUST be
-//     retired via RETIRE_CONNECTION_ID.
+
+//  * NEW_CONNECTION_ID frames (§19.15) — peer advertises a fresh
+//  (seq, cid, reset_token) and a `retire_prior_to` low-water
+//  mark. Any local CID with seq < retire_prior_to MUST be
+//  retired via RETIRE_CONNECTION_ID.
 //
-//   * RETIRE_CONNECTION_ID frames (§19.16) — peer tells us a CID it
-//     sent earlier is no longer in use.
+
+//  * RETIRE_CONNECTION_ID frames (§19.16) — peer tells us a CID it
+//  sent earlier is no longer in use.
 //
-//   * active_connection_id_limit transport parameter (§18.2) caps
-//     how many active CIDs we're willing to track at once.
+
+//  * active_connection_id_limit transport parameter (§18.2) caps
+//  how many active CIDs we're willing to track at once.
 //
+
 // This module models *one direction* — either the peer-issued CIDs
 // we use as Destination CID (when `side == Remote`) or our own
 // locally-issued CIDs for the peer to use (when `side == Local`).
 // Connections carry two pools, one per direction.
 //
+
 // # Invariants enforced
 //
-//   * Active pool size ≤ active_connection_id_limit (violation =
-//     TransportError.ConnectionIdLimitError).
-//   * Sequence numbers are monotonically non-decreasing; a peer
-//     that repeats or backdates a sequence is a protocol error.
-//   * retire_prior_to never decreases.
-//   * `pick_for_migration` rotates CIDs round-robin so traffic
-//     patterns don't re-identify the connection across migrations.
+
+//  * Active pool size ≤ active_connection_id_limit (violation =
+//  TransportError.ConnectionIdLimitError).
+//  * Sequence numbers are monotonically non-decreasing; a peer
+//  that repeats or backdates a sequence is a protocol error.
+//  * retire_prior_to never decreases.
+//  * `pick_for_migration` rotates CIDs round-robin so traffic
+//  patterns don't re-identify the connection across migrations.
 //
+
 // =============================================================================
 
 module core.net.quic.cid_pool;

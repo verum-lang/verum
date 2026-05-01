@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `Limit` records ONE threshold and the HWM bytes-allocated since
 // last reset. Setting the limit to 0 disables enforcement (matches
 // SQLite's documented behaviour).

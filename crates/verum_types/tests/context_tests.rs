@@ -14,6 +14,7 @@
 )]
 // Unit tests for context.rs
 //
+
 // Migrated from src/context.rs per project test organization guidelines.
 
 use verum_common::List;

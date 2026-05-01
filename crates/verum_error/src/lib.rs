@@ -1,8 +1,10 @@
 #![allow(unexpected_cfgs)]
 //! # Verum Error Handling System
 //!
+
 //! Centralized **runtime error handling** system implementing the 5-Level Error Defense Architecture.
 //!
+
 //! Verum uses a defense-in-depth approach where five complementary layers each provide
 //! progressively stronger safety guarantees, from compile-time prevention through
 //! runtime recovery to security containment. The system is built on `Result<T, E>`
@@ -11,59 +13,73 @@
 //! and fix suggestions. Panics are reserved for programmer errors; `Result` is used
 //! for all expected failures.
 //!
+
 //! The five levels are:
 //!
+
 //! - **Level 0: Type Prevention** - Compile-time safety (refinement types, affine types)
 //! - **Level 1: Static Verification** - Proof-based safety (SMT integration, @verify modes)
 //! - **Level 2: Explicit Handling** - Runtime recovery (Result types, error contexts)
 //! - **Level 3: Fault Tolerance** - Resilience patterns (supervision, circuit breakers)
 //! - **Level 4: Security Containment** - Isolation boundaries (sandboxing, capability control)
 //!
+
 //! ## Separation of Concerns
 //!
+
 //! **verum_error** provides **runtime error handling** for Verum programs - the Result types,
 //! error contexts, and recovery strategies that Verum code uses at runtime.
 //!
+
 //! For **compiler diagnostics** (beautiful error messages, source spans, SMT traces), see the
 //! **verum_diagnostics** module which handles compilation errors and warnings.
 //!
+
 //! ## Key Features
 //!
+
 //! - **Unified error hierarchy** - Single source of truth for all error types
 //! - **Zero-cost error contexts** - Context closures only execute on error path
 //! - **Automatic context preservation** - Error chains maintained through `?` operator
 //! - **Level 3 fault tolerance** - Production-ready supervision trees and circuit breakers
 //! - **Integration with ExecutionEnv** - Seamless error recovery in async runtime
 //!
+
 //! ## Usage
 //!
+
 //! ```rust
 //! use verum_error::{Result, VerumError, ErrorKind};
 //!
+
 //! fn example() -> Result<i32> {
-//!     let value = 42;
-//!     if value > 0 {
-//!         Ok(value)
-//!     } else {
-//!         Err(VerumError::new("Invalid value", ErrorKind::InvalidState))
-//!     }
+//!  let value = 42;
+//!  if value > 0 {
+//!  Ok(value)
+//!  } else {
+//!  Err(VerumError::new("Invalid value", ErrorKind::InvalidState))
+//!  }
 //! }
 //! ```
 //!
+
 //! ## Unified Error Type (New)
 //!
+
 //! The `unified` module provides a single error type that can represent errors from all
 //! Verum modules, enabling seamless error propagation across module boundaries:
 //!
+
 //! ```rust,ignore
 //! use verum_error::unified::{VerumError as UnifiedError, Result};
 //!
+
 //! fn cross_module_operation() -> Result<()> {
-//!     // Each ? automatically converts the specific error type
-//!     perform_cbgr_check()?;     // From verum_cbgr::Error
-//!     verify_types()?;            // From TypeError
-//!     run_smt_solver()?;          // From verum_smt::Error
-//!     Ok(())
+//!  // Each ? automatically converts the specific error type
+//!  perform_cbgr_check()?; // From verum_cbgr::Error
+//!  verify_types()?; // From TypeError
+//!  run_smt_solver()?; // From verum_smt::Error
+//!  Ok(())
 //! }
 //! ```
 
@@ -154,6 +170,7 @@ pub mod prelude {
 pub mod unified_prelude {
     //! Prelude for unified error handling across all modules
     //!
+
     //! This prelude is useful when working with multiple Verum modules
     //! and you want seamless error conversion.
 

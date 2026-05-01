@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for protocol SMT encoding
 //!
+
 //! Tests cover:
 //! - Protocol implementation checking
 //! - Associated type resolution

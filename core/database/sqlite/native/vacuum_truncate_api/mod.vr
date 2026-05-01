@@ -4,11 +4,12 @@
 // Post-VACUUM file truncation — the DB file shrinks to the new logical size.
 // Spec §10.5 — VACUUM.
 //
+
 // Rules:
-//   * The new size is the number of used pages after rewrite × page_size.
-//   * Freed pages at the tail are released to the filesystem.
-//   * If PRAGMA incremental_vacuum is active, free pages are held in the
-//     free-list trunk instead of returned immediately.
+//  * The new size is the number of used pages after rewrite × page_size.
+//  * Freed pages at the tail are released to the filesystem.
+//  * If PRAGMA incremental_vacuum is active, free pages are held in the
+//  free-list trunk instead of returned immediately.
 // =============================================================================
 
 module core.database.sqlite.native.vacuum_truncate_api;

@@ -1,10 +1,12 @@
 //! Fuzz target for capability flag validation
 //!
+
 //! This fuzzer tests:
 //! - Capability flag violations
 //! - Invalid capability combinations
 //! - Detection of: capability bypass, privilege escalation
 //!
+
 //! The fuzzer generates random capability combinations and operations,
 //! verifying that CBGR enforces capability requirements correctly.
 

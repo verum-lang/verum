@@ -5,39 +5,49 @@
 // Dependencies: core, core.collections
 // =============================================================================
 //
+
 // RFC 9110 §14 — byte-range requests + responses. Every HTTP server
 // that serves video, resumable downloads, PDF streaming, or large
 // file deltas needs this.
 //
+
 // # Request side
 //
+
 // Wire:
-//   Range: bytes=0-499, 600-899, 1000-
+//  Range: bytes=0-499, 600-899, 1000-
 //
+
 // Parses into a typed `RangeSet` of (start, end) pairs plus
 // open-ended suffixes (`-500` = last 500 bytes) and prefixes
 // (`1000-` = from byte 1000 to end).
 //
+
 // # Response side
 //
-//   Content-Range: bytes 0-499/1234
-//   Content-Range: bytes */1234         (416 Unsatisfiable)
+
+//  Content-Range: bytes 0-499/1234
+//  Content-Range: bytes */1234 (416 Unsatisfiable)
 //
+
 // `encode_content_range` emits the canonical form; parsers accept
 // RFC 9110-conformant inputs with the usual whitespace tolerance.
 //
+
 // # Semantics (RFC 9110 §14.1.2)
 //
-//   * Ranges MUST resolve against a known resource length.
-//   * Invalid starts (> length - 1) fail the whole request with
-//     416 Range Not Satisfiable.
-//   * Each sub-range clamps `end` to `length - 1`.
-//   * Suffix ranges (`-N`) clamp at 0 when N > length.
-//   * Multiple overlapping ranges are coalesced in
-//     `resolve_and_merge` — the server emits the coalesced list
-//     via `multipart/byteranges` or returns 200 with the whole
-//     representation when the overhead of multipart dominates.
+
+//  * Ranges MUST resolve against a known resource length.
+//  * Invalid starts (> length - 1) fail the whole request with
+//  416 Range Not Satisfiable.
+//  * Each sub-range clamps `end` to `length - 1`.
+//  * Suffix ranges (`-N`) clamp at 0 when N > length.
+//  * Multiple overlapping ranges are coalesced in
+//  `resolve_and_merge` — the server emits the coalesced list
+//  via `multipart/byteranges` or returns 200 with the whole
+//  representation when the overhead of multipart dominates.
 //
+
 // =============================================================================
 
 module core.net.http_range;
@@ -119,6 +129,7 @@ public const MAX_RANGE_SPECS: Int = 256;
 
 /// Parse a `Range:` header value (without the `Range:` prefix).
 ///
+
 /// Accepts the canonical form `bytes=a-b, c-d, e-`. Returns
 /// `Malformed` on syntactically invalid input. Callers then
 /// call `resolve_and_merge` with the resource length to produce

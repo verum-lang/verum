@@ -1,13 +1,16 @@
 //! File-relative mount resolver (#5 / P1.5).
 //!
+
 //! Recursively walks `MountTreeKind::File` declarations across
 //! a set of already-parsed AST modules, loads each referenced
 //! `.vr` file via [`ModuleLoader::load_file_mount`], parses it,
 //! and emits a complete list of newly-registered modules ready
 //! for the existing module-registry pipeline.
 //!
+
 //! ## Architectural shape
 //!
+
 //! The pipeline already handles module-path mounts
 //! (`mount foo.bar`) end-to-end: parser produces
 //! `MountTreeKind::Path`, the loader resolves the dotted path
@@ -15,41 +18,51 @@
 //! parsed module by its module path, and the import-resolution
 //! pass walks the registry.
 //!
+
 //! File mounts (`mount ./helper.vr;`) plug into the same
 //! pipeline by **synthesising a module path** for each loaded
 //! file: alias if the mount carries one, else the file's
-//! basename without `.vr`.  The loaded module becomes
+//! basename without `.vr`. The loaded module becomes
 //! addressable as a regular module under that synthetic name.
 //!
+
 //! Concretely:
 //!
+
 //! ```text
 //! // src/main.vr
 //! mount ./helper.vr;
 //!
+
 //! // src/helper.vr
 //! module helper;
 //! public fn ping() -> Int { 42 }
 //! ```
 //!
+
 //! After resolution, the registry contains:
-//!   * `main`     (parsed from `src/main.vr`)
-//!   * `helper`   (parsed from `src/helper.vr`, synthesised
-//!                 from the file basename)
+//!  * `main` (parsed from `src/main.vr`)
+//!  * `helper` (parsed from `src/helper.vr`, synthesised
+//!  from the file basename)
 //!
+
 //! and any `helper.ping()` call inside `main` resolves
 //! through the existing module-path machinery.
 //!
+
 //! ## Cycle protection
 //!
+
 //! Recursion is bounded by `MAX_MOUNT_DEPTH = 16` to prevent
 //! pathological circular file-mount chains from looping
-//! forever.  A diamond (two files both mounting a shared
+//! forever. A diamond (two files both mounting a shared
 //! third) is fine — the loader's per-file cache dedups
 //! repeated reads.
 //!
+
 //! ## Determinism
 //!
+
 //! The result list is sorted by synthetic module name so
 //! downstream registration produces stable ModuleId values
 //! across runs.
@@ -99,13 +112,15 @@ impl ResolvedFileMount {
 /// return the deduplicated list of files to register as
 /// modules.
 ///
+
 /// The starting set is the user's already-parsed entry
 /// points (cog root .vr files); the returned list excludes
 /// those entries so callers can simply concat both lists
 /// into the registry.
 ///
+
 /// `parse_one` is a caller-supplied callback that converts
-/// a raw `ModuleSource` into a `verum_ast::Module`.  The
+/// a raw `ModuleSource` into a `verum_ast::Module`. The
 /// callback shape (rather than a hard dep on
 /// verum_fast_parser) keeps this module dep-light — callers
 /// that want a custom parser can plug it in.
@@ -173,9 +188,10 @@ where
     Ok(output)
 }
 
-/// Derive a synthetic module name for a file mount.  Alias
+/// Derive a synthetic module name for a file mount. Alias
 /// wins; otherwise the file basename (without `.vr`).
 ///
+
 /// The basename fallback uses the LAST path component, so
 /// `../shared/util.vr` becomes `util`. Callers that want
 /// path-disambiguated names should specify an explicit alias.

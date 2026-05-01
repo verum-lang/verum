@@ -5,26 +5,30 @@
 // Dependencies: core, core.time, core.net.quic.{path, frame}
 // =============================================================================
 //
+
 // Ties the Phase-5 QuicPath / PathManager primitives into the RX / TX
 // pipeline:
 //
-//   * Inbound bytes → `on_inbound_bytes(pm, n)` — feeds byte-count
-//     into the current active path's anti-amplification accounting.
-//   * PATH_CHALLENGE frame → `on_path_challenge(pm, data)` — emits
-//     the PATH_RESPONSE echo via the returned outbound frame list.
-//   * PATH_RESPONSE frame → `on_path_response(pm, data, now)` —
-//     validates the active / standby path (whichever matches) and
-//     potentially promotes standby to active.
-//   * Outbound tx gate → `gate_outbound(pm, bytes)` — before the
-//     sender picks a packet size, this checks QuicPath.can_send against
-//     the anti-amplification budget and returns the clamped byte
-//     budget the sender is allowed to emit right now.
+
+//  * Inbound bytes → `on_inbound_bytes(pm, n)` — feeds byte-count
+//  into the current active path's anti-amplification accounting.
+//  * PATH_CHALLENGE frame → `on_path_challenge(pm, data)` — emits
+//  the PATH_RESPONSE echo via the returned outbound frame list.
+//  * PATH_RESPONSE frame → `on_path_response(pm, data, now)` —
+//  validates the active / standby path (whichever matches) and
+//  potentially promotes standby to active.
+//  * Outbound tx gate → `gate_outbound(pm, bytes)` — before the
+//  sender picks a packet size, this checks QuicPath.can_send against
+//  the anti-amplification budget and returns the clamped byte
+//  budget the sender is allowed to emit right now.
 //
+
 // Integration note: the TX pipeline currently emits one packet per
 // call; this module exposes the per-tx gate so that the caller can
 // decide whether to clamp payload size or pad to MAX_DATAGRAM_SIZE
 // based on current path status.
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm.path_control;

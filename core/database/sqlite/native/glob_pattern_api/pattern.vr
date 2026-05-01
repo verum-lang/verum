@@ -24,7 +24,7 @@ public fn token_kind_name(t: &GlobToken) -> Text {
     }
 }
 
-// LIKE vs GLOB classification.  Same operator surface, different defaults.
+// LIKE vs GLOB classification. Same operator surface, different defaults.
 public type GlobOperator is
     | OpLike
     | OpGlob
@@ -59,7 +59,7 @@ public fn supports_char_class(op: &GlobOperator) -> Bool {
 }
 
 // Whether the pattern can be reduced to a prefix-match (literal head followed
-// by `*` and nothing else).  Reduction enables index range scans.
+// by `*` and nothing else). Reduction enables index range scans.
 public type ReductionVerdict is
     | RvFullScan
     | RvPrefixMatch

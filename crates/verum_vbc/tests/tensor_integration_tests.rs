@@ -1,5 +1,6 @@
 //! Comprehensive integration tests for the VBC tensor execution system.
 //!
+
 //! These tests verify end-to-end correctness of tensor operations,
 //! including dispatch, kernel execution, and memory management.
 
@@ -721,7 +722,7 @@ fn test_tensor_reduce_integer_all_any() {
     let ptr = t_not_all.data_ptr_i32_mut();
     unsafe {
         *ptr.add(0) = 1;
-        *ptr.add(1) = 0;  // zero element
+        *ptr.add(1) = 0; // zero element
         *ptr.add(2) = 1;
         *ptr.add(3) = 1;
     }
@@ -1162,7 +1163,7 @@ fn test_tensor_contract() {
     let mm_ptr = mm.data_ptr_f64();
     unsafe {
         // Expected: [[1*1+2*2+3*3, 1*4+2*5+3*6], [4*1+5*2+6*3, 4*4+5*5+6*6]]
-        //         = [[14, 32], [32, 77]]
+        //  = [[14, 32], [32, 77]]
         assert!(((*mm_ptr.add(0)) - 14.0).abs() < 1e-10, "[0,0] should be 14");
         assert!(((*mm_ptr.add(1)) - 32.0).abs() < 1e-10, "[0,1] should be 32");
         assert!(((*mm_ptr.add(2)) - 32.0).abs() < 1e-10, "[1,0] should be 32");
@@ -1219,10 +1220,10 @@ fn test_tensor_matrix_exponential() {
     let mut d = TensorHandle::zeros(&[2, 2], DType::F64).unwrap();
     let d_ptr = d.data_ptr_f64_mut();
     unsafe {
-        *d_ptr.add(0) = 1.0;  // e^1 ≈ 2.718
+        *d_ptr.add(0) = 1.0; // e^1 ≈ 2.718
         *d_ptr.add(1) = 0.0;
         *d_ptr.add(2) = 0.0;
-        *d_ptr.add(3) = 2.0;  // e^2 ≈ 7.389
+        *d_ptr.add(3) = 2.0; // e^2 ≈ 7.389
     }
 
     let result = dispatch_expm(&d);

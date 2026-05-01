@@ -1,29 +1,39 @@
 //! Unified source location tracking for the Verum compiler.
 //!
+
 //! This module provides two span representations:
 //!
+
 //! - [`Span`]: Efficient byte-offset based spans (12 bytes, Copy)
 //! - [`LineColSpan`]: Human-readable line/column spans for diagnostics
 //!
+
 //! # Design Principles
 //!
+
 //! 1. **Efficiency First**: Use `Span` for AST nodes and internal processing
 //! 2. **Display Quality**: Convert to `LineColSpan` only for error messages
 //! 3. **Lazy Conversion**: Defer expensive line/column calculations
 //! 4. **Zero Copy**: `Span` is Copy, no heap allocations
 //!
+
 //! # Specification
 //!
+
 //! Unified span handling used across all compiler crates for source location tracking.
 //!
+
 //! # Examples
 //!
+
 //! ```rust
 //! use verum_common::span::{Span, FileId};
 //!
+
 //! let span = Span::new(0, 10, FileId::new(0));
 //! assert_eq!(span.len(), 10);
 //!
+
 //! let merged = span.merge(Span::new(5, 15, FileId::new(0)));
 //! assert_eq!(merged.start, 0);
 //! assert_eq!(merged.end, 15);
@@ -39,6 +49,7 @@ use crate::Text;
 
 /// A unique identifier for a source file.
 ///
+
 /// File IDs are assigned sequentially during compilation and used to
 /// distinguish spans from different files efficiently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -78,18 +89,23 @@ impl fmt::Display for FileId {
 
 /// A byte-offset based source span (primary representation).
 ///
+
 /// This is the canonical span representation used throughout the compiler.
 /// It's efficient (12 bytes), copyable, and suitable for AST nodes.
 ///
+
 /// # Performance Characteristics
 ///
+
 /// - Size: 12 bytes (3 × u32)
 /// - Copy: Yes (no heap allocation)
 /// - Comparison: O(1)
 /// - Merge: O(1)
 ///
+
 /// # Specification
 ///
+
 /// Performance: Spans are 12 bytes (3 x u32), Copy, and require < 5% memory
 /// overhead vs unsafe code. Comparison and merge are O(1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -133,8 +149,10 @@ impl Span {
 
     /// Merge two spans into one that covers both.
     ///
+
     /// # Panics
     ///
+
     /// Panics if spans are from different files.
     pub fn merge(self, other: Span) -> Span {
         assert_eq!(
@@ -164,18 +182,20 @@ impl Span {
     }
 
     /// Walk the synthetic-origin chain to the deepest user-source
-    /// ancestor (#274).  `resolver` looks up `SyntheticOrigin`
+    /// ancestor (#274). `resolver` looks up `SyntheticOrigin`
     /// entries by FileId — typically the session's source registry.
     ///
+
     /// Returns the topmost user-visible span (one whose FileId has
     /// no synthetic origin) plus the chain of synthetic kinds that
     /// were traversed, ordered from leaf (this span's file) to
-    /// user source.  When this span itself is already user-source,
+    /// user source. When this span itself is already user-source,
     /// returns `(self, [])` — the empty chain signals "already
     /// resolved".
     ///
+
     /// Cycle defence: bails after `max_depth` iterations and
-    /// returns the deepest reached span.  Synthetic chains
+    /// returns the deepest reached span. Synthetic chains
     /// shouldn't loop in well-formed compiler output, but
     /// defence-in-depth keeps a malformed invariant from hanging
     /// the diagnostic renderer.
@@ -212,8 +232,9 @@ impl Span {
 
 /// Result of `Span::resolve_to_user_source` (#274).
 ///
+
 /// Pairs the user-visible span with the chain of synthetic
-/// expansions that were traversed to reach it.  The renderer uses
+/// expansions that were traversed to reach it. The renderer uses
 /// the chain to construct labels like
 /// "in @derive expansion → in macro expansion".
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -241,17 +262,22 @@ impl fmt::Display for Span {
 
 /// A line/column based span for human-readable diagnostics.
 ///
+
 /// This representation is more expensive (heap allocation for file name)
 /// but provides better error messages. Use only for diagnostic output.
 ///
+
 /// # Design Notes
 ///
+
 /// - Lines and columns are 1-indexed (human-friendly)
 /// - Supports both single-line and multi-line spans
 /// - Lazy conversion from `Span` using source file information
 ///
+
 /// # Performance
 ///
+
 /// This type allocates a String for the file path, so avoid using it
 /// in hot paths. Convert from `Span` only when displaying errors.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -304,6 +330,7 @@ impl LineColSpan {
 
     /// Get the length of the span on a single line.
     ///
+
     /// Returns 0 for multi-line spans.
     pub fn length(&self) -> usize {
         if self.is_multiline() {
@@ -339,6 +366,7 @@ impl fmt::Display for LineColSpan {
 
 /// What kind of expansion produced a synthetic source file.
 ///
+
 /// Recorded on `SourceFile.synthetic_origin` so the diagnostic
 /// renderer can produce labels like "in macro expansion of @derive"
 /// vs "in monomorphization of `List<T>`".
@@ -371,6 +399,7 @@ impl SyntheticKind {
 
 /// Provenance record for a synthetic source file (#274).
 ///
+
 /// When a macro / derive / monomorphization / @delegate produces a
 /// new source artefact, the resulting `SourceFile` carries this
 /// origin pointing back at the user-source span that triggered the
@@ -378,6 +407,7 @@ impl SyntheticKind {
 /// transitively (via `Span::resolve_to_user_source`) to find the
 /// deepest user-visible location.
 ///
+
 /// Without this, errors in generated code surface with synthetic
 /// `FileId` locations like `<macro:Eq>:1:1` — opaque to users
 /// debugging their own program.
@@ -397,6 +427,7 @@ pub struct SyntheticOrigin {
 
 /// Information about a source file for span conversion.
 ///
+
 /// This type maintains the mapping between byte offsets and line/column
 /// positions, enabling efficient conversion from `Span` to `LineColSpan`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -411,12 +442,12 @@ pub struct SourceFile {
     pub source: Text,
     /// Line start positions (byte offsets) for quick line lookup
     pub line_starts: Vec<u32>,
-    /// Synthetic-origin provenance.  `None` for user-source files
+    /// Synthetic-origin provenance. `None` for user-source files
     /// loaded from disk; `Some` for files produced by macro /
-    /// derive / monomorphization / @delegate expansions.  The
+    /// derive / monomorphization / @delegate expansions. The
     /// diagnostic renderer walks the chain via
     /// `Span::resolve_to_user_source` to surface user-visible
-    /// locations even for errors in generated code.  Closes #274.
+    /// locations even for errors in generated code. Closes #274.
     #[serde(default)]
     pub synthetic_origin: Option<SyntheticOrigin>,
 }
@@ -436,10 +467,10 @@ impl SourceFile {
     }
 
     /// Create a synthetic source file produced by macro/derive/
-    /// monomorphization/@delegate expansion.  Carries a
+    /// monomorphization/@delegate expansion. Carries a
     /// `SyntheticOrigin` back-pointer at the parent span so the
     /// diagnostic renderer can resolve errors to user-visible
-    /// locations via `Span::resolve_to_user_source`.  Closes #274.
+    /// locations via `Span::resolve_to_user_source`. Closes #274.
     pub fn synthetic(
         id: FileId,
         name: String,
@@ -478,10 +509,11 @@ impl SourceFile {
 
     /// Compute line start positions from source text.
     ///
+
     /// Supports all three line ending conventions:
-    /// - LF (\n)      - Unix/Linux
-    /// - CRLF (\r\n)  - Windows
-    /// - CR (\r)      - Classic Mac
+    /// - LF (\n) - Unix/Linux
+    /// - CRLF (\r\n) - Windows
+    /// - CR (\r) - Classic Mac
     fn compute_line_starts(source: &str) -> Vec<u32> {
         let mut starts = Vec::new();
         starts.push(0);
@@ -515,6 +547,7 @@ impl SourceFile {
 
     /// Get the line and column for a byte offset.
     ///
+
     /// Returns (line, column) both 0-indexed for internal use.
     /// Add 1 to each for human-readable 1-indexed positions.
     pub fn line_col(&self, offset: u32) -> (u32, u32) {
@@ -531,6 +564,7 @@ impl SourceFile {
 
     /// Convert a byte-offset Span to a LineColSpan.
     ///
+
     /// Lines and columns in the result are 1-indexed.
     pub fn span_to_line_col(&self, span: Span) -> Option<LineColSpan> {
         if span.file_id != self.id {
@@ -617,6 +651,7 @@ use std::sync::RwLock;
 
 /// Global source file registry for span-to-location conversion.
 ///
+
 /// This registry allows the parser and other components to convert
 /// byte-offset Spans to human-readable file:line:column format.
 static GLOBAL_SOURCE_FILES: std::sync::OnceLock<RwLock<HashMap<u32, SourceFile>>> =
@@ -628,6 +663,7 @@ fn global_registry() -> &'static RwLock<HashMap<u32, SourceFile>> {
 
 /// Register a source file in the global registry.
 ///
+
 /// Call this when loading/parsing a source file to enable proper
 /// error message formatting.
 pub fn register_source_file(id: FileId, name: impl Into<String>, source: impl Into<String>) {
@@ -640,6 +676,7 @@ pub fn register_source_file(id: FileId, name: impl Into<String>, source: impl In
 
 /// Convert a Span to a LineColSpan using the global registry.
 ///
+
 /// Returns a human-readable location like "file.vr:42:15" if the
 /// source file is registered, or a fallback format otherwise.
 pub fn global_span_to_line_col(span: Span) -> LineColSpan {
@@ -677,10 +714,11 @@ pub fn global_get_filename(id: FileId) -> Option<String> {
 // =============================================================================
 // Source-map synthetic-origin pin tests (task #274).
 //
+
 // The architectural primitive is `Span::resolve_to_user_source` plus the
 // `SourceFile.synthetic_origin` field that lets the diagnostic renderer
 // walk the parent chain from a synthetic FileId back to the user-source
-// span that triggered the expansion.  Each test pins a layer of the
+// span that triggered the expansion. Each test pins a layer of the
 // architecture so a future refactor that breaks the contract trips loudly.
 // =============================================================================
 
@@ -768,7 +806,7 @@ mod source_map_tests {
     #[test]
     fn resolve_walks_nested_synthetic_chain() {
         // Pin: derive-expanded code that itself macro-expands
-        // resolves through both layers.  Chain order is leaf-to-
+        // resolves through both layers. Chain order is leaf-to-
         // root: [DeriveExpansion, MacroExpansion] when the
         // synthetic file came from a derive within a macro body.
         let user_file = FileId::new(1);
@@ -808,7 +846,7 @@ mod source_map_tests {
     #[test]
     fn resolve_terminates_on_cyclic_chain() {
         // Pin: defence-in-depth — a malformed synthetic chain that
-        // cycles must NOT hang the renderer.  After MAX_DEPTH
+        // cycles must NOT hang the renderer. After MAX_DEPTH
         // (32) iterations the resolver returns whatever it has.
         let file_a = FileId::new(10);
         let file_b = FileId::new(20);
@@ -827,7 +865,7 @@ mod source_map_tests {
 
         let leaf = Span::new(0, 5, file_a);
         let resolver = |fid: FileId| chain.get(&fid).copied();
-        // Must not hang.  The chain must be capped.
+        // Must not hang. The chain must be capped.
         let result = leaf.resolve_to_user_source(resolver);
         assert!(
             result.expansion_chain.len() <= 32,
@@ -839,7 +877,7 @@ mod source_map_tests {
     #[test]
     fn synthetic_kind_label_is_human_readable() {
         // Pin: every variant has a label suitable for diagnostic
-        // output ("in <label>").  Future SyntheticKind variants
+        // output ("in <label>"). Future SyntheticKind variants
         // must add a label (compile-time exhaustiveness via match).
         assert_eq!(SyntheticKind::MacroExpansion.label(), "macro expansion");
         assert_eq!(SyntheticKind::DeriveExpansion.label(), "@derive expansion");

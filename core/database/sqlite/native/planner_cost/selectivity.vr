@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.3
 //
+
 // Per-predicate fraction-of-rows estimator. Returns a Float64 in
 // [0.0, 1.0]. Conjunctions multiply, disjunctions use the inclusion-
 // exclusion lower bound (a + b - a*b clamped to 1.0).

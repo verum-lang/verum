@@ -4,6 +4,7 @@
 // Layer: Standard Library / Collections
 // Purpose: concrete Graph<V, L> instance for sparse graphs
 //
+
 // `AdjacencyList<V, L>` is the canonical sparse graph representation.
 // Each vertex maps to a list of outgoing edges; the total memory is
 // Θ(|V| + |E|), and the out-neighbourhood of a vertex is retrievable
@@ -11,13 +12,16 @@
 // the full edge list — Θ(|E|) — and are cached lazily on first use
 // if the workload exposes them.
 //
+
 // This is the first concrete implementation of the
 // `core.math.graph.Graph<V, L>` protocol. Every algorithm in
 // `core.math.graph` — bfs, dfs, reachable, connected_components,
 // topological_sort, dijkstra — runs unchanged against this type.
 //
+
 // ## Why hash-map-of-lists
 //
+
 // For graphs with average degree d ≤ log |V|, this beats an adjacency
 // matrix in both memory and iteration cost. Dense graphs (d ≈ |V|)
 // should prefer `core.math.linalg.Matrix<Float>` with a
@@ -36,11 +40,12 @@ mount core.math.graph.{Edge};
 
 /// Hash-map-of-outgoing-edges graph.
 ///
+
 /// Invariants (discharged by the model-verification pipeline on
 /// `implement Graph for AdjacencyList`):
 /// 1. Every `src` vertex of every edge in `out_edges` is a key of `out_edges`.
 /// 2. Every `tgt` vertex of every edge is a key of `out_edges` (the
-///    map contains isolated vertices too).
+///  map contains isolated vertices too).
 /// 3. The `vertex_list` is consistent with the key set of `out_edges`.
 public type AdjacencyList<V, L> is {
     /// Ordered vertex list — preserves insertion order for
@@ -111,6 +116,7 @@ implement<V: Eq + Hash, L> AdjacencyList<V, L> {
     // -------------------------------------------------------------
     // §2.5. Zero-clone borrow accessors
     //
+
     // The `Graph<V, L>` protocol's API is shape-pinned at owned
     // `List<Edge>` returns — every algorithm consuming the protocol
     // must work cross-implementation, so clone-on-return is the
@@ -121,6 +127,7 @@ implement<V: Eq + Hash, L> AdjacencyList<V, L> {
     // graph with average degree 100 makes one clone per call into
     // 10^6 wasted allocations across a typical traversal.
     //
+
     // Naming convention: `_ref` suffix means "no ownership transfer",
     // matching `core.collections.map.Map::get` (returns `Maybe<&V>`).
     // -------------------------------------------------------------

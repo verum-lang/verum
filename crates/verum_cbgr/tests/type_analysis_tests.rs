@@ -14,12 +14,14 @@
 )]
 //! Comprehensive tests for Type-aware Field Analysis and Type-based Alias Refinement
 //!
+
 //! Validates type-aware field analysis and type-based alias refinement for
 //! CBGR escape analysis. Type information enables: (1) field extraction aware
 //! of struct layout, (2) alias refinement using type incompatibility (different
 //! concrete types cannot alias), (3) generic type handling for parametric
 //! polymorphism, (4) type cache for O(1) repeated lookups.
 //!
+
 //! This test suite validates the production-grade type analysis features:
 //! - Type-aware field extraction
 //! - Type-based alias refinement
@@ -27,6 +29,7 @@
 //! - Field-sensitive analysis integration
 //! - Type cache performance
 //!
+
 //! Test Coverage: 18+ comprehensive tests covering all major features
 
 use verum_cbgr::analysis::{BasicBlock, BlockId, ControlFlowGraph, EscapeAnalyzer, RefId};
@@ -511,6 +514,7 @@ fn test_type_cache_stats_report() {
 
 // Total tests: 27 (exceeds minimum requirement of 18)
 //
+
 // Coverage breakdown:
 // - TypeInfo API: 4 tests
 // - FieldLayout: 5 tests
@@ -519,6 +523,7 @@ fn test_type_cache_stats_report() {
 // - EscapeAnalyzer integration: 3 tests
 // - Complex scenarios: 4 tests
 //
+
 // All major features tested:
 // ✓ Type info creation and layout
 // ✓ Field extraction from types

@@ -5,9 +5,11 @@
 // Dependencies: core, sync, async/future
 // =============================================================================
 //
+
 // Task represents a spawned asynchronous computation.
 // Tasks run concurrently and can be awaited via JoinHandle.
 //
+
 // =============================================================================
 
 module core.async.task;
@@ -229,6 +231,7 @@ where F.Output: Send
 // Blocking Task Coordination — closes #242 architectural stub
 // =============================================================================
 //
+
 // `spawn_blocking` runs CPU-intensive or blocking I/O work on a
 // **dedicated** thread pool (`core.runtime.pool::ThreadPool`),
 // distinct from the async executor's worker pool. Pre-fix the
@@ -238,6 +241,7 @@ where F.Output: Send
 // blocking pool and the async future polls a completion flag,
 // freeing async workers between polls.
 //
+
 // **Coordination state**: `BlockingState<T>` carries the
 // completion flag (`AtomicBool`) and the result slot
 // (`Mutex<Maybe<T>>`). The pool task writes the result and sets
@@ -245,6 +249,7 @@ where F.Output: Send
 // Acquire ordering, then takes the result under the mutex. This
 // is the canonical write-once / read-once cross-thread handoff.
 //
+
 // **Closure marshalling**: the closure `f` and the state slot
 // are heap-boxed together and the pointer is passed as the pool
 // task's `arg`. The pool's `func: fn(Int) -> Int` recovers the
@@ -266,14 +271,15 @@ public type BlockingState<T> is {
 
 // Future that polls a `BlockingState` for completion.
 //
+
 // Returned by `spawn_blocking`. On `poll`:
-//   * If `done` is set, take the result under the mutex and
-//     return `Poll.Ready(value)`.
-//   * Otherwise, schedule a re-poll via `cx.waker().wake_by_ref()`
-//     and return `Poll.Pending`. This keeps the async worker
-//     free for other futures between polls — the wake_by_ref
-//     enqueues this task back onto the executor's ready queue
-//     so the next executor tick will re-poll.
+//  * If `done` is set, take the result under the mutex and
+//  return `Poll.Ready(value)`.
+//  * Otherwise, schedule a re-poll via `cx.waker().wake_by_ref()`
+//  and return `Poll.Pending`. This keeps the async worker
+//  free for other futures between polls — the wake_by_ref
+//  enqueues this task back onto the executor's ready queue
+//  so the next executor tick will re-poll.
 public type BlockingFuture<T> is {
     state: Shared<BlockingState<T>>,
 };
@@ -318,6 +324,7 @@ type BlockingArg<F, T> is {
 
 // Spawn a blocking operation on a dedicated thread pool.
 //
+
 // The closure runs on `core.runtime.pool::ThreadPool`'s global
 // pool (distinct from the async executor's worker pool). The
 // returned `JoinHandle` polls a completion flag set by the

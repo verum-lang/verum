@@ -1,6 +1,7 @@
 //! HIT path-constructor β-rule
 //! tests.
 //!
+
 //! Per `K-Elim` extension: when the eliminator's scrutinee is a
 //! bare path-ctor reference (a 1-cell or higher cell of the
 //! surrounding inductive), the eliminator β-reduces to the
@@ -9,14 +10,15 @@
 //! homogeneous `PathTy` value of the right type per the
 //! eliminator-emit convention.
 //!
+
 //! Coverage:
-//!   • S¹ Loop reduces to case_Loop (closed-loop branch).
-//!   • Interval Seg reduces to case_Seg (heterogeneous PathOver).
-//!   • Suspension merid reduces to case_merid.
-//!   • Path-ctor β fires AFTER point-ctor cases in the case list
-//!     (cases.len() = point_count + path_count layout).
-//!   • Out-of-range scrutinee leaves the term neutral.
-//!   • Mixed: nested point + path β within a single normalisation.
+//!  • S¹ Loop reduces to case_Loop (closed-loop branch).
+//!  • Interval Seg reduces to case_Seg (heterogeneous PathOver).
+//!  • Suspension merid reduces to case_merid.
+//!  • Path-ctor β fires AFTER point-ctor cases in the case list
+//!  (cases.len() = point_count + path_count layout).
+//!  • Out-of-range scrutinee leaves the term neutral.
+//!  • Mixed: nested point + path β within a single normalisation.
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
@@ -128,6 +130,7 @@ fn path_ctor_beta_picks_correct_index_among_multiple_paths() {
     // HIT with multiple path ctors: cases must select the right
     // one by declaration order.
     //
+
     // Torus-like: Base | loop_a : Base↝Base | loop_b : Base↝Base
     let mut reg = InductiveRegistry::new();
     let torus_2 = RegisteredInductive::new(
@@ -221,7 +224,7 @@ fn path_ctor_beta_unrelated_var_stays_neutral() {
 #[test]
 fn path_ctor_beta_fires_after_point_ctor_offset_layout() {
     // HIT with TWO point ctors and ONE path ctor:
-    //   cases = [point0, point1, path0]
+    //  cases = [point0, point1, path0]
     // Path-ctor case index = point_count (2) + path_idx (0) = 2.
     let mut reg = InductiveRegistry::new();
     let interval = RegisteredInductive::new(

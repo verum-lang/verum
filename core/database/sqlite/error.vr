@@ -5,6 +5,7 @@
 // Spec: internal/specs/database.md §5.6, §6.2
 // =============================================================================
 //
+
 // Loom (`core.database.sqlite.native.l7_api.database.DbError`) carries
 // SQLite-shaped tags (DbBusy, DbLocked, DbConstraint, ...). The Spindle
 // surface speaks `core.database.common.error.DbError`. This module is
@@ -12,6 +13,7 @@
 // `dberr_from_loom` exactly once so the rest of the façade only deals
 // in the unified shape.
 //
+
 // Mapping is defined in database.md §6.2 (loom DbBusy → DbError
 // Adapter(retryable=true) for retry-combinator; loom DbConstraint →
 // QueryFailed with SQLSTATE 23000 so `is_constraint_violation()` fires
@@ -81,6 +83,7 @@ fn make_sqlstate(s: &Text) -> SqlState {
 
 /// Translate one loom-side DbError into a Spindle-surface DbError.
 ///
+
 /// Retryable tags (DbBusy, DbLocked, DbInterrupted) become
 /// `Adapter(AdapterSpecific{ retryable: true })` so `run_with_retry`
 /// picks them up while preserving the original tag for debugging.

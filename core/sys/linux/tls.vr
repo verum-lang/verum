@@ -8,24 +8,29 @@ module sys.linux.tls;
 // Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
+
 // This module provides TLS (Thread-Local Storage) bootstrap functionality
 // required for @thread_local variables, particularly critical for the
 // per-thread allocator in std.mem.LocalHeap.
 //
+
 // Bootstrap sequence:
 // 1. _start calls init_main_thread_tls() before any other code
 // 2. mmap allocates memory for TCB + TLS data segment
 // 3. The thread pointer register is set to the TCB address:
-//      - x86_64: arch_prctl(ARCH_SET_FS, tcb) — kernel writes %fs.base
-//      - aarch64: msr tpidr_el0, tcb — direct register write from EL0
+//  - x86_64: arch_prctl(ARCH_SET_FS, tcb) — kernel writes %fs.base
+//  - aarch64: msr tpidr_el0, tcb — direct register write from EL0
 // 4. Now @thread_local variables work via %fs:[off] (x86_64) or
-//    [tpidr_el0, #off] (aarch64).
+//  [tpidr_el0, #off] (aarch64).
 //
+
 // CRITICAL: Without TLS initialization, the thread pointer is not set
 // and any access to @thread_local variables will SIGSEGV.
 //
+
 // For spawned threads, clone() with CLONE_SETTLS flag initializes TLS.
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 2.2.A (TLS Bootstrap)
 // =============================================================================
 
@@ -77,19 +82,21 @@ public const STACK_GUARD_MAGIC: USize = 0xDEAD_BEEF_CAFE_BABE;
 
 /// Thread Control Block - stored at %fs:0
 ///
+
 /// This structure must be at the address pointed to by %fs.
 /// The first field (self_ptr) must point to itself for ABI compatibility.
 ///
+
 /// Layout (x86_64):
 /// ```
-/// %fs:0   -> self_ptr (points to this TCB)
-/// %fs:8   -> stack_guard
-/// %fs:16  -> tid
-/// %fs:20  -> errno
-/// %fs:24  -> tls_size
-/// %fs:32  -> tls_data
-/// %fs:40  -> context_slots (for V-LLSI context system)
-/// %fs:48  -> user_data
+/// %fs:0 -> self_ptr (points to this TCB)
+/// %fs:8 -> stack_guard
+/// %fs:16 -> tid
+/// %fs:20 -> errno
+/// %fs:24 -> tls_size
+/// %fs:32 -> tls_data
+/// %fs:40 -> context_slots (for V-LLSI context system)
+/// %fs:48 -> user_data
 /// ```
 public type ThreadControlBlock is {
     /// Self-pointer (required by x86_64 TLS ABI, must be at offset 0)
@@ -128,13 +135,14 @@ public const MAX_CONTEXT_SLOTS: Int = 256;
 public const CONTEXT_STACK_DEPTH: Int = 8;
 
 /// Linux-specific raw context-slots stored at the per-thread
-/// TLS-data offset.  Carries 256 unsafe-byte-pointers + a
+/// TLS-data offset. Carries 256 unsafe-byte-pointers + a
 /// parent-chain pointer + an active-bit bitmap.
 ///
+
 /// Renamed from `ContextSlots` to disambiguate from the
 /// cross-platform high-level `core.sys.common.ContextSlots`
 /// (which uses typed `ContextEntry` values rather than raw
-/// `&unsafe Byte`s).  The `Raw` prefix signals the low-level
+/// `&unsafe Byte`s). The `Raw` prefix signals the low-level
 /// nature; the high-level wrapper in `core.sys.common` keeps
 /// the canonical short name as the user-facing surface.
 public type RawContextSlots is {
@@ -150,6 +158,7 @@ public type RawContextSlots is {
 
 /// Thread-Local-Storage initialization / management error types.
 ///
+
 /// Renamed from `TlsError` to disambiguate from the
 /// network-protocol `core.net.tls13.error.TlsError` (the
 /// "TLS" abbreviation overloads with thread-local-storage
@@ -203,9 +212,11 @@ implement Eq for ThreadLocalError {
 
 /// Initialize TLS for the main thread.
 ///
+
 /// This MUST be called from _start before any @thread_local access.
 /// Failure to call this will result in SIGSEGV on first TLS access.
 ///
+
 /// # Returns
 /// * `Ok(())` - TLS initialized successfully
 /// * `Err(ThreadLocalError)` - Initialization failed
@@ -215,6 +226,7 @@ public fn init_main_thread_tls() -> Result<(), ThreadLocalError> {
 
 /// Initialize TLS with custom TLS data size.
 ///
+
 /// # Arguments
 /// * `tls_size` - Size of TLS data segment (will be rounded up to alignment)
 public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), ThreadLocalError> {
@@ -248,7 +260,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), ThreadLocalEr
 
     // Layout:
     // [TLS data][TCB][Context slots]
-    //           ^--- %fs points here
+    //  ^--- %fs points here
 
     let tls_data_ptr = base;
     let tcb_ptr = unsafe { base.offset(aligned_tls_size as Int) } as &unsafe ThreadControlBlock;
@@ -275,8 +287,9 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), ThreadLocalEr
 
     // Set the thread pointer register so @thread_local variables resolve.
     //
-    //   x86_64:  arch_prctl(ARCH_SET_FS, tcb)  — kernel updates MSR_FS_BASE
-    //   aarch64: msr tpidr_el0, tcb            — direct register write (EL0)
+
+    //  x86_64: arch_prctl(ARCH_SET_FS, tcb) — kernel updates MSR_FS_BASE
+    //  aarch64: msr tpidr_el0, tcb — direct register write (EL0)
     @cfg(target_arch = "x86_64") {
         let result = unsafe {
             syscall_raw(SYS_ARCH_PRCTL, ARCH_SET_FS, tcb_ptr as Int, 0, 0, 0, 0)
@@ -307,6 +320,7 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), ThreadLocalEr
 
 /// Create TLS block for a new thread (called before clone).
 ///
+
 /// Returns a pointer suitable for CLONE_SETTLS argument.
 public fn create_thread_tls(stack_size: USize) -> Result<&unsafe ThreadControlBlock, ThreadLocalError> {
     init_thread_tls_with_size(DEFAULT_TLS_SIZE)?;
@@ -319,6 +333,7 @@ public fn create_thread_tls(stack_size: USize) -> Result<&unsafe ThreadControlBl
 
 /// Get the current thread's TCB pointer.
 ///
+
 /// # Safety
 /// TLS must be initialized via init_main_thread_tls() first.
 @inline
@@ -330,6 +345,7 @@ public fn get_current_tcb() -> Result<&unsafe ThreadControlBlock, ThreadLocalErr
 
 /// Get the current thread's context slots.
 ///
+
 /// Used by the V-LLSI context system for provide/using.
 @inline
 public fn get_context_slots() -> &RawContextSlots {
@@ -388,6 +404,7 @@ public fn check_stack_guard() -> Bool {
 
 /// Get a value from a context slot.
 ///
+
 /// Returns None if slot is not active.
 @inline
 public fn ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
@@ -420,6 +437,7 @@ fn ctx_get_from(slots: &RawContextSlots, slot: UInt8) -> Maybe<&unsafe Byte> {
 
 /// Get a mutable value from a context slot.
 ///
+
 /// Returns the same raw pointer as ctx_get - the caller is responsible
 /// for ensuring exclusive access when modifying the value.
 @inline
@@ -472,6 +490,7 @@ public fn ctx_pop() {
 
 /// Clean up TLS for the current thread.
 ///
+
 /// Called during thread exit. Does NOT free main thread TLS.
 public fn cleanup_thread_tls() {
     match get_current_tcb() {

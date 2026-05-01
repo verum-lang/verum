@@ -1,52 +1,58 @@
 //! Cog distribution registry — reproducibility chain + multi-mirror
 //! trust model.
 //!
+
 //! ## Goal
 //!
+
 //! Make Verum's package manager production-grade so verified
 //! mathematics can be published, depended-on, and audit-traced
 //! like Cargo / npm but with **cryptographic proof-integrity**:
 //!
-//!   1. **Per-cog reproducibility hash chain**: every published
-//!      cog ships with a blake3 chain over (source files,
-//!      verum.lock, audit reports, certificates).  Downstream
-//!      consumers verify the entire dependency closure.
-//!   2. **Cog signing** (Ed25519): the registry verifies
-//!      signatures on publish + serve.
-//!   3. **Verified-build attestations**: CI runs
-//!      `make audit-honesty-gate` + `make audit`, attests the
-//!      result into the registry; consumers see "audited by
-//!      VERIFIED-CI on date X" badges.
-//!   4. **Math content discovery**: tag cogs by paper-DOI /
-//!      framework lineage / theorem catalogue.
-//!   5. **Multi-mirror trust**: the registry protocol supports N
-//!      independent mirrors; a cog is trusted only when every
-//!      mirror agrees on its content hash.
+
+//!  1. **Per-cog reproducibility hash chain**: every published
+//!  cog ships with a blake3 chain over (source files,
+//!  verum.lock, audit reports, certificates). Downstream
+//!  consumers verify the entire dependency closure.
+//!  2. **Cog signing** (Ed25519): the registry verifies
+//!  signatures on publish + serve.
+//!  3. **Verified-build attestations**: CI runs
+//!  `make audit-honesty-gate` + `make audit`, attests the
+//!  result into the registry; consumers see "audited by
+//!  VERIFIED-CI on date X" badges.
+//!  4. **Math content discovery**: tag cogs by paper-DOI /
+//!  framework lineage / theorem catalogue.
+//!  5. **Multi-mirror trust**: the registry protocol supports N
+//!  independent mirrors; a cog is trusted only when every
+//!  mirror agrees on its content hash.
 //!
+
 //! ## Architectural pattern
 //!
+
 //! Same single-trait-boundary pattern as the rest of the
 //! integration arc:
 //!
-//!   * [`CogManifest`] — typed metadata (name, version, deps,
-//!     content hash, attestations, framework lineage).
-//!   * [`CogReproEnvelope`] — typed reproducibility chain
-//!     (`input_hash` over source files + lockfile + audit reports
-//!     ⟶ `build_env_hash` over toolchain pinning ⟶ `output_hash`
-//!     over compiled artefacts).
-//!   * [`AttestationKind`] — VerifiedCi / Honesty / Coord /
-//!     CrossFormat / FrameworkSoundness.
-//!   * [`Attestation`] — typed `(kind, signer, signature_bytes,
-//!     timestamp)`.
-//!   * [`PublishOutcome`] / [`LookupOutcome`] — typed registry
-//!     verdicts.
-//!   * [`RegistryClient`] trait — single dispatch interface.
-//!   * Reference impls: [`MemoryRegistry`] (deterministic, in-
-//!     process), [`LocalFilesystemRegistry`] (V0 disk-backed
-//!     reference — every cog stored as JSON under
-//!     `<root>/<name>/<version>.json`).
-//!   * [`MultiMirrorClient`] — composite that fans out to multiple
-//!     registries and requires consensus on content hashes.
+
+//!  * [`CogManifest`] — typed metadata (name, version, deps,
+//!  content hash, attestations, framework lineage).
+//!  * [`CogReproEnvelope`] — typed reproducibility chain
+//!  (`input_hash` over source files + lockfile + audit reports
+//!  ⟶ `build_env_hash` over toolchain pinning ⟶ `output_hash`
+//!  over compiled artefacts).
+//!  * [`AttestationKind`] — VerifiedCi / Honesty / Coord /
+//!  CrossFormat / FrameworkSoundness.
+//!  * [`Attestation`] — typed `(kind, signer, signature_bytes,
+//!  timestamp)`.
+//!  * [`PublishOutcome`] / [`LookupOutcome`] — typed registry
+//!  verdicts.
+//!  * [`RegistryClient`] trait — single dispatch interface.
+//!  * Reference impls: [`MemoryRegistry`] (deterministic, in-
+//!  process), [`LocalFilesystemRegistry`] (V0 disk-backed
+//!  reference — every cog stored as JSON under
+//!  `<root>/<name>/<version>.json`).
+//!  * [`MultiMirrorClient`] — composite that fans out to multiple
+//!  registries and requires consensus on content hashes.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -134,18 +140,20 @@ impl std::fmt::Display for CogVersion {
 // CogReproEnvelope — reproducibility chain
 // =============================================================================
 
-/// Per-cog reproducibility chain.  Three blake3 hashes:
+/// Per-cog reproducibility chain. Three blake3 hashes:
 ///
-///   * `input_hash` — blake3 over (sorted source-file hashes +
-///     lockfile + audit-report hashes).
-///   * `build_env_hash` — blake3 over the pinned toolchain
-///     (Verum kernel version, SMT-solver versions, foreign-tool
-///     versions).  Drift here invalidates the build.
-///   * `output_hash` — blake3 over the compiled artefacts (.vbc
-///     archives + cert files).
+
+///  * `input_hash` — blake3 over (sorted source-file hashes +
+///  lockfile + audit-report hashes).
+///  * `build_env_hash` — blake3 over the pinned toolchain
+///  (Verum kernel version, SMT-solver versions, foreign-tool
+///  versions). Drift here invalidates the build.
+///  * `output_hash` — blake3 over the compiled artefacts (.vbc
+///  archives + cert files).
 ///
+
 /// A consumer fetches the cog, recomputes each hash from the
-/// downloaded payload, and compares against the envelope.  Any
+/// downloaded payload, and compares against the envelope. Any
 /// mismatch ⇒ tampering or build-env drift.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CogReproEnvelope {
@@ -153,13 +161,13 @@ pub struct CogReproEnvelope {
     pub build_env_hash: Text,
     pub output_hash: Text,
     /// Blake3 chain hash: `chain_hash = blake3(input_hash ‖
-    /// build_env_hash ‖ output_hash)`.  This is the single
+    /// build_env_hash ‖ output_hash)`. This is the single
     /// canonical identifier for the cog version's content.
     pub chain_hash: Text,
 }
 
 impl CogReproEnvelope {
-    /// Build an envelope from raw component bytes.  Each hash is
+    /// Build an envelope from raw component bytes. Each hash is
     /// blake3 hex; the chain hash is derived deterministically.
     pub fn compute(input: &[u8], build_env: &[u8], output: &[u8]) -> Self {
         let input_hash = hex32(blake3::hash(input).as_bytes());
@@ -183,7 +191,7 @@ impl CogReproEnvelope {
     }
 
     /// True iff `chain_hash` matches the canonical derivation of
-    /// the three component hashes.  Tampering with any field
+    /// the three component hashes. Tampering with any field
     /// (without recomputing the chain) trips this.
     pub fn chain_hash_valid(&self) -> bool {
         let mut h = blake3::Hasher::new();
@@ -380,7 +388,7 @@ pub enum PublishOutcome {
         reason: Text,
     },
     /// Same `(name, version)` already exists with a different
-    /// chain hash.  This is a hard failure (immutable releases).
+    /// chain hash. This is a hard failure (immutable releases).
     VersionConflict {
         existing_chain_hash: Text,
         proposed_chain_hash: Text,
@@ -444,21 +452,24 @@ impl std::error::Error for RegistryError {}
 // Ed25519 attestation signing / verification (#96 hardening)
 // =============================================================================
 //
+
 // Pre-this-module, `Attestation::signature` was an opaque `Text`
 // blob that the registry stored verbatim — `MemoryRegistry::publish`
-// accepted any string as a "signature".  An adversary could publish
+// accepted any string as a "signature". An adversary could publish
 // a manifest with a fabricated `signature` field and the registry
 // would happily serve it to consumers.
 //
+
 // Hardening: deterministic Ed25519 over a stable canonical message
-// (`name + version + envelope.chain_hash + kind.name`).  Every
+// (`name + version + envelope.chain_hash + kind.name`). Every
 // `RegistryClient` implementation is encouraged to call
 // `verify_attestation` against the publisher's pinned public key
 // before accepting; consumers (e.g. the CLI's `verum cog install`)
 // run the same check on download.
 //
+
 // Key encoding follows the standard 64-hex-character convention
-// (32 bytes hex-encoded).  Signatures are 128 hex characters
+// (32 bytes hex-encoded). Signatures are 128 hex characters
 // (64 bytes hex-encoded) — both round-trip through `serde` cleanly.
 
 use ed25519_dalek::{
@@ -469,6 +480,7 @@ use ed25519_dalek::{
 /// Canonical message bytes Ed25519 signs over for a given
 /// (name, version, envelope-chain-hash, attestation-kind) tuple.
 ///
+
 /// The four components are joined by `'\n'` separators — newline
 /// is forbidden in any of them (the four are all kebab-/lowercase-
 /// identifier-shaped or hex-encoded), so the join is unambiguously
@@ -528,9 +540,10 @@ impl CogVersion {
     }
 }
 
-/// Sign one attestation with an Ed25519 key.  Returns the hex-
+/// Sign one attestation with an Ed25519 key. Returns the hex-
 /// encoded 128-character signature.
 ///
+
 /// `secret_key_hex` is a 64-character (32 byte) hex-encoded secret
 /// scalar — the same encoding `ed25519-dalek::SigningKey::from_bytes`
 /// expects after hex decoding.
@@ -551,6 +564,7 @@ pub fn sign_attestation(
 
 /// Verify one attestation against a publisher public key.
 ///
+
 /// `public_key_hex` is 64 hex chars (32 bytes); the attestation's
 /// `signature` field is 128 hex chars (64 bytes).
 pub fn verify_attestation(
@@ -573,7 +587,7 @@ pub fn verify_attestation(
         .map_err(|_| AttestationCryptoError::SignatureMismatch)
 }
 
-/// Decode a fixed-size hex string into a byte array.  Returns
+/// Decode a fixed-size hex string into a byte array. Returns
 /// `None` if the input isn't exactly `N * 2` hex characters.
 fn decode_hex_array<const N: usize>(hex: &str) -> Option<[u8; N]> {
     if hex.len() != N * 2 {
@@ -604,10 +618,10 @@ pub trait RegistryClient: std::fmt::Debug + Send + Sync {
     /// Look up a specific (name, version) pair.
     fn lookup(&self, name: &str, version: &CogVersion) -> Result<LookupOutcome, RegistryError>;
 
-    /// Search by tag.  Returns matching `(name, version)` pairs.
+    /// Search by tag. Returns matching `(name, version)` pairs.
     fn search(&self, query: &SearchQuery) -> Result<Vec<(Text, CogVersion)>, RegistryError>;
 
-    /// Publish a manifest.  The registry validates the envelope's
+    /// Publish a manifest. The registry validates the envelope's
     /// chain hash, checks for version conflicts, and (V1+) verifies
     /// signatures.
     fn publish(&self, manifest: &CogManifest) -> Result<PublishOutcome, RegistryError>;
@@ -741,8 +755,8 @@ impl RegistryClient for MemoryRegistry {
 // LocalFilesystemRegistry — disk-backed reference
 // =============================================================================
 
-/// Disk-backed registry.  One JSON file per cog version under
-/// `<root>/<name>/<version>.json`.  V0 reference impl; V1+
+/// Disk-backed registry. One JSON file per cog version under
+/// `<root>/<name>/<version>.json`. V0 reference impl; V1+
 /// production server fronts an HTTP API but uses the same trait.
 #[derive(Debug)]
 pub struct LocalFilesystemRegistry {
@@ -937,7 +951,7 @@ impl RegistryClient for LocalFilesystemRegistry {
 // =============================================================================
 
 /// Composite client that fans out to N mirrors and requires
-/// consensus on the chain hash.  Returns `Found` only when every
+/// consensus on the chain hash. Returns `Found` only when every
 /// mirror that has the cog returns the same chain hash.
 pub struct MultiMirrorClient {
     pub mirrors: Vec<Box<dyn RegistryClient>>,
@@ -963,7 +977,7 @@ pub struct MirrorConsensusVerdict {
     /// Per-mirror outcomes keyed by registry id.
     pub per_mirror: BTreeMap<Text, LookupOutcome>,
     /// True iff every mirror that returned `Found` agrees on the
-    /// chain hash.  False means at least one mirror disagrees —
+    /// chain hash. False means at least one mirror disagrees —
     /// the cog's content is *not* trusted.
     pub consensus: bool,
     /// The agreed-upon chain hash when `consensus = true` and at
@@ -976,7 +990,8 @@ impl MultiMirrorClient {
     /// `NotFound` and `Error` outcomes do NOT break consensus —
     /// only conflicting `Found` results do.
     ///
-    /// **V0 / back-compat behaviour.**  Use [`lookup_with_consensus_policy`]
+
+    /// **V0 / back-compat behaviour.** Use [`lookup_with_consensus_policy`]
     /// for the production gates (minimum quorum, identity match,
     /// signature verification under publisher pubkeys).
     pub fn lookup_with_consensus(
@@ -988,17 +1003,18 @@ impl MultiMirrorClient {
     }
 
     /// Hardened lookup that applies the supplied policy gates on top
-    /// of the V0 chain-hash agreement.  Returns `consensus = true`
+    /// of the V0 chain-hash agreement. Returns `consensus = true`
     /// only when every gate passes:
     ///
-    ///   1. Every `Found` verdict's manifest `chain_hash` is identical.
-    ///   2. The `Found` count is ≥ `policy.min_quorum`.
-    ///   3. When `policy.require_identity_match`, every `Found`'s
-    ///      manifest name + version match the query.
-    ///   4. For every `(kind, pubkey)` pair in
-    ///      `policy.required_attestations`, every `Found`'s
-    ///      manifest carries an attestation of `kind` whose Ed25519
-    ///      signature verifies under one of the configured pubkeys.
+
+    ///  1. Every `Found` verdict's manifest `chain_hash` is identical.
+    ///  2. The `Found` count is ≥ `policy.min_quorum`.
+    ///  3. When `policy.require_identity_match`, every `Found`'s
+    ///  manifest name + version match the query.
+    ///  4. For every `(kind, pubkey)` pair in
+    ///  `policy.required_attestations`, every `Found`'s
+    ///  manifest carries an attestation of `kind` whose Ed25519
+    ///  signature verifies under one of the configured pubkeys.
     pub fn lookup_with_consensus_policy(
         &self,
         name: &str,
@@ -1085,23 +1101,23 @@ impl MultiMirrorClient {
 // =============================================================================
 
 /// Policy applied by [`MultiMirrorClient::lookup_with_consensus_policy`]
-/// on top of the V0 chain-hash agreement check.  Each gate is opt-in
+/// on top of the V0 chain-hash agreement check. Each gate is opt-in
 /// so callers can layer them: production verifiers configure all
 /// three (quorum + identity + attestation), while the V0 default
 /// (`Default::default()`) preserves chain-hash-only behaviour.
 #[derive(Debug, Clone, Default)]
 pub struct MirrorConsensusPolicy {
     /// Minimum number of mirrors that must return `Found` for
-    /// consensus to hold.  Default `0` accepts any number ≥ 0
+    /// consensus to hold. Default `0` accepts any number ≥ 0
     /// (V0 behaviour).
     pub min_quorum: usize,
     /// When `true`, every `Found` manifest's `name` and `version`
-    /// MUST equal the query's.  Default `false` (V0 behaviour).
+    /// MUST equal the query's. Default `false` (V0 behaviour).
     pub require_identity_match: bool,
     /// Per-attestation-kind list of publisher Ed25519 public keys
-    /// (hex-encoded, 64 chars).  Every `Found` manifest must carry
+    /// (hex-encoded, 64 chars). Every `Found` manifest must carry
     /// an attestation of each listed kind whose signature verifies
-    /// under one of the listed pubkeys.  Default empty (no gate).
+    /// under one of the listed pubkeys. Default empty (no gate).
     pub required_attestations: Vec<(AttestationKind, Vec<Text>)>,
 }
 
@@ -1805,7 +1821,7 @@ mod tests {
 
     #[test]
     fn consensus_policy_default_preserves_v0_chain_hash_only() {
-        // Default policy = chain-hash agreement only.  Single-Found
+        // Default policy = chain-hash agreement only. Single-Found
         // result still passes consensus (same as V0).
         let m1 = MemoryRegistry::new("m1");
         let m2 = MemoryRegistry::new("m2");

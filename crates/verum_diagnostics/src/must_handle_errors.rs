@@ -1,19 +1,24 @@
 //! E0317: Unused Result that must be used
 //!
+
 //! The @must_handle annotation provides compile-time enforcement that Result<T, E> values
 //! with critical error types are explicitly handled before being dropped. Unlike @must_use
 //! (which is a warning on function return values), @must_handle is a compile ERROR that
 //! applies to the error TYPE itself -- once a type is marked @must_handle, ALL functions
 //! returning Result<T, ThatType> inherit the enforcement.
 //!
+
 //! This module provides comprehensive diagnostics for @must_handle annotation violations.
 //! When a Result<T, E> has an error type E marked with @must_handle, the compiler enforces
 //! that the Result is explicitly handled before being dropped.
 //!
+
 //! # Error Code E0317
 //!
+
 //! **Severity**: Error (compile-time failure)
 //!
+
 //! **Trigger**: A Result<T, E> value where E is marked with @must_handle is dropped
 //! without being explicitly handled through one of the allowed operations:
 //! - `?` operator (error propagation)
@@ -23,121 +28,136 @@
 //! - `if let Ok/Err` (conditional handling)
 //! - `.is_err()` check before drop
 //!
+
 //! # Examples
 //!
+
 //! ## Example 1: Basic violation
 //!
+
 //! ```verum
 //! @must_handle
 //! type CriticalError is | ConnectionLost | DataCorruption;
 //!
+
 //! fn risky() -> Result<Data, CriticalError> { ... }
 //!
+
 //! fn bad() {
-//!     let result = risky();  // ❌ E0317
+//!  let result = risky(); // ❌ E0317
 //! }
 //! ```
 //!
+
 //! **Error message**:
 //! ```text
 //! error[E0317]: unused Result that must be used
-//!   --> example.vr:5:5
-//!    |
-//! 5  |     let result = risky();
-//!    |     ^^^^^^^^^^^^^^^^^^^^^ Result with @must_handle error type dropped without handling
-//!    |
-//!    = note: error type `CriticalError` is marked with @must_handle
-//!    = note: this Result must be handled before being dropped
-//!    = help: use `risky()?` to propagate the error
-//!    = help: use `risky().unwrap()` to panic if error occurs
-//!    = help: use `match risky() { Ok(x) => ..., Err(e) => ... }` to handle both cases
+//!  --> example.vr:5:5
+//!  |
+//! 5 | let result = risky();
+//!  | ^^^^^^^^^^^^^^^^^^^^^ Result with @must_handle error type dropped without handling
+//!  |
+//!  = note: error type `CriticalError` is marked with @must_handle
+//!  = note: this Result must be handled before being dropped
+//!  = help: use `risky()?` to propagate the error
+//!  = help: use `risky().unwrap()` to panic if error occurs
+//!  = help: use `match risky() { Ok(x) => ..., Err(e) => ... }` to handle both cases
 //! ```
 //!
+
 //! ## Example 2: Wildcard pattern
 //!
+
 //! ```verum
 //! fn bad() {
-//!     let _ = risky();  // ❌ E0317
+//!  let _ = risky(); // ❌ E0317
 //! }
 //! ```
 //!
+
 //! **Error message**:
 //! ```text
 //! error[E0317]: unused Result that must be used
-//!   --> example.vr:2:5
-//!    |
-//! 2  |     let _ = risky();
-//!    |     ^^^^^^^^^^^^^^^^ Result with @must_handle error type intentionally ignored
-//!    |
-//!    = note: error type `CriticalError` is marked with @must_handle
-//!    = note: wildcard pattern `_` explicitly ignores the Result
-//!    = help: @must_handle errors represent critical failures that should never be ignored
-//!    = help: use `?` to propagate: let data = risky()?;
-//!    = help: use pattern matching to handle both cases
+//!  --> example.vr:2:5
+//!  |
+//! 2 | let _ = risky();
+//!  | ^^^^^^^^^^^^^^^^ Result with @must_handle error type intentionally ignored
+//!  |
+//!  = note: error type `CriticalError` is marked with @must_handle
+//!  = note: wildcard pattern `_` explicitly ignores the Result
+//!  = help: @must_handle errors represent critical failures that should never be ignored
+//!  = help: use `?` to propagate: let data = risky()?;
+//!  = help: use pattern matching to handle both cases
 //! ```
 //!
+
 //! ## Example 3: Binding without use
 //!
+
 //! ```verum
 //! fn bad() {
-//!     let result = risky();
-//!     // result never used
-//! }  // ❌ E0317
+//!  let result = risky();
+//!  // result never used
+//! } // ❌ E0317
 //! ```
 //!
+
 //! **Error message**:
 //! ```text
 //! error[E0317]: unused Result that must be used
-//!   --> example.vr:2:5
-//!    |
-//! 2  |     let result = risky();
-//!    |     ^^^^^^^^^^^^^^^^^^^^^ Result created here
-//! 3 |     // result never used
+//!  --> example.vr:2:5
+//!  |
+//! 2 | let result = risky();
+//!  | ^^^^^^^^^^^^^^^^^^^^^ Result created here
+//! 3 | // result never used
 //! 4 | }
-//!   | - Result dropped here without being handled
-//!    |
-//!    = note: error type `CriticalError` is marked with @must_handle
-//!    = note: variable `result` bound but never checked or handled
-//!    = help: add `result?` to propagate the error
-//!    = help: or use `result.unwrap()` to panic on error
-//!    = help: or match on the Result to handle both Ok and Err cases
+//!  | - Result dropped here without being handled
+//!  |
+//!  = note: error type `CriticalError` is marked with @must_handle
+//!  = note: variable `result` bound but never checked or handled
+//!  = help: add `result?` to propagate the error
+//!  = help: or use `result.unwrap()` to panic on error
+//!  = help: or match on the Result to handle both Ok and Err cases
 //! ```
 //!
+
 //! ## Example 4: Conditional branches (partial handling)
 //!
+
 //! ```verum
 //! fn bad(flag: bool) {
-//!     let result = risky();
-//!     if flag {
-//!         result.unwrap();  // Handled here
-//!     }
-//!     // Not handled in else branch
-//! }  // ❌ E0317
+//!  let result = risky();
+//!  if flag {
+//!  result.unwrap(); // Handled here
+//!  }
+//!  // Not handled in else branch
+//! } // ❌ E0317
 //! ```
 //!
+
 //! **Error message**:
 //! ```text
 //! error[E0317]: unused Result that must be used in some code paths
-//!   --> example.vr:2:5
-//!    |
-//! 2  |     let result = risky();
-//!    |     ^^^^^^^^^^^^^^^^^^^^^ Result created here
-//! 3  |     if flag {
-//! 4  |         result.unwrap();
-//!    |         --------------- handled in this branch
-//! 5  |     }
-//!    |     - not handled when condition is false
-//! 6  | }
-//!   | - Result may be dropped without handling
-//!    |
-//!    = note: error type `CriticalError` is marked with @must_handle
-//!    = note: Result must be handled in ALL control flow paths
-//!    = help: handle in both branches:
-//!           if flag {
-//!               result.unwrap();
-//!           } else {
-//!               result.unwrap();  // or handle differently
-//!           }
+//!  --> example.vr:2:5
+//!  |
+//! 2 | let result = risky();
+//!  | ^^^^^^^^^^^^^^^^^^^^^ Result created here
+//! 3 | if flag {
+//! 4 | result.unwrap();
+//!  | --------------- handled in this branch
+//! 5 | }
+//!  | - not handled when condition is false
+//! 6 | }
+//!  | - Result may be dropped without handling
+//!  |
+//!  = note: error type `CriticalError` is marked with @must_handle
+//!  = note: Result must be handled in ALL control flow paths
+//!  = help: handle in both branches:
+//!  if flag {
+//!  result.unwrap();
+//!  } else {
+//!  result.unwrap(); // or handle differently
+//!  }
 //! ```
 
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder, Label, Severity};
@@ -160,6 +180,7 @@ fn span_to_linecol(span: Span) -> LineColSpan {
 
 /// E0317: Unused Result that must be used
 ///
+
 /// This error is emitted when a Result<T, E> with a @must_handle error type
 /// is dropped without being explicitly handled.
 #[derive(Debug, Clone)]
@@ -311,6 +332,7 @@ impl BranchInfo {
 
 /// Tracker for @must_handle Results throughout compilation.
 ///
+
 /// This tracker maintains state about which Result values have @must_handle
 /// error types and whether they have been properly handled. It is used during
 /// type checking and code generation to ensure compliance with the @must_handle

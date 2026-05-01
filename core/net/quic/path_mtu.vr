@@ -4,36 +4,44 @@
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
+
 // QUIC RFC 9000 §14 mandates a minimum UDP payload size of 1200 bytes
 // and recommends peers discover the actual path MTU using DPLPMTUD
 // (Datagram Packetization Layer PMTUD, RFC 8899). This lets the
 // sender raise its per-datagram size from 1200 up to the true path
 // MTU (often 1500 on the public Internet, larger on internal links).
 //
+
 // The algorithm maintains three values:
 //
-//   * BASE_PLPMTU = 1200 bytes (QUIC floor, RFC 9000 §14).
-//   * MIN_PLPMTU  = 1200 bytes (same as BASE in QUIC).
-//   * MAX_PLPMTU  = 65527 bytes (maximum UDP payload).
-//   * probed_size  = current size under probe (strictly > current PLPMTU).
-//   * current_plpmtu = last confirmed size.
+
+//  * BASE_PLPMTU = 1200 bytes (QUIC floor, RFC 9000 §14).
+//  * MIN_PLPMTU = 1200 bytes (same as BASE in QUIC).
+//  * MAX_PLPMTU = 65527 bytes (maximum UDP payload).
+//  * probed_size = current size under probe (strictly > current PLPMTU).
+//  * current_plpmtu = last confirmed size.
 //
+
 // State machine (RFC 8899 §5):
 //
-//   Disabled → Base → Search_Complete
-//                 │          ↓
-//                 └→ Search  ↑
-//                      │     │
-//                      └→ Error_Down (raise budget back toward BASE)
+
+//  Disabled → Base → Search_Complete
+//  │ ↓
+//  └→ Search ↑
+//  │ │
+//  └→ Error_Down (raise budget back toward BASE)
 //
+
 // Probe packets are sent padded with PADDING frames (RFC 9000 §19.1)
 // up to the probed_size; if acknowledged, the sender raises
 // current_plpmtu. If lost, the sender backs off.
 //
+
 // This scaffold type-checks and exposes the state-machine surface; it
 // does NOT yet drive the Pacer or the send path directly — that
 // integration lands in the Phase 7 perf work.
 //
+
 // =============================================================================
 
 module core.net.quic.path_mtu;

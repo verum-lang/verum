@@ -1,24 +1,28 @@
 //! Regression contract for cross-module same-name / different-arity
 //! function registration during stdlib loading.
 //!
-//! Background.  Several stdlib symbols share simple names but live in
+
+//! Background. Several stdlib symbols share simple names but live in
 //! different modules with different arities — the canonical pair is
 //! `core/sys/<plat>/libsystem.vr::write(fd, buf, n)` (3-arity FFI binding)
 //! and `core/io/fs.vr::write(path, contents)` (2-arity high-level helper).
 //! The codegen handles this with arity-suffixed alternative keys
 //! (`name#arity`) and an arity-aware lookup at the call site.
 //!
+
 //! In `prefer_existing_functions = true` mode (set by pipeline.rs while
 //! loading imported stdlib modules), `register_function` had a fast path
 //! that skipped the arity-suffix branch entirely:
 //!
+
 //! ```ignore
 //! if self.prefer_existing_functions {
-//!     self.functions.entry(name).or_insert(info);    // <- silent drop
+//!  self.functions.entry(name).or_insert(info); // <- silent drop
 //! } else { ... store name or alt-key based on arity ... }
 //! ```
 //!
-//! The second registration was simply discarded.  When `core/io/fs.vr`
+
+//! The second registration was simply discarded. When `core/io/fs.vr`
 //! loaded before `libsystem.vr`, the FFI 3-arity `write` was dropped and
 //! every `safe_write`, `safe_pread`, `safe_pwrite`, `safe_send`,
 //! `safe_recv`, `safe_sendto`, `safe_getsockopt` wrapper failed to
@@ -26,10 +30,12 @@
 //! and disappeared via the lenient-skip path — surfacing later as
 //! `method 'X.Y' not found on value` runtime panics far from the cause.
 //!
+
 //! The fix moves the arity-suffix branch outside the prefer-existing
 //! gate so both modes preserve alternative arities (first-wins under
 //! prefer-existing, last-wins otherwise).
 //!
+
 //! This test pins the fix in place: it runs vtest on a fixture that
 //! transitively loads the stdlib (any `// @test: run-interpreter` does)
 //! and asserts no `wrong number of arguments for write|pread|pwrite|

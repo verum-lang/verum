@@ -1,8 +1,10 @@
 //! Full Pipeline Integration Tests for Verum Compiler
 //!
+
 //! Comprehensive end-to-end testing of the entire compilation pipeline.
 //! Tests coverage targets: 75% → 95%
 //!
+
 //! Test categories:
 //! - Full compilation pipeline (lex → parse → resolve → typecheck → verify → codegen)
 //! - Error propagation through pipeline stages

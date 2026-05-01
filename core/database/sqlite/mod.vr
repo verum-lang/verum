@@ -5,17 +5,20 @@
 // Spec: internal/specs/sqlite-native.md (engine), internal/specs/database.md §6.2
 // =============================================================================
 //
+
 // Two-tier layout:
 //
-//   * `core.database.sqlite.{adapter,connection,error}` — Spindle
-//     adapter façade. Carries the unified `core.database.common.error.
-//     DbError`, exposes `SqliteAdapter` / `SqliteConfig` / `Sqlite-
-//     Connection` for user code.
+
+//  * `core.database.sqlite.{adapter,connection,error}` — Spindle
+//  adapter façade. Carries the unified `core.database.common.error.
+//  DbError`, exposes `SqliteAdapter` / `SqliteConfig` / `Sqlite-
+//  Connection` for user code.
 //
-//   * `core.database.sqlite.native` — pure-Verum SQLite reimplementation
-//     (loom). The façade above sits on top of `native.l7_api`; once
-//     loom's WAL + PosixVfs land (T3 / T4) the file-backed code path
-//     stops returning UNSUPPORTED.
+
+//  * `core.database.sqlite.native` — pure-Verum SQLite reimplementation
+//  (loom). The façade above sits on top of `native.l7_api`; once
+//  loom's WAL + PosixVfs land (T3 / T4) the file-backed code path
+//  stops returning UNSUPPORTED.
 // =============================================================================
 
 module core.database.sqlite;

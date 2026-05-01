@@ -15,6 +15,7 @@
 )]
 //! Tests for declaration AST nodes.
 //!
+
 //! This module tests all declaration types including functions, types,
 //! protocols (traits), implementations, modules, and more.
 
@@ -1471,8 +1472,8 @@ fn test_resource_modifier_affine_variant() {
 fn test_context_decl_with_sub_contexts() {
     // Sub-context declarations for fine-grained capability control
     // context FileSystem {
-    //     context Read { fn read(path: Text) -> Result<List<u8>> }
-    //     context Write { fn write(path: Text, data: List<u8>) -> Result<()> }
+    //  context Read { fn read(path: Text) -> Result<List<u8>> }
+    //  context Write { fn write(path: Text, data: List<u8>) -> Result<()> }
     // }
     let span = test_span();
 

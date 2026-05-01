@@ -72,7 +72,7 @@ public fn mmap_capable_v3_set() -> MethodSet {
     m
 }
 
-/// Every iVersion-1 slot must be filled.  Returns the first missing
+/// Every iVersion-1 slot must be filled. Returns the first missing
 /// method name, or "" when the set is viable.
 public fn missing_v1_method(m: &MethodSet) -> Text {
     if !m.has_close                  { return "xClose".clone(); }

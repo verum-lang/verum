@@ -19,8 +19,10 @@ pub struct TypeId<'c> {
 impl TypeId<'_> {
     /// Creates a type ID from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub const unsafe fn from_raw(raw: MlirTypeID) -> Self {
         Self {
@@ -36,8 +38,10 @@ impl TypeId<'_> {
 
     /// Creates a type ID from an 8-byte aligned reference.
     ///
+
     /// # Panics
     ///
+
     /// This function will panic if the given reference is not 8-byte aligned.
     /// Panicking is intentional here: misaligned type IDs indicate a bug, not a runtime condition.
     pub fn create<T>(reference: &T) -> Self {

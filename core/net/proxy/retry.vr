@@ -2,23 +2,27 @@
 // core/net/proxy/retry.vr — RetryLayer with budgets
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §9.3
+// Spec: internal/specs/net-framework.md §9.3
 // =============================================================================
 //
+
 // Retry middleware with three built-in knobs:
 //
-//   * `max_attempts`    — total attempts including the first (≥ 1).
-//   * `backoff_base_ms` — exponential base; i-th retry waits 2^i × base
-//                         capped at `backoff_max_ms`.
-//   * `budget`          — (optional) global retry budget enforced by
-//                         a shared counter; prevents retry storms when
-//                         the entire upstream fleet is in trouble.
+
+//  * `max_attempts` — total attempts including the first (≥ 1).
+//  * `backoff_base_ms` — exponential base; i-th retry waits 2^i × base
+//  capped at `backoff_max_ms`.
+//  * `budget` — (optional) global retry budget enforced by
+//  a shared counter; prevents retry storms when
+//  the entire upstream fleet is in trouble.
 //
+
 // The retry decision respects `ErrorCategory.is_retryable()` — errors
 // classified as Transient or Upstream retry; Permanent / Client /
 // Security do not. This is the key §5.6 insight that avoids the
 // "blind retry on 400 Bad Request" bug class.
 //
+
 // =============================================================================
 
 module core.net.proxy.retry;

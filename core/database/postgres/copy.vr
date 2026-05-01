@@ -6,28 +6,33 @@ module core.database.postgres.copy;
 // Layer: 2-3
 // Spec: database.md §6.1.6; postgresql.org §53.6 "COPY".
 //
+
 // COPY is the high-throughput bulk-ingest path on Postgres — 5-10×
 // faster than `INSERT` even when pipelined, because the server skips
 // per-row Parse/Bind round-trips and accepts a stream of pre-formatted
-// rows.  The wire flow:
+// rows. The wire flow:
 //
-//     C → S : Query("COPY t (c1, c2) FROM STDIN [BINARY]")
-//     S → C : CopyInResponse { format, column_formats }
-//     C → S : CopyData { bytes: row_bytes }   * many *
-//     C → S : CopyDone   |   C → S : CopyFail(reason)
-//     S → C : CommandComplete { tag: "COPY N" }
-//     S → C : ReadyForQuery
+
+//  C → S : Query("COPY t (c1, c2) FROM STDIN [BINARY]")
+//  S → C : CopyInResponse { format, column_formats }
+//  C → S : CopyData { bytes: row_bytes } * many *
+//  C → S : CopyDone | C → S : CopyFail(reason)
+//  S → C : CommandComplete { tag: "COPY N" }
+//  S → C : ReadyForQuery
 //
+
 // COPY TO (server → client) is symmetric:
 //
-//     C → S : Query("COPY t (c) TO STDOUT [BINARY]")
-//     S → C : CopyOutResponse { format, column_formats }
-//     S → C : CopyData { bytes }   * many *
-//     S → C : CopyDone
-//     S → C : CommandComplete + ReadyForQuery
+
+//  C → S : Query("COPY t (c) TO STDOUT [BINARY]")
+//  S → C : CopyOutResponse { format, column_formats }
+//  S → C : CopyData { bytes } * many *
+//  S → C : CopyDone
+//  S → C : CommandComplete + ReadyForQuery
 //
+
 // v1 covers TEXT mode (newline-terminated rows, tab-separated columns
-// per Postgres default).  Binary mode requires the 19-byte signature
+// per Postgres default). Binary mode requires the 19-byte signature
 // + 32-bit endian-marked field counts; deferred to v2.
 // =============================================================================
 
@@ -43,7 +48,7 @@ mount core.database.postgres.connection.{PgConnection};
 // CopyInBuilder — fluent assembly of a COPY FROM statement
 // -----------------------------------------------------------------------------
 
-/// Builder for a COPY FROM statement.  Renders the SQL and drives the
+/// Builder for a COPY FROM statement. Renders the SQL and drives the
 /// server's CopyInResponse / CopyData / CopyDone state machine.
 public type CopyInBuilder is {
     table: Text,
@@ -55,14 +60,14 @@ public fn copy_in(table: &Text) -> CopyInBuilder {
 }
 
 implement CopyInBuilder {
-    /// Restrict the COPY to a column subset.  Required when the
+    /// Restrict the COPY to a column subset. Required when the
     /// caller's row layout doesn't match the table column order.
     public fn with_columns(mut self, cols: List<Text>) -> CopyInBuilder {
         self.columns = cols;
         self
     }
 
-    /// Render the SQL — `COPY t (c1, c2) FROM STDIN`.  Internal use
+    /// Render the SQL — `COPY t (c1, c2) FROM STDIN`. Internal use
     /// by `run`; exposed for tracing / dry-run.
     pub fn render_sql(&self) -> Text {
         let mut sql: Text = "COPY ".clone();
@@ -81,9 +86,9 @@ implement CopyInBuilder {
         sql
     }
 
-    /// Drive the COPY FROM round-trip.  `rows` is a list of pre-
+    /// Drive the COPY FROM round-trip. `rows` is a list of pre-
     /// formatted row strings (newline-terminated; tab-separated for
-    /// the default text format).  Returns the server-reported COPY
+    /// the default text format). Returns the server-reported COPY
     /// row count from the trailing CommandComplete.
     pub fn run(&self, conn: &mut PgConnection, rows: &List<Text>)
         -> Result<Int, DbError>
@@ -92,7 +97,7 @@ implement CopyInBuilder {
     }
 
     /// Drive a COPY FROM where each row is *raw bytes* the caller
-    /// has already formatted (e.g. for binary-mode COPY).  The
+    /// has already formatted (e.g. for binary-mode COPY). The
     /// caller is responsible for the wire-format invariant.
     pub fn run_bytes(&self, conn: &mut PgConnection, rows: &List<List<Byte>>)
         -> Result<Int, DbError>

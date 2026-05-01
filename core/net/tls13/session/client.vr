@@ -3,38 +3,45 @@
 // =============================================================================
 // Layer: 7 (Session)
 // Spec: internal/specs/tls-quic.md §4.3 — typed state machines
-//       RFC 8446 §4 (handshake), §5 (record layer), §6 (alerts)
+//  RFC 8446 §4 (handshake), §5 (record layer), §6 (alerts)
 // =============================================================================
 //
+
 // Public entry point for pure-Verum TLS 1.3 client sessions.
 //
+
 // # Compile-time state progression
 //
+
 // ```text
-//     ┌──────────────────────┐   progress()             ┌─────────────────┐
-//     │ TlsClient<Handshaking> │ ──── Continue ──▶       │ TlsClient<Handshaking> │
-//     │                      │ ──── Done     ──▶       │ TlsClient<Established> │
-//     └──────────────────────┘                          └────────┬────────┘
-//                                                               │
-//                                                               │ close()
-//                                                               ▼
-//                                                      ┌─────────────────┐
-//                                                      │ TlsClient<Closed>    │
-//                                                      └─────────────────┘
+//  ┌──────────────────────┐ progress() ┌─────────────────┐
+//  │ TlsClient<Handshaking> │ ──── Continue ──▶ │ TlsClient<Handshaking> │
+//  │ │ ──── Done ──▶ │ TlsClient<Established> │
+//  └──────────────────────┘ └────────┬────────┘
+//  │
+//  │ close()
+//  ▼
+//  ┌─────────────────┐
+//  │ TlsClient<Closed> │
+//  └─────────────────┘
 // ```
 //
+
 // `read()` / `write()` only exist on `TlsClient<Established>`. Attempting
 // `client.write(...)` in `Handshaking` is a compile error (no such method
 // on the type) — exactly the architectural property §4.3 promises.
 //
+
 // # Wire-layer separation
 //
+
 // This module does NOT own the transport. A caller feeds raw bytes
 // into `progress()` / `recv()` and consumes the outbound bytes returned
 // for transmission. Integration with `core.net.tcp` / any async framing
 // is the caller's responsibility (the facade in `core.net.tls.session.*`
 // composes both).
 //
+
 // =============================================================================
 
 module core.net.tls13.session.client;

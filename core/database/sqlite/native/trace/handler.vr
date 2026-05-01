@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (sqlite3_trace_v2)
 //
+
 // `TraceHandler` is the user-facing protocol. The L7 façade installs
 // at most one handler per Connection but the catalogue lets the host
 // chain handlers via `compose` so multiple subscribers (audit, EXPLAIN

@@ -2,12 +2,14 @@
 // core.action.primitives — eight primitive acts (Diakrisis Actic §1 + §21)
 // =============================================================================
 //
+
 // Seven canonical Diakrisis Actic primitives + ε_classify (added per the
 // Diakrisis ↔ Noesis ↔ Verum cross-audit recommendation #3 — needed by
 // the OWL 2 V1 ecosystem for ontology classification / subsumption /
 // instance-check obligations that don't fit cleanly into the original
 // seven primitives).
 //
+
 // VVA §21.3 routes every OWL 2 reasoning task through `@verify(...)` —
 // `ε_classify` lets the @enact attribute carry the Actic dual coordinate
 // for the function performing that reasoning. Functions decorated with

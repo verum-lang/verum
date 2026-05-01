@@ -5,6 +5,7 @@
 // Spec: internal/specs/database.md §5.6
 // =============================================================================
 //
+
 // One error type for every adapter. Vendor-specific codes are carried
 // through `Adapter(AdapterError)`, but classifiers (`is_retryable`,
 // `is_constraint_violation`, `category`) work portably so a single
@@ -12,6 +13,7 @@
 // 1213, and SQLite SQLITE_BUSY without per-vendor branching at the
 // call site.
 //
+
 // `IntoResponse` wires Weft → DbError automatically: a handler that
 // uses [Database] gets `?` propagation to a 4xx/5xx response with the
 // right status and never leaks server-internal SQL text to clients.
@@ -52,6 +54,7 @@ implement AdapterId {
 /// emits these natively; MySQL maps server errno → SQLSTATE in the
 /// adapter; SQLite synthesises a small subset.
 ///
+
 /// The code is held as a `Text` (5 ASCII chars) rather than a packed
 /// integer because every operator from now on (display, log, retry
 /// policy lookup) reads it as text. The 5-char invariant is enforced
@@ -316,11 +319,13 @@ fn auth_kind_name(k: &AuthErrorKind) -> Text {
 // Display + Debug + Eq for the error taxonomy
 // =============================================================================
 //
+
 // AuthFailed Display surfaces only the kind tag — never SCRAM
 // payloads, never role names, never token state — to avoid
-// becoming an oracle for credential probing.  Adapter messages
+// becoming an oracle for credential probing. Adapter messages
 // are passed through (vendor controls them).
 //
+
 // =============================================================================
 
 implement Display for AdapterId {

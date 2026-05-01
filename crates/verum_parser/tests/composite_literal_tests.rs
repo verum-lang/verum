@@ -14,6 +14,7 @@
 )]
 // Comprehensive test suite for composite literals in Verum.
 //
+
 // This test suite covers:
 // - Matrix literals: mat#"[[1, 2], [3, 4]]"
 // - Vector literals: vec#"<1, 2, 3>" or vec#"[1, 2, 3]"
@@ -21,6 +22,7 @@
 // - Music literals: music#"C4 D4 E4 F4", music#"Cmaj7"
 // - Interval literals: interval#"[0, 100)", interval#"[0..100]"
 //
+
 // Tests for composite literal syntax: bool_lit = "true" | "false"
 
 use verum_ast::{Expr, ExprKind, FileId, Literal, LiteralKind};

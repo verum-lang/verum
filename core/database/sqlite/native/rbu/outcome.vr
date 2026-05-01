@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3rbu_step returns one of SQLITE_OK / SQLITE_DONE / error code;
 // sqlite3rbu_close returns SQLITE_OK / SQLITE_DONE (success) or
 // SQLITE_NOMEM / error with an errmsg.

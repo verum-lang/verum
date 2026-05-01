@@ -1,6 +1,7 @@
 //! End-to-end integration tests for `verum export` with persistent
 //! certificate loading.
 //!
+
 //! When an `SmtCertificate` is on-disk in `.verum/cache/certificates/`
 //! for a theorem, `verum export` should load it via the
 //! `FileSystemCertificateStore`, route it through the

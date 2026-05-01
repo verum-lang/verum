@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The engine keeps a list of (schema_name, TxnState) pairs plus the
-// top-level autocommit flag.  BEGIN clears autocommit + inserts a
+// top-level autocommit flag. BEGIN clears autocommit + inserts a
 // TxRead / TxWrite state; COMMIT / ROLLBACK restore autocommit.
 // =============================================================================
 

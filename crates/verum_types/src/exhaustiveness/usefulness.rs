@@ -1,8 +1,10 @@
 //! Usefulness Algorithm
 //!
+
 //! This module implements the usefulness check from Maranget's algorithm.
 //! A pattern is "useful" if it covers at least one case not covered by previous patterns.
 //!
+
 //! The algorithm works by recursively analyzing the coverage matrix:
 //! 1. If the matrix is empty, the pattern is useful (covers new ground)
 //! 2. If the pattern starts with a wildcard, check each possible constructor
@@ -17,13 +19,17 @@ use verum_common::{List, Text};
 
 /// Check if a pattern row is useful (adds coverage not provided by earlier patterns)
 ///
+
 /// # Arguments
 ///
+
 /// * `earlier_rows` - Rows from patterns that come before
 /// * `row` - The row to check for usefulness
 ///
+
 /// # Returns
 ///
+
 /// `true` if the row covers at least one case not covered by earlier rows
 pub fn is_useful(earlier_rows: &[PatternRow], row: &PatternRow) -> bool {
     // Empty matrix - this pattern is useful
@@ -391,6 +397,7 @@ fn is_useful_active(
 
 /// Check usefulness when the first column is a wildcard
 ///
+
 /// Performance: Uses HashSet<Text> for O(1) constructor lookup instead of O(n) list search
 fn is_useful_wildcard(earlier_rows: &[PatternRow], row: &PatternRow) -> bool {
     // Check if any earlier row has a wildcard in the first column (without a guard)
@@ -779,6 +786,7 @@ fn expand_constructor(col: &PatternColumn, _ctor: &Constructor) -> List<PatternC
 
 /// Collect constructor names from a pattern column (optimized with HashSet)
 ///
+
 /// Performance: O(1) insertion vs O(n) for List-based version
 fn collect_constructors_fast(col: &PatternColumn, out: &mut HashSet<Text>) {
     match col {

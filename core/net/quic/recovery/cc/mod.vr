@@ -5,28 +5,33 @@
 // Dependencies: core.time.{instant, duration}
 // =============================================================================
 //
+
 // Every QUIC connection runs a congestion-control algorithm that
 // governs the in-flight byte limit (cwnd) and the pacing rate.
 // RFC 9002 mandates NewReno compliance for v1; CUBIC (RFC 9438) and
 // BBRv2 are optional advanced choices available behind the same
 // CongestionCtrl protocol.
 //
+
 // Protocol shape:
 //
-//   trait CongestionCtrl {
-//       fn on_packet_sent(bytes)                          — +bytes_in_flight
-//       fn on_ack_received(acked_bytes, rtt, now)         — +cwnd, exit slow-start
-//       fn on_packets_lost(lost_bytes, now)               — cut cwnd
-//       fn on_pto(now)                                    — PTO fire, no state change
-//       fn window()                                       — current cwnd (bytes)
-//       fn bytes_in_flight()                              — current in-flight
-//       fn should_pace()                                  — always true for NewReno
-//       fn pacing_rate()                                  — bytes/sec
-//   }
+
+//  trait CongestionCtrl {
+//  fn on_packet_sent(bytes) — +bytes_in_flight
+//  fn on_ack_received(acked_bytes, rtt, now) — +cwnd, exit slow-start
+//  fn on_packets_lost(lost_bytes, now) — cut cwnd
+//  fn on_pto(now) — PTO fire, no state change
+//  fn window() — current cwnd (bytes)
+//  fn bytes_in_flight() — current in-flight
+//  fn should_pace() — always true for NewReno
+//  fn pacing_rate() — bytes/sec
+//  }
 //
+
 // The top-level connection holds one `CongestionCtrl` impl and calls
 // the ack/loss hooks from the recovery loop.
 //
+
 // =============================================================================
 
 module core.net.quic.recovery.cc;

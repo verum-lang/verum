@@ -1,16 +1,21 @@
 //! Operator Protocol System
 //!
+
 //! Maps operators to their corresponding protocols for stdlib-agnostic resolution.
 //!
+
 //! ## Architecture
 //!
+
 //! Instead of hardcoding operator behavior for specific types (like Int, Float),
 //! the type system resolves operators through protocol implementations:
 //!
+
 //! ```verum
 //! // User code
 //! let sum = a + b;
 //!
+
 //! // Type checker resolves:
 //! // 1. Get protocol for `+` operator -> "Add"
 //! // 2. Check if type of `a` implements `Add`
@@ -18,31 +23,33 @@
 //! // 4. Type check arguments and return type
 //! ```
 //!
+
 //! ## Protocol Mappings
 //!
+
 //! | Operator | Protocol | Method |
 //! |----------|----------|--------|
-//! | `+`      | Add      | add    |
-//! | `-`      | Sub      | sub    |
-//! | `*`      | Mul      | mul    |
-//! | `/`      | Div      | div    |
-//! | `%`      | Rem      | rem    |
-//! | `==`     | Eq       | eq     |
-//! | `!=`     | Eq       | ne     |
-//! | `<`      | Ord      | lt     |
-//! | `<=`     | Ord      | le     |
-//! | `>`      | Ord      | gt     |
-//! | `>=`     | Ord      | ge     |
-//! | `&`      | BitAnd   | bitand |
-//! | `\|`     | BitOr    | bitor  |
-//! | `^`      | BitXor   | bitxor |
-//! | `<<`     | Shl      | shl    |
-//! | `>>`     | Shr      | shr    |
-//! | `!`      | Not      | not    |
-//! | `-` (unary) | Neg   | neg    |
-//! | `[idx]`  | Index    | index  |
+//! | `+` | Add | add |
+//! | `-` | Sub | sub |
+//! | `*` | Mul | mul |
+//! | `/` | Div | div |
+//! | `%` | Rem | rem |
+//! | `==` | Eq | eq |
+//! | `!=` | Eq | ne |
+//! | `<` | Ord | lt |
+//! | `<=` | Ord | le |
+//! | `>` | Ord | gt |
+//! | `>=` | Ord | ge |
+//! | `&` | BitAnd | bitand |
+//! | `\|` | BitOr | bitor |
+//! | `^` | BitXor | bitxor |
+//! | `<<` | Shl | shl |
+//! | `>>` | Shr | shr |
+//! | `!` | Not | not |
+//! | `-` (unary) | Neg | neg |
+//! | `[idx]` | Index | index |
 //! | `[idx]=` | IndexMut | index_mut |
-//! | `*ref`   | Deref    | deref  |
+//! | `*ref` | Deref | deref |
 //! | `*mut_ref` | DerefMut | deref_mut |
 
 use verum_ast::expr::{BinOp, UnOp};
@@ -50,6 +57,7 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// Operator to protocol mapping configuration
 ///
+
 /// This struct holds the complete mapping from operators to their protocols.
 /// The mappings can be customized or extended for different language configurations.
 #[derive(Debug, Clone)]

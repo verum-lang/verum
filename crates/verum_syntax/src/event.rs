@@ -1,10 +1,12 @@
 //! Event-based parsing infrastructure.
 //!
+
 //! The parser emits events instead of building trees directly. This enables:
 //! 1. Retroactive modifications via markers (precede pattern)
 //! 2. Different tree representations from the same parse
 //! 3. Easy testing without tree construction
 //!
+
 //! Event-Based Parser Design:
 //! Events are emitted in parsing order, then reordered to tree order via
 //! forward_parent links. The `precede` pattern enables retroactive parent
@@ -16,12 +18,14 @@ use crate::SyntaxKind;
 
 /// Events emitted during parsing.
 ///
+
 /// The parser emits a flat sequence of events that can be processed
 /// by different sinks to produce different representations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// Start a new node.
     ///
+
     /// If `forward_parent` is set, this node will be wrapped in another
     /// node later (retroactive parent wrapping).
     Start {
@@ -97,6 +101,7 @@ impl Event {
 
 /// Marker for a node start position.
 ///
+
 /// Markers are used for retroactive parent wrapping. When parsing an expression
 /// like `1 + 2`, we start with `1`, then realize we need to wrap it in a
 /// binary expression. The marker allows this retroactive wrapping.
@@ -121,6 +126,7 @@ impl Marker {
 
     /// Complete this marker with the given kind.
     ///
+
     /// This updates the Start event at the marker's position and emits
     /// a Finish event.
     pub fn complete(mut self, p: &mut EventBuilder, kind: SyntaxKind) -> CompletedMarker {
@@ -138,6 +144,7 @@ impl Marker {
 
     /// Abandon this marker.
     ///
+
     /// The Start event is converted to a Tombstone. Tombstones are filtered
     /// out when events are finalized.
     pub fn abandon(mut self, p: &mut EventBuilder) {
@@ -188,12 +195,14 @@ impl CompletedMarker {
 
     /// Wrap this completed node in a parent node.
     ///
+
     /// This is used for retroactive parent wrapping. For example, when
     /// parsing `1 + 2`, we first parse `1` as a literal, then realize
     /// we need to wrap it in a binary expression.
     ///
+
     /// Before: `[Start(LITERAL), ..., Finish]`
-    /// After:  `[Start(BINARY), Start(LITERAL), ..., Finish, ...]`
+    /// After: `[Start(BINARY), Start(LITERAL), ..., Finish, ...]`
     pub fn precede(self, p: &mut EventBuilder) -> Marker {
         let new_marker = p.start();
         let idx = self.pos as usize;
@@ -210,6 +219,7 @@ impl CompletedMarker {
 
     /// Extend this marker to the right to include additional tokens.
     ///
+
     /// This is used when we need to include trailing tokens in an existing
     /// node, such as adding a postfix operator.
     pub fn extend_to(self, _p: &mut EventBuilder, end: CompletedMarker) -> CompletedMarker {
@@ -226,6 +236,7 @@ impl CompletedMarker {
 
 /// Builder for parser events.
 ///
+
 /// This collects events during parsing and provides methods for
 /// processing them into a syntax tree.
 #[derive(Debug, Default)]
@@ -315,11 +326,13 @@ impl EventBuilder {
 
     /// Reorder events to handle forward_parent links.
     ///
+
     /// This transforms:
-    ///   `[Start(A, forward=1), ..., Start(B), ...]`
+    ///  `[Start(A, forward=1), ..., Start(B), ...]`
     /// into:
-    ///   `[Start(B), Start(A), ..., ...]`
+    ///  `[Start(B), Start(A), ..., ...]`
     ///
+
     /// This is necessary because markers with forward_parent were
     /// created before their parent nodes.
     pub fn reorder(mut self) -> Vec<Event> {

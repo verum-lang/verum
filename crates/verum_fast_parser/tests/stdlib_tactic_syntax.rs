@@ -1,6 +1,7 @@
 //! Parser-surface regression tests for the `core.proof.tactics`
 //! 7-file stdlib layout.
 //!
+
 //! Each test parses a representative tactic declaration from the
 //! stdlib's seven files and asserts the parser accepts the shape.
 //! If a parser change breaks one of the stdlib's tactic syntaxes,

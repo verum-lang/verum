@@ -14,6 +14,7 @@
 )]
 // Comprehensive declaration parsing tests for Verum.
 //
+
 // This test suite covers all declaration forms:
 // - Function declarations
 // - Type declarations (records, variants, aliases)
@@ -2177,10 +2178,10 @@ implement<T> [T] {
 // NOTE: Disabled - this test relied on a temporary debug file
 // #[test]
 // fn test_exact_slice_content() {
-//     let source = include_str!("/tmp/slice_test_content.txt");
-//     // Add closing brace
-//     let source = format!("{}\n}}", source);
-//     assert_parses(&source);
+//  let source = include_str!("/tmp/slice_test_content.txt");
+//  // Add closing brace
+//  let source = format!("{}\n}}", source);
+//  assert_parses(&source);
 // }
 
 // Test full slice.vr file
@@ -2250,6 +2251,7 @@ fn test_type_alias_with_named_refinement_predicates() {
 // foundational audit). Pin the parsing here so future grammar refactors
 // can't quietly drop it again.
 //
+
 // Per `grammar/verum.ebnf:474-476` only the `is` form is grammar-canonical:
 // the recursive-descent parser additionally accepts `=` for historical
 // reasons but that path contradicts the authoritative grammar and is

@@ -1,16 +1,20 @@
 //! Context Requirements - Function dependency declarations
 //!
+
 //! Context group expansion: resolving context group names to their constituent contexts recursively — Context Requirements
 //!
+
 //! This module implements context requirements, which specify what contexts
 //! a function needs to execute. Requirements are declared with `using [Ctx1, Ctx2]`.
 //!
+
 //! # Examples
 //!
+
 //! ```verum
 //! fn process() using [Logger, Database] {
-//!     Logger.log(Level.Info, "Processing...");
-//!     Database.save(...);
+//!  Logger.log(Level.Info, "Processing...");
+//!  Database.save(...);
 //! }
 //! ```
 
@@ -29,13 +33,16 @@ use crate::ty::TypeVar;
 
 /// Context expression - either a concrete set of contexts or a type variable.
 ///
+
 /// This enables context polymorphism where higher-order functions can propagate
 /// context requirements from callbacks:
 ///
+
 /// ```verum
 /// fn map<T, U, using C>(iter: I, f: fn(T) -> U using C) -> MapIter<T, U> using C
 /// ```
 ///
+
 /// In this example, `C` is a context variable that unifies with the actual context
 /// requirements of the callback `f`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,6 +139,7 @@ impl ContextExpr {
 
     /// Apply a context substitution, resolving variables to their bound values.
     ///
+
     /// Follows chains: if v1 -> v2 -> Concrete, resolves transitively.
     pub fn apply_context_subst(&self, subst: &indexmap::IndexMap<crate::ty::TypeVar, ContextExpr>) -> ContextExpr {
         match self {
@@ -221,19 +229,24 @@ impl<'de> serde::Deserialize<'de> for ContextExpr {
 
 /// Context requirement - specifies what contexts a function needs
 ///
+
 /// Context group expansion: resolving context group names to their constituent contexts recursively — Context Requirements
 ///
+
 /// A context requirement is a set of contexts that must be provided
 /// for a function to execute. The requirement is checked at compile-time
 /// and satisfied at runtime via the context environment (θ).
 ///
+
 /// # Examples
 ///
+
 /// ```no_run
 /// use verum_types::di::requirement::{ContextRequirement, ContextRef};
 /// # let logger_type_id = std::any::TypeId::of::<()>();
 /// # let db_type_id = std::any::TypeId::of::<()>();
 ///
+
 /// // Function requires Logger and Database
 /// let mut req = ContextRequirement::empty();
 /// req.add_context(ContextRef::new("Logger".into(), logger_type_id));
@@ -273,11 +286,13 @@ impl<'de> serde::Deserialize<'de> for ContextRequirement {
 
 /// Reference to a context in a requirement
 ///
+
 /// Each context reference includes:
 /// - **name**: The context name (e.g., "Logger")
 /// - **type_id**: Runtime type identifier for lookup
 /// - **type_args**: Optional type arguments (e.g., State<Int>)
 ///
+
 /// Extended with advanced context patterns (Advanced context patterns (negative contexts, call graph verification, module aliases)):
 /// - **alias**: Optional alias name for the context
 /// - **is_negative**: Whether this is a negative context (`!Database`)
@@ -325,6 +340,7 @@ pub struct ContextRef {
 
 /// Reference to a context transform (e.g., `.transactional()`)
 ///
+
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ContextTransformRef {
@@ -342,11 +358,14 @@ fn default_type_id() -> TypeId {
 impl ContextRequirement {
     /// Create an empty context requirement (pure function)
     ///
+
     /// # Examples
     ///
+
     /// ```
     /// use verum_types::di::requirement::ContextRequirement;
     ///
+
     /// let req = ContextRequirement::empty();
     /// assert!(req.is_empty());
     /// ```
@@ -358,16 +377,21 @@ impl ContextRequirement {
 
     /// Create a context requirement with a single context
     ///
+
     /// # Arguments
     ///
+
     /// * `context` - The context reference
     ///
+
     /// # Examples
     ///
+
     /// ```
     /// use verum_types::di::requirement::{ContextRequirement, ContextRef};
     /// # let type_id = std::any::TypeId::of::<()>();
     ///
+
     /// let logger_ref = ContextRef::new("Logger".into(), type_id);
     /// let req = ContextRequirement::single(logger_ref);
     /// assert_eq!(req.len(), 1);
@@ -380,17 +404,22 @@ impl ContextRequirement {
 
     /// Create a context requirement from multiple contexts
     ///
+
     /// # Arguments
     ///
+
     /// * `contexts` - Iterator of context references
     ///
+
     /// # Examples
     ///
+
     /// ```no_run
     /// use verum_types::di::requirement::{ContextRequirement, ContextRef};
     /// # let logger_ref = ContextRef::new("Logger".into(), std::any::TypeId::of::<()>());
     /// # let db_ref = ContextRef::new("Database".into(), std::any::TypeId::of::<()>());
     ///
+
     /// let req = ContextRequirement::from_contexts(vec![logger_ref, db_ref]);
     /// assert_eq!(req.len(), 2);
     /// ```
@@ -402,8 +431,10 @@ impl ContextRequirement {
 
     /// Add a context to this requirement
     ///
+
     /// # Arguments
     ///
+
     /// * `context` - The context to add
     pub fn add_context(&mut self, context: ContextRef) {
         self.contexts.insert(context);
@@ -411,12 +442,16 @@ impl ContextRequirement {
 
     /// Remove a context from this requirement
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The context name to remove
     ///
+
     /// # Returns
     ///
+
     /// `true` if the context was removed, `false` if not found
     pub fn remove_context(&mut self, name: &str) -> bool {
         // Find the context first, clone it to avoid borrow issues
@@ -445,8 +480,10 @@ impl ContextRequirement {
 
     /// Check if a specific context is required
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The context name to check
     pub fn requires(&self, name: &str) -> bool {
         self.contexts.iter().any(|c| c.name.as_str() == name)
@@ -454,12 +491,16 @@ impl ContextRequirement {
 
     /// Get a context reference by name
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The context name
     ///
+
     /// # Returns
     ///
+
     /// `Some(&ContextRef)` if found, `None` otherwise
     pub fn get_context(&self, name: &str) -> Maybe<&ContextRef> {
         self.contexts
@@ -469,19 +510,25 @@ impl ContextRequirement {
 
     /// Merge this requirement with another
     ///
+
     /// Returns a new requirement containing all contexts from both.
     ///
+
     /// # Arguments
     ///
+
     /// * `other` - The other requirement to merge
     ///
+
     /// # Examples
     ///
+
     /// ```no_run
     /// use verum_types::di::requirement::{ContextRequirement, ContextRef};
     /// # let logger_ref = ContextRef::new("Logger".into(), std::any::TypeId::of::<()>());
     /// # let db_ref = ContextRef::new("Database".into(), std::any::TypeId::of::<()>());
     ///
+
     /// let req1 = ContextRequirement::single(logger_ref);
     /// let req2 = ContextRequirement::single(db_ref);
     /// let merged = req1.merge(&req2);
@@ -497,14 +544,19 @@ impl ContextRequirement {
 
     /// Check if this requirement is satisfied by an environment
     ///
+
     /// Context resolution: resolving context names to declarations, expanding groups, checking provision — .2 - Context Provision
     ///
+
     /// # Arguments
     ///
+
     /// * `env` - The context environment to check
     ///
+
     /// # Returns
     ///
+
     /// `true` if all required contexts are available in the environment
     pub fn satisfies(&self, env: &ContextEnv) -> bool {
         self.contexts.iter().all(|ctx| env.has_context(ctx.type_id))
@@ -512,14 +564,19 @@ impl ContextRequirement {
 
     /// Get missing contexts from an environment
     ///
+
     /// Returns a list of context names that are required but not provided.
     ///
+
     /// # Arguments
     ///
+
     /// * `env` - The context environment to check
     ///
+
     /// # Returns
     ///
+
     /// List of missing context names
     pub fn missing_contexts(&self, env: &ContextEnv) -> List<Text> {
         self.contexts
@@ -531,10 +588,13 @@ impl ContextRequirement {
 
     /// Check if this requirement is a subset of another
     ///
+
     /// Returns `true` if all contexts in this requirement are also in `other`.
     ///
+
     /// # Arguments
     ///
+
     /// * `other` - The other requirement to compare against
     pub fn is_subset_of(&self, other: &Self) -> bool {
         self.contexts.iter().all(|ctx| other.contexts.contains(ctx))
@@ -561,6 +621,7 @@ impl ContextRequirement {
 
     /// Get all negative contexts (excluded contexts)
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     pub fn negative_contexts(&self) -> List<&ContextRef> {
         self.contexts.iter().filter(|c| c.is_negative).collect()
@@ -568,6 +629,7 @@ impl ContextRequirement {
 
     /// Get all positive contexts (required contexts)
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     pub fn positive_contexts(&self) -> List<&ContextRef> {
         self.contexts.iter().filter(|c| !c.is_negative).collect()
@@ -575,12 +637,16 @@ impl ContextRequirement {
 
     /// Check if a context name is excluded (negative)
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The context name to check
     ///
+
     /// # Returns
     ///
+
     /// `true` if the context is explicitly excluded (`!Context`)
     pub fn is_excluded(&self, name: &str) -> bool {
         self.contexts.iter().any(|c| c.is_negative && c.name.as_str() == name)
@@ -588,12 +654,16 @@ impl ContextRequirement {
 
     /// Get a context by its alias
     ///
+
     /// # Arguments
     ///
+
     /// * `alias` - The alias name
     ///
+
     /// # Returns
     ///
+
     /// `Some(&ContextRef)` if found, `None` otherwise
     pub fn get_by_alias(&self, alias: &str) -> Maybe<&ContextRef> {
         self.contexts
@@ -603,6 +673,7 @@ impl ContextRequirement {
 
     /// Get all aliased contexts
     ///
+
     /// Returns contexts that have an alias set (via `as alias` or `name:` syntax)
     pub fn aliased_contexts(&self) -> List<&ContextRef> {
         self.contexts
@@ -613,6 +684,7 @@ impl ContextRequirement {
 
     /// Get all conditional contexts
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
     pub fn conditional_contexts(&self) -> List<&ContextRef> {
         self.contexts.iter().filter(|c| c.is_conditional()).collect()
@@ -620,6 +692,7 @@ impl ContextRequirement {
 
     /// Get all transformed contexts
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
     pub fn transformed_contexts(&self) -> List<&ContextRef> {
         self.contexts.iter().filter(|c| c.has_transforms()).collect()
@@ -627,14 +700,19 @@ impl ContextRequirement {
 
     /// Validate that using a context name is allowed
     ///
+
     /// Returns an error if the context is excluded (negative)
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The context name being used
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if allowed, `Err(message)` if excluded
     pub fn validate_usage(&self, name: &str) -> std::result::Result<(), Text> {
         if self.is_excluded(name) {
@@ -651,8 +729,10 @@ impl ContextRequirement {
 impl ContextRef {
     /// Create a new context reference
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - Context name
     /// * `type_id` - Runtime type ID
     pub fn new(name: Text, type_id: TypeId) -> Self {
@@ -671,6 +751,7 @@ impl ContextRef {
 
     /// Create a negative context reference (`!Database`)
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     pub fn negative(name: Text, type_id: TypeId) -> Self {
         ContextRef {
@@ -687,6 +768,7 @@ impl ContextRef {
 
     /// Create an aliased context reference (`Database as db`)
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts
     pub fn aliased(name: Text, type_id: TypeId, alias: Text) -> Self {
         ContextRef {
@@ -703,6 +785,7 @@ impl ContextRef {
 
     /// Create a conditional context reference (`Analytics if cfg.enabled`)
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
     pub fn conditional(name: Text, type_id: TypeId, condition: Text) -> Self {
         ContextRef {
@@ -719,6 +802,7 @@ impl ContextRef {
 
     /// Create a context reference with transforms (`Database.transactional()`)
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
     pub fn with_transforms(name: Text, type_id: TypeId, transforms: List<ContextTransformRef>) -> Self {
         ContextRef {
@@ -753,8 +837,10 @@ impl ContextRef {
 
     /// Create a context reference with type arguments
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - Context name
     /// * `type_id` - Runtime type ID
     /// * `type_args` - Type arguments (e.g., ["Int"] for State<Int>)
@@ -783,8 +869,10 @@ impl ContextRef {
 
     /// Get the qualified name including type arguments
     ///
+
     /// # Examples
     ///
+
     /// - `Logger` -> "Logger"
     /// - `State<Int>` -> "State<Int>"
     /// - `Cache<Text, Data>` -> "Cache<Text, Data>"

@@ -1,15 +1,19 @@
 //! Diagnostics Sub-Context
 //!
+
 //! Manages compilation diagnostics, source mapping, and error/warning collection
 //! during meta function execution.
 //!
+
 //! ## Responsibility
 //!
+
 //! - Error and warning collection
 //! - Source code mapping (file_id -> source text)
 //! - Span mappings for generated code
 //! - Line directives for debugging
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -20,6 +24,7 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 
 /// Diagnostics collector for meta function execution
 ///
+
 /// Collects errors, warnings, and other diagnostics during compile-time
 /// evaluation, along with source mapping information for generated code.
 #[derive(Debug, Clone, Default)]
@@ -81,6 +86,7 @@ impl DiagnosticsCollector {
 
     /// Add an error diagnostic
     ///
+
     /// Note: The span is stored as byte offsets. For proper line/column display,
     /// use the source_map to convert byte offsets before final rendering.
     pub fn add_error(&mut self, message: Text, _span: verum_ast::Span) {
@@ -93,6 +99,7 @@ impl DiagnosticsCollector {
 
     /// Add a warning diagnostic
     ///
+
     /// Note: The span is stored as byte offsets. For proper line/column display,
     /// use the source_map to convert byte offsets before final rendering.
     pub fn add_warning(&mut self, message: Text, _span: verum_ast::Span) {

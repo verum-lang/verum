@@ -24,9 +24,11 @@ const ITER_TYPE_GENERATOR: i64 = 4;
 
 /// IterNew (0xC0) - Create iterator from iterable.
 ///
+
 /// Format: `IterNew dst, src`
 /// Creates an iterator over src and stores in dst.
 ///
+
 /// Type discrimination is performed by examining the ObjectHeader's type_id:
 /// - TypeId::LIST (512) → ITER_TYPE_LIST
 /// - TypeId::MAP (513) → ITER_TYPE_MAP
@@ -34,6 +36,7 @@ const ITER_TYPE_GENERATOR: i64 = 4;
 /// - TypeId::ARRAY (518) → ITER_TYPE_ARRAY
 /// - TypeId::RANGE (517) → ITER_TYPE_RANGE (special handling)
 ///
+
 /// Iterator protocol: creates an iterator object from a collection or range. The iterator
 /// holds a type tag (LIST/SET/MAP/ARRAY/RANGE), the source reference, and a cursor index.
 /// Each call to IterNext advances the cursor and returns the next element or nil.
@@ -62,8 +65,8 @@ pub(in super::super) fn handle_iter_new(state: &mut InterpreterState) -> Interpr
             (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
         };
         unsafe {
-            *iter_ptr = source;                                    // generator value
-            *iter_ptr.add(1) = Value::from_i64(0);                // unused for generators
+            *iter_ptr = source; // generator value
+            *iter_ptr.add(1) = Value::from_i64(0); // unused for generators
             *iter_ptr.add(2) = Value::from_i64(ITER_TYPE_GENERATOR); // iter_type
         }
         state.set_reg(dst, Value::from_ptr(iter_obj.as_ptr() as *mut u8));
@@ -144,9 +147,9 @@ pub(in super::super) fn handle_iter_new(state: &mut InterpreterState) -> Interpr
 
     // Initialize iterator
     unsafe {
-        *iter_ptr = source;                              // source_ptr
-        *iter_ptr.add(1) = Value::from_i64(0);           // current_idx = 0
-        *iter_ptr.add(2) = Value::from_i64(iter_type);   // iter_type
+        *iter_ptr = source; // source_ptr
+        *iter_ptr.add(1) = Value::from_i64(0); // current_idx = 0
+        *iter_ptr.add(2) = Value::from_i64(iter_type); // iter_type
     }
 
     state.set_reg(dst, Value::from_ptr(iter_obj.as_ptr() as *mut u8));
@@ -155,6 +158,7 @@ pub(in super::super) fn handle_iter_new(state: &mut InterpreterState) -> Interpr
 
 /// IterNext (0xC1) - Get next element from iterator.
 ///
+
 /// Format: `IterNext dst, has_next_dst, iter`
 /// Advances iterator, sets dst to next value (or unit if exhausted),
 /// and sets has_next_dst to bool indicating if there was a value.
@@ -312,11 +316,11 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
             };
 
             // Inspect the source's type_id to decide element shape:
-            //   SET → yield key only (matches `implement<T> Iterator for
-            //         SetIter<T> { type Item = T; … }` in
-            //         core/collections/set.vr)
-            //   MAP → yield `(key, value)` 2-tuple for destructuring
-            //         `for (k, v) in map { … }`
+            //  SET → yield key only (matches `implement<T> Iterator for
+            //  SetIter<T> { type Item = T; … }` in
+            //  core/collections/set.vr)
+            //  MAP → yield `(key, value)` 2-tuple for destructuring
+            //  `for (k, v) in map { … }`
             // Everything else (historical builtins piping through
             // TypeId::UNIT) defaults to the MAP pair shape.
             let source_is_set = {
@@ -393,6 +397,7 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
             // For IterNew, we store the source range pointer
             // For IterNext, current_idx is used as the current value
             //
+
             // Range objects have layout: [start, end, step, inclusive_flag]
             // We read these on first iteration
             let range_header = unsafe {
@@ -443,13 +448,15 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
 
 /// NewRange (0xCC) - Create a new range for iteration.
 ///
+
 /// Encoding: opcode + dst + start + end + inclusive (1 byte)
 /// Effect: Creates a Range object that can be iterated with IterNew/IterNext.
 ///
+
 /// Range layout in memory (3 Values at data offset) - must match IterNext expectations:
-///   [0] start:      Starting value (Int)
-///   [1] end:        Ending value (Int)
-///   [2] inclusive:  Whether end is included (Bool: 0 or 1)
+///  [0] start: Starting value (Int)
+///  [1] end: Ending value (Int)
+///  [2] inclusive: Whether end is included (Bool: 0 or 1)
 pub(in super::super) fn handle_new_range(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let start_reg = read_reg(state)?;
@@ -475,8 +482,8 @@ pub(in super::super) fn handle_new_range(state: &mut InterpreterState) -> Interp
 
     // Write range data - must match IterNext's expected layout
     unsafe {
-        *data_ptr = Value::from_i64(start_int);         // [0] start
-        *data_ptr.add(1) = Value::from_i64(end_int);    // [1] end
+        *data_ptr = Value::from_i64(start_int); // [0] start
+        *data_ptr.add(1) = Value::from_i64(end_int); // [1] end
         *data_ptr.add(2) = Value::from_bool(inclusive); // [2] inclusive flag
     }
 

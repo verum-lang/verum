@@ -4,12 +4,15 @@
 // Layer: Stdlib (1)
 // Dependencies: None (intrinsics are compiler-provided)
 //
+
 // This module provides a unified, modular organization of all Verum intrinsics.
 // Intrinsics are compiler-provided functions that map directly to CPU instructions,
 // runtime operations, or compile-time computations.
 //
+
 // # Module Organization
 //
+
 // ## Core Intrinsics (VBC-compatible, zero-allocation)
 // - arithmetic: Basic math, checked/wrapping/saturating arithmetic
 // - bitwise: Bit operations, shifts, rotations
@@ -22,6 +25,7 @@
 // - platform: Platform detection and CPU features
 // - simd: SIMD lane operations
 //
+
 // ## Runtime Intrinsics (@requires_runtime)
 // - runtime/async: Async runtime operations
 // - runtime/tls: Thread-local storage
@@ -32,24 +36,29 @@
 // - runtime/text: Text/string operations
 // - runtime/tier: VBC tier management
 //
+
 // ## Low-Level Intrinsics (@llvm_only)
 // - lowlevel/x86_64: x86_64-specific (SSE, AVX, privileged)
 // - lowlevel/aarch64: ARM64-specific (NEON, SVE, system regs)
 // - lowlevel/kernel: Kernel entry points, naked functions
 //
+
 // # @llvm_only Attribute
 //
+
 // Functions marked @llvm_only cannot execute in the VBC interpreter.
 // They require AOT compilation:
 // - Inline assembly (`asm { }`)
 // - Privileged CPU instructions (ring 0)
 // - Platform-specific hardware access
 //
+
 // ```verum
 // @llvm_only(reason = "inline assembly")
 // pub unsafe fn rdmsr(msr: UInt32) -> UInt64;
 // ```
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 

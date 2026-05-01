@@ -6,18 +6,22 @@ module core.database.sqlite.native.l1_pager.recovery;
 // Layer: 1
 // Spec: sqlite-native.md §8.5
 //
+
 // When a database opens, the pager scans `<db>-wal` for valid frames
 // and returns the set of `(page_no → latest_frame_offset)` mappings it
 // should use for satisfying reads. Invalid or torn frames past the last
 // valid commit record are discarded — matching C-SQLite's behaviour of
 // treating post-crash partial writes as "never happened".
 //
+
 // Correctness invariant (Z3-checkable, §21.4):
 //
-//     forall crash_point k,
-//         recover(truncate(wal, k))
-//             == recover_up_to_last_commit_before(wal, k)
+
+//  forall crash_point k,
+//  recover(truncate(wal, k))
+//  == recover_up_to_last_commit_before(wal, k)
 //
+
 // This module implements the *pure* side of recovery: given a byte
 // stream, return the decision. The actual file-I/O loop (read header,
 // iterate frames, apply to page cache) is driven by the pager actor.
@@ -97,21 +101,23 @@ implement Eq for RecoveryError {
 /// Analyse a byte stream representing a `<db>-wal` file. Returns a
 /// `RecoveryPlan` describing which prefix of frames is trustworthy.
 ///
+
 /// Algorithm (§8.5):
 ///
-///   1. Parse the 32-byte header. If short / bad magic → error.
-///   2. Initialise a running checksum over the header-seed bytes.
-///   3. For each frame:
-///        a. Parse its 24-byte header and extract the expected
-///           (checksum_1, checksum_2).
-///        b. Compute the running checksum across (frame_header[0..8]
-///           + frame_payload).
-///        c. If salt or checksum mismatches, STOP — every frame past
-///           this point is invalid.
-///        d. Otherwise, this frame is valid. If it's a commit marker,
-///           remember the index and DB size. Record page_no → offset.
-///   4. Truncate the plan at the last commit marker — frames after it
-///      are "uncommitted" (valid checksums but no commit quorum).
+
+///  1. Parse the 32-byte header. If short / bad magic → error.
+///  2. Initialise a running checksum over the header-seed bytes.
+///  3. For each frame:
+///  a. Parse its 24-byte header and extract the expected
+///  (checksum_1, checksum_2).
+///  b. Compute the running checksum across (frame_header[0..8]
+///  + frame_payload).
+///  c. If salt or checksum mismatches, STOP — every frame past
+///  this point is invalid.
+///  d. Otherwise, this frame is valid. If it's a commit marker,
+///  remember the index and DB size. Record page_no → offset.
+///  4. Truncate the plan at the last commit marker — frames after it
+///  are "uncommitted" (valid checksums but no commit quorum).
 public fn wal_scan(
     wal_bytes: &[Byte],
     page_size: Int,

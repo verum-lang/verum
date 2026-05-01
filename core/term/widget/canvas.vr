@@ -364,11 +364,11 @@ implement Painter {
 // Braille dot mapping
 // =============================================================================
 // Braille patterns: U+2800 base, dots arranged:
-//   Dot 1 (0x01)  Dot 4 (0x08)     col 0  col 1
-//   Dot 2 (0x02)  Dot 5 (0x10)     row 0  row 0
-//   Dot 3 (0x04)  Dot 6 (0x20)     row 1  row 1
-//   Dot 7 (0x40)  Dot 8 (0x80)     row 2  row 2
-//                                    row 3  row 3
+//  Dot 1 (0x01) Dot 4 (0x08) col 0 col 1
+//  Dot 2 (0x02) Dot 5 (0x10) row 0 row 0
+//  Dot 3 (0x04) Dot 6 (0x20) row 1 row 1
+//  Dot 7 (0x40) Dot 8 (0x80) row 2 row 2
+//  row 3 row 3
 // Each terminal cell represents a 2x4 pixel grid.
 
 /// Braille dot bit offsets: BRAILLE_DOTS[row][col]

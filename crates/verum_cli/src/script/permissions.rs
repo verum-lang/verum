@@ -1,12 +1,15 @@
 //! Permission-scope parser and runtime guard (P3.1).
 //!
+
 //! Verum scripts declare what they're allowed to do via Deno-style
 //! permission scopes:
 //!
+
 //! ```text
 //! permissions = ["net=api.example.com:443", "fs:read=./data", "time"]
 //! ```
 //!
+
 //! This module turns those strings into a typed [`Permission`] and a
 //! [`PermissionSet`] that can be queried at runtime by intrinsic
 //! handlers ("am I allowed to open this socket?"). Parse failures
@@ -14,33 +17,40 @@
 //! [`DeniedReason`] with the granted-set context attached so the user
 //! can see *why* the check failed.
 //!
+
 //! # Grammar
 //!
+
 //! ```text
-//! scope         = scope_kind , [ "=" , scope_targets ]
-//! scope_kind    = "fs:read" | "fs:write" | "net" | "env" | "run" | "ffi"
-//!               | "time"    | "random"
-//! scope_targets = target , { "," , target }     (* non-empty, no whitespace *)
-//! target        = any non-comma, non-whitespace UTF-8 sequence
+//! scope = scope_kind , [ "=" , scope_targets ]
+//! scope_kind = "fs:read" | "fs:write" | "net" | "env" | "run" | "ffi"
+//!  | "time" | "random"
+//! scope_targets = target , { "," , target } (* non-empty, no whitespace *)
+//! target = any non-comma, non-whitespace UTF-8 sequence
 //! ```
 //!
+
 //! `time` and `random` accept blanket form only.
 //!
+
 //! # Matching
 //!
+
 //! Per kind:
 //!
-//! | kind        | target form                    | match rule                                      |
+
+//! | kind | target form | match rule |
 //! |-------------|--------------------------------|-------------------------------------------------|
-//! | `fs:read`   | path prefix                    | request path starts with target path            |
-//! | `fs:write`  | path prefix                    | request path starts with target path            |
-//! | `net`       | `host`, `host:port`, `:port`   | host equality; port equality if grant has one   |
-//! | `env`       | env-var name                   | literal equality                                |
-//! | `run`       | program name                   | literal equality                                |
-//! | `ffi`       | library name                   | literal equality                                |
-//! | `time`      | (no targets)                   | always granted if scope present                 |
-//! | `random`    | (no targets)                   | always granted if scope present                 |
+//! | `fs:read` | path prefix | request path starts with target path |
+//! | `fs:write` | path prefix | request path starts with target path |
+//! | `net` | `host`, `host:port`, `:port` | host equality; port equality if grant has one |
+//! | `env` | env-var name | literal equality |
+//! | `run` | program name | literal equality |
+//! | `ffi` | library name | literal equality |
+//! | `time` | (no targets) | always granted if scope present |
+//! | `random` | (no targets) | always granted if scope present |
 //!
+
 //! Multiple grants of the same kind are unioned: a request matches if
 //! *any* grant for that kind allows it.
 
@@ -391,6 +401,7 @@ impl PermissionSet {
 /// Path-prefix match: `path` is authorised by `target` if, after
 /// best-effort normalisation, `path` starts at or below `target`.
 ///
+
 /// "Best effort" because we operate on lexical paths — we don't
 /// canonicalise via the filesystem (which would refuse symlinks and
 /// non-existent paths). For the purposes of permission checks, lexical
@@ -410,10 +421,11 @@ fn path_prefix_matches(path: &Path, target: &str) -> bool {
 
 /// Net target match: a grant `target` matches a request `(host, port)`.
 ///
+
 /// Target forms:
-///   - `"host"`            — any port on this host
-///   - `"host:port"`       — exact host + port
-///   - `":port"`           — any host on this port
+///  - `"host"` — any port on this host
+///  - `"host:port"` — exact host + port
+///  - `":port"` — any host on this port
 fn net_target_matches(target: &str, host: &str, port: Option<u16>) -> bool {
     if let Some(suffix) = target.strip_prefix(':') {
         // Bare port form.

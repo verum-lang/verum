@@ -3,11 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3changeset_op returns (op, ncol, zTab, bIndirect):
-//     op       ∈ {SQLITE_INSERT, SQLITE_UPDATE, SQLITE_DELETE}
-//     ncol     = number of columns in the table
-//     zTab     = table name
-//     bIndirect = 1 if the change was applied indirectly (by a trigger)
+
+//  sqlite3changeset_op returns (op, ncol, zTab, bIndirect):
+//  op ∈ {SQLITE_INSERT, SQLITE_UPDATE, SQLITE_DELETE}
+//  ncol = number of columns in the table
+//  zTab = table name
+//  bIndirect = 1 if the change was applied indirectly (by a trigger)
 // =============================================================================
 
 module core.database.sqlite.native.changeset_iter.op;

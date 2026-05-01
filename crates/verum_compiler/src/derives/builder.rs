@@ -1,37 +1,46 @@
 //! Builder derive macro implementation
 //!
+
 //! Generates a type-safe builder pattern with compile-time required field verification.
 //!
+
 //! ## Generated Code
 //!
+
 //! For a type like:
 //! ```verum
 //! @builder
 //! type HttpRequest is {
-//!     method: HttpMethod,                      // Required
-//!     url: Url,                                // Required
-//!     headers: Map<Text, Text> = Map.new(),   // Optional with default
-//!     body: Maybe<Bytes> = Maybe.None,        // Optional
-//!     timeout: Duration = 30.seconds,         // Optional with default
+//!  method: HttpMethod, // Required
+//!  url: Url, // Required
+//!  headers: Map<Text, Text> = Map.new(), // Optional with default
+//!  body: Maybe<Bytes> = Maybe.None, // Optional
+//!  timeout: Duration = 30.seconds, // Optional with default
 //! };
 //! ```
 //!
+
 //! This derive generates:
 //! 1. `HttpRequestBuilder` type with appropriate field types
 //! 2. `HttpRequest.builder()` static method returning `HttpRequestBuilder`
 //! 3. `.method(value)`, `.url(value)`, etc. setter methods (chainable)
 //! 4. `.build()` method that constructs the final type
 //!
+
 //! ## Type Safety
 //!
+
 //! Required fields are stored as `Maybe<T>` in the builder and validated at build time.
 //! Optional fields (those with default values) keep their original type.
 //!
+
 //! ## CBGR Considerations
 //!
+
 //! The builder pattern creates owned values, avoiding reference lifetime issues.
 //! Each setter takes ownership and returns the modified builder.
 //!
+
 //! @derive(Builder): generates builder pattern with .with_field() methods,
 //! optional fields, validation, and type-safe construction.
 //! @derive infrastructure: macro expansion framework for automatic code
@@ -53,6 +62,7 @@ use verum_common::{Heap, List, Maybe, Text};
 
 /// Builder derive macro implementation
 ///
+
 /// Generates ergonomic type-safe builder pattern with:
 /// - Compile-time required field verification
 /// - Optional fields with defaults
@@ -171,6 +181,7 @@ impl DeriveMacro for DeriveBuilder {
 impl DeriveBuilder {
     /// Generate the builder type declaration
     ///
+
     /// For each field in the original type:
     /// - Required fields (no default) become Maybe<T>
     /// - Optional fields (has default) keep their original type T
@@ -255,12 +266,13 @@ impl DeriveBuilder {
 
     /// Generate a setter method for a field
     ///
+
     /// ```verum
     /// fn field_name(mut self, value: FieldType) -> Self {
-    ///     self.field_name = Maybe.Some(value);  // for required fields
-    ///     // or
-    ///     self.field_name = value;               // for optional fields
-    ///     self
+    ///  self.field_name = Maybe.Some(value); // for required fields
+    ///  // or
+    ///  self.field_name = value; // for optional fields
+    ///  self
     /// }
     /// ```
     fn generate_setter(&self, field: &FieldInfo, span: Span) -> FunctionDecl {
@@ -378,14 +390,16 @@ impl DeriveBuilder {
 
     /// Generate the build() method
     ///
+
     /// ```verum
     /// fn build(self) -> Result<TypeName, BuilderError> {
-    ///     let field1 = self.field1.ok_or(BuilderError.MissingField("field1"))?;
-    ///     let field2 = self.field2.ok_or(BuilderError.MissingField("field2"))?;
-    ///     // Optional fields just use their value
-    ///     let field3 = self.field3;  // Has default
+    ///  let field1 = self.field1.ok_or(BuilderError.MissingField("field1"))?;
+    ///  let field2 = self.field2.ok_or(BuilderError.MissingField("field2"))?;
+    ///  // Optional fields just use their value
+    ///  let field3 = self.field3; // Has default
     ///
-    ///     Result.Ok(TypeName { field1, field2, field3 })
+
+    ///  Result.Ok(TypeName { field1, field2, field3 })
     /// }
     /// ```
     fn generate_build_method(&self, type_info: &TypeInfo, span: Span) -> FunctionDecl {
@@ -404,8 +418,8 @@ impl DeriveBuilder {
             if field.is_required() {
                 // Required field: extract from Maybe with error handling
                 // let __field_val = match self.field {
-                //     Maybe.Some(v) => v,
-                //     Maybe.None => panic(f"Missing required field: {field_name}"),
+                //  Maybe.Some(v) => v,
+                //  Maybe.None => panic(f"Missing required field: {field_name}"),
                 // };
                 let self_field = Expr::new(
                     ExprKind::Field {
@@ -619,14 +633,15 @@ impl DeriveBuilder {
 
     /// Generate the builder() static method for the original type
     ///
+
     /// ```verum
     /// fn builder() -> TypeNameBuilder {
-    ///     TypeNameBuilder {
-    ///         required_field1: Maybe.None,
-    ///         required_field2: Maybe.None,
-    ///         optional_field1: default_value1,
-    ///         optional_field2: default_value2,
-    ///     }
+    ///  TypeNameBuilder {
+    ///  required_field1: Maybe.None,
+    ///  required_field2: Maybe.None,
+    ///  optional_field1: default_value1,
+    ///  optional_field2: default_value2,
+    ///  }
     /// }
     /// ```
     fn generate_builder_method(
@@ -737,9 +752,11 @@ impl DeriveBuilder {
 
     /// Generate a compound item containing the builder type, builder impl, and origin impl
     ///
+
     /// Since the derive system expects a single Item, we package everything into
     /// a synthetic module or use a special ItemKind for compound derives.
     ///
+
     /// For now, we return the impl on the original type with the builder() method.
     /// The builder type and its impl will need special handling in the compiler pipeline.
     fn generate_compound_item(
@@ -752,12 +769,15 @@ impl DeriveBuilder {
         // For industrial implementation, we need to emit multiple items.
         // The current derive infrastructure returns a single Item.
         //
+
         // Strategy: Return a synthetic module containing all items.
         // The compiler will then flatten this module's contents into the parent scope.
         //
+
         // Alternative: Extend DeriveResult to return List<Item>.
         // This would require changes to DeriveRegistry and DeriveMacro trait.
         //
+
         // For now, we use a Module item that the compiler should handle specially.
         // Items marked with @derive_generated should be hoisted to parent scope.
 

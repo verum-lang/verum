@@ -9,14 +9,17 @@ module sys.linux.arch;
 // =============================================================================
 @cfg(target_os = "linux")
 //
+
 // Linux syscall numbers differ between CPU architectures:
-//   - x86_64 uses the arch-specific table in arch/x86/entry/syscalls/syscall_64.tbl
-//   - aarch64 uses the asm-generic unified table (include/uapi/asm-generic/unistd.h)
+//  - x86_64 uses the arch-specific table in arch/x86/entry/syscalls/syscall_64.tbl
+//  - aarch64 uses the asm-generic unified table (include/uapi/asm-generic/unistd.h)
 //
+
 // Syscalls numbered >= 425 are typically aligned across both architectures
 // (they are post-unification additions such as io_uring_*, clone3, openat2,
 // epoll_pwait2, futex_waitv).
 //
+
 // When a syscall exists on both architectures, both values are exported
 // under the same name, with @cfg(target_arch = "...") selecting one at
 // compile time. When a syscall is present only on x86_64 (e.g., SYS_OPEN,
@@ -24,9 +27,10 @@ module sys.linux.arch;
 // aarch64 code path must use the portable equivalent (openat, newfstatat,
 // thread-pointer access via tpidr_el0, etc.).
 //
+
 // Authoritative source of numbers:
-//   - x86_64: https://github.com/torvalds/linux/blob/master/arch/x86/entry/syscalls/syscall_64.tbl
-//   - aarch64: https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/unistd.h
+//  - x86_64: https://github.com/torvalds/linux/blob/master/arch/x86/entry/syscalls/syscall_64.tbl
+//  - aarch64: https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/unistd.h
 // =============================================================================
 
 // -----------------------------------------------------------------------------
@@ -114,23 +118,24 @@ public const SYS_NEWFSTATAT: Int = 79;
 // -----------------------------------------------------------------------------
 // x86_64-only legacy file syscalls (absent on aarch64)
 //
+
 // On aarch64, use the portable *at variants with AT_FDCWD instead:
-//   open       -> openat(AT_FDCWD, ...)
-//   stat/lstat -> newfstatat / statx
-//   access     -> faccessat(AT_FDCWD, ...)
-//   poll       -> ppoll
-//   pipe       -> pipe2
-//   select     -> pselect6
-//   mkdir      -> mkdirat(AT_FDCWD, ...)
-//   rmdir      -> unlinkat(AT_FDCWD, path, AT_REMOVEDIR)
-//   unlink     -> unlinkat(AT_FDCWD, path, 0)
-//   symlink    -> symlinkat
-//   readlink   -> readlinkat
-//   rename     -> renameat
-//   link       -> linkat
-//   chmod      -> fchmodat
-//   chown      -> fchownat
-//   dup2       -> dup3(oldfd, newfd, 0)
+//  open -> openat(AT_FDCWD, ...)
+//  stat/lstat -> newfstatat / statx
+//  access -> faccessat(AT_FDCWD, ...)
+//  poll -> ppoll
+//  pipe -> pipe2
+//  select -> pselect6
+//  mkdir -> mkdirat(AT_FDCWD, ...)
+//  rmdir -> unlinkat(AT_FDCWD, path, AT_REMOVEDIR)
+//  unlink -> unlinkat(AT_FDCWD, path, 0)
+//  symlink -> symlinkat
+//  readlink -> readlinkat
+//  rename -> renameat
+//  link -> linkat
+//  chmod -> fchmodat
+//  chown -> fchownat
+//  dup2 -> dup3(oldfd, newfd, 0)
 // -----------------------------------------------------------------------------
 
 @cfg(target_arch = "x86_64")

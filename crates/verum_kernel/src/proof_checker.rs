@@ -1,55 +1,65 @@
 //! # Minimal proof-term checker (#157 — the trusted base)
 //!
+
 //! The smallest possible kernel that re-verifies a Verum proof from
-//! a serialised proof-term certificate.  This module is the explicit
+//! a serialised proof-term certificate. This module is the explicit
 //! trusted base for Verum's reference-standard kernel claim:
 //! everything else in `verum_kernel/` is *infrastructure* (the apply
 //! dispatcher, the bridge audits, the cross-format renderers); the
 //! proof-term checker here is the *verdict authority* that an
 //! independent reviewer can read top-to-bottom in one sitting.
 //!
+
 //! ## Design discipline — < 1000 LOC, hand-auditable
 //!
+
 //! The checker implements a minimal Calculus of Constructions
-//! fragment with bidirectional type-checking.  Six inference rules
+//! fragment with bidirectional type-checking. Six inference rules
 //! are exhaustive: T-Var, T-Univ, T-Pi-Form, T-Lam-Intro, T-App-Elim,
-//! T-Conv (β-conversion).  No cubical, modal, or refinement
+//! T-Conv (β-conversion). No cubical, modal, or refinement
 //! extensions — those layer on top via `verum_kernel`'s broader rule
 //! set, and their soundness theorems are tracked separately by
 //! `core/verify/kernel_soundness/`.
 //!
+
 //! The trade-off is deliberate: the checker rejects MOST Verum
 //! programs (since most use refinement / cubical / modal / SMT-axiom
 //! features), but the programs it accepts have an iron-clad
-//! independent verdict.  The full Verum kernel handles the broader
+//! independent verdict. The full Verum kernel handles the broader
 //! surface; the proof-term checker handles the irreducible core.
 //!
+
 //! ## What this DOES NOT do
 //!
+
 //! - Does NOT type-check refinement types (those need SMT).
 //! - Does NOT decide propositional equality up to η-conversion
-//!   beyond α + β (η is a separable extension).
+//!  beyond α + β (η is a separable extension).
 //! - Does NOT inspect `@framework`-cited axioms — these are leaves
-//!   that the apply-graph audit handles.
+//!  that the apply-graph audit handles.
 //! - Does NOT aspire to feature parity with Coq's `coqchk` — it
-//!   aspires to feature parity with HOL Light's kernel: minimal,
-//!   exhaustive, hand-readable.
+//!  aspires to feature parity with HOL Light's kernel: minimal,
+//!  exhaustive, hand-readable.
 //!
+
 //! ## Trust delegation
 //!
+
 //! After this checker accepts a `(term, expected_type)` pair, the
 //! ONLY things a reviewer needs to trust are:
 //!
-//!   1. This file (~600 LOC, exhaustive pattern-matching, no `unsafe`).
-//!   2. The Rust compiler's correctness (or, after Phase 3 / #154,
-//!      the Verum self-hosted kernel that consumes this checker's
-//!      output as a verifiable artifact).
-//!   3. The serialisation format of `.vproof` files (simple JSON or
-//!      s-expression — separately auditable).
+
+//!  1. This file (~600 LOC, exhaustive pattern-matching, no `unsafe`).
+//!  2. The Rust compiler's correctness (or, after Phase 3 / #154,
+//!  the Verum self-hosted kernel that consumes this checker's
+//!  output as a verifiable artifact).
+//!  3. The serialisation format of `.vproof` files (simple JSON or
+//!  s-expression — separately auditable).
 //!
+
 //! Compare: HOL Light kernel ~5K LOC SML; Coq kernel ~10K LOC OCaml;
-//! Lean kernel ~5K LOC C++.  Verum proof-term checker target: < 1000
-//! LOC Rust.  Order-of-magnitude smaller trusted base than any
+//! Lean kernel ~5K LOC C++. Verum proof-term checker target: < 1000
+//! LOC Rust. Order-of-magnitude smaller trusted base than any
 //! production proof assistant.
 
 use serde::{Deserialize, Serialize};
@@ -58,7 +68,7 @@ use serde::{Deserialize, Serialize};
 // Minimal CoC AST
 // =============================================================================
 
-/// A proof term.  Types ARE terms (CIC-style); a "type" is a term
+/// A proof term. Types ARE terms (CIC-style); a "type" is a term
 /// whose own type is some `Universe(n)`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Term {
@@ -71,17 +81,17 @@ pub enum Term {
     /// (n=1, 2, ... κ).
     Universe(u32),
 
-    /// Dependent function type `Π(x : A). B`.  The body `B` is under
+    /// Dependent function type `Π(x : A). B`. The body `B` is under
     /// a binder shifting de Bruijn indices: index 0 in `B` refers to
     /// the bound argument of type `A`.
     Pi(Box<Term>, Box<Term>),
 
-    /// Lambda abstraction `λ(x : A). body`.  Carries the domain
+    /// Lambda abstraction `λ(x : A). body`. Carries the domain
     /// annotation so type-checking is bidirectional-from-info-rich
     /// (every binder is type-annotated; no inference of binder types).
     Lam(Box<Term>, Box<Term>),
 
-    /// Application `f x`.  Evaluation reduces to substitution of `x`
+    /// Application `f x`. Evaluation reduces to substitution of `x`
     /// for de Bruijn 0 in the body of `f`.
     App(Box<Term>, Box<Term>),
 }
@@ -131,7 +141,7 @@ impl Context {
         Self::default()
     }
 
-    /// Look up the type of variable at de Bruijn index `i`.  Returns
+    /// Look up the type of variable at de Bruijn index `i`. Returns
     /// `None` if the index is out of bounds (free variable).
     /// Crucially: the returned type is shifted up by `i + 1` so the
     /// caller sees it in the OUTER context's de Bruijn frame.
@@ -147,7 +157,7 @@ impl Context {
     }
 
     /// Extend the context with a new binder of type `ty` (the new
-    /// innermost binding).  Returns a fresh context — the original
+    /// innermost binding). Returns a fresh context — the original
     /// is unchanged for compositionality.
     pub fn extend(&self, ty: Term) -> Self {
         let mut out = self.clone();
@@ -166,7 +176,7 @@ impl Context {
 // =============================================================================
 
 /// Shift every variable index in `term` by `+amount` if its index
-/// is `>= cutoff`.  Used when moving a term INTO a binder context.
+/// is `>= cutoff`. Used when moving a term INTO a binder context.
 fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
     match term {
         Term::Var(i) => {
@@ -193,8 +203,8 @@ fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
 }
 
 /// Substitute `replacement` for the variable at de Bruijn index
-/// `target` in `term`.  Used by β-reduction: `(λ. body) x` reduces
-/// to `subst(body, 0, x)`.  The replacement is shifted to compensate
+/// `target` in `term`. Used by β-reduction: `(λ. body) x` reduces
+/// to `subst(body, 0, x)`. The replacement is shifted to compensate
 /// for the binders the substitution descends into.
 fn subst(term: Term, target: usize, replacement: &Term) -> Term {
     match term {
@@ -222,8 +232,8 @@ fn subst(term: Term, target: usize, replacement: &Term) -> Term {
     }
 }
 
-/// β-reduce the head of a term to weak head normal form.  Repeats
-/// until no top-level redex remains.  Cycle-safe by construction
+/// β-reduce the head of a term to weak head normal form. Repeats
+/// until no top-level redex remains. Cycle-safe by construction
 /// (each reduction strictly shrinks the App-structure at the head).
 fn whnf(mut term: Term) -> Term {
     loop {
@@ -243,14 +253,15 @@ fn whnf(mut term: Term) -> Term {
 }
 
 /// α-equivalence + β-equality + η-equivalence (definitional equality
-/// at the level the checker decides).  Both sides are reduced to
+/// at the level the checker decides). Both sides are reduced to
 /// WHNF and then compared structurally; under binders, α-equivalence
 /// is automatic via de Bruijn indices.
 ///
+
 /// **η-equivalence (T-Eta-Conv)** — `λx. (f x) ≡ f` when `x` (de
 /// Bruijn 0 in the body) does not occur free in the CONTENT of `f`.
 /// This is the standard CIC rule extending β with extensional
-/// function equality.  Brings the proof-term checker to textbook
+/// function equality. Brings the proof-term checker to textbook
 /// CIC parity within the < 1000 LOC trust-base budget.
 fn def_eq(a: &Term, b: &Term) -> bool {
     let a = whnf(a.clone());
@@ -265,9 +276,9 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
         (Term::Pi(a1, b1), Term::Pi(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
         (Term::Lam(a1, b1), Term::Lam(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
         (Term::App(f1, x1), Term::App(f2, x2)) => def_eq(f1, f2) && def_eq(x1, x2),
-        // η-equivalence — one-sided cases.  When one side is a
+        // η-equivalence — one-sided cases. When one side is a
         // λx.(f x) and the other is `f`, they're equal iff `x`
-        // does not appear free in `f`.  This rule fires AFTER WHNF
+        // does not appear free in `f`. This rule fires AFTER WHNF
         // reduction so β-redexes are eliminated first; what remains
         // is purely structural η.
         (Term::Lam(_, body), other) => eta_match(body, other),
@@ -280,6 +291,7 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
 /// a λ at depth 0) is `App(f, Var(0))` where `f` does not contain
 /// Var(0) free, AND `f` (after shifting down) is equal to `other`.
 ///
+
 /// This is the soundness gate for T-Eta-Conv: the bound variable
 /// must not "leak" into the function part of the application.
 fn eta_match(lam_body: &Term, other: &Term) -> bool {
@@ -304,7 +316,7 @@ fn eta_match(lam_body: &Term, other: &Term) -> bool {
 }
 
 /// Check whether de Bruijn index `target` occurs FREE in `term`
-/// (i.e., not captured by an inner binder).  Used by the η-rule
+/// (i.e., not captured by an inner binder). Used by the η-rule
 /// to ensure the bound variable doesn't leak into the function
 /// part.
 fn is_free_in(term: &Term, target: usize) -> bool {
@@ -319,7 +331,7 @@ fn is_free_in(term: &Term, target: usize) -> bool {
 
 /// Inverse of `shift_up` — decrement every variable index in `term`
 /// by `amount` if its index is `>= cutoff + amount`, leaving lower
-/// indices alone.  Panics in debug if it would produce a negative
+/// indices alone. Panics in debug if it would produce a negative
 /// index (caller bug).
 fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
     match term {
@@ -357,7 +369,7 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
 // Bidirectional type checker — the six rules
 // =============================================================================
 
-/// Type-checking error.  Each error names the kernel rule that
+/// Type-checking error. Each error names the kernel rule that
 /// rejected the term, so a reviewer can trace the verdict to the
 /// exact arm of `infer`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -376,20 +388,22 @@ pub enum CheckError {
     TypeMismatch { expected: Term, actual: Term },
 }
 
-/// Infer the type of `term` in `ctx`.  Returns the unique type or
+/// Infer the type of `term` in `ctx`. Returns the unique type or
 /// a `CheckError` naming the rejecting kernel rule.
 ///
+
 /// **The six rules at a glance.**
 ///
-///   T-Var:    ctx[i] = T  →  Var(i) : T
-///   T-Univ:   Universe(n) : Universe(n+1)
-///   T-Pi-Form: A : Universe(n), B : Universe(m) under (A:: ctx)
-///             → Pi(A, B) : Universe(max(n, m))
-///   T-Lam-Intro: B : T under (A:: ctx)  →  Lam(A, B) : Pi(A, T)
-///   T-App-Elim: f : Pi(A, B), x : A  →  App(f, x) : B[x/0]
-///   T-Conv:   T1 ≡_β T2 (definitional equality lets the checker
-///             swap T1 for T2 in any judgement; used implicitly in
-///             T-App-Elim to match argument types).
+
+///  T-Var: ctx[i] = T → Var(i) : T
+///  T-Univ: Universe(n) : Universe(n+1)
+///  T-Pi-Form: A : Universe(n), B : Universe(m) under (A:: ctx)
+///  → Pi(A, B) : Universe(max(n, m))
+///  T-Lam-Intro: B : T under (A:: ctx) → Lam(A, B) : Pi(A, T)
+///  T-App-Elim: f : Pi(A, B), x : A → App(f, x) : B[x/0]
+///  T-Conv: T1 ≡_β T2 (definitional equality lets the checker
+///  swap T1 for T2 in any judgement; used implicitly in
+///  T-App-Elim to match argument types).
 pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
     match term {
         // T-Var
@@ -445,7 +459,7 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
     }
 }
 
-/// Check that `term` has type `expected`.  Wraps `infer` + `def_eq`.
+/// Check that `term` has type `expected`. Wraps `infer` + `def_eq`.
 /// This is the load-bearing entry point for `verum check-proof`:
 /// the .vproof file says "this term has this type", and we either
 /// agree or reject.
@@ -474,23 +488,23 @@ fn expect_universe(term: &Term) -> Option<u32> {
 // =============================================================================
 
 /// A `.vproof` certificate carries a self-contained type-checking
-/// problem: a closed term + its claimed type.  The minimal proof-
+/// problem: a closed term + its claimed type. The minimal proof-
 /// term checker re-verifies the pair top-to-bottom.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Certificate {
-    /// The proof-term.  Must be closed (no free variables).
+    /// The proof-term. Must be closed (no free variables).
     pub term: Term,
-    /// The claimed type.  Also closed.
+    /// The claimed type. Also closed.
     pub claimed_type: Term,
     /// Optional metadata: theorem name, source file, kernel-version
-    /// hint.  Not load-bearing — the checker doesn't read them.
+    /// hint. Not load-bearing — the checker doesn't read them.
     #[serde(default)]
     pub metadata: std::collections::BTreeMap<String, String>,
 }
 
 impl Certificate {
-    /// Verify the certificate.  Returns `Ok(())` iff the term has the
-    /// claimed type in an empty context.  Any free variable in either
+    /// Verify the certificate. Returns `Ok(())` iff the term has the
+    /// claimed type in an empty context. Any free variable in either
     /// term or type is a structural error rejected here.
     pub fn verify(&self) -> Result<(), CheckError> {
         let ctx = Context::new();
@@ -556,7 +570,7 @@ mod tests {
 
     #[test]
     fn t_lam_intro_produces_pi() {
-        // λ(x : Universe(0)). x  has type  Π(_ : Universe(0)). Universe(0)
+        // λ(x : Universe(0)). x has type Π(_ : Universe(0)). Universe(0)
         let ctx = Context::new();
         let lam = Term::lam(Term::Universe(0), Term::Var(0));
         let inferred = infer(&ctx, &lam).unwrap();
@@ -566,10 +580,10 @@ mod tests {
 
     #[test]
     fn t_app_elim_with_correct_argument() {
-        // (λ(x : Universe(0)). x) y   where y : Universe(0) (a hypothesis).
+        // (λ(x : Universe(0)). x) y where y : Universe(0) (a hypothesis).
         // Result has type Universe(0) (the codomain after substitution).
         // Note: `Universe(0)` itself does NOT have type `Universe(0)` —
-        // it has type `Universe(1)`.  So we can't pass `Universe(0)` as
+        // it has type `Universe(1)`. So we can't pass `Universe(0)` as
         // an argument here; we must use a context variable typed at
         // `Universe(0)`.
         let ctx = Context::new().extend(Term::Universe(0));
@@ -606,7 +620,7 @@ mod tests {
         match infer(&ctx, &bad) {
             Err(CheckError::DomainMismatch { .. }) => {}
             // Actually — Universe(5) IS a Universe, so its TYPE is
-            // Universe(6).  The Pi expects something of type Universe(0).
+            // Universe(6). The Pi expects something of type Universe(0).
             // 6 ≠ 0 → DomainMismatch.
             other => panic!("expected DomainMismatch, got {:?}", other),
         }
@@ -614,7 +628,7 @@ mod tests {
 
     #[test]
     fn beta_reduction_resolves_application() {
-        // (λx. x) y  →  y  (where y : T, the application has type T)
+        // (λx. x) y → y (where y : T, the application has type T)
         let ctx = Context::new().extend(Term::Universe(0)); // y : Universe(0)
         let id = Term::lam(Term::Universe(0), Term::Var(0));
         let app = Term::app(id, Term::Var(0));
@@ -626,7 +640,7 @@ mod tests {
 
     #[test]
     fn certificate_verifies_correct_pair() {
-        // Identity at Universe(0): λ(x:U(0)). x  has type  Π(_:U(0)).U(0)
+        // Identity at Universe(0): λ(x:U(0)). x has type Π(_:U(0)).U(0)
         let cert = Certificate {
             term: Term::lam(Term::Universe(0), Term::Var(0)),
             claimed_type: Term::pi(Term::Universe(0), Term::Universe(0)),
@@ -651,9 +665,9 @@ mod tests {
 
     #[test]
     fn shift_up_handles_binders_correctly() {
-        // shift_up(Var(0), 1, 0) → Var(1)  (free var gets shifted)
-        // shift_up(Lam(_, Var(0)), 1, 0) → Lam(_, Var(0))  (bound stays)
-        // shift_up(Lam(_, Var(1)), 1, 0) → Lam(_, Var(2))  (free in body shifts)
+        // shift_up(Var(0), 1, 0) → Var(1) (free var gets shifted)
+        // shift_up(Lam(_, Var(0)), 1, 0) → Lam(_, Var(0)) (bound stays)
+        // shift_up(Lam(_, Var(1)), 1, 0) → Lam(_, Var(2)) (free in body shifts)
         assert_eq!(
             shift_up(Term::Var(0), 1, 0),
             Term::Var(1),
@@ -669,7 +683,7 @@ mod tests {
 
     #[test]
     fn def_eq_is_alpha_plus_beta() {
-        // (λx. x) y  ≡_β  y
+        // (λx. x) y ≡_β y
         let lhs = Term::app(
             Term::lam(Term::Universe(0), Term::Var(0)),
             Term::Universe(7),
@@ -685,16 +699,16 @@ mod tests {
 
     #[test]
     fn def_eq_eta_lam_app_equals_function() {
-        // λ(x : Univ(0)). (f x)  ≡_η  f   when f doesn't contain x.
+        // λ(x : Univ(0)). (f x) ≡_η f when f doesn't contain x.
         // We use Var(0) referring to OUTER context (a hypothesis "f"
-        // present at depth 0).  Inside the lambda, that becomes Var(1).
+        // present at depth 0). Inside the lambda, that becomes Var(1).
         let f_outer = Term::Var(0);
         // Inside lambda body: Var(0) is the bound x; Var(1) is f.
         let lam_eta = Term::lam(
             Term::Universe(0),
             Term::app(Term::Var(1), Term::Var(0)),
         );
-        // Outer context: f : Π(_:Univ(0)).Univ(0).  The lam_eta's type
+        // Outer context: f : Π(_:Univ(0)).Univ(0). The lam_eta's type
         // is the same Pi, and η-equality with f_outer should hold.
         // For the def_eq test, we don't need the context — we just
         // check whether the term forms are η-equivalent.
@@ -705,7 +719,7 @@ mod tests {
 
     #[test]
     fn def_eq_eta_rejects_when_arg_is_not_bound_var() {
-        // λ(x : Univ(0)). (f y)  is NOT η-equivalent to f — the
+        // λ(x : Univ(0)). (f y) is NOT η-equivalent to f — the
         // application argument isn't the bound variable.
         let f = Term::Var(0); // outer context
         let lam_not_eta = Term::lam(
@@ -719,7 +733,7 @@ mod tests {
 
     #[test]
     fn def_eq_eta_rejects_when_var_escapes_into_function() {
-        // λ(x : Univ(0)). (x x)  has the bound variable in the
+        // λ(x : Univ(0)). (x x) has the bound variable in the
         // FUNCTION part — η would be unsound here, must be rejected.
         let lam_unsound = Term::lam(
             Term::Universe(0),
@@ -735,12 +749,12 @@ mod tests {
         assert!(is_free_in(&Term::Var(0), 0));
         let lam_body_zero = Term::lam(Term::Universe(0), Term::Var(0));
         // Lam(_, Var(0)) — the body's Var(0) is the bound var, NOT
-        // a free reference to outer Var(0).  Querying outer-target=0
+        // a free reference to outer Var(0). Querying outer-target=0
         // shifts to inner-target=1 inside the body, which Var(0) is
-        // NOT.  So the outer Var(0) is NOT free in this term.
+        // NOT. So the outer Var(0) is NOT free in this term.
         assert!(!is_free_in(&lam_body_zero, 0));
         // But Var(1) inside the body IS a free reference to OUTER
-        // Var(0).  The outer-target=0 query shifts to target=1 in
+        // Var(0). The outer-target=0 query shifts to target=1 in
         // the body, which matches Var(1).
         let lam_body_outer = Term::lam(Term::Universe(0), Term::Var(1));
         assert!(is_free_in(&lam_body_outer, 0));
@@ -766,9 +780,9 @@ mod tests {
         let inferred = infer(&ctx, &outer_pi).unwrap();
         // Universe(1) — outer.A : Universe(0); body of outer is Pi
         // taking Var(0) (A) and returning Var(1) (A under one
-        // additional binder).  Var(0) under the outer binder has
+        // additional binder). Var(0) under the outer binder has
         // type Universe(0); the inner Pi forms over it, producing
-        // Universe(0).  Outer Pi: max(Univ(1) for type-of-A,
+        // Universe(0). Outer Pi: max(Univ(1) for type-of-A,
         // Univ(0) for body-Pi) = Universe(1).
         assert_eq!(inferred, Term::Universe(1));
     }
@@ -776,7 +790,7 @@ mod tests {
     #[test]
     fn polymorphic_identity_type_checks() {
         // λ(A : Univ(0)). λ(x : A). x
-        //   has type  Π(A : Univ(0)). Π(_ : A). A
+        //  has type Π(A : Univ(0)). Π(_ : A). A
         let ctx = Context::new();
         let body = Term::lam(Term::Var(0), Term::Var(0));
         let id = Term::lam(Term::Universe(0), body);

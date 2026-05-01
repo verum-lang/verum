@@ -8,15 +8,18 @@ module sys.linux.syscall;
 // Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
+
 // This module provides direct access to Linux system calls via the
 // SYSCALL_LINUX VBC opcode. It defines the syscall_raw wrapper and
 // portable safe wrappers around the kernel ABI. Architecture-specific
 // syscall numbers live in `sys.linux.arch` and are re-exported here.
 //
+
 // Wrappers that depend on x86_64-only legacy syscalls (open, stat, mkdir,
 // etc.) are gated with `@cfg(target_arch = "x86_64")`. Portable equivalents
 // (openat, newfstatat, mkdirat, ...) are available on both architectures.
 //
+
 // Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
 
@@ -102,18 +105,22 @@ public mount sys.linux.arch.{
 
 /// Raw syscall wrapper - executes a Linux syscall directly.
 ///
+
 /// This function wraps the syscall6 intrinsic from stdlib.intrinsics, which
 /// compiles to the SYSCALL_LINUX VBC opcode in the interpreter or inlines
 /// to the syscall instruction in AOT compilation.
 ///
+
 /// # Arguments
 /// * `num` - Syscall number (from SYS_* constants below)
 /// * `a1`-`a6` - Up to 6 syscall arguments
 ///
+
 /// # Returns
 /// The raw syscall return value. Negative values typically indicate
 /// errors (-errno).
 ///
+
 /// # Safety
 /// This is an unsafe operation. Incorrect arguments can cause
 /// undefined behavior or system instability.
@@ -232,7 +239,7 @@ public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSEr
     }
 }
 
-/// Raw-pointer pread — caller-owned buffer + explicit count.  Mirrors
+/// Raw-pointer pread — caller-owned buffer + explicit count. Mirrors
 /// libsystem.safe_pread_raw; bypasses `&mut [Byte]` parameter coercion
 /// (RUNTIME-3-DEEPER sidestep).
 public fn pread_raw(fd: FileDesc, buf: &unsafe Byte, count: Int, offset: Int) -> Result<Int, OSError> {
@@ -295,21 +302,23 @@ public fn close(fd: FileDesc) -> Result<(), OSError> {
 // Process control — fork / pipe / dup / wait / kill / exec
 // =============================================================================
 //
+
 // Process syscalls are arch-conditional:
-//   x86_64: legacy SYS_FORK / SYS_PIPE / SYS_DUP2 are available.
-//   aarch64: must use SYS_CLONE(SIGCHLD) / SYS_PIPE2(0) / SYS_DUP3(0).
+//  x86_64: legacy SYS_FORK / SYS_PIPE / SYS_DUP2 are available.
+//  aarch64: must use SYS_CLONE(SIGCHLD) / SYS_PIPE2(0) / SYS_DUP3(0).
 //
+
 // Each safe wrapper hides the arch difference behind a uniform Verum API.
 
 /// CLONE_VM | CLONE_VFORK | SIGCHLD — flags equivalent to a `vfork()` call,
-/// useful when the child is going to immediately exec.  Not used by the
+/// useful when the child is going to immediately exec. Not used by the
 /// default `fork` wrapper — kept here for completeness.
 public const CLONE_VFORK_FLAGS: Int = 0x4000 | 0x100 | 17;
 /// SIGCHLD = 17 on Linux/x86_64 and aarch64 — matches glibc fork() behaviour.
 public const FORK_FLAGS: Int = 17;
 
-/// fork(2): create a child process.  Returns the child's pid in the
-/// parent and 0 in the child.  Negative on error.
+/// fork(2): create a child process. Returns the child's pid in the
+/// parent and 0 in the child. Negative on error.
 public fn fork() -> Result<Int, OSError> {
     @cfg(target_arch = "x86_64")
     {
@@ -324,7 +333,7 @@ public fn fork() -> Result<Int, OSError> {
     }
 }
 
-/// pipe(2) / pipe2(2): create a pipe pair.  Writes the read- and
+/// pipe(2) / pipe2(2): create a pipe pair. Writes the read- and
 /// write-end fds into `fds[0]` and `fds[1]` respectively.
 public fn pipe(fds: &mut [Int32; 2]) -> Result<(), OSError> {
     @cfg(target_arch = "x86_64")
@@ -346,8 +355,8 @@ public fn pipe2(fds: &mut [Int32; 2], flags: Int) -> Result<(), OSError> {
     if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(()) }
 }
 
-/// dup2(oldfd, newfd): duplicate a file descriptor.  Closes newfd first
-/// if it is open.  Returns newfd on success.
+/// dup2(oldfd, newfd): duplicate a file descriptor. Closes newfd first
+/// if it is open. Returns newfd on success.
 public fn dup2(oldfd: FileDesc, newfd: FileDesc) -> Result<Int, OSError> {
     @cfg(target_arch = "x86_64")
     {
@@ -375,7 +384,7 @@ public fn dup3(oldfd: FileDesc, newfd: FileDesc, flags: Int) -> Result<Int, OSEr
 }
 
 /// execve(path, argv, envp): replace the current process image.
-/// Only returns on error (with `Err`).  Both `argv` and `envp` are
+/// Only returns on error (with `Err`). Both `argv` and `envp` are
 /// NULL-terminated arrays of NUL-terminated byte strings.
 public fn execve(path: &Byte, argv: Int, envp: Int) -> Result<!, OSError> {
     let r = unsafe {
@@ -395,14 +404,14 @@ public fn wait4(pid: Int, status: &mut Int32, options: Int) -> Result<Int, OSErr
     if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
 }
 
-/// kill(pid, sig): send a signal.  pid > 0 — to that process; pid == 0 —
+/// kill(pid, sig): send a signal. pid > 0 — to that process; pid == 0 —
 /// to the process group of the caller; pid == -1 — broadcast.
 public fn kill(pid: Int, sig: Int) -> Result<(), OSError> {
     let r = unsafe { syscall_raw(SYS_KILL, pid, sig, 0, 0, 0, 0) };
     if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(()) }
 }
 
-/// fcntl(fd, cmd, arg): file-descriptor control.  Used to set FD_CLOEXEC
+/// fcntl(fd, cmd, arg): file-descriptor control. Used to set FD_CLOEXEC
 /// or O_NONBLOCK on pipe ends after creation.
 public fn fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
     let r = unsafe { syscall_raw(SYS_FCNTL, fd.as_raw(), cmd, arg, 0, 0, 0) };
@@ -688,6 +697,7 @@ public type Stat is {
 
 /// Open a file.
 ///
+
 /// Internally uses openat(AT_FDCWD, ...) which is portable across all
 /// Linux architectures. (aarch64 has no legacy `open` syscall.)
 public fn open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
@@ -708,9 +718,9 @@ public fn open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError
 }
 
 /// Copy a UTF-8 path into a 4096-byte stack buffer and
-/// NUL-terminate.  Manual byte loop sidesteps the
+/// NUL-terminate. Manual byte loop sidesteps the
 /// RUNTIME-3-DEEPER (#104) slice-on-array recursion in
-/// the Tier-0 interpreter.  Mirrors the matching helper
+/// the Tier-0 interpreter. Mirrors the matching helper
 /// in `core/sys/darwin/libsystem.vr`.
 fn copy_path_nul(path_buf: &mut [Byte; 4096], path: &[Byte]) -> Int {
     let len = path.len().min(4095);
@@ -724,8 +734,8 @@ fn copy_path_nul(path_buf: &mut [Byte; 4096], path: &[Byte]) -> Int {
 }
 
 /// Raw-pointer entry that bypasses the `&[Byte]` parameter coercion
-/// path (RUNTIME-3-DEEPER).  Caller is responsible for NUL-terminating
-/// the buffer; this entry does no copy and no length check.  Used by
+/// path (RUNTIME-3-DEEPER). Caller is responsible for NUL-terminating
+/// the buffer; this entry does no copy and no length check. Used by
 /// l0_vfs/posix_vfs.vr `sys_open_raw` so PosixVfs.open works under the
 /// Tier-0 interpreter on Linux mirroring the libsystem.safe_open_raw
 /// path on macOS.
@@ -796,6 +806,7 @@ public fn fstat(fd: FileDesc, stat: &mut Stat) -> Result<(), OSError> {
 
 /// Get file status by path.
 ///
+
 /// Uses the portable newfstatat(AT_FDCWD, ...) syscall.
 public fn stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
     // Ensure null-terminated path (copy_path_nul sidesteps
@@ -823,6 +834,7 @@ public fn stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
 
 /// Get symbolic link status (doesn't follow symlinks).
 ///
+
 /// Uses newfstatat(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW) which is portable.
 public fn lstat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
     // Ensure null-terminated path (copy_path_nul sidesteps
@@ -895,6 +907,7 @@ public const R_OK: Int = 4;
 
 /// Probe path accessibility relative to AT_FDCWD via faccessat(2).
 ///
+
 /// `mode` is a bitwise-OR of `F_OK | R_OK | W_OK | X_OK`. Returns
 /// `Ok(true)` on success, `Ok(false)` on EACCES/ENOENT/ENOTDIR/EROFS,
 /// `Err(...)` for everything else (EIO, EFAULT, ENAMETOOLONG, ELOOP).
@@ -992,7 +1005,7 @@ public fn unlink(path: &[Byte]) -> Result<(), OSError> {
     }
 }
 
-/// Raw-pointer unlink — caller-owned NUL-terminated buffer.  Mirrors
+/// Raw-pointer unlink — caller-owned NUL-terminated buffer. Mirrors
 /// `open_raw`; bypasses `&[Byte]` parameter coercion (RUNTIME-3-DEEPER).
 public fn unlink_raw(path: &Byte) -> Result<(), OSError> {
     let result = unsafe {
@@ -1125,6 +1138,7 @@ public fn readlink(path: &[Byte], buf: &mut [Byte]) -> Result<Int, OSError> {
 
 /// Create a hard link.
 ///
+
 /// Uses the portable linkat(AT_FDCWD, ...) underneath — works on both
 /// x86_64 and aarch64 (aarch64 has no legacy `link` syscall).
 public fn link(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
@@ -1553,6 +1567,7 @@ public fn shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
 
 /// Get socket name (local address).
 ///
+
 /// `addr_len` is `socklen_t *` (UInt32 on Linux glibc). T0.4.2 Phase 4
 /// wrapper migration — the kernel writes 4 bytes through this pointer,
 /// so an `&mut Int` (i64*) would leave the high 4 bytes uninitialized
@@ -1599,7 +1614,7 @@ public fn getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32
 }
 
 // `fcntl` is declared earlier in this file (around line 407) — keep
-// a single canonical declaration.  A duplicate here previously
+// a single canonical declaration. A duplicate here previously
 // emitted two codegen-time function bodies with the same descriptor
 // id, requiring the dedup pass at `crates/verum_vbc/src/codegen/
 // mod.rs` to collapse on every script run.
@@ -1694,6 +1709,7 @@ public type IpMreq is {
 
 /// Join an IPv4 multicast group.
 ///
+
 /// multiaddr: multicast group address (4 bytes, network byte order)
 /// interface: local interface address (4 bytes, network byte order), 0 = default
 public fn join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
@@ -1717,6 +1733,7 @@ public fn leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32)
 
 /// Set multicast TTL (time-to-live) for IPv4.
 ///
+
 /// TTL controls how many network hops a multicast packet can traverse:
 /// - 0: Restricted to same host
 /// - 1: Restricted to same subnet (default)
@@ -1730,6 +1747,7 @@ public fn set_multicast_ttl_v4(fd: FileDesc, ttl: Int) -> Result<(), OSError> {
 
 /// Set multicast loopback for IPv4.
 ///
+
 /// When enabled (default), multicast packets sent are looped back to the local
 /// socket if it has joined the same multicast group.
 public fn set_multicast_loop_v4(fd: FileDesc, enabled: Bool) -> Result<(), OSError> {
@@ -1738,6 +1756,7 @@ public fn set_multicast_loop_v4(fd: FileDesc, enabled: Bool) -> Result<(), OSErr
 
 /// Peek at data without consuming it (MSG_PEEK).
 ///
+
 /// Returns the number of bytes available. The data remains in the socket buffer.
 public fn peek(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
     recv(fd, buf, MSG_PEEK)
@@ -1775,6 +1794,6 @@ public const TIOCSWINSZ: Int = 0x5414;
 // Duplicates here previously emitted two codegen-time function
 // bodies with the same descriptor id, requiring the dedup pass at
 // `crates/verum_vbc/src/codegen/mod.rs` to collapse on every script
-// run.  The earlier `ioctl` uses the POSIX-correct `request: UInt64`
+// run. The earlier `ioctl` uses the POSIX-correct `request: UInt64`
 // signature; this trailing `request: Int` form was the legacy
 // shape and is removed to avoid the silent shadow.

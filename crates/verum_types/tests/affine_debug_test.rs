@@ -1,5 +1,6 @@
 //! Integration tests for affine type checking through the full pipeline
 //!
+
 //! These tests verify that affine type checking works correctly when
 //! going through parsing -> type registration -> type checking.
 
@@ -84,8 +85,8 @@ fn main() {
 fn test_affine_double_field_access() {
     // Field access BORROWS the affine value, doesn't consume it.
     // Multiple field accesses on the same affine value are allowed:
-    //   let x = h.id;   // borrow h, extract field
-    //   let y = h.id;   // borrow h again, still valid
+    //  let x = h.id; // borrow h, extract field
+    //  let y = h.id; // borrow h again, still valid
     // Only full value transfer consumes: let h2 = h;
     let code = r#"
 type affine Handle is {

@@ -4,15 +4,17 @@
 // Layer: 0 (façade — SQLITE_LOCK_* taxonomy)
 // Spec: SQLite file format §7.4 (locking)
 //
-//   SQLITE_LOCK_NONE      = 0
-//   SQLITE_LOCK_SHARED    = 1
-//   SQLITE_LOCK_RESERVED  = 2
-//   SQLITE_LOCK_PENDING   = 3
-//   SQLITE_LOCK_EXCLUSIVE = 4
+
+//  SQLITE_LOCK_NONE = 0
+//  SQLITE_LOCK_SHARED = 1
+//  SQLITE_LOCK_RESERVED = 2
+//  SQLITE_LOCK_PENDING = 3
+//  SQLITE_LOCK_EXCLUSIVE = 4
 //
+
 // The monotone-rank transitions are:
-//   NONE → SHARED → RESERVED → EXCLUSIVE
-//   NONE → SHARED → PENDING → EXCLUSIVE
+//  NONE → SHARED → RESERVED → EXCLUSIVE
+//  NONE → SHARED → PENDING → EXCLUSIVE
 // =============================================================================
 
 module core.database.sqlite.native.lock_modes;

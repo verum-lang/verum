@@ -4,6 +4,7 @@
 // Layer: 6
 // Spec: sqlite-native.md §17.1
 //
+
 // Trigger sub-program registry attached to a SchemaCache. Indexed by
 // (table_name, timing, event) so the L4 interpreter can query all
 // matching triggers in a single lookup at every DML hook.

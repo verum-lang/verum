@@ -16,6 +16,7 @@
 
 // Error Handling Integration Tests
 //
+
 // Tests error propagation through the compilation pipeline,
 // diagnostic quality, error recovery, and error continuation.
 

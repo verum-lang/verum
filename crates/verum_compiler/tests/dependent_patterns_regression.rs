@@ -20,8 +20,10 @@
 //! should NEVER regress — any change to the type checker, unifier, or
 //! refinement system must keep all of these passing.
 //!
+
 //! # Strategic finding (Phase A.1 audit)
 //!
+
 //! The plan originally listed "Phase A.1 Pi-type surface syntax" as a
 //! blocker for downstream work (hott.vr, simplicial.vr, infinity topos,
 //! etc.). The assumption was that Verum lacked a way to express
@@ -30,23 +32,27 @@
 //! dependent-type patterns needed for production dependently-typed
 //! programming through three composable mechanisms:
 //!
+
 //! 1. **Refinement types with earlier-param references**
-//!    `fn index(len: Int, i: Int{>= 0, < len}) -> Int`
-//!    The predicate `i < len` treats `len` as an in-scope term, which
-//!    is exactly the Π-type `(len: Int) → (i: Int) → Int` with the
-//!    `len`-bound witnessed by the refinement predicate.
+//!  `fn index(len: Int, i: Int{>= 0, < len}) -> Int`
+//!  The predicate `i < len` treats `len` as an in-scope term, which
+//!  is exactly the Π-type `(len: Int) → (i: Int) → Int` with the
+//!  `len`-bound witnessed by the refinement predicate.
 //!
+
 //! 2. **Meta parameters for type-level values**
-//!    `fn fill<N: meta Int>(v: Int) -> [Int; N]`
-//!    `N` is a compile-time integer that can appear in type positions
-//!    (sized arrays, matrix dimensions, etc.), providing full
-//!    type-level computation over integer indices.
+//!  `fn fill<N: meta Int>(v: Int) -> [Int; N]`
+//!  `N` is a compile-time integer that can appear in type positions
+//!  (sized arrays, matrix dimensions, etc.), providing full
+//!  type-level computation over integer indices.
 //!
+
 //! 3. **Higher-kinded types**
-//!    `fn map<F<_>, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>`
-//!    Full HKT support enables Functor, Monad, and similar abstractions
-//!    without new syntax.
+//!  `fn map<F<_>, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>`
+//!  Full HKT support enables Functor, Monad, and similar abstractions
+//!  without new syntax.
 //!
+
 //! **Implication**: Phase A.1 is re-scoped from "add new Pi surface
 //! syntax" to "document and regression-test existing support". The
 //! remaining unique feature of classical Π-types —
@@ -56,6 +62,7 @@
 //! missing piece should be added to this file as a failing test first,
 //! then implemented.
 //!
+
 //! Related: plan at `~/.claude/plans/rustling-churning-unicorn.md`,
 //! Phase A.1 (to be updated).
 
@@ -376,6 +383,7 @@ fn baseline_generic_with_refined_bound() {
 // Phase 3: Enforcement at call sites (asserting current behaviour)
 // ============================================================================
 //
+
 // These tests ASSERT the current behaviour of the refinement checker at
 // call sites. Some of them encode a known gap (dependent refinements that
 // reference an earlier parameter are NOT currently enforced on concrete
@@ -383,6 +391,7 @@ fn baseline_generic_with_refined_bound() {
 // failing assertions will flip and the test body must be updated at the
 // same time.
 //
+
 // Related: `crates/verum_types/src/refinement.rs`, the Phase A.5
 // activation in `crates/verum_compiler/src/pipeline.rs:5249`.
 // ============================================================================
@@ -443,6 +452,7 @@ fn enforcement_valid_dependent_call_accepted() {
 /// Dependent refinement enforcement: `safe_get(5, 10)` MUST be rejected
 /// because the refinement on `i` says `i < len` and here `len=5, i=10`.
 ///
+
 /// This test was previously a FIXME tripwire documenting the bug that
 /// the refinement checker did not substitute concrete literal arguments
 /// into earlier-param refinements at call sites. The fix is in
@@ -452,6 +462,7 @@ fn enforcement_valid_dependent_call_accepted() {
 /// `RefinementChecker::substitute_in_expr` for each earlier argument
 /// into subsequent parameters' predicates before calling `check_expr`.
 ///
+
 /// Related: `crates/verum_types/src/refinement.rs:1285`
 /// (`substitute_in_expr`), `crates/verum_types/src/infer.rs:47704`
 /// (`register_function_signature` populating `function_param_names`).

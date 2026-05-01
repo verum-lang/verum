@@ -5,22 +5,26 @@
 // Dependencies: core, base.memory, io.fs, sys, time
 // =============================================================================
 //
+
 // File descriptors, child processes, temporary files and lock files all
 // share an ownership pattern: the resource MUST be released exactly once,
 // at a deterministic point. Verum's CBGR (Capability-Based Generation
 // References) achieves this through:
 //
-//   * `Drop` semantics — release at scope exit, including unwind
-//   * `@must_consume` — compile error if a resource is dropped without
-//     calling its release method (e.g. `wait()` on a Child)
-//   * Generation-tagged refs — runtime use-after-free detection at ~15 ns
+
+//  * `Drop` semantics — release at scope exit, including unwind
+//  * `@must_consume` — compile error if a resource is dropped without
+//  calling its release method (e.g. `wait()` on a Child)
+//  * Generation-tagged refs — runtime use-after-free detection at ~15 ns
 //
+
 // This module wraps the platform-level handles (Fd, file paths, locks)
 // in CBGR-friendly types with explicit Drop impls. Where possible, we
 // reuse `core.io.fs.File` and `core.io.process.Child` directly — this
 // module exists to add shell-specific niceties (TempFile auto-unlink,
 // FileLock with flock, scoped lock guards).
 //
+
 // =============================================================================
 
 module resources;
@@ -38,6 +42,7 @@ mount core.shell.result.{ShellError};
 // Fd — owned file descriptor
 // =============================================================================
 //
+
 // A thin owning wrapper around an integer fd / handle. Drop closes
 // unconditionally; double-close is impossible because the inner fd is
 // nulled out on close.
@@ -62,7 +67,7 @@ implement Fd {
     public fn close(mut self) {
         if !self.closed {
             // Reuse the platform-specific close from io.process via the
-            // common fd-ops pathway.  On Unix this is `close(2)`, on
+            // common fd-ops pathway. On Unix this is `close(2)`, on
             // Windows `CloseHandle`.
             __platform_fd_close(self.raw);
             self.closed = true;
@@ -106,10 +111,12 @@ fn __platform_fd_close(fd: Int) {
 // TempFile — temporary file that auto-unlinks on Drop
 // =============================================================================
 //
+
 // Created in the host's temp directory or an explicit parent. The file
 // path is removed when the `TempFile` is dropped, *regardless* of whether
 // the dispatch path was successful, errored, panicked, or unwound.
 //
+
 // To prevent the auto-delete (e.g. when atomically renaming to a target),
 // call `persist()` or move the path into a `PathBuf` and clear `path`.
 
@@ -181,6 +188,7 @@ fn generate_suffix() -> Text {
 // FileLock — flock-based mutual exclusion
 // =============================================================================
 //
+
 // A `FileLock` wraps an open Fd plus a flag indicating advisory-vs-exclusive
 // lock acquired via `flock(2)` (Unix) or `LockFileEx` (Windows). Drop
 // releases the lock automatically.
@@ -279,6 +287,7 @@ fn __platform_flock(fd: Int, op: Int) -> Int {
 // SharedFd — multi-owner Fd with refcount-driven close
 // =============================================================================
 //
+
 // When a `Fd` must be passed to multiple async tasks (e.g. fan-out reading
 // from one process stdout), `SharedFd` provides reference-counted access.
 // The underlying close happens only when the last clone is dropped.

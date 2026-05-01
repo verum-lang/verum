@@ -1,36 +1,43 @@
 //! Script-mode dispatch for `verum`.
 //!
+
 //! Verum can be invoked in two distinct modes:
 //!
+
 //! 1. **Project mode** — `verum run`, `verum build`, etc., dispatched through
-//!    clap subcommands and operating on a `verum.toml`-rooted project tree.
+//!  clap subcommands and operating on a `verum.toml`-rooted project tree.
 //! 2. **Script mode** — `verum path/to/file.vr [args…]` or, via shebang,
-//!    `./file.vr [args…]`. The `.vr` file is parsed, compiled, and executed
-//!    directly. No `verum.toml` is required.
+//!  `./file.vr [args…]`. The `.vr` file is parsed, compiled, and executed
+//!  directly. No `verum.toml` is required.
 //!
+
 //! Script mode is signalled by a `#!` line at byte 0 of the source file (the
 //! POSIX-shebang convention). [`verum_lexer::strip_shebang`] strips the line
 //! before tokenisation; this module is responsible only for deciding whether
 //! `verum`'s argv looks like a script invocation, and if so, rewriting argv so
 //! that downstream clap parsing sees `verum run <file> <args…>`.
 //!
+
 //! Why argv rewriting and not a clap fallback? Two reasons:
 //!
+
 //! - Shebang invocations (`./file.vr`) hit the kernel as
-//!   `verum file.vr [args…]`. Clap would reject `file.vr` as an unknown
-//!   subcommand. A pre-clap rewrite is the simplest, most robust fix.
+//!  `verum file.vr [args…]`. Clap would reject `file.vr` as an unknown
+//!  subcommand. A pre-clap rewrite is the simplest, most robust fix.
 //! - The rewrite is safe: `run` is an existing subcommand whose arity already
-//!   accepts `<file> [args…]`. We are not inventing a new dispatch path.
+//!  accepts `<file> [args…]`. We are not inventing a new dispatch path.
 //!
+
 //! # Invariants
 //!
+
 //! - The rewrite ONLY fires when argv[1] points at an existing file with a
-//!   `.vr` extension OR a `#!` shebang. Existing subcommands win
-//!   unconditionally; if `argv[1]` matches a known clap subcommand name, no
-//!   rewrite happens.
+//!  `.vr` extension OR a `#!` shebang. Existing subcommands win
+//!  unconditionally; if `argv[1]` matches a known clap subcommand name, no
+//!  rewrite happens.
 //! - If `argv[1]` is a flag (starts with `-`), no rewrite happens.
 //! - If the file does not exist, no rewrite happens — clap's normal "unknown
-//!   subcommand" error reaches the user.
+//!  subcommand" error reaches the user.
 
 pub mod cache;
 pub mod context;
@@ -45,6 +52,7 @@ use std::path::Path;
 /// Subcommand names registered by `verum`. If `argv[1]` matches any of these,
 /// we never rewrite — the user is invoking the subcommand directly.
 ///
+
 /// Maintained in sync with `enum Commands` in `main.rs`. Adding a subcommand
 /// requires adding its CLI name here as well; the rewrite is conservative —
 /// missing entries cause script mode to (incorrectly) fire on a real
@@ -105,10 +113,13 @@ const KNOWN_SUBCOMMANDS: &[&str] = &[
 /// rewrite it to `verum run <file> -- <args…>`. Returns the (possibly
 /// unchanged) argv to feed into clap.
 ///
+
 /// `argv` must include `argv[0]` (the binary path), as is conventional.
 ///
+
 /// # Arg-passing semantics
 ///
+
 /// In a shebang invocation (`./hello.vr foo bar`), the OS hands `verum` the
 /// argv `["verum", "hello.vr", "foo", "bar"]`. The user expects `foo` and
 /// `bar` to reach the script, not to act as `verum`-level flags. We therefore
@@ -143,6 +154,7 @@ pub fn rewrite_argv_for_script_mode(argv: Vec<OsString>) -> Vec<OsString> {
 /// True iff `arg` should trigger a script-mode rewrite. The check is
 /// deliberately strict: false positives would shadow legitimate subcommands.
 ///
+
 /// **Verum execution-mode contract.** The no-`run` shorthand
 /// (`verum ./script.vr`) is reserved for **scripts**, not arbitrary
 /// `.vr` files. A script is identified by a `#!` shebang line at byte 0
@@ -151,19 +163,22 @@ pub fn rewrite_argv_for_script_mode(argv: Vec<OsString>) -> Vec<OsString> {
 /// form. This makes the three execution modes unambiguous from argv
 /// alone:
 ///
-/// | Mode        | Invocation                        | Required signal           |
+
+/// | Mode | Invocation | Required signal |
 /// |-------------|-----------------------------------|---------------------------|
-/// | Interpreter | `verum run file.vr`               | `fn main()` in source     |
-/// | AOT         | `verum run --aot file.vr`         | `fn main()` in source     |
-/// | Script      | `verum file.vr` or `./file.vr`    | `#!` shebang at byte 0    |
+/// | Interpreter | `verum run file.vr` | `fn main()` in source |
+/// | AOT | `verum run --aot file.vr` | `fn main()` in source |
+/// | Script | `verum file.vr` or `./file.vr` | `#!` shebang at byte 0 |
 ///
+
 /// Conditions, AND-joined:
 /// - Not a flag (does not start with `-`).
 /// - Not a known subcommand name (UTF-8 only — every Verum subcommand
-///   spells its name in ASCII, so a non-UTF-8 OsString cannot collide).
+///  spells its name in ASCII, so a non-UTF-8 OsString cannot collide).
 /// - Names an existing file (regular file, accessible).
 /// - **Begins with `#!` shebang** (BOM-tolerant: `EF BB BF #!` accepted).
 ///
+
 /// **Encoding contract:** flag detection and the file-existence /
 /// shebang checks all operate on the raw `OsStr` so non-UTF-8 paths
 /// (Windows legacy paths, macOS broken-encoding test fixtures,
@@ -241,12 +256,14 @@ pub fn is_script_invocation(argv: &[OsString]) -> bool {
 /// precise advisory message when `argv[1]` looks like a *would-be* script
 /// (existing `.vr` file) but lacks the mandatory `#!` shebang.
 ///
+
 /// The Verum execution-mode contract reserves the no-`run` shorthand for
 /// shebang scripts; without one, clap would surface the generic "unknown
 /// subcommand" error which gives the user no actionable next step. By
 /// detecting the misuse pre-clap we can point them at the exact fix
 /// (`verum run file.vr` for non-script files, or add a shebang).
 ///
+
 /// Returns `Some(message)` only for the `.vr`-extension-without-shebang
 /// case; every other shape (subcommands, flags, non-existent files, files
 /// with unrelated extensions) returns `None` to stay out of clap's way.

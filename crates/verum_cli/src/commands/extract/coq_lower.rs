@@ -1,20 +1,21 @@
 //! Verum AST → Coq lowerer.
 //!
+
 //! Mirrors `ocaml_lower` / `lean_lower` shape but emits Coq term
 //! syntax (gallina). Coq differences:
-//!   * `let-in` is `let x := value in rest` (`:=` for definition,
-//!     `=` for proposition equality).
-//!   * Boolean ops: `andb` / `orb` / `negb` for Bool; `&&` / `||`
-//!     reserved for Prop. We emit `andb` / `orb` for Verum's `&&` /
-//!     `||` since Verum-extracted code is value-level, not Prop.
-//!   * Equality is `=` for Prop / `=?` for Decidable Bool. Verum's
-//!     `==` is value-level Decidable, so we emit `=?`.
-//!   * `if-then-else` is `if cond then a else b` (no `:=` between).
-//!   * Modulo is `mod` (Coq Stdlib's Z.modulo / N.modulo prefix
-//!     form). For broad coverage we emit `mod` infix which Coq
-//!     mathcomp accepts as a Bool-namespace operator; pure Coq
-//!     stdlib uses `Z.modulo a b`. We emit `mod` since the
-//!     extracted output assumes a math-comp / mathlib-style env.
+//!  * `let-in` is `let x := value in rest` (`:=` for definition,
+//!  `=` for proposition equality).
+//!  * Boolean ops: `andb` / `orb` / `negb` for Bool; `&&` / `||`
+//!  reserved for Prop. We emit `andb` / `orb` for Verum's `&&` /
+//!  `||` since Verum-extracted code is value-level, not Prop.
+//!  * Equality is `=` for Prop / `=?` for Decidable Bool. Verum's
+//!  `==` is value-level Decidable, so we emit `=?`.
+//!  * `if-then-else` is `if cond then a else b` (no `:=` between).
+//!  * Modulo is `mod` (Coq Stdlib's Z.modulo / N.modulo prefix
+//!  form). For broad coverage we emit `mod` infix which Coq
+//!  mathcomp accepts as a Bool-namespace operator; pure Coq
+//!  stdlib uses `Z.modulo a b`. We emit `mod` since the
+//!  extracted output assumes a math-comp / mathlib-style env.
 
 use verum_ast::expr::{BinOp, Block, ConditionKind, Expr, ExprKind, IfCondition, UnOp};
 use verum_ast::literal::{LiteralKind, StringLit};

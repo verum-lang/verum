@@ -5,43 +5,53 @@
 // Dependencies: core, sys/{linux,darwin,windows}
 // =============================================================================
 //
+
 // Cross-platform signal handling for Verum programs.
 //
+
 // # Architecture
 //
+
 // Signal handling uses platform-specific mechanisms:
 // - Linux: sigaction() via direct syscall (rt_sigaction, syscall 13)
 // - macOS: sigaction() via libSystem.B.dylib
 // - Windows: SetConsoleCtrlHandler() via kernel32.dll
 //
+
 // # Safety
 //
+
 // Signal handlers execute in a restricted context. Only async-signal-safe
 // operations are permitted inside handlers:
 // - Setting atomic flags
 // - Writing to pre-allocated buffers
 // - Calling write() on file descriptors
 //
+
 // Do NOT allocate memory, acquire locks, or call non-reentrant functions
 // from within a signal handler.
 //
+
 // # Example
 // ```verum
 // mount core.sys.signal.{Signal, on_signal};
 //
+
 // fn main() {
-//     on_signal(Signal.Int, fn() {
-//         print("Caught SIGINT, shutting down...");
-//         exit(0);
-//     });
+//  on_signal(Signal.Int, fn() {
+//  print("Caught SIGINT, shutting down...");
+//  exit(0);
+//  });
 //
-//     // Main loop
-//     loop {
-//         do_work();
-//     }
+
+//  // Main loop
+//  loop {
+//  do_work();
+//  }
 // }
 // ```
 //
+
 // =============================================================================
 
 module sys.signal;
@@ -69,6 +79,7 @@ fn SetConsoleCtrlHandler(handler: fn(UInt32) -> Int, add: Int) -> Int;
 
 /// POSIX signal numbers.
 ///
+
 /// These are the standard signals available on Unix-like systems.
 /// On Windows, only Int (Ctrl+C), Term, and Abort are supported
 /// via SetConsoleCtrlHandler.
@@ -285,20 +296,24 @@ static mut SIGNAL_HANDLERS: [Int; 64] = [0; 64];
 
 /// Register a handler for the given signal.
 ///
+
 /// The handler will be called when the signal is delivered to this process.
 /// Only one handler can be registered per signal; registering a new handler
 /// replaces the previous one.
 ///
+
 /// # Safety
 ///
+
 /// Signal handlers run in an async-signal-unsafe context. Only perform
 /// simple operations like setting flags or writing to pipes.
 ///
+
 /// # Example
 /// ```verum
 /// on_signal(Signal.Int, fn() {
-///     // Set a flag to trigger graceful shutdown
-///     SHUTDOWN_REQUESTED.store(true, Relaxed);
+///  // Set a flag to trigger graceful shutdown
+///  SHUTDOWN_REQUESTED.store(true, Relaxed);
 /// });
 /// ```
 public fn on_signal(sig: Signal, handler: fn()) -> Result<(), SignalError> {
@@ -352,12 +367,14 @@ public fn reset_signal(sig: Signal) -> Result<(), SignalError> {
 
 /// Ignore a signal.
 ///
+
 /// The signal will be delivered but silently discarded.
 /// Useful for SIGPIPE in network servers.
 ///
+
 /// # Example
 /// ```verum
-/// ignore_signal(Signal.Pipe);  // Prevent SIGPIPE crashes
+/// ignore_signal(Signal.Pipe); // Prevent SIGPIPE crashes
 /// ```
 public fn ignore_signal(sig: Signal) -> Result<(), SignalError> {
     if !sig.is_catchable() {
@@ -459,22 +476,26 @@ fn register_windows_handler() -> Result<(), SignalError> {
 
 /// A signal-safe boolean flag.
 ///
+
 /// This type uses atomic operations and is safe to set from within
 /// a signal handler and check from the main thread.
 ///
+
 /// # Example
 /// ```verum
 /// static SHUTDOWN: SignalFlag = SignalFlag.new();
 ///
+
 /// fn main() {
-///     on_signal(Signal.Int, fn() {
-///         SHUTDOWN.set();
-///     });
+///  on_signal(Signal.Int, fn() {
+///  SHUTDOWN.set();
+///  });
 ///
-///     while !SHUTDOWN.is_set() {
-///         do_work();
-///     }
-///     print("Shutting down gracefully");
+
+///  while !SHUTDOWN.is_set() {
+///  do_work();
+///  }
+///  print("Shutting down gracefully");
 /// }
 /// ```
 public type SignalFlag is {

@@ -5,11 +5,13 @@
 // Dependencies: core, io.stdio, base.protocols
 // =============================================================================
 //
+
 // Console input helpers for command-line scripts. Prompt-then-read pattern
 // over `core.io.stdio`. Password input attempts to disable terminal echo
 // (POSIX `termios` / Windows `SetConsoleMode`), falling back to plain
 // readline on platforms where TTY control is unavailable.
 //
+
 // =============================================================================
 
 module interactive;

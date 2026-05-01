@@ -2,10 +2,12 @@
 //! iff_proof actually concludes `left <=> right` for the claimed
 //! pair (left, right).
 //!
+
 //! Pre-fix the validator only checked:
 //! 1. iff_proof validates internally against its own conclusion.
 //! 2. `(left = right) == expected` syntactically.
 //!
+
 //! It did NOT check that iff_proof's conclusion is `left <=> right`.
 //! A user could pair a proof of `P <=> Q` with claim `A = B` for
 //! unrelated A, B — pre-fix this silently passed.

@@ -39,7 +39,7 @@ public fn returned_row(o: &VtabInFirstNextOutcome) -> Bool {
     match o { OkRow => true, _ => false }
 }
 
-// Step result combines new position + outcome.  Use a record (tuple returns
+// Step result combines new position + outcome. Use a record (tuple returns
 // remain unsupported in Verum).
 public type VtabInFirstStepResult is { pos: VtabInPosition, outcome: VtabInFirstNextOutcome };
 

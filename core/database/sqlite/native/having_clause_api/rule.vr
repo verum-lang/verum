@@ -29,8 +29,8 @@ public fn is_accepted(v: &HavingClauseVerdict) -> Bool {
 }
 
 // Classify a HAVING expression made up of several references.
-//   refs — per-sub-expression kind (in parse order)
-//   has_group_by — whether the query has a GROUP BY clause
+//  refs — per-sub-expression kind (in parse order)
+//  has_group_by — whether the query has a GROUP BY clause
 public fn classify(refs: &List<ExprRefKind>, has_group_by: Bool) -> HavingClauseVerdict {
     // First blocker: a bare-column reference fails.
     let mut i: Int = 0;

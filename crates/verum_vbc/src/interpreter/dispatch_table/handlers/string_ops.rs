@@ -14,6 +14,7 @@ use super::bytecode_io::*;
 
 /// ToString (0x7A) - Convert value to string.
 ///
+
 /// Encoding: opcode + dst + src
 /// Effect: Converts `src` value to a string representation and stores in `dst`.
 pub(in super::super) fn handle_to_string(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -56,6 +57,7 @@ pub(in super::super) fn handle_to_string(state: &mut InterpreterState) -> Interp
 
 /// Concat (0x7B) - Concatenate strings.
 ///
+
 /// Encoding: opcode + dst + a + b
 /// Effect: Concatenates strings `a` and `b` into `dst`.
 pub(in super::super) fn handle_concat(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -99,6 +101,7 @@ pub(in super::super) fn handle_concat(state: &mut InterpreterState) -> Interpret
 
 /// CharToStr (0xCB) - Convert Char to string.
 ///
+
 /// Encoding: opcode + dst + src
 /// Effect: Converts a Char value (stored as Int codepoint) to a 1-character string.
 pub(in super::super) fn handle_char_to_str(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {

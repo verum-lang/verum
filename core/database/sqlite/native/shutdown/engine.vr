@@ -3,11 +3,14 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `ShutdownEngine` walks `shutdown_order()` (mem→pcache→page→mem→mutex
 // in REVERSE init order). For each subsystem it transitions:
 //
-//   ... → SpDraining(sub) → SpClosing(sub) → next subsystem
+
+//  ... → SpDraining(sub) → SpClosing(sub) → next subsystem
 //
+
 // On any subsystem failure the engine jumps to `SpFailed(reason)`
 // and does NOT touch later subsystems (matching SQLite's policy of
 // leaving the process in a known partial state).
@@ -52,9 +55,10 @@ implement ShutdownEngine {
 
     /// Step the machine. Each call walks one micro-transition:
     ///
-    ///   SpInit → SpDraining(order[0])
-    ///   SpDraining(s) → SpClosing(s)
-    ///   SpClosing(s) → SpDraining(next) or SpDone
+
+    ///  SpInit → SpDraining(order[0])
+    ///  SpDraining(s) → SpClosing(s)
+    ///  SpClosing(s) → SpDraining(next) or SpDone
     pub fn advance(&mut self) {
         match &self.phase {
             SpInit => {

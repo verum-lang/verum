@@ -5,44 +5,54 @@
 // Dependencies: core, core.security.mac.hmac, core.security.util.rng
 // =============================================================================
 //
+
 // HyperLogLog — counts distinct items in a stream with bounded
 // memory and ~1.04/√m relative error. Used at scale by Redis
 // (PFADD/PFCOUNT), Google BigQuery APPROX_COUNT_DISTINCT, Trino
 // approx_distinct, Druid theta-sketch equivalents.
 //
+
 // # Sizing
 //
-//   `precision` p ∈ [4, 16]; m = 2^p registers of 6 bits each.
+
+//  `precision` p ∈ [4, 16]; m = 2^p registers of 6 bits each.
 //
-//   p   | memory  | 1σ error
-//   ----|---------|----------
-//    4  |   12 B  | 26%
-//    8  |  192 B  |  6.5%
-//   10  |  768 B  |  3.25%
-//   12  |  3 KiB  |  1.6%
-//   14  | 12 KiB  |  0.81%    (Redis default)
-//   16  | 48 KiB  |  0.4%
+
+//  p | memory | 1σ error
+//  ----|---------|----------
+//  4 | 12 B | 26%
+//  8 | 192 B | 6.5%
+//  10 | 768 B | 3.25%
+//  12 | 3 KiB | 1.6%
+//  14 | 12 KiB | 0.81% (Redis default)
+//  16 | 48 KiB | 0.4%
 //
+
 // # API
 //
+
 // ```
 // let mut hll = HyperLogLog.new(14);
 // hll.add(b"user:alice");
 // hll.add(b"user:bob");
 // let n: UInt64 = hll.estimate();
 //
+
 // // Merge two sketches (union of their underlying sets).
 // hll.merge(&other);
 // ```
 //
+
 // # Security
 //
+
 // The HMAC-SHA256 key is CSPRNG-sourced per-sketch so an attacker
 // cannot craft adversarial inputs that skew a specific sketch's
 // error beyond the theoretical bound. Use `new_with_key` for
 // deterministic re-construction across runs (e.g. Redis HLL
 // merge across nodes requires the same family hash).
 //
+
 // =============================================================================
 
 module core.collections.hyperloglog;

@@ -1,69 +1,80 @@
 //! # Apply-graph traversal — transitive bridge-discharge classifier
 //!
+
 //! Task #150 / MSFS-L4.13 — the load-bearing piece that converts the
 //! L3 → L4 promotion claim ("every step transitively reduces to
 //! Verum kernel rules ∪ ZFC ∪ paper-cited external references") from
 //! a *property of the immediate `apply` callsite* into a *property
 //! of the entire transitive proof chain*.
 //!
+
 //! ## Why transitive matters
 //!
+
 //! Pre-#150 the bridge-discharge pre-pass at
 //! `verum_compiler::phases::bridge_discharge_check::validate_proof_body_bridges`
 //! walked *only the immediate apply callsites* in a theorem's proof
-//! body.  Apply-targets that were not `kernel_*_strict` bridges were
+//! body. Apply-targets that were not `kernel_*_strict` bridges were
 //! silently skipped — the discharge claim "this proof transitively
 //! grounds out in kernel-discharged bridges" was treated *on faith*
 //! once the chain went through any intermediate `_full` form.
 //!
+
 //! Concretely: the standard MSFS pattern after the #143 audit refactor
 //! is `corpus_thm.proof { apply stdlib_full(args); }` where
 //! `stdlib_full.proof { apply kernel_strict_bridge_1(...); apply
-//! kernel_strict_bridge_2(...); }`.  The pre-#150 pre-pass saw only
+//! kernel_strict_bridge_2(...); }`. The pre-#150 pre-pass saw only
 //! `apply stdlib_full(args)`, recognised it wasn't kernel-prefixed,
-//! and accepted it.  A `stdlib_full` that bottomed out at a
+//! and accepted it. A `stdlib_full` that bottomed out at a
 //! placeholder axiom would pass the gate without raising any signal.
 //!
+
 //! Post-#150 the apply-graph walker resolves each apply-target against
 //! the workspace-wide symbol table, recursively walks into its proof
-//! body, and classifies the apply-graph's *leaves*.  The leaf taxonomy
+//! body, and classifies the apply-graph's *leaves*. The leaf taxonomy
 //! is:
 //!
-//!   * [`LeafKind::KernelStrict`] — apply-target is a `kernel_*_strict`
-//!     bridge that goes through `verum_kernel::dispatch_intrinsic`.
-//!     The L4 trust base.
-//!   * [`LeafKind::FrameworkAxiom`] — apply-target is an axiom carrying
-//!     a `@framework(name, "citation")` attribute pointing to an
-//!     external work (Lurie HTT, Adámek-Rosický, etc.).  Acceptable
-//!     for L4 if the citation is to an authoritative external source.
-//!   * [`LeafKind::PlaceholderAxiom`] — apply-target is an axiom with
-//!     no `@framework` attribute and no kernel-strict prefix.  An
-//!     internal stand-in awaiting promotion.  *This is the leaf class
-//!     a transitive L4 claim must drive to zero.*
-//!   * [`LeafKind::Unresolved`] — apply-target couldn't be located in
-//!     the symbol table.  Indicates either a workspace-discovery gap
-//!     or a built-in-kernel-rule reference outside the corpus.
+
+//!  * [`LeafKind::KernelStrict`] — apply-target is a `kernel_*_strict`
+//!  bridge that goes through `verum_kernel::dispatch_intrinsic`.
+//!  The L4 trust base.
+//!  * [`LeafKind::FrameworkAxiom`] — apply-target is an axiom carrying
+//!  a `@framework(name, "citation")` attribute pointing to an
+//!  external work (Lurie HTT, Adámek-Rosický, etc.). Acceptable
+//!  for L4 if the citation is to an authoritative external source.
+//!  * [`LeafKind::PlaceholderAxiom`] — apply-target is an axiom with
+//!  no `@framework` attribute and no kernel-strict prefix. An
+//!  internal stand-in awaiting promotion. *This is the leaf class
+//!  a transitive L4 claim must drive to zero.*
+//!  * [`LeafKind::Unresolved`] — apply-target couldn't be located in
+//!  the symbol table. Indicates either a workspace-discovery gap
+//!  or a built-in-kernel-rule reference outside the corpus.
 //!
+
 //! The composition `(kernel_strict, framework_axiom, placeholder_axiom,
 //! unresolved)` for a theorem's transitive apply-graph is the L4
-//! certificate.  A non-zero `placeholder_axiom` count means the L4
+//! certificate. A non-zero `placeholder_axiom` count means the L4
 //! claim is *not yet load-bearing* for that theorem — every chain
 //! continues to a stand-in that still requires elimination.
 //!
+
 //! ## Architecture
 //!
+
 //! Three layers:
 //!
-//!   1. [`ApplyTarget`] — one resolved apply-callsite reference.
-//!   2. [`SymbolEntry`] / [`ApplyGraph`] — workspace-wide symbol
-//!      lookup table with each entry classified at construction time.
-//!   3. [`walk_transitive`] — DFS over the graph from a root theorem,
-//!      classifying every leaf and accumulating the
-//!      [`LeafComposition`].  Cycle detection via the visited set
-//!      so mutual recursion (or self-reference) doesn't loop forever.
+
+//!  1. [`ApplyTarget`] — one resolved apply-callsite reference.
+//!  2. [`SymbolEntry`] / [`ApplyGraph`] — workspace-wide symbol
+//!  lookup table with each entry classified at construction time.
+//!  3. [`walk_transitive`] — DFS over the graph from a root theorem,
+//!  classifying every leaf and accumulating the
+//!  [`LeafComposition`]. Cycle detection via the visited set
+//!  so mutual recursion (or self-reference) doesn't loop forever.
 //!
+
 //! The walker is *pure* (no I/O, no Z3 invocation, no kernel re-check
-//! round-trip) — graph traversal + hashmap lookup.  Microsecond-scale
+//! round-trip) — graph traversal + hashmap lookup. Microsecond-scale
 //! per theorem so the audit gate can walk the entire MSFS corpus
 //! (37 theorems × max-depth 8) in milliseconds.
 
@@ -75,29 +86,30 @@ use verum_ast::expr::{Expr, ExprKind};
 
 /// Classification of a single apply-graph leaf.
 ///
+
 /// A leaf is a node whose body either (a) doesn't recurse further
 /// (axiom — no `apply` callsites in its body) or (b) is a kernel
-/// bridge consumed by the dispatcher (`kernel_*_strict`).  Theorem
+/// bridge consumed by the dispatcher (`kernel_*_strict`). Theorem
 /// nodes whose proof body contains nested `apply`s are never leaves
 /// themselves; they decompose into the leaves of their children.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum LeafKind {
-    /// `kernel_*_strict` bridge — the trust base.  The dispatcher
+    /// `kernel_*_strict` bridge — the trust base. The dispatcher
     /// (in `verum_kernel::intrinsic_dispatch`) is the algorithmic
     /// witness for these.
     KernelStrict,
     /// Axiom carrying a `@framework(name, "citation")` attribute —
     /// trusted via external authoritative reference (Lurie HTT,
-    /// Adámek-Rosický, etc.).  Acceptable for L4 only if the
+    /// Adámek-Rosický, etc.). Acceptable for L4 only if the
     /// citation resolves to a real external proof.
     FrameworkAxiom,
     /// Plain axiom — no framework citation, not a kernel bridge.
     /// An *internal stand-in* awaiting promotion to a theorem with
-    /// a real proof.  This is the leaf class a load-bearing L4
+    /// a real proof. This is the leaf class a load-bearing L4
     /// claim must drive to zero.
     PlaceholderAxiom,
     /// Apply-target couldn't be resolved in the workspace's symbol
-    /// table.  Either the workspace discovery missed a file (rare —
+    /// table. Either the workspace discovery missed a file (rare —
     /// the audit walker scans the manifest's tree) or the apply-
     /// target is a built-in kernel rule that lives outside the
     /// corpus (exotic).
@@ -117,7 +129,7 @@ impl LeafKind {
 }
 
 /// One leaf hit during a transitive walk — the leaf classification
-/// plus the apply-target name that produced it.  Carries enough
+/// plus the apply-target name that produced it. Carries enough
 /// context for the audit report to reconstruct the chain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeafHit {
@@ -127,13 +139,13 @@ pub struct LeafHit {
     /// The leaf's classification.
     pub kind: LeafKind,
     /// The chain of intermediate symbols traversed from the root
-    /// to this leaf (root excluded; leaf included).  Useful for
+    /// to this leaf (root excluded; leaf included). Useful for
     /// pinpointing which intermediate `_full` form leaks to a
     /// placeholder.
     pub chain: Vec<String>,
 }
 
-/// Composition of leaf classes for one transitive walk.  The L4
+/// Composition of leaf classes for one transitive walk. The L4
 /// promotion claim is "every leaf is `KernelStrict` or
 /// `FrameworkAxiom`" — i.e., `placeholder_axiom == 0` AND
 /// `unresolved == 0`.
@@ -173,6 +185,7 @@ impl LeafComposition {
 
 /// One symbol's classification in the workspace-wide symbol table.
 ///
+
 /// At graph-construction time every theorem / axiom declaration in
 /// the workspace is inserted with one of the three entry kinds.
 /// `Theorem` entries carry their proof body so the walker can recurse;
@@ -183,7 +196,7 @@ pub enum SymbolEntry {
     /// `apply` callsites.
     Theorem {
         /// Names of apply-targets discovered in the proof body
-        /// (in declaration order).  Pre-extracted to keep the
+        /// (in declaration order). Pre-extracted to keep the
         /// recursive walker free of AST dependencies.
         apply_targets: Vec<String>,
     },
@@ -213,7 +226,7 @@ impl SymbolEntry {
     }
 }
 
-/// Workspace-wide symbol table.  Built once per audit run from a
+/// Workspace-wide symbol table. Built once per audit run from a
 /// scan of every `.vr` file under the manifest root.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ApplyGraph {
@@ -221,13 +234,13 @@ pub struct ApplyGraph {
 }
 
 impl ApplyGraph {
-    /// Construct a fresh, empty graph.  Populate via [`ApplyGraph::insert`]
+    /// Construct a fresh, empty graph. Populate via [`ApplyGraph::insert`]
     /// before traversing.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Insert a symbol with its pre-classified entry.  Repeated
+    /// Insert a symbol with its pre-classified entry. Repeated
     /// inserts of the same name overwrite (last-write-wins) — useful
     /// when a workspace file has both an `axiom` declaration and a
     /// later `theorem` promotion sharing the same identifier.
@@ -235,7 +248,7 @@ impl ApplyGraph {
         self.entries.insert(name.into(), entry);
     }
 
-    /// Look up a symbol's entry by name.  Returns `None` for
+    /// Look up a symbol's entry by name. Returns `None` for
     /// undeclared symbols (the walker treats those as
     /// [`LeafKind::Unresolved`]).
     pub fn get(&self, name: &str) -> Option<&SymbolEntry> {
@@ -243,17 +256,199 @@ impl ApplyGraph {
     }
 }
 
+/// One theorem that transitively depends on a target axiom, with
+/// the chain of intermediate symbols leading from the theorem to
+/// the axiom. Returned by [`dependent_theorems`] for diagnostic
+/// rendering (task #318 / #188).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DependentTheorem {
+    /// The theorem's resolved symbol name.
+    pub theorem: String,
+    /// Chain of symbols from the theorem down to the target axiom
+    /// (theorem first, axiom last). Useful for explaining *why*
+    /// a particular theorem depends on the broken axiom.
+    pub chain: Vec<String>,
+}
+
+/// **Reverse-walk the apply-graph from `axiom_name`** and enumerate
+/// every theorem whose transitive proof depends on the named axiom.
+///
+
+/// Algorithm: build a reverse adjacency map (axiom → callers) by
+/// walking every theorem's `apply_targets` once, then BFS forward
+/// from `axiom_name` over the reverse edges, collecting reachable
+/// theorem nodes. Cycle-safe via the visited set, so mutual
+/// recursion / self-reference terminates.
+///
+
+/// Each returned [`DependentTheorem`] carries the chain of
+/// intermediate symbols from the theorem down to the axiom. When
+/// multiple chains reach the axiom from the same theorem, the
+/// shortest path (BFS) is recorded; the diagnostic only needs
+/// some witness, not every chain.
+///
+
+/// **Architectural rationale (task #318).** When an axiom rejects
+/// at compile time, mathematicians shouldn't have to manually trace
+/// dependency chains in a 200-theorem corpus. This walker
+/// transforms the apply-graph from L4-audit infrastructure into a
+/// diagnostic primitive — the data already exists; the walker
+/// surfaces it.
+///
+
+/// **Performance**: O(N + E) where N = symbols, E = total
+/// apply-edges in the workspace. Microsecond-scale on the MSFS
+/// corpus (~100 theorems, ~500 edges).
+///
+
+/// **Returned order**: lexicographic by theorem name, so the
+/// diagnostic's listing is deterministic across runs.
+pub fn dependent_theorems(graph: &ApplyGraph, axiom_name: &str) -> Vec<DependentTheorem> {
+    // Reverse adjacency: child → list of parents that apply child.
+    let mut reverse: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (parent, entry) in graph.entries.iter() {
+        if let SymbolEntry::Theorem { apply_targets } = entry {
+            for child in apply_targets {
+                reverse
+                    .entry(child.clone())
+                    .or_default()
+                    .push(parent.clone());
+            }
+        }
+    }
+
+    // BFS from axiom_name over reverse edges, recording every
+    // theorem reachable upstream + the chain that proves it.
+    //
+
+    // We BFS rather than DFS so the recorded chain is the shortest
+    // dependency path — most diagnostically relevant for the user.
+    let mut found: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut queue: std::collections::VecDeque<(String, Vec<String>)> =
+        std::collections::VecDeque::new();
+    queue.push_back((axiom_name.to_string(), vec![axiom_name.to_string()]));
+    let mut visited: HashSet<String> = HashSet::new();
+    visited.insert(axiom_name.to_string());
+
+    while let Some((current, chain_to_current)) = queue.pop_front() {
+        let parents = match reverse.get(&current) {
+            Some(p) => p,
+            None => continue,
+        };
+        for parent in parents {
+            if visited.contains(parent) {
+                continue;
+            }
+            visited.insert(parent.clone());
+
+            // Build chain from theorem (parent) down to axiom: the
+            // parent is prepended to chain_to_current so the result
+            // reads top-to-bottom (theorem → ... → axiom).
+            let mut chain = Vec::with_capacity(chain_to_current.len() + 1);
+            chain.push(parent.clone());
+            chain.extend(chain_to_current.iter().cloned());
+
+            // Only record actual theorem nodes (not intermediate
+            // axioms or unresolved entries). Intermediate theorems
+            // also propagate up the reverse edges so distant callers
+            // still get discovered.
+            if matches!(graph.get(parent), Some(SymbolEntry::Theorem { .. })) {
+                found.entry(parent.clone()).or_insert_with(|| chain.clone());
+            }
+            queue.push_back((parent.clone(), chain));
+        }
+    }
+
+    let mut out: Vec<DependentTheorem> = found
+        .into_iter()
+        .map(|(theorem, chain)| DependentTheorem { theorem, chain })
+        .collect();
+    out.sort_by(|a, b| a.theorem.cmp(&b.theorem));
+    out
+}
+
+/// **Render a dependency-aware diagnostic note** for an axiom rejection.
+///
+
+/// Returns a multi-line `String` formatted as a `note:` block listing
+/// every theorem whose transitive proof depends on `axiom_name`.
+/// When the axiom has no dependents, returns `None` so the caller can
+/// skip emitting an empty note.
+///
+
+/// `theorem_sources` is an optional map from theorem name to source
+/// path; when provided, each listed dependent is rendered with its
+/// `(file_path)` location for easy navigation. When absent, the
+/// listing is name-only.
+///
+
+/// Intended layout:
+///
+
+/// ```text
+/// note: 7 downstream theorems transitively depend on this axiom:
+///  - msfs_lemma_3_4_outputs_in_s_s_global (math/s_definable/lemma_3_4.vr)
+///  - msfs_theorem_5_1_afnt_alpha (math/frameworks/msfs/05_afnt_alpha.vr)
+///  - ...
+/// ```
+///
+
+/// Caller responsibility: this function only formats; it does not
+/// emit to a diagnostic surface. Callers attach the returned string
+/// to the existing diagnostic (e.g., via the verum_diagnostics
+/// `Diagnostic` builder, an `eprintln!` call, or a JSON `note` field).
+pub fn render_dependent_theorems_note(
+    graph: &ApplyGraph,
+    axiom_name: &str,
+    theorem_sources: Option<&BTreeMap<String, std::path::PathBuf>>,
+) -> Option<String> {
+    let deps = dependent_theorems(graph, axiom_name);
+    if deps.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    out.push_str(&format!(
+        "note: {} downstream theorem{} transitively depend{} on this axiom:\n",
+        deps.len(),
+        if deps.len() == 1 { "" } else { "s" },
+        if deps.len() == 1 { "s" } else { "" },
+    ));
+    let max_name_width = deps
+        .iter()
+        .map(|d| d.theorem.len())
+        .max()
+        .unwrap_or(0);
+    for dep in &deps {
+        match theorem_sources.and_then(|m| m.get(&dep.theorem)) {
+            Some(path) => {
+                out.push_str(&format!(
+                    "  - {:<width$}  ({})\n",
+                    dep.theorem,
+                    path.display(),
+                    width = max_name_width,
+                ));
+            }
+            None => {
+                out.push_str(&format!("  - {}\n", dep.theorem));
+            }
+        }
+    }
+    Some(out)
+}
+
 /// Walk the transitive apply-graph rooted at `root` and classify
-/// every leaf.  The walker visits each symbol at most once
+/// every leaf. The walker visits each symbol at most once
 /// (cycle-safe via the visited set), so mutual recursion is
 /// finite-time.
 ///
+
 /// `max_depth` caps the walk depth as a safety stop (defensive: a
 /// well-formed corpus reaches every leaf in 4–6 hops, but a
 /// pathological cycle around the visited-set would still terminate
 /// finitely; the depth cap is just a *display-friendly* termination
 /// criterion).
 ///
+
 /// Returns the [`LeafComposition`] — read-only summary the audit
 /// gate emits as JSON / human-readable text.
 pub fn walk_transitive(
@@ -297,7 +492,7 @@ fn walk_node(
 
     match graph.get(name) {
         Some(SymbolEntry::Theorem { apply_targets }) => {
-            // Recurse into each apply-target.  Theorem nodes never
+            // Recurse into each apply-target. Theorem nodes never
             // produce a leaf hit themselves — only their descendants do.
             // Snapshot the targets so the borrow on `graph` doesn't
             // interfere with the recursive borrow of `composition`.
@@ -317,24 +512,27 @@ fn walk_node(
         }
         None => {
             // Symbol not in the workspace — apply name-based fallback
-            // classification.  Three workspace-boundary patterns
+            // classification. Three workspace-boundary patterns
             // surface as recognised leaves rather than Unresolved:
             //
-            //   1. `kernel_*` — stdlib kernel bridges outside the
-            //      audited corpus tree.  Treat as `KernelStrict`
-            //      (the dispatcher is the algorithmic witness).
+
+            //  1. `kernel_*` — stdlib kernel bridges outside the
+            //  audited corpus tree. Treat as `KernelStrict`
+            //  (the dispatcher is the algorithmic witness).
             //
-            //   2. Foreign-framework prefixes (`mathlib4.`,
-            //      `coq_stdlib.`, `lean4_stdlib.`, `zfc.`,
-            //      `mathlib.`) — apply targets cited from upstream
-            //      vetted proofs.  Treat as `FrameworkAxiom` (the
-            //      audit-report records the citation; the reviewer
-            //      independently verifies the upstream proof).
-            //      This is the workspace-boundary mirror of the
-            //      `@framework(...)` attribute check on axioms.
+
+            //  2. Foreign-framework prefixes (`mathlib4.`,
+            //  `coq_stdlib.`, `lean4_stdlib.`, `zfc.`,
+            //  `mathlib.`) — apply targets cited from upstream
+            //  vetted proofs. Treat as `FrameworkAxiom` (the
+            //  audit-report records the citation; the reviewer
+            //  independently verifies the upstream proof).
+            //  This is the workspace-boundary mirror of the
+            //  `@framework(...)` attribute check on axioms.
             //
-            //   3. Everything else — `Unresolved` so the audit
-            //      report flags the workspace-discovery gap loudly.
+
+            //  3. Everything else — `Unresolved` so the audit
+            //  report flags the workspace-discovery gap loudly.
             let kind = if name.starts_with("kernel_") {
                 LeafKind::KernelStrict
             } else if is_foreign_framework_target(name) {
@@ -358,29 +556,33 @@ fn walk_node(
 /// proof* (mathlib4, Coq stdlib, Lean stdlib, ZFC) versus a genuine
 /// workspace-discovery gap.
 ///
+
 /// **Recognised prefixes** (matched at the start of the dotted path):
 ///
-///   - `mathlib4.`      — Lean 4 mathlib
-///   - `mathlib.`       — generic mathlib (Lean 3 / 4 hybrid corpus)
-///   - `coq_stdlib.`    — Coq standard library
-///   - `lean4_stdlib.`  — Lean 4 core library
-///   - `lean_stdlib.`   — Lean 3 / generic Lean library
-///   - `zfc.`           — ZFC-foundational citations (e.g.
-///                        `zfc.extensionality`, `zfc.foundation`)
-///   - `agda_stdlib.`   — Agda standard library
-///   - `isabelle.`      — Isabelle/HOL library
+
+///  - `mathlib4.` — Lean 4 mathlib
+///  - `mathlib.` — generic mathlib (Lean 3 / 4 hybrid corpus)
+///  - `coq_stdlib.` — Coq standard library
+///  - `lean4_stdlib.` — Lean 4 core library
+///  - `lean_stdlib.` — Lean 3 / generic Lean library
+///  - `zfc.` — ZFC-foundational citations (e.g.
+///  `zfc.extensionality`, `zfc.foundation`)
+///  - `agda_stdlib.` — Agda standard library
+///  - `isabelle.` — Isabelle/HOL library
 ///
+
 /// **Why this lives in the apply-graph walker, not on the
 /// `@framework` attribute**: the attribute is on the *target*'s
-/// declaration site (the lemma stub).  When the target lives outside
+/// declaration site (the lemma stub). When the target lives outside
 /// the audited workspace tree, there's no `@framework(...)` attribute
-/// available — the walker only has the apply-callsite name.  The
+/// available — the walker only has the apply-callsite name. The
 /// prefix-based classification mirrors the `kernel_*` workspace-
 /// boundary fallback that was already in place for stdlib kernel
 /// bridges.
 ///
+
 /// **Discharges**: `kernel_v0/lemmas/*.vr` apply chains land on these
-/// prefixes (e.g., `apply mathlib4.lambda.ChurchRosser`).  Without
+/// prefixes (e.g., `apply mathlib4.lambda.ChurchRosser`). Without
 /// this classifier they'd surface as `Unresolved` and the audit gate
 /// would penalise the L4-load-bearing claim.
 pub fn is_foreign_framework_target(name: &str) -> bool {
@@ -405,11 +607,12 @@ pub fn is_foreign_framework_target(name: &str) -> bool {
 // =============================================================================
 
 /// Walk a `ProofBody` and collect every `apply <symbol>(args)`
-/// target's name in encounter order.  Skips non-apply tactics.
+/// target's name in encounter order. Skips non-apply tactics.
 ///
+
 /// This is the compile-time half of the apply-graph: invoking it on
 /// every theorem in the workspace populates each `SymbolEntry::Theorem`'s
-/// `apply_targets` list.  Pure AST walk — no semantic resolution.
+/// `apply_targets` list. Pure AST walk — no semantic resolution.
 pub fn extract_apply_targets(body: &ProofBody) -> Vec<String> {
     let mut targets = Vec::new();
     walk_proof_body(body, &mut targets);
@@ -461,8 +664,8 @@ fn walk_tactic(tactic: &TacticExpr, targets: &mut Vec<String>) {
     match tactic {
         TacticExpr::Apply { lemma, args } => {
             // Two parser shapes (matches bridge_discharge_check):
-            //   * Apply{lemma:Call{func, args:[..]}, args:[]}
-            //   * Apply{lemma:Path, args:[..]}
+            //  * Apply{lemma:Call{func, args:[..]}, args:[]}
+            //  * Apply{lemma:Path, args:[..]}
             let effective_lemma: &Expr = match &lemma.kind {
                 ExprKind::Call { func, .. } if args.is_empty() => func.as_ref(),
                 _ => lemma,
@@ -474,7 +677,7 @@ fn walk_tactic(tactic: &TacticExpr, targets: &mut Vec<String>) {
                 // would otherwise treat "trivial" as a theorem
                 // reference and the apply-graph would leak an
                 // unresolved leaf for what is in fact a primitive
-                // tactic invocation.  These names are not theorems
+                // tactic invocation. These names are not theorems
                 // and never resolve in the symbol table.
                 if !is_builtin_tactic_name(&name) {
                     targets.push(name);
@@ -499,14 +702,15 @@ fn walk_tactic(tactic: &TacticExpr, targets: &mut Vec<String>) {
     }
 }
 
-/// Built-in tactic name set.  Source like `apply trivial;` parses
+/// Built-in tactic name set. Source like `apply trivial;` parses
 /// as `Apply { lemma: Path(trivial) }` rather than `TacticExpr::Trivial`
 /// because the parser doesn't (yet) lower bare-name tactic invocations
-/// into the canonical TacticExpr variant.  The apply-graph walker
+/// into the canonical TacticExpr variant. The apply-graph walker
 /// filters these names so the chain doesn't leak unresolved leaves
 /// for primitive-tactic calls — they're not theorem references at
 /// the kernel level.
 ///
+
 /// The list mirrors the canonical `TacticExpr::*` primitive variants
 /// + a small set of stdlib-built-in alias names that elaborator-time
 /// resolution treats as primitives (`refl` for Reflexivity, etc.).
@@ -637,7 +841,7 @@ mod tests {
     #[test]
     fn placeholder_in_intermediate_full_form_breaks_chain() {
         // The defect this gate exists to catch: stdlib_full bottoms
-        // out at a placeholder.  The corpus theorem looked clean to
+        // out at a placeholder. The corpus theorem looked clean to
         // the immediate-discharge gate but its transitive chain leaks.
         let g = graph_with(vec![
             (
@@ -686,7 +890,7 @@ mod tests {
     fn kernel_prefixed_unresolved_classifies_as_kernel_strict() {
         // Kernel bridges declared in the verum stdlib (outside the
         // audited corpus tree) appear as un-symbol-tabled apply
-        // targets.  The `kernel_` naming convention is the
+        // targets. The `kernel_` naming convention is the
         // architectural contract — name-based fallback classifies
         // them as KernelStrict so the corpus's L4 verdict isn't
         // penalised for the workspace boundary.
@@ -704,7 +908,7 @@ mod tests {
 
     #[test]
     fn cycle_detection_terminates() {
-        // a → b → a (cycle).  Walker must terminate; both nodes are
+        // a → b → a (cycle). Walker must terminate; both nodes are
         // theorems with no real leaves, so the composition is empty.
         let g = graph_with(vec![
             (
@@ -790,7 +994,7 @@ mod tests {
     #[test]
     fn foreign_framework_prefixes_classify_as_framework_axiom() {
         // Recognised foreign-framework prefixes should land on
-        // `FrameworkAxiom`, not `Unresolved`.  This covers the
+        // `FrameworkAxiom`, not `Unresolved`. This covers the
         // `kernel_v0/lemmas/*.vr` apply-chain pattern.
         for prefix in &[
             "mathlib4.lambda.ChurchRosser",
@@ -832,7 +1036,7 @@ mod tests {
     #[test]
     fn foreign_framework_apply_chain_is_l4_load_bearing() {
         // Pattern: theorem applies a foreign-framework target by name
-        // (no workspace declaration).  The walker's name-based
+        // (no workspace declaration). The walker's name-based
         // fallback must recognise the prefix and classify as
         // `FrameworkAxiom`, keeping the L4 verdict load-bearing.
         let g = graph_with(vec![(
@@ -853,7 +1057,7 @@ mod tests {
     #[test]
     fn builtin_tactic_names_are_recognised() {
         // Filter set must include every TacticExpr primitive variant
-        // name + common stdlib aliases.  Drift in the elaborator's
+        // name + common stdlib aliases. Drift in the elaborator's
         // primitive-tactic list flips this test.
         for name in [
             "trivial",
@@ -900,5 +1104,309 @@ mod tests {
                 name,
             );
         }
+    }
+
+    // ============================================================
+    // dependent_theorems — task #318 / #188 reverse-walk
+    // ============================================================
+
+    #[test]
+    fn dependent_theorems_empty_graph_returns_empty() {
+        let g = ApplyGraph::new();
+        let deps = dependent_theorems(&g, "kernel_xyz_strict");
+        assert!(
+            deps.is_empty(),
+            "empty graph must produce no dependents; got {:?}",
+            deps,
+        );
+    }
+
+    #[test]
+    fn dependent_theorems_no_callers_returns_empty() {
+        let g = graph_with(vec![
+            ("orphan_axiom", SymbolEntry::PlaceholderAxiom),
+            (
+                "thm_unrelated",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["other_axiom".to_string()],
+                },
+            ),
+            ("other_axiom", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let deps = dependent_theorems(&g, "orphan_axiom");
+        assert!(
+            deps.is_empty(),
+            "axiom with no callers must have zero dependents; got {:?}",
+            deps,
+        );
+    }
+
+    #[test]
+    fn dependent_theorems_single_direct_dependency() {
+        let g = graph_with(vec![
+            (
+                "thm_a",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["axiom_x".to_string()],
+                },
+            ),
+            ("axiom_x", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let deps = dependent_theorems(&g, "axiom_x");
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].theorem, "thm_a");
+        assert_eq!(
+            deps[0].chain,
+            vec!["thm_a".to_string(), "axiom_x".to_string()],
+        );
+    }
+
+    #[test]
+    fn dependent_theorems_multi_level_transitive_chain() {
+        let g = graph_with(vec![
+            (
+                "thm_top",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["thm_mid".to_string()],
+                },
+            ),
+            (
+                "thm_mid",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["axiom_x".to_string()],
+                },
+            ),
+            ("axiom_x", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let deps = dependent_theorems(&g, "axiom_x");
+        let names: Vec<&str> = deps.iter().map(|d| d.theorem.as_str()).collect();
+        assert_eq!(names, vec!["thm_mid", "thm_top"]);
+        let top = deps.iter().find(|d| d.theorem == "thm_top").unwrap();
+        assert_eq!(
+            top.chain,
+            vec![
+                "thm_top".to_string(),
+                "thm_mid".to_string(),
+                "axiom_x".to_string(),
+            ],
+        );
+        let mid = deps.iter().find(|d| d.theorem == "thm_mid").unwrap();
+        assert_eq!(
+            mid.chain,
+            vec!["thm_mid".to_string(), "axiom_x".to_string()],
+        );
+    }
+
+    #[test]
+    fn dependent_theorems_multiple_callers() {
+        let g = graph_with(vec![
+            (
+                "thm_a",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["shared_axiom".to_string()],
+                },
+            ),
+            (
+                "thm_b",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["shared_axiom".to_string()],
+                },
+            ),
+            ("shared_axiom", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let deps = dependent_theorems(&g, "shared_axiom");
+        assert_eq!(deps.len(), 2);
+        let names: Vec<&str> = deps.iter().map(|d| d.theorem.as_str()).collect();
+        assert_eq!(names, vec!["thm_a", "thm_b"]);
+    }
+
+    #[test]
+    fn dependent_theorems_cycle_does_not_infinite_loop() {
+        // a → b → a (mutual recursion); both apply axiom_x.
+        let g = graph_with(vec![
+            (
+                "a",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["b".to_string(), "axiom_x".to_string()],
+                },
+            ),
+            (
+                "b",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["a".to_string(), "axiom_x".to_string()],
+                },
+            ),
+            ("axiom_x", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let deps = dependent_theorems(&g, "axiom_x");
+        let names: Vec<&str> = deps.iter().map(|d| d.theorem.as_str()).collect();
+        assert_eq!(names, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn dependent_theorems_diamond_dependency() {
+        let g = graph_with(vec![
+            (
+                "thm_top",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["thm_left".to_string(), "thm_right".to_string()],
+                },
+            ),
+            (
+                "thm_left",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["axiom_x".to_string()],
+                },
+            ),
+            (
+                "thm_right",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["axiom_x".to_string()],
+                },
+            ),
+            ("axiom_x", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let deps = dependent_theorems(&g, "axiom_x");
+        let names: Vec<&str> = deps.iter().map(|d| d.theorem.as_str()).collect();
+        assert_eq!(names, vec!["thm_left", "thm_right", "thm_top"]);
+        let top = deps.iter().find(|d| d.theorem == "thm_top").unwrap();
+        assert_eq!(top.chain.len(), 3, "diamond chain has length 3");
+        assert_eq!(top.chain.first().map(|s| s.as_str()), Some("thm_top"));
+        assert_eq!(top.chain.last().map(|s| s.as_str()), Some("axiom_x"));
+    }
+
+    #[test]
+    fn dependent_theorems_chain_is_shortest_via_bfs() {
+        // Two paths from thm_root to axiom_x: short (length 2) and
+        // long (length 4). BFS must pick the short one.
+        let g = graph_with(vec![
+            (
+                "thm_root",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["axiom_x".to_string(), "step_a".to_string()],
+                },
+            ),
+            (
+                "step_a",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["step_b".to_string()],
+                },
+            ),
+            (
+                "step_b",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["axiom_x".to_string()],
+                },
+            ),
+            ("axiom_x", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let deps = dependent_theorems(&g, "axiom_x");
+        let root = deps.iter().find(|d| d.theorem == "thm_root").unwrap();
+        assert_eq!(
+            root.chain,
+            vec!["thm_root".to_string(), "axiom_x".to_string()],
+            "BFS must record the shortest chain",
+        );
+    }
+
+    #[test]
+    fn dependent_theorems_self_reference_does_not_loop() {
+        let g = graph_with(vec![
+            (
+                "self_ref",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["self_ref".to_string(), "axiom_x".to_string()],
+                },
+            ),
+            ("axiom_x", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let deps = dependent_theorems(&g, "axiom_x");
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].theorem, "self_ref");
+    }
+
+    #[test]
+    fn render_dependent_theorems_note_returns_none_for_no_dependents() {
+        let g = graph_with(vec![("orphan", SymbolEntry::PlaceholderAxiom)]);
+        let note = render_dependent_theorems_note(&g, "orphan", None);
+        assert!(
+            note.is_none(),
+            "axiom with no dependents should render no note; got {:?}",
+            note,
+        );
+    }
+
+    #[test]
+    fn render_dependent_theorems_note_lists_each_dependent() {
+        let g = graph_with(vec![
+            (
+                "thm_alpha",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["axiom_x".to_string()],
+                },
+            ),
+            (
+                "thm_beta",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["axiom_x".to_string()],
+                },
+            ),
+            ("axiom_x", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let note = render_dependent_theorems_note(&g, "axiom_x", None)
+            .expect("note must render when dependents exist");
+        assert!(
+            note.contains("2 downstream theorems"),
+            "header must reflect dependent count; got: {}",
+            note,
+        );
+        assert!(note.contains("- thm_alpha"));
+        assert!(note.contains("- thm_beta"));
+    }
+
+    #[test]
+    fn render_dependent_theorems_note_singular_for_one_dependent() {
+        let g = graph_with(vec![
+            (
+                "thm_only",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["axiom_x".to_string()],
+                },
+            ),
+            ("axiom_x", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let note = render_dependent_theorems_note(&g, "axiom_x", None)
+            .expect("singular dependent must still render");
+        assert!(
+            note.contains("1 downstream theorem ") && note.contains("depends on"),
+            "singular grammar should be 'theorem depends'; got: {}",
+            note,
+        );
+    }
+
+    #[test]
+    fn render_dependent_theorems_note_includes_source_paths_when_provided() {
+        use std::path::PathBuf;
+        let g = graph_with(vec![
+            (
+                "thm_a",
+                SymbolEntry::Theorem {
+                    apply_targets: vec!["axiom_x".to_string()],
+                },
+            ),
+            ("axiom_x", SymbolEntry::PlaceholderAxiom),
+        ]);
+        let mut sources = BTreeMap::new();
+        sources.insert(
+            "thm_a".to_string(),
+            PathBuf::from("math/lemma_3_4.vr"),
+        );
+        let note = render_dependent_theorems_note(&g, "axiom_x", Some(&sources))
+            .expect("note must render");
+        assert!(
+            note.contains("math/lemma_3_4.vr"),
+            "source path must appear in rendered note; got: {}",
+            note,
+        );
     }
 }

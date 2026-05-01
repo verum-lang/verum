@@ -14,6 +14,7 @@
 )]
 // Comprehensive declaration parsing tests for Verum.
 //
+
 // This test suite covers all declaration forms:
 // - Function declarations
 // - Type declarations (records, variants, aliases)
@@ -2174,10 +2175,10 @@ implement<T> [T] {
 // NOTE: Disabled - this test relied on a temporary debug file
 // #[test]
 // fn test_exact_slice_content() {
-//     let source = include_str!("/tmp/slice_test_content.txt");
-//     // Add closing brace
-//     let source = format!("{}\n}}", source);
-//     assert_parses(&source);
+//  let source = include_str!("/tmp/slice_test_content.txt");
+//  // Add closing brace
+//  let source = format!("{}\n}}", source);
+//  assert_parses(&source);
 // }
 
 // Test full slice.vr file

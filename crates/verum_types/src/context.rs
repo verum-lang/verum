@@ -1,5 +1,6 @@
 //! Type context and environment for type checking.
 //!
+
 //! This module provides the typing context that tracks:
 //! - Variable bindings and their types
 //! - Type schemes for let-polymorphism
@@ -22,9 +23,11 @@ pub use verum_modules::ModuleId;
 
 /// A type scheme represents a polymorphic type: ∀α β. T
 ///
+
 /// This enables let-polymorphism where bound variables can
 /// be instantiated differently at each use site.
 ///
+
 /// Implicit arguments: compiler-inferred function arguments resolved by unification or type class search — Implicit arguments
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeScheme {
@@ -111,10 +114,12 @@ impl TypeScheme {
     /// Add type bounds to an existing scheme.
     /// Returns a new scheme with the added bounds.
     ///
+
     /// CRITICAL: This also adds any free vars from the bounds to the scheme's vars
     /// if not already present. This ensures that when instantiating, all vars
     /// in the bounds get substituted with fresh vars.
     ///
+
     /// For example, for `fn map<U, F: fn(T) -> U>` where T is from the impl block:
     /// - method_ty is `fn(F) -> Maybe<U>` with free vars {F, U}
     /// - but the bound `fn(T) -> U` has free var T
@@ -181,6 +186,7 @@ impl TypeScheme {
 
     /// Instantiate the type scheme and return both the type and the ordered list of fresh type vars
     ///
+
     /// This is critical for correctly binding receiver type args to method type params.
     /// The returned Vec<TypeVar> preserves the order of vars in the scheme, which should match
     /// the order of type params in the original implement block + method declaration.
@@ -202,6 +208,7 @@ impl TypeScheme {
 
     /// Instantiate the type scheme and return the type, fresh vars, and which are implicit.
     ///
+
     /// This is needed for implicit argument resolution where we need to know which
     /// fresh type variables should be inferred vs. explicitly provided.
     /// Implicit arguments: compiler-inferred function arguments resolved by unification or type class search
@@ -230,11 +237,13 @@ impl TypeScheme {
 
     /// Instantiate the type scheme and return type, fresh vars, and type bounds mapped to fresh vars.
     ///
+
     /// This is essential for proper closure type inference:
     /// - When a method like `map<U, F: fn(T) -> U>` is instantiated
     /// - We need to know that the fresh var for F has a function type bound
     /// - This enables checking closures against bounded type variables
     ///
+
     /// Returns: (instantiated_type, fresh_vars, type_bounds_for_fresh_vars)
     /// The Map maps fresh TypeVar to its type bounds (if any).
     pub fn instantiate_with_type_bounds(&self) -> (Type, List<TypeVar>, Map<TypeVar, List<Type>>) {
@@ -271,6 +280,7 @@ impl TypeScheme {
 
     /// Instantiate the type scheme and return the protocol bounds mapped to fresh vars.
     ///
+
     /// Returns (instantiated_type, fresh_vars, protocol_bounds_for_fresh_vars).
     /// Used at call sites to verify concrete types satisfy protocol constraints.
     pub fn instantiate_with_protocol_bounds(&self) -> (Type, List<TypeVar>, Map<TypeVar, List<ProtocolBound>>) {
@@ -313,6 +323,7 @@ impl TypeScheme {
 /// Type parameter with bounds and variance
 /// Tensor types: Tensor<T, Shape: meta [usize]> with compile-time shape tracking for N-dimensional arrays
 ///
+
 /// Used for generic functions and types with protocol constraints.
 /// Example: `fn sort<T>(list: List<T>) where type T: Ord { ... }`
 #[derive(Debug, Clone, PartialEq)]
@@ -422,10 +433,12 @@ impl UniverseConstraint {
     /// Check if this constraint is satisfied given a substitution.
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
     ///
+
     /// Returns:
     /// - `true` if the constraint is definitely satisfied or cannot be falsified
     /// - `false` if the constraint is definitely violated
     ///
+
     /// For constraints involving unresolved variables, we use structural analysis:
     /// - Variables with equal IDs are considered equal
     /// - Succ(v) > v is always true
@@ -744,6 +757,7 @@ impl UniverseContext {
     /// Solve universe constraints using iterative constraint propagation.
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Universe polymorphism
     ///
+
     /// The algorithm uses a multi-phase approach:
     /// 1. Propagate equality constraints (unification)
     /// 2. Propagate successor constraints (v = u + 1)
@@ -751,6 +765,7 @@ impl UniverseContext {
     /// 4. Propagate ordering constraints (u < v, u <= v)
     /// 5. Assign concrete levels to remaining variables using lower bounds
     ///
+
     /// Returns Ok(()) if all constraints are satisfiable, Err otherwise.
     pub fn solve(&mut self) -> Result<(), Text> {
         let max_iterations = 100;
@@ -1191,9 +1206,11 @@ impl Default for UniverseContext {
 
 /// Type environment maps variables to type schemes.
 ///
+
 /// This supports lexical scoping through a chain of environments.
 /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Module awareness for type resolution
 ///
+
 /// PERF NOTE: Uses Box for parent. The child() method still clones, but
 /// push_scope/pop_scope provide zero-copy scope management for the common
 /// case of lexical scoping. Use push_scope/pop_scope when possible.
@@ -1228,6 +1245,7 @@ impl TypeEnv {
 
     /// Create a child environment (nested scope)
     ///
+
     /// NOTE: This clones the current environment. For better performance,
     /// use push_scope/pop_scope which avoids cloning.
     pub fn child(&self) -> Self {
@@ -1242,6 +1260,7 @@ impl TypeEnv {
 
     /// Push a new scope (mutates the current environment to have a new child scope)
     ///
+
     /// PERF: This is the efficient way to create nested scopes - no cloning!
     /// The current environment is moved into parent, not cloned.
     /// Inherits current_module and universe_ctx like child() does.
@@ -1256,6 +1275,7 @@ impl TypeEnv {
 
     /// Pop the current scope and restore the parent
     ///
+
     /// PERF: Zero-copy restoration of parent scope.
     pub fn pop_scope(&mut self) {
         if let Some(parent) = self.parent.take() {
@@ -1288,6 +1308,7 @@ impl TypeEnv {
 
     /// Remove a binding from the current scope (only).
     ///
+
     /// Does NOT reach into parent scopes — caller discipline: only use
     /// this to evict a binding owned by the current scope (e.g. a stdlib
     /// variant-constructor that a user type declaration should shadow).
@@ -1337,6 +1358,7 @@ impl TypeEnv {
 
     /// Generalize a type relative to this environment
     ///
+
     /// This creates a type scheme by quantifying over free variables
     /// that don't appear in the environment (let-polymorphism).
     pub fn generalize(&self, ty: Type) -> TypeScheme {
@@ -1361,6 +1383,7 @@ impl TypeEnv {
     /// Generalize a type into a type scheme, tracking which vars are implicit.
     /// Implicit arguments: compiler-inferred function arguments resolved by unification or type class search
     ///
+
     /// This enables functions with implicit parameters: `fn id<{T}>(x: T) -> T`
     pub fn generalize_with_implicit(
         &self,
@@ -1427,6 +1450,7 @@ impl TypeEnv {
     /// Check if type satisfies parameter bounds
     /// Generic bounds checking: verifying type arguments satisfy protocol constraints at instantiation sites
     ///
+
     /// Performs actual bounds checking using the provided ProtocolChecker.
     /// Returns the bounds that need to be satisfied if a protocol checker is not provided.
     pub fn check_param_bounds(
@@ -1457,6 +1481,7 @@ impl TypeEnv {
     /// Get the bounds for a type parameter (for external checking)
     /// Generic bounds checking: verifying type arguments satisfy protocol constraints at instantiation sites
     ///
+
     /// Returns the protocol bounds for a type parameter, or None if not found.
     pub fn get_param_bounds(&self, param_name: &str) -> Maybe<List<ProtocolBound>> {
         self.get_type_param(param_name)
@@ -1558,6 +1583,7 @@ impl Default for TypeEnv {
 
 /// Type context for the entire type checker.
 ///
+
 /// This maintains global state including:
 /// - Current type environment
 /// - Protocol implementations
@@ -1594,6 +1620,7 @@ pub struct TypeContext {
     /// Protocol bounds on type variables
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .4 - GAT where clause constraints
     ///
+
     /// Maps TypeVar -> List<ProtocolBound> for constraint checking during
     /// GAT instantiation and generic function type checking.
     /// Example: `fn sort<T: Ord>(list: List<T>) -> List<T>` binds T -> [Ord]
@@ -1601,6 +1628,7 @@ pub struct TypeContext {
 
     /// Audit-A4: meta-parameter / const-generic environment.
     ///
+
     /// Maps a meta-param name (e.g. `N` in `fn foo<N: meta usize>()`)
     /// to its current binding. Populated during generic-param
     /// processing in `infer.rs` at the `GenericParamKind::Meta` and
@@ -1610,6 +1638,7 @@ pub struct TypeContext {
     /// (rather than translating to an unbound Z3 variable that the
     /// solver couldn't satisfy).
     ///
+
     /// `Bound(value)` means a concrete instantiation has been seen
     /// (e.g. `foo::<5>()` sets `N -> Bound(MetaValue::Int(5))`).
     /// `Symbolic` means the meta-param is in scope but unbound — its
@@ -1620,6 +1649,7 @@ pub struct TypeContext {
 
 /// Audit-A4: binding of a meta / const-generic parameter.
 ///
+
 /// The environment in `TypeContext::meta_param_environment` carries
 /// these so refinement-predicate substitution can either inline a
 /// concrete value (`Bound`) or preserve the symbolic reference
@@ -1639,15 +1669,18 @@ pub enum MetaParamBinding {
 impl TypeContext {
     /// Create a new type context with language primitives only.
     ///
+
     /// This is the STDLIB-AGNOSTIC constructor that includes only:
     /// - Language primitives (Bool, Unit)
     /// - Compiler intrinsics (transmute, alloc, free, etc.)
     /// - CBGR type aliases (RawPtr, Epoch)
     ///
+
     /// **STDLIB TYPES ARE NOT INCLUDED** - they must be loaded from:
     /// - core/*.vr source files (via pipeline.load_stdlib_modules())
     /// - Pre-compiled VBC archives (via CoreMetadata)
     ///
+
     /// Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files
     pub fn new() -> Self {
         let mut ctx = Self::new_minimal();
@@ -1663,9 +1696,11 @@ impl TypeContext {
 
     /// Create a minimal type context without any types.
     ///
+
     /// Used for stdlib bootstrap where types are registered dynamically
     /// as stdlib .vr files are parsed.
     ///
+
     /// Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files
     pub fn new_minimal() -> Self {
         Self {
@@ -1704,10 +1739,12 @@ impl TypeContext {
 
     /// Add ONLY language primitive type constructors.
     ///
+
     /// STDLIB-AGNOSTIC: This method adds ONLY true language primitives:
     /// - Bool (true | false)
     /// - Unit (())
     ///
+
     /// All other types (Maybe, Result, List, Map, Set, Heap, Shared)
     /// MUST come from stdlib source files, NOT hardcoded here.
     fn add_primitive_constructors(&mut self) {
@@ -1730,13 +1767,16 @@ impl TypeContext {
 
     /// Add low-level type aliases for CBGR memory safety system.
     ///
+
     /// STDLIB-AGNOSTIC: These are language-level type aliases, NOT stdlib types.
     /// They define raw pointer and epoch types used by the CBGR memory model.
     ///
+
     /// NOTE: Intrinsic FUNCTIONS (transmute, alloc, free, etc.) are registered
     /// in TypeChecker::register_primitives() to keep all function signatures
     /// in one place. This function only defines TYPE ALIASES.
     ///
+
     /// Type aliases:
     /// - RawPtr: raw mutable pointer (void* equivalent)
     /// - u32: 32-bit unsigned integer (for CBGR generation counters)
@@ -1768,9 +1808,11 @@ impl TypeContext {
 
     /// Add protocol implementations for language primitive types.
     ///
+
     /// IMPORTANT: These are NOT stdlib types - Int, Text, Bool, Float are
     /// language primitives with built-in protocol implementations.
     ///
+
     /// Protocols:
     /// - Eq: equality comparison (==, !=)
     /// - Ord: ordering comparison (<, <=, >, >=)
@@ -1779,6 +1821,7 @@ impl TypeContext {
     /// - Mul: multiplication (*)
     /// - Div: division (/)
     ///
+
     /// These are part of the language specification, not stdlib.
     fn add_primitive_protocol_impls(&mut self) {
         // Int implements all numeric protocols
@@ -1811,9 +1854,11 @@ impl TypeContext {
 
     /// Register a stdlib type dynamically from parsed source.
     ///
+
     /// STDLIB-AGNOSTIC: This method is used by the compilation pipeline
     /// to register types discovered in core/*.vr source files.
     ///
+
     /// Example: When parsing core/base/maybe.vr, the compiler calls:
     /// `ctx.register_stdlib_type("Maybe", maybe_type, maybe_constructors)`
     pub fn register_stdlib_type(
@@ -1829,6 +1874,7 @@ impl TypeContext {
 
     /// Register a generic stdlib type with type parameters.
     ///
+
     /// STDLIB-AGNOSTIC: For generic types like Maybe<T>, Result<T,E>, List<T>.
     pub fn register_generic_stdlib_type(
         &mut self,
@@ -1859,14 +1905,17 @@ impl TypeContext {
 
     /// Add a protocol to the registry
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Complete Protocol System
     /// Protocol coherence: ensuring unique implementations across the program, orphan rules, overlap detection — .1 - Coherence Rules
     ///
+
     /// This registers a protocol in the type context, enabling:
     /// - Type checking of protocol implementations
     /// - Protocol bound verification on generic types
     /// - VTable generation for dynamic dispatch
     ///
+
     /// The protocol registry tracks:
     /// - Protocol name -> set of implementing types
     /// - Each implementing type maps to its implementation details
@@ -1919,6 +1968,7 @@ impl TypeContext {
 
     /// Iterate over all type definitions.
     ///
+
     /// Returns an iterator over (name, type) pairs. Used by two-pass type
     /// resolution to verify that no placeholder types remain after resolution.
     pub fn all_types(&self) -> impl Iterator<Item = (&Text, &Type)> {
@@ -1966,14 +2016,17 @@ impl TypeContext {
 
     /// Generalize a type with ordered type parameter names
     ///
+
     /// This creates a type scheme by quantifying over type variables in the specified order.
     /// Uses lookup_type to find type params which are stored in type_defs (not env.bindings).
     ///
+
     /// This is critical for correct type argument binding in generic method calls:
     /// - For `implement<L, R> Either<L, R> { fn map_left<L2>(...) }` with receiver `Either<Int, Text>`
     /// - We need vars = [L, R, L2] so that Int binds to L and Text binds to R
     /// - Using unordered free_vars() could produce [L2, R, L] causing wrong bindings
     ///
+
     /// CRITICAL: For methods, ALL impl type params MUST be included in the scheme even if
     /// they don't appear in the function type (because self was excluded). This ensures
     /// proper alignment: receiver_type_args[i] binds to scheme.vars[i].
@@ -1991,6 +2044,7 @@ impl TypeContext {
         // This maintains positional alignment for method call binding where
         // receiver_type_args[i] must bind to scheme.vars[i].
         //
+
         // BEWARE: this variant resolves TypeVars by *name*. If the
         // calling context has shadowed one of `ordered_param_names`
         // with a later `define_type` (e.g. method-level params
@@ -2032,6 +2086,7 @@ impl TypeContext {
     /// the impl and method TypeVars separately, so pass them in the
     /// correct order directly.
     ///
+
     /// `ordered_vars` should list impl-level TypeVars first, in
     /// declaration order, followed by method-level TypeVars in
     /// declaration order. Any additional free_vars not already in
@@ -2169,6 +2224,7 @@ impl TypeContext {
     /// Look up a qualified type by path (e.g., "Module.Type" or "module::type")
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Path-based type resolution
     ///
+
     /// Supports both dot (.) and double-colon (::) separators for qualified paths.
     /// Resolution strategy:
     /// 1. Parse the path into module segments and type name
@@ -2229,6 +2285,7 @@ impl TypeContext {
     /// Get the module ID that defines a type
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Reverse module lookup
     ///
+
     /// This allows determining which module a type belongs to,
     /// useful for visibility checking and qualified name generation.
     pub fn get_type_module(&self, type_name: &str) -> Option<ModuleId> {
@@ -2244,6 +2301,7 @@ impl TypeContext {
     /// Look up a type with visibility checking
     /// Visibility and access control: private (default), public, cog-public, module-scoped
     ///
+
     /// Returns the type only if it's accessible from the current module.
     /// Private types are only accessible within their defining module.
     pub fn lookup_type_visible(
@@ -2280,32 +2338,40 @@ impl TypeContext {
     /// Add a protocol bound to a type variable
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .4 - GAT where clause constraints
     ///
+
     /// This method tracks protocol bounds on type variables for later verification.
     /// Used primarily during GAT instantiation to apply where clause constraints.
     ///
+
     /// # Protocol Bound Tracking
     ///
+
     /// When processing generic declarations like:
     /// ```verum
     /// fn sort<T: Ord + Clone>(list: List<T>) -> List<T>
     /// ```
     ///
+
     /// This method is called twice:
     /// 1. `add_protocol_bound(T_var, Ord)`
     /// 2. `add_protocol_bound(T_var, Clone)`
     ///
+
     /// The bounds are accumulated and later verified during type checking when
     /// the generic is instantiated with concrete types.
     ///
+
     /// # GAT Integration
     ///
+
     /// For GAT where clauses:
     /// ```verum
     /// protocol Container {
-    ///     type Item<T> where T: Clone + Debug
+    ///  type Item<T> where T: Clone + Debug
     /// }
     /// ```
     ///
+
     /// The bounds are tracked per-GAT instantiation to ensure constraints are
     /// satisfied when the associated type is resolved.
     pub fn add_protocol_bound(&mut self, var: TypeVar, bound: crate::protocol::ProtocolBound) {
@@ -2321,6 +2387,7 @@ impl TypeContext {
     /// Get all protocol bounds for a type variable
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .4 - GAT where clause constraints
     ///
+
     /// Returns the list of protocol bounds that must be satisfied when the
     /// type variable is instantiated with a concrete type.
     pub fn get_protocol_bounds(&self, var: &TypeVar) -> Maybe<&List<ProtocolBound>> {
@@ -2330,6 +2397,7 @@ impl TypeContext {
     /// Check if a type variable has a specific protocol bound
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Complete Protocol System
     ///
+
     /// Returns true if the type variable is bounded by the given protocol.
     pub fn has_protocol_bound(&self, var: &TypeVar, protocol: &Text) -> bool {
         if let Some(bounds) = self.type_var_bounds.get(var) {
@@ -2383,9 +2451,11 @@ impl TypeContext {
     /// Generate accessor functions for record/struct types
     /// Cross-field refinements on structs: "type T is { f1: A, f2: B } where constraint(f1, f2)" — .2.1 lines 1839-1857
     ///
+
     /// For each field in a record, generates a function:
     /// `fn field_name(self: RecordType) -> FieldType { self.field_name }`
     ///
+
     /// These accessors are used in inline refinement syntax:
     /// `type ValidUser is User{age(it) >= 18 && email(it).contains("@")}`
     pub fn generate_accessors(&mut self, type_name: &str, ty: &Type) -> Result<(), Text> {
@@ -2583,18 +2653,21 @@ pub struct ProtocolImpl {
 
 /// Initialization state for definite assignment analysis.
 ///
+
 /// Tracks whether a variable is fully initialized, partially initialized,
 /// or completely uninitialized. This enables detection of partial initialization
 /// errors at compile time.
 ///
+
 /// # Example States
 ///
+
 /// ```verum
-/// let x: Int;                  // x: Uninitialized
-/// let tuple: (Int, Int, Int);  // tuple: Uninitialized
-/// tuple.0 = 1;                 // tuple: PartiallyInitialized(Tuple { [0] })
-/// tuple.1 = 2;                 // tuple: PartiallyInitialized(Tuple { [0, 1] })
-/// tuple.2 = 3;                 // tuple: FullyInitialized
+/// let x: Int; // x: Uninitialized
+/// let tuple: (Int, Int, Int); // tuple: Uninitialized
+/// tuple.0 = 1; // tuple: PartiallyInitialized(Tuple { [0] })
+/// tuple.1 = 2; // tuple: PartiallyInitialized(Tuple { [0, 1] })
+/// tuple.2 = 3; // tuple: FullyInitialized
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum InitState {
@@ -2680,6 +2753,7 @@ impl InitState {
 pub enum PartialInit {
     /// Tuple with some elements initialized
     ///
+
     /// Example: `tuple.0 = 1; tuple.1 = 2;` with total=3 gives initialized={0, 1}
     Tuple {
         /// Indices that have been initialized
@@ -2689,6 +2763,7 @@ pub enum PartialInit {
     },
     /// Array with some elements initialized
     ///
+
     /// Example: `arr[0] = 10; arr[1] = 20;` with len=5 gives initialized={0, 1}
     Array {
         /// Indices that have been initialized (only tracks statically known indices)
@@ -2698,6 +2773,7 @@ pub enum PartialInit {
     },
     /// Record/struct with some fields initialized
     ///
+
     /// Example: `person.name = "Alice";` gives initialized={"name"}, required={"name", "age", "email"}
     Record {
         /// Fields that have been initialized
@@ -2764,6 +2840,7 @@ impl PartialInit {
 
 /// Initialization tracker for definite assignment analysis.
 ///
+
 /// Tracks the initialization state of variables in the current scope.
 /// Used during type checking to detect use of uninitialized or
 /// partially initialized variables.

@@ -3,21 +3,25 @@
 // =============================================================================
 // Spec: sqlite-native.md operational tooling
 //
+
 // `MigrationPlan` is the deterministic ordering of `Migration`s the
 // runner will apply. It catches three categories of authoring error
 // at plan-build time:
 //
-//   * `PeDuplicateVersion`  — two migrations declare the same version
-//   * `PeUnknownDependency` — depends_on references a missing version
-//   * `PeCycle`             — dependency DAG has a cycle
+
+//  * `PeDuplicateVersion` — two migrations declare the same version
+//  * `PeUnknownDependency` — depends_on references a missing version
+//  * `PeCycle` — dependency DAG has a cycle
 //
+
 // On success the plan exposes:
 //
-//   * `ordered`        — Migration sequence in apply order
-//   * `min_version`    — smallest version (after which a runner
-//                         operating on an empty DB starts work)
-//   * `max_version`    — largest version (where it ends)
-//   * `is_reversible`  — True ⇒ every step has a down_sql
+
+//  * `ordered` — Migration sequence in apply order
+//  * `min_version` — smallest version (after which a runner
+//  operating on an empty DB starts work)
+//  * `max_version` — largest version (where it ends)
+//  * `is_reversible` — True ⇒ every step has a down_sql
 // =============================================================================
 
 module core.database.sqlite.native.migrations.plan;

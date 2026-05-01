@@ -2,41 +2,49 @@
 // core/net/weft/spiffe.vr — SPIFFE workload identity middleware
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §8.13
+// Spec: internal/specs/net-framework.md §8.13
 // =============================================================================
 //
+
 // Plugs `core/security/spiffe/*` (SpiffeId, X509Svid, JwtSvid, bundles,
 // workload-API client) into Weft as a standard `Layer`. Two modes:
 //
-//   * `SpiffeAuthLayer.jwt(trust_bundle)` — validates `Authorization:
-//     Bearer <JWT-SVID>` against the bundle; rejects unsigned /
-//     expired / trust-domain-mismatched tokens with 401.
+
+//  * `SpiffeAuthLayer.jwt(trust_bundle)` — validates `Authorization:
+//  Bearer <JWT-SVID>` against the bundle; rejects unsigned /
+//  expired / trust-domain-mismatched tokens with 401.
 //
-//   * `SpiffeAuthLayer.mtls(trust_bundle)` — validates the client
-//     certificate presented during the TLS handshake (extracted via
-//     the TlsTransport peer-certificate hook); rejects with 401 on
-//     any validation failure.
+
+//  * `SpiffeAuthLayer.mtls(trust_bundle)` — validates the client
+//  certificate presented during the TLS handshake (extracted via
+//  the TlsTransport peer-certificate hook); rejects with 401 on
+//  any validation failure.
 //
+
 // Both modes yield a `Principal` value carried on the request — the
 // handler reads `req.headers().get(&"x-weft-spiffe-id")` (phase-6
 // plumbing) or the context-system `Ctx<Principal>` extractor (once
 // the context bridge §5.8 is finalised).
 //
+
 // Rotation (§8.13 "certificate rotation") — consumers of this layer
 // pass a `TrustBundleProvider` that updates itself in the background
 // via the SPIRE Workload API (`core.security.spiffe.workload_api`).
 // When the provider refreshes, new requests pick up the new bundle on
 // their next validate call — no server restart required.
 //
+
 // Out of scope for this phase (deferred):
 //
-//   * HBONE-aware mode for Istio ambient (§8.13 "HBONE-aware mode").
-//   * SVID → request-header projection for downstream services.
-//   * Full crypto path-chain verification — Phase-6 skeleton calls
-//     out to the runtime intrinsic `verum.spiffe.validate_jwt_svid`
-//     and `verum.spiffe.validate_x509_svid` which the runtime wires
-//     up to the crate-level implementation.
+
+//  * HBONE-aware mode for Istio ambient (§8.13 "HBONE-aware mode").
+//  * SVID → request-header projection for downstream services.
+//  * Full crypto path-chain verification — Phase-6 skeleton calls
+//  out to the runtime intrinsic `verum.spiffe.validate_jwt_svid`
+//  and `verum.spiffe.validate_x509_svid` which the runtime wires
+//  up to the crate-level implementation.
 //
+
 // =============================================================================
 
 module core.net.weft.spiffe;

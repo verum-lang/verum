@@ -14,6 +14,7 @@
 )]
 // Comprehensive test suite for type parsing in Verum.
 //
+
 // This test suite covers all type syntax in the Verum language:
 // - Primitive types (Int, Float, Bool, String, Char)
 // - Generic types (Vec<T>, HashMap<K, V>)
@@ -982,6 +983,7 @@ fn test_real_world_safe_index() {
 // - Edge cases: 5 tests
 // - Real-world examples: 10 tests
 //
+
 // This comprehensive test suite ensures that the type parser correctly
 // handles all Verum type syntax, with special emphasis on refinement types
 // (Verum's unique value proposition).

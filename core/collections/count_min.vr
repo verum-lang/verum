@@ -5,47 +5,59 @@
 // Dependencies: core, core.security.mac.hmac, core.security.util.rng
 // =============================================================================
 //
+
 // Count-Min sketch — estimates the frequency of items in a stream
 // with bounded memory and tunable accuracy. Used at scale by
 // Datadog heavy-hitter detection, Facebook's AdaptivePeeling,
 // Redis TopK modules, and OpenTelemetry aggregators.
 //
+
 // Completes the classic probabilistic trio shipped under
 // `core.collections`:
 //
-//   * BloomFilter   — "is X present?"          (false positives)
-//   * HyperLogLog   — "how many distinct?"     (count distinct)
-//   * CountMinSketch — "how often is X seen?"  (frequency)
+
+//  * BloomFilter — "is X present?" (false positives)
+//  * HyperLogLog — "how many distinct?" (count distinct)
+//  * CountMinSketch — "how often is X seen?" (frequency)
 //
+
 // # Sizing
 //
-//   width  w = ⌈e / epsilon⌉       — columns (error within epsilon·N)
-//   depth  d = ⌈ln(1/delta)⌉       — rows    (probability 1-delta)
+
+//  width w = ⌈e / epsilon⌉ — columns (error within epsilon·N)
+//  depth d = ⌈ln(1/delta)⌉ — rows (probability 1-delta)
 //
-//   at epsilon=0.001, delta=0.001 → w=2719, d=7 → 76 KiB with u32.
+
+//  at epsilon=0.001, delta=0.001 → w=2719, d=7 → 76 KiB with u32.
 //
+
 // Each incoming item is hashed d times to pick a column per row;
 // the increment bumps all d cells. The frequency estimate is the
 // minimum of the d cells (the "min" in Count-Min), which removes
 // upward bias from hash collisions.
 //
+
 // # API
 //
+
 // ```
 // let mut cms = CountMinSketch.with_target(0.001, 0.001);
 // cms.add(b"foo");
 // cms.add(b"foo");
 // cms.add(b"bar");
-// let n: UInt64 = cms.estimate(b"foo");      // ≥ 2
+// let n: UInt64 = cms.estimate(b"foo"); // ≥ 2
 // ```
 //
+
 // # Security
 //
+
 // HMAC-SHA256-keyed hashing with a CSPRNG-sourced 32-byte key per
 // sketch. Attacker observing the sketch cannot craft
 // adversarial collisions that inflate the error past the
 // theoretical bound.
 //
+
 // =============================================================================
 
 module core.collections.count_min;

@@ -10,7 +10,7 @@ public type Store is
     | TsMemory     // 2 — temp tables in RAM only
     ;
 
-// SQLITE_TEMP_STORE compile-time default.  We model the build-time default as
+// SQLITE_TEMP_STORE compile-time default. We model the build-time default as
 // "memory" here — matching the most common Linux build — but the engine reads
 // it from a constant.
 public fn compile_default() -> Store { TsMemory }

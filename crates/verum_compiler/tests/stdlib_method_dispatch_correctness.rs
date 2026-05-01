@@ -1,8 +1,9 @@
 //! Method-dispatch receiver-type-narrowing guardrail (#169 / method-dispatch narrowing).
 //!
+
 //! Multiple stdlib types declare a method with the same simple name —
 //! most notably `unwrap`, declared on Result, Maybe, Poll, and (historic)
-//! generic-T paths.  The codegen in
+//! generic-T paths. The codegen in
 //! `crates/verum_vbc/src/codegen/expressions.rs::compile_method_call`
 //! resolves the call by first building an `effective_method_name` from
 //! the receiver expression's shape; before method-dispatch narrowing the catch-all fell
@@ -10,24 +11,28 @@
 //! covered, and the dispatcher picked WHICHEVER candidate was
 //! registered first by name+arity.
 //!
+
 //! For `Result<Int, Int>::Err(99).unwrap()` that frequently resolved to
 //! a candidate whose `unwrap` does NOT panic on Err — the call returned
 //! 99 silently and downstream code saw a malformed value, surfacing
 //! later as `field index N (offset M) exceeds object data size K` or
 //! `null pointer dereference` far from the cause.
 //!
+
 //! method-dispatch narrowing added a safety net: after the giant match, if the
 //! resulting `effective_method_name` is still bare (no `.`, no `$`),
 //! retry via `infer_expr_type_name(receiver)` — a generic best-effort
 //! type-inference helper — and prefix as `Type.method` when the
 //! inference succeeds with an Uppercase-typed base name.
 //!
+
 //! This test pins the contract: the `unwrap` family on each of its
 //! stdlib types panics correctly on the receiver-type's bottom
-//! element.  A regression that re-introduces the silent fallback fails
+//! element. A regression that re-introduces the silent fallback fails
 //! one of these fixtures, and the failure message points at
 //! `compile_method_call` directly.
 //!
+
 //! Each fixture lives under
 //! `vcs/specs/L0-critical/_codegen_regressions/` with the
 //! `@test: run-interpreter-panic` directive and an `@expected-panic`
@@ -35,12 +40,14 @@
 //! matching; this guardrail just runs vtest and asserts the spec
 //! passed.
 //!
+
 //! Adding a new method-dispatch contract:
 //!
-//!   1. Build a fixture under `vcs/specs/L0-critical/_codegen_regressions/`
-//!      that exercises the receiver type's bottom-element method call
-//!      and uses `@expected-panic: <substring>`.
-//!   2. Add a four-line test below: `assert_dispatch_panic(&fixture)`.
+
+//!  1. Build a fixture under `vcs/specs/L0-critical/_codegen_regressions/`
+//!  that exercises the receiver type's bottom-element method call
+//!  and uses `@expected-panic: <substring>`.
+//!  2. Add a four-line test below: `assert_dispatch_panic(&fixture)`.
 
 mod stdlib_support;
 
@@ -51,6 +58,7 @@ use stdlib_support::{vtest_run_capture, workspace_root};
 /// directive was satisfied (panic fired AND message matched the
 /// `@expected-panic` substring).
 ///
+
 /// `scenario` names the fixture in the failure message so a CI diff
 /// identifies which dispatch contract regressed.
 fn assert_dispatch_panic(scenario: &str, fixture: &std::path::Path) {
@@ -101,7 +109,7 @@ fn assert_dispatch_panic(scenario: &str, fixture: &std::path::Path) {
 /// `Result<T, E>::Err(_).unwrap()` must panic with a message that
 /// identifies the receiver as a `Result` (i.e. mentions `Err` in the
 /// message — the canonical phrasing is "called `unwrap` on an Err
-/// value").  The `@expected-panic` directive in the fixture verifies
+/// value"). The `@expected-panic` directive in the fixture verifies
 /// the message; this guardrail verifies the test passed.
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
@@ -114,7 +122,7 @@ fn result_unwrap_on_err_panics() {
 
 /// `Maybe<T>::None.unwrap()` must panic with a message that identifies
 /// the receiver as a `Maybe` (canonical phrasing "called `unwrap` on
-/// a None value").  The pair of this test + the Result test exercises
+/// a None value"). The pair of this test + the Result test exercises
 /// the receiver-narrowing's discrimination between the two siblings.
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]

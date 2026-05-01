@@ -1,10 +1,11 @@
 // json_group_array — aggregate accumulator.
 //
+
 // Step rules:
-//   * NULL X → JSON null  (json_group_array preserves NULLs unlike GROUP_CONCAT)
-//   * Numeric X → JSON number
-//   * Text X → JSON string (escaping done at finalize)
-//   * BLOB X → engine raises SQLITE_ERROR (json1 doesn't accept blobs)
+//  * NULL X → JSON null (json_group_array preserves NULLs unlike GROUP_CONCAT)
+//  * Numeric X → JSON number
+//  * Text X → JSON string (escaping done at finalize)
+//  * BLOB X → engine raises SQLITE_ERROR (json1 doesn't accept blobs)
 
 module core.database.sqlite.native.json_group_array_fn.agg;
 

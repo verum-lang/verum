@@ -52,8 +52,10 @@ pub(in super::super) fn handle_divf(state: &mut InterpreterState) -> Interpreter
 
 /// Unary float operations with sub-opcode dispatch.
 ///
+
 /// Format: `[0x25] [sub_op:u8] [dst:reg] [src:reg]`
 ///
+
 /// Sub-opcodes (basic, aligned with UnaryFloatOp enum):
 /// - 0: Neg - Negate
 /// - 1: Abs - Absolute value
@@ -67,6 +69,7 @@ pub(in super::super) fn handle_divf(state: &mut InterpreterState) -> Interpreter
 /// - 9: Ceil - Ceiling (round up)
 /// - 10: Round - Round to nearest
 ///
+
 /// Extended sub-opcodes (transcendental functions):
 /// - 11: Asin - Inverse sine (arcsin)
 /// - 12: Acos - Inverse cosine (arccos)

@@ -1,5 +1,6 @@
 //! Unified Hashing Infrastructure for the Verum Compiler
 //!
+
 //! This module provides Blake3-based hashing utilities used throughout the compiler.
 //! Blake3 is chosen for its:
 //! - Extreme speed (3-10x faster than SHA-256)
@@ -7,15 +8,19 @@
 //! - Parallelizable design (SIMD + multi-threaded)
 //! - Incremental hashing support
 //!
+
 //! # Usage
 //!
+
 //! ```rust
 //! use verum_compiler::hash::{ContentHash, hash_bytes, hash_str};
 //!
+
 //! // Simple hashing
 //! let hash = hash_bytes(b"hello world");
 //! let hash = hash_str("hello world");
 //!
+
 //! // Incremental hashing
 //! let mut hasher = ContentHash::new();
 //! hasher.update(b"part1");
@@ -23,14 +28,17 @@
 //! let hash = hasher.finalize();
 //! ```
 //!
+
 //! # Migration from SHA-256
 //!
+
 //! This module replaces SHA-256 usage in:
 //! - Incremental compilation hashes
 //! - Cache keys
 //! - Content-addressable storage
 //! - Module fingerprints
 //!
+
 //! Note: AWS signing (distributed_cache.rs) must continue using SHA-256
 //! as required by the AWS Signature V4 protocol.
 
@@ -40,6 +48,7 @@ use std::path::Path;
 
 /// A 256-bit (32-byte) Blake3 hash value.
 ///
+
 /// This is the standard hash output used throughout the Verum compiler
 /// for content-addressable storage, cache keys, and fingerprinting.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -54,8 +63,10 @@ impl HashValue {
 
     /// Create a hash value from raw bytes.
     ///
+
     /// # Panics
     ///
+
     /// Panics if the slice is not exactly 32 bytes.
     pub fn from_slice(slice: &[u8]) -> Self {
         let mut bytes = [0u8; 32];
@@ -99,6 +110,7 @@ impl HashValue {
 
     /// Convert the hash to a u64 by taking the first 8 bytes.
     ///
+
     /// This is useful for compatibility with APIs that expect u64 hashes,
     /// though it loses collision resistance. Use the full HashValue where
     /// possible.
@@ -170,14 +182,18 @@ impl<'de> serde::Deserialize<'de> for HashValue {
 
 /// Incremental hasher for computing Blake3 hashes.
 ///
+
 /// This provides a simple API for incrementally hashing content.
 /// It wraps Blake3's Hasher with a convenient interface.
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_compiler::hash::ContentHash;
 ///
+
 /// let mut hasher = ContentHash::new();
 /// hasher.update(b"hello");
 /// hasher.update(b" ");
@@ -277,6 +293,7 @@ pub fn hash_str(s: &str) -> HashValue {
 
 /// Hash a file's contents and return the hash value.
 ///
+
 /// Returns an error if the file cannot be read.
 pub fn hash_file(path: &Path) -> std::io::Result<HashValue> {
     let data = std::fs::read(path)?;
@@ -285,6 +302,7 @@ pub fn hash_file(path: &Path) -> std::io::Result<HashValue> {
 
 /// Hash multiple items into a single hash.
 ///
+
 /// This is useful for creating composite keys from multiple values.
 pub fn hash_multiple<I, T>(items: I) -> HashValue
 where
@@ -311,6 +329,7 @@ pub fn hash_hashable<T: Hash>(value: &T) -> HashValue {
 
 /// Generate a cache key from multiple components.
 ///
+
 /// This creates a reproducible hash from multiple string components,
 /// suitable for use as a cache key.
 pub fn cache_key(components: &[&str]) -> HashValue {
@@ -326,6 +345,7 @@ pub fn cache_key(components: &[&str]) -> HashValue {
 
 /// Generate a cache key from a type name and configuration.
 ///
+
 /// This is useful for type-specific caches where the configuration
 /// affects the cached result.
 pub fn typed_cache_key<T: Hash>(type_name: &str, config: &T) -> HashValue {
@@ -342,6 +362,7 @@ pub fn typed_cache_key<T: Hash>(type_name: &str, config: &T) -> HashValue {
 
 /// Compute a content-addressable storage key for source code.
 ///
+
 /// This normalizes line endings and trims whitespace to ensure
 /// consistent hashes across platforms.
 pub fn source_hash(source: &str) -> HashValue {
@@ -352,6 +373,7 @@ pub fn source_hash(source: &str) -> HashValue {
 
 /// Compute a hash for a module's signature (types, exports, etc.).
 ///
+
 /// This is used for incremental compilation to detect API changes.
 pub fn signature_hash(module_name: &str, exports: &[&str]) -> HashValue {
     let mut hasher = ContentHash::new();
@@ -370,6 +392,7 @@ pub fn signature_hash(module_name: &str, exports: &[&str]) -> HashValue {
 
 /// Represents the change type for incremental compilation.
 ///
+
 /// Distinguishes between signature changes (API-breaking) and body changes
 /// (implementation-only), enabling more efficient recompilation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -386,6 +409,7 @@ pub enum ChangeKind {
 
 /// Hash data for a function, separating signature from body.
 ///
+
 /// This enables fine-grained invalidation during incremental compilation:
 /// - Signature change → all dependents need recompilation
 /// - Body change → dependents only need re-verification
@@ -426,21 +450,25 @@ impl FunctionHashes {
 
 /// Builder for computing function hashes.
 ///
+
 /// Separates signature components from body components to enable
 /// fine-grained change detection.
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_compiler::hash::FunctionHashBuilder;
 ///
+
 /// let hashes = FunctionHashBuilder::new()
-///     .with_name("my_function")
-///     .with_param("x", "Int")
-///     .with_param("y", "Float")
-///     .with_return_type("Bool")
-///     .with_bytecode(&[0x01, 0x02, 0x03])
-///     .finish();
+///  .with_name("my_function")
+///  .with_param("x", "Int")
+///  .with_param("y", "Float")
+///  .with_return_type("Bool")
+///  .with_bytecode(&[0x01, 0x02, 0x03])
+///  .finish();
 /// ```
 pub struct FunctionHashBuilder {
     /// Hasher for signature components (name, params, return type, etc.)
@@ -588,6 +616,7 @@ impl Default for FunctionHashBuilder {
 
 /// Hash data for a module item (function, type, constant).
 ///
+
 /// Used for fine-grained incremental compilation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -627,6 +656,7 @@ impl ItemHashes {
 
     /// Compare with another item hashes and return the overall change kind.
     ///
+
     /// Returns:
     /// - `NoChange` if all items are identical
     /// - `BodyOnly` if only function bodies changed
@@ -728,19 +758,24 @@ use verum_common::Maybe;
 
 /// Compute item hashes for all items in a module.
 ///
+
 /// This function extracts functions, types, and constants from a parsed
 /// module and computes their signature and body hashes for fine-grained
 /// incremental compilation.
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// use verum_compiler::hash::compute_item_hashes_from_module;
 /// use verum_ast::Module;
 ///
+
 /// let module: Module = parse("source.vr")?;
 /// let hashes = compute_item_hashes_from_module(&module);
 ///
+
 /// // Use hashes with IncrementalCompiler
 /// incremental_compiler.update_item_hashes(path, hashes);
 /// ```

@@ -1,5 +1,6 @@
 //! Parse result types for script parsing
 //!
+
 //! Moved from verum_parser::script
 
 use verum_ast::{Expr, Item, Module, Stmt};

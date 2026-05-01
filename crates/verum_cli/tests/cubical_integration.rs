@@ -337,7 +337,7 @@ fn task_78_every_acceptance_bullet_reachable_via_cli() {
 #[test]
 fn task_78_face_formula_grammar_complete_via_cli() {
     // CCHM face-formula grammar must accept the full canonical
-    // grammar.  Pin every production via the CLI.
+    // grammar. Pin every production via the CLI.
     for s in [
         "1",
         "0",

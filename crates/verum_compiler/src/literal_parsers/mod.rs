@@ -1,8 +1,10 @@
 //! Built-in compile-time parsers for tagged literals
 //!
+
 //! Compile-time literal protocol: meta functions registered via
 //! @tagged_literal/@interpolation_handler for compile-time parsing.
 //!
+
 //! This module provides compile-time parsing and validation for:
 //! - DateTime literals (d#"2024-01-15T10:30:00Z")
 //! - Duration literals (duration#"1h30m")

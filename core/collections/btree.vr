@@ -5,14 +5,18 @@
 // Dependencies: core, memory
 // =============================================================================
 //
+
 // This module provides B-tree based ordered collections:
 //
+
 // - BTreeMap<K, V>: Ordered map with O(log n) operations
 // - BTreeSet<T>: Ordered set backed by BTreeMap
 //
+
 // B-trees maintain sorted order and provide efficient range queries.
 // They are cache-friendly due to their node structure.
 //
+
 // Performance characteristics:
 // - Insert: O(log n)
 // - Lookup: O(log n)
@@ -20,6 +24,7 @@
 // - Range iteration: O(log n + k) where k is range size
 // - In-order iteration: O(n)
 //
+
 // =============================================================================
 
 module btree;
@@ -46,25 +51,30 @@ const MIN_KEYS: Int = B - 1;
 
 /// An ordered map based on a B-tree.
 ///
+
 /// BTreeMap maintains keys in sorted order and provides efficient
 /// range queries and ordered iteration.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let mut map = BTreeMap.new();
 /// map.insert(3, "three");
 /// map.insert(1, "one");
 /// map.insert(2, "two");
 ///
+
 /// // Iteration is in sorted order
 /// for (k, v) in map.iter() {
-///     println(f"{k}: {v}");  // 1: one, 2: two, 3: three
+///  println(f"{k}: {v}"); // 1: one, 2: two, 3: three
 /// }
 ///
+
 /// // Range queries
 /// for (k, v) in map.range(1..3) {
-///     println(f"{k}: {v}");  // 1: one, 2: two
+///  println(f"{k}: {v}"); // 1: one, 2: two
 /// }
 /// ```
 public type BTreeMap<K: Ord, V> is {
@@ -127,8 +137,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Returns a reference to the value corresponding to the key.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// map.insert(1, "a");
@@ -161,12 +173,15 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Inserts a key-value pair into the map.
     ///
+
     /// If the map did not have this key present, None is returned.
     /// If the map did have this key present, the value is updated,
     /// && the old value is returned.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// assert_eq(map.insert(37, "a"), None);
@@ -215,8 +230,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Removes a key from the map, returning the value at the key if it existed.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// map.insert(1, "a");
@@ -253,6 +270,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Gets the first key-value pair in the map.
     ///
+
     /// The key is the minimum key in the map.
     public fn first_key_value(&self) -> Maybe<(&K, &V)> {
         match &self.root {
@@ -263,6 +281,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Gets the last key-value pair in the map.
     ///
+
     /// The key is the maximum key in the map.
     public fn last_key_value(&self) -> Maybe<(&K, &V)> {
         match &self.root {
@@ -322,16 +341,19 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Returns an iterator over key-value pairs in the given range.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// for i in 0..10 {
-    ///     map.insert(i, i * 10);
+    ///  map.insert(i, i * 10);
     /// }
     ///
+
     /// for (k, v) in map.range(3..7) {
-    ///     println(f"{k}: {v}");  // 3: 30, 4: 40, 5: 50, 6: 60
+    ///  println(f"{k}: {v}"); // 3: 30, 4: 40, 5: 50, 6: 60
     /// }
     /// ```
     public fn range<R: RangeBounds<K>>(&self, range: R) -> BTreeMapRange<K, V> {
@@ -340,16 +362,20 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Returns the first key-value pair with a key greater than or equal to the given key.
     ///
+
     /// This is an efficient O(log n) bound query.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// map.insert(1, "one");
     /// map.insert(3, "three");
     /// map.insert(5, "five");
     ///
+
     /// assert_eq(map.lower_bound(&3), Some((&3, &"three")));
     /// assert_eq(map.lower_bound(&2), Some((&3, &"three")));
     /// assert_eq(map.lower_bound(&6), None);
@@ -363,16 +389,20 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Returns the first key-value pair with a key strictly greater than the given key.
     ///
+
     /// This is an efficient O(log n) bound query.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// map.insert(1, "one");
     /// map.insert(3, "three");
     /// map.insert(5, "five");
     ///
+
     /// assert_eq(map.upper_bound(&3), Some((&5, &"five")));
     /// assert_eq(map.upper_bound(&5), None);
     /// ```
@@ -385,6 +415,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Returns the key-value pair corresponding to the supplied key.
     ///
+
     /// This is useful when the key type implements `Ord` based on only a portion
     /// of the value, and you want to get the full stored key.
     public fn get_key_value(&self, key: &K) -> Maybe<(&K, &V)> {
@@ -396,8 +427,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Removes a key from the map, returning the stored key and value if present.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// map.insert(1, "one");
@@ -416,10 +449,13 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Retains only the elements specified by the predicate.
     ///
+
     /// In other words, remove all pairs `(k, v)` for which `f(&k, &v)` returns `false`.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut map = BTreeMap.new();
     /// map.insert(1, 10);
@@ -446,8 +482,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Moves all elements from `other` into `self`, leaving `other` empty.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut a = BTreeMap.new();
     /// a.insert(1, "one");
@@ -476,8 +514,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// Splits the map into two at the given key. Returns everything after the given key,
     /// including the key itself.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut a = BTreeMap.new();
     /// a.insert(1, "one");
@@ -1137,6 +1177,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// Drain all entries from the map, returning an iterator over (K, V) pairs.
     /// After draining, the map is empty.
     ///
+
     /// # Example
     /// ```verum
     /// let mut map = BTreeMap.new();
@@ -1608,6 +1649,7 @@ implement<K: Ord, V> BTreeMapIter<K, V> {
 
     /// Create an iterator that starts at the first key >= start_key.
     ///
+
     /// This is O(log n) instead of O(n) for range queries.
     /// Spec: docs/audit1.md Section 13.2 (BTreeMap range optimization)
     fn seek_from(map: &BTreeMap<K, V>, start_key: &K) -> BTreeMapIter<K, V> {
@@ -1627,6 +1669,7 @@ implement<K: Ord, V> BTreeMapIter<K, V> {
 
     /// Seek to the first key >= target in the subtree rooted at node.
     ///
+
     /// Uses binary search within each node for O(log n) total time.
     fn seek_to_key(&mut self, node: &Heap<BTreeNode<K, V>>, target: &K) {
         // Use a stack-based iteration to avoid reassignment type issues
@@ -1655,6 +1698,7 @@ implement<K: Ord, V> BTreeMapIter<K, V> {
 
     /// Binary search to find the index of the first key >= target.
     ///
+
     /// Returns the index where target would be inserted to maintain order.
     fn find_key_position(node: &Heap<BTreeNode<K, V>>, target: &K) -> Int {
         let mut low = 0;
@@ -1802,9 +1846,11 @@ implement<K: Ord, V> IntoIterator for BTreeMapValues<K, V> {
 
 /// Range iterator over BTreeMap.
 ///
+
 /// Optimized for O(log n + k) where k is the number of elements in range.
 /// Uses binary search to seek to range start instead of scanning from beginning.
 ///
+
 /// Spec: docs/audit1.md Section 13.2 (BTreeMap range optimization)
 public type BTreeMapRange<K: Ord, V> is {
     iter: BTreeMapIter<K, V>,
@@ -1905,22 +1951,27 @@ implement<K: Ord, V> IntoIterator for BTreeMapRange<K, V> {
 
 /// An ordered set based on a B-tree.
 ///
+
 /// BTreeSet is implemented as a BTreeMap<T, ()>, providing all the
 /// same performance characteristics.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let mut set = BTreeSet.new();
 /// set.insert(3);
 /// set.insert(1);
 /// set.insert(2);
 ///
+
 /// // Iteration is in sorted order
 /// for x in set.iter() {
-///     println(x);  // 1, 2, 3
+///  println(x); // 1, 2, 3
 /// }
 ///
+
 /// assert(set.contains(&2));
 /// ```
 public type BTreeSet<T: Ord> is {
@@ -1957,6 +2008,7 @@ implement<T: Ord> BTreeSet<T> {
 
     /// Adds a value to the set.
     ///
+
     /// Returns true if the value was newly inserted.
     /// Returns false if the set already contained this value.
     public fn insert(&mut self, value: T) -> Bool
@@ -1967,6 +2019,7 @@ implement<T: Ord> BTreeSet<T> {
 
     /// Removes a value from the set.
     ///
+
     /// Returns true if the value was present.
     public fn remove(&mut self, value: &T) -> Bool
     where T: Clone
@@ -2114,8 +2167,10 @@ implement<T: Ord> BTreeSet<T> {
 
     /// Retains only the elements specified by the predicate.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut set = BTreeSet.new();
     /// set.insert(1); set.insert(2); set.insert(3); set.insert(4);
@@ -2138,8 +2193,10 @@ implement<T: Ord> BTreeSet<T> {
 
     /// Moves all elements from `other` into `self`, leaving `other` empty.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut a = BTreeSet.new();
     /// a.insert(1);
@@ -2165,8 +2222,10 @@ implement<T: Ord> BTreeSet<T> {
     /// Splits the set into two at the given value. Returns everything
     /// after the given value, including the value itself.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut a = BTreeSet.new();
     /// a.insert(1); a.insert(2); a.insert(3);
@@ -2260,6 +2319,7 @@ implement<T: Ord> BTreeSet<T> {
     /// Returns a reference to the first element >= given value.
     /// O(log n) operation using the underlying BTreeMap.
     ///
+
     /// # Example
     /// ```verum
     /// let mut set = BTreeSet.new();
@@ -2278,6 +2338,7 @@ implement<T: Ord> BTreeSet<T> {
     /// Returns a reference to the first element strictly > given value.
     /// O(log n) operation using the underlying BTreeMap.
     ///
+
     /// # Example
     /// ```verum
     /// let mut set = BTreeSet.new();
@@ -2295,6 +2356,7 @@ implement<T: Ord> BTreeSet<T> {
     /// In-place symmetric difference: removes elements present in both,
     /// adds elements only in other.
     ///
+
     /// # Example
     /// ```verum
     /// let mut a = BTreeSet.new();
@@ -2328,8 +2390,10 @@ implement<T: Ord> BTreeSet<T> {
 
     /// In-place union: add all elements from other without draining it.
     ///
+
     /// Unlike `append` which empties `other`, this preserves `other`.
     ///
+
     /// # Example
     /// ```verum
     /// let mut a = BTreeSet.new();
@@ -2350,6 +2414,7 @@ implement<T: Ord> BTreeSet<T> {
 
     /// In-place difference: remove all elements that are in other.
     ///
+
     /// # Example
     /// ```verum
     /// let mut a = BTreeSet.new();
@@ -2375,6 +2440,7 @@ implement<T: Ord> BTreeSet<T> {
 
     /// In-place intersection: retain only elements also in other.
     ///
+
     /// # Example
     /// ```verum
     /// let mut a = BTreeSet.new();
@@ -2415,6 +2481,7 @@ implement<T: Ord> BTreeSet<T> {
     /// Drain all elements from the set, returning an iterator over them.
     /// After draining, the set is empty. Elements are yielded in sorted order.
     ///
+
     /// # Example
     /// ```verum
     /// let mut set = BTreeSet.new();
@@ -2740,6 +2807,7 @@ implement<T: Ord> IntoIterator for BTreeSetDrain<T> {
 
 /// Mutable iterator over BTreeMap values in key order.
 ///
+
 /// Uses pre-collected keys to safely yield mutable value references.
 public type BTreeMapValuesMut<K: Ord, V> is {
     map: &mut BTreeMap<K, V>,
@@ -2766,6 +2834,7 @@ implement<K: Ord, V> Iterator for BTreeMapValuesMut<K, V> {
 
 /// Mutable iterator over BTreeMap entries (&K, &mut V) in key order.
 ///
+
 /// Keys are yielded as immutable references to preserve tree ordering invariant.
 /// Uses pre-collected keys to safely yield mutable value references.
 public type BTreeMapIterMut<K: Ord, V> is {
@@ -3145,12 +3214,14 @@ implement<K: Ord, V> BTreeEntry<K, V> {
     /// Provides in-place mutable access to an occupied entry before any
     /// potential inserts into the map.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// map.entry("key")
-    ///    .and_modify(|v| *v = *v + 1)
-    ///    .or_insert(0);
+    ///  .and_modify(|v| *v = *v + 1)
+    ///  .or_insert(0);
     /// ```
     public fn and_modify<F: fn(&mut V)>(self, f: F) -> BTreeEntry<K, V>
     where K: Clone, V: Clone

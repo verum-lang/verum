@@ -102,6 +102,7 @@ public fn autopoietic_flag(e: Enactment) -> Bool {
 // =============================================================================
 // §11.4 (#243) — streaming CoherenceMonitor
 //
+
 // `gauge_consistency` is one-shot: pass a `List<Enactment>`, get a
 // summary report. The streaming monitor below is the dual: build
 // incrementally, observe one enactment at a time, ask for the
@@ -116,6 +117,7 @@ public fn autopoietic_flag(e: Enactment) -> Bool {
 /// `monitor_observe(&mut self, e)`, read the running tally via
 /// `monitor_report(&self)`.
 ///
+
 /// The monitor maintains a single canonicalised representative — the
 /// first observed enactment — and decides each subsequent enactment's
 /// gauge-equivalence against that representative. This matches the
@@ -143,6 +145,7 @@ public fn monitor_new(epsilon: Primitive) -> CoherenceMonitor {
 /// `consistent` or `divergent` based on `gauge_equivalent` against
 /// the representative.
 ///
+
 /// Returns `true` iff the observation was recorded as consistent
 /// (so the call site can short-circuit on first divergence if
 /// desired).

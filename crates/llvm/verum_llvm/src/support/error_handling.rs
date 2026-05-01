@@ -8,16 +8,18 @@ use verum_llvm_sys::LLVMDiagnosticSeverity;
 
 /// Installs a fatal error handler that LLVM calls before `exit()`.
 ///
+
 /// # Example
 ///
+
 /// ```no_run
 /// use verum_llvm::support::error_handling::install_fatal_error_handler;
 /// extern "C" fn print_before_exit(msg: *const i8) {
-///     let c_str = unsafe { std::ffi::CStr::from_ptr(msg) };
-///     eprintln!("LLVM fatally errored: {:?}", c_str);
+///  let c_str = unsafe { std::ffi::CStr::from_ptr(msg) };
+///  eprintln!("LLVM fatally errored: {:?}", c_str);
 /// }
 /// unsafe {
-///     install_fatal_error_handler(print_before_exit);
+///  install_fatal_error_handler(print_before_exit);
 /// }
 /// ```
 pub unsafe fn install_fatal_error_handler(handler: extern "C" fn(*const ::libc::c_char)) {
@@ -54,6 +56,7 @@ impl DiagnosticInfo {
 // Assmuptions this handler makes:
 // * A valid *mut *mut i8 is provided as the void_ptr (via context.set_diagnostic_handler)
 //
+
 // https://github.com/llvm-mirror/llvm/blob/master/tools/llvm-c-test/diagnostic.c was super useful
 // for figuring out how to get this to work
 pub(crate) extern "C" fn get_error_str_diagnostic_handler(

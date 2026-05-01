@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.5 (DST)
 //
+
 // Generates an `OpStream` from a `DstSeed` according to a configurable
 // op mix. The generator maintains a small "live keys" set so update /
 // delete / select draws don't always miss.

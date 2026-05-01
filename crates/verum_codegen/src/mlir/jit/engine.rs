@@ -1,7 +1,9 @@
 //! Industrial-grade JIT Engine for MLIR-based code execution.
 //!
+
 //! Provides comprehensive JIT compilation and execution with:
 //!
+
 //! - Type-safe function calling via generic traits
 //! - Packed calling convention support (MLIR standard)
 //! - External symbol registration with symbol resolver integration
@@ -9,47 +11,55 @@
 //! - Callback mechanism for JIT → Rust interop
 //! - Multi-threaded support
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
-//! │                           JIT Execution Pipeline                             │
+//! │ JIT Execution Pipeline │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //!
-//!   MLIR Module (lowered to LLVM dialect)
-//!         │
-//!         ▼
+
+//!  MLIR Module (lowered to LLVM dialect)
+//!  │
+//!  ▼
 //! ┌─────────────────┐
-//! │   JitCompiler   │  Optimization + Code generation
-//! │                 │  (melior ExecutionEngine)
+//! │ JitCompiler │ Optimization + Code generation
+//! │ │ (melior ExecutionEngine)
 //! └────────┬────────┘
-//!          │
-//!          ▼
-//! ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-//! │  Symbol Linker  │───▶│   JIT Cache     │───▶│  Code Memory    │
-//! │ (SymbolResolver)│    │  (compiled fn)  │    │  (executable)   │
-//! └─────────────────┘    └─────────────────┘    └─────────────────┘
-//!                                │
-//!                                ▼
-//!                        ┌─────────────────┐
-//!                        │  TypedCaller    │  Type-safe invocation
-//!                        │  (JitCallable)  │
-//!                        └─────────────────┘
+//!  │
+//!  ▼
+//! ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+//! │ Symbol Linker │───▶│ JIT Cache │───▶│ Code Memory │
+//! │ (SymbolResolver)│ │ (compiled fn) │ │ (executable) │
+//! └─────────────────┘ └─────────────────┘ └─────────────────┘
+//!  │
+//!  ▼
+//!  ┌─────────────────┐
+//!  │ TypedCaller │ Type-safe invocation
+//!  │ (JitCallable) │
+//!  └─────────────────┘
 //! ```
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use crate::mlir::jit::{JitEngine, JitConfig};
 //!
+
 //! // Create JIT with optimization level 2
 //! let config = JitConfig::new().optimization_level(2);
 //! let engine = JitEngine::compile(&module, config)?;
 //!
+
 //! // Type-safe function call
 //! let result: i64 = engine.call("add", (1i64, 2i64))?;
 //! assert_eq!(result, 3);
 //!
+
 //! // Or use packed calling convention
 //! let mut args = [1i64 as *mut (), 2i64 as *mut ()];
 //! let mut result = 0i64;
@@ -322,8 +332,10 @@ pub struct JitStatsSummary {
 
 /// Trait for types that can be passed to JIT functions.
 ///
+
 /// # Safety
 ///
+
 /// Implementors must ensure the type is FFI-safe and can be safely
 /// passed across the JIT boundary.
 pub unsafe trait JitArg {
@@ -556,6 +568,7 @@ unsafe impl Sync for CompiledFunction {}
 
 /// Industrial-grade JIT engine.
 ///
+
 /// Provides:
 /// - Type-safe function calling
 /// - External symbol resolution
@@ -588,7 +601,7 @@ pub struct JitEngine {
 // SAFETY: JitEngine can be sent/shared across threads because:
 // - `engine` (ExecutionEngine) manages its own thread safety for JIT code
 // - `registered_symbols` (DashMap) is a concurrent map; the *mut () values point to
-//   static library symbols or JIT code that outlives the engine
+//  static library symbols or JIT code that outlives the engine
 // - `function_cache` and `callbacks` use thread-safe containers (DashMap, Arc)
 // - `stats` is wrapped in Arc with atomic counters
 // - All raw pointers are to immutable, long-lived code/symbol addresses
@@ -720,8 +733,10 @@ impl JitEngine {
 
     /// Register an external symbol.
     ///
+
     /// # Safety
     ///
+
     /// The pointer must be valid for the lifetime of the engine.
     pub unsafe fn register_symbol_unsafe(&self, name: impl Into<Text>, ptr: *mut ()) {
         let name = name.into();
@@ -791,8 +806,10 @@ impl JitEngine {
 
     /// Type-safe function call.
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// let result: i64 = engine.call("add", (1i64, 2i64))?;
     /// ```
@@ -859,8 +876,10 @@ impl JitEngine {
 
     /// Call a function with the given arguments (legacy).
     ///
+
     /// # Safety
     ///
+
     /// The argument types must match the function signature.
     pub unsafe fn call_raw(&self, name: &str, args: &mut [*mut ()]) -> Result<()> {
         self.stats.function_calls.fetch_add(1, Ordering::Relaxed);
@@ -879,8 +898,10 @@ impl JitEngine {
 
     /// Low-level invoke with packed arguments.
     ///
+
     /// # Safety
     ///
+
     /// Arguments must match the function signature exactly.
     pub unsafe fn invoke_packed(&self, name: &str, args: &mut [*mut ()]) -> Result<()> {
         // SAFETY: Caller guarantees arguments match function signature exactly
@@ -980,8 +1001,10 @@ impl JitEngine {
 
     /// Call function with no arguments and void return (legacy).
     ///
+
     /// # Safety
     ///
+
     /// The function must have the signature `() -> ()`.
     pub unsafe fn call_void(&self, name: &str) -> Result<()> {
         // SAFETY: Caller guarantees function has () -> () signature
@@ -1094,6 +1117,7 @@ impl JitEngine {
 
 /// High-level JIT compiler interface.
 ///
+
 /// Provides a builder pattern for configuring and creating JIT engines.
 pub struct JitCompiler {
     config: JitConfig,

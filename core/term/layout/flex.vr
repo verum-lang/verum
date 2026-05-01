@@ -5,6 +5,7 @@
 // cell grids. Supports row/column directions, wrapping, grow/shrink factors,
 // justify-content, align-items, and align-content.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#8.3
 // =============================================================================
 
@@ -157,13 +158,14 @@ implement FlexLayout {
     /// Compute flex layout positions and sizes for child items.
     /// Implements CSS Flexbox Level 1, Section 9: Flex TermLayout Algorithm.
     ///
+
     /// Steps:
-    ///   1. Determine available main/cross sizes
-    ///   2. Determine flex base sizes (hypothetical main sizes)
-    ///   3. Collect items into flex lines (wrapping)
-    ///   4. Resolve flexible lengths (grow/shrink with freeze)
-    ///   5. Align items on cross axis
-    ///   6. Distribute remaining space per justify_content
+    ///  1. Determine available main/cross sizes
+    ///  2. Determine flex base sizes (hypothetical main sizes)
+    ///  3. Collect items into flex lines (wrapping)
+    ///  4. Resolve flexible lengths (grow/shrink with freeze)
+    ///  5. Align items on cross axis
+    ///  6. Distribute remaining space per justify_content
     public fn compute(&self, container: Rect, items: &List<FlexItem>) -> List<Rect> {
         let n = items.len();
         if n == 0 { return List.new(); }

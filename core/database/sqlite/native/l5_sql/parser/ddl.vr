@@ -6,33 +6,39 @@ module core.database.sqlite.native.l5_sql.parser.ddl;
 // Layer: 5
 // Spec: sqlite.org/lang_{createtable,createindex,droptable,altertable}.html
 //
+
 // Grammar (subset — the v1 we can actually codegen):
 //
-//   create-table-stmt = CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS]
-//                        qname '(' column-def {, column-def | table-constraint} ')'
-//                        [WITHOUT ROWID] [STRICT]
+
+//  create-table-stmt = CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS]
+//  qname '(' column-def {, column-def | table-constraint} ')'
+//  [WITHOUT ROWID] [STRICT]
 //
-//   column-def = ident [type-name] { column-constraint }
-//   type-name  = ident { ident | '(' INT [, INT] ')' }
+
+//  column-def = ident [type-name] { column-constraint }
+//  type-name = ident { ident | '(' INT [, INT] ')' }
 //
-//   column-constraint = PRIMARY KEY [ASC|DESC] [on-conflict] [AUTOINCREMENT]
-//                     | NOT NULL [on-conflict]
-//                     | UNIQUE [on-conflict]
-//                     | CHECK '(' expr ')'
-//                     | DEFAULT ( expr | signed-number | literal )
-//                     | COLLATE ident
-//                     | REFERENCES qname [ '(' ident {, ident} ')' ]
+
+//  column-constraint = PRIMARY KEY [ASC|DESC] [on-conflict] [AUTOINCREMENT]
+//  | NOT NULL [on-conflict]
+//  | UNIQUE [on-conflict]
+//  | CHECK '(' expr ')'
+//  | DEFAULT ( expr | signed-number | literal )
+//  | COLLATE ident
+//  | REFERENCES qname [ '(' ident {, ident} ')' ]
 //
-//   table-constraint  = PRIMARY KEY '(' ident {, ident} ')' [on-conflict]
-//                     | UNIQUE '(' ident {, ident} ')' [on-conflict]
-//                     | CHECK '(' expr ')'
-//                     | FOREIGN KEY '(' ident {, ident} ')' REFERENCES ...
+
+//  table-constraint = PRIMARY KEY '(' ident {, ident} ')' [on-conflict]
+//  | UNIQUE '(' ident {, ident} ')' [on-conflict]
+//  | CHECK '(' expr ')'
+//  | FOREIGN KEY '(' ident {, ident} ')' REFERENCES ...
 //
-//   drop-stmt  = DROP (TABLE|INDEX|VIEW|TRIGGER) [IF EXISTS] qname
-//   create-index-stmt = CREATE [UNIQUE] INDEX [IF NOT EXISTS] qname ON
-//                        qname '(' ident {, ident} ')'   -- stashed as
-//                        expression; v1 parses but discards the expr
-//                        detail until the planner consumes it.
+
+//  drop-stmt = DROP (TABLE|INDEX|VIEW|TRIGGER) [IF EXISTS] qname
+//  create-index-stmt = CREATE [UNIQUE] INDEX [IF NOT EXISTS] qname ON
+//  qname '(' ident {, ident} ')' -- stashed as
+//  expression; v1 parses but discards the expr
+//  detail until the planner consumes it.
 // =============================================================================
 
 mount core.*;

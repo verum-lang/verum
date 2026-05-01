@@ -1,10 +1,12 @@
 //! `verum hooks install` — git pre-commit hook installer.
 //!
+
 //! Industrial pattern: one command writes `.git/hooks/pre-commit`
 //! that runs `verum lint --since HEAD --severity error` plus
 //! `verum fmt --check` before each commit. Reduces *"new contributor
 //! to the team must paste this snippet"* friction to zero.
 //!
+
 //! Safety: the hook script carries a header marker (`# Generated
 //! by `verum hooks install`...`) so `uninstall` only touches files
 //! we wrote — a hand-edited or third-party hook is never silently

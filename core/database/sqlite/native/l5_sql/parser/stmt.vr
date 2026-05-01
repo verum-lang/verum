@@ -6,15 +6,18 @@ module core.database.sqlite.native.l5_sql.parser.stmt;
 // Layer: 5
 // Spec: sqlite-native.md §12.2, sqlite.org/syntax/sql-stmt.html
 //
+
 // The parser's public entry points:
 //
-//   parse_statement(ts) -> Result<SqlStatement, ParseError>
-//       Parses one statement (no leading/trailing ';'). Dispatches on
-//       the leading keyword.
+
+//  parse_statement(ts) -> Result<SqlStatement, ParseError>
+//  Parses one statement (no leading/trailing ';'). Dispatches on
+//  the leading keyword.
 //
-//   parse_batch(src) -> Result<List<SqlStatement>, ParseError>
-//       Tokenises `src` and parses until EOF, consuming ';' between
-//       statements. Empty statements (';;') are silently skipped.
+
+//  parse_batch(src) -> Result<List<SqlStatement>, ParseError>
+//  Tokenises `src` and parses until EOF, consuming ';' between
+//  statements. Empty statements (';;') are silently skipped.
 // =============================================================================
 
 mount core.*;

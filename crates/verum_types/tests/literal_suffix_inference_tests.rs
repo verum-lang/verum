@@ -186,6 +186,7 @@ fn test_type_directed_interpretation() {
 fn test_suffix_resolution_algorithm() {
     // Unification: Robinson's algorithm extended with row polymorphism, refinement subtyping, and type class constraints — .4.2 lines 8747-8754
     //
+
     // Resolution algorithm:
     // 1. Lookup suffix in registered suffix table
     // 2. Find type T that implements FromIntegerLiteral<SUFFIX> or FromFloatLiteral<SUFFIX>

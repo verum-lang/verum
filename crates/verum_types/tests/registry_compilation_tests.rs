@@ -14,9 +14,11 @@
 )]
 // Comprehensive tests for registry compilation and cross-module type integration
 //
+
 // Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Module Registry and Type Lookup
 // Sum types (variants): "type T is A | B(payload) | C { fields }" for algebraic data types (Variants)
 //
+
 // This test suite validates:
 // 1. Module registry with cross-module types
 // 2. Type lookups across modules in registry

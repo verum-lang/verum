@@ -1,55 +1,63 @@
-//! Industrial-grade tactic infrastructure — V0 algorithmic kernel
-//! rule.  Production tactics that close subgoals via decision
+//! Industrial-grade tactic infrastructure — algorithmic kernel
+//! rule. Production tactics that close subgoals via decision
 //! procedures or structural recursion, NOT via SMT delegation.
 //!
+
 //! ## What this delivers
 //!
+
 //! Verum's existing 22 built-in tactics are *paper-cited* — they
 //! drive an SMT backend or a framework-axiom citation, then the
-//! kernel re-checks the resulting term.  This is sound but not
+//! kernel re-checks the resulting term. This is sound but not
 //! *closing* — most subgoals still hand off to Z3.
 //!
+
 //! Industrial-grade tactics close subgoals **without external help**:
 //! they implement decision procedures whose correctness is proved
 //! once-and-for-all in the kernel, then dispatched per-subgoal.
 //!
-//! V0 ships the following tactics, each with a kernel-checkable
+
+//! ships the following tactics, each with a kernel-checkable
 //! decision predicate + explicit-witness emission:
 //!
-//!   1. [`tactic_lia`] — *Linear Integer Arithmetic*.  Decides
-//!      validity of formulae over ℤ with `+`, `−`, multiplication
-//!      by constants, equality and inequality.  Reduction: Presburger
-//!      arithmetic (decidable, EXPSPACE-complete).  V0 surface: a
-//!      sound-but-incomplete decision on conjunctions of linear
-//!      constraints (Omega-test style elimination).
-//!   2. [`tactic_decide`] — *boolean tautology decision*.  Closes
-//!      decidable-by-design propositional formulae over a fixed
-//!      atomic alphabet.  Reduction: truth-table exhaustion (V0
-//!      surface — V1 promotion to BDD/SAT for larger inputs).
-//!   3. [`tactic_induction`] — *structural induction on natural
-//!      numbers*.  Discharges goals of shape `∀n. P(n)` by reducing
-//!      to `P(0)` and `∀k. P(k) ⇒ P(k+1)`.
-//!   4. [`tactic_congruence`] — *congruence closure on uninterpreted
-//!      function symbols*.  Decides equality in EUF (E-graph
-//!      saturation).
-//!   5. [`tactic_eauto`] — *bounded back-chaining eauto*.  Resolves
-//!      a goal against a hint database via depth-bounded back-chaining;
-//!      records used hints for kernel re-check.
+
+//!  1. [`tactic_lia`] — *Linear Integer Arithmetic*. Decides
+//!  validity of formulae over ℤ with `+`, `−`, multiplication
+//!  by constants, equality and inequality. Reduction: Presburger
+//!  arithmetic (decidable, EXPSPACE-complete). current surface: a
+//!  sound-but-incomplete decision on conjunctions of linear
+//!  constraints (Omega-test style elimination).
+//!  2. [`tactic_decide`] — *boolean tautology decision*. Closes
+//!  decidable-by-design propositional formulae over a fixed
+//!  atomic alphabet. Reduction: truth-table exhaustion (V0
+//!  surface — V1 promotion to BDD/SAT for larger inputs).
+//!  3. [`tactic_induction`] — *structural induction on natural
+//!  numbers*. Discharges goals of shape `∀n. P(n)` by reducing
+//!  to `P(0)` and `∀k. P(k) ⇒ P(k+1)`.
+//!  4. [`tactic_congruence`] — *congruence closure on uninterpreted
+//!  function symbols*. Decides equality in EUF (E-graph
+//!  saturation).
+//!  5. [`tactic_eauto`] — *bounded back-chaining eauto*. Resolves
+//!  a goal against a hint database via depth-bounded back-chaining;
+//!  records used hints for kernel re-check.
 //!
+
 //! Each tactic returns a [`TacticOutcome`] structure that carries
 //! the closing-witness data (linear-elimination certificate /
 //! truth-table assignment / induction split / congruence chain /
-//! hint sequence).  The kernel re-checks the witness in linear
+//! hint sequence). The kernel re-checks the witness in linear
 //! time relative to the witness size.
 //!
+
 //! ## What this UNBLOCKS
 //!
-//!   - **MSFS proof bodies** that currently delegate to SMT can
-//!     instead invoke [`tactic_lia`] / [`tactic_decide`] for
-//!     in-kernel discharge.
-//!   - **Verum's tactic budget**: the existing 22 SMT-driven tactics
-//!     paid CPU + non-determinism per subgoal; the 5 industrial
-//!     tactics here are deterministic and run in milliseconds.
+
+//!  - **MSFS proof bodies** that currently delegate to SMT can
+//!  instead invoke [`tactic_lia`] / [`tactic_decide`] for
+//!  in-kernel discharge.
+//!  - **Verum's tactic budget**: the existing 22 SMT-driven tactics
+//!  paid CPU + non-determinism per subgoal; the 5 industrial
+//!  tactics here are deterministic and run in milliseconds.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -61,12 +69,12 @@ use verum_common::Text;
 /// Outcome of running a tactic on a subgoal.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TacticOutcome {
-    /// The subgoal was closed.  The witness is data the kernel
+    /// The subgoal was closed. The witness is data the kernel
     /// re-checks to certify the closure.
     Closed {
         /// Diagnostic name of the tactic that closed.
         tactic_name: Text,
-        /// Re-checkable witness data (string-encoded for V0 surface;
+        /// Re-checkable witness data (string-encoded for current surface;
         /// V1 promotes to a typed `TacticWitness` enum).
         witness: Text,
     },
@@ -158,7 +166,8 @@ impl LinearConstraint {
 /// a true RHS) OR the constraint set is *trivially unsatisfiable*
 /// (contains `0 = 1` or analogue) — discharging the goal `false ⇒ ⊥`.
 ///
-/// V1 promotion: full Omega-test elimination; V2 promotion: full
+
+/// Future work: full Omega-test elimination; V2 promotion: full
 /// Cooper's algorithm for divisibility constraints.
 pub fn tactic_lia(constraints: &[LinearConstraint]) -> TacticOutcome {
     // Check for trivial unsatisfiability first.
@@ -244,9 +253,9 @@ impl BoolFormula {
 }
 
 /// V0 decide tactic: closes a propositional formula iff it is a
-/// tautology over the supplied atomic alphabet.  Truth-table
+/// tautology over the supplied atomic alphabet. Truth-table
 /// exhaustion (correct for any finite alphabet; capped at 16 atoms
-/// for V0 surface to keep evaluation under 2^16 = 64K cases).
+/// for current surface to keep evaluation under 2^16 = 64K cases).
 pub fn tactic_decide(formula: &BoolFormula) -> TacticOutcome {
     let n = formula.max_atom() as usize;
     if n > 16 {
@@ -327,7 +336,7 @@ pub fn tactic_induction(
 // =============================================================================
 
 /// An equality assertion `lhs = rhs` in the EUF (Equality of
-/// Uninterpreted Functions) signature.  Term identifiers are u32.
+/// Uninterpreted Functions) signature. Term identifiers are u32.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CongruenceEquation {
     /// Left-hand side term identifier.
@@ -374,7 +383,8 @@ impl UnionFind {
 /// V0 congruence tactic: given a list of input equalities and a target
 /// equation, decides whether the target is in the equational closure.
 ///
-/// V0 surface: equality-closure only (no congruence-closure on
+
+/// current surface: equality-closure only (no congruence-closure on
 /// uninterpreted function applications); V1 promotion to full E-graph
 /// saturation.
 pub fn tactic_congruence(
@@ -432,12 +442,12 @@ pub fn tactic_congruence(
 pub struct EautoHint {
     /// The conclusion (head of the rule).
     pub head: u32,
-    /// The premises (body of the rule).  Empty for axioms.
+    /// The premises (body of the rule). Empty for axioms.
     pub body: Vec<u32>,
 }
 
 /// V0 eauto tactic: depth-bounded back-chaining over the supplied hint
-/// database.  Closes a goal iff there is a derivation of depth ≤ `bound`
+/// database. Closes a goal iff there is a derivation of depth ≤ `bound`
 /// from axiom-shaped hints (those with `body == []`).
 pub fn tactic_eauto(
     hints: &[EautoHint],
@@ -670,7 +680,7 @@ mod tests {
 
     #[test]
     fn eauto_handles_cycles_without_infinite_loop() {
-        // Rule: A :- A.  Goal: ⊢ A.  No axiom — should fail, not loop.
+        // Rule: A :- A. Goal: ⊢ A. No axiom — should fail, not loop.
         let hints = vec![EautoHint { head: 0, body: vec![0] }];
         assert!(!tactic_eauto(&hints, 0, 5).is_closed());
     }

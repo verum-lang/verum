@@ -75,8 +75,10 @@ impl<'c> Location<'c> {
 
     /// Creates a location from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirLocation) -> Self {
         Self {

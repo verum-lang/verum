@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.6
 //
+
 // Julian Day = continuous count of days since noon UTC on 1 Jan 4713 BC
 // (proleptic Julian calendar). The conversion uses the well-known
 // Fliegel & Van Flandern algorithm.
 //
+
 // JD for noon → exactly an integer; JD at any other time has a
 // fractional part (e.g. midnight UTC = JD - 0.5).
 // =============================================================================

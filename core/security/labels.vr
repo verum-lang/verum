@@ -2,36 +2,45 @@
 // labels.vr — Security Labels for Information-Flow Control
 // =============================================================================
 //
+
 // Layer: Standard Library / Security
 //
+
 // User-facing surface for the modal-types analysis core
 // (`verum_types.modal_types`). Lattice-based security labels
 // classify values; the type system enforces that labeled values
 // only flow to contexts permitted by the lattice ordering, ruling
 // out information leaks at compile time.
 //
+
 // ## The canonical chain
 //
+
 // ```text
-//     Public ⊑ Internal ⊑ Secret ⊑ TopSecret
+//  Public ⊑ Internal ⊑ Secret ⊑ TopSecret
 // ```
 //
+
 // A `Public` value flows freely into a `Secret` context (it's
 // merely "more sensitive than necessary"), but a `Secret` value
 // may *not* flow into a `Public` context — that would leak the
 // secret.
 //
+
 // ## Example
 //
+
 // ```verum
 // let bank_balance: Labeled<Int> = labeled(Label.Secret, 5000);
 // let credit_score: Labeled<Int> = labeled(Label.Internal, 720);
 //
+
 // // Flow check before logging:
 // let log_label: Label = Label.Public;
 // assert(!flows_to(Label.Secret, log_label));
 // ```
 //
+
 // =============================================================================
 
 module core.security.labels;

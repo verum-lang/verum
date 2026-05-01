@@ -3,19 +3,22 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.4 / §18
 //
+
 // Two related table-valued vtabs:
 //
-//   pragma_index_list('t')   — one row per index attached to table t
-//      seq    INTEGER
-//      name   TEXT
-//      unique INTEGER (0/1)
-//      origin TEXT     ('c' / 'u' / 'pk')
-//      partial INTEGER (0/1)
+
+//  pragma_index_list('t') — one row per index attached to table t
+//  seq INTEGER
+//  name TEXT
+//  unique INTEGER (0/1)
+//  origin TEXT ('c' / 'u' / 'pk')
+//  partial INTEGER (0/1)
 //
-//   pragma_index_info('idx') — one row per column in idx
-//      seqno INTEGER
-//      cid   INTEGER
-//      name  TEXT
+
+//  pragma_index_info('idx') — one row per column in idx
+//  seqno INTEGER
+//  cid INTEGER
+//  name TEXT
 // =============================================================================
 
 module core.database.sqlite.native.dbstat.index_info;

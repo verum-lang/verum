@@ -1,22 +1,26 @@
 //! Cog-level registry for user-authored tactic packages.
 //!
+
 //! This module is the shared lookup surface that binds tactic names
 //! at the cog-dependency layer rather than at the compiler-intrinsic
 //! layer. The four consumers of the registry:
 //!
+
 //! 1. **stdlib** `core.proof.tactics.*` — loaded at session start as
-//!    a well-known package with a fixed revision.
+//!  a well-known package with a fixed revision.
 //! 2. **User project** — `@tactic` / `@tactic meta fn` declarations
-//!    in the project's own `.vr` files register into the project
-//!    package.
+//!  in the project's own `.vr` files register into the project
+//!  package.
 //! 3. **Imported cogs** — a cog that exports `@tactic` declarations
-//!    loads into a package named after the cog's path.
+//!  loads into a package named after the cog's path.
 //! 4. **`verum verify`** — looks up tactics by name when the proof
-//!    DSL refers to them, producing a clear "unknown tactic in
-//!    which package" diagnostic on miss.
+//!  DSL refers to them, producing a clear "unknown tactic in
+//!  which package" diagnostic on miss.
 //!
+
 //! Semantics
 //!
+
 //! Each registered entry is keyed by `(package, name)` and carries
 //! a revision tag for version-skew diagnostics. Duplicate
 //! registration is rejected — the compiler surfaces it as
@@ -26,6 +30,7 @@
 //! always shadows an imported or stdlib tactic with the same name
 //! (the shadowing is explicit, not accidental).
 //!
+
 //! The registry is deliberately unaware of tactic semantics — it
 //! stores opaque `TacticBody` handles that the user_tactic compiler
 //! consumes. Decoupling registration from execution lets the
@@ -38,6 +43,7 @@ use verum_common::{List, Maybe, Text};
 
 /// A registered tactic declaration.
 ///
+
 /// Carries enough metadata for diagnostics (`package`, `revision`,
 /// `source_span` once the parser patch lands) plus the opaque body
 /// the executor consumes.
@@ -63,6 +69,7 @@ pub struct TacticDecl {
 
 /// Scope disambiguator used by the lookup algorithm.
 ///
+
 /// The enum order determines search order: `Project` first,
 /// `ImportedCog` next (iterated in registration order), `Stdlib`
 /// last. A project-local tactic always shadows the stdlib or an
@@ -93,6 +100,7 @@ impl TacticPackageRegistry {
 
     /// Register a tactic declaration.
     ///
+
     /// Returns `Err(RegistryError::DuplicateRegistration)` if
     /// `(package, name)` is already bound. Callers that want to
     /// intentionally shadow must place the new entry in a
@@ -146,6 +154,7 @@ impl TacticPackageRegistry {
     /// declaration following the Project → ImportedCog → Stdlib
     /// search order.
     ///
+
     /// Returns `None` if no package contains the name.
     pub fn lookup(&self, name: &str) -> Maybe<&TacticDecl> {
         // Phase 1: search every Project-scoped package.

@@ -14,6 +14,7 @@
 )]
 //! Advanced context system tests for type checking
 //!
+
 //! Tests cover:
 //! - Context set operations (union, subset)
 //! - Context checker scoping

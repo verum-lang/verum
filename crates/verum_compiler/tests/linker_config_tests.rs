@@ -1,5 +1,6 @@
 //! Integration tests for linker configuration from Verum.toml
 //!
+
 //! These tests verify that linker configuration is correctly parsed from
 //! Verum.toml and applied to the compilation pipeline.
 

@@ -14,6 +14,7 @@
 )]
 //! Tests for Bounds Check Elimination
 //!
+
 //! Bounds Check Elimination via Refinement Types:
 //! Bounds checks are eliminated in AOT code when refinement types and meta
 //! parameters prove safety at compile time. The analysis checks:
@@ -209,7 +210,7 @@ fn test_loop_invariant_elimination() {
 
 #[test]
 fn test_loop_invariant_mismatch() {
-    // for i in 0..10 { array[i] }  // array.len() != 10
+    // for i in 0..10 { array[i] } // array.len() != 10
     // Expected: Check kept
 
     let cfg = make_cfg();

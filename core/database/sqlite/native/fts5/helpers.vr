@@ -3,16 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 (fts5 builtin functions)
 //
+
 // Two pure-text helpers:
 //
-//   * `highlight(text, ranges, open, close)` — wrap each (start, end)
-//                                              byte range in the marker
-//                                              pair
-//   * `snippet(text, ranges, open, close, ellipsis, n_words)` —
-//                                              extract a `n_words`-wide
-//                                              window centred on the
-//                                              first matching range
+
+//  * `highlight(text, ranges, open, close)` — wrap each (start, end)
+//  byte range in the marker
+//  pair
+//  * `snippet(text, ranges, open, close, ellipsis, n_words)` —
+//  extract a `n_words`-wide
+//  window centred on the
+//  first matching range
 //
+
 // =============================================================================
 
 module core.database.sqlite.native.fts5.helpers;

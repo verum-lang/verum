@@ -34,13 +34,13 @@ public fn classify_first_byte(b: Int) -> BindParamCountKind {
     PkAnonymous
 }
 
-// Highest-1-based index probe.  Return value matches SQLite's contract:
+// Highest-1-based index probe. Return value matches SQLite's contract:
 // the largest parameter slot index, irrespective of the kind sequence.
 public fn highest_index(slots: Int, max_numbered: Int) -> Int {
     if slots > max_numbered { slots } else { max_numbered }
 }
 
-// Pre-check on the requested index used by sqlite3_bind_*.  Out-of-range
+// Pre-check on the requested index used by sqlite3_bind_*. Out-of-range
 // returns SQLITE_RANGE (25).
 public type IndexCheck is
     | IcOk

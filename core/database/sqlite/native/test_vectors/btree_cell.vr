@@ -3,13 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md Appendix E.4 (btree cell parsing test vectors)
 //
+
 // Cells appear in four flavours per page kind:
 //
-//   * TableLeafCell       — varint(payload_size) || varint(rowid) || payload
-//   * TableInteriorCell   — uint32(left_child) || varint(rowid)
-//   * IndexLeafCell       — varint(payload_size) || payload
-//   * IndexInteriorCell   — uint32(left_child) || varint(payload_size) || payload
+
+//  * TableLeafCell — varint(payload_size) || varint(rowid) || payload
+//  * TableInteriorCell — uint32(left_child) || varint(rowid)
+//  * IndexLeafCell — varint(payload_size) || payload
+//  * IndexInteriorCell — uint32(left_child) || varint(payload_size) || payload
 //
+
 // Each vector pairs one canonical encoding with the parsed
 // `BtreeCellShape` the L3 cursor must produce.
 // =============================================================================

@@ -15,6 +15,7 @@
 // Tests for new where clause support in declarations
 // Tests for where clause disambiguation in declarations.
 //
+
 // This tests the separation of generic and meta where clauses in:
 // - FunctionDecl
 // - TypeDecl
@@ -149,8 +150,8 @@ fn test_function_with_meta_where_clause() {
 #[test]
 fn test_function_with_both_where_clauses() {
     // Test: fn process<T, N: meta usize>()
-    //           where type T: Ord
-    //           where meta N > 0
+    //  where type T: Ord
+    //  where meta N > 0
     let dummy_span = Span::dummy();
 
     let generic_where = WhereClause::new(
@@ -228,8 +229,8 @@ fn test_function_with_both_where_clauses() {
 #[test]
 fn test_type_decl_with_meta_where_clause() {
     // Test: type Matrix<M: meta usize, N: meta usize>
-    //           where meta M > 0, meta N > 0
-    //       is { data: [[Float; N]; M] }
+    //  where meta M > 0, meta N > 0
+    //  is { data: [[Float; N]; M] }
     let dummy_span = Span::dummy();
 
     let meta_where = WhereClause::new(
@@ -297,9 +298,9 @@ fn test_type_decl_with_meta_where_clause() {
 #[test]
 fn test_protocol_with_both_where_clauses() {
     // Test: protocol Container<T, N: meta usize>
-    //           where type T: Clone
-    //           where meta N > 0
-    //       { ... }
+    //  where type T: Clone
+    //  where meta N > 0
+    //  { ... }
     let dummy_span = Span::dummy();
 
     let generic_where = WhereClause::new(
@@ -361,9 +362,9 @@ fn test_protocol_with_both_where_clauses() {
 #[test]
 fn test_impl_with_both_where_clauses() {
     // Test: implement<T, N: meta usize> Container<T, N> for Array<T, N>
-    //           where type T: Clone
-    //           where meta N > 0
-    //       { ... }
+    //  where type T: Clone
+    //  where meta N > 0
+    //  { ... }
     let dummy_span = Span::dummy();
 
     let generic_where = WhereClause::new(
@@ -468,10 +469,10 @@ fn test_function_with_context_requirements() {
 #[test]
 fn test_complete_function_declaration() {
     // Test: fn process<T, N: meta usize>(data: T) -> Result<T>
-    //           using [Database, Logger]
-    //           where type T: Serialize
-    //           where meta N > 0
-    //       { ... }
+    //  using [Database, Logger]
+    //  where type T: Serialize
+    //  where meta N > 0
+    //  { ... }
     let dummy_span = Span::dummy();
 
     let contexts = vec![

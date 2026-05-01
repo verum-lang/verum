@@ -4,17 +4,19 @@
 // Layer: 4
 // Spec: sqlite-native.md §15.1 (Numeric section)
 //
+
 // `Register`-typed implementations of the non-math numeric functions:
 // ABS, ROUND, COALESCE, IFNULL, NULLIF, MIN/MAX (varargs scalar form),
 // IIF, SIGN, RANDOM, RANDOMBLOB, ZEROBLOB, plus the planner-hint
 // no-ops LIKELY / UNLIKELY / LIKELIHOOD.
 //
+
 // NULL behaviour:
-//   * COALESCE returns first non-null
-//   * IFNULL is COALESCE arity-2
-//   * NULLIF returns NULL if equal, else first arg
-//   * MIN/MAX skip NULL; if every arg is NULL, return NULL
-//   * IIF(cond, t, f) — cond=NULL is treated falsy
+//  * COALESCE returns first non-null
+//  * IFNULL is COALESCE arity-2
+//  * NULLIF returns NULL if equal, else first arg
+//  * MIN/MAX skip NULL; if every arg is NULL, return NULL
+//  * IIF(cond, t, f) — cond=NULL is treated falsy
 // =============================================================================
 
 module core.database.sqlite.native.builtins.numeric_fns;
@@ -181,6 +183,7 @@ public fn sign(v: &Register) -> Register {
 // RANDOM / RANDOMBLOB / ZEROBLOB
 // -----------------------------------------------------------------------------
 //
+
 // Uses xorshift64* — SQLite uses ChaCha20 for high-quality output;
 // we substitute the lighter xorshift here. Caller may seed via the
 // `random_seed_set` global helper. This is **not** cryptographically

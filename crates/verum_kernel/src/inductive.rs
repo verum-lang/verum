@@ -1,40 +1,47 @@
 //! Inductive-type registry + strict-positivity checking (K-Pos rule).
 //!
+
 //! Split out of `lib.rs` . An inductive type is well-formed
 //! only when its own name appears *strictly positively* in every
 //! constructor's argument types. Allowing non-positive recursion
 //! (e.g. `type Bad = Wrap(Bad -> A)`) admits Berardi's paradox and
 //! lets the user derive `False`.
 //!
+
 //! The kernel enforces this at registration time via
 //! [`InductiveRegistry::register`]: every [`RegisteredInductive`] is
 //! validated by [`check_strict_positivity`] before it is admitted.
 //! A failure surfaces as `KernelError::PositivityViolation` with a
 //! human-readable position string for diagnostic copy.
 //!
+
 //! VVA spec §7.3 (`K-Pos`): for every constructor `C(t1, ..., tn) -> T`
 //! of an inductive type `T`, every recursive occurrence of `T` in any
 //! `ti` must appear strictly positively.
 //!
+
 //! Strict positivity, formally — for an inductive type name `T` and
 //! a type `t`, the predicate `appears_only_strictly_positively(T, t)`:
 //!
-//!   * For `Universe(_)` / `Var(_)` / `Path(_)` / `Sigma(_)` (no
-//!     functional negation through any arrow): admit iff every nested
-//!     type satisfies the predicate.
-//!   * For `Pi(domain, codomain)`: admit iff `T` does NOT appear
-//!     anywhere in `domain` (the negative position) AND `codomain`
-//!     itself is strictly positive in `T`.
-//!   * For `Inductive(name, args)` where `name == T`: admit (this is
-//!     the recursive use we are admitting).
-//!   * For `Inductive(other_name, args)`: admit iff every `arg` is
-//!     strictly positive in `T`.
+
+//!  * For `Universe(_)` / `Var(_)` / `Path(_)` / `Sigma(_)` (no
+//!  functional negation through any arrow): admit iff every nested
+//!  type satisfies the predicate.
+//!  * For `Pi(domain, codomain)`: admit iff `T` does NOT appear
+//!  anywhere in `domain` (the negative position) AND `codomain`
+//!  itself is strictly positive in `T`.
+//!  * For `Inductive(name, args)` where `name == T`: admit (this is
+//!  the recursive use we are admitting).
+//!  * For `Inductive(other_name, args)`: admit iff every `arg` is
+//!  strictly positive in `T`.
 //!
+
 //! The check is *constructor-by-constructor*: each constructor is a
 //! Π-chain of argument types, with the codomain being the type's own
 //! `Inductive(T, _)` head. We descend each argument's type tree under
 //! the strictly-positive discipline.
 //!
+
 //! This module also hosts [`is_uip_shape`] (UIP-detection for the
 //! axiom registry), [`is_var_named`] and [`is_path_over`] — these
 //! cross-cut into axiom-registry's UIP rejection (`pub(crate)` so
@@ -60,25 +67,28 @@ pub struct ConstructorSig {
 
 /// one **path constructor** of a higher inductive type.
 ///
+
 /// Per a HIT extends an ordinary inductive with cells whose
 /// boundary is a path between two values of the type itself; the path
 /// constructor's body is the kernel-internal record of that cell.
 ///
+
 /// **Cell dimension** is recorded explicitly via [`Self::dim`]
 /// ():
 /// * `dim = 1` — a 1-cell (path) `lhs ↝ rhs` between two point
-///   inhabitants of the surrounding inductive (e.g. S¹'s
-///   `Loop : Base ↝ Base`, Interval's `Seg : Zero ↝ One`).
+///  inhabitants of the surrounding inductive (e.g. S¹'s
+///  `Loop : Base ↝ Base`, Interval's `Seg : Zero ↝ One`).
 /// * `dim = 2` — a 2-cell (homotopy) between two 1-cells
-///   `(p : a ↝ b) ↝ (q : a ↝ b)` (e.g. Torus's
-///   `Surf : (loop_a · loop_b) ↝ (loop_b · loop_a)`). The
-///   endpoint terms `lhs` / `rhs` are themselves path-typed
-///   expressions (1-cells reified via `PathTy` or composite
-///   ctor applications).
+///  `(p : a ↝ b) ↝ (q : a ↝ b)` (e.g. Torus's
+///  `Surf : (loop_a · loop_b) ↝ (loop_b · loop_a)`). The
+///  endpoint terms `lhs` / `rhs` are themselves path-typed
+///  expressions (1-cells reified via `PathTy` or composite
+///  ctor applications).
 /// * `dim = n` — n-cells generalise: endpoints are (n−1)-cells,
-///   recursively, and the eliminator's path-branch type
-///   nests `PathOver` over `PathOver` n times.
+///  recursively, and the eliminator's path-branch type
+///  nests `PathOver` over `PathOver` n times.
 ///
+
 /// The endpoint expressions `lhs` / `rhs` are arbitrary [`CoreTerm`]s
 /// over the surrounding inductive — typically references to point
 /// constructors (e.g. `Var("Base")` for S¹'s `loop : Base ↝ Base`),
@@ -86,6 +96,7 @@ pub struct ConstructorSig {
 /// HIT's `merid : Σ X ↝ Σ X` where the recursor at `lhs` is computed
 /// by recursion over the argument).
 ///
+
 /// ships kernel-level n-cell support: the eliminator
 /// emit unconditionally walks the dim field and nests `PathOver`
 /// branches accordingly. The grammar / parser surface for the
@@ -301,6 +312,7 @@ impl InductiveRegistry {
     /// returned — those carry path-substitution semantics, handled
     /// separately).
     ///
+
     /// Used by `support::normalize_with_inductives` to fire the
     /// HIT eliminator's β-rule:
     /// `Elim(motive, [c0, c1, ..., cn]) (App-chain(C, args))`
@@ -327,6 +339,7 @@ impl InductiveRegistry {
     /// the inductive's `path_constructors` list. `None` when the
     /// name doesn't match any registered path ctor.
     ///
+
     /// Used by `support::normalize_with_inductives` to fire the
     /// HIT path-constructor β-rule. With N point ctors and M path
     /// ctors, `Elim(motive, cases)(Var(P_j))` reduces to
@@ -351,6 +364,7 @@ impl InductiveRegistry {
     /// inductive by qualified path. Returns the registered level
     /// when present, `None` when the name isn't in the registry.
     ///
+
     /// Used by `infer`'s `Inductive` arm to honour the spec's
     /// declared universe instead of the pre-V8 hardcoded
     /// `Concrete(0)` fallback. Path matching is by full string
@@ -440,17 +454,18 @@ fn name_appears_in(target: &str, ty: &CoreTerm) -> bool {
 /// The strict-positivity walker for `K-Pos`. Returns Ok iff
 /// the type name `target` appears only strictly positively in `ty`.
 ///
+
 /// The discipline:
 /// - On `Pi(domain, codomain)`: `target` must NOT appear in `domain`
-///   (the negative position); `codomain` must itself be strictly
-///   positive in `target`.
+///  (the negative position); `codomain` must itself be strictly
+///  positive in `target`.
 /// - On `Inductive(name, args)`: when `name == target`, the recursive
-///   reference is admitted (this IS the strict-positive site). When
-///   `name != target`, every `arg` must itself be strictly positive
-///   in `target` — this catches indirect non-positive recursion via
-///   parametrised types like `BadCons(SomeFn(Bad), ...)`.
+///  reference is admitted (this IS the strict-positive site). When
+///  `name != target`, every `arg` must itself be strictly positive
+///  in `target` — this catches indirect non-positive recursion via
+///  parametrised types like `BadCons(SomeFn(Bad), ...)`.
 /// - On `Sigma`, `App`, `Refine`, `Lambda`: descend into both halves;
-///   strict positivity is closed under products and dependent pairs.
+///  strict positivity is closed under products and dependent pairs.
 /// - On atoms: vacuously OK.
 pub fn check_strict_positivity(
     target: &str,
@@ -483,6 +498,7 @@ pub fn check_strict_positivity(
             // are admitting; args may also mention `target` but ONLY
             // strictly positively (caught by recursion below).
             //
+
             // For non-self inductives: every argument must itself be
             // strictly positive in `target`. This catches `BadList =
             // Cons(SomeFn(target), BadList)` where SomeFn is a
@@ -531,10 +547,12 @@ pub fn check_strict_positivity(
 
 /// Return `true` iff `ty` is the direct UIP shape:
 ///
+
 /// ```text
 /// Π A. Π a. Π b. Π p. Π q. PathTy(PathTy(A, a, b), p, q)
 /// ```
 ///
+
 /// The check is deliberately conservative: it inspects the outer
 /// five Π binders and confirms that the innermost codomain is a
 /// path-of-paths whose inner carrier is `A`. Axioms that imply UIP
@@ -545,6 +563,7 @@ pub fn check_strict_positivity(
 /// where UIP is derivable (not axiomatised) from the proposition
 /// truncation.
 ///
+
 /// `pub(crate)` because the AxiomRegistry's UIP rejection
 /// (`KernelError::UipForbidden`) calls this to detect the shape;
 /// not part of the public kernel API.
@@ -613,50 +632,57 @@ fn is_path_over(ty: &CoreTerm, carrier_name: &str) -> bool {
 /// derive the **dependent eliminator type** for an
 /// inductive (with optional path constructors).
 ///
+
 /// Per + Task C3 (`docs/architecture/...verum-verification-architecture.md
 /// #17.2`) the kernel auto-generates the eliminator's type signature
 /// from the registered declaration. The shape is:
 ///
+
 /// ```text
 /// elim_T : Π (motive : T → Type_u) .
-///          Π (case_C₁ : Π (a₁:A₁)…(aₙ:Aₙ) . motive(C₁(a₁,…,aₙ))) .   -- one per point ctor
-///          ⋮
-///          Π (case_P : PathTy(motive(P.lhs),
-///                             ↻(P.lhs), ↻(P.rhs))) .                 -- one per path ctor
-///          ⋮
-///          Π (x : T) . motive(x)
+///  Π (case_C₁ : Π (a₁:A₁)…(aₙ:Aₙ) . motive(C₁(a₁,…,aₙ))) . -- one per point ctor
+///  ⋮
+///  Π (case_P : PathTy(motive(P.lhs),
+///  ↻(P.lhs), ↻(P.rhs))) . -- one per path ctor
+///  ⋮
+///  Π (x : T) . motive(x)
 /// ```
 ///
+
 /// where `↻(e)` denotes the **recursor's image** at endpoint `e`.
 /// V1 emits `↻(e) = e` for non-trivial endpoints — the kernel
 /// records the **structural** type signature; recursor coherence
 /// (so that `↻(P.lhs)` actually reduces to the right case-application
-/// chain) is V2 work tied to the `Elim` β-rule rollout. The point of
+/// chain) is future work tied to the `Elim` β-rule rollout. The point of
 /// V1 is that the eliminator **typechecks at the right shape** so
 /// frameworks (HoTT, cubical) can attest the computational content
 /// via axioms or `@verify` proofs without the kernel committing to a
 /// premature reduction strategy.
 ///
+
 /// # Examples
 ///
+
 /// * Ordinary `Bool` → `Π(motive: Bool → Type). Π(case_True: motive(True)).
-///   Π(case_False: motive(False)). Π(x: Bool). motive(x)`.
+///  Π(case_False: motive(False)). Π(x: Bool). motive(x)`.
 /// * S¹ HIT (point `Base`, path `Loop : Base..Base`) →
-///   `Π(motive). Π(case_Base: motive(Base)).
-///    Π(case_Loop: PathTy(motive(Base), Base, Base)). Π(x: S¹). motive(x)`.
+///  `Π(motive). Π(case_Base: motive(Base)).
+///  Π(case_Loop: PathTy(motive(Base), Base, Base)). Π(x: S¹). motive(x)`.
 /// * Interval HIT (`Zero`, `One`, `Seg : Zero..One`) →
-///   `Π(motive). Π(case_Zero). Π(case_One).
-///    Π(case_Seg: PathTy(motive(Zero), Zero, One)). Π(x). motive(x)`.
+///  `Π(motive). Π(case_Zero). Π(case_One).
+///  Π(case_Seg: PathTy(motive(Zero), Zero, One)). Π(x). motive(x)`.
 ///
+
 /// # V1 limitations (tracked for V2)
 ///
+
 /// * Recursor-image at non-nullary endpoints is emitted as the raw
-///   endpoint expression — V2 will resolve to the right case-app chain.
+///  endpoint expression — Future work will resolve to the right case-app chain.
 /// * Path-over (the dependent path needed when `motive(lhs) ≠
-///   motive(rhs)` definitionally) is approximated by `PathTy` over
-///   `motive(lhs)`; the framework system attests homogeneity for V1.
+///  motive(rhs)` definitionally) is approximated by `PathTy` over
+///  `motive(lhs)`; the framework system attests homogeneity for V1.
 /// * Higher cells (2-cells +) are not yet representable — needs the
-///   nested `path_endpoints` grammar extension.
+///  nested `path_endpoints` grammar extension.
 pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
     let parent_ind = CoreTerm::Inductive {
         path: decl.name.clone(),
@@ -702,10 +728,12 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
         let rhs_image = recursor_image_at_endpoint(&path.rhs, &point_ctor_names);
         // n-cell eliminator branch.
         //
+
         // For dim=1 (classical 1-cells): emit either homogeneous
         // PathTy (closed loop) or dependent PathOver (heterogeneous
         // endpoints).
         //
+
         // For dim≥2 (higher cells): nest PathOver `dim` times.
         // Each layer adds one PathOver wrapper representing one
         // dimensional step. The kernel surface is shape-correct
@@ -755,12 +783,15 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
 
 /// derive the case-branch type for a point constructor.
 ///
+
 /// For ctor `C(a₁:A₁, …, aₙ:Aₙ) : T`, the eliminator's case branch is:
 ///
+
 /// ```text
 /// Π (a₁ : A₁) … (aₙ : Aₙ) . motive(C(a₁, …, aₙ))
 /// ```
 ///
+
 /// Nullary ctors collapse to `motive(C)` (no Π binders).
 pub fn point_constructor_case_type(
     motive_var: &CoreTerm,
@@ -796,14 +827,17 @@ pub fn point_constructor_case_type(
 
 /// recursor's image at a path-constructor endpoint.
 ///
+
 /// V1: emit the endpoint expression as-is.
 ///
+
 /// V2 when `endpoint` is `Var(name)` and `name` matches a
 /// registered point ctor, rewrite to `Var("case_<name>")`. This
 /// produces an eliminator type whose path-branch PathTy endpoints
 /// reference the recursor's image (a value of `motive(point)`)
 /// rather than the constructor itself (a value of `T`).
 ///
+
 /// V3 (App-chain endpoint resolution. When an
 /// endpoint is a non-nullary constructor application
 /// `App(...App(Var("Cons"), arg₁), …, argₙ)`, rewrite to
@@ -815,19 +849,20 @@ pub fn point_constructor_case_type(
 /// references or values whose recursor image is supplied by the
 /// surrounding elaboration context.
 ///
+
 /// Limitations (deferred to V3.1+):
 /// * The β-rule for the eliminator (`Elim(...case_C...)(C args)` ↦
-///   `case_C(args, recursor_calls(args))`) is not yet realised at
-///   the kernel-typing layer — the eliminator typechecks at the
-///   right shape, but reduction is structural-only. Tracked under
-///   §7.4 V3 follow-up.
+///  `case_C(args, recursor_calls(args))`) is not yet realised at
+///  the kernel-typing layer — the eliminator typechecks at the
+///  right shape, but reduction is structural-only. Tracked under
+///  §7.4 V3 follow-up.
 /// * Dependent path-over (when `motive(lhs) ≠ motive(rhs)`
-///   definitionally) is still approximated by a homogeneous PathTy
-///   over `motive(lhs)`. Tracked under §7.4 V3 follow-up.
+///  definitionally) is still approximated by a homogeneous PathTy
+///  over `motive(lhs)`. Tracked under §7.4 V3 follow-up.
 /// * Higher cells (2-cells +) require an AST/grammar extension to
-///   express nested path endpoints; the kernel surface is ready
-///   (recursive recursor-image is shape-correct for any depth) but
-///   the parser doesn't admit the surface yet.
+///  express nested path endpoints; the kernel surface is ready
+///  (recursive recursor-image is shape-correct for any depth) but
+///  the parser doesn't admit the surface yet.
 fn recursor_image_at_endpoint(
     endpoint: &CoreTerm,
     point_ctor_names: &[&str],
@@ -860,13 +895,15 @@ fn recursor_image_at_endpoint(
 /// build the eliminator's
 /// branch-type for an n-cell path constructor.
 ///
+
 /// For `dim = 1`:
-///   * If `path_lhs == path_rhs` structurally → homogeneous
-///     `PathTy(motive(path_lhs), lhs_image, rhs_image)`.
-///   * Else → dependent `PathOver(motive, parent_path, lhs_image,
-///     rhs_image)` where `parent_path = PathTy(parent_ind, path_lhs,
-///     path_rhs)` reifies the constructor-path shape.
+///  * If `path_lhs == path_rhs` structurally → homogeneous
+///  `PathTy(motive(path_lhs), lhs_image, rhs_image)`.
+///  * Else → dependent `PathOver(motive, parent_path, lhs_image,
+///  rhs_image)` where `parent_path = PathTy(parent_ind, path_lhs,
+///  path_rhs)` reifies the constructor-path shape.
 ///
+
 /// For `dim ≥ 2`: nest `PathOver` (`dim − 1`) times around the
 /// dim=1 branch, each layer adding one dimensional wrap. The
 /// outermost path slot reifies the n-cell as a nested PathTy

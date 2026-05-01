@@ -5,14 +5,18 @@
 // Dependencies: core, async/task, async/future
 // =============================================================================
 //
+
 // This module provides the runtime types for the `nursery` language construct.
 // Nursery blocks guarantee that all spawned tasks complete before the scope exits,
 // providing true structured concurrency semantics.
 //
+
 // Spec: docs/improvements.md Section 9 - Structured Concurrency
 //
+
 // ## Overview
 //
+
 // A nursery creates a structured concurrency scope:
 // - All tasks spawned within the nursery are tracked
 // - The nursery waits for all tasks to complete before exiting
@@ -20,21 +24,24 @@
 // - Timeouts and task limits can be configured
 // - Cancellation propagates to all spawned tasks
 //
+
 // ## Syntax
 //
+
 // ```verum
 // nursery(timeout: 5000, max_tasks: 100, on_error: cancel_all) {
-//     spawn task1();
-//     spawn task2();
-//     spawn task3();
+//  spawn task1();
+//  spawn task2();
+//  spawn task3();
 // } on_cancel {
-//     cleanup();
+//  cleanup();
 // } recover |err| {
-//     log_error(err);
-//     default_value()
+//  log_error(err);
+//  default_value()
 // }
 // ```
 //
+
 // =============================================================================
 
 module nursery;
@@ -55,6 +62,7 @@ mount super.Future;
 
 /// Error behavior when a task in the nursery fails.
 ///
+
 /// This corresponds to the `on_error` option in the nursery syntax:
 /// - `nursery(on_error: cancel_all) { ... }` -> `CancelAll`
 /// - `nursery(on_error: wait_all) { ... }` -> `WaitAll`
@@ -76,6 +84,7 @@ public type NurseryErrorBehavior is
 
 /// Configuration options for a nursery.
 ///
+
 /// These correspond to the options in the nursery syntax:
 /// ```verum
 /// nursery(timeout: 5000, max_tasks: 100, on_error: cancel_all) { ... }
@@ -207,9 +216,9 @@ implement Debug for NurseryError {
 
 // Eq is intentionally NOT defined: NurseryError carries `Heap<Error>`
 // (a trait-object payload) for `Single` / `Multiple`, and the `Error`
-// protocol does not extend Eq.  Comparing two trait-object errors via
+// protocol does not extend Eq. Comparing two trait-object errors via
 // `message()` text would be an oracle leak masquerading as structural
-// equality.  Use pattern-test (`x is NurseryError.Cancelled`) for
+// equality. Use pattern-test (`x is NurseryError.Cancelled`) for
 // taxonomy queries; reach for `.message()` only when text comparison
 // is the explicit contract.
 
@@ -219,6 +228,7 @@ implement Debug for NurseryError {
 
 /// Handle to a task spawned within a nursery.
 ///
+
 /// This handle allows checking the task's status and awaiting its result.
 /// Unlike a regular `JoinHandle`, dropping this handle does NOT cancel the task -
 /// the nursery guarantees all tasks complete.
@@ -331,17 +341,20 @@ type NurseryState is {
 
 /// A nursery for structured concurrency.
 ///
+
 /// The nursery tracks all spawned tasks and ensures they complete before
 /// the nursery scope exits. This provides the runtime support for the
 /// `nursery { ... }` language construct.
 ///
+
 /// ## Example
 ///
+
 /// ```verum
 /// nursery {
-///     spawn fetch_data_a();
-///     spawn fetch_data_b();
-///     spawn fetch_data_c();
+///  spawn fetch_data_a();
+///  spawn fetch_data_b();
+///  spawn fetch_data_c();
 /// }
 /// // All three tasks are guaranteed to complete (or be cancelled) here
 /// ```
@@ -371,6 +384,7 @@ implement Nursery {
 
     /// Spawn a task into the nursery.
     ///
+
     /// The task will be tracked and the nursery will wait for it to complete.
     /// Returns a `TaskHandle` that can be used to await the result.
     public fn spawn<T: Send, F: Future<Output = T> + Send>(&mut self, future: F) -> TaskHandle<T> {
@@ -417,6 +431,7 @@ implement Nursery {
 
     /// Wait for all tasks to complete.
     ///
+
     /// Returns `Ok(())` if all tasks completed successfully, or
     /// `Err(NurseryError)` if any task failed (depending on error behavior).
     public async fn wait_all(&mut self) -> Result<(), NurseryError> {
@@ -471,16 +486,19 @@ implement Nursery {
 
 /// Run a closure with a new nursery scope.
 ///
+
 /// This is a helper for using nurseries in a scoped manner.
 /// All tasks spawned within the closure are tracked and waited on.
 ///
+
 /// ## Example
 ///
+
 /// ```verum
 /// let results = with_nursery(NurseryOptions.default()) { |n|
-///     let h1 = n.spawn(async { compute_a() });
-///     let h2 = n.spawn(async { compute_b() });
-///     (h1.await?, h2.await?)
+///  let h1 = n.spawn(async { compute_a() });
+///  let h2 = n.spawn(async { compute_b() });
+///  (h1.await?, h2.await?)
 /// }.await?;
 /// ```
 public async fn with_nursery<T, F: fn(&mut Nursery) -> T>(options: NurseryOptions, f: F) -> Result<T, NurseryError> {

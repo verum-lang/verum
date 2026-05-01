@@ -6,51 +6,62 @@
 // Reference: https://semver.org/spec/v2.0.0.html
 // =============================================================================
 //
+
 // Semver 2.0.0 — the package-version grammar used by npm, Cargo,
 // pip, Maven, RubyGems, Go modules, Helm charts, OCI images,
 // Kubernetes CRDs, and every modern language ecosystem.
 //
+
 // # Grammar (EBNF fragment)
 //
+
 // ```
-// version     = major "." minor "." patch [ "-" pre-release ] [ "+" build-meta ]
-// major       = <non-leading-zero digits>
+// version = major "." minor "." patch [ "-" pre-release ] [ "+" build-meta ]
+// major = <non-leading-zero digits>
 // pre-release = identifier *("." identifier)
-// build-meta  = alnum_id *("." alnum_id)
+// build-meta = alnum_id *("." alnum_id)
 // ```
 //
+
 // # Examples
 //
-//   1.2.3
-//   1.0.0-alpha
-//   1.0.0-alpha.1
-//   1.0.0-0.3.7
-//   1.0.0-x.7.z.92
-//   1.0.0+20130313144700
-//   1.0.0-beta+exp.sha.5114f85
+
+//  1.2.3
+//  1.0.0-alpha
+//  1.0.0-alpha.1
+//  1.0.0-0.3.7
+//  1.0.0-x.7.z.92
+//  1.0.0+20130313144700
+//  1.0.0-beta+exp.sha.5114f85
 //
+
 // # Ordering (§11)
 //
-//   major → minor → patch (numeric comparison each)
-//     → pre-release: none > any prerelease
-//     → within prereleases, dot-separated identifiers compared
-//       left-to-right: numeric < alphanumeric by ASCII, fewer
-//       identifiers < more when common prefix equal.
-//   build-meta is IGNORED in precedence.
+
+//  major → minor → patch (numeric comparison each)
+//  → pre-release: none > any prerelease
+//  → within prereleases, dot-separated identifiers compared
+//  left-to-right: numeric < alphanumeric by ASCII, fewer
+//  identifiers < more when common prefix equal.
+//  build-meta is IGNORED in precedence.
 //
+
 // # API
 //
+
 // ```
 // let v: SemVer = semver.parse(&Text.from("1.2.3-beta.1+build.5"))?;
 // assert(v.major == 1);
-// assert(v.pre_release.len() == 2);   // ["beta", "1"]
+// assert(v.pre_release.len() == 2); // ["beta", "1"]
 //
+
 // // Total ordering.
 // let a = semver.parse(&Text.from("1.0.0-alpha"))?;
 // let b = semver.parse(&Text.from("1.0.0"))?;
-// assert(semver.cmp(&a, &b) < 0);     // prerelease < release
+// assert(semver.cmp(&a, &b) < 0); // prerelease < release
 // ```
 //
+
 // =============================================================================
 
 module core.base.semver;

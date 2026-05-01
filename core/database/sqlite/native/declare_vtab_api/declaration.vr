@@ -20,7 +20,7 @@ public fn new_declaration(sql: Text, tag: Int64) -> DeclarationText {
 }
 
 /// Trivial shape check: must start with "CREATE" (after stripping
-/// leading whitespace).  Full parsing lives in l5_sql.
+/// leading whitespace). Full parsing lives in l5_sql.
 public fn looks_like_create_table(d: &DeclarationText) -> Bool {
     let bs = d.sql.as_bytes();
     let mut i: Int = 0;

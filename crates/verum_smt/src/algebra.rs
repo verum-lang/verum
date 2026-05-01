@@ -1,21 +1,27 @@
 //! Algebraic Structure Verification
 //!
+
 //! Implements verification of algebraic structures and their laws.
 //!
+
 //! Verifies algebraic structure axioms using SMT. Groups require associativity
 //! `(a*b)*c = a*(b*c)`, identity `e*a = a`, and inverse `inv(a)*a = e`.
 //! Homomorphisms verify `f(a*b) = f(a)*f(b)`. Substructures verify closure,
 //! identity inclusion, and inverse closure. All verified via Z3 proof search.
 //!
+
 //! ## Features
 //!
+
 //! - **Group Axioms**: Verify associativity, identity, and inverse laws
 //! - **Monoid Verification**: Verify associativity and identity
 //! - **Homomorphism Checking**: Verify structure-preserving maps
 //! - **Substructure Validation**: Check closure and containment properties
 //!
+
 //! ## Performance Targets
 //!
+
 //! - Axiom verification: < 100ms per law
 //! - Structure validation: < 50ms per check
 
@@ -29,6 +35,7 @@ use crate::proof_search::{ProofError, ProofGoal, ProofSearchEngine, ProofTerm};
 
 /// Algebraic structure with operations and laws
 ///
+
 /// An algebraic structure with operations (op, id, inv) and laws (associativity,
 /// identity, inverse) that must be verified. Protocols like Group, Monoid, Ring
 /// are modeled as algebraic structures with required axiom laws.
@@ -70,6 +77,7 @@ impl AlgebraicStructure {
 
     /// Create a group structure
     ///
+
     /// Create a group structure with op (binary), id (identity), inv (inverse) operations
     /// and associativity, left_id, left_inv axiom laws.
     pub fn group(name: Text, carrier_type: Text) -> Self {
@@ -146,6 +154,7 @@ pub struct Operation {
 
 /// Law that must be satisfied by a structure
 ///
+
 /// An axiom law (e.g., associativity, left_identity) with its statement expression
 /// and optional proof term once verified.
 #[derive(Debug, Clone)]
@@ -185,6 +194,7 @@ impl Law {
 
 /// Homomorphism between algebraic structures
 ///
+
 /// A structure-preserving map between algebraic structures.
 /// Must satisfy: `f(op_source(a, b)) = op_target(f(a), f(b))`.
 #[derive(Debug, Clone)]
@@ -222,6 +232,7 @@ impl Homomorphism {
 
 /// Substructure (e.g., subgroup, submonoid)
 ///
+
 /// A subset of a structure that is itself a structure: must be closed under operations,
 /// contain the identity, and contain inverses of all elements.
 #[derive(Debug, Clone)]
@@ -263,8 +274,10 @@ impl AlgebraVerifier {
 
     /// Verify all group axioms
     ///
+
     /// Verify all group axioms via SMT proof search.
     ///
+
     /// Returns proofs of:
     /// 1. Associativity: (a • b) • c = a • (b • c)
     /// 2. Left identity: e • a = a
@@ -695,6 +708,7 @@ impl AlgebraVerifier {
 
     /// Verify monoid axioms
     ///
+
     /// Returns proofs of:
     /// 1. Associativity
     /// 2. Left identity
@@ -722,8 +736,10 @@ impl AlgebraVerifier {
 
     /// Verify homomorphism property
     ///
+
     /// Verify the structure-preserving property of a homomorphism.
     ///
+
     /// Verifies: f(a . b) = f(a) * f(b)
     pub fn verify_homomorphism(
         &mut self,
@@ -746,6 +762,7 @@ impl AlgebraVerifier {
 
     /// Verify substructure properties
     ///
+
     /// Verify substructure properties: closure under operations, identity inclusion,
     /// and inverse closure.
     pub fn verify_substructure(
@@ -835,6 +852,7 @@ pub fn bool_and_monoid() -> AlgebraicStructure {
 impl AlgebraVerifier {
     /// Verify commutativity: a • b = b • a
     ///
+
     /// Verifies that the operation is commutative using Z3
     pub fn verify_commutativity(
         &mut self,
@@ -906,6 +924,7 @@ impl AlgebraVerifier {
 
     /// Verify distributivity: a • (b + c) = (a • b) + (a • c)
     ///
+
     /// Verifies left distributivity of multiplication over addition using Z3
     pub fn verify_distributivity(
         &mut self,
@@ -1019,6 +1038,7 @@ impl AlgebraVerifier {
 
 /// Ring algebraic structure
 ///
+
 /// A ring is a set with two binary operations (addition and multiplication)
 /// satisfying:
 /// - (R, +) is an abelian group
@@ -1144,6 +1164,7 @@ impl Ring {
 
 /// Field algebraic structure
 ///
+
 /// A field is a commutative ring where every non-zero element has a
 /// multiplicative inverse.
 #[derive(Debug, Clone)]
@@ -1203,6 +1224,7 @@ impl Field {
 
 /// Vector space over a field
 ///
+
 /// A vector space consists of:
 /// - A set V of vectors
 /// - A field F of scalars
@@ -1292,6 +1314,7 @@ impl VectorSpace {
 
 /// Category structure
 ///
+
 /// A category consists of:
 /// - A collection of objects
 /// - A collection of morphisms between objects
@@ -1377,6 +1400,7 @@ impl Category {
 
 /// Functor between categories
 ///
+
 /// A functor F: C → D consists of:
 /// - An object mapping: Obj(C) → Obj(D)
 /// - A morphism mapping: Mor(C) → Mor(D)
@@ -1419,6 +1443,7 @@ impl Functor {
 
     /// Verify functor laws
     ///
+
     /// Verifies that the functor preserves identity and composition
     pub fn verify_laws(
         &mut self,
@@ -1571,6 +1596,7 @@ impl Functor {
 
 /// Natural transformation between functors
 ///
+
 /// A natural transformation η: F ⇒ G consists of:
 /// - A component morphism η_A: F(A) → G(A) for each object A
 /// Satisfying naturality:
@@ -1612,6 +1638,7 @@ impl NaturalTransformation {
 
     /// Verify naturality condition
     ///
+
     /// For any morphism f: A → B, verifies: G(f) ∘ η_A = η_B ∘ F(f)
     pub fn verify_naturality(
         &mut self,

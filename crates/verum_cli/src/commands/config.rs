@@ -1,10 +1,12 @@
 //! `verum config show` — display the resolved language-feature set.
 //!
+
 //! Loads `verum.toml`, applies any `-Z` / `--tier` / `--cbgr` / …
 //! overrides supplied on the command line, translates the merged
 //! manifest into the compiler-facing [`LanguageFeatures`] value, runs
 //! the feature validator, and prints the result.
 //!
+
 //! This lets users verify that their config file and CLI overrides are
 //! producing the effective feature set they expect — without having to
 //! run a build and scrape logs.
@@ -18,8 +20,9 @@ use crate::error::CliError;
 
 /// Execute `verum config show`.
 ///
+
 /// * `json` — emit machine-readable JSON instead of the human-friendly
-///   panel.
+///  panel.
 pub fn execute(json_output: bool) -> Result<(), CliError> {
     // Locate and load verum.toml.
     let manifest_dir = Manifest::find_manifest_dir()?;
@@ -142,6 +145,7 @@ fn print_json(
 
 /// Execute `verum config validate`.
 ///
+
 /// Loads and validates verum.toml without printing the full feature set.
 /// Exits 0 on success; exits non-zero with diagnostics on failure.
 pub fn validate() -> Result<(), CliError> {

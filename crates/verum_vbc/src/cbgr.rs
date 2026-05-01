@@ -1,43 +1,53 @@
 //! CBGR Codegen Abstractions for VBC
 //!
+
 //! This module provides abstract code generation strategies for CBGR (Counter-Based
 //! Garbage Rejection) memory safety operations. These abstractions are used by:
 //!
+
 //! - VBC interpreter for inline CBGR checks (dispatch.rs)
 //! - VBC → MLIR lowering for generating optimized memory operations
 //! - Escape analysis integration for tier decisions
 //!
+
 //! # Three-Tier Safety Model
 //!
+
 //! - **Tier 0 (Managed)**: Runtime CBGR validation (~15ns overhead)
 //! - **Tier 1 (Checked)**: Compiler-proven safe (0ns overhead)
 //! - **Tier 2 (Unsafe)**: Manual safety proof (0ns overhead)
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! verum_cbgr (compile-time analysis)
-//!       │
-//!       │ produces tier decisions
-//!       ▼
+//!  │
+//!  │ produces tier decisions
+//!  ▼
 //! DereferenceCodegen / CapabilityCheckCodegen
-//!       │
-//!       │ consumed by
-//!       ▼
+//!  │
+//!  │ consumed by
+//!  ▼
 //! ┌─────────────────────────────────────────┐
-//! │ VBC Interpreter    │ VBC → MLIR Lowering │
-//! │ (inline checks)    │ (optimized IR)      │
+//! │ VBC Interpreter │ VBC → MLIR Lowering │
+//! │ (inline checks) │ (optimized IR) │
 //! └─────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Example
 //!
+
 //! ```rust
 //! use verum_vbc::cbgr::{DereferenceCodegen, CbgrTier};
 //!
+
 //! // Tier decision from escape analysis
 //! let tier = CbgrTier::Tier1; // compiler proved safe
 //!
+
 //! // Select codegen strategy
 //! let strategy = DereferenceCodegen::for_tier(tier);
 //! assert!(matches!(strategy, DereferenceCodegen::DirectAccess));
@@ -52,12 +62,14 @@ pub use crate::types::CbgrTier;
 
 /// Code generation strategy for dereference operations.
 ///
+
 /// Describes HOW to generate code for dereferencing a reference,
 /// based on the tier decision from escape analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DereferenceCodegen {
     /// Inline CBGR validation (Tier 0 - Managed)
     ///
+
     /// Generates code that:
     /// 1. Loads current generation from allocation header
     /// 2. Compares with expected generation in reference
@@ -65,6 +77,7 @@ pub enum DereferenceCodegen {
     /// 4. Branches to panic on mismatch
     /// 5. Proceeds with dereference on success
     ///
+
     /// Overhead: ~15ns (5-7 instructions)
     InlineCbgrCheck {
         /// Expected generation (filled during codegen)
@@ -77,17 +90,21 @@ pub enum DereferenceCodegen {
 
     /// Direct pointer access (Tier 1 - Checked)
     ///
+
     /// Generates a single pointer load - no validation needed
     /// because the compiler proved this reference is safe.
     ///
+
     /// Overhead: 0ns (1 instruction)
     DirectAccess,
 
     /// Unchecked pointer access (Tier 2 - Unsafe)
     ///
+
     /// Generates a single pointer load with no metadata.
     /// Developer has provided proof of safety.
     ///
+
     /// Overhead: 0ns (1 instruction)
     UncheckedAccess,
 }
@@ -115,6 +132,7 @@ impl DereferenceCodegen {
 
     /// Create pending CBGR check strategy (values filled during codegen).
     ///
+
     /// Used during static analysis when generation/epoch values
     /// are not yet known. Values will be filled via `with_values()`.
     #[must_use]
@@ -179,6 +197,7 @@ impl DereferenceCodegen {
 
 /// Required capability for an operation.
 ///
+
 /// Capabilities are fine-grained permissions that can be checked
 /// at compile-time or runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -198,6 +217,7 @@ pub enum RequiredCapability {
 impl RequiredCapability {
     /// Get capability bit mask.
     ///
+
     /// Matches the bit layout in CBGR runtime:
     /// - Read: 0x01
     /// - Write: 0x02
@@ -303,6 +323,7 @@ impl CapabilityCheckCodegen {
 
 /// Combined dereference + capability check strategy.
 ///
+
 /// This represents the complete code generation decision for
 /// a reference operation, combining CBGR validation with
 /// capability checking.
@@ -395,6 +416,7 @@ impl CbgrDereferenceStrategy {
 
 /// Statistics for CBGR code generation.
 ///
+
 /// Tracks how many references of each tier were generated.
 #[derive(Debug, Clone, Default)]
 pub struct CbgrCodegenStats {

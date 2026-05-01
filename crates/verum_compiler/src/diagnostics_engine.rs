@@ -1,11 +1,13 @@
 //! Unified Diagnostics Engine
 //!
+
 //! Provides rich error messages with:
 //! - Source code snippets
 //! - Colorized output
 //! - Suggestions and fixes
 //! - Error recovery
 //!
+
 //! Diagnostic infrastructure: structured error/warning/info messages with
 //! source spans, suggestions, and fix-it hints. Supports LSP integration.
 

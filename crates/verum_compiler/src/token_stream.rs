@@ -1,9 +1,11 @@
 //! TokenStream - Re-export of TokenStream from quote module
 //!
+
 //! This module provides a convenient re-export of the TokenStream type
 //! and related functionality from the quote module. This allows users to
 //! import from either `verum_compiler::token_stream` or `verum_compiler::quote`.
 //!
+
 //! Token stream for procedural macros: provides the interface between
 //! meta functions and the compiler, enabling AST manipulation via quote!.
 
@@ -25,13 +27,17 @@ pub use crate::quote::{
 
 /// Create a quote from a string literal
 ///
+
 /// This is a helper function that parses a string into a Quote object.
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_compiler::token_stream::quote_str;
 ///
+
 /// let q = quote_str("let x = #value;").unwrap();
 /// ```
 pub fn quote_str(s: &str) -> Result<Quote, QuoteError> {
@@ -40,23 +46,27 @@ pub fn quote_str(s: &str) -> Result<Quote, QuoteError> {
 
 /// Macro-like helper for creating token streams
 ///
+
 /// This provides a programmatic way to create TokenStreams similar to
 /// the quote! macro but without requiring procedural macro infrastructure.
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_compiler::token_stream::quote_builder;
 /// use verum_ast::Span;
 ///
+
 /// let ts = quote_builder()
-///     .keyword("fn")
-///     .ident("example")
-///     .punct("(")
-///     .punct(")")
-///     .punct("{")
-///     .punct("}")
-///     .build();
+///  .keyword("fn")
+///  .ident("example")
+///  .punct("(")
+///  .punct(")")
+///  .punct("{")
+///  .punct("}")
+///  .build();
 /// ```
 pub fn quote_builder() -> QuoteBuilder {
     QuoteBuilder::new()

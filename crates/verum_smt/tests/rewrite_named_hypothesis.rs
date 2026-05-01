@@ -1,11 +1,13 @@
 //! Regression: `try_rewrite` must use the user-named hypothesis, not
 //! the first equality it finds.
 //!
+
 //! Pre-fix the function ignored its `hypothesis: &Text` parameter and
 //! scanned `goal.hypotheses` for the FIRST equality, then rewrote
 //! using that. Result: `rewrite h2` on a goal where `h0` is also an
 //! equality silently used `h0` and produced wrong substitutions.
 //!
+
 //! Post-fix the function resolves the hypothesis name through
 //! `find_hypothesis_index` (already used by `cases_on` and `destruct`),
 //! requires the resolved hypothesis to actually be an equality, and
@@ -48,8 +50,8 @@ fn eq(lhs: Expr, rhs: Expr) -> Expr {
 
 #[test]
 fn rewrite_uses_named_hypothesis_not_first_equality() {
-    // h0: a = b   (first equality, would be picked pre-fix)
-    // h1: c = d   (the one the user wants)
+    // h0: a = b (first equality, would be picked pre-fix)
+    // h1: c = d (the one the user wants)
     // goal: c + 1 > 0
     // rewrite h1 → d + 1 > 0
     // Pre-fix would have used h0 which doesn't match `c`, returning

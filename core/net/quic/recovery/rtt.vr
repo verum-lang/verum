@@ -5,35 +5,41 @@
 // Dependencies: core, core.time.duration
 // =============================================================================
 //
+
 // RFC 9002 §5.3 — per-connection RTT estimator:
 //
-//   latest_rtt       — freshest sample from the most recent ack.
-//   smoothed_rtt     — EWMA, α = 1/8
-//   rttvar           — mean deviation, β = 1/4
-//   min_rtt          — unadjusted minimum ever observed
-//   first_rtt_sample — was any sample taken yet?
+
+//  latest_rtt — freshest sample from the most recent ack.
+//  smoothed_rtt — EWMA, α = 1/8
+//  rttvar — mean deviation, β = 1/4
+//  min_rtt — unadjusted minimum ever observed
+//  first_rtt_sample — was any sample taken yet?
 //
+
 // Update algorithm (§5.3):
 //
-//   if first sample:
-//       smoothed_rtt = latest_rtt
-//       rttvar       = latest_rtt / 2
-//       min_rtt      = latest_rtt
-//   else:
-//       // Adjust latest_rtt by ack_delay when that keeps the result
-//       // ≥ min_rtt; otherwise use raw.
-//       min_rtt = min(min_rtt, latest_rtt)
-//       ack_delay = min(ack_delay, max_ack_delay)  // after handshake
-//       adjusted_rtt = if latest_rtt - min_rtt >= ack_delay
-//                         then latest_rtt - ack_delay
-//                         else latest_rtt
-//       rttvar = (3/4)*rttvar + (1/4)*|smoothed_rtt - adjusted_rtt|
-//       smoothed_rtt = (7/8)*smoothed_rtt + (1/8)*adjusted_rtt
+
+//  if first sample:
+//  smoothed_rtt = latest_rtt
+//  rttvar = latest_rtt / 2
+//  min_rtt = latest_rtt
+//  else:
+//  // Adjust latest_rtt by ack_delay when that keeps the result
+//  // ≥ min_rtt; otherwise use raw.
+//  min_rtt = min(min_rtt, latest_rtt)
+//  ack_delay = min(ack_delay, max_ack_delay) // after handshake
+//  adjusted_rtt = if latest_rtt - min_rtt >= ack_delay
+//  then latest_rtt - ack_delay
+//  else latest_rtt
+//  rttvar = (3/4)*rttvar + (1/4)*|smoothed_rtt - adjusted_rtt|
+//  smoothed_rtt = (7/8)*smoothed_rtt + (1/8)*adjusted_rtt
 //
+
 // All durations are tracked as microseconds in the fields so the
 // EWMA math doesn't lose resolution to millisecond rounding; public
 // getters convert to Duration.
 //
+
 // =============================================================================
 
 module core.net.quic.recovery.rtt;
@@ -57,8 +63,8 @@ public type RttEstimator is {
 
 implement RttEstimator {
     /// Fresh estimator — RFC 9002 §5.3 defaults:
-    ///   smoothed_rtt = 333 ms (kInitialRtt)
-    ///   rttvar       = smoothed_rtt / 2
+    ///  smoothed_rtt = 333 ms (kInitialRtt)
+    ///  rttvar = smoothed_rtt / 2
     public fn new() -> RttEstimator {
         let initial_us: UInt64 = 333_000_u64;
         RttEstimator {

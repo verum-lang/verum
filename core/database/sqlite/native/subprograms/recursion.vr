@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.4 (recursive triggers)
 //
+
 // SQLite caps trigger recursion at SQLITE_MAX_TRIGGER_DEPTH (default
 // 1000); recursive triggers are off by default
 // (`PRAGMA recursive_triggers = OFF`). loom mirrors both.
 //
+
 // `RecursionGuard` is a stack-of-(SubProgramId) the interpreter
 // maintains across `Gosub`. Each `enter` checks the new id against
 // the stack; if the id appears AND `recursive_triggers` is OFF, it

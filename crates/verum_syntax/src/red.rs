@@ -1,12 +1,15 @@
 //! Red tree - the facade over the green tree providing parent pointers and absolute positions.
 //!
+
 //! Red nodes are built on-demand from green nodes. They provide:
 //! - Parent pointers for navigating up the tree
 //! - Absolute text positions (computed from relative widths)
 //! - Convenient iteration and query methods
 //!
+
 //! Red nodes are cheap to create and should be discarded on each edit.
 //!
+
 //! Red Tree (Facade Layer):
 //! Red nodes are built on-demand from green nodes and provide parent pointers
 //! and absolute text positions (computed from relative widths stored in green nodes).
@@ -23,6 +26,7 @@ use crate::SyntaxKind;
 
 /// Red node - provides parent pointers and absolute positions.
 ///
+
 /// Built on-demand from green nodes, discarded on edits.
 /// Uses reference counting for efficient cloning.
 #[derive(Clone)]

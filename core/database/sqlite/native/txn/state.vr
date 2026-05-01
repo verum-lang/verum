@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_txn_state.
 //
-//   SQLITE_TXN_NONE   = 0  — no transaction active on the named schema
-//   SQLITE_TXN_READ   = 1  — read transaction active
-//   SQLITE_TXN_WRITE  = 2  — write transaction active (has pending changes)
+
+//  SQLITE_TXN_NONE = 0 — no transaction active on the named schema
+//  SQLITE_TXN_READ = 1 — read transaction active
+//  SQLITE_TXN_WRITE = 2 — write transaction active (has pending changes)
 //
+
 // sqlite3_txn_state returns -1 if the supplied schema name is unknown.
 // =============================================================================
 

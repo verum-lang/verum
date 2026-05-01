@@ -1,32 +1,38 @@
 //! Kripke Semantics — modal worlds + accessibility.
 //!
+
 //! Kripke frames give a formal model for modal logic: a set of
 //! *worlds* and an *accessibility* relation between them. A
 //! formula `□φ` ("necessarily φ") holds at a world iff `φ` holds
 //! at every accessible world; `◇φ` ("possibly φ") iff `φ` holds
 //! at some accessible world.
 //!
+
 //! ## Frame classes
 //!
+
 //! Different modal logics correspond to constraints on the
 //! accessibility relation:
 //!
+
 //! ```text
-//!     K    — no constraints
-//!     T    — reflexive       (every world sees itself)
-//!     B    — symmetric
-//!     4    — transitive      (corresponds to S4)
-//!     5    — Euclidean
-//!     S4   — reflexive + transitive
-//!     S5   — equivalence relation (refl + sym + trans)
+//!  K — no constraints
+//!  T — reflexive (every world sees itself)
+//!  B — symmetric
+//!  4 — transitive (corresponds to S4)
+//!  5 — Euclidean
+//!  S4 — reflexive + transitive
+//!  S5 — equivalence relation (refl + sym + trans)
 //! ```
 //!
+
 //! ## API
 //!
+
 //! * [`World`] — a world identifier
 //! * [`KripkeFrame`] — set of worlds + accessibility edges
 //! * [`Valuation`] — assigns truth values to atomic propositions
-//!   per world
+//!  per world
 //! * [`evaluate`] — recursive modal-logic evaluator
 //! * [`FrameClass::is_satisfied_by`] — check refl/trans/sym/etc.
 
@@ -275,7 +281,7 @@ mod tests {
     }
 
     fn linear_frame() -> KripkeFrame {
-        // w0 → w1 → w2  (transitive closure not included)
+        // w0 → w1 → w2 (transitive closure not included)
         let mut f = KripkeFrame::new();
         f.add_edge(w("0"), w("1"));
         f.add_edge(w("1"), w("2"));
@@ -443,7 +449,7 @@ mod tests {
     #[test]
     fn nested_modalities_evaluate() {
         // w0 → w1 → w2, p holds at w2.
-        // ◇◇p at w0?  Yes, via w0→w1→w2.
+        // ◇◇p at w0? Yes, via w0→w1→w2.
         let f = linear_frame();
         let mut v = Valuation::new();
         v.set(w("2"), "p", true);

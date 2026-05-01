@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_overload_function(db, name, n) makes the virtual table's
-// xFindFunction callback a candidate for the named scalar.  The
+// xFindFunction callback a candidate for the named scalar. The
 // catalogue records the declaration; routing is the vtab module's job.
 // =============================================================================
 

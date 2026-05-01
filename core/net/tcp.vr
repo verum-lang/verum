@@ -5,25 +5,32 @@
 // Dependencies: core, io, async, net/addr, sys/
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI system interfaces:
 // - Linux: Uses sys/linux/syscall.{socket, connect, bind, listen, accept, ...}
 // - macOS: Uses sys/darwin/libsystem.{safe_socket, safe_connect, ...}
 // - No FFI dependencies on verum_runtime or verum_bootstrap
 //
+
 // # Performance Characteristics
 //
+
 // - Zero-copy I/O via direct syscalls
 // - Minimal allocations on hot path
 // - ~2ns context access for async operations
 // - Direct kernel interaction without FFI overhead
 //
+
 // =============================================================================
 //
+
 // TCP (Transmission Control Protocol) provides reliable, ordered, and
 // error-checked delivery of a stream of bytes.
 //
+
 // # Example - Client
 // ```verum
 // let stream = TcpStream.connect("127.0.0.1:8080")?;
@@ -31,16 +38,18 @@
 // let response = stream.read_to_text()?;
 // ```
 //
+
 // # Example - Server
 // ```verum
 // let listener = TcpListener.bind("127.0.0.1:8080")?;
 // for stream in listener.incoming() {
-//     spawn {
-//         handle_client(stream?);
-//     };
+//  spawn {
+//  handle_client(stream?);
+//  };
 // }
 // ```
 //
+
 // =============================================================================
 
 module core.net.tcp;
@@ -178,12 +187,12 @@ mount sys.common.{FileDesc, OSError};
 // Import I/O engine for async operations
 mount sys.io_engine.{IOEngine, IOInterest, IoError};
 
-// Unified TCP-listen intrinsic family (#25 cascade).  These dispatch
+// Unified TCP-listen intrinsic family (#25 cascade). These dispatch
 // through the same opcode in interpreter and AOT mode — the
 // interpreter side calls `std::net::TcpListener::bind` and returns a
 // real kernel fd via `into_raw_fd()`; the AOT side lowers to the
 // `verum_tcp_listen_v2` LLVM helper which emits inet_pton +
-// socket+setsockopt+bind+listen IR directly.  Both paths produce a
+// socket+setsockopt+bind+listen IR directly. Both paths produce a
 // real kernel fd, so the rest of `core.net.tcp` (`accept` / `close` /
 // `setsockopt` / `getsockname`) works uniformly across modes.
 mount sys.raw.{__tcp_listen_v2_raw, __tcp_local_port_raw};
@@ -194,6 +203,7 @@ mount sys.raw.{__tcp_listen_v2_raw, __tcp_local_port_raw};
 
 /// Future that completes when a file descriptor becomes ready for I/O.
 ///
+
 /// Uses the native V-LLSI IOEngine (io_uring on Linux, kqueue on macOS)
 /// for efficient event notification with minimal syscall overhead.
 type AsyncIoReady is {
@@ -264,25 +274,32 @@ implement Drop for AsyncIoReady {
 
 /// A TCP stream between a local and a remote socket.
 ///
+
 /// After creating a TcpStream by either connecting to a remote host or
 /// accepting a connection on a TcpListener, data can be transmitted using
 /// the Read and Write protocols.
 ///
+
 /// # Performance Characteristics
 ///
+
 /// - Direct syscall access: ~50ns per operation (no FFI overhead)
 /// - Zero-copy reads when using read_into()
 /// - MSG_NOSIGNAL on Linux prevents SIGPIPE (critical for servers)
 /// - TCP_NODELAY disabled by default; enable for latency-sensitive protocols
 ///
+
 /// # Thread Safety
 ///
+
 /// - Reading and writing can happen concurrently from different threads
 /// - Multiple concurrent reads or writes are NOT safe without synchronization
 /// - Use Mutex<TcpStream> or split into separate read/write handles
 ///
+
 /// # Protocol Implementation Notes
 ///
+
 /// For high-performance protocols (QUIC, HTTP/2, HTTP/3):
 /// - Use set_nodelay(true) to disable Nagle's algorithm
 /// - Use non-blocking I/O with the async runtime for connection multiplexing
@@ -296,15 +313,17 @@ public type TcpStream is {
 implement TcpStream {
     /// Create a TCP connection to the specified address.
     ///
+
     /// This is a blocking operation that resolves DNS and attempts connection
     /// to each resolved address until one succeeds.
     ///
+
     /// # Example
     /// ```verum
     /// let stream = TcpStream.connect("127.0.0.1:8080")?;
     /// // or with explicit address
     /// let stream = TcpStream.connect(SocketAddr.new_v4(
-    ///     Ipv4Addr.localhost(), 8080
+    ///  Ipv4Addr.localhost(), 8080
     /// ))?;
     /// ```
     public fn connect<A: ToSocketAddrs>(addr: A) -> Result<TcpStream, IoError> {
@@ -370,12 +389,15 @@ implement TcpStream {
 
     /// Create an async TCP connection.
     ///
+
     /// Returns a future that resolves when the connection is established.
     /// This is the preferred method for high-throughput servers where you
     /// need to handle many concurrent connections.
     ///
+
     /// # Implementation Notes
     ///
+
     /// Uses non-blocking connect with io_uring (Linux) or kqueue (macOS)
     /// for efficient event notification. The socket is set to non-blocking
     /// mode, connect() returns EINPROGRESS, then we await write readiness.
@@ -491,6 +513,7 @@ implement TcpStream {
 
     /// Get the remote address this stream is connected to.
     ///
+
     /// This returns the cached address from connection time. For the actual
     /// current peer address (which should be the same), use peer_addr_syscall().
     public fn peer_addr(&self) -> Result<SocketAddr, IoError> {
@@ -499,6 +522,7 @@ implement TcpStream {
 
     /// Get the local address of this stream.
     ///
+
     /// Returns the local IP and port assigned to this socket by the kernel.
     public fn local_addr(&self) -> Result<SocketAddr, IoError> {
         let mut addr_buf = [0_u8; 128];
@@ -522,6 +546,7 @@ implement TcpStream {
 
     /// Shutdown the read, write, or both halves of this stream.
     ///
+
     /// This is a graceful shutdown that allows pending data to be sent/received.
     /// For immediate termination, drop the stream or use set_linger(0).
     public fn shutdown(&self, how: Shutdown) -> Result<(), IoError> {
@@ -541,6 +566,7 @@ implement TcpStream {
 
     /// Set the read timeout.
     ///
+
     /// A value of None means reads will block indefinitely.
     /// A value of Some(ms) sets the timeout in milliseconds.
     public fn set_read_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
@@ -555,6 +581,7 @@ implement TcpStream {
 
     /// Set the write timeout.
     ///
+
     /// A value of None means writes will block indefinitely.
     /// A value of Some(ms) sets the timeout in milliseconds.
     public fn set_write_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
@@ -569,9 +596,11 @@ implement TcpStream {
 
     /// Set TCP_NODELAY option (disable Nagle's algorithm).
     ///
+
     /// When enabled, small packets are sent immediately without waiting for
     /// more data. Essential for latency-sensitive protocols like HTTP/2, QUIC.
     ///
+
     /// # Performance Impact
     /// - Enabled: Lower latency, potentially higher packet overhead
     /// - Disabled: Higher latency, better bandwidth utilization
@@ -586,6 +615,7 @@ implement TcpStream {
 
     /// Set SO_KEEPALIVE option.
     ///
+
     /// When enabled, the kernel sends periodic probes to detect dead connections.
     /// Recommended for long-lived connections (database, message queue clients).
     public fn set_keepalive(&self, keepalive: Bool) -> Result<(), IoError> {
@@ -599,6 +629,7 @@ implement TcpStream {
 
     /// Set the socket to non-blocking mode.
     ///
+
     /// In non-blocking mode, read/write operations return immediately with
     /// EWOULDBLOCK/EAGAIN if they would block. Use with async I/O or poll/select.
     public fn set_nonblocking(&self, nonblocking: Bool) -> Result<(), IoError> {
@@ -612,9 +643,11 @@ implement TcpStream {
 
     /// Get the raw file descriptor for advanced operations.
     ///
+
     /// Use this to set custom socket options, integrate with external event
     /// loops, or perform operations not exposed by this API.
     ///
+
     /// # Safety
     /// The returned fd is valid only while this TcpStream exists.
     /// Do not close() the fd directly.
@@ -624,6 +657,7 @@ implement TcpStream {
 
     /// Create a new independently owned handle to the stream (via dup()).
     ///
+
     /// The returned TcpStream refers to the same underlying socket.
     /// Both handles must be closed for the socket to be released.
     public fn try_clone(&self) -> Result<TcpStream, IoError> {
@@ -684,13 +718,15 @@ implement Write for TcpStream {
 // AsyncRead / AsyncWrite — non-blocking protocol implementation
 // =============================================================================
 //
+
 // Wraps the sync recv/send syscalls with readiness-waiting via AsyncIoReady.
 // poll_read: if data ready → recv() → Ready(n); if WouldBlock → Pending +
 // waker registered with I/O engine so receiver is woken on next read event.
 //
+
 // Buffer parameter is `&mut List<Byte>` (red-team §4 fix): byte-typed
 // end-to-end so the per-element footprint is 1 byte rather than 8 bytes
-// (NaN-boxed Value).  10 000-connection × 16-KiB-buffer pool drops from
+// (NaN-boxed Value). 10 000-connection × 16-KiB-buffer pool drops from
 // 1.28 GiB to 160 MiB.
 
 implement AsyncRead for TcpStream {
@@ -785,6 +821,7 @@ implement AsyncWrite for TcpStream {
 implement TcpStream {
     /// Async read — returns the number of bytes read into `buf`.
     ///
+
     /// `buf` is `&mut List<Byte>` (red-team §4 fix): byte-typed end-to-end.
     /// Forwards directly to the AsyncRead protocol's `poll_read`.
     pub async fn read_async(&mut self, buf: &mut List<Byte>) -> Result<Int, IoError> {
@@ -794,7 +831,8 @@ implement TcpStream {
 
     /// Async write — returns the number of bytes written from `buf`.
     ///
-    /// `buf` is `&List<Byte>`.  Forwards directly to the AsyncWrite
+
+    /// `buf` is `&List<Byte>`. Forwards directly to the AsyncWrite
     /// protocol's `poll_write`.
     pub async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError> {
         let mut fut = AsyncWriteFut { stream: self, buf: buf };
@@ -803,7 +841,8 @@ implement TcpStream {
 
     /// Cancellable async read — returns Err on token fire.
     ///
-    /// `buf` is `&mut List<Byte>` post-#316.  See `read_async`.
+
+    /// `buf` is `&mut List<Byte>` post-#316. See `read_async`.
     pub async fn read_cancellable(
         &mut self,
         buf: &mut List<Byte>,
@@ -817,7 +856,8 @@ implement TcpStream {
 
     /// Cancellable async write.
     ///
-    /// `buf` is `&List<Byte>` post-#316.  See `write_async`.
+
+    /// `buf` is `&List<Byte>` post-#316. See `write_async`.
     pub async fn write_cancellable(
         &mut self,
         buf: &List<Byte>,
@@ -832,6 +872,7 @@ implement TcpStream {
 
 // Helper Future types for read_async / write_async.
 //
+
 // User-facing `read_async(&mut List<Byte>)` / `write_async(&List<Byte>)`
 // wrappers forward directly to the `AsyncRead` / `AsyncWrite` protocols
 // — both speak `List<Byte>` end-to-end post-§4, so no marshalling step
@@ -892,35 +933,41 @@ implement Display for TcpStream {
 
 /// A TCP socket server, listening for connections.
 ///
+
 /// After creating a TcpListener by binding it to a socket address, it
 /// listens for incoming TCP connections. These can be accepted by calling
 /// `accept()` or by iterating over `incoming()`.
 ///
+
 /// # Performance Characteristics
 ///
+
 /// - Default backlog of 1024 connections (adjustable via bind_with_backlog)
 /// - SO_REUSEADDR enabled by default for quick server restart
 /// - For high-throughput servers, consider SO_REUSEPORT for multi-threaded accept
 ///
+
 /// # Scaling Patterns
 ///
+
 /// For maximum throughput on multi-core systems:
 /// ```verum
 /// // Option 1: Single listener, dispatch to worker threads
 /// let listener = TcpListener.bind("0.0.0.0:8080")?;
 /// for stream in listener.incoming() {
-///     spawn_worker(stream?);
+///  spawn_worker(stream?);
 /// }
 ///
+
 /// // Option 2: SO_REUSEPORT - each thread has own listener (recommended)
 /// // Kernel load-balances incoming connections
 /// for _ in 0..num_cpus() {
-///     spawn {
-///         let listener = TcpListener.bind_reuseport("0.0.0.0:8080")?;
-///         for stream in listener.incoming() {
-///             handle_client(stream?);
-///         }
-///     };
+///  spawn {
+///  let listener = TcpListener.bind_reuseport("0.0.0.0:8080")?;
+///  for stream in listener.incoming() {
+///  handle_client(stream?);
+///  }
+///  };
 /// }
 /// ```
 public type TcpListener is {
@@ -934,6 +981,7 @@ const DEFAULT_BACKLOG: Int = 1024;
 implement TcpListener {
     /// Create a new TcpListener bound to the specified address.
     ///
+
     /// The returned listener is ready to accept connections.
     /// SO_REUSEADDR is enabled by default to allow quick rebinding after restart.
     public fn bind<A: ToSocketAddrs>(addr: A) -> Result<TcpListener, IoError> {
@@ -942,6 +990,7 @@ implement TcpListener {
 
     /// Create a TcpListener with a custom backlog size.
     ///
+
     /// The backlog determines the maximum number of pending connections
     /// that can be queued before the kernel starts rejecting new ones.
     public fn bind_with_backlog<A: ToSocketAddrs>(addr: A, backlog: Int) -> Result<TcpListener, IoError> {
@@ -960,6 +1009,7 @@ implement TcpListener {
 
     /// Bind with SO_REUSEPORT for multi-threaded accept scaling.
     ///
+
     /// Multiple listeners can bind to the same address, and the kernel
     /// will load-balance incoming connections between them. This provides
     /// better scalability than a single listener with dispatch.
@@ -979,16 +1029,16 @@ implement TcpListener {
 
     /// Internal: bind to specific address with given backlog.
     /// Internal: bind via the unified `__tcp_listen_v2_raw` intrinsic
-    /// family.  Replaces the previous socket+setsockopt+bind+listen
+    /// family. Replaces the previous socket+setsockopt+bind+listen
     /// chain that was dispatched through libsystem in interpreter
-    /// mode.  Both interpreter and AOT mode now converge on the same
+    /// mode. Both interpreter and AOT mode now converge on the same
     /// intrinsic — the interpreter calls `std::net::TcpListener::bind`
     /// (returning a real kernel fd via `into_raw_fd()`), AOT lowers to
     /// the `verum_tcp_listen_v2` LLVM helper that emits
-    /// inet_pton+socket+setsockopt+bind+listen IR directly.  The
+    /// inet_pton+socket+setsockopt+bind+listen IR directly. The
     /// resulting fd is a real kernel fd in both modes — subsequent
     /// `accept`/`close`/`setsockopt` continue through libsystem
-    /// uniformly.  See `internal/specs/net-framework.md` for the L1
+    /// uniformly. See `internal/specs/net-framework.md` for the L1
     /// transport-layer architectural commitment.
     fn bind_addr_with_backlog(addr: &SocketAddr, backlog: Int) -> Result<TcpListener, IoError> {
         // Stringify the host once; the intrinsic parses via inet_pton
@@ -1000,7 +1050,7 @@ implement TcpListener {
         if result < 0 {
             // v2 returns negative errno on failure (e.g. -EADDRINUSE,
             // -EACCES) — negate to recover the positive errno that
-            // `IoError.from_raw_os_error` expects.  This errno
+            // `IoError.from_raw_os_error` expects. This errno
             // fidelity is the architectural promise that distinguishes
             // v2 from the legacy v1 (`__tcp_listen_raw`) which
             // collapsed every failure to `-1`.
@@ -1018,7 +1068,7 @@ implement TcpListener {
             port
         };
 
-        // Reconstruct the SocketAddr with the resolved port.  Preserve
+        // Reconstruct the SocketAddr with the resolved port. Preserve
         // the v4/v6 family of the caller's address — `__tcp_listen_v2_raw`
         // already enforced the family at bind time via inet_pton.
         let actual_addr = match *addr {
@@ -1033,7 +1083,7 @@ implement TcpListener {
     }
 
     /// Internal: bind with SO_REUSEPORT for load-balanced multi-threaded
-    /// accept.  Same architectural commitment as `bind_addr_with_backlog`
+    /// accept. Same architectural commitment as `bind_addr_with_backlog`
     /// (#25 cascade) — dispatches through the unified
     /// `__tcp_listen_v2_raw` intrinsic with `flags=TCP_LISTEN_FLAG_REUSEPORT`.
     /// Both interpreter and AOT mode honour the SO_REUSEPORT bit
@@ -1045,7 +1095,7 @@ implement TcpListener {
         let host = f"{addr.ip()}";
         let port = addr.port();
 
-        // TCP_LISTEN_FLAG_REUSEPORT = 1 (bit 0).  Defined in
+        // TCP_LISTEN_FLAG_REUSEPORT = 1 (bit 0). Defined in
         // `core/sys/raw.vr` alongside the intrinsic declaration.
         let flags: Int = 1;
 
@@ -1074,6 +1124,7 @@ implement TcpListener {
 
     /// Accept a new incoming connection.
     ///
+
     /// This function blocks until a new connection is available.
     /// Returns the connected TcpStream and the peer's socket address.
     public fn accept(&self) -> Result<(TcpStream, SocketAddr), IoError> {
@@ -1103,6 +1154,7 @@ implement TcpListener {
 
     /// Accept a new connection asynchronously.
     ///
+
     /// This version yields to the executor while waiting for incoming connections,
     /// allowing other tasks to run. Uses io_uring (Linux) or kqueue (macOS)
     /// for efficient event notification.
@@ -1159,6 +1211,7 @@ implement TcpListener {
 
     /// Get an iterator over incoming connections.
     ///
+
     /// This is a convenience method that yields Result<TcpStream, IoError>.
     /// The iterator never returns None - it continues accepting forever.
     public fn incoming(&self) -> Incoming {
@@ -1167,6 +1220,7 @@ implement TcpListener {
 
     /// Set the listener to non-blocking mode.
     ///
+
     /// In non-blocking mode, accept() returns EAGAIN/EWOULDBLOCK if no
     /// connection is pending instead of blocking.
     public fn set_nonblocking(&self, nonblocking: Bool) -> Result<(), IoError> {
@@ -1213,6 +1267,7 @@ implement Display for TcpListener {
 
 /// An iterator over incoming TCP connections.
 ///
+
 /// This is created by `TcpListener.incoming()`.
 public type Incoming is {
     listener: &TcpListener,
@@ -1230,6 +1285,7 @@ implement Iterator for Incoming {
 // AsyncIncoming — Stream<Item = Result<TcpStream, IoError>>
 // =============================================================================
 //
+
 // Enables `for await conn in listener.incoming_async() { ... }` pattern.
 
 public type AsyncIncoming<'a> is {
@@ -1287,11 +1343,12 @@ implement<'a> AsyncIterator for AsyncIncoming<'a> {
 implement TcpListener {
     /// Async-iterator over incoming connections.
     ///
+
     /// Usage:
-    ///   for await conn in listener.incoming_async() {
-    ///       let stream = conn?;
-    ///       spawn handle(stream);
-    ///   }
+    ///  for await conn in listener.incoming_async() {
+    ///  let stream = conn?;
+    ///  spawn handle(stream);
+    ///  }
     public fn incoming_async(&self) -> AsyncIncoming {
         AsyncIncoming { listener: self }
     }
@@ -1322,6 +1379,7 @@ public type Shutdown is
 // Socket Address Serialization
 // =============================================================================
 //
+
 // These functions convert between SocketAddr and the native sockaddr structures
 // expected by the kernel. Performance critical for high-connection-rate servers.
 
@@ -1333,18 +1391,20 @@ const SOCKADDR_IN6_SIZE: Int = 28;
 
 /// Serialize a socket address to bytes for syscalls.
 ///
+
 /// Returns the bytes in native sockaddr_in/sockaddr_in6 format.
 /// Uses a fixed-size buffer to avoid heap allocation on hot path.
 ///
+
 /// **Platform layout (task #5 fix)**: Linux/Windows use the
 /// POSIX `sockaddr_in` with a 2-byte `sa_family_t` at offset 0.
 /// BSD-derived systems (macOS, iOS, FreeBSD) prepend a 1-byte
 /// `sin_len` then the 1-byte `sin_family` — the older sockaddr
-/// layout that pre-dates the POSIX standardisation.  The kernel
+/// layout that pre-dates the POSIX standardisation. The kernel
 /// expects EXACTLY the platform's native layout; sending Linux
 /// bytes to macOS makes the kernel parse `sin_len=AF_INET=2`
 /// (truncates) and `sin_family=0=AF_UNSPEC`, so `bind` returns
-/// EINVAL/EAFNOSUPPORT.  Discovered while bisecting AOT
+/// EINVAL/EAFNOSUPPORT. Discovered while bisecting AOT
 /// `TcpListener.bind("127.0.0.1:0")` failures (task #5).
 fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
     match *addr {

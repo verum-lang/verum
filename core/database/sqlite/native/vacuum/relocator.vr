@@ -3,16 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §10.5
 //
+
 // VACUUM rewrites every parent-pointer in the database file when it
 // moves a page from `src_pgno` to `dst_pgno`. The relocation map is
 // the source of truth for that rewrite step:
 //
-//   * `Relocator` accumulates `(src, dst)` pairs as the engine
-//     decides where each surviving page lands.
-//   * `lookup(src) -> Maybe<dst>` answers "does this page live in
-//     the new file, and where?".
-//   * `apply_to_pointer(p)` rewrites a parent-pointer slot — used
-//     by the engine when re-walking the source tree.
+
+//  * `Relocator` accumulates `(src, dst)` pairs as the engine
+//  decides where each surviving page lands.
+//  * `lookup(src) -> Maybe<dst>` answers "does this page live in
+//  the new file, and where?".
+//  * `apply_to_pointer(p)` rewrites a parent-pointer slot — used
+//  by the engine when re-walking the source tree.
 // =============================================================================
 
 module core.database.sqlite.native.vacuum.relocator;

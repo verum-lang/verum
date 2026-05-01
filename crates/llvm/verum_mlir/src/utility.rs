@@ -28,6 +28,7 @@ pub fn register_all_dialects(registry: &DialectRegistry) {
 
 /// Register only the MLIR dialects Verum actually targets.
 ///
+
 /// Calling `mlirRegisterAllDialects` marks every dialect's `initialize()`
 /// method as reachable, which in turn pulls in every op, type, attribute
 /// and interface implementation in that dialect — including OpenMP,
@@ -35,12 +36,14 @@ pub fn register_all_dialects(registry: &DialectRegistry) {
 /// never emits. This explicit list lets static-linker dead-code
 /// elimination drop the unreachable dialects at link time.
 ///
+
 /// Verum's pipeline needs:
 /// - Core lowering: arith, func, scf, cf, memref, llvm, math
 /// - Linear algebra / tensor: linalg, tensor, vector
 /// - Pass scheduling: transform
 /// - GPU targets: gpu, nvvm, rocdl, spirv, amdgpu
 ///
+
 /// If a new codegen path introduces `convert-X-to-Y` passes where `X` or
 /// `Y` is not on this list, MLIR pass parsing will fail at runtime with
 /// a "Dialect not registered" error — that is the signal to add it here.

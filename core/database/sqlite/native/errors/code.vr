@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API, Appendix D
 //
-// Primary codes occupy the low 8 bits of an extended code.  A typed
+
+// Primary codes occupy the low 8 bits of an extended code. A typed
 // `PrimaryCode` variant prevents mis-spelling; `extended_of(primary,
 // extension)` builds the 32-bit composite.
 // =============================================================================

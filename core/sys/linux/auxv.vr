@@ -7,43 +7,51 @@ module sys.linux.auxv;
 // Dependencies: None
 // Platform: Linux (all architectures)
 //
+
 // This module provides direct access to the auxiliary vector passed by the
 // Linux kernel at program startup. No libc dependency.
 //
+
 // # Stack Layout at _start
 //
+
 // The kernel passes the following on the stack:
 // ```
-// [argc]              <- rsp at entry
+// [argc] <- rsp at entry
 // [argv[0]]
 // [argv[1]]
 // ...
-// [NULL]              <- end of argv
+// [NULL] <- end of argv
 // [environ[0]]
 // [environ[1]]
 // ...
-// [NULL]              <- end of environ
-// [auxv[0].type]      <- auxiliary vector starts here
+// [NULL] <- end of environ
+// [auxv[0].type] <- auxiliary vector starts here
 // [auxv[0].value]
 // [auxv[1].type]
 // [auxv[1].value]
 // ...
-// [AT_NULL (0)]       <- end marker
+// [AT_NULL (0)] <- end marker
 // [0]
 // ```
 //
+
 // # Usage
 //
+
 // ```verum
 // mount core.sys.linux.auxv.{init_auxv, getauxval, AT_HWCAP};
 //
+
 // // Called once at startup with argv pointer
 // init_auxv(argv);
 //
+
 // // Later, query auxiliary values
 // let hwcap = getauxval(AT_HWCAP);
 // ```
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -120,12 +128,15 @@ static mut AUXV_PTR: *const AuxvEntry = null;
 
 /// Initialize auxiliary vector access from argv pointer.
 ///
+
 /// This function locates the auxiliary vector by walking past argv and environ.
 /// Must be called once at program startup before any getauxval() calls.
 ///
+
 /// # Arguments
 /// * `argv` - Pointer to argv array (from kernel stack)
 ///
+
 /// # Safety
 /// This must be called exactly once during program initialization.
 /// The argv pointer must be valid and point to the kernel-provided stack.
@@ -161,15 +172,19 @@ public fn init_auxv(argv: *const *const Byte) {
 
 /// Get a value from the auxiliary vector.
 ///
+
 /// Returns the value associated with the given type, or 0 if not found.
 /// This is the no-libc equivalent of libc's getauxval().
 ///
+
 /// # Arguments
 /// * `type_` - The auxiliary vector type (AT_* constant)
 ///
+
 /// # Returns
 /// The value for the given type, or 0 if not found or not initialized.
 ///
+
 /// # Example
 /// ```verum
 /// let hwcap = getauxval(AT_HWCAP);

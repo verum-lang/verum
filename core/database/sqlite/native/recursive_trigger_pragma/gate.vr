@@ -1,6 +1,7 @@
 // PRAGMA recursive_triggers gate.
 //
-// When OFF (default): a trigger cannot fire another trigger.  The DML inside
+
+// When OFF (default): a trigger cannot fire another trigger. The DML inside
 // a trigger body executes with trigger-firing temporarily suppressed.
 // When ON: triggers may cascade up to SQLITE_LIMIT_TRIGGER_DEPTH levels.
 
@@ -32,7 +33,7 @@ public fn cascades(m: &RecursiveTriggerMode) -> Bool {
 }
 
 // Decide whether a new trigger may fire when we are already inside `depth`
-// trigger bodies.  Off-mode forbids any nesting; on-mode forbids recursion
+// trigger bodies. Off-mode forbids any nesting; on-mode forbids recursion
 // only after exceeding the configured limit (handled separately).
 public fn allows_fire(m: &RecursiveTriggerMode, current_depth: Int) -> Bool {
     match m {

@@ -1,11 +1,13 @@
 //! VBC Execution Tests - End-to-end tests that actually run VBC bytecode.
 //!
+
 //! These tests:
 //! 1. Create VBC instructions programmatically
 //! 2. Encode them to bytecode
 //! 3. Execute in the VBC interpreter
 //! 4. Verify results
 //!
+
 //! This validates that the full VBC pipeline works correctly.
 
 #![cfg(test)]

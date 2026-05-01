@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 (FTS5 unicode61 tokenizer)
 //
+
 // Splits on Unicode word-break (treats every non-letter codepoint as a
 // separator). The full Unicode database is provided by
 // `core.text.unicode`; here we expose the tokenizer surface and

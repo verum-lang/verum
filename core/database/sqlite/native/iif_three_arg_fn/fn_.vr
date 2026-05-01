@@ -1,9 +1,10 @@
 // iif(X, Y, Z) — three-argument conditional.
 //
+
 // Truthiness rules (SQL three-valued):
-//   * NULL X  → result is Z  (NULL is "not true")
-//   * X == 0  → result is Z
-//   * other   → result is Y
+//  * NULL X → result is Z (NULL is "not true")
+//  * X == 0 → result is Z
+//  * other → result is Y
 
 module core.database.sqlite.native.iif_three_arg_fn.fn_;
 
@@ -24,7 +25,7 @@ public fn is_null(v: &IifThreeArgValue) -> Bool {
 }
 
 // Truthiness: SQL coerces non-zero numbers and non-empty text to true; NULL
-// and zero are false.  iif() tests the standard "truth" projection on X.
+// and zero are false. iif() tests the standard "truth" projection on X.
 public fn is_truthy(v: &IifThreeArgValue) -> Bool {
     match v {
         VNull    => false,

@@ -2,22 +2,26 @@
 // owl2_fs.types — primitive sorts of the OWL 2 Direct Semantics
 // =============================================================================
 //
+
 // Shkotin 2019 (`internal/OWL2.DS2HOL.pdf`) §Notation: the DS2HOL
 // translation rests on two carrier sorts and one metric:
 //
-//   o  — Individual (the carrier of the OWL 2 universe ΔᴵO)
-//   d  — Literal    (the carrier of typed data values)
-//   #  — quantifier of quantity (count_o)
+
+//  o — Individual (the carrier of the OWL 2 universe ΔᴵO)
+//  d — Literal (the carrier of typed data values)
+//  # — quantifier of quantity (count_o)
 //
+
 // We surface these as Verum types so every framework axiom in
 // `core.math.frameworks.owl2_fs.*` can name them by the canonical
-// Shkotin spelling.  The types are *abstract* — concrete encodings
+// Shkotin spelling. The types are *abstract* — concrete encodings
 // (IRI for Individual, RDF literal-shape for Literal) live at
-// `core.math.frameworks.owl2_fs.encoding` (V2).
+// `core.math.frameworks.owl2_fs.encoding` .
 //
+
 // `count_o` (Shkotin's # quantifier-of-quantity) is shipped here as
-// the smallest ergonomic site rather than as a one-axiom file.  See
-// VVA §21.5 — V1 ships the signature, V2 wires CVC5 Finite Model
+// the smallest ergonomic site rather than as a one-axiom file. See
+// VVA §21.5 — ships the signature, V2 wires CVC5 Finite Model
 // Finding and the `E_OWL2_UNBOUNDED_COUNT` diagnostic.
 // =============================================================================
 
@@ -30,7 +34,7 @@ public type Individual is protocol {
     fn is_named(self) -> Bool;
 };
 
-/// The carrier sort `d` of OWL 2 data values (Literals).  Shkotin's
+/// The carrier sort `d` of OWL 2 data values (Literals). Shkotin's
 /// "d" sort; concrete RDF literals factor through the lexical-form +
 /// datatype-IRI representation.
 public type Literal is protocol {
@@ -38,11 +42,11 @@ public type Literal is protocol {
     fn lexical_form(self) -> Text;
 };
 
-/// VVA §21.5 — quantifier of quantity.  `count_o(pred)` is the
-/// number of `Individual`s satisfying `pred`.  Returns `Int >= 0`
-/// at runtime.  When the domain is not finite, the V2 SMT dispatch
-/// returns `E_OWL2_UNBOUNDED_COUNT`.  V1 ships the axiom with a
-/// `true` placeholder body; V2 will replace it with the full HOL
+/// VVA §21.5 — quantifier of quantity. `count_o(pred)` is the
+/// number of `Individual`s satisfying `pred`. Returns `Int >= 0`
+/// at runtime. When the domain is not finite, the V2 SMT dispatch
+/// returns `E_OWL2_UNBOUNDED_COUNT`. ships the axiom with a
+/// `true` placeholder body; Future work will replace it with the full HOL
 /// definition `#y:o P(y) ≡ |{y : Individual | P(y)}|` plus the
 /// finite-domain side condition.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §Notation (quantifier of quantity #)")
@@ -51,23 +55,28 @@ public axiom count_o_spec() -> Bool
 
 // ─── #134 / C7 V2 — Direct-Semantics carrier sorts ──────────────────
 //
+
 // W3C OWL 2 Direct Semantics §3.1 defines an interpretation `I` over
 // two carrier sets:
 //
-//   ΔᴵO  — the "object domain", where Individuals and class members
-//          live (sort `o`)
-//   Δᴵᴰ  — the "data domain", a fixed superset of all RDF datatype
-//          value spaces, where Literals live (sort `d`)
+
+//  ΔᴵO — the "object domain", where Individuals and class members
+//  live (sort `o`)
+//  Δᴵᴰ — the "data domain", a fixed superset of all RDF datatype
+//  value spaces, where Literals live (sort `d`)
 //
+
 // The interpretation function `⟦·⟧^I` maps:
 //
-//   • Individual → ΔᴵO          (§3.1, "individual interpretation")
-//   • Class      → 𝒫(ΔᴵO)        (§3.1, "class interpretation")
-//   • OPE        → 𝒫(ΔᴵO × ΔᴵO)  (§3.1, "object-property interpretation")
-//   • DPE        → 𝒫(ΔᴵO × Δᴵᴰ)  (§3.1, "data-property interpretation")
-//   • DR  / DT   → 𝒫(Δᴵᴰ)        (§3.1, "data-range interpretation")
-//   • Literal    → Δᴵᴰ           (§3.1, "literal interpretation")
+
+//  • Individual → ΔᴵO (§3.1, "individual interpretation")
+//  • Class → 𝒫(ΔᴵO) (§3.1, "class interpretation")
+//  • OPE → 𝒫(ΔᴵO × ΔᴵO) (§3.1, "object-property interpretation")
+//  • DPE → 𝒫(ΔᴵO × Δᴵᴰ) (§3.1, "data-property interpretation")
+//  • DR / DT → 𝒫(Δᴵᴰ) (§3.1, "data-range interpretation")
+//  • Literal → Δᴵᴰ (§3.1, "literal interpretation")
 //
+
 // Every assertion / class / property axiom of OWL 2 DS is a Boolean
 // proposition over these mappings. V2 axiom bodies in this package
 // state those propositions via `ensures` clauses on
@@ -96,6 +105,7 @@ public type DataRange is protocol {};
 /// Each method's contract is: "true iff the named entity's
 /// interpretation under I contains the given tuple/value".
 ///
+
 /// V1 (this commit) ships the protocol as a trusted boundary —
 /// concrete reasoners furnish their own witness implementation
 /// when they invoke a V2 axiom. V2 SMT dispatch will discharge
@@ -131,7 +141,7 @@ public type Interpretation is protocol {
 
     /// `⟦OPE₁⟧^I = (⟦OPE₂⟧^I)⁻¹`: OPE₁ is the inverse relation of
     /// OPE₂ under I (W3C §3.1 ObjectInverseOf). Equivalently:
-    /// (a^I, b^I) ∈ ⟦OPE₁⟧^I  iff  (b^I, a^I) ∈ ⟦OPE₂⟧^I
+    /// (a^I, b^I) ∈ ⟦OPE₁⟧^I iff (b^I, a^I) ∈ ⟦OPE₂⟧^I
     /// for all individuals a, b.
     fn object_property_inverse<P: ObjectPropertyExpression>(
         self, ope1: P, ope2: P,
@@ -191,7 +201,7 @@ public type Interpretation is protocol {
         self, ope: P,
     ) -> Bool;
 
-    /// W3C §5.5.12 SymmetricObjectProperty: (a,b) ∈ ⟦OPE⟧^I  iff
+    /// W3C §5.5.12 SymmetricObjectProperty: (a,b) ∈ ⟦OPE⟧^I iff
     /// (b,a) ∈ ⟦OPE⟧^I.
     fn object_property_symmetric<P: ObjectPropertyExpression>(
         self, ope: P,
@@ -211,7 +221,7 @@ public type Interpretation is protocol {
 
     /// W3C §5.5.2/§5.5.3 SubObjectPropertyOfChain (binary core):
     /// ⟦OPE₁⟧^I ∘ ⟦OPE₂⟧^I ⊆ ⟦OPE_super⟧^I (relation composition).
-    /// V2 ships the binary-chain core; n-ary chains via Verum-level
+    /// ships the binary-chain core; n-ary chains via Verum-level
     /// fold over consecutive pairs.
     fn object_property_chain<P: ObjectPropertyExpression>(
         self, first: P, second: P, sup: P,
@@ -260,7 +270,7 @@ public type Interpretation is protocol {
     /// key list (object + data) gives the SAME value when applied to
     /// two NamedIndividuals a, b that are members of CE under I, then
     /// a^I = b^I.
-    /// V2 ships the binary-key core (one OPE + one DPE); n-ary lists
+    /// ships the binary-key core (one OPE + one DPE); n-ary lists
     /// fold via Verum-level helper.
     fn has_key_named<C: ClassExpression, P: ObjectPropertyExpression, D: DataPropertyExpression>(
         self, ce: C, ope: P, dpe: D,
@@ -288,15 +298,15 @@ public type Interpretation is protocol {
 
     /// W3C §3.4 DataOneOf (singleton core):
     /// ⟦DataOneOf(lt)⟧^I = { lt^I }.
-    /// V2 ships the singleton; n-ary enumerations via Verum-level fold.
+    /// ships the singleton; n-ary enumerations via Verum-level fold.
     fn data_one_of<R: DataRange>(
         self, result: R, lt: Literal,
     ) -> Bool;
 
     /// W3C §3.4 DatatypeRestriction:
     /// ⟦DatatypeRestriction(DT, F₁ v₁, ..., Fₙ vₙ)⟧^I
-    ///    =  ⟦DT⟧^I  ∩  facet-conjunction(F₁ v₁, ..., Fₙ vₙ).
-    /// V2 ships a single-facet form `(DT, facet_iri, value)`; n-ary
+    ///  = ⟦DT⟧^I ∩ facet-conjunction(F₁ v₁, ..., Fₙ vₙ).
+    /// ships a single-facet form `(DT, facet_iri, value)`; n-ary
     /// facet conjunction via Verum-level fold.
     fn datatype_restriction<R: DataRange>(
         self, result: R, base: R, facet: Text, value: Literal,
@@ -394,7 +404,7 @@ public type Interpretation is protocol {
 
     /// W3C §3.3 DataMinCardinality / DataMaxCardinality /
     /// DataExactCardinality / DataQualified*: counting predicates over
-    /// DPE-values per individual under I. V2 ships them as separate
+    /// DPE-values per individual under I. ships them as separate
     /// predicates so SMT dispatch can pick the most specific encoding.
     fn class_data_min_cardinality<C: ClassExpression, D: DataPropertyExpression>(
         self, result: C, n: Int, dpe: D,

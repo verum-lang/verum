@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for tensor shape verification using Z3 Array theory
 //!
+
 //! This test suite validates:
 //! - Matrix multiplication shape checking
 //! - NumPy-style broadcasting
@@ -22,6 +23,7 @@
 //! - Reshape validation with Z3 product constraints
 //! - Bounds check elimination verification
 //!
+
 //! Tests all tensor shape verification features: Tensor<T, Shape> with compile-time
 //! shape parameters, matrix multiplication dimension checking, NumPy-style broadcasting,
 //! reshape validation (product of old shape = product of new shape), and bounds check
@@ -593,11 +595,11 @@ fn test_bounds_elimination_nested_loops_matmul() {
 
     // Matrix multiplication loops:
     // for i in 0..M {
-    //   for j in 0..N {
-    //     for k in 0..K {
-    //       result[i, j] += a[i, k] * b[k, j]
-    //     }
-    //   }
+    //  for j in 0..N {
+    //  for k in 0..K {
+    //  result[i, j] += a[i, k] * b[k, j]
+    //  }
+    //  }
     // }
     let loop_bounds = vec![
         LoopBound {
@@ -723,9 +725,9 @@ fn test_bounds_elimination_multidimensional_access() {
 
     // Nested loops for 2D array:
     // for i in 0..3 {
-    //   for j in 0..4 {
-    //     a[i, j]
-    //   }
+    //  for j in 0..4 {
+    //  a[i, j]
+    //  }
     // }
     let loop_bounds = vec![
         LoopBound {

@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md Appendix F
 //
+
 // `pragmas/registry.vr` carries the ~50 settable / introspection
 // PRAGMAs from §18.1-§18.4. Appendix F lists ~130 total — the
 // remaining ~80 are compile-time, debug, and rarely-used PRAGMAs.
 //
+
 // We catalogue them here so EXPLAIN, `pragma_list`, and the help-
 // text surface a complete list without touching `pragmas/registry.vr`.
 // The classification is the same `PragmaScope`/`EffectPhase` taxonomy.

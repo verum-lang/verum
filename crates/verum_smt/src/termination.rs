@@ -1,14 +1,18 @@
 //! Termination Checking for Dependent Types
 //!
+
 //! This module provides termination verification for recursive functions
 //! as required by the dependent types extension for total functions
 //!
+
 //! ## Features
 //!
+
 //! - **Structural recursion**: Verify calls on structurally smaller arguments
 //! - **Well-founded measures**: Custom termination measures
 //! - **Lexicographic ordering**: Multi-argument termination proofs
 //!
+
 //! Structural recursion is automatically checked (calls on subterms of inductive args).
 //! General recursion requires explicit `decreasing (args) by ordering` annotations.
 //! Well-founded measures map arguments to a well-ordered domain (typically Nat).
@@ -79,9 +83,11 @@ pub enum TerminationMeasure {
 
 /// Termination checker
 ///
+
 /// Verifies that recursive functions always terminate by checking that
 /// recursive calls are made on strictly smaller arguments.
 ///
+
 /// Verifies that recursive functions terminate using three strategies:
 /// 1. Structural recursion: calls on direct subterms of inductive type arguments
 /// 2. Well-founded measures: user-provided `decreasing` annotations with orderings
@@ -101,6 +107,7 @@ impl TerminationChecker {
 
     /// Check that a function terminates
     ///
+
     /// Returns Ok(true) if termination is proven, Ok(false) if it cannot be proven,
     /// or Err if there's a definite non-termination.
     pub fn check_termination(&mut self, func: &Function) -> Result<bool, TerminationError> {
@@ -132,8 +139,10 @@ impl TerminationChecker {
 
     /// Check structural recursion
     ///
+
     /// Verifies that all recursive calls are made on structurally smaller arguments.
     ///
+
     /// Structural recursion: for inductive types, recursive calls must be on direct
     /// subterms. E.g., `length(Cons(_, tail)) => length(tail)` is valid because `tail`
     /// is a subterm of the `Cons` constructor. This is automatically checked.
@@ -166,6 +175,7 @@ impl TerminationChecker {
 
     /// Check if an argument is structurally smaller than the original parameter
     ///
+
     /// An argument is structurally smaller if it's a direct substructure
     /// of the parameter (e.g., tail of a list, left/right child of a tree).
     fn is_structurally_smaller(

@@ -1,16 +1,19 @@
 //! K-Univ universe-level-overflow regression tests (V8, B1, #207).
 //!
+
 //! Pre-V8 the kernel's universe-typing rule used
 //! `Concrete(n).saturating_add(1)` to compute the successor level.
 //! At `u32::MAX` the saturation silently returned `u32::MAX`, so the
 //! inference rule was effectively `Universe(Concrete(MAX)) :
 //! Universe(Concrete(MAX))` — type-in-type, soundness-fatal.
 //!
+
 //! V8 fix: detect the overflow boundary and reject with
 //! `KernelError::UniverseLevelOverflow`. Honest workloads use
 //! single-digit universe levels (typical max is 2 or 3); reaching
 //! `u32::MAX` indicates an elaborator bug or an adversarial input.
 //!
+
 //! These tests exercise the boundary directly via the public
 //! `infer` entry point.
 

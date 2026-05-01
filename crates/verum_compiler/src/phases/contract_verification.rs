@@ -1,9 +1,12 @@
 //! Phase 3a: Contract Verification
 //!
+
 //! SMT-based formal verification of contract literals and refinement types.
 //!
+
 //! ## Features
 //!
+
 //! - Translate contracts to SMT-LIB format
 //! - Verify with Z3/CVC5 solvers
 //! - Check pre/post conditions
@@ -12,14 +15,17 @@
 //! - Counterexample generation on failure
 //! - Integration with verum_smt for SMT solving
 //!
+
 //! ## Verification Flow
 //!
+
 //! 1. Extract contracts from function attributes and body
 //! 2. Parse RSL (Refinement Specification Language) clauses
 //! 3. Translate to SMT formulas
 //! 4. Verify using Z3 solver
 //! 5. Generate counterexamples on failure
 //!
+
 //! Phase 3a: Contract verification. Translates contract#"..." to SMT-LIB,
 //! generates verification conditions, invokes Z3/CVC5, verifies
 //! preconditions => postconditions. Output: Verified AST or CompileError.
@@ -44,11 +50,13 @@ use super::{
 
 /// Contract verification phase
 ///
+
 /// This phase performs SMT-based verification of:
 /// - Function contracts (pre/postconditions)
 /// - Type invariants
 /// - Protocol contracts
 ///
+
 /// Uses the verum_smt crate for Z3 integration.
 pub struct ContractVerificationPhase {
     /// Z3 context for SMT solving
@@ -57,6 +65,7 @@ pub struct ContractVerificationPhase {
     config: VerificationConfig,
     /// Shared SMT routing statistics collector.
     ///
+
     /// When `Some`, every invocation of the underlying Z3 solver
     /// records a routing decision (`Z3Only`) plus its outcome and
     /// elapsed time. The session's `Arc<RoutingStats>` is threaded in
@@ -204,6 +213,7 @@ impl ContractVerificationPhase {
 
     /// Install a shared routing-stats collector.
     ///
+
     /// Stored on the phase and forwarded to the underlying `Context`
     /// so every Z3 `check()` during verification is visible to
     /// `verum smt-stats`. Idempotent and thread-safe.
@@ -323,12 +333,14 @@ impl ContractVerificationPhase {
 
     /// Verify function contracts (pre/post conditions)
     ///
+
     /// Honors `@verify(strategy)` attributes:
     /// - `runtime` / `static`: skip SMT entirely (runtime checks only).
     /// - `formal` / `fast` / `thorough` / `certified` / `synthesize`:
-    ///   proceed with SMT verification, using a timeout scaled by
-    ///   `strategy.timeout_multiplier()`.
+    ///  proceed with SMT verification, using a timeout scaled by
+    ///  `strategy.timeout_multiplier()`.
     ///
+
     /// The strategy is recorded in `stats` for observability and appears
     /// in the verification report emitted at the end of the phase.
     fn verify_function_contract(
@@ -381,14 +393,14 @@ impl ContractVerificationPhase {
         } else {
             // No `@verify` attribute on this function — consult the
             // phase-level `VerificationConfig.mode`:
-            //   - `Runtime`: skip SMT entirely for unannotated
-            //     functions (caller opted out of static verification
-            //     globally).
-            //   - `Proof`: future hook for routing through the
-            //     proof kernel; for now records `functions_strategy_formal`
-            //     and proceeds with the SMT path (same behaviour as
-            //     before, but now load-bearing for the audit gate).
-            //   - `Auto`: existing default — Formal SMT verification.
+            //  - `Runtime`: skip SMT entirely for unannotated
+            //  functions (caller opted out of static verification
+            //  globally).
+            //  - `Proof`: future hook for routing through the
+            //  proof kernel; for now records `functions_strategy_formal`
+            //  and proceeds with the SMT path (same behaviour as
+            //  before, but now load-bearing for the audit gate).
+            //  - `Auto`: existing default — Formal SMT verification.
             match self.config.mode {
                 VerifyMode::Runtime => {
                     tracing::debug!(

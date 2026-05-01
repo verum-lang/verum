@@ -8,9 +8,11 @@ module sys.darwin.errno;
 // Platform: macOS (Darwin/XNU)
 // =============================================================================
 //
+
 // BSD-derived errno values for macOS. These are stable across macOS versions.
 // Reference: /usr/include/sys/errno.h
 //
+
 // Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
 

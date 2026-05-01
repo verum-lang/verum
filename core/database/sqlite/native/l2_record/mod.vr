@@ -7,20 +7,24 @@ module core.database.sqlite.native.l2_record;
 // Dependencies: l0_vfs (indirect), core/encoding/varint, core/text/case_fold
 // =============================================================================
 //
+
 // The record layer owns the bytes-in-row representation. Above it the
 // B-tree and VDBE know nothing of how column values are encoded; they
 // just get decoded Values. Below it the pager knows nothing of SQL
 // types; it just gets byte ranges.
 //
+
 // Shipped modules:
 //
-//   * `varint`    — facade over `core.encoding.varint.sqlite_*`
-//   * `record`    — serial-type codes + header encode/decode
-//   * `affinity`  — TEXT / NUMERIC / INTEGER / REAL / BLOB affinity
-//                   inference from declared column type text
-//   * `collation` — BINARY / NOCASE / RTRIM built-ins + user registry
-//   * `strict`    — STRICT-table type check (rejects affinity coercion)
+
+//  * `varint` — facade over `core.encoding.varint.sqlite_*`
+//  * `record` — serial-type codes + header encode/decode
+//  * `affinity` — TEXT / NUMERIC / INTEGER / REAL / BLOB affinity
+//  inference from declared column type text
+//  * `collation` — BINARY / NOCASE / RTRIM built-ins + user registry
+//  * `strict` — STRICT-table type check (rejects affinity coercion)
 //
+
 // =============================================================================
 
 public module varint;

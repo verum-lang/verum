@@ -1,5 +1,6 @@
 //! Complete type information for compile-time reflection
 //!
+
 //! Provides comprehensive type metadata combining all reflection components.
 
 use verum_common::{List, Maybe, Text};
@@ -12,6 +13,7 @@ use super::variant_info::VariantInfo;
 
 /// Complete type information for compile-time reflection
 ///
+
 /// Provides comprehensive type metadata including fields, variants, and protocol implementations.
 #[derive(Debug, Clone)]
 pub struct TypeInfo {

@@ -59,8 +59,10 @@ impl<'c> Module<'c> {
 
     /// Creates a module from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirModule) -> Self {
         Self {
@@ -71,8 +73,10 @@ impl<'c> Module<'c> {
 
     /// Creates an optional module from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub unsafe fn from_option_raw(raw: MlirModule) -> Option<Self> {
         if raw.ptr.is_null() {

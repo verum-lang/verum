@@ -1,25 +1,27 @@
 //! AST → VBC codegen orchestration + import resolution.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 10). Houses the core
 //! "build the runtime VBC module from a typed AST" pipeline step,
 //! plus the module-graph helpers it depends on:
 //!
-//!   * `compile_ast_to_vbc` — primary orchestrator: runs
-//!     dependent-type verification, proof erasure, CBGR tier
-//!     analysis, VBC codegen + monomorphisation, retains
-//!     stdlib-imported modules for cross-module symbol lookups.
-//!   * `collect_imported_stdlib_modules` — transitive `mount`
-//!     closure walker that pulls every stdlib module reachable
-//!     from the user module's import graph (the foundation of
-//!     lazy stdlib loading).
-//!   * `resolve_super_path` — `super.*` / `.X` mount-path
-//!     resolution helper.
-//!   * `clear_non_compilable_stdlib_modules` — selective module
-//!     retention after type checking; drops prelude /
-//!     protocol-definition modules that would introduce
-//!     unresolvable cross-module method references at codegen,
-//!     while keeping modules whose function bodies need to be
-//!     compiled to VBC (collections, sync, text, io, mem, etc.).
+
+//!  * `compile_ast_to_vbc` — primary orchestrator: runs
+//!  dependent-type verification, proof erasure, CBGR tier
+//!  analysis, VBC codegen + monomorphisation, retains
+//!  stdlib-imported modules for cross-module symbol lookups.
+//!  * `collect_imported_stdlib_modules` — transitive `mount`
+//!  closure walker that pulls every stdlib module reachable
+//!  from the user module's import graph (the foundation of
+//!  lazy stdlib loading).
+//!  * `resolve_super_path` — `super.*` / `.X` mount-path
+//!  resolution helper.
+//!  * `clear_non_compilable_stdlib_modules` — selective module
+//!  retention after type checking; drops prelude /
+//!  protocol-definition modules that would introduce
+//!  unresolvable cross-module method references at codegen,
+//!  while keeping modules whose function bodies need to be
+//!  compiled to VBC (collections, sync, text, io, mem, etc.).
 
 use std::sync::Arc;
 
@@ -44,6 +46,7 @@ impl<'s> CompilationPipeline<'s> {
         // *before* proof erasure so that theorems, axioms, and proof
         // bodies are still available for verification.
         //
+
         // The orchestrator is fire-and-report: it does not block
         // compilation on verification failure — diagnostics are
         // emitted, and the pipeline continues. This matches the
@@ -137,6 +140,7 @@ impl<'s> CompilationPipeline<'s> {
         // skip for the same item kinds, but doing it upstream keeps the
         // module in a canonical runtime-only form.
         //
+
         // Gated on [codegen].proof_erasure. When the flag is disabled,
         // proof terms survive into VBC and become runtime values — used
         // by research scenarios that inspect the proof witness at
@@ -175,9 +179,9 @@ impl<'s> CompilationPipeline<'s> {
             // `codegen/mod.rs:480` comment block). With `validate:
             // true` here, every `verum run` aborts at codegen-finalize
             // before reaching the interpreter — silently breaking
-            // hello-world and downstream weft probes.  CI / release
+            // hello-world and downstream weft probes. CI / release
             // paths still flip the gate on through
-            // `CodegenConfig::with_validation()`.  Keeping it off in
+            // `CodegenConfig::with_validation()`. Keeping it off in
             // the user-facing pipeline is consistent with the existing
             // "Default lenient" architectural intent below for
             // `strict_codegen`.
@@ -189,7 +193,7 @@ impl<'s> CompilationPipeline<'s> {
             is_systems_profile: profile == crate::profile_system::Profile::Systems,
             is_embedded: self.session.options().is_embedded(),
             // Default lenient — pipeline-driven user builds tolerate
-            // partial / forward-referenced stdlib state.  CI / release
+            // partial / forward-referenced stdlib state. CI / release
             // gating that wants to reject any bug-class skip should
             // build via `CodegenConfig::with_strict_codegen()` instead.
             strict_codegen: false,
@@ -198,22 +202,24 @@ impl<'s> CompilationPipeline<'s> {
         let mut codegen = VbcCodegen::with_config(config);
 
         // Run CBGR tier analysis: escape analysis → tier determination
-        // → RefChecked/RefUnsafe emission.  Promotes non-escaping refs
+        // → RefChecked/RefUnsafe emission. Promotes non-escaping refs
         // from Tier 0 (~15ns) to Tier 1 (0ns).
         //
+
         // #118 — correctness fix + parallelisation.
         //
+
         // Pre-fix the merge loop iterated `0..func_tc.decision_count()`
         // and constructed `ExprId(i)` for `i in 0..N`, but
         // `from_analysis_result` populates decisions with span-encoded
-        // `ExprId(start<<32|end)` keys.  The `get_tier(ExprId(i))`
+        // `ExprId(start<<32|end)` keys. The `get_tier(ExprId(i))`
         // lookup always missed and the merge silently inserted only
-        // `default_tier` (Tier0).  CBGR tier promotion was therefore
+        // `default_tier` (Tier0). CBGR tier promotion was therefore
         // NEVER applied to user code — every reference got Tier 0
         // CBGR overhead at runtime, defeating the language's headline
-        // memory-safety/perf trade-off.  Now we use the canonical
+        // memory-safety/perf trade-off. Now we use the canonical
         // `iter_decisions()` API so real ExprId-keyed promotions reach
-        // codegen.  Per-function analyses also fan out via rayon —
+        // codegen. Per-function analyses also fan out via rayon —
         // each `TierAnalyzer` is independent, results merge into the
         // module-level `TierContext` under a single Mutex held only
         // for the per-function append (microsecond-scale).
@@ -362,9 +368,11 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Collect parsed stdlib modules that are imported by the given module.
     ///
+
     /// Scans the module's `mount` statements, extracts module paths, and looks up
     /// the corresponding parsed ASTs in `self.modules`.
     ///
+
     /// Module path mapping: stdlib modules are stored with `std.` prefix
     /// (e.g., `std.sys.darwin.time`), but imports use various prefixes like
     /// `core.sys.darwin.time` or `sys.darwin.time`. This method tries all variants.
@@ -382,12 +390,14 @@ impl<'s> CompilationPipeline<'s> {
         // These are always needed regardless of user imports — they replace C runtime
         // stubs with compiled Verum code.
         //
+
         // Additional modules are included below via mount-statement scanning.
         // The Internal linkage + GlobalDCE safety net removes unreferenced functions.
         //
+
         // Exclusions:
         // - core.base.maybe: defines "Maybe<T>" which collides with user-defined
-        //   "Maybe" types (test 018). Handled inline in instruction.rs instead.
+        //  "Maybe" types (test 018). Handled inline in instruction.rs instead.
         // Modules whose compiled .vr code replaces C runtime stubs.
         // Added incrementally as each module's ABI is verified correct.
         const ALWAYS_INCLUDE: &[&str] = &[
@@ -398,7 +408,7 @@ impl<'s> CompilationPipeline<'s> {
             "core.sys.common",
             // NOTE: core.sys.raw used to be hardcoded here as a workaround
             // for the closure walker's inability to resolve `super.*`
-            // mount paths.  With #163's resolve_super_path landing AND
+            // mount paths. With #163's resolve_super_path landing AND
             // #164's PathSegment::Super extraction fix, `mount super.raw.*`
             // from core.sys.time_ops now resolves correctly to core.sys.raw
             // and the transitive-closure pass pulls it in automatically.
@@ -426,13 +436,13 @@ impl<'s> CompilationPipeline<'s> {
             // core.base.memory hosts the typed-OOM primitives `try_alloc` /
             // `try_alloc_zeroed` / `try_realloc` that List / Map / Text /
             // Deque use internally for their `try_with_capacity` / `try_grow`
-            // / `try_resize` paths.  Without this entry, the per-mount
+            // / `try_resize` paths. Without this entry, the per-mount
             // scan WOULD pick up core.base.memory only AFTER the dependent
             // modules have already been compiled (they're earlier in this
-            // list).  The result was bug-class lenient SKIPs across
+            // list). The result was bug-class lenient SKIPs across
             // List.try_with_capacity, List.try_resize_buffer,
             // Map.try_resize, Text.try_with_capacity, Deque.try_reallocate
-            // — every fallible-allocation API in core/.  Closes #200.
+            // — every fallible-allocation API in core/. Closes #200.
             "core.base.memory",
             // Phase 2B: New modules — added incrementally, each tested
             "core.text.char",
@@ -448,7 +458,7 @@ impl<'s> CompilationPipeline<'s> {
             "core.mem.mod",          // ExecutionTier enum, error types
             "core.mem.capability",   // Capability flags, pure bit ops
             "core.mem.size_class",   // Size class bins (needs clz_u64, wired via ArithExtended)
-            // Tier 1.5: Capability-audit substrate (#202).  MUST come
+            // Tier 1.5: Capability-audit substrate (#202). MUST come
             // before `core.mem.header` because header.vr's writer
             // entry points (try_revoke / attenuate_capabilities /
             // increment_ref_count / decrement_ref_count /
@@ -457,7 +467,7 @@ impl<'s> CompilationPipeline<'s> {
             // Without these in the codegen session, header.vr's
             // record_* references become undefined and the writer
             // methods get bug-class lenient SKIP'd — disabling every
-            // CBGR primitive at runtime.  The runtime gate inside
+            // CBGR primitive at runtime. The runtime gate inside
             // `cap_audit_ring.commit` keeps these calls O(1) when
             // audit is off, so always-loading the modules has no
             // perf cost beyond the 1-2 ns gate-check.
@@ -554,7 +564,7 @@ impl<'s> CompilationPipeline<'s> {
                     // Same extraction policy as the closure-walker pass
                     // below: preserve Super and Relative segments as the
                     // literal "super" string so downstream resolution can
-                    // see them.  Filtering them silently was the bug
+                    // see them. Filtering them silently was the bug
                     // class fixed in #163/#164 — even if this site's
                     // immediate downstream candidate-matching can't act
                     // on a leading "super." (the user module's own path
@@ -678,23 +688,26 @@ impl<'s> CompilationPipeline<'s> {
         // ------------------------------------------------------------------
         // Transitive mount closure over already-collected stdlib modules.
         //
+
         // Root fix for the class of failure where stdlib module A mounts
         // stdlib module B, the user imports A directly, and B's type /
         // variant declarations never reach VBC codegen:
         //
-        //   * `core.database.sqlite.native.l0_vfs.memdb_vfs` mounts
-        //     `core.database.sqlite.native.l0_vfs.vfs_protocol`.
-        //   * A user script that does
-        //     `mount …memdb_vfs.{open_memory_rwc}` pulls memdb_vfs into
-        //     `imported` via the loop above, but NOT vfs_protocol.
-        //   * vfs_protocol's `type LockKind is Unlocked | Shared | …;`
-        //     never flows through `register_type_constructors`, so
-        //     variants like `Unlocked` are absent from the VBC function
-        //     table. Any stdlib body that writes `lock_state: Unlocked`
-        //     is then silently dropped by the lenient top-level-fn SKIP
-        //     path and callers hit `FunctionNotFound(FunctionId(N))` at
-        //     runtime with no diagnostic.
+
+        //  * `core.database.sqlite.native.l0_vfs.memdb_vfs` mounts
+        //  `core.database.sqlite.native.l0_vfs.vfs_protocol`.
+        //  * A user script that does
+        //  `mount …memdb_vfs.{open_memory_rwc}` pulls memdb_vfs into
+        //  `imported` via the loop above, but NOT vfs_protocol.
+        //  * vfs_protocol's `type LockKind is Unlocked | Shared | …;`
+        //  never flows through `register_type_constructors`, so
+        //  variants like `Unlocked` are absent from the VBC function
+        //  table. Any stdlib body that writes `lock_state: Unlocked`
+        //  is then silently dropped by the lenient top-level-fn SKIP
+        //  path and callers hit `FunctionNotFound(FunctionId(N))` at
+        //  runtime with no diagnostic.
         //
+
         // This pass walks each already-imported module's own `mount`
         // statements and adds any matched modules not yet present,
         // iterating to a fixed point. Purely structural — no compiler
@@ -704,7 +717,7 @@ impl<'s> CompilationPipeline<'s> {
         // untouched (it is a separate AOT-runtime concern).
         loop {
             let before_len = imported.len();
-            // Snapshot the (path, module) pairs we'll iterate over.  We
+            // Snapshot the (path, module) pairs we'll iterate over. We
             // need both halves: the module body to walk its `mount`
             // statements, and its dotted path to anchor `super.*`
             // resolution.
@@ -732,18 +745,20 @@ impl<'s> CompilationPipeline<'s> {
                     // (`super`, leading `.` for relative-to-parent)
                     // so resolve_super_path can process them.
                     //
+
                     // PathSegment::Super and PathSegment::Relative are
                     // distinct AST variants from PathSegment::Name —
                     // filtering them to None at extraction was the bug
                     // that #163's super.* fix nominally addressed but
-                    // did not yet exercise.  After this commit,
+                    // did not yet exercise. After this commit,
                     // `mount super.X` arrives as "super.X" and
                     // `mount .X` arrives as "super.X" too (a leading
                     // `.` denotes "sibling of current module" in the
                     // stdlib's mount grammar — semantically a
-                    // one-level super walk).  Both then flow through
+                    // one-level super walk). Both then flow through
                     // resolve_super_path uniformly.
                     //
+
                     // PathSegment::SelfValue / PathSegment::Cog don't
                     // appear in stdlib mount paths today; they're left
                     // in the catch-all `_ => None` arm so adding a new
@@ -767,7 +782,7 @@ impl<'s> CompilationPipeline<'s> {
                         continue;
                     }
                     // Resolve `super.*` paths against the source module's
-                    // own dotted path BEFORE the prefix walk.  Without
+                    // own dotted path BEFORE the prefix walk. Without
                     // this, `mount super.raw.foo` from `core.sys.time_ops`
                     // would walk `super.raw.foo`, `super.raw`, `super` —
                     // none of which are keys in `self.modules`, so the
@@ -780,6 +795,7 @@ impl<'s> CompilationPipeline<'s> {
                     // is `core.x.y.z.{...}` matches the leaf module or any
                     // ancestor that happens to be indexed directly.
                     //
+
                     // Each prefix is tried as-is and again under a `core.`
                     // prefix so short stdlib paths like `mount base.memory`
                     // resolve against `core.base.memory` in `self.modules`.
@@ -848,19 +864,21 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Resolve `super.*` segments at the start of a `mount` path
-    /// against the source module's own dotted path.  Each leading
+    /// against the source module's own dotted path. Each leading
     /// `super` strips one trailing component from the source path; the
-    /// remaining mount segments are appended.  Mounts that don't begin
+    /// remaining mount segments are appended. Mounts that don't begin
     /// with `super` are returned unchanged (the path is already
     /// anchored at the stdlib root or at an absolute prefix the
     /// progressive-prefix walk handles).
     ///
+
     /// Examples (src = `core.sys.time_ops`):
-    ///   `super.raw.foo`        → `core.sys.raw.foo`
-    ///   `super.super.collections.List` → `core.collections.List` (drops 2)
-    ///   `core.foo.bar`         → `core.foo.bar` (unchanged)
-    ///   `super` (alone)        → `core.sys` (just the parent path)
+    ///  `super.raw.foo` → `core.sys.raw.foo`
+    ///  `super.super.collections.List` → `core.collections.List` (drops 2)
+    ///  `core.foo.bar` → `core.foo.bar` (unchanged)
+    ///  `super` (alone) → `core.sys` (just the parent path)
     ///
+
     /// If the mount path requests more `super` levels than the source
     /// has components, the original path is returned (the progressive-
     /// prefix walk will then fail to match anything, which is the
@@ -878,7 +896,7 @@ impl<'s> CompilationPipeline<'s> {
         let src_segs: Vec<&str> = src_path.split('.').collect();
         // `super` walks one step *up* — it must leave at least one
         // remaining component (the parent module) for the result to
-        // anchor against an existing stdlib path.  super_count ==
+        // anchor against an existing stdlib path. super_count ==
         // src_segs.len() walks exactly to the root and yields an empty
         // parent; super_count > src_segs.len() walks past the root.
         // Both cases are malformed inputs — return the original mount
@@ -901,12 +919,14 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Retain stdlib modules that contain compilable function bodies.
     ///
+
     /// After type-checking, we clear modules whose ASTs are no longer needed.
     /// Modules with function implementations (function bodies with statements)
     /// are retained so their bodies can be compiled to VBC → LLVM.
     /// Modules containing only type/protocol declarations are cleared — their
     /// type information was already extracted during type-checking.
     ///
+
     /// `user_module`, when provided, is scanned for `mount` statements and any
     /// stdlib modules matching the mount target (plus their submodules) are
     /// retained. Without this, user code that mounts a stdlib module outside
@@ -921,6 +941,7 @@ impl<'s> CompilationPipeline<'s> {
         // definitions used during type checking and should be dropped to avoid
         // compiling thousands of unreachable functions.
         //
+
         // Modules in ALWAYS_INCLUDE have compiled implementations that the AOT
         // pipeline dispatches to (Strategy 1/2 in instruction.rs).
         const ALWAYS_INCLUDE: &[&str] = &[
@@ -997,12 +1018,12 @@ impl<'s> CompilationPipeline<'s> {
             // See KNOWN_ISSUES.md "Shared<T> / CBGR-allocator Bootstrap".
             "core.mem.allocator",
             "core.mem.heap",
-            // Capability-audit substrate (#202).  MUST be retained
+            // Capability-audit substrate (#202). MUST be retained
             // alongside `core.mem.header` because every CBGR writer
             // entry point (try_revoke / attenuate_capabilities /
             // increment_ref_count / decrement_ref_count /
             // increment_generation) emits a `record_*` call into the
-            // audit ring.  Without these in the retained set, the
+            // audit ring. Without these in the retained set, the
             // codegen skips the writer methods (bug-class) and CBGR
             // primitives have no working bodies.
             "core.mem.cap_audit_ring",
@@ -1052,7 +1073,7 @@ impl<'s> CompilationPipeline<'s> {
                         // this file — preserve Super/Relative as
                         // "super" so downstream consumers see the
                         // structural prefix rather than a silently-
-                        // truncated path.  See the user-mount loop at
+                        // truncated path. See the user-mount loop at
                         // ~line 11158 and the closure walker at
                         // ~line 11336 for the full bug-class context.
                         let full = path.segments.iter()

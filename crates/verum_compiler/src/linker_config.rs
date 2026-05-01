@@ -1,65 +1,85 @@
 //! Linker configuration from Verum.toml
 //!
+
 //! This module provides comprehensive configuration for the linking phase,
 //! supporting all LLD linker options through Verum.toml configuration.
 //!
+
 //! ## Configuration Schema
 //!
+
 //! ```toml
 //! [linker]
 //! # Output kind: "executable", "shared", "static", "object"
 //! output = "executable"
 //!
+
 //! # LTO mode: "none", "thin", "full"
 //! lto = "thin"
 //!
+
 //! # Use LLVM linker (lld) instead of system linker
 //! use_lld = true
 //!
+
 //! # Enable position-independent code
 //! pic = true
 //!
+
 //! # Strip debug symbols
 //! strip = false
 //!
+
 //! # Keep debug info in output
 //! debug_info = true
 //!
+
 //! # Static linking (no runtime dependencies)
 //! static_link = false
 //!
+
 //! # Strip debug symbols only (keep function names)
 //! strip_debug_only = false
 //!
+
 //! # Entry point symbol name (for executables)
 //! entry_point = "main"
 //!
+
 //! # Target triple (e.g., "x86_64-unknown-linux-gnu")
 //! target = "native"
 //!
+
 //! # Library search paths
 //! library_paths = ["/usr/local/lib", "vendor/lib"]
 //!
+
 //! # Libraries to link
 //! libraries = ["pthread", "m", "dl"]
 //!
+
 //! # Symbols to export (for shared libraries)
 //! exports = ["api_init", "api_cleanup"]
 //!
+
 //! # Extra linker flags
 //! extra_flags = ["-Wl,--as-needed"]
 //!
+
 //! # Platform-specific settings
 //! [linker.linux]
 //! libraries = ["rt", "pthread"]
 //!
+
 //! [linker.macos]
 //! extra_flags = ["-framework", "CoreFoundation"]
 //!
+
 //! [linker.windows]
 //! libraries = ["kernel32", "user32"]
 //! ```
 //!
+
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

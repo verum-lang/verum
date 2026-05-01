@@ -14,6 +14,7 @@
 )]
 // Advanced Error Handling Tests
 //
+
 // Comprehensive error scenarios and recovery testing:
 // - Unterminated strings and characters
 // - Invalid escape sequences
@@ -24,6 +25,7 @@
 // - Multiple simultaneous errors
 // - Edge case error conditions
 //
+
 // Tests lexer error handling behavior per the Verum lexical grammar.
 
 use verum_ast::span::FileId;

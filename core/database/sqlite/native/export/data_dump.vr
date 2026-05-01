@@ -3,13 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — dump / restore)
 //
+
 // Row-stream emitter. Three formats:
 //
-//   * `DfInsert` — `INSERT INTO <table>(<cols>) VALUES (<vals>);`
-//                   round-trippable via Database.execute()
-//   * `DfCsv`    — RFC 4180 CSV with header row
-//   * `DfJsonl`  — one JSON object per line, keys = column names
+
+//  * `DfInsert` — `INSERT INTO <table>(<cols>) VALUES (<vals>);`
+//  round-trippable via Database.execute()
+//  * `DfCsv` — RFC 4180 CSV with header row
+//  * `DfJsonl` — one JSON object per line, keys = column names
 //
+
 // The caller wraps each row in a `RowDump` (column names + values).
 // =============================================================================
 

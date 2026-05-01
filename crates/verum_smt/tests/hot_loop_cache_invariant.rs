@@ -1,23 +1,26 @@
 //! Red-team Round 3 §2.2 — refinement-check hot-loop cache invariant.
 //!
+
 //! Adversarial scenario: a hot inner loop calls a function whose
 //! parameter type carries a non-trivial refinement, e.g.
 //! `fn foo(x: Int{x > 0})`. Naive verifier behaviour would re-run
 //! the SMT subsumption query at every call site / loop iteration,
 //! defeating the verifier's amortised cost target.
 //!
+
 //! Defense: `SubsumptionChecker` interns each (φ₁, φ₂) pair into
 //! a result cache keyed by the canonical hash. Hot-loop callers
 //! see ~zero amortised cost — the second + Nth check return
 //! `cache_hits` rather than re-running Z3.
 //!
+
 //! These tests pin the invariant programmatically:
-//!   1. A repeated call pattern produces exactly one cache MISS
-//!      and (N-1) cache HITS.
-//!   2. Distinct refinements remain distinct — no false-positive
-//!      sharing across cache keys.
-//!   3. The hit rate satisfies `hits / (hits + misses) >= 0.99`
-//!      for a 1000-call hot-loop.
+//!  1. A repeated call pattern produces exactly one cache MISS
+//!  and (N-1) cache HITS.
+//!  2. Distinct refinements remain distinct — no false-positive
+//!  sharing across cache keys.
+//!  3. The hit rate satisfies `hits / (hits + misses) >= 0.99`
+//!  for a 1000-call hot-loop.
 
 use verum_ast::expr::{BinOp, Expr, ExprKind};
 use verum_ast::literal::{IntLit, Literal, LiteralKind};

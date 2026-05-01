@@ -1,34 +1,44 @@
 //! Build Assets Intrinsics (Tier 1 - Requires BuildAssets)
 //!
+
 //! Provides compile-time file system access with security restrictions.
 //! All functions in this module require the `BuildAssets` context since they
 //! access the file system.
 //!
+
 //! ## File Loading
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `load_text(path)` | `(Text) -> Text` | Load file as text |
 //! | `include_bytes(path)` | `(Text) -> Bytes` | Load file as bytes |
 //! | `include_str(path)` | `(Text) -> Text` | Alias for load_text |
 //!
+
 //! ## File System Operations
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `asset_exists(path)` | `(Text) -> Bool` | Check if file exists |
 //! | `asset_list_dir(path)` | `(Text) -> List<Text>` | List directory contents |
 //! | `asset_metadata(path)` | `(Text) -> AssetMetadata` | Get file metadata |
 //!
+
 //! ## Security
 //!
+
 //! All paths are restricted to the project root and configured asset directories.
 //! Path traversal (e.g., `..`) and absolute paths are not allowed.
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 1**: All functions require `using [BuildAssets]` context.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -43,6 +53,7 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register build assets builtins with context requirements
 ///
+
 /// All file system functions require BuildAssets context since they
 /// access files from the project directory.
 pub fn register_builtins(map: &mut BuiltinRegistry) {
@@ -272,6 +283,7 @@ fn meta_load_toml(
 /// `load_toml`, returning the parsed Map<Text, MetaValue>
 /// for further composition by user code.
 ///
+
 /// `@codegen(path, fn_name)` — two-arg form is the
 /// architectural completion of #20 P7 / @codegen:
 /// after loading the spec, invokes the user-defined meta
@@ -281,17 +293,20 @@ fn meta_load_toml(
 /// a `MetaValue::Items(...)` that the surrounding macro
 /// expansion splices into the module:
 ///
+
 /// ```verum
 /// public meta fn build_users(spec: Map<Text, Any>) -> List<Item>
-///     using [BuildAssets, AstAccess]
+///  using [BuildAssets, AstAccess]
 /// {
-///     // Construct AST items from the parsed spec...
+///  // Construct AST items from the parsed spec...
 /// }
 ///
+
 /// // Module-level invocation:
 /// @codegen("schemas/users.toml", "build_users");
 /// ```
 ///
+
 /// Sandbox + cycle protection: file load goes through the
 /// same `BuildAssetsInfo::load_toml` path (project-root
 /// canonicalize precheck); the user meta-fn invocation
@@ -355,7 +370,7 @@ fn meta_codegen(
     };
 
     // Validate arity — the user meta fn must accept exactly
-    // one argument (the parsed spec map).  This is a clear
+    // one argument (the parsed spec map). This is a clear
     // diagnostic instead of letting `execute_user_meta_fn`
     // surface a generic ArityMismatch with no context.
     if user_fn.params.len() != 1 {
@@ -369,7 +384,7 @@ fn meta_codegen(
         ))));
     }
 
-    // Invoke the user meta fn with the parsed spec.  The
+    // Invoke the user meta fn with the parsed spec. The
     // result is whatever the fn returns — typically
     // MetaValue::Items for code-generation patterns, but
     // could be any ConstValue (e.g. derived constants).
@@ -741,7 +756,7 @@ mod tests {
         // assets/icons/info.png
         // assets/themes/dark/wallpaper.png
         // assets/themes/light/wallpaper.png
-        // assets/notes.txt   (must NOT match *.png)
+        // assets/notes.txt (must NOT match *.png)
         let icons = temp_dir.path().join("assets").join("icons");
         let dark = temp_dir.path().join("assets").join("themes").join("dark");
         let light = temp_dir.path().join("assets").join("themes").join("light");

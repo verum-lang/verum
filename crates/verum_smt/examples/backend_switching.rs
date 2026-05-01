@@ -1,5 +1,6 @@
 //! Backend Switching Examples - Complete Usage Guide
 //!
+
 //! This example demonstrates all backend switching capabilities:
 //! - Manual backend selection
 //! - Automatic backend selection
@@ -8,11 +9,13 @@
 //! - Cross-validation
 //! - Configuration management
 //!
+
 //! Run with:
 //! ```bash
 //! cargo run --example backend_switching --features cvc5
 //! ```
 //!
+
 //! NOTE: Requires the `cvc5` feature to be enabled
 
 #[cfg(not(feature = "cvc5"))]

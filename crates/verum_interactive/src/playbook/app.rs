@@ -1,5 +1,6 @@
 //! Main Playbook application: state, event loop, and rendering.
 //!
+
 //! Cyberpunk-inspired research environment for Verum language exploration.
 //! All keybinding dispatch uses the centralized `Keybindings` module.
 
@@ -1446,6 +1447,7 @@ impl PlaybookApp {
 
     /// Start the default introductory tutorial.
     ///
+
     /// Populates the playbook with a sequence of markdown and code cells
     /// that walk the user through fundamental Verum concepts: expressions,
     /// let bindings, functions, types, pattern matching, lists, and maps.
@@ -1456,6 +1458,7 @@ impl PlaybookApp {
 
     /// Start a built-in tutorial by index (from `builtin_tutorials()`).
     ///
+
     /// Returns `false` if the index is out of range.
     pub fn start_tutorial_by_index(&mut self, index: usize) -> bool {
         let tutorials = builtin_tutorials();
@@ -1513,6 +1516,7 @@ impl PlaybookApp {
 
     /// Build the cells for the built-in introductory tutorial.
     ///
+
     /// This is the default tutorial shown when the user runs `:tutorial`
     /// or calls `start_tutorial()`. It covers the essential Verum concepts
     /// using correct Verum syntax (not Rust).

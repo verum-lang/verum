@@ -1,5 +1,6 @@
 //! Type parser for Verum using hand-written recursive descent.
 //!
+
 //! This module implements parsing for all Verum types, including:
 //! - Primitive types (Int, Float, Bool, Text, Char)
 //! - Compound types (tuples, arrays, functions)
@@ -23,6 +24,7 @@ use crate::parser::{ParseResult, RecursiveParser};
 impl<'a> RecursiveParser<'a> {
     /// Parse a type expression.
     ///
+
     /// This is the main entry point for type parsing.
     pub fn parse_type(&mut self) -> ParseResult<Type> {
         self.parse_type_impl(true, false, true)
@@ -37,10 +39,12 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a type that may have a refinement, but check lookahead to avoid
     /// consuming a function/impl body brace.
     ///
+
     /// This is used for return types in functions, predicates, and impl methods where:
     /// - `fn abs(x: Int) -> Int{>= 0} { body }` should parse the refinement
     /// - `fn is_even(n: Int) -> Bool { body }` should NOT consume the body brace as refinement
     ///
+
     /// The key: refinements can only appear if there's content inside the braces that looks
     /// like a predicate (starts with comparison operator, or is an expression).
     pub fn parse_type_with_lookahead(&mut self) -> ParseResult<Type> {
@@ -235,6 +239,7 @@ impl<'a> RecursiveParser<'a> {
         // Capability-restricted types: `Type with [Cap1, Cap2]` restricts a context
         // to a subset of its capabilities (e.g., `Database with [Read]` allows only reads)
         //
+
         // This must be checked before refinements because:
         // - `Database with [Read]` is a capability type
         // - `Database{is_connected}` is a refinement type
@@ -274,14 +279,17 @@ impl<'a> RecursiveParser<'a> {
         // Only if refinements are allowed in this context
         // Note: We need to distinguish `Type where predicate` (refinement) from declaration-level where clauses
         //
+
         // IMPORTANT: When use_lookahead is true (for function/impl return types), we DON'T allow
         // `where` refinements because `where` after a return type is almost always a generic where clause:
         // - `fn foo() -> Vec<U> where F: Fn(T) -> U { ... }` - generic where clause, not refinement
         // - `type Pos is Int where x > 0;` - refinement where clause (but not in return type context)
         //
+
         // EXCEPTION: Lambda refinements like `where |x| x > 0` are ALWAYS refinements, never generic
         // where clauses, because generic where clauses don't have lambda syntax. So we allow them.
         //
+
         // So `where` refinements are only allowed when:
         // 1. use_lookahead is false (type alias context), OR
         // 2. The where is followed by a lambda: where |x| expr
@@ -329,12 +337,14 @@ impl<'a> RecursiveParser<'a> {
             // We want to parse refinements like `Int{>= 0}` but not consume
             // function/impl body braces.
             //
+
             // Strategy: Look ahead into the braces to see if it looks like a refinement.
             // Refinements start with:
             // - Comparison operators: >, <, >=, <=, ==, !=
             // - Identifiers (function calls or variable names)
             // - Pipe (lambda syntax: where |x| ...)
             //
+
             // Function bodies start with:
             // - Statements (let, if, return, loop, etc.)
             // - Block expressions
@@ -380,10 +390,12 @@ impl<'a> RecursiveParser<'a> {
                     // - Refinements: {is_valid(it)}, {it > 0}
                     // - Function bodies: {x + y}, {n % 2 == 0}, { x }
                     //
+
                     // Conservative approach: assume identifier = function body
                     // Only treat as refinement if followed immediately by `(`
                     // (indicating a predicate call like {is_valid(it)})
                     //
+
                     // Note: {foo} could be either a refinement or a function body.
                     // In function return type context, it's more likely a function body,
                     // so we treat it conservatively as a function body.
@@ -414,18 +426,22 @@ impl<'a> RecursiveParser<'a> {
                     }
                     // Handle 'self' for tuple/struct refinements like (Int, Int) { self.0 <= self.1 }
                     //
+
                     // IMPORTANT: In return type context (use_lookahead=true), `{ self ... }` is
                     // almost always a function body, not a refinement:
                     // - `fn method(&self) -> Bool { self == other }` - function body
                     // - `fn method(&self) -> Bool { self.x >= 0 }` - function body
                     //
+
                     // Refinements on return types use `it` or `result`, not `self`:
                     // - `fn foo() -> Int { it > 0 }` - refinement
                     // - `fn foo() -> Int { result >= 0 }` - refinement
                     //
+
                     // Type alias contexts (use_lookahead=false) can have `self` refinements:
                     // - `type Pos is (Int, Int) { self.0 >= 0 && self.1 >= 0 };`
                     //
+
                     // Since we're in use_lookahead=true context here, always treat { self ... }
                     // as a function body to avoid the confusing parse error where the function
                     // body is consumed as a refinement type.
@@ -434,10 +450,12 @@ impl<'a> RecursiveParser<'a> {
                         // VERY conservative heuristic: Only treat as refinement if it's explicitly using 'it'
                         // This avoids false positives like `Bool { x > 0 }` (function body) vs `Int{it > 0}` (refinement)
                         //
+
                         // Refinements typically use the implicit `it` variable: {it > 0}, {it.contains('@')}
                         // For 'result', it's handled as TokenKind::Result above (lexed as a keyword)
                         // Function bodies use parameter names: {x > 0}, {n % 2 == 0}
                         //
+
                         // If the identifier is 'it', check the next token:
                         if name.as_str() == "it" {
                             match self.stream.peek_nth(1).map(|t| &t.kind) {
@@ -523,6 +541,7 @@ impl<'a> RecursiveParser<'a> {
     /// Three equivalent refinement forms: inline `T{pred}`, declarative `T where pred`,
     /// and sigma `n: T where f(n)`. The sigma form binds a name visible in the predicate.
     ///
+
     /// Per the three forms share a single AST node: this emits
     /// `TypeKind::Refined` with the binder carried as `predicate.binding`.
     pub fn parse_sigma_type(&mut self) -> ParseResult<Type> {
@@ -547,6 +566,7 @@ impl<'a> RecursiveParser<'a> {
         // Valid: `inner: (n: Int, data: [Int])` - nested sigma wrapped in parens
         // Invalid: `Item: Display: Clone` - chained colons without parens
         //
+
         // Post-canonicalisation : the sigma surface form lowers to
         // `TypeKind::Refined` with `predicate.binding = Some(name)`, so the
         // chain-of-colons detector looks for a refined node whose binding is
@@ -673,6 +693,7 @@ impl<'a> RecursiveParser<'a> {
             // `Type` alone is Type(0), `Type(N)` is a concrete universe level,
             // `Type(u)` is a universe level variable for universe polymorphism.
             //
+
             // We parse `Type` as a universe type when:
             // - It's `Type` followed by `(` (explicit level annotation)
             // - It's `Type` NOT followed by `<` or `.` (bare Type = Type(0))
@@ -872,6 +893,7 @@ impl<'a> RecursiveParser<'a> {
     /// Parse anonymous record type: { x: Int, y: Int }
     /// Grammar: record_type = '{' , field_list , '}' ;
     ///
+
     /// Note: Anonymous record types in type expressions don't support visibility
     /// modifiers or attributes - those are only for named type definitions.
     fn parse_record_type(&mut self) -> ParseResult<Type> {
@@ -949,9 +971,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse universe type: `Type`, `Type(0)`, `Type(1)`, `Type(u)`.
     ///
+
     /// Grammar: universe_type = 'Type' , [ '(' , universe_level , ')' ] ;
     /// universe_level = integer_lit | identifier ;
     ///
+
     /// Bare `Type` is equivalent to `Type(0)` (the base universe).
     /// `Type(N)` for integer N is a concrete universe level.
     /// `Type(u)` for identifier u is a universe level variable (universe polymorphism).
@@ -978,15 +1002,17 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a universe level expression inside `Type(...)`.
     ///
+
     /// Grammar:
-    ///   universe_level_expr = integer_lit
-    ///                       | identifier
-    ///                       | 'max' '(' universe_level_expr ',' universe_level_expr ')'
+    ///  universe_level_expr = integer_lit
+    ///  | identifier
+    ///  | 'max' '(' universe_level_expr ',' universe_level_expr ')'
     ///
+
     /// Examples:
-    ///   Type(0)          -- concrete level 0
-    ///   Type(u)          -- level variable u
-    ///   Type(max(u, v))  -- maximum of two levels
+    ///  Type(0) -- concrete level 0
+    ///  Type(u) -- level variable u
+    ///  Type(max(u, v)) -- maximum of two levels
     fn parse_universe_level_expr(&mut self) -> ParseResult<UniverseLevelExpr> {
         match self.stream.peek() {
             // Concrete level: 0, 1, 2, ...
@@ -1047,6 +1073,7 @@ impl<'a> RecursiveParser<'a> {
 
         // Parse type arguments: <A>
         //
+
         // Use `expect_gt` to correctly split the outer `>` from a
         // `>>` token produced by the lexer when the carrier itself is
         // generic: `Path<Susp<A>>(…)` tokenises as `Path`, `<`, `Susp`,
@@ -1173,10 +1200,12 @@ impl<'a> RecursiveParser<'a> {
     /// Existential types represent opaque types implementing certain protocol bounds.
     /// Used for return type abstraction and type erasure: `some T: Bound1 + Bound2`.
     ///
+
     /// Existential types represent opaque types that implement certain protocols.
     /// They are used for return type abstraction (hiding implementation details)
     /// and for type erasure.
     ///
+
     /// Examples:
     /// - `some T: Iterator` - some type implementing Iterator
     /// - `some T: Display + Debug` - some type implementing both Display and Debug
@@ -1234,6 +1263,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse extern function pointer type: extern "C" fn(A, B) -> C
     ///
+
     /// Syntax:
     /// - `extern fn(...)` - defaults to C calling convention
     /// - `extern "C" fn(...)` - explicit C calling convention
@@ -1275,9 +1305,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse function type: fn(A, B) -> C or fn<R>(A, R) -> R (rank-2)
     ///
+
     /// The `calling_convention` parameter is `Some` when parsing extern function
     /// pointer types (e.g., `extern "C" fn(...)`), `None` for regular function types.
     ///
+
     /// Rank-2 function types have universally quantified type parameters:
     /// - `fn<R>(Reducer<B, R>) -> Reducer<A, R>` - R is quantified within the function type
     /// - This enables storing polymorphic functions as values (e.g., transducers)
@@ -1356,9 +1388,9 @@ impl<'a> RecursiveParser<'a> {
         // Optional context clause AFTER return type (CANONICAL FORM)
         // Context clause: `using [Ctx1, Ctx2]` or `using Ctx` after return type (canonical form)
         // Grammar: context_clause = 'using' , context_spec ;
-        // Format: fn(A) -> B using [Context]          -- bracketed contexts
-        // Format: fn(A) -> B using Context            -- single context
-        // Format: fn(A) using [Context]               -- when return type is unit
+        // Format: fn(A) -> B using [Context] -- bracketed contexts
+        // Format: fn(A) -> B using Context -- single context
+        // Format: fn(A) using [Context] -- when return type is unit
         // Supports all advanced patterns: negative (!), alias (as), named (:),
         // conditional (if), transforms (.), type arguments (<>)
         let contexts: ContextList = if self.stream.consume(&TokenKind::Using).is_some() {
@@ -1401,6 +1433,7 @@ impl<'a> RecursiveParser<'a> {
     /// Parse async function type: async fn(A, B) -> C
     /// Transforms to fn(A, B) -> Future<C>
     ///
+
     /// Grammar: function_type = [ 'async' ] , 'fn' , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ] ;
     fn parse_async_function_type(&mut self) -> ParseResult<Type> {
         let start_pos = self.stream.position();
@@ -1800,6 +1833,7 @@ impl<'a> RecursiveParser<'a> {
         // (module path) as qualified. This is a known limitation that will be addressed
         // when we have better context (e.g., distinguish type parameters from module names).
         //
+
         // For chained associated types like C.Iter.Item, we need to create nested Qualified types:
         // C.Iter.Item becomes Qualified { self_ty: Qualified { self_ty: Path(C), assoc: Iter }, assoc: Item }
         let mut base_type = if path.segments.len() > 1 {
@@ -1850,6 +1884,7 @@ impl<'a> RecursiveParser<'a> {
         // Handle additional dot notation for nested associated types: Self.Item.Output
         // This is less common but still valid
         //
+
         // IMPORTANT: Only consume `.` if followed by an identifier.
         // This prevents `.` from being consumed when it's used as a separator in
         // forall/exists expressions (e.g., `forall i: T . body`), where the `.`
@@ -1894,10 +1929,11 @@ impl<'a> RecursiveParser<'a> {
             );
 
             // After `<…>`, check for value-argument parentheses:
-            //   Fiber<A, B>(f, b)
-            //   IsContrMap<A, B>(f)
-            //   Glue<A>(phi, T, e)
+            //  Fiber<A, B>(f, b)
+            //  IsContrMap<A, B>(f)
+            //  Glue<A>(phi, T, e)
             //
+
             // This is the general dependent-type application shape that
             // `core/math/hott.vr`, `cubical.vr`, `infinity_topos.vr`, and
             // `kan_extension.vr` pervasively rely on. The two-argument
@@ -1938,6 +1974,7 @@ impl<'a> RecursiveParser<'a> {
         }
         // DependentApp without generic prefix — `C.cells(0)`, `Obj(n)`.
         //
+
         // When the base (possibly a Qualified type like `C.cells`) is
         // followed directly by `(<literal>…)`, it is a value-indexed
         // dependent type, not the "constructor-style" `A(B(C(Int)))`
@@ -2073,7 +2110,7 @@ impl<'a> RecursiveParser<'a> {
                 // Minimum binding power for expressions inside generic args.
                 // Must be > 10 to exclude shift operators `<<` (10) and
                 // `>>` (10) which would consume the closing `>>`/`>` as
-                // a right-shift operator.  Comparison operators `<`/`>`
+                // a right-shift operator. Comparison operators `<`/`>`
                 // have BP 6, arithmetic has BP ≤ 13, so BP 11 is the
                 // sweet spot: allows +, -, *, /, % but blocks << and >>.
                 const GENERIC_ARG_MIN_BP: u8 = 11;
@@ -2214,6 +2251,7 @@ impl<'a> RecursiveParser<'a> {
                             // Check if `>` after a type is actually a comparison operator
                             // E.g.: Proof<n > 0> -- `n` parsed as type, `>` is comparison
                             //
+
                             // EXCLUSION: `(` as the first token of the RHS is ambiguous
                             // with a DependentApp value-argument list `Outer<Type<…>(…)>`.
                             // In the stdlib HoTT pattern `Foo<Bar<A>(v)>` the `(v)` is a
@@ -2320,6 +2358,7 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a const expression in generic argument position.
     /// This is similar to parse_expr() but stops at generic argument boundaries (comma and >).
     ///
+
     /// Examples:
     /// - `10` - simple integer literal
     /// - `N + 1` - const expression with identifier
@@ -2516,6 +2555,7 @@ impl<'a> RecursiveParser<'a> {
                 // Bare where expression (Rule 5 - implicit 'it' binding)
                 // Parse the expression, then validate no trailing tokens remain
                 //
+
                 // First try implicit 'it' comparison: `where > 0` becomes `where it > 0`
                 // This handles: `Int where > 0`, `Int where >= 0 && <= 100`, etc.
                 let first_expr = if let Some(implicit_expr) =
@@ -2530,6 +2570,7 @@ impl<'a> RecursiveParser<'a> {
                 // This is common in type definitions like:
                 // type ValidIndex<const N: Int> is Int where self >= 0, self < N;
                 //
+
                 // IMPORTANT: Only consume commas if the next tokens look like a predicate
                 // expression (comparison, identifier followed by comparison, etc.), NOT
                 // if they look like a parameter declaration (identifier followed by colon).
@@ -2584,6 +2625,7 @@ impl<'a> RecursiveParser<'a> {
                 // a valid terminator. If there are unexpected tokens (like "x x > 0"
                 // where only first "x" is consumed), this is a malformed refinement.
                 //
+
                 // Valid terminators for a bare where refinement:
                 // - End of input (for parse_type_str)
                 // - Semicolon (for type definitions: `type Pos is Int where x > 0;`)
@@ -2594,6 +2636,7 @@ impl<'a> RecursiveParser<'a> {
                 // - Where (for chained where clauses)
                 // - LBrace (for following function/impl body - but NOT directly after bare where)
                 //
+
                 // Invalid: Identifier, number, or operator immediately following
                 // (indicates malformed syntax like "x x > 0")
                 // Note: Comma is no longer valid here since we consumed all comma-separated predicates
@@ -2785,6 +2828,7 @@ impl<'a> RecursiveParser<'a> {
         // Note: We use . (Dot) for paths in PRIMARY context (e.g., Color.Red)
         // In POSTFIX context, . is still used for field/method access on expressions
         //
+
         // IMPORTANT: Only consume `.` if followed by an identifier-like token.
         // This prevents `.` from being consumed when it's used as a separator in
         // forall/exists expressions (e.g., `forall i: T . body`), where the `.`
@@ -2893,10 +2937,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a single generic parameter
     ///
+
     /// Supports both explicit and implicit parameters:
     /// - Explicit: `T`, `T: Display`, `N: meta Nat`
     /// - Implicit: `{T}`, `{A: Type}`, `{n: meta Nat}`
     ///
+
     /// Implicit params use braces: `{T}`, `{A: Type}`, `{n: meta Nat}` — inferred from usage.
     /// Explicit params are bare: `T`, `T: Display`, `N: meta Nat`.
     /// Dependent type params use `meta` keyword to indicate compile-time-only values.
@@ -3130,7 +3176,7 @@ impl<'a> RecursiveParser<'a> {
 
                 // Check for kind annotation: F: Type -> Type
                 // Grammar: kind_annotated_param = identifier ':' kind_expr
-                //          kind_expr = 'Type' [ '->' kind_expr ] | '(' kind_expr ')'
+                //  kind_expr = 'Type' [ '->' kind_expr ] | '(' kind_expr ')'
                 // Disambiguates from protocol bounds (T: Display) by the presence of
                 // the `Type` keyword (TokenKind::Type) as the first token after ':'.
                 if self.stream.check(&TokenKind::Type) {
@@ -3370,6 +3416,7 @@ impl<'a> RecursiveParser<'a> {
     /// - Negative bounds: `T: !Send`
     /// - Other complex type bounds
     ///
+
     /// If the bound is a simple path (protocol name), it creates a Protocol bound.
     /// If it's a complex type (like a function type), it creates an Equality bound.
     pub fn parse_type_bounds_or_type(&mut self) -> ParseResult<List<TypeBound>> {
@@ -3489,8 +3536,10 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a capability list for capability-restricted types.
     ///
+
     /// Parses: `[Read, Write, Admin]` or `[Read | Write, Admin]`
     ///
+
     /// Grammar:
     /// ```ebnf
     /// capability_list = '[' , capability_item , { ',' , capability_item } , ']' ;
@@ -3499,6 +3548,7 @@ impl<'a> RecursiveParser<'a> {
     /// capability_or_expr = capability_name , '|' , capability_name , { '|' , capability_name } ;
     /// ```
     ///
+
     /// Capability attenuation restricts a context to a subset of its operations.
     /// E.g., `Database with [Read]` restricts to read-only access. Sub-contexts (like
     /// `FS.ReadOnly`) are resolved at compile-time with zero runtime overhead.
@@ -3548,15 +3598,17 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a single capability name.
     ///
+
     /// Handles both standard capabilities (Read, Write, etc.) and custom capabilities.
     /// Standard capabilities are recognized by name and converted to the appropriate enum variant.
     ///
+
     /// Grammar:
     /// ```ebnf
     /// capability_name = 'Read' | 'Write' | 'ReadWrite' | 'Admin' | 'Transaction'
-    ///                 | 'Network' | 'FileSystem' | 'Query' | 'Execute'
-    ///                 | 'Logging' | 'Metrics' | 'Config' | 'Cache' | 'Auth'
-    ///                 | identifier ;
+    ///  | 'Network' | 'FileSystem' | 'Query' | 'Execute'
+    ///  | 'Logging' | 'Metrics' | 'Config' | 'Cache' | 'Auth'
+    ///  | identifier ;
     /// ```
     fn parse_capability_name(&mut self) -> ParseResult<verum_ast::expr::Capability> {
         use verum_ast::expr::Capability;
@@ -3587,9 +3639,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse associated type bindings for dyn protocol types.
     ///
+
     /// Parses comma-separated type bindings: Item = Int, State = String
     /// Used in: dyn Container<Item = Int> + Display
     ///
+
     /// Associated type bindings for dyn protocol types: `dyn Container<Item = Int> + Display`
     /// Grammar: type_bindings = type_binding , { ',' , type_binding } ;
     /// type_binding = identifier , '=' , type_expr ;
@@ -3600,6 +3654,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a single type binding: Item = Int
     ///
+
     /// Single type binding: `Item = Int` — associates a concrete type with an associated type name
     fn parse_type_binding(&mut self) -> ParseResult<TypeBinding> {
         let start_pos = self.stream.position();
@@ -3645,16 +3700,17 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a where predicate with v6.0-BALANCED disambiguation.
     ///
+
     /// Where predicates disambiguate via keyword prefix:
     /// - `where type T: Protocol` — generic type constraint (type bound)
     /// - `where type A.Item = B` — associated type equality
     /// - `where value_expr` — value-level constraint (refinement predicate)
-    ///   The `type` prefix distinguishes type bounds from value predicates.
+    ///  The `type` prefix distinguishes type bounds from value predicates.
     fn parse_where_predicate(&mut self) -> ParseResult<WherePredicate> {
         let start_pos = self.stream.position();
 
         // 1. Generic type constraint: where type T: Protocol
-        //    or associated type equality: where type A.Item = B
+        //  or associated type equality: where type A.Item = B
         if self.stream.consume(&TokenKind::Type).is_some() {
             // Use parse_type_no_sigma to prevent `T: Clone` from being parsed as a sigma type.
             // In `where type T: Clone`, `T` is a type identifier and `: Clone` is a type bound,
@@ -3758,7 +3814,7 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // 6. Implicit type constraint: where T: Protocol (without "type" keyword)
-        //    Also handles associated type equality: where T.Item = Int
+        //  Also handles associated type equality: where T.Item = Int
         // Try to parse as type constraint if we have an identifier followed by colon or dot
         if self.is_ident() || self.stream.check(&TokenKind::SelfType) {
             let checkpoint = self.stream.position();
@@ -3831,6 +3887,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse context list: [Database, Logger, Auth]
     ///
+
     /// Verum uses a Context System for dependency injection, NOT algebraic effects.
     /// Contexts are declared with `using [...]` and provided with `provide`.
     /// Verum uses a Context System for dependency injection (NOT algebraic effects).
@@ -3948,6 +4005,7 @@ impl<'a> RecursiveParser<'a> {
             // Parse optional associated type bindings: <Item = Int, State = String>
             // — OR generic type parameters of the protocol path: `Sieve<C>`.
             //
+
             // The stdlib uses `&dyn Sieve<C>` (generic protocol) widely,
             // alongside `dyn Container<Item = Int>` (associated-type
             // bindings). Peek at the second token after `<`: an `=` means
@@ -4017,17 +4075,20 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a kind expression for HKT kind annotations.
     ///
+
     /// Grammar:
     /// ```ebnf
     /// kind_expr = 'Type' , [ '->' , kind_expr ]
-    ///           | '(' , kind_expr , ')' ;
+    ///  | '(' , kind_expr , ')' ;
     /// ```
     ///
+
     /// Examples:
-    /// - `Type`              → `KindAnnotation::Type`
-    /// - `Type -> Type`      → `Arrow(Type, Type)`
+    /// - `Type` → `KindAnnotation::Type`
+    /// - `Type -> Type` → `Arrow(Type, Type)`
     /// - `Type -> Type -> Type` → `Arrow(Type, Arrow(Type, Type))`
     ///
+
     /// Called after the `:` in `F: Type -> Type`.
     /// The caller is responsible for having already confirmed that
     /// `TokenKind::Type` is next in the stream.

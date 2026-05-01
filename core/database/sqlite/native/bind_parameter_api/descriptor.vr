@@ -3,12 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // SQLite accepts four bind-parameter syntaxes:
-//   ?        — anonymous (index assigned in order of occurrence)
-//   ?NNN     — explicit index
-//   :name    — named
-//   @name    — named (alternate sigil)
-//   $name    — named (Tcl-style)
+//  ? — anonymous (index assigned in order of occurrence)
+//  ?NNN — explicit index
+//  :name — named
+//  @name — named (alternate sigil)
+//  $name — named (Tcl-style)
 // =============================================================================
 
 module core.database.sqlite.native.bind_parameter_api.descriptor;

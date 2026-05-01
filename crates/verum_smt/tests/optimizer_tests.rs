@@ -38,6 +38,7 @@ fn test_maxsat_solver() {
 // OptimizerConfig.method wiring tests
 // =============================================================================
 //
+
 // Pin: `OptimizerConfig.method` reaches Z3's `:opt.priority`
 // parameter through `Z3Optimizer::new`. Pre-fix the field landed
 // on the optimizer but no code path consulted it, so callers

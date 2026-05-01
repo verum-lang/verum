@@ -1,34 +1,42 @@
 //! Stdlib coercion-protocol registry — temporary scaffold pending
 //! `#101` protocol-based replacement.
 //!
+
 //! # Background
 //!
+
 //! `verum_types/src/CLAUDE.md` lays down a hard architectural rule:
 //!
+
 //! > **NEVER hardcode stdlib/core type knowledge in the compiler.**
 //! > The compiler implementation (verum_types, verum_vbc, etc.) must
 //! > have ZERO knowledge of stdlib (`core/`) types.
 //!
+
 //! Until protocol-based discovery is wired up (each stdlib type
 //! declares `implement IntCoercible / TensorLike / Indexable /
 //! RangeLike for X` and the compiler scans implement-blocks to drive
 //! unifier registration), we centralise the hardcoded scaffolding
 //! HERE so:
 //!
-//!   * The violation is contained in one identifiable location, not
-//!     scattered through `pipeline.rs` Pass 5.5.
-//!   * A grep for the protocol name (`int_coercible_stdlib_names`,
-//!     etc.) shows the entire list of stdlib types the compiler
-//!     "knows about" — no hidden sites to forget when ripping the
-//!     list out.
-//!   * The follow-up replacement (#101) only has to delete this
-//!     module and replace `register_stdlib_coercions` with a
-//!     protocol-walking pass.
+
+//!  * The violation is contained in one identifiable location, not
+//!  scattered through `pipeline.rs` Pass 5.5.
+//!  * A grep for the protocol name (`int_coercible_stdlib_names`,
+//!  etc.) shows the entire list of stdlib types the compiler
+//!  "knows about" — no hidden sites to forget when ripping the
+//!  list out.
+//!  * The follow-up replacement (#101) only has to delete this
+//!  module and replace `register_stdlib_coercions` with a
+//!  protocol-walking pass.
 //!
+
 //! # Migration plan (for #101 follow-up)
 //!
+
 //! Step 1: define the four coercion protocols in `core/base/coercion.vr`:
 //!
+
 //! ```verum
 //! public type IntCoercible is protocol {};
 //! public type TensorLike is protocol { /* tensor-shape methods */ };
@@ -36,20 +44,24 @@
 //! public type RangeLike is protocol { fn start(&self) -> Int; fn end(&self) -> Int; };
 //! ```
 //!
+
 //! Step 2: have stdlib types `implement` the relevant protocol(s):
 //!
+
 //! ```verum
 //! implement IntCoercible for Duration {};
 //! implement IntCoercible for Port {};
 //! implement TensorLike for DynTensor<T> { /* ... */ };
 //! ```
 //!
+
 //! Step 3: in pipeline.rs replace the call to `register_stdlib_coercions`
 //! with a pass that walks `module.items` for `ItemKind::Impl(impl_decl)`
 //! whose `protocol_path` matches one of the four protocols, and calls
 //! the corresponding `register_*_type` method on the unifier with the
 //! impl block's target type name.
 //!
+
 //! Step 4: delete this module.
 
 /// Stdlib type names that participate in tensor-family coercions.
@@ -77,20 +89,22 @@ pub const RANGE_LIKE_STDLIB_NAMES: &[&str] = &[
 
 /// Stdlib type names that cross-coerce with `Int` in unification.
 ///
+
 /// Categories:
-///   * Scalar wrappers (Duration, Instant, Epoch) — sized-numeric
-///     value types where the underlying representation is i64
-///   * FFI handles (Port, FileDesc, MachPort, VmAddress, VmSize,
-///     ClockId, ...) — POSIX/syscall integer typedefs
-///   * Bitflags (MemProt, MapFlags, Sockaddr) — packed-bit i64
-///   * Path types (Path, PathBuf) — coerce because indexing/slicing
-///     produces Int, not because they're integers themselves
-///   * Resource handles (GPUBuffer, DeviceRegistry, ProcessGroup) —
-///     opaque-i64 handles
-///   * Tensor family (DynTensor, Tensor, Vector) — for index ops
-///   * Container family (List, Range, Slice, Maybe, Lazy, Once) —
-///     for length/index coercion targeting Int
+///  * Scalar wrappers (Duration, Instant, Epoch) — sized-numeric
+///  value types where the underlying representation is i64
+///  * FFI handles (Port, FileDesc, MachPort, VmAddress, VmSize,
+///  ClockId, ...) — POSIX/syscall integer typedefs
+///  * Bitflags (MemProt, MapFlags, Sockaddr) — packed-bit i64
+///  * Path types (Path, PathBuf) — coerce because indexing/slicing
+///  produces Int, not because they're integers themselves
+///  * Resource handles (GPUBuffer, DeviceRegistry, ProcessGroup) —
+///  opaque-i64 handles
+///  * Tensor family (DynTensor, Tensor, Vector) — for index ops
+///  * Container family (List, Range, Slice, Maybe, Lazy, Once) —
+///  for length/index coercion targeting Int
 ///
+
 /// Becomes obsolete once `IntCoercible` protocol is wired (#101 step 3).
 pub const INT_COERCIBLE_STDLIB_NAMES: &[&str] = &[
     // FFI integer typedefs
@@ -114,6 +128,7 @@ pub const INT_COERCIBLE_STDLIB_NAMES: &[&str] = &[
 /// Float64) live in `unify.rs::Unifier::new` and are NOT included
 /// here — those are part of the language definition, not stdlib.
 ///
+
 /// Becomes obsolete once `Numeric` protocol query lands (separate
 /// follow-up — `Numeric` exists at `core/base/protocols.vr` but isn't
 /// queryable from the unifier yet).
@@ -127,6 +142,7 @@ pub const SIZED_NUMERIC_STDLIB_NAMES: &[&str] = &[
 /// unifier. Single entry point so callers in `pipeline.rs` Pass 5.5
 /// don't see any hardcoded names.
 ///
+
 /// When #101 protocol-based discovery lands, this function's body
 /// gets replaced by a `walk_implement_blocks_and_register` pass —
 /// the call sites stay the same.
@@ -152,22 +168,24 @@ pub fn register_stdlib_coercions(unifier: &mut verum_types::unify::Unifier) {
 // Step 2 of #101 — protocol-based discovery
 // ============================================================================
 //
+
 // Walks AST `ItemKind::Impl(ImplKind::Protocol { protocol, for_type, ..})`
 // blocks and registers the target type with the unifier when the
 // protocol path's tail matches one of the four coercion markers
 // declared in `core/base/coercion.vr`. Combined with the hardcoded
 // fallback above, this gives:
 //
-//   * Stdlib types that already `implement <Coercion>` get registered
-//     by the protocol scan (ZERO architectural violation for those
-//     types).
-//   * Stdlib types that haven't yet been retrofitted with implement
-//     blocks still get registered via the hardcoded fallback,
-//     keeping behaviour stable.
-//   * Each retrofit (adding `implement IntCoercible for X` to one
-//     stdlib type) lets us delete X from the hardcoded list and
-//     verify nothing regresses — incremental migration with safe
-//     rollback at every step.
+
+//  * Stdlib types that already `implement <Coercion>` get registered
+//  by the protocol scan (ZERO architectural violation for those
+//  types).
+//  * Stdlib types that haven't yet been retrofitted with implement
+//  blocks still get registered via the hardcoded fallback,
+//  keeping behaviour stable.
+//  * Each retrofit (adding `implement IntCoercible for X` to one
+//  stdlib type) lets us delete X from the hardcoded list and
+//  verify nothing regresses — incremental migration with safe
+//  rollback at every step.
 
 /// Match the four coercion-marker protocol names against the LAST
 /// segment of an impl-block's protocol path. Returns the name as a
@@ -215,6 +233,7 @@ fn impl_target_head_name(ty: &verum_ast::ty::Type) -> Option<String> {
 /// it more than once is harmless because the unifier's register_*
 /// methods de-duplicate via HashSet.
 ///
+
 /// Public so `pipeline.rs` Pass 5.5 can call it with the loaded
 /// stdlib + user modules.
 pub fn scan_protocol_implementations<'a, I>(

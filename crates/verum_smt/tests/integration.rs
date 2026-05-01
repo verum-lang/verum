@@ -962,7 +962,7 @@ mod real_world_verification_tests {
     fn test_verify_negation() {
         let ctx = Context::new();
 
-        // Create type: Int{!(it < 0)}  which is equivalent to it >= 0
+        // Create type: Int{!(it < 0)} which is equivalent to it >= 0
         let base = Type::int(dummy_span());
         let lt_zero = binary_expr(BinOp::Lt, ident_expr("it"), int_lit(0));
         let predicate = Expr::new(
@@ -1040,7 +1040,7 @@ mod real_world_verification_tests {
     fn test_verify_subtraction_constraint() {
         let ctx = Context::new();
 
-        // Create type: Int{it - 5 > 0}  which means it > 5
+        // Create type: Int{it - 5 > 0} which means it > 5
         let base = Type::int(dummy_span());
         let minus_five = binary_expr(BinOp::Sub, ident_expr("it"), int_lit(5));
         let predicate = binary_expr(BinOp::Gt, minus_five, int_lit(0));
@@ -1056,7 +1056,7 @@ mod real_world_verification_tests {
     fn test_verify_modulo_constraint() {
         let ctx = Context::new();
 
-        // Create type: Int{it % 2 == 0}  (even numbers)
+        // Create type: Int{it % 2 == 0} (even numbers)
         let base = Type::int(dummy_span());
         let mod_two = binary_expr(BinOp::Rem, ident_expr("it"), int_lit(2));
         let predicate = binary_expr(BinOp::Eq, mod_two, int_lit(0));
@@ -1149,7 +1149,7 @@ mod real_world_verification_tests {
     fn test_verify_nested_arithmetic() {
         let ctx = Context::new();
 
-        // Create type: Int{(it + 5) * 2 > 20}  which means it > 5
+        // Create type: Int{(it + 5) * 2 > 20} which means it > 5
         let base = Type::int(dummy_span());
         let plus_five = binary_expr(BinOp::Add, ident_expr("it"), int_lit(5));
         let times_two = binary_expr(BinOp::Mul, plus_five, int_lit(2));
@@ -1272,7 +1272,7 @@ mod real_world_verification_tests {
     fn test_verify_division_by_constant() {
         let ctx = Context::new();
 
-        // Create type: Int{it / 2 > 5}  which means it > 10
+        // Create type: Int{it / 2 > 5} which means it > 10
         let base = Type::int(dummy_span());
         let div_two = binary_expr(BinOp::Div, ident_expr("it"), int_lit(2));
         let predicate = binary_expr(BinOp::Gt, div_two, int_lit(5));

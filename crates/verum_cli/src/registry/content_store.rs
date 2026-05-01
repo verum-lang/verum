@@ -1,28 +1,33 @@
 //! Content-addressed cog store (P5.1).
 //!
+
 //! Resolved cog blobs (tarballs, source trees, anything content-stable)
 //! live at `~/.verum/store/<blake3-hex>/`, deduplicated by content.
 //! Two `(name, version)` tuples that resolve to byte-identical blobs
 //! share one on-disk entry — saving space and giving the resolver a
 //! deterministic supply-chain integrity check.
 //!
+
 //! # Layout
 //!
+
 //! ```text
 //! ~/.verum/store/
-//! ├── <blake3-hex>/                — one per unique blob
-//! │   ├── blob.bin                 — the raw bytes (any format: .tar.zst, ...)
-//! │   └── meta.toml                — {schema, name, version, source, retrieved_at,
-//! │                                  last_accessed_at, size}
-//! ├── refs/                        — (name, version) → digest indirection
-//! │   ├── <name>/
-//! │   │   ├── <version>.ref        — file whose contents = the digest hex
-//! │   │   └── ...
-//! │   └── ...
+//! ├── <blake3-hex>/ — one per unique blob
+//! │ ├── blob.bin — the raw bytes (any format: .tar.zst, ...)
+//! │ └── meta.toml — {schema, name, version, source, retrieved_at,
+//! │ last_accessed_at, size}
+//! ├── refs/ — (name, version) → digest indirection
+//! │ ├── <name>/
+//! │ │ ├── <version>.ref — file whose contents = the digest hex
+//! │ │ └── ...
+//! │ └── ...
 //! ```
 //!
+
 //! # Integrity contract
 //!
+
 //! Every [`ContentStore::lookup_by_digest`] call re-hashes the on-disk
 //! blob and compares against the directory name. A mismatch is treated
 //! as corruption: the entry is evicted, refs that pointed at it are
@@ -30,8 +35,10 @@
 //! There is no "trust on first use" — the cache cannot serve a
 //! tampered blob even silently.
 //!
+
 //! # Atomicity
 //!
+
 //! [`ContentStore::insert`] writes through a per-pid tempdir then
 //! renames into place; concurrent in-process inserts are serialised
 //! by a process-local store mutex (the cleanup+rename window is racy
@@ -39,8 +46,10 @@
 //! both writers produce byte-identical blobs because the digest is
 //! deterministic.
 //!
+
 //! # GC
 //!
+
 //! [`ContentStore::gc_to_size`] evicts orphaned digests (no ref points
 //! at them) first; if still over budget, evicts least-recently-accessed
 //! refs and their underlying blobs. This protects pinned dependencies
@@ -130,9 +139,9 @@ pub struct Meta {
     /// Cog version (e.g. `"1.4.0"`).
     pub version: String,
     /// Source descriptor:
-    ///   - `registry+<url>` for the public registry
-    ///   - `git+<url>#<sha>` for git-pinned cogs
-    ///   - `path+<dir>` for filesystem-local cogs
+    ///  - `registry+<url>` for the public registry
+    ///  - `git+<url>#<sha>` for git-pinned cogs
+    ///  - `path+<dir>` for filesystem-local cogs
     pub source: String,
     /// Wall-clock seconds since UNIX epoch when the blob was first
     /// stored.
@@ -288,6 +297,7 @@ impl ContentStore {
     /// blob's actual digest is verified against it (catching mid-flight
     /// corruption). On success returns the canonical digest.
     ///
+
     /// Concurrent inserts of the same blob are safe — both writers
     /// produce byte-identical content; the loser's tempdir is reaped.
     pub fn insert(
@@ -474,10 +484,10 @@ impl ContentStore {
     }
 
     /// Enumerate all (digest, meta) entries. Skips:
-    ///   - directories whose name isn't a 64-char blake3 hex,
-    ///   - entries whose meta.toml fails to parse (evicted silently),
-    ///   - entries whose schema_version is stale (evicted silently),
-    ///   - `.tmp.*` artefacts from interrupted inserts (reaped).
+    ///  - directories whose name isn't a 64-char blake3 hex,
+    ///  - entries whose meta.toml fails to parse (evicted silently),
+    ///  - entries whose schema_version is stale (evicted silently),
+    ///  - `.tmp.*` artefacts from interrupted inserts (reaped).
     pub fn list(&self) -> StoreResult<Vec<(Digest, Meta)>> {
         let read = match fs::read_dir(&self.root) {
             Ok(r) => r,

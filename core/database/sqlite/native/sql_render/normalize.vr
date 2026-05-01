@@ -3,15 +3,17 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The normalized form is what sqlite3_normalized_sql returns: a
-// fingerprint used as a plan-cache key.  The transform:
+// fingerprint used as a plan-cache key. The transform:
 //
-//   * collapses runs of whitespace to a single space,
-//   * replaces numeric literals (123, 4.5, 1e-3) with `?`,
-//   * replaces string literals with `?`,
-//   * preserves identifiers + keywords in their input casing (the
-//     real SQLite uppercases; this catalogue keeps the implementation
-//     simple and documents that in the header).
+
+//  * collapses runs of whitespace to a single space,
+//  * replaces numeric literals (123, 4.5, 1e-3) with `?`,
+//  * replaces string literals with `?`,
+//  * preserves identifiers + keywords in their input casing (the
+//  real SQLite uppercases; this catalogue keeps the implementation
+//  simple and documents that in the header).
 // =============================================================================
 
 module core.database.sqlite.native.sql_render.normalize;

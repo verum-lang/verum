@@ -3,16 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md Appendix E
 //
+
 // Canonical test vectors for the file-format primitives. Used by
 // the differential harness to confirm loom matches SQLite C bit-
 // for-bit.
 //
+
 // Sections:
-//   * E.1 — varint round-trip (28 vectors covering every byte length)
-//   * E.2 — record-header serialisation (representative shapes)
-//   * E.3 — WAL frame checksum (initial-state vectors)
-//   * E.4 — B-tree cell parsing (cell-kind sentinels)
+//  * E.1 — varint round-trip (28 vectors covering every byte length)
+//  * E.2 — record-header serialisation (representative shapes)
+//  * E.3 — WAL frame checksum (initial-state vectors)
+//  * E.4 — B-tree cell parsing (cell-kind sentinels)
 //
+
 // Helpers `bytes!(...)` / `hex!(...)` would be ergonomic but Verum
 // doesn't currently support raw-string bytes literals, so each vector
 // is built up byte-by-byte.
@@ -93,10 +96,12 @@ public fn varint_vectors() -> List<VarintTestSample> {
 // RecordHeaderVector — E.2 representative record-header shapes
 // -----------------------------------------------------------------------------
 //
+
 // SQLite record header: header-length varint + N type-code varints,
 // followed by N value blobs. Each type code encodes the value's
 // SerialType (0=NULL, 1=INT8, ..., 12+=BLOB, 13+=TEXT).
 //
+
 // We catalogue 5 representative shapes from the spec.
 // =============================================================================
 
@@ -150,12 +155,15 @@ public fn record_vectors() -> List<RecordHeaderVector> {
 // WalChecksumVector — E.3 initial-state WAL frame-checksum vectors
 // -----------------------------------------------------------------------------
 //
+
 // SQLite WAL uses a 64-bit running checksum split into two 32-bit
 // words (s1, s2) updated per 8-byte chunk:
 //
-//   s1 += (s1 << 16) ^ chunk_lo32
-//   s2 += (s2 << 16) ^ chunk_hi32
+
+//  s1 += (s1 << 16) ^ chunk_lo32
+//  s2 += (s2 << 16) ^ chunk_hi32
 //
+
 // The vectors below are the three checksums from the canonical
 // "all zero", "alternating bytes", "frame header" inputs. They are
 // what `core.security.hash.crc32` / WAL frame-write code must
@@ -201,6 +209,7 @@ public fn wal_checksum_vectors() -> List<WalChecksumVector> {
 // BtreeCellTestSample — E.4 b-tree cell sentinel vectors
 // -----------------------------------------------------------------------------
 //
+
 // SQLite b-tree cells come in 4 flavours; we provide one minimal
 // example of each (table-leaf, index-leaf, table-interior,
 // index-interior) plus the sentinel byte sequence the parser

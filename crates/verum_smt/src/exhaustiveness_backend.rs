@@ -2,6 +2,7 @@
 //! `verum_types::exhaustiveness::smt` to break the
 //! `verum_types ↔ verum_smt` circular dependency.
 //!
+
 //! The public types consumed by callers (`GuardedPattern`,
 //! `SmtGuardConfig`, `SmtGuardResult`, `SmtValue`, `SmtWitness`) stay in
 //! `verum_types::exhaustiveness` so `verum_types` can express guard
@@ -23,6 +24,7 @@ use verum_types::ty::Type;
 
 /// SMT-based guard verifier
 ///
+
 /// Manages Z3 context and provides methods for analyzing guard conditions
 /// using SMT solving. Implements the `GuardVerifier` trait so callers can
 /// hold a `&dyn GuardVerifier` without linking Z3.
@@ -187,6 +189,7 @@ impl SmtGuardVerifier {
 
     /// Extract witness values for uncovered cases.
     ///
+
     /// Honours `SmtGuardConfig.max_witnesses`: iteratively asks Z3
     /// for a satisfying model, extracts the bindings, then asserts
     /// a "block-this-model" constraint and re-solves to surface
@@ -358,11 +361,13 @@ impl SmtGuardVerifier {
 
     /// Get a satisfying model for a formula.
     ///
+
     /// Walks the formula collecting every `Var(name)` reference, then
     /// asks the solver to evaluate each name in the satisfying model
     /// (under the right Z3 sort for `scrutinee_ty`) and returns the
     /// resulting bindings as the witness.
     ///
+
     /// Pre-fix this method only ever extracted a binding named `"n"`
     /// (a hardcoded literal) AND hardcoded `Type::Int` for both the
     /// formula translation and the var-extraction sort. Bool guards
@@ -374,6 +379,7 @@ impl SmtGuardVerifier {
     /// diagnostics. The dispatch on `scrutinee_ty` declares vars in
     /// the matching Z3 sort.
     ///
+
     /// Now retained behind `#[cfg(test)]` since the production
     /// path goes through `get_models(...)` (which honours
     /// `SmtGuardConfig.max_witnesses`); this single-shot variant
@@ -473,6 +479,7 @@ impl SmtGuardVerifier {
     /// uncovered region (e.g. `n ≤ 0` over Int has infinitely many
     /// witnesses) doesn't run forever.
     ///
+
     /// Returns an empty Vec when the formula is UNSAT (no uncovered
     /// witnesses to surface).
     fn get_models(
@@ -729,6 +736,7 @@ const _: Duration = Duration::ZERO;
 
 /// Analyze guards in a match and produce warnings if appropriate.
 ///
+
 /// Moved from `verum_types::exhaustiveness::smt::analyze_guarded_match` so
 /// callers that already depend on `verum_smt` can use the SMT-backed
 /// analysis directly.
@@ -897,27 +905,28 @@ mod tests {
         // Integration test that exercises ALL FOUR layers of the
         // SMT exhaustiveness chain together. A regression in any
         // single layer surfaces here:
-        //   - guard Expr lift (matrix.rs) — without it, the
-        //     translator sees `Bool(true)` and returns
-        //     is_exhaustive=true (false positive).
-        //   - bound_vars population — without it, the translator
-        //     drops `n` references to None → unknown_guards.
-        //   - witness Var enumeration (collect_var_names) —
-        //     without it, the bindings map is empty (`_` in
-        //     diagnostics).
-        //   - witness sort dispatch — without it for Int, the
-        //     Int extraction never fires (here it actually does
-        //     work since Int is the default arm; this test
-        //     specifically locks the positive case for
-        //     completeness).
+        //  - guard Expr lift (matrix.rs) — without it, the
+        //  translator sees `Bool(true)` and returns
+        //  is_exhaustive=true (false positive).
+        //  - bound_vars population — without it, the translator
+        //  drops `n` references to None → unknown_guards.
+        //  - witness Var enumeration (collect_var_names) —
+        //  without it, the bindings map is empty (`_` in
+        //  diagnostics).
+        //  - witness sort dispatch — without it for Int, the
+        //  Int extraction never fires (here it actually does
+        //  work since Int is the default arm; this test
+        //  specifically locks the positive case for
+        //  completeness).
         //
+
         // Scenario: a single guard `n > 0` over Int — clearly NOT
         // exhaustive (n = 0, n = -1, … all uncovered). The full
         // chain must report:
-        //   - is_exhaustive: false
-        //   - uncovered_witnesses: at least one with `n` bound to
-        //     a concrete non-positive integer
-        //   - unknown_guards: empty (the guard MUST translate)
+        //  - is_exhaustive: false
+        //  - uncovered_witnesses: at least one with `n` bound to
+        //  a concrete non-positive integer
+        //  - unknown_guards: empty (the guard MUST translate)
         use verum_ast::expr::{BinOp, ExprKind};
         use verum_ast::literal::Literal;
         use verum_ast::span::Span;

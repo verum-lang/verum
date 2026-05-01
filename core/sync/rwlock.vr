@@ -5,9 +5,11 @@
 // Dependencies: core, sync/atomic
 // =============================================================================
 //
+
 // RwLock<T> allows multiple readers or a single writer.
 // Uses atomic counters for efficient reader tracking.
 //
+
 // =============================================================================
 
 module core.sync.rwlock;
@@ -41,16 +43,18 @@ mount core.intrinsics.spin_hint;
 
 // Read-write lock allowing multiple readers or one writer.
 //
-// **Fairness model: writer-preferred.**  When at least one
+
+// **Fairness model: writer-preferred.** When at least one
 // writer is queued (`writers_waiting > 0`), incoming readers
 // step aside and sleep on the futex even if they could
-// otherwise CAS the reader count up.  This prevents the
+// otherwise CAS the reader count up. This prevents the
 // classic readers-preferred starvation pattern where a steady
 // stream of new readers keeps the state positive and writers
-// never observe the `state == 0` window they need.  The cost
+// never observe the `state == 0` window they need. The cost
 // is mild reader latency under sustained writer pressure;
 // the benefit is bounded writer wait-time.
 //
+
 // `writers_waiting` is incremented by `write()` BEFORE its
 // futex_wait registration (Release, paired with the
 // `read()`-side Acquire load) and decremented after the CAS
@@ -85,6 +89,7 @@ implement<T> RwLock<T> {
 
     // Acquire read lock.
     //
+
     // Blocks via futex until no writer holds the lock AND no writer
     // is queued. The "no writer queued" check is the writer-preference
     // gate: when `writers_waiting > 0`, incoming readers step aside
@@ -118,6 +123,7 @@ implement<T> RwLock<T> {
 
     // Try to acquire read lock without blocking.
     //
+
     // Honours the writer-preference gate identically to `read()`:
     // returns `WouldBlock` when a writer is queued even if `state >= 0`.
     public fn try_read(&self) -> TryLockResult<RwLockReadGuard<T>> {
@@ -137,6 +143,7 @@ implement<T> RwLock<T> {
 
     // Acquire write lock.
     //
+
     // Blocks via futex until no readers or writers hold the lock.
     // Increments `writers_waiting` on entry to gate incoming readers
     // (writer-preference fairness — see `read()` doc). The counter
@@ -178,6 +185,7 @@ implement<T> RwLock<T> {
 
     /// Check if rwlock is poisoned (previous holder marked it as poisoned).
     ///
+
     /// See `Mutex.is_poisoned` for notes on poisoning semantics — Verum
     /// does not yet expose a "currently unwinding" predicate, so the
     /// poison flag is only set when callers explicitly invoke `poison()`.
@@ -187,6 +195,7 @@ implement<T> RwLock<T> {
 
     /// Mark this rwlock as poisoned.
     ///
+
     /// Subsequent acquirers will receive `Err(PoisonError)` until
     /// `clear_poison()` is invoked. Intended for callers that detect
     /// inconsistent state while holding a guard and want to flag
@@ -197,6 +206,7 @@ implement<T> RwLock<T> {
 
     /// Clear poison state.
     ///
+
     /// Caller is responsible for ensuring the protected data is in a
     /// valid state before clearing.
     public fn clear_poison(&self) {

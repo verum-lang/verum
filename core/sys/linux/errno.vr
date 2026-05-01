@@ -8,9 +8,11 @@ module sys.linux.errno;
 // Platform: Linux
 // =============================================================================
 //
+
 // This module defines Linux errno constants. These are the error codes
 // returned by system calls (as negative values) and stored in errno.
 //
+
 // Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // Reference: /usr/include/asm-generic/errno-base.h, errno.h
 // =============================================================================

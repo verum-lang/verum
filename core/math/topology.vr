@@ -4,6 +4,7 @@
 // Layer: Foundations (Mathematical Structures)
 // Spec: docs/detailed/13-formal-proofs.md
 //
+
 // Defines topological spaces, continuous maps, homeomorphisms, compactness,
 // connectedness, separation axioms, metric spaces, normed spaces, manifolds,
 // and algebraic topology structures (fundamental group, homology).
@@ -397,6 +398,7 @@ public type CoveringSpace<B: TopologicalSpace> is protocol {
 // Topology protocol-inheritance theorems (SMT-discharged)
 // =============================================================================
 //
+
 // These theorems lock in the separation-axiom tower, the
 // compactness/connectedness hierarchy, and the manifold chain.
 // They act as build-time regression guards against accidental

@@ -1,5 +1,6 @@
 //! Verification result caching for refinement type checking.
 //!
+
 //! This module implements a hash-based LRU cache for SMT verification results,
 //! providing 10-100x speedup for incremental builds by avoiding redundant
 //! solver invocations.
@@ -17,6 +18,7 @@ use verum_common::ToText;
 
 /// Cache key for verification results.
 ///
+
 /// Combines hash of refinement predicate + base type for unique identification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct CacheKey {
@@ -35,6 +37,7 @@ impl CacheKey {
 
 /// Hash an expression for cache key generation.
 ///
+
 /// Implements structural hashing that improves cache hits by:
 /// - Normalizing variable names (alpha-equivalence)
 /// - Commutative operation ordering
@@ -219,6 +222,7 @@ impl VerificationCacheInner {
 
 /// Thread-safe verification result cache.
 ///
+
 /// Provides automatic caching of SMT verification results with LRU eviction.
 /// Expected cache hit rate: 90%+ for typical incremental builds.
 pub struct VerificationCache {
@@ -236,6 +240,7 @@ impl VerificationCache {
 
     /// Create a new verification cache with custom configuration.
     ///
+
     /// Honours `CacheConfig.distributed_cache`: when present, the
     /// distributed backend is auto-constructed and installed on
     /// the new cache. Pre-fix the field was set via the
@@ -324,6 +329,7 @@ impl VerificationCache {
 
     /// Get cached verification result if available.
     ///
+
     /// Returns `None` if not cached, requiring SMT verification.
     pub fn get(&self, predicate: &Expr, base_type: &Type) -> Maybe<VerificationResult> {
         let key = CacheKey::new(predicate, base_type);
@@ -360,6 +366,7 @@ impl VerificationCache {
 
     /// Cache a verification result with statistics-driven decision
     ///
+
     /// Only caches if the query was expensive based on solver statistics.
     /// This improves cache efficiency by avoiding cheap queries.
     pub fn insert_with_stats(
@@ -382,15 +389,17 @@ impl VerificationCache {
 
     /// Get or compute a verification result.
     ///
+
     /// Checks cache first, falling back to the provided verification function.
     /// This is the primary API for using the cache.
     ///
+
     /// # Example
     /// ```ignore
     /// let result = cache.get_or_verify(
-    ///     &predicate,
-    ///     &base_type,
-    ///     || verify_with_z3(&predicate, &base_type)
+    ///  &predicate,
+    ///  &base_type,
+    ///  || verify_with_z3(&predicate, &base_type)
     /// );
     /// ```
     pub fn get_or_verify<F>(
@@ -431,6 +440,7 @@ impl VerificationCache {
     /// stats-aware insertion path — `get_or_verify` always
     /// cached unconditionally regardless of the config.
     ///
+
     /// The closure returns both the verification result and the
     /// solver statistics that produced it. When the cache
     /// config has `statistics_driven = true`, only "expensive"
@@ -438,15 +448,17 @@ impl VerificationCache {
     /// cached. When `statistics_driven = false`, every result
     /// is cached just like `get_or_verify`.
     ///
+
     /// # Arguments
     ///
+
     /// * `predicate` / `base_type` — cache key components
     /// * `verify_fn` — closure returning `(result, decisions,
-    ///   conflicts, solve_time_ms)`. Backends that don't expose
-    ///   per-query statistics can pass zeros — the statistics-
-    ///   driven gate then short-circuits to "skip cache" when
-    ///   any threshold is non-zero, which is the desired
-    ///   conservative behaviour.
+    ///  conflicts, solve_time_ms)`. Backends that don't expose
+    ///  per-query statistics can pass zeros — the statistics-
+    ///  driven gate then short-circuits to "skip cache" when
+    ///  any threshold is non-zero, which is the desired
+    ///  conservative behaviour.
     pub fn get_or_verify_with_stats<F>(
         &self,
         predicate: &Expr,
@@ -533,6 +545,7 @@ impl Clone for VerificationCache {
 
 /// Cache performance statistics.
 ///
+
 /// Tracks cache effectiveness and capacity utilization for
 /// verification result caching.
 #[derive(Debug, Clone, Default)]
@@ -685,6 +698,7 @@ impl CacheConfig {
 
     /// Check if result should be cached based on statistics
     ///
+
     /// Uses Z3 solver statistics to determine if a query was expensive
     /// enough to warrant caching. Only caches expensive queries to
     /// maximize cache efficiency.
@@ -709,6 +723,7 @@ impl CacheConfig {
 
 /// Parse a cached counterexample value string into a map of variable assignments.
 ///
+
 /// Supports various formats that Z3 models are typically stored as:
 /// - Simple assignment: "x = 5" or "x = -5"
 /// - Multiple assignments: "x = 5, y = true"
@@ -716,8 +731,10 @@ impl CacheConfig {
 /// - Real/float values: "ratio = 3.14" or "ratio = 3/2"
 /// - Unknown/complex: stored as-is with Unknown variant
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// let assignments = parse_cached_counterexample("x = -5, y = true");
 /// assert_eq!(assignments.get("x"), Some(&CounterExampleValue::Int(-5)));
@@ -763,6 +780,7 @@ fn parse_cached_counterexample(
 
 /// Parse a single "name = value" assignment string.
 ///
+
 /// Returns `Some((name, value))` if successfully parsed, `None` otherwise.
 fn parse_assignment(s: &str) -> Option<(String, crate::counterexample::CounterExampleValue)> {
     // Find the '=' separator
@@ -781,6 +799,7 @@ fn parse_assignment(s: &str) -> Option<(String, crate::counterexample::CounterEx
 
 /// Parse a value string into the appropriate CounterExampleValue variant.
 ///
+
 /// Attempts to parse as (in order):
 /// 1. Boolean (true/false)
 /// 2. Integer (including negative)
@@ -932,6 +951,7 @@ impl DistributedCacheConfig {
 impl CacheStats {
     /// Calculate total time saved by cache hits.
     ///
+
     /// Estimates time saved based on average verification time without cache.
     /// Assumes average SMT query takes ~1s (1,000,000 microseconds).
     pub fn time_saved_estimate(&self, avg_verification_time_us: u64) -> Duration {
@@ -1044,6 +1064,7 @@ impl VerificationCache {
 
     /// Get estimated cache size in bytes.
     ///
+
     /// Rough estimate: ~200 bytes per entry (key + value + metadata).
     pub fn estimated_size_bytes(&self) -> u64 {
         let entry_count = self.inner.read().unwrap().size();
@@ -1062,11 +1083,14 @@ impl VerificationCache {
 
     /// Get with fallback to distributed cache
     ///
+
     /// First checks local cache, then falls back to distributed cache if configured.
     /// This is an async method because distributed cache access involves network I/O.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// let result = cache.get_with_distributed(predicate, base_type).await;
     /// ```

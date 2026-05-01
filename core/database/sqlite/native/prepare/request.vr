@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_prepare[_v2|_v3].
 //
+
 // One sqlite3_prepare call takes a SQL buffer + flags; only a prefix
-// up to the first statement terminator is compiled.  The rest is
+// up to the first statement terminator is compiled. The rest is
 // returned via a tail pointer so callers can loop over multi-stmt
 // scripts.
 // =============================================================================

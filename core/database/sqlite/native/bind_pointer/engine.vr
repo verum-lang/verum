@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // An engine is a flat list indexed by 1-based parameter position
 // (slot 0 is not valid, to match sqlite3_bind_* convention).
 // =============================================================================

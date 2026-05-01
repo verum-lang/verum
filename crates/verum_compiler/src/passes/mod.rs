@@ -1,5 +1,6 @@
 //! Compiler Optimization Passes
 //!
+
 //! This module contains specialized optimization passes that run during
 //! the compilation pipeline.
 

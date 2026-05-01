@@ -3,14 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.3
 //
+
 // Each index kind affects the planner's cost estimate differently:
 //
-//   * `Plain`        — base cost from `planner_cost.cost.estimate_access`
-//   * `Unique`       — selectivity capped at 1 row when probed by full key
-//   * `Partial`      — cost discounted by predicate-overlap fraction
-//                      (only matching rows are present in the index)
-//   * `Expression`   — base cost + per-row expression-evaluation overhead
-//   * `Covering`     — base cost minus row-payload-fetch overhead
+
+//  * `Plain` — base cost from `planner_cost.cost.estimate_access`
+//  * `Unique` — selectivity capped at 1 row when probed by full key
+//  * `Partial` — cost discounted by predicate-overlap fraction
+//  (only matching rows are present in the index)
+//  * `Expression` — base cost + per-row expression-evaluation overhead
+//  * `Covering` — base cost minus row-payload-fetch overhead
 // =============================================================================
 
 module core.database.sqlite.native.index_variants.estimator;
@@ -25,9 +27,11 @@ mount core.database.sqlite.native.index_variants.kind.{
 // CostAdjustment
 // -----------------------------------------------------------------------------
 //
+
 // The planner applies the adjustment as:
 //
-//   adjusted_cost = base_cost * row_multiplier + setup_overhead
+
+//  adjusted_cost = base_cost * row_multiplier + setup_overhead
 // =============================================================================
 
 public type CostAdjustment is {
@@ -51,6 +55,7 @@ public fn no_adjustment() -> CostAdjustment {
 // adjust_for(kind, partial_overlap?)
 // -----------------------------------------------------------------------------
 //
+
 // `partial_overlap`: if the index is partial, the fraction of rows
 // whose values satisfy the partial predicate (estimated by the
 // planner from stat4 / default 0.5).

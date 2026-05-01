@@ -1,19 +1,25 @@
 //! Constraint Reflection (Tier 1 - Requires MetaTypes)
 //!
+
 //! Reflection over type constraints: bounds, lifetimes, where clauses.
 //!
+
 //! ## Constraint Introspection
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `bounds_of(T)` | `(Type) -> List<Bound>` | Get trait bounds |
 //! | `lifetime_params_of(T)` | `(Type) -> List<Lifetime>` | Get lifetime parameters |
 //! | `where_clause_of(T)` | `(Type) -> List<Constraint>` | Get where clause constraints |
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 1**: All functions require `using [MetaTypes]` context.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

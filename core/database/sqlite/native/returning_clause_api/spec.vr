@@ -45,7 +45,7 @@ public fn push_expression(s: &mut ReturningSpec, sql: Text) {
 }
 
 /// Column count the engine will emit PER ROW, given the target
-/// table has `table_columns` columns.  RekStar expands to that many;
+/// table has `table_columns` columns. RekStar expands to that many;
 /// other kinds contribute 1 each.
 public fn projected_columns(s: &ReturningSpec, table_columns: Int) -> Int {
     let mut total: Int = 0;

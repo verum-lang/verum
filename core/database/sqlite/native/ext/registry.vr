@@ -3,14 +3,17 @@
 // =============================================================================
 // Spec: sqlite-native.md §19.1, §19.5
 //
+
 // Stores everything an extension can attach to a Connection:
 //
-//   * scalar functions  (Heap<dyn ScalarFn>)
-//   * aggregate factories (we keep a constructor closure rather than
-//     `dyn AggregateFn` because the protocol carries an associated
-//     `State` type; the registration site monomorphises it.)
-//   * hook handlers (one slot per hook surface — last subscriber wins)
+
+//  * scalar functions (Heap<dyn ScalarFn>)
+//  * aggregate factories (we keep a constructor closure rather than
+//  `dyn AggregateFn` because the protocol carries an associated
+//  `State` type; the registration site monomorphises it.)
+//  * hook handlers (one slot per hook surface — last subscriber wins)
 //
+
 // Lookup is case-insensitive on SQL-visible names. Built-in
 // catalogue (`builtins/`) is registered separately and queried first;
 // the L4 dispatch falls back here if a name is not built-in.
@@ -85,10 +88,12 @@ public type ScalarEntry is {
 /// declares an associated type. Instead we close over the protocol
 /// dispatch in three thunks at registration time:
 ///
-///   * init_fn      — () → boxed state
-///   * step_fn      — (boxed state, args) → ()
-///   * finalize_fn  — (boxed state) → Register
+
+///  * init_fn — () → boxed state
+///  * step_fn — (boxed state, args) → ()
+///  * finalize_fn — (boxed state) → Register
 ///
+
 /// Each thunk knows how to drive the underlying typed AggregateFn via
 /// downcasting at the call site. `BoxedState` is defined opaquely
 /// using `Heap<dyn AggregateState>` (see `aggregate_state.vr`) so

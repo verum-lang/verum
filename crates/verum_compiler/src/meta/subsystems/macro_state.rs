@@ -1,5 +1,6 @@
 //! Macro state context for meta functions
 //!
+
 //! Provides caching, memoization, and invocation tracking for meta functions.
 
 use verum_ast::MetaValue;
@@ -7,6 +8,7 @@ use verum_common::{List, Map, Text};
 
 /// Cache statistics for debugging
 ///
+
 /// Matches: core/meta/contexts.vr CacheStats
 #[derive(Debug, Clone, Default)]
 pub struct CacheStats {
@@ -40,6 +42,7 @@ impl CacheStats {
 
 /// Macro state context configuration
 ///
+
 /// Provides caching, memoization, and invocation tracking for meta functions.
 /// Matches: core/meta/contexts.vr MacroState
 #[derive(Debug, Clone)]

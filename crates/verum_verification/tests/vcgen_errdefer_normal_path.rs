@@ -2,11 +2,13 @@
 //! no-op for normal-path WP — same architectural fix as
 //! `verum_smt::wp_calculus` (commit fc02bfc9, task #24).
 //!
+
 //! Pre-fix the arm called `wp_expr(expr, postcondition)` — the
 //! semantics of `defer` (always runs) — which wrongly threaded the
 //! cleanup's effects through every normal exit. Post-fix the arm
 //! returns `postcondition.clone()` and binds the expression to `_`.
 //!
+
 //! The pin: build two Stmts producing the same value, one
 //! `errdefer cleanup_expr;` and one Empty. Their WPs against the
 //! same postcondition must be equal.

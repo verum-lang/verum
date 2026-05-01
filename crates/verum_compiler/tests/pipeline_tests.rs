@@ -14,6 +14,7 @@
 )]
 // Unit tests for pipeline.rs
 //
+
 // Migrated from src/pipeline.rs to comply with CLAUDE.md test organization.
 
 use std::io::Write;

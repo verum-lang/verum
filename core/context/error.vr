@@ -8,19 +8,22 @@ module error;
 
 /// Error type for context system failures.
 ///
+
 /// Returned when a context cannot be resolved or provided.
 ///
+
 /// # Error Codes
 ///
+
 /// | Code | Error |
 /// |------|-------|
 /// | E3050 | Direct negative context violation |
 /// | E3051 | Transitive negative context violation |
 /// | E3052 | Conflicting positive and negative constraints |
-/// | E805  | Circular dependency in DI graph |
-/// | E806  | Scope violation (Singleton depending on Request) |
-/// | E807  | Missing @inject constructor |
-/// | E808  | Constructor parameter mismatch |
+/// | E805 | Circular dependency in DI graph |
+/// | E806 | Scope violation (Singleton depending on Request) |
+/// | E807 | Missing @inject constructor |
+/// | E808 | Constructor parameter mismatch |
 public type ContextError is
     /// Context not found in the current environment.
     NotFound { context_name: Text }

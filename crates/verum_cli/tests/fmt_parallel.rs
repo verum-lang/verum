@@ -1,5 +1,6 @@
 //! Parallel-runner determinism contract for `verum fmt`.
 //!
+
 //! 1-thread vs 8-thread runs against the same fixture must rewrite
 //! every file in exactly the same way. The contract is that
 //! parallelism never mutates the *output*, only the *wall-clock

@@ -4,6 +4,7 @@
 // Deferred foreign-key enforcement — DEFERRABLE INITIALLY DEFERRED semantics.
 // Spec §17.3 — FOREIGN KEY.
 //
+
 // SQLite only ever enforces at COMMIT boundary for DEFERRED constraints.
 // This catalogue tracks the violation-set per-transaction.
 // =============================================================================

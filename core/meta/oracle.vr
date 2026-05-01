@@ -3,42 +3,52 @@
 // =============================================================================
 // Layer: Meta / Proof Tactics
 //
+
 // An experimental tactic that consults an external Large Language Model
 // oracle to suggest proof terms. The oracle is **not trusted** — any
 // suggestion it produces must be verified by the SMT backend before
 // acceptance.
 //
+
 // ## Design
 //
+
 // The oracle tactic is a **candidate generator**, not a proof checker.
 // Workflow:
 //
-//   1. User writes `theorem T() proof by oracle(confidence: 0.8);`
-//   2. Compiler serialises the goal and sends it to the LLM endpoint
-//      via the MCP (Model Context Protocol) bridge in `core/meta/contexts.vr`.
-//   3. LLM returns one or more candidate proof terms with confidence scores.
-//   4. Each candidate is run through the normal SMT verification pipeline.
-//   5. The first candidate that verifies is accepted; otherwise the
-//      tactic fails.
+
+//  1. User writes `theorem T() proof by oracle(confidence: 0.8);`
+//  2. Compiler serialises the goal and sends it to the LLM endpoint
+//  via the MCP (Model Context Protocol) bridge in `core/meta/contexts.vr`.
+//  3. LLM returns one or more candidate proof terms with confidence scores.
+//  4. Each candidate is run through the normal SMT verification pipeline.
+//  5. The first candidate that verifies is accepted; otherwise the
+//  tactic fails.
 //
+
 // ## Trust model
 //
+
 // The oracle cannot introduce unsoundness. Every suggestion is:
-//   - Type-checked by the Verum type checker.
-//   - Verified by the SMT backend (same path as `auto`).
-//   - Required to satisfy `@verify(formal)` obligations.
+//  - Type-checked by the Verum type checker.
+//  - Verified by the SMT backend (same path as `auto`).
+//  - Required to satisfy `@verify(formal)` obligations.
 //
+
 // The LLM's only role is candidate generation — reducing proof-search
 // space by suggesting lemma applications, rewrite targets, case splits,
 // and induction hypotheses that a human might try first.
 //
+
 // ## Status
 //
+
 // **Experimental.** The MCP bridge and oracle-response parser live
 // in `core/meta/contexts.vr.MetaRuntime`. This file provides the
 // Verum-level API surface.
 //
-// @cfg(feature = "llm_oracle")  — feature-gated; default off.
+
+// @cfg(feature = "llm_oracle") — feature-gated; default off.
 // =============================================================================
 
 module core.meta.oracle;
@@ -94,6 +104,7 @@ public fn aggressive_oracle_config() -> OracleConfig {
 
 /// A single candidate proof suggestion from the oracle.
 ///
+
 /// The `proof_term` is the raw text the oracle returned — it must be
 /// type-checked and SMT-verified before use. The `confidence` reflects
 /// the oracle's self-assessment.

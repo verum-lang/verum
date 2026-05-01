@@ -7,9 +7,11 @@ module sys.file_ops;
 // Dependencies: sys/raw
 // =============================================================================
 //
+
 // Pure Verum implementation of file operations. Compiled through
 // VBC → LLVM pipeline. No C runtime dependency.
 //
+
 // =============================================================================
 
 mount core.*;

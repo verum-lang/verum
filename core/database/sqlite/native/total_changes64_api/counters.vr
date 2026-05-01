@@ -5,7 +5,7 @@ module core.database.sqlite.native.total_changes64_api.counters;
 mount base.{Bool, Int64, Text};
 mount core.collections.list.{List};
 
-// Per-connection counters.  `last_stmt` resets each statement; `total`
+// Per-connection counters. `last_stmt` resets each statement; `total`
 // accumulates over the connection's lifetime.
 public type Counters is {
     last_stmt: Int64,
@@ -16,7 +16,7 @@ public fn empty() -> Counters {
     Counters { last_stmt: 0 as Int64, total: 0 as Int64 }
 }
 
-// Record the row count from one DML statement.  `last_stmt` becomes that
+// Record the row count from one DML statement. `last_stmt` becomes that
 // count; `total` adds it to the accumulator.
 public fn record_stmt(mut c: Counters, rows: Int64) -> Counters {
     c.last_stmt = rows;
@@ -33,7 +33,7 @@ public fn reset_stmt(mut c: Counters) -> Counters {
 public fn changes64(c: &Counters) -> Int64 { c.last_stmt }
 public fn total_changes64(c: &Counters) -> Int64 { c.total }
 
-// 32-bit narrowing.  Saturates to Int32 max if the 64-bit value overflows.
+// 32-bit narrowing. Saturates to Int32 max if the 64-bit value overflows.
 public fn changes32_saturating(c: &Counters) -> Int {
     let v = c.last_stmt;
     let max32 = 2147483647 as Int64;

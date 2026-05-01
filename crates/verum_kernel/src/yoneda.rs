@@ -1,36 +1,44 @@
-//! Yoneda embedding + ∞-Kan extensions — V0 algorithmic kernel rules.
+//! Yoneda embedding + ∞-Kan extensions — algorithmic kernel rules.
 //!
+
 //! ## What this delivers
 //!
+
 //! Two foundational ∞-categorical operations that gate MSFS
 //! Definition 3.3 (the S_S Yoneda + Kan-extension closure):
 //!
-//! 1. **Yoneda embedding** `y : C → PSh(C)` (HTT 1.2.1).  The
-//!    fundamental embedding that lifts any ∞-category into its
-//!    presheaf ∞-topos.
+
+//! 1. **Yoneda embedding** `y : C → PSh(C)` (HTT 1.2.1). The
+//!  fundamental embedding that lifts any ∞-category into its
+//!  presheaf ∞-topos.
 //!
-//! 2. **∞-Kan extensions** (HTT 4.3.3.7).  Given `f : C → D` and
-//!    `p : C → E`, the left Kan extension `Lan_f(p) : D → E` exists
-//!    when `E` has appropriate colimits.
+
+//! 2. **∞-Kan extensions** (HTT 4.3.3.7). Given `f : C → D` and
+//!  `p : C → E`, the left Kan extension `Lan_f(p) : D → E` exists
+//!  when `E` has appropriate colimits.
 //!
+
 //! ## V0 algorithmic surface
 //!
+
 //! Both operations are produced as concrete kernel-checkable values
-//! (algorithmic builders + universal-property witness).  V1 will add
+//! (algorithmic builders + universal-property witness). Future work will add
 //! the higher-coherence content (associator + pentagonal coherence
-//! cells); V0 ships the 1-categorical skeleton + closure invariants.
+//! cells); ships the 1-categorical skeleton + closure invariants.
 //!
+
 //! ## What this UNBLOCKS in MSFS
 //!
-//!   - **Definition 3.3** S_S closure under Yoneda — currently
-//!     admits via host stdlib axiom `msfs_s_s_closed_under_yoneda`.
-//!     Promotion: invoke `yoneda_embedding(c)` to produce the
-//!     concrete embedding witness.
-//!   - **Definition 3.3** S_S closure O1 (Kan extensions along
-//!     S-definable morphisms) — admits HTT 4.3.3.7.  Promotion:
-//!     invoke `build_kan_extension(f, p)`.
-//!   - **OWL2 → HTT bridge** `class_to_presheaf` — currently V3
-//!     parameterised; V4 promotes to use `yoneda_embedding` directly.
+
+//!  - **Definition 3.3** S_S closure under Yoneda — currently
+//!  admits via host stdlib axiom `msfs_s_s_closed_under_yoneda`.
+//!  Promotion: invoke `yoneda_embedding(c)` to produce the
+//!  concrete embedding witness.
+//!  - **Definition 3.3** S_S closure O1 (Kan extensions along
+//!  S-definable morphisms) — admits HTT 4.3.3.7. Promotion:
+//!  invoke `build_kan_extension(f, p)`.
+//!  - **OWL2 → HTT bridge** `class_to_presheaf` — currently V3
+//!  parameterised; V4 promotes to use `yoneda_embedding` directly.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -38,8 +46,8 @@ use verum_common::Text;
 use crate::infinity_category::InfinityCategory;
 use crate::ordinal::Ordinal;
 
-/// A presheaf on an ∞-category — V0 surface representation.
-/// `PSh(C) = [C^op, ∞-Set]`.  The presheaf is identified by its
+/// A presheaf on an ∞-category — current surface representation.
+/// `PSh(C) = [C^op, ∞-Set]`. The presheaf is identified by its
 /// representable image data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Presheaf {
@@ -48,7 +56,7 @@ pub struct Presheaf {
     /// The base category whose opposite the presheaf is defined on.
     pub base_category: Text,
     /// True iff the presheaf is *representable* — i.e. of the form
-    /// `y(x)` for some object `x ∈ C`.  Yoneda embedding produces
+    /// `y(x)` for some object `x ∈ C`. Yoneda embedding produces
     /// only representable presheaves; arbitrary presheaves are
     /// reachable via colimits of representables.
     pub is_representable: bool,
@@ -83,14 +91,16 @@ impl Presheaf {
 
 /// The Yoneda embedding `y: C → PSh(C)` — V0 algorithmic builder.
 ///
+
 /// **Construction (HTT 1.2.1)**: for every object `x ∈ C`, the
-/// representable presheaf `y(x) = Hom_C(-, x)` is built.  The
+/// representable presheaf `y(x) = Hom_C(-, x)` is built. The
 /// embedding is fully faithful (Yoneda lemma) and lands in the
 /// representable subcategory `PSh^repr(C)`.
 ///
+
 /// **Decidable property**: `y` is fully faithful at every level.
 /// Proof: by Yoneda lemma, `Hom_PSh(y(x), y(y)) ≃ Hom_C(x, y)`.
-/// V0 surface: returns the embedding's source/target identification
+/// current surface: returns the embedding's source/target identification
 /// + a fullness witness flag.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct YonedaEmbedding {
@@ -100,35 +110,37 @@ pub struct YonedaEmbedding {
     pub source_category: InfinityCategory,
     /// The target presheaf ∞-category `PSh(C)`.
     pub target_category: InfinityCategory,
-    /// Witness: the embedding is fully faithful.  Always `true` by
+    /// Witness: the embedding is fully faithful. Always `true` by
     /// Yoneda lemma; the kernel re-checks at every citation site.
     pub is_fully_faithful: bool,
-    /// The level at which fully-faithfulness holds.  By HTT 1.2.1,
+    /// The level at which fully-faithfulness holds. By HTT 1.2.1,
     /// it holds at every level up to `source.level`.
     pub fullness_level: Ordinal,
 }
 
 /// Build the presheaf ∞-category `PSh(C) = [C^op, ∞-Set]`.
 ///
+
 /// **Universe rule (HTT 5.5)**: `PSh(C)` lives one *universe* up
-/// from `C`.  If `C: U_κ`, then `PSh(C): U_{κ+1}` where `κ+1`
+/// from `C`. If `C: U_κ`, then `PSh(C): U_{κ+1}` where `κ+1`
 /// denotes the *next inaccessible cardinal*, not the ordinal
 /// successor `κ+1` — the distinction matters because `Sh`/`PSh`
-/// constructions internalise size hierarchies.  V0 invokes
+/// constructions internalise size hierarchies. V0 invokes
 /// [`Ordinal::next_inaccessible`] for the ascent.
 pub fn presheaf_category(c: &InfinityCategory) -> InfinityCategory {
     InfinityCategory {
         name: Text::from(format!("PSh({})", c.name.as_str())),
-        // PSh(C) inherits the level from C.  At V0 we don't promote.
+        // PSh(C) inherits the level from C. At V0 we don't promote.
         level: c.level.clone(),
         // PSh(C) lives one universe up — the *next inaccessible*,
-        // per HTT 5.5.  This is **not** ordinal succession.
+        // per HTT 5.5. This is **not** ordinal succession.
         universe: c.universe.next_inaccessible(),
     }
 }
 
 /// Build the Yoneda embedding `y: C → PSh(C)` (HTT 1.2.1).
 ///
+
 /// **Algorithm**: construct the target `PSh(C)`, identify the
 /// embedding as a fully-faithful functor, and certify the level at
 /// which fullness holds (the source's level by HTT 1.2.1).
@@ -144,13 +156,15 @@ pub fn yoneda_embedding(c: &InfinityCategory) -> YonedaEmbedding {
 }
 
 /// The Yoneda lemma: `Hom_PSh(C)(y(x), p) ≃ p(x)` natural in `x`
-/// and `p`.  V0 surface returns the identification witness.
+/// and `p`. current surface returns the identification witness.
 ///
+
 /// **Mathematical content**: every natural transformation
 /// `α : y(x) → p` is determined by its component at the identity
 /// `id_x ∈ y(x)(x) = Hom_C(x, x)`, namely `α_x(id_x) ∈ p(x)`.
 /// The map `α ↦ α_x(id_x)` is a bijection (the Yoneda lemma).
 ///
+
 /// V0 produces the identification's two endpoints + witness flag.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct YonedaLemma {
@@ -162,7 +176,7 @@ pub struct YonedaLemma {
     pub lhs_name: Text,
     /// RHS: `p(x)`.
     pub rhs_name: Text,
-    /// Witness: the LHS and RHS are naturally isomorphic.  Always
+    /// Witness: the LHS and RHS are naturally isomorphic. Always
     /// true by HTT 1.2.1.
     pub is_natural_isomorphism: bool,
 }
@@ -189,7 +203,7 @@ pub fn yoneda_lemma(
 // =============================================================================
 
 /// A left Kan extension `Lan_f(p) : D → E` where `f : C → D` and
-/// `p : C → E`.  Built when `E` admits all relevant colimits.
+/// `p : C → E`. Built when `E` admits all relevant colimits.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KanExtension {
     /// Diagnostic name.
@@ -206,19 +220,21 @@ pub struct KanExtension {
     pub intermediate_category: Text,
     /// The target ∞-category `E`.
     pub target_category: Text,
-    /// Witness: the extension exists.  By HTT 4.3.3.7 this holds when
-    /// `f` is fully faithful and `E` has appropriate colimits.  V0
+    /// Witness: the extension exists. By HTT 4.3.3.7 this holds when
+    /// `f` is fully faithful and `E` has appropriate colimits. V0
     /// requires the precondition flag.
     pub exists: bool,
 }
 
 /// Build the left Kan extension `Lan_f(p)` along a fully-faithful
-/// functor `f`.  V0 algorithmic surface (HTT 4.3.3.7).
+/// functor `f`. V0 algorithmic surface (HTT 4.3.3.7).
 ///
+
 /// **Preconditions**:
-///   - `f` is fully faithful (V0 surface trusts caller declaration).
-///   - The target category has appropriate colimits.
+///  - `f` is fully faithful (current surface trusts caller declaration).
+///  - The target category has appropriate colimits.
 ///
+
 /// Returns `None` when preconditions fail.
 pub fn build_kan_extension(
     along_functor_name: impl Into<Text>,
@@ -247,11 +263,11 @@ pub fn build_kan_extension(
 }
 
 /// Verify that a Kan extension `Lan_f(p)` agrees with `p` on the
-/// image of `f`: `Lan_f(p) ∘ f ≃ p`.  This is the universal-property
+/// image of `f`: `Lan_f(p) ∘ f ≃ p`. This is the universal-property
 /// witness — always true by HTT 4.3.3.7.
 pub fn kan_extension_unit_witness(_extension: &KanExtension) -> bool {
-    // V0 surface: the universal property is structurally guaranteed
-    // by the build_kan_extension precondition checks.  V1 will produce
+    // current surface: the universal property is structurally guaranteed
+    // by the build_kan_extension precondition checks. Future work will produce
     // the explicit unit natural-transformation cell.
     true
 }

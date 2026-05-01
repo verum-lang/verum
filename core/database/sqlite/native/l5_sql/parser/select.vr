@@ -6,29 +6,36 @@ module core.database.sqlite.native.l5_sql.parser.select;
 // Layer: 5
 // Spec: sqlite.org/lang_select.html, sqlite-native.md §12.2
 //
+
 // Grammar implemented:
 //
-//   select-stmt   = simple-select { compound-op simple-select }
-//                    [ ORDER BY order-term {, order-term} ]
-//                    [ LIMIT expr [OFFSET expr] ]
+
+//  select-stmt = simple-select { compound-op simple-select }
+//  [ ORDER BY order-term {, order-term} ]
+//  [ LIMIT expr [OFFSET expr] ]
 //
-//   simple-select = SELECT [DISTINCT|ALL] result-cols
-//                    [ FROM from-clause ]
-//                    [ WHERE expr ]
-//                    [ GROUP BY expr {, expr} ]
-//                    [ HAVING expr ]
+
+//  simple-select = SELECT [DISTINCT|ALL] result-cols
+//  [ FROM from-clause ]
+//  [ WHERE expr ]
+//  [ GROUP BY expr {, expr} ]
+//  [ HAVING expr ]
 //
-//   compound-op   = UNION | UNION ALL | INTERSECT | EXCEPT
+
+//  compound-op = UNION | UNION ALL | INTERSECT | EXCEPT
 //
-//   result-cols   = result-col {, result-col}
-//   result-col    = `*` | ident `.` `*` | expr [AS ident]
+
+//  result-cols = result-col {, result-col}
+//  result-col = `*` | ident `.` `*` | expr [AS ident]
 //
-//   from-clause   = from-item { join-clause }
-//   from-item     = table-ref [AS? alias]
-//   join-clause   = join-op from-item [ON expr | USING (cols)]
-//   join-op       = [NATURAL] [LEFT|RIGHT|FULL [OUTER]| INNER| CROSS] JOIN
+
+//  from-clause = from-item { join-clause }
+//  from-item = table-ref [AS? alias]
+//  join-clause = join-op from-item [ON expr | USING (cols)]
+//  join-op = [NATURAL] [LEFT|RIGHT|FULL [OUTER]| INNER| CROSS] JOIN
 //
-//   order-term    = expr [COLLATE ident] [ASC|DESC] [NULLS FIRST|LAST]
+
+//  order-term = expr [COLLATE ident] [ASC|DESC] [NULLS FIRST|LAST]
 // =============================================================================
 
 mount core.*;

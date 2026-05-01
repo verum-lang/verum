@@ -3,56 +3,67 @@
 // =============================================================================
 // Layer: 3 (Security)
 // Dependencies: core, core.encoding.cbor,
-//               core.security.ecc.ed25519, core.security.mac.hmac,
-//               core.security.util.constant_time
+//  core.security.ecc.ed25519, core.security.mac.hmac,
+//  core.security.util.constant_time
 // =============================================================================
 //
+
 // RFC 9052 — the CBOR-based signing/MAC/encryption format behind
 // WebAuthn passkeys, CWT (CBOR Web Token, RFC 8392), mDoc mobile
 // driving licenses (ISO 18013-5), and COSE-backed ATs (OAuth
 // DPoP-bound tokens).
 //
+
 // # Scope (v0.1)
 //
-//   * COSE_Sign1 — single-signer signed message. The 80% of
-//     production COSE traffic is this.
-//   * COSE_Mac0  — single-recipient MAC'd message.
+
+//  * COSE_Sign1 — single-signer signed message. The 80% of
+//  production COSE traffic is this.
+//  * COSE_Mac0 — single-recipient MAC'd message.
 //
+
 // # Supported algorithms
 //
-//   Alg  | ID    | Behaviour
-//   -----|-------|-----------
-//   ES256|  -7   | ECDSA-P256-SHA256  (not yet wired — leaves a clean slot)
-//   EdDSA|  -8   | Ed25519
-//   HS256|   5   | HMAC-SHA256 (COSE_Mac0)
-//   HS384|   6   | HMAC-SHA384 (COSE_Mac0)
-//   HS512|   7   | HMAC-SHA512 (COSE_Mac0)
+
+//  Alg | ID | Behaviour
+//  -----|-------|-----------
+//  ES256| -7 | ECDSA-P256-SHA256 (not yet wired — leaves a clean slot)
+//  EdDSA| -8 | Ed25519
+//  HS256| 5 | HMAC-SHA256 (COSE_Mac0)
+//  HS384| 6 | HMAC-SHA384 (COSE_Mac0)
+//  HS512| 7 | HMAC-SHA512 (COSE_Mac0)
 //
+
 // # Structure of COSE_Sign1
 //
-//   COSE_Sign1 = [
-//       protected:   bstr,          // serialised map of protected headers
-//       unprotected: map,           // unserialised map
-//       payload:     bstr / nil,    // raw bytes (or nil = detached)
-//       signature:   bstr,          // signature over Sig_structure
-//   ]
+
+//  COSE_Sign1 = [
+//  protected: bstr, // serialised map of protected headers
+//  unprotected: map, // unserialised map
+//  payload: bstr / nil, // raw bytes (or nil = detached)
+//  signature: bstr, // signature over Sig_structure
+//  ]
 //
-//   Sig_structure = [
-//       "Signature1",                // context string
-//       body_protected: bstr,        // = protected header bstr
-//       external_aad:   bstr,        // caller-supplied AAD (may be empty)
-//       payload:        bstr,        // = payload bstr
-//   ]
+
+//  Sig_structure = [
+//  "Signature1", // context string
+//  body_protected: bstr, // = protected header bstr
+//  external_aad: bstr, // caller-supplied AAD (may be empty)
+//  payload: bstr, // = payload bstr
+//  ]
 //
+
 // # Security notes
 //
-//   * The signing input is the CBOR-encoded `Sig_structure`; we
-//     always emit it canonically (encode_canonical) so the
-//     verifier can reproduce byte-exact.
-//   * Algorithm confusion prevented by the typed `CoseAlg` enum
-//     + protocol-driven signer/verifier.
-//   * HMAC compare in `Mac0` is constant-time.
+
+//  * The signing input is the CBOR-encoded `Sig_structure`; we
+//  always emit it canonically (encode_canonical) so the
+//  verifier can reproduce byte-exact.
+//  * Algorithm confusion prevented by the typed `CoseAlg` enum
+//  + protocol-driven signer/verifier.
+//  * HMAC compare in `Mac0` is constant-time.
 //
+
 // =============================================================================
 
 module core.security.cose;
@@ -107,7 +118,7 @@ public type CoseError is
     | WrongKeyKind
     | SignatureMismatch;
 
-// Display + Debug + Eq for CoseError.  SignatureMismatch
+// Display + Debug + Eq for CoseError. SignatureMismatch
 // surfaces no detail — RFC 9052 §6 mandates value-blind
 // COSE_Sign1 / COSE_Mac0 verification (oracle-attack
 // discipline carried across from JwtError / TlsError).
@@ -176,13 +187,17 @@ fn key_matches_alg(alg: &CoseAlg, key: &CoseKey) -> Bool {
 // Headers
 // =============================================================================
 //
+
 // COSE reuses RFC 8152 header parameter IDs. The two we handle:
 //
-//   1  — alg (int)
-//   4  — kid (bstr)
+
+//  1 — alg (int)
+//  4 — kid (bstr)
 //
+
 // Other headers pass through unchanged in `unprotected`.
 //
+
 // =============================================================================
 
 public type CoseHeaders is {
@@ -313,20 +328,23 @@ public fn verify_sign1(
 // MAC'd messages (COSE_Mac0)
 // =============================================================================
 //
+
 // COSE_Mac0 = [
-//     protected:   bstr,
-//     unprotected: map,
-//     payload:     bstr,
-//     tag:         bstr,
+//  protected: bstr,
+//  unprotected: map,
+//  payload: bstr,
+//  tag: bstr,
 // ]
 //
+
 // MAC_structure = [
-//     "MAC0",
-//     body_protected: bstr,
-//     external_aad:   bstr,
-//     payload:        bstr,
+//  "MAC0",
+//  body_protected: bstr,
+//  external_aad: bstr,
+//  payload: bstr,
 // ]
 //
+
 // =============================================================================
 
 public fn mac0(

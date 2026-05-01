@@ -5,53 +5,63 @@
 // Dependencies: core, core.collections, core.time, core.security.mac.siphash
 // =============================================================================
 //
+
 // RFC 8446 §8 specifies two anti-replay mechanisms for 0-RTT data:
 //
-//   (a) Single-use tickets   — server-enforced by removing the ticket
-//       from its ticket cache on first acceptance. `resume_verify` +
-//       `resumption.ClientSessionStore.take` already give us that.
+
+//  (a) Single-use tickets — server-enforced by removing the ticket
+//  from its ticket cache on first acceptance. `resume_verify` +
+//  `resumption.ClientSessionStore.take` already give us that.
 //
-//   (b) ClientHello recording — server records (psk_identity,
-//       truncated-CH hash) pairs for the freshness window and rejects
-//       any subsequent matching 0-RTT attempt.
+
+//  (b) ClientHello recording — server records (psk_identity,
+//  truncated-CH hash) pairs for the freshness window and rejects
+//  any subsequent matching 0-RTT attempt.
 //
+
 // This module implements (b): a probabilistic Bloom-filter backed
 // cache with *two* rotating buckets, matching the construction
 // described in RFC 8446 §8.2 (with FFFFFF default 2^24 entries and
 // 2^-10 false-positive rate):
 //
-//   * Every bucket covers the freshness window + a grace overlap so
-//     an incoming 0-RTT attempt whose CH was issued just before a
-//     bucket rotation is still caught by the previous bucket.
-//   * Rotation is lazy — happens at `insert` time when the current
-//     time is past the active bucket's cut-off. This keeps the
-//     cache allocation-free in the hot path.
+
+//  * Every bucket covers the freshness window + a grace overlap so
+//  an incoming 0-RTT attempt whose CH was issued just before a
+//  bucket rotation is still caught by the previous bucket.
+//  * Rotation is lazy — happens at `insert` time when the current
+//  time is past the active bucket's cut-off. This keeps the
+//  cache allocation-free in the hot path.
 //
+
 // # Security properties
 //
-//   * False-positive rate = user-configurable (default 2^-10 ≈ 0.1%).
-//     A false positive means a *legitimate* 0-RTT attempt is rejected
-//     — safe (client falls back to full handshake) but visible as a
-//     performance regression. **Never** a false *negative* within the
-//     window: once an entry is added, the same (psk_id, ch_hash) pair
-//     always tests positive until the bucket rotates out.
-//   * Two-bucket rotation: an attacker cannot race bucket boundaries
-//     to get an accepted replay — each bucket extends past the window
-//     by 50% so any in-flight 0-RTT is still covered by at least one
-//     active bucket.
-//   * SipHash-2-4 keyed with a server-side secret → no precomputed
-//     collisions; keys rotate with bucket rotation to prevent long-
-//     term collision probing.
+
+//  * False-positive rate = user-configurable (default 2^-10 ≈ 0.1%).
+//  A false positive means a *legitimate* 0-RTT attempt is rejected
+//  — safe (client falls back to full handshake) but visible as a
+//  performance regression. **Never** a false *negative* within the
+//  window: once an entry is added, the same (psk_id, ch_hash) pair
+//  always tests positive until the bucket rotates out.
+//  * Two-bucket rotation: an attacker cannot race bucket boundaries
+//  to get an accepted replay — each bucket extends past the window
+//  by 50% so any in-flight 0-RTT is still covered by at least one
+//  active bucket.
+//  * SipHash-2-4 keyed with a server-side secret → no precomputed
+//  collisions; keys rotate with bucket rotation to prevent long-
+//  term collision probing.
 //
+
 // # Non-goals (by design in v0.1)
 //
-//   * Cross-server coordination (Redis/memcached) — deployments with
-//     many TLS terminators need an external shared replay cache.
-//     This module is a building block; the distributed implementation
-//     wraps the local interface in a `ReplayCache` protocol.
-//   * Precise accounting — we store Bloom bits, not tuples, so
-//     eviction is all-or-nothing per rotation.
+
+//  * Cross-server coordination (Redis/memcached) — deployments with
+//  many TLS terminators need an external shared replay cache.
+//  This module is a building block; the distributed implementation
+//  wraps the local interface in a `ReplayCache` protocol.
+//  * Precise accounting — we store Bloom bits, not tuples, so
+//  eviction is all-or-nothing per rotation.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.zero_rtt_antireplay;
@@ -230,6 +240,7 @@ implement ReplayCache {
     /// `clock_gettime(CLOCK_MONOTONIC)` / `mach_absolute_time()` /
     /// `QueryPerformanceCounter`).
     ///
+
     /// Callers that need a deterministic clock source (tests, replay
     /// of captured traces, simulated networks) SHOULD instead use
     /// `ReplayCache.new_at(cfg, origin)` and drive `try_admit` with
@@ -268,11 +279,13 @@ implement ReplayCache {
 
     /// Attempt to admit a (psk_id, ch_hash) pair. Returns:
     ///
-    ///   * `Ok(true)`  — admitted; caller may accept the 0-RTT flight.
-    ///   * `Ok(false)` — already present in either active or retired
-    ///                   bucket: REJECT the 0-RTT flight (the client
-    ///                   may still complete a full 1-RTT handshake).
+
+    ///  * `Ok(true)` — admitted; caller may accept the 0-RTT flight.
+    ///  * `Ok(false)` — already present in either active or retired
+    ///  bucket: REJECT the 0-RTT flight (the client
+    ///  may still complete a full 1-RTT handshake).
     ///
+
     /// `now` must be monotonic wall-clock or `Instant.now()` — used
     /// to trigger rotation lazily.
     public fn try_admit(
@@ -339,19 +352,23 @@ public type ReplayStats is {
 // ReplayGuard protocol — pluggable abstraction over replay caches
 // =============================================================================
 //
+
 // Multi-terminator deployments need a shared replay cache — the local
 // in-memory `ReplayCache` above only catches replays that hit the
 // same process. The `ReplayGuard` protocol lets callers swap in a
 // Redis- or memcached-backed cache without touching ServerSm code.
 //
+
 // Implementers include:
 //
-//   * `ReplayCache` (this module) — single-process Bloom filter.
-//   * `NoReplayGuard` (this module) — stub that always admits; useful
-//     in tests where 0-RTT replay is out of scope.
-//   * User-supplied distributed impls (Redis / memcached / etcd) —
-//     the external crate plugs behind the same `try_admit` signature.
+
+//  * `ReplayCache` (this module) — single-process Bloom filter.
+//  * `NoReplayGuard` (this module) — stub that always admits; useful
+//  in tests where 0-RTT replay is out of scope.
+//  * User-supplied distributed impls (Redis / memcached / etcd) —
+//  the external crate plugs behind the same `try_admit` signature.
 //
+
 // =============================================================================
 
 /// Pluggable guard protocol over a 0-RTT replay cache. One method

@@ -46,7 +46,7 @@ implement PCacheEngine {
     }
 
     /// Decide whether the fetch will allocate based on demand + cache
-    /// fullness.  Returns true iff a new page will be produced.
+    /// fullness. Returns true iff a new page will be produced.
     pub fn will_allocate(&mut self, demand: &FetchDemand, under_limit: Bool) -> Bool {
         let allocate = match demand {
             FdNoAllocate          => false,

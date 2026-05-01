@@ -14,9 +14,11 @@
 )]
 //! Tests for the visitor pattern and AST traversal.
 //!
+
 //! This module ensures that the visitor pattern correctly traverses
 //! all nodes in the AST and that custom visitors can be implemented.
 //!
+
 //! The visitor system supports two traversal modes:
 //! - Recursive mode (default): Simple traversal using the call stack
 //! - Iterative mode: Stack-safe traversal using IterativeVisitor wrapper
@@ -911,12 +913,14 @@ fn test_iterative_mode_depth_1000() {
 fn test_iterative_mode_depth_2000() {
     // Test with deep tree (2000 levels)
     //
+
     // Note: While `create_deep_expr` builds the tree iteratively (stack-safe),
     // the current `IterativeVisitor` architecture still has recursive calls
     // when the inner visitor's `visit_*` methods call `walk_*` functions.
     // The `walk_*` functions use `visit_child!` macro which falls back to
     // recursion when the visitor doesn't provide a `work_stack()`.
     //
+
     // Depth 2000 is chosen to fit within typical test thread stack limits
     // (~512KB on macOS) while still exercising the iterative traversal logic.
     let deep_expr = create_deep_expr(2000);

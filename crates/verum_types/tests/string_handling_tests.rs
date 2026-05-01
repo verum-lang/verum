@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_imports, unused_variables, unused_mut)]
 //! Tests for string literal type inference
 //!
+
 //! This test suite verifies that:
 //! 1. String literals are correctly typed as Text
 //! 2. F-string literals are correctly typed as Text

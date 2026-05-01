@@ -3,18 +3,21 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — CDC + replication)
 //
+
 // Wire-level message taxonomy. Actual encoding is the host's
 // responsibility (typically protobuf or flatbuffers); we expose
 // the shape + the validation rules.
 //
+
 // ReplicationMessage flow:
 //
-//   Replica → Primary: HELLO {replica_id, last_known_position, role_request}
-//   Primary → Replica: HELLO_ACK {epoch, server_id, accepted_role}
-//   Replica → Primary: REQUEST_FRAMES {since_position, max_frames}
-//   Primary → Replica: FRAME_BATCH {frames, ends_at_commit}
-//   Replica → Primary: ACK {applied_position}
-//   Either:           ERROR {code, detail}
+
+//  Replica → Primary: HELLO {replica_id, last_known_position, role_request}
+//  Primary → Replica: HELLO_ACK {epoch, server_id, accepted_role}
+//  Replica → Primary: REQUEST_FRAMES {since_position, max_frames}
+//  Primary → Replica: FRAME_BATCH {frames, ends_at_commit}
+//  Replica → Primary: ACK {applied_position}
+//  Either: ERROR {code, detail}
 // =============================================================================
 
 module core.database.sqlite.native.replication.protocol;

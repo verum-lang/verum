@@ -1,40 +1,46 @@
 //! TokenStream serialization for VBC heap storage.
 //!
+
 //! This module provides serialization and deserialization of TokenStream for
 //! the VBC meta-system. When a meta function generates code via `quote { ... }`,
 //! the resulting TokenStream is serialized to a binary format and stored on the
 //! VBC interpreter's heap. When the meta function returns, the TokenStream is
 //! deserialized and parsed back into AST.
 //!
+
 //! ## Binary Format (Version 1)
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
-//! │                     TokenStream Binary Format                           │
+//! │ TokenStream Binary Format │
 //! ├─────────────────────────────────────────────────────────────────────────┤
-//! │  Header (16 bytes)                                                      │
-//! │  ├─ magic: u32 = 0x56544B53 ("VTKS" - Verum TokenStream)              │
-//! │  ├─ version: u32 = 1                                                   │
-//! │  ├─ token_count: u32                                                   │
-//! │  └─ flags: u32 (bit 0: has_span)                                       │
+//! │ Header (16 bytes) │
+//! │ ├─ magic: u32 = 0x56544B53 ("VTKS" - Verum TokenStream) │
+//! │ ├─ version: u32 = 1 │
+//! │ ├─ token_count: u32 │
+//! │ └─ flags: u32 (bit 0: has_span) │
 //! ├─────────────────────────────────────────────────────────────────────────┤
-//! │  Optional Span (12 bytes, if has_span)                                 │
-//! │  ├─ file_id: u32                                                       │
-//! │  ├─ start: u32                                                         │
-//! │  └─ end: u32                                                           │
+//! │ Optional Span (12 bytes, if has_span) │
+//! │ ├─ file_id: u32 │
+//! │ ├─ start: u32 │
+//! │ └─ end: u32 │
 //! ├─────────────────────────────────────────────────────────────────────────┤
-//! │  Token Array (variable size)                                           │
-//! │  └─ [SerializedToken; token_count]                                     │
+//! │ Token Array (variable size) │
+//! │ └─ [SerializedToken; token_count] │
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! ## Performance Characteristics
 //!
+
 //! - Serialization: O(n) where n = number of tokens
 //! - Deserialization: O(n)
 //! - Memory overhead: ~20% over raw token data (due to length prefixes)
 //! - Typical throughput: >1M tokens/sec on modern hardware
 //!
+
 //! Part of Verum's unified meta-system: all compile-time computation uses `meta fn` and the
 //! `@` prefix for macros/attributes. Token streams are the interchange format between the
 //! meta-system and procedural macros. Tagged literals (`d#"..."`, `sql"..."`), derives
@@ -155,6 +161,7 @@ impl SerializedSpan {
 
 /// Serializable token kind discriminant.
 ///
+
 /// This maps to verum_lexer::TokenKind variants. We use a compact u16 discriminant
 /// followed by variant-specific payload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -952,6 +959,7 @@ impl SerializedToken {
 
 /// Serialize a list of tokens to binary format.
 ///
+
 /// This is the primary serialization entry point for the codegen phase.
 pub fn serialize_tokens(
     tokens: &[verum_lexer::Token],
@@ -978,6 +986,7 @@ pub fn serialize_tokens(
 
 /// Deserialize tokens from binary format.
 ///
+
 /// This is the primary deserialization entry point for the extraction phase.
 pub fn deserialize_tokens(data: &[u8]) -> TokenStreamResult<(Vec<verum_lexer::Token>, Option<verum_common::span::Span>)> {
     // Validate minimum size (header only)
@@ -1020,6 +1029,7 @@ pub fn deserialize_tokens(data: &[u8]) -> TokenStreamResult<(Vec<verum_lexer::To
 
 /// Estimate the serialized size for pre-allocation.
 ///
+
 /// Returns an upper bound on the serialized size for a given number of tokens.
 pub fn estimate_serialized_size(token_count: usize) -> usize {
     // Header (16) + optional span (12) + tokens (avg ~32 bytes each)
@@ -1032,6 +1042,7 @@ pub fn estimate_serialized_size(token_count: usize) -> usize {
 
 /// Create a TokenStream heap object from tokens.
 ///
+
 /// This allocates a heap object containing the serialized TokenStream data.
 /// The object has TypeId::TOKEN_STREAM and can be passed as a Value.
 pub fn create_token_stream_object(
@@ -1051,17 +1062,22 @@ pub fn create_token_stream_object(
 
 /// Create a TokenStream heap object directly from serialized bytes.
 ///
+
 /// This is the optimal path for the MetaQuote instruction, where the
 /// serialized TokenStream bytes are already stored in the constant pool.
 /// Unlike `create_token_stream_object`, this avoids redundant re-serialization.
 ///
+
 /// # Arguments
 ///
+
 /// * `heap` - The interpreter heap for allocation
 /// * `serialized_data` - Pre-serialized TokenStream bytes (from constant pool)
 ///
+
 /// # Performance
 ///
+
 /// This is O(n) where n = serialized data size, just for the copy.
 /// No parsing or re-serialization occurs.
 pub fn create_token_stream_object_from_bytes(
@@ -1076,6 +1092,7 @@ pub fn create_token_stream_object_from_bytes(
 
 /// Extract TokenStream from a heap object.
 ///
+
 /// This reads the serialized data from a heap object and deserializes it
 /// back into a list of tokens.
 pub fn extract_token_stream_from_object(

@@ -14,10 +14,12 @@
 )]
 // v6.0-BALANCED Semantic Types Integration Tests
 //
+
 // This test suite validates correct usage and integration of v6.0-BALANCED
-// semantic types (List, Text, Map, Set,  Heap, Shared) throughout
+// semantic types (List, Text, Map, Set, Heap, Shared) throughout
 // the verum_types crate.
 //
+
 // Semantic integrity: types describe meaning (List, Text, Map), not implementation (Vec, String, HashMap)
 
 use indexmap::IndexMap;

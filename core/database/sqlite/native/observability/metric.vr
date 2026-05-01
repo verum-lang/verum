@@ -3,17 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling)
 //
+
 // Three flavour primitives:
 //
-//   * `MetricObsCounter`   — strictly-monotonic Int64 (rows_read,
-//                    queries_total, ...)
-//   * `MetricObsGauge`     — observable Int64 that may go up or down
-//                    (cache_size_bytes, open_cursors, ...)
-//   * `MetricObsHistogram` — bucketed distribution with O(1) record;
-//                    SQLite-shaped buckets:
-//                    [10us, 100us, 1ms, 10ms, 100ms, 1s, 10s, +inf]
-//                    (matches the latency profile of typical
-//                    OLTP workloads)
+
+//  * `MetricObsCounter` — strictly-monotonic Int64 (rows_read,
+//  queries_total, ...)
+//  * `MetricObsGauge` — observable Int64 that may go up or down
+//  (cache_size_bytes, open_cursors, ...)
+//  * `MetricObsHistogram` — bucketed distribution with O(1) record;
+//  SQLite-shaped buckets:
+//  [10us, 100us, 1ms, 10ms, 100ms, 1s, 10s, +inf]
+//  (matches the latency profile of typical
+//  OLTP workloads)
 // =============================================================================
 
 module core.database.sqlite.native.observability.metric;

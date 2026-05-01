@@ -5,36 +5,45 @@
 // Dependencies: core, encoding.varint, quic.{version, connection_id, frame}
 // =============================================================================
 //
+
 // RFC 9000 §17 defines six packet formats, distinguished by the header-
 // form bit (the top bit of the first byte):
 //
-//   Long header (bit 7 = 1):
-//     0x00  Initial                  (has Token + Length + PN)
-//     0x01  0-RTT                    (no Token)
-//     0x02  Handshake                (no Token)
-//     0x03  Retry                    (no PN; has Token + Retry Integrity Tag)
+
+//  Long header (bit 7 = 1):
+//  0x00 Initial (has Token + Length + PN)
+//  0x01 0-RTT (no Token)
+//  0x02 Handshake (no Token)
+//  0x03 Retry (no PN; has Token + Retry Integrity Tag)
 //
-//   Short header (bit 7 = 0):
-//     1-RTT                          (carries Application Data)
+
+//  Short header (bit 7 = 0):
+//  1-RTT (carries Application Data)
 //
-//   Two special packet types live outside the type-bit table:
-//     Version Negotiation            (long, version = 0x00000000)
-//     Stateless Reset                (short-looking, fixed bit pattern
-//                                     in last 20 bytes)
+
+//  Two special packet types live outside the type-bit table:
+//  Version Negotiation (long, version = 0x00000000)
+//  Stateless Reset (short-looking, fixed bit pattern
+//  in last 20 bytes)
 //
+
 // Packet Number (PN) encoding is covered by `pn.rs`: the wire PN is
 // truncated to 1..4 bytes and reconstructed via RFC 9000 §A.3 using
 // the known `largest_pn` for the PN space.
 //
+
 // # Structures
 //
-//   LongHeader { type_byte, version, dcid, scid, <type-specific fields> }
-//   ShortHeader { type_byte, dcid, packet_number, payload }
+
+//  LongHeader { type_byte, version, dcid, scid, <type-specific fields> }
+//  ShortHeader { type_byte, dcid, packet_number, payload }
 //
+
 // Packet numbers are header-protected and AEAD-sealed (RFC 9001 §5).
 // This module handles only the plaintext framing; crypto sealing +
 // header protection live in `core.net.quic.crypto.*` (already landed).
 //
+
 // =============================================================================
 
 module core.net.quic.packet;
@@ -266,20 +275,24 @@ fn parse_retry(first: UInt8, version: UInt32, dcid: ConnectionId, scid: Connecti
 // Initial (§17.2.2), Handshake (§17.2.4), 0-RTT (§17.2.3)
 // =============================================================================
 //
+
 // Initial adds a `Token Length + Token` before Length/PN/Payload.
 // Handshake and 0-RTT skip the token; the rest of the layout is identical.
 //
+
 // Wire format after DCID/SCID:
-//   [Initial only]  Token Length (varint)
-//                   Token (bytes)
-//   Length (varint)   — covers PN + payload length
-//   Packet Number (1..4 bytes, length = (first_byte & 0x03) + 1)
-//   Payload (remaining bytes up to `Length - pn_len`)
+//  [Initial only] Token Length (varint)
+//  Token (bytes)
+//  Length (varint) — covers PN + payload length
+//  Packet Number (1..4 bytes, length = (first_byte & 0x03) + 1)
+//  Payload (remaining bytes up to `Length - pn_len`)
 //
+
 // Caller passes header-protection-cleared `first_byte` so the PN
 // length bits are reliable. Prior to HP removal, the lower 5 bits
 // are masked/XORed per RFC 9001 §5.4.
 //
+
 // =============================================================================
 
 fn parse_initial(first: UInt8, version: UInt32, dcid: ConnectionId, scid: ConnectionId,
@@ -370,13 +383,15 @@ fn parse_pn_and_payload(
 // Short header (1-RTT) parsing
 // =============================================================================
 //
+
 // 1-RTT header:
-//   First byte:   0|1|K|... (header form = 0, fixed bit = 1, spin bit,
-//                 reserved, key-phase, PN length minus 1 in low 2 bits)
-//   Destination CID (length known per connection — caller passes dcid_len)
-//   Packet Number (1..4 bytes)
-//   Payload
+//  First byte: 0|1|K|... (header form = 0, fixed bit = 1, spin bit,
+//  reserved, key-phase, PN length minus 1 in low 2 bits)
+//  Destination CID (length known per connection — caller passes dcid_len)
+//  Packet Number (1..4 bytes)
+//  Payload
 //
+
 // The DCID length is NOT on the wire — the peer tracks which CIDs it
 // issued and their lengths.
 // =============================================================================
@@ -445,22 +460,27 @@ public fn parse_long(buf: &[Byte]) -> Result<Packet, PacketError> {
 // Packet number decoding — RFC 9000 §A.3
 // =============================================================================
 //
+
 // Wire PN is truncated; receiver reconstructs using:
 //
-//   let expected = largest_pn + 1
-//   let pn_win = 1 << (pn_nbits)
-//   let pn_hwin = pn_win / 2
-//   let pn_mask = pn_win - 1
+
+//  let expected = largest_pn + 1
+//  let pn_win = 1 << (pn_nbits)
+//  let pn_hwin = pn_win / 2
+//  let pn_mask = pn_win - 1
 //
-//   let candidate = (expected & ~pn_mask) | truncated_pn
+
+//  let candidate = (expected & ~pn_mask) | truncated_pn
 //
-//   if candidate <= expected - pn_hwin && candidate < (1<<62) - pn_win:
-//       pn = candidate + pn_win
-//   else if candidate > expected + pn_hwin && candidate >= pn_win:
-//       pn = candidate - pn_win
-//   else:
-//       pn = candidate
+
+//  if candidate <= expected - pn_hwin && candidate < (1<<62) - pn_win:
+//  pn = candidate + pn_win
+//  else if candidate > expected + pn_hwin && candidate >= pn_win:
+//  pn = candidate - pn_win
+//  else:
+//  pn = candidate
 //
+
 // =============================================================================
 
 public fn decode_packet_number(
@@ -493,6 +513,7 @@ public fn decode_packet_number(
 /// needed given the largest-acked PN in the same PN space, per
 /// RFC 9000 §17.1 "Packet Number Encoding".
 ///
+
 /// Returns (truncated_pn, byte_length).
 public fn encode_packet_number_len(pn: UInt64, largest_acked: Maybe<UInt64>) -> (UInt32, UInt8) {
     let num_unacked: UInt64 = match largest_acked {

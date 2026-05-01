@@ -1,5 +1,6 @@
 //! Pattern matching nodes in the AST.
 //!
+
 //! Patterns are used in let bindings, function parameters, match expressions,
 //! and other contexts where values are destructured or matched.
 
@@ -52,13 +53,15 @@ impl Spanned for Pattern {
 
 /// The kind of pattern.
 ///
+
 /// # Dependent Pattern Matching Extensions (v2.0+ planned)
 ///
+
 /// In the dependent type system (future extension), patterns can:
 /// 1. Refine types based on matched constructors (e.g., matching `Zero` proves `n = 0`)
 /// 2. Include view patterns for alternative pattern interfaces via `view` declarations
 /// 3. Carry proof obligations about the matched value via `with` clauses
-///    These extensions enable compile-time proof of pattern exhaustiveness and type narrowing.
+///  These extensions enable compile-time proof of pattern exhaustiveness and type narrowing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PatternKind {
     /// Wildcard pattern: _
@@ -128,36 +131,42 @@ pub enum PatternKind {
 
     /// View pattern: match through a transformation function.
     ///
+
     /// The view function is applied to the scrutinee and the result is matched
     /// against the inner pattern. This enables matching on computed properties
     /// without requiring a separate `let` binding.
     ///
+
     /// # Syntax
     /// ```verum
     /// view_fn -> inner_pattern
     /// ```
     ///
+
     /// # Examples
     /// ```verum
     /// // Match through a transformation function
     /// match value {
-    ///     parity -> Even(k) => print(f"{k} is even"),
-    ///     parity -> Odd(k) => print(f"{k} is odd"),
+    ///  parity -> Even(k) => print(f"{k} is even"),
+    ///  parity -> Odd(k) => print(f"{k} is odd"),
     /// }
     ///
+
     /// // Qualified view function (module path)
     /// match response {
-    ///     json.parse -> Ok(data) => process(data),
-    ///     json.parse -> Err(e) => handle(e),
+    ///  json.parse -> Ok(data) => process(data),
+    ///  json.parse -> Err(e) => handle(e),
     /// }
     ///
+
     /// // Nested view patterns
     /// match input {
-    ///     parse_int -> Some(abs -> Positive(n)) => use_positive(n),
-    ///     _ => default(),
+    ///  parse_int -> Some(abs -> Positive(n)) => use_positive(n),
+    ///  _ => default(),
     /// }
     /// ```
     ///
+
     /// # Semantics
     /// - The view function is called with the scrutinee as its argument
     /// - The return value is matched against the inner pattern
@@ -173,35 +182,42 @@ pub enum PatternKind {
     /// Active pattern invocation: user-defined pattern matchers (F#-style).
     /// Active patterns are declared with `pattern Name(params) -> ReturnType = body;`.
     ///
+
     /// # Pattern Categories
     ///
+
     /// ## 1. Total Patterns (Boolean Test)
     /// ```verum
     /// pattern Even(n: Int) -> Bool = n % 2 == 0;
     ///
+
     /// match n {
-    ///     Even() => "even",
-    ///     _ => "odd",
+    ///  Even() => "even",
+    ///  _ => "odd",
     /// }
     /// ```
     ///
+
     /// ## 2. Parameterized Patterns
     /// ```verum
     /// pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n <= hi;
     ///
+
     /// match n {
-    ///     InRange(0, 100)() => "in range",
-    ///     _ => "out of range",
+    ///  InRange(0, 100)() => "in range",
+    ///  _ => "out of range",
     /// }
     /// ```
     ///
+
     /// ## 3. Partial Patterns (Extraction with Bindings)
     /// ```verum
     /// pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
     ///
+
     /// match s {
-    ///     ParseInt(n) => use(n),    // n: Int, extracted from Some
-    ///     _ => handle_error(),
+    ///  ParseInt(n) => use(n), // n: Int, extracted from Some
+    ///  _ => handle_error(),
     /// }
     /// ```
     Active {
@@ -220,12 +236,13 @@ pub enum PatternKind {
 
     /// Pattern combination with &: matches when ALL patterns match simultaneously.
     ///
+
     /// # Example
     /// ```verum
     /// match n {
-    ///     Even() & Positive() => "positive even",
-    ///     Even() => "non-positive even",
-    ///     _ => "odd",
+    ///  Even() & Positive() => "positive even",
+    ///  Even() => "non-positive even",
+    ///  _ => "odd",
     /// }
     /// ```
     And(List<Pattern>),
@@ -233,23 +250,27 @@ pub enum PatternKind {
     /// Guarded pattern: pattern with inline guard condition
     /// Spec: Rust RFC 3637 - Guard Patterns
     ///
+
     /// Allows guards to nest within or-patterns, enabling per-alternative conditions.
     /// The guard is evaluated after the pattern matches and must return Bool.
     ///
+
     /// # Example
     /// ```verum
     /// match user.plan() {
-    ///     (Plan.Regular if user.credit() >= 100) |
-    ///     (Plan.Premium if user.credit() >= 80) => complete(),
-    ///     _ => error(),
+    ///  (Plan.Regular if user.credit() >= 100) |
+    ///  (Plan.Premium if user.credit() >= 80) => complete(),
+    ///  _ => error(),
     /// }
     ///
+
     /// match (x, y) {
-    ///     ((Some(a) if a > 0) | (Some(a) if a < -10), b) => process(a, b),
-    ///     _ => default(),
+    ///  ((Some(a) if a > 0) | (Some(a) if a < -10), b) => process(a, b),
+    ///  _ => default(),
     /// }
     /// ```
     ///
+
     /// # Semantics
     /// - Pattern is matched first, then guard is evaluated
     /// - If guard returns false, the match continues to next alternative
@@ -264,18 +285,21 @@ pub enum PatternKind {
 
     /// Type test pattern for runtime type checking and narrowing.
     ///
+
     /// This pattern tests if a value has a specific runtime type and binds it
     /// to a variable with the narrowed type. Essential for safe dynamic typing.
     ///
+
     /// # Example
     /// ```verum
     /// match value {
-    ///     x is Int => process(x),   // x has type Int
-    ///     x is Text => format(x),   // x has type Text
-    ///     _ => other(),
+    ///  x is Int => process(x), // x has type Int
+    ///  x is Text => format(x), // x has type Text
+    ///  _ => other(),
     /// }
     /// ```
     ///
+
     /// # Semantics
     /// - At runtime, checks if value is of the specified type
     /// - If match succeeds, binding has the narrowed type in that arm
@@ -289,24 +313,27 @@ pub enum PatternKind {
 
     /// Stream pattern for matching and destructuring lazy streams/iterators.
     ///
+
     /// Unlike slice patterns which work on fixed collections, stream patterns
     /// consume elements lazily from an iterator.
     ///
+
     /// # Examples
     /// ```verum
     /// match iterator {
-    ///     stream[first, second, ...rest] => {
-    ///         // first and second consumed, rest is remaining iterator
-    ///     }
-    ///     stream[head, ...tail] => {
-    ///         // consume one, tail is remaining
-    ///     }
-    ///     stream[] => {
-    ///         // empty stream
-    ///     }
+    ///  stream[first, second, ...rest] => {
+    ///  // first and second consumed, rest is remaining iterator
+    ///  }
+    ///  stream[head, ...tail] => {
+    ///  // consume one, tail is remaining
+    ///  }
+    ///  stream[] => {
+    ///  // empty stream
+    ///  }
     /// }
     /// ```
     ///
+
     /// # Semantics
     /// - Patterns before `...` are consumed from the iterator
     /// - The `...rest` binding captures the remaining iterator (not a list!)
@@ -321,14 +348,16 @@ pub enum PatternKind {
 
     /// Cons pattern for destructuring stream/list types: `head :: tail`
     ///
+
     /// Right-associative: `a :: b :: rest` means `Cons(a, Cons(b, rest))`
     ///
+
     /// # Examples
     /// ```verum
     /// match stream {
-    ///     a :: b :: _ => use_two(a, b),
-    ///     head :: rest => use_head(head),
-    ///     Nil => empty(),
+    ///  a :: b :: _ => use_two(a, b),
+    ///  head :: rest => use_head(head),
+    ///  Nil => empty(),
     /// }
     /// ```
     Cons {
@@ -388,19 +417,22 @@ pub enum VariantPatternData {
 
 /// A match arm in a match expression.
 ///
+
 /// # Dependent Pattern Matching (v2.0+ planned)
 ///
+
 /// Match arms can include with-clauses for proof obligations in dependent pattern matching.
 /// The with-clause specifies constraints that are proven when the pattern matches.
 /// For example, matching `Zero` in a Nat pattern proves `n = 0` in that arm.
 ///
+
 /// # Examples
 /// ```verum
 /// fn is_zero(n: Nat) -> bool with (n = 0) | (n ≠ 0) =
-///     match n {
-///         Zero => true    // Here we know n = 0
-///         Succ(_) => false // Here we know n ≠ 0
-///     }
+///  match n {
+///  Zero => true // Here we know n = 0
+///  Succ(_) => false // Here we know n ≠ 0
+///  }
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MatchArm {

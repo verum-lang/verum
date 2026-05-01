@@ -2,7 +2,7 @@
 // result_api/error.vr — ResultError sum
 // =============================================================================
 // Spec: SQLite C API — sqlite3_result_error / _error_code /
-//                    _error_nomem / _error_toobig.
+//  _error_nomem / _error_toobig.
 // =============================================================================
 
 module core.database.sqlite.native.result_api.error;

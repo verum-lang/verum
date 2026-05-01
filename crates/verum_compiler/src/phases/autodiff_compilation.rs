@@ -1,9 +1,12 @@
 //! Phase 4a: Autodiff Compilation
 //!
+
 //! Generate VJP functions for @differentiable functions.
 //!
+
 //! ## Features
 //!
+
 //! - Reverse-mode automatic differentiation (VJP)
 //! - Forward-mode automatic differentiation (JVP)
 //! - Generate gradient functions automatically
@@ -11,20 +14,25 @@
 //! - Optimize gradient computation
 //! - CBGR-aware code generation (~15ns overhead per check)
 //!
+
 //! ## @differentiable Attribute Parameters
 //!
+
 //! - `wrt`: Parameters to differentiate with respect to (required)
 //! - `mode`: "forward" or "reverse" (default: "reverse")
 //! - `order`: Derivative order (1, 2, etc., default: 1)
 //! - `custom_vjp`: User-provided VJP implementation
 //!
+
 //! ## Generated Functions
 //!
+
 //! For `@differentiable(wrt = "weights, bias")`:
 //! - `fn_vjp(...)`: Vector-Jacobian Product (reverse-mode)
 //! - `fn_jvp(...)`: Jacobian-Vector Product (forward-mode)
 //! - `fn_grad(...)`: Gradient (for scalar outputs)
 //!
+
 //! Phase 4a: Autodiff compilation. Builds computational graphs for
 //! @differentiable functions, generates VJP (reverse-mode) functions,
 //! type-checks generated gradient code.
@@ -461,7 +469,7 @@ impl GraphBuilder {
                 // For loops in autodiff context are handled as accumulation operations.
                 // The gradient flows through by treating the loop as a reduction over
                 // the iterated values. This is correct for common patterns like:
-                //   sum = 0; for x in xs { sum += f(x); } => grad(sum) = sum of grads
+                //  sum = 0; for x in xs { sum += f(x); } => grad(sum) = sum of grads
                 // For more complex loop patterns, users should use explicit reduction ops.
                 let iter_id = self.build_from_expr(iter)?;
                 Ok(self.graph.add_node(
@@ -698,9 +706,11 @@ impl DerivativeGenerator {
     /// Generate VJP (Vector-Jacobian Product) function
     /// Reverse-mode automatic differentiation
     ///
+
     /// For `fn f(x, y) -> z`:
     /// Generates `fn f_vjp(x, y, grad_z) -> (z, (grad_x, grad_y))`
     ///
+
     /// CBGR Note: Generated code includes ~15ns overhead per reference check
     pub fn generate_vjp(&self) -> Result<Item, String> {
         let vjp_name: verum_common::Text = format!("{}_vjp", self.func.name.as_str()).into();
@@ -755,6 +765,7 @@ impl DerivativeGenerator {
     /// Generate JVP (Jacobian-Vector Product) function
     /// Forward-mode automatic differentiation
     ///
+
     /// For `fn f(x, y) -> z`:
     /// Generates `fn f_jvp(x, y, tangent_x, tangent_y) -> (z, tangent_z)`
     pub fn generate_jvp(&self) -> Result<Item, String> {
@@ -810,6 +821,7 @@ impl DerivativeGenerator {
 
     /// Generate gradient function (for scalar outputs)
     ///
+
     /// For `fn f(x, y) -> Float`:
     /// Generates `fn f_grad(x, y) -> (grad_x, grad_y)`
     pub fn generate_grad(&self) -> Result<Item, String> {

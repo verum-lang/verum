@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for try operator (?) error diagnostics.
 //!
+
 //! Tests for E0203 (Result type mismatch), E0204 (ambiguous multiple conversion paths),
 //! and E0205 (try operator in non-Result context). The '?' operator desugars to
 //! match expr { Ok(v) => v, Err(e) => return Err(e.into()) } and requires compatible

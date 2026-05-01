@@ -5,16 +5,19 @@
 // Dependencies: core, base.env, shell.{context, permissions, result}
 // =============================================================================
 //
+
 // One-stop helpers for `#!/usr/bin/env verum` shell scripts:
 //
-//   * `script_main(body)` — wraps `body` in a default ShellContext and
-//     uniform error handling
-//   * `args()`, `arg(n)` — re-export from base.env
-//   * `exit(code)`, `die(message, code)` — exit with diagnostic
-//   * `bootstrap(source)` — parse frontmatter from the script source and
-//     produce a configured ShellContext (intended for the verum_cli
-//     script-runner; advanced scripts can call this manually)
+
+//  * `script_main(body)` — wraps `body` in a default ShellContext and
+//  uniform error handling
+//  * `args()`, `arg(n)` — re-export from base.env
+//  * `exit(code)`, `die(message, code)` — exit with diagnostic
+//  * `bootstrap(source)` — parse frontmatter from the script source and
+//  produce a configured ShellContext (intended for the verum_cli
+//  script-runner; advanced scripts can call this manually)
 //
+
 // =============================================================================
 
 module script;
@@ -113,15 +116,17 @@ public fn bootstrap_from_file(path: &Path) -> Result<ShellContext, ShellError> {
 /// Run `body()` with a default `ShellContext` provided. On success,
 /// exits 0; on `Err`, prints to stderr and exits 1.
 ///
+
 /// Intended pattern:
 ///
-///     fn main() {
-///         script_main(|| async { Ok(()) }).await;
-///     }
+
+///  fn main() {
+///  script_main(|| async { Ok(()) }).await;
+///  }
 public async fn script_main(body_outcome: Result<(), ShellError>) -> ! {
     // The pre-awaited outcome pattern avoids generic `async fn` bounds
     // (not yet expressible in Verum's grammar). Caller writes:
-    //   script_main(my_main().await).await
+    //  script_main(my_main().await).await
     match body_outcome {
         Ok(())   => exit_success(),
         Err(err) => {

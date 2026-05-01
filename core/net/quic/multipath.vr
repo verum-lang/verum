@@ -2,50 +2,62 @@
 // core/net/quic/multipath.vr — Multipath QUIC (draft-ietf-quic-multipath-21)
 // =============================================================================
 // Layer: 5 (Network — QUIC)
-// Spec:  internal/specs/net-framework.md §6.10 (Phase 4 — Multipath)
-//        draft-ietf-quic-multipath-21
+// Spec: internal/specs/net-framework.md §6.10 (Phase 4 — Multipath)
+//  draft-ietf-quic-multipath-21
 // =============================================================================
 //
+
 // Multipath QUIC lets a single QUIC connection use *multiple network
 // paths* simultaneously — wifi + cellular on a phone, dual-homed
 // servers, link aggregation across SR-IOV NICs. Throughput aggregates;
 // resilience is automatic; an idle path is hot-swappable to a primary
 // without renegotiation.
 //
+
 // Wire-format additions over RFC 9000 single-path QUIC:
 //
-//   * Per-path packet-number space — each path has its own PN
-//     (largest_acked, sent_packets, ack_ranges, keys) so a packet
-//     loss on one path doesn't artificially shrink another's window.
+
+//  * Per-path packet-number space — each path has its own PN
+//  (largest_acked, sent_packets, ack_ranges, keys) so a packet
+//  loss on one path doesn't artificially shrink another's window.
 //
-//   * QuicPath Identifier (varint) prepended to every long-header packet
-//     once multipath is negotiated — indexes the PathSet entry.
+
+//  * QuicPath Identifier (varint) prepended to every long-header packet
+//  once multipath is negotiated — indexes the PathSet entry.
 //
-//   * MP_NEW_PATH frame (type 0x15228c00) — server announces a new
-//     server-side path to the client + the CID it issued for that
-//     path.
+
+//  * MP_NEW_PATH frame (type 0x15228c00) — server announces a new
+//  server-side path to the client + the CID it issued for that
+//  path.
 //
-//   * MP_RETIRE_PATH frame (type 0x15228c01) — either peer signals
-//     a path is no longer in use; the receiver tears down the path's
-//     keys + PN-space + scheduler entry.
+
+//  * MP_RETIRE_PATH frame (type 0x15228c01) — either peer signals
+//  a path is no longer in use; the receiver tears down the path's
+//  keys + PN-space + scheduler entry.
 //
-//   * MP_ACK frame (type 0x15228c02 / 0x15228c03 with ECN) — ACK
-//     per-path, indexed by QuicPath Identifier.
+
+//  * MP_ACK frame (type 0x15228c02 / 0x15228c03 with ECN) — ACK
+//  per-path, indexed by QuicPath Identifier.
 //
+
 // QuicPath scheduler:
 //
+
 // The scheduler decides which path each next-out packet uses. The
 // module ships three production-tested algorithms:
 //
-//   * RoundRobinScheduler — fair distribution; default for
-//     symmetric-bandwidth deployments.
-//   * WeightedScheduler — caller-supplied per-path weights; e.g.
-//     wifi=10, cellular=1 if cellular is metered.
-//   * LowestRttScheduler — picks the path with the smallest smoothed
-//     RTT; minimises tail latency on heterogeneous paths.
+
+//  * RoundRobinScheduler — fair distribution; default for
+//  symmetric-bandwidth deployments.
+//  * WeightedScheduler — caller-supplied per-path weights; e.g.
+//  wifi=10, cellular=1 if cellular is metered.
+//  * LowestRttScheduler — picks the path with the smallest smoothed
+//  RTT; minimises tail latency on heterogeneous paths.
 //
+
 // Custom schedulers implement `MultipathScheduler` directly.
 //
+
 // =============================================================================
 
 module core.net.quic.multipath;
@@ -286,6 +298,7 @@ implement MultipathScheduler for RoundRobinScheduler {
 // WeightedScheduler — picks proportional to per-path weight
 // -----------------------------------------------------------------------------
 //
+
 // Stride-scheduler variant of weighted round-robin. Each path has a
 // `pass_count` counter; on every pick we choose the path with the
 // minimum (pass_count / weight). Retired paths are skipped.
@@ -377,6 +390,7 @@ implement MultipathScheduler for LowestRttScheduler {
 // MP_NEW_PATH / MP_RETIRE_PATH frame codepoints
 // =============================================================================
 //
+
 // draft-ietf-quic-multipath-21 §3.4 — frame type codepoints. The
 // integration layer wires these into the QUIC frame codec when the
 // transport-parameter `enable_multipath` is negotiated.

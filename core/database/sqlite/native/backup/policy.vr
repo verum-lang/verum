@@ -3,17 +3,21 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling)
 //
+
 // Throttling determines how aggressively the backup process copies
 // pages. Two facets:
 //
-//   * `pages_per_step`  — pages copied per call to `BackupEngineHandle.step`
-//   * `sleep_between_ns` — caller-driven inter-step wait in nanoseconds
+
+//  * `pages_per_step` — pages copied per call to `BackupEngineHandle.step`
+//  * `sleep_between_ns` — caller-driven inter-step wait in nanoseconds
 //
+
 // Three pre-canned policies cover the common cases:
 //
-//   * `unlimited()`        — copy as fast as the I/O subsystem allows
-//   * `bounded(n, sleep)`  — `n` pages per step + constant sleep
-//   * `adaptive_load()`    — slow down when source-write rate is high
+
+//  * `unlimited()` — copy as fast as the I/O subsystem allows
+//  * `bounded(n, sleep)` — `n` pages per step + constant sleep
+//  * `adaptive_load()` — slow down when source-write rate is high
 // =============================================================================
 
 module core.database.sqlite.native.backup.policy;
@@ -80,6 +84,7 @@ implement ThrottlePolicy for Bounded {
 // AdaptiveLoad — back off when source is busy
 // -----------------------------------------------------------------------------
 //
+
 // Maintains an exponential-moving-average of recent source-write
 // counts. When the EMA exceeds `threshold_writes`, halves the
 // next-step page count (down to 1) and doubles the sleep.

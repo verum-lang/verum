@@ -1,22 +1,26 @@
 //! HIT eliminator
 //! β-reduction tests.
 //!
+
 //! The standard inductive β-rule is:
 //!
-//!     Elim(motive, [c₀, c₁, …, cₙ]) ( C(arg₁, …, argₘ) )
-//!       ↦ App-chain(cᵢ, arg₁, …, argₘ, recursor-calls)
+
+//!  Elim(motive, [c₀, c₁, …, cₙ]) ( C(arg₁, …, argₘ) )
+//!  ↦ App-chain(cᵢ, arg₁, …, argₘ, recursor-calls)
 //!
+
 //! where C is the i-th point ctor of the parent inductive and
 //! every recursive argument argⱼ (whose declared ctor type is the
 //! same parent inductive) is followed by a recursor call
 //! `Elim(motive, cases)(argⱼ)`. This matches the dependent-elim
 //! shape Coq / Lean / Agda generate automatically.
 //!
+
 //! Path-constructor β-rule (path substitution) is V3.1 follow-up;
 //! these tests cover point-ctor β-rule on:
-//!   • Bool — non-recursive ctors, two cases
-//!   • Nat  — recursive Succ ctor, recursor call insertion
-//!   • S¹   — point ctor only (path ctor scrutinee remains neutral)
+//!  • Bool — non-recursive ctors, two cases
+//!  • Nat — recursive Succ ctor, recursor call insertion
+//!  • S¹ — point ctor only (path ctor scrutinee remains neutral)
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
@@ -48,7 +52,7 @@ fn elim(scrutinee: CoreTerm, motive: CoreTerm, cases: Vec<CoreTerm>) -> CoreTerm
 }
 
 // =============================================================================
-// Bool β-rule — Elim(case_T, case_F)(True)  ↦ case_T  (no args, no recursion)
+// Bool β-rule — Elim(case_T, case_F)(True) ↦ case_T (no args, no recursion)
 // =============================================================================
 
 #[test]
@@ -166,8 +170,8 @@ fn nat_elim_beta_reduces_zero_to_zero_case() {
 #[test]
 fn nat_elim_beta_reduces_succ_with_recursor_call() {
     // Elim(motive, [zero, succ_case])(Succ(Zero))
-    //   ↦ App(App(succ_case, Zero), Elim(motive, [...])(Zero))
-    //   ↦ App(App(succ_case, Zero), case_zero)        (after recursive β)
+    //  ↦ App(App(succ_case, Zero), Elim(motive, [...])(Zero))
+    //  ↦ App(App(succ_case, Zero), case_zero) (after recursive β)
     let mut reg = InductiveRegistry::new();
     reg.register(nat_inductive()).unwrap();
 
@@ -197,8 +201,8 @@ fn nat_elim_beta_reduces_succ_with_recursor_call() {
 #[test]
 fn nat_elim_beta_reduces_succ_succ_with_two_recursor_calls() {
     // Elim(motive, [zero, succ])(Succ(Succ(Zero)))
-    //   ↦ App(App(succ, Succ(Zero)), Elim(...)(Succ(Zero)))
-    //   ↦ App(App(succ, Succ(Zero)), App(App(succ, Zero), case_zero))
+    //  ↦ App(App(succ, Succ(Zero)), Elim(...)(Succ(Zero)))
+    //  ↦ App(App(succ, Succ(Zero)), App(App(succ, Zero), case_zero))
     let mut reg = InductiveRegistry::new();
     reg.register(nat_inductive()).unwrap();
 

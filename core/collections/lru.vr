@@ -5,45 +5,57 @@
 // Dependencies: core, core.collections.map
 // =============================================================================
 //
+
 // The simpler companion to `TtlCache`: pure capacity-bounded LRU
 // with no TTL. The workhorse cache every user-level codebase needs
 // for memoization, decoded-parse cache, request→response cache,
 // read-through DB cache, etc.
 //
+
 // Differences from `TtlCache`:
 //
-//   * No expiration — entries stay until evicted by capacity pressure.
-//   * Simpler API (no TTL override, no `purge_expired`).
-//   * Returns a previous-value-on-insert when a key replaces an
-//     existing entry — useful for refcount bookkeeping.
+
+//  * No expiration — entries stay until evicted by capacity pressure.
+//  * Simpler API (no TTL override, no `purge_expired`).
+//  * Returns a previous-value-on-insert when a key replaces an
+//  existing entry — useful for refcount bookkeeping.
 //
+
 // If both capacity AND time-based eviction are needed, use
 // `TtlCache`. If only time-based expiration, `core.base.cell` +
 // `core.time` are usually enough.
 //
+
 // # API
 //
+
 // ```
 // let mut cache: LruCache<Text, User> = LruCache.new(1024);
 //
-// let prev = cache.insert(key.clone(), user);   // returns Maybe<User>
+
+// let prev = cache.insert(key.clone(), user); // returns Maybe<User>
 // match cache.get(&key) { Some(u) => ..., None => ... }
 //
+
 // cache.remove(&key);
 // cache.clear();
-// let stats = cache.stats();       // hits / misses / evicted
+// let stats = cache.stats(); // hits / misses / evicted
 // ```
 //
+
 // # Cost
 //
-//   * Lookup + insert: O(1) amortised (hash map lookup) +
-//     O(n) worst-case on the order-tracking list.
-//   * Eviction: O(1) (pops from list front).
+
+//  * Lookup + insert: O(1) amortised (hash map lookup) +
+//  O(n) worst-case on the order-tracking list.
+//  * Eviction: O(1) (pops from list front).
 //
+
 // A doubly-linked-list upgrade for truly O(1) insert/get
 // arrives in a follow-up when a concrete caller demonstrates
 // the >10k-entry working set where it matters.
 //
+
 // =============================================================================
 
 module core.collections.lru;

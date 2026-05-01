@@ -96,7 +96,7 @@ public fn walk_mode_name(w: &JsonTreeWalkMode) -> Text {
     }
 }
 
-// Estimated row count for cardinality hints.  TopOnly returns at most
+// Estimated row count for cardinality hints. TopOnly returns at most
 // `direct_children`; DepthFirst returns total node count.
 public fn estimate_rows(v: &Variant, direct_children: Int64, total_nodes: Int64) -> Int64 {
     match v {

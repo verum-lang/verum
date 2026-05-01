@@ -1,22 +1,28 @@
 //! VBC module serialization.
 //!
+
 //! This module provides serialization of VBC modules to binary format.
 //! The output is a self-contained `.vbc` file that can be loaded for
 //! interpretation, JIT, or AOT compilation.
 //!
+
 //! ## Compression Support
 //!
+
 //! VBC files can be compressed using zstd or lz4 to reduce storage and improve
 //! load times (CPU-bound decompression is often faster than disk I/O for
 //! compressed data).
 //!
+
 //! ```rust,ignore
 //! use verum_vbc::serialize::{serialize_module, serialize_module_compressed};
 //! use verum_vbc::compression::CompressionOptions;
 //!
+
 //! // Serialize without compression (default)
 //! let bytes = serialize_module(&module)?;
 //!
+
 //! // Serialize with zstd compression
 //! let compressed = serialize_module_compressed(&module, CompressionOptions::zstd())?;
 //! ```
@@ -49,22 +55,27 @@ pub fn serialize_module(module: &VbcModule) -> VbcResult<Vec<u8>> {
 
 /// Serializes a VBC module to binary format with optional compression.
 ///
+
 /// The bytecode section is compressed using the specified algorithm if it
 /// meets the size threshold. Other sections (string table, extensions) are
 /// not compressed as they're typically smaller and already compact.
 ///
+
 /// # Arguments
 /// * `module` - The VBC module to serialize
 /// * `options` - Compression options (algorithm, level, threshold)
 ///
+
 /// # Example
 /// ```rust,ignore
 /// use verum_vbc::compression::CompressionOptions;
 /// use verum_vbc::serialize::serialize_module_compressed;
 ///
+
 /// // With zstd compression (default settings)
 /// let bytes = serialize_module_compressed(&module, CompressionOptions::zstd())?;
 ///
+
 /// // With lz4 for faster decompression
 /// let bytes = serialize_module_compressed(&module, CompressionOptions::lz4())?;
 /// ```
@@ -150,11 +161,11 @@ impl Serializer {
 
         // Compute content hash using blake3 (truncated to u64 for header).
         // blake3::Hash::as_bytes() always returns a 32-byte buffer; `[..8]`
-        // on it is statically safe.  We use `expect` rather than
+        // on it is statically safe. We use `expect` rather than
         // `unwrap_or([0u8; 8])` because the silent-zero fallback would
         // DEFEAT the integrity check entirely — every module would write
         // a zero hash and every verify-side recompute would match it,
-        // making tampering undetectable.  Panic-on-impossible is
+        // making tampering undetectable. Panic-on-impossible is
         // architecturally correct; an all-zero hash is worse than a
         // crash.
         let content_hash = {
@@ -270,15 +281,19 @@ impl Serializer {
 
     /// Serializes bytecode with optional compression.
     ///
+
     /// # Format
     ///
+
     /// The bytecode section has a compression header followed by the data:
     /// - `u8`: Compression algorithm (0=None, 1=Zstd, 2=Lz4)
     /// - `u32`: Uncompressed size (only present if algorithm != None)
     /// - `bytes`: Compressed or uncompressed bytecode
     ///
+
     /// # Returns
     ///
+
     /// Returns `(stored_size, uncompressed_size)` where stored_size is what
     /// was actually written (including compression header).
     fn serialize_bytecode(&mut self, bytecode: &[u8]) -> VbcResult<(u32, u32)> {
@@ -616,18 +631,20 @@ impl Serializer {
 
     /// Serializes the extensions section (tensor metadata, FFI, dependencies).
     ///
+
     /// Returns (offset, size, extra_flags) where extra_flags are VbcFlags
     /// indicating which tensor metadata is present.
     ///
+
     /// Extension section format:
     /// - u8 section_mask: bitmask of present sections
-    ///   - 0x01: shape_metadata (tensor shapes)
-    ///   - 0x02: device_hints (GPU/CPU placement)
-    ///   - 0x04: distribution (distributed training)
-    ///   - 0x08: autodiff_graph (gradient computation)
-    ///   - 0x10: mlir_hints (optimization hints)
-    ///   - 0x20: ffi_tables (libraries, symbols, layouts)
-    ///   - 0x40: dependencies (module dependencies)
+    ///  - 0x01: shape_metadata (tensor shapes)
+    ///  - 0x02: device_hints (GPU/CPU placement)
+    ///  - 0x04: distribution (distributed training)
+    ///  - 0x08: autodiff_graph (gradient computation)
+    ///  - 0x10: mlir_hints (optimization hints)
+    ///  - 0x20: ffi_tables (libraries, symbols, layouts)
+    ///  - 0x40: dependencies (module dependencies)
     /// - For each present section: u32 length + bincode data
     fn serialize_extensions(&mut self, module: &VbcModule) -> VbcResult<(u32, u32, VbcFlags)> {
         // Check if any tensor metadata is present

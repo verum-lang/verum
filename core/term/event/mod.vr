@@ -5,10 +5,12 @@
 // Dependencies: core.time, core.io, core.term.raw
 // =============================================================================
 //
+
 // Terminal event system: keyboard, mouse, resize, paste, and focus events.
 // Includes a full ANSI input sequence parser (CSI/SS3/OSC FSM), platform
 // event source (poll/read), and sync/async EventStream.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5
 // =============================================================================
 

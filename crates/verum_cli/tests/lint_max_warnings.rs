@@ -1,10 +1,11 @@
 //! Contract for `verum lint --max-warnings N`.
 //!
+
 //! Exit-code expectations:
 //! - `--max-warnings 0`: any warning fails. Equivalent to today's
-//!   `--deny-warnings`.
+//!  `--deny-warnings`.
 //! - `--max-warnings N (>0)`: passes when warnings ≤ N, fails when
-//!   warnings > N. The error names the budget.
+//!  warnings > N. The error names the budget.
 //! - Errors always fail the run regardless of N.
 
 use std::path::PathBuf;

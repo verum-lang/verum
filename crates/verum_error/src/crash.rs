@@ -1,44 +1,51 @@
 //! Industrial-grade crash reporter for the Verum toolchain.
 //!
+
 //! # What this provides
 //!
+
 //! A single `install()` call at the start of `main` wires up:
 //!
+
 //! 1. **Panic hook** — wraps [`std::panic::set_hook`] so every Rust panic
-//!    (including ones on rayon workers, with `panic = "abort"` set) is
-//!    captured, written to a structured report on disk, and surfaces to
-//!    the user with the report path and a link to file an issue.
+//!  (including ones on rayon workers, with `panic = "abort"` set) is
+//!  captured, written to a structured report on disk, and surfaces to
+//!  the user with the report path and a link to file an issue.
 //! 2. **Fatal signal handlers** — `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGFPE`,
-//!    `SIGABRT` are trapped via `sigaction` on Unix. The handler is
-//!    best-effort async-signal-safe: it captures a backtrace (via the
-//!    `backtrace` crate — not strictly sig-safe but works in practice
-//!    for dev tools), dumps a minimal report via raw `libc::write`, then
-//!    chains to the default handler so the kernel can still produce a
-//!    core dump if configured.
+//!  `SIGABRT` are trapped via `sigaction` on Unix. The handler is
+//!  best-effort async-signal-safe: it captures a backtrace (via the
+//!  `backtrace` crate — not strictly sig-safe but works in practice
+//!  for dev tools), dumps a minimal report via raw `libc::write`, then
+//!  chains to the default handler so the kernel can still produce a
+//!  core dump if configured.
 //! 3. **Environment snapshot** — captured once at install time
-//!    (version, git SHA, rustc, OS, arch, args, env) so reports are
-//!    self-contained even when the user cannot reproduce.
+//!  (version, git SHA, rustc, OS, arch, args, env) so reports are
+//!  self-contained even when the user cannot reproduce.
 //! 4. **Breadcrumb trail** — see [`crate::breadcrumb`]. Attached to
-//!    every report so the dev can see the last known phase of the
-//!    compilation pipeline before the crash.
+//!  every report so the dev can see the last known phase of the
+//!  compilation pipeline before the crash.
 //! 5. **Report store** — reports are written to
-//!    `~/.verum/crashes/verum-<ISO-TS>-<short-uid>.{json,log}` with
-//!    bounded retention (default: last 50). The JSON is stable, schema-
-//!    versioned; the `.log` is a human-friendly render.
+//!  `~/.verum/crashes/verum-<ISO-TS>-<short-uid>.{json,log}` with
+//!  bounded retention (default: last 50). The JSON is stable, schema-
+//!  versioned; the `.log` is a human-friendly render.
 //!
+
 //! # Signal-safety caveats
 //!
+
 //! A hard fault may leave the process in an inconsistent state. We do
 //! our best:
 //!
+
 //! - Use `sigaltstack` so a stack overflow still lands the handler.
 //! - Pre-allocate the crash-report directory at install time so we
-//!   don't need to create dirs on the signal path.
+//!  don't need to create dirs on the signal path.
 //! - Write the minimal report via raw `libc::write` to avoid the
-//!   `std::io` machinery (which takes locks).
+//!  `std::io` machinery (which takes locks).
 //! - Chain to the original handler so `ulimit -c`-configured core
-//!   dumps keep working.
+//!  dumps keep working.
 //!
+
 //! The fuller JSON report attempted in the signal path may fail if
 //! global allocator state is poisoned. This is acceptable: you still
 //! get the minimal `.log` plus (optionally) the OS core dump.
@@ -1075,6 +1082,7 @@ unsafe fn install_signal_handlers_unix() {}
 
 // ----- signal handling (Windows) -----
 //
+
 // `SetUnhandledExceptionFilter` fires before the Windows Error
 // Reporting dialog. We write the structured crash report, then return
 // `EXCEPTION_CONTINUE_SEARCH` so the OS still runs its default chain

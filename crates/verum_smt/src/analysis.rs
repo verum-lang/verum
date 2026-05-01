@@ -1,15 +1,19 @@
 //! Formal Analysis (Real Analysis) with SMT Verification
 //!
+
 //! Comprehensive implementation of real analysis concepts with Z3-based verification
 //! of fundamental theorems and properties.
 //!
+
 //! Implements formal real analysis verification: complete ordered fields with the
 //! completeness axiom (every bounded non-empty set has a supremum), epsilon-delta
 //! limits, continuity (point-wise and uniform), and key theorems (IVT, EVT).
 //! Uses Z3's nonlinear real arithmetic (NRA) theory for verification.
 //!
+
 //! ## Features
 //!
+
 //! - **Complete Ordered Fields**: Real numbers with completeness axiom
 //! - **Limits**: Epsilon-delta definition and verification
 //! - **Continuity**: Point-wise and uniform continuity
@@ -17,29 +21,37 @@
 //! - **Key Theorems**: Intermediate Value Theorem, Extreme Value Theorem
 //! - **Z3 Integration**: Non-linear real arithmetic (NRA) support
 //!
+
 //! ## Performance Targets
 //!
+
 //! - Limit verification: < 200ms per property
 //! - Continuity check: < 150ms per function at point
 //! - Theorem verification: < 500ms per theorem
 //! - Sequence convergence: < 100ms per sequence
 //!
+
 //! ## Architecture
 //!
+
 //! All verification operations return `ProofTerm` evidence that can be:
 //! - Exported to proof assistants (Coq, Lean, Isabelle)
 //! - Used for gradual verification
 //! - Cached for incremental compilation
 //!
+
 //! ## Examples
 //!
+
 //! ```rust,no_run
 //! use verum_smt::analysis::{AnalysisVerifier, RealFunction};
 //! use verum_smt::Context;
 //!
+
 //! let ctx = Context::new();
 //! let mut verifier = AnalysisVerifier::new();
 //!
+
 //! // Verify continuity of f(x) = x^2 at x = 2
 //! let f = RealFunction::polynomial(vec![0.0, 0.0, 1.0].into()); // x^2
 //! let proof = verifier.verify_continuity_at(&ctx, &f, 2.0).unwrap();
@@ -105,9 +117,11 @@ pub enum AnalysisError {
 
 /// Complete ordered field structure (models real numbers)
 ///
+
 /// Models the real numbers as a complete ordered field satisfying:
 /// `forall(S: Set<R>). bounded_above(S) AND S != empty => exists(sup: R). is_supremum(S, sup)`.
 ///
+
 /// A complete ordered field is an ordered field satisfying the completeness axiom:
 /// Every non-empty set bounded above has a least upper bound (supremum).
 #[derive(Debug, Clone)]
@@ -143,6 +157,7 @@ impl CompleteOrderedField {
 
     /// Verify completeness axiom: every non-empty bounded-above set has a supremum
     ///
+
     /// Verify the completeness axiom: every non-empty bounded-above set has a supremum.
     pub fn verify_completeness(
         &mut self,
@@ -192,6 +207,7 @@ impl CompleteOrderedField {
 
 /// Representation of a real-valued function
 ///
+
 /// For SMT verification, functions are represented symbolically or as
 /// concrete implementations.
 #[derive(Debug, Clone)]
@@ -288,6 +304,7 @@ impl RealFunction {
 
 /// Limit definition: lim_{x -> a} f(x) = L
 ///
+
 /// Epsilon-delta limit definition:
 /// ∀ε > 0. ∃δ > 0. ∀x. 0 < |x - a| < δ → |f(x) - L| < ε
 #[derive(Debug, Clone)]
@@ -318,6 +335,7 @@ impl Limit {
 
     /// Verify the limit using epsilon-delta definition
     ///
+
     /// For numerical verification, we check specific epsilon values and
     /// find corresponding delta.
     pub fn verify(&mut self, ctx: &Context) -> AnalysisResult<ProofTerm> {
@@ -344,6 +362,7 @@ impl Limit {
 
     /// Find delta for given epsilon
     ///
+
     /// For polynomial f(x), |f(x) - f(a)| < ε requires δ proportional to ε/M
     /// where M is an upper bound on |f'(x)| near a.
     fn find_delta(&self, epsilon: f64) -> AnalysisResult<f64> {
@@ -436,6 +455,7 @@ impl Limit {
 
 /// Continuity at a point
 ///
+
 /// A function f is continuous at a if: lim_{x -> a} f(x) = f(a)
 #[derive(Debug, Clone)]
 pub struct Continuity {
@@ -461,6 +481,7 @@ impl Continuity {
 
     /// Verify continuity at the point
     ///
+
     /// f is continuous at a if:
     /// 1. f(a) is defined
     /// 2. lim_{x -> a} f(x) exists
@@ -544,6 +565,7 @@ impl RealSequence {
 
     /// Check if sequence is Cauchy
     ///
+
     /// A sequence is Cauchy if for every ε > 0, there exists N such that
     /// for all m, n > N, |a_m - a_n| < ε
     pub fn is_cauchy(&self, epsilon: f64) -> bool {
@@ -615,6 +637,7 @@ impl RealSequence {
 
 /// Analysis theorem verifier with Z3 integration
 ///
+
 /// Provides verification of fundamental analysis theorems using Z3's
 /// non-linear real arithmetic (NRA) theory.
 pub struct AnalysisVerifier {
@@ -632,6 +655,7 @@ impl AnalysisVerifier {
 
     /// Verify continuity of a function at a point
     ///
+
     /// Verify continuity at a point: `lim_{x -> a} f(x) = f(a)`.
     pub fn verify_continuity_at(
         &mut self,
@@ -645,6 +669,7 @@ impl AnalysisVerifier {
 
     /// Verify Intermediate Value Theorem
     ///
+
     /// Intermediate Value Theorem: if f is continuous on [a, b] and f(a) < 0 < f(b), then there exists
     /// c ∈ (a, b) such that f(c) = 0.
     pub fn verify_intermediate_value_theorem(
@@ -700,6 +725,7 @@ impl AnalysisVerifier {
 
     /// Verify Extreme Value Theorem
     ///
+
     /// If f is continuous on [a, b], then f attains its maximum and minimum
     /// on [a, b].
     pub fn verify_extreme_value_theorem(
@@ -747,6 +773,7 @@ impl AnalysisVerifier {
 
     /// Verify Bolzano-Weierstrass Theorem
     ///
+
     /// Every bounded sequence has a convergent subsequence.
     pub fn verify_bolzano_weierstrass(
         &mut self,
@@ -900,6 +927,7 @@ impl Default for AnalysisVerifier {
 
 /// Uniform continuity on an interval
 ///
+
 /// A function f is uniformly continuous on [a, b] if:
 /// ∀ε > 0. ∃δ > 0. ∀x, y ∈ [a, b]. |x - y| < δ → |f(x) - f(y)| < ε
 #[derive(Debug, Clone)]

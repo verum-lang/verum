@@ -48,9 +48,9 @@ fn main() {{
     print(f"Sum: {{sum}}");
 
     // Three-tier references:
-    //   &T         — managed (~15ns CBGR check)
-    //   &checked T — compiler-proven (0ns)
-    //   &unsafe T  — manual proof (0ns, requires @unsafe)
+    //  &T — managed (~15ns CBGR check)
+    //  &checked T — compiler-proven (0ns)
+    //  &unsafe T — manual proof (0ns, requires @unsafe)
 }}
 "#,
                 name = name

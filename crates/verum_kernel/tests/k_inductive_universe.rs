@@ -1,5 +1,6 @@
 //! K-Inductive universe-level integration tests (V8, #215).
 //!
+
 //! Pre-V8 the kernel's `infer` arm for `CoreTerm::Inductive` returned
 //! `Universe(Concrete(0))` regardless of the declared level — silently
 //! demoting HoTT-level types to set-level. V8 ships

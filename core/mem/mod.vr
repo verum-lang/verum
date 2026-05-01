@@ -5,48 +5,56 @@
 // Dependencies: sys/common, sys/{platform}/mem
 // =============================================================================
 //
+
 // This module provides the CBGR (Counter-Based Generation Reference) memory
 // safety system and allocator infrastructure for the Verum standard library.
 //
+
 // # Architecture
 //
+
 // ```
 // ┌─────────────────────────────────────────────────────────────────────┐
-// │                        std.mem Module                               │
+// │ std.mem Module │
 // ├─────────────────────────────────────────────────────────────────────┤
-// │  allocator.vr      - CBGR-aware allocator with inline headers      │
-// │  header.vr         - AllocationHeader (32 bytes, cache-aligned)    │
-// │  thin_ref.vr       - ThinRef<T> (16 bytes, sized types)            │
-// │  fat_ref.vr        - FatRef<T> (32 bytes, unsized types)           │
-// │  hazard.vr         - Hazard pointer system (race protection)       │
-// │  epoch.vr          - Epoch management (wraparound safety)          │
-// │  capability.vr     - Capability flags for access control           │
+// │ allocator.vr - CBGR-aware allocator with inline headers │
+// │ header.vr - AllocationHeader (32 bytes, cache-aligned) │
+// │ thin_ref.vr - ThinRef<T> (16 bytes, sized types) │
+// │ fat_ref.vr - FatRef<T> (32 bytes, unsized types) │
+// │ hazard.vr - Hazard pointer system (race protection) │
+// │ epoch.vr - Epoch management (wraparound safety) │
+// │ capability.vr - Capability flags for access control │
 // └─────────────────────────────────────────────────────────────────────┘
-//                              │
-//                              ▼
+//  │
+//  ▼
 // ┌─────────────────────────────────────────────────────────────────────┐
-// │                     sys/ Platform Layer                             │
-// │  sys/linux/mem.vr    - mmap, munmap, mprotect                      │
-// │  sys/darwin/libsystem.vr - mmap, munmap, mprotect                  │
-// │  sys/windows/kernel32.vr - VirtualAlloc, VirtualFree               │
+// │ sys/ Platform Layer │
+// │ sys/linux/mem.vr - mmap, munmap, mprotect │
+// │ sys/darwin/libsystem.vr - mmap, munmap, mprotect │
+// │ sys/windows/kernel32.vr - VirtualAlloc, VirtualFree │
 // └─────────────────────────────────────────────────────────────────────┘
 // ```
 //
+
 // # CBGR Overview
 //
+
 // CBGR provides memory safety without garbage collection by:
 // 1. Prepending a 32-byte header to each allocation
 // 2. Storing generation + epoch in references (ThinRef/FatRef)
 // 3. Validating generation on each dereference (~15ns)
 // 4. Using hazard pointers to prevent race conditions
 //
+
 // # Performance Targets
 //
+
 // - CBGR check: ~15ns per dereference (Tier 0)
 // - CBGR check (hot path): ~5ns (Tier 1+ with inlining)
 // - Memory overhead: 32 bytes per allocation header
 // - Reference overhead: 16 bytes (ThinRef) or 32 bytes (FatRef)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 6
 // =============================================================================
 
@@ -153,7 +161,7 @@ public mount .heap.{
 
 /// Read-only introspection surface for CBGR-managed allocations.
 /// Used by panic post-mortem dumps, runtime monitoring, and (eventually)
-/// live debugger / observer integrations.  See `mem/diagnostics.vr` for
+/// live debugger / observer integrations. See `mem/diagnostics.vr` for
 /// the design rationale and memory-ordering contract.
 public mount .diagnostics.{
     MemHeaderView, header_view_of,
@@ -162,8 +170,8 @@ public mount .diagnostics.{
 };
 
 /// Capability-audit event type — one auditable CBGR state transition
-/// (revoke / attenuate / ref_count change / generation bump).  Format-
-/// stable boundary that observers code against.  See `mem/cap_audit.vr`
+/// (revoke / attenuate / ref_count change / generation bump). Format-
+/// stable boundary that observers code against. See `mem/cap_audit.vr`
 /// for the design rationale.
 public mount .cap_audit.{
     CapEvent, CapEventKind,
@@ -174,7 +182,7 @@ public mount .cap_audit.{
 
 /// Capability-audit ring buffer — lock-free SPMC storage for CapEvent.
 /// Producers call `commit(event)` from CBGR write sites; observers
-/// snapshot the recent history via `recent(n)`.  See
+/// snapshot the recent history via `recent(n)`. See
 /// `mem/cap_audit_ring.vr` for the design rationale and seqlock
 /// concurrency protocol.
 public mount .cap_audit_ring.{

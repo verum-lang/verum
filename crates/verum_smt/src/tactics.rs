@@ -1,8 +1,10 @@
 //! Z3 Tactics and Strategies Module
 //!
+
 //! This module provides a comprehensive wrapper around Z3's tactics system,
 //! enabling sophisticated proof search strategies and formula simplification.
 //!
+
 //! Based on experiments/z3.rs documentation.
 //! Performance targets: CBGR check <15ns (L1 cache hot), type inference <100ms/10K LOC,
 //! compilation >50K LOC/sec, runtime 0.85-0.95x native C, memory overhead <5%.
@@ -141,13 +143,13 @@ pub enum TacticCombinator {
     ParOr(List<TacticCombinator>),
 
     /// Soft-fail: try `t`; if it fails, succeed silently (leave the
-    /// goal unchanged).  Equivalent to `OrElse(t, skip)` — the
+    /// goal unchanged). Equivalent to `OrElse(t, skip)` — the
     /// simplifier desugars accordingly per
     /// `verum_verification::tactic_combinator::canonical_laws`'s
     /// `try-equals-orelse-skip` rule.
     Try(Box<TacticCombinator>),
 
-    /// First-success choice over `n` alternatives.  `FirstOf([t])`
+    /// First-success choice over `n` alternatives. `FirstOf([t])`
     /// reduces to `t`; `FirstOf([t1, t2, ...])` reduces to a
     /// left-folded `OrElse` chain (which the simplifier then
     /// right-associates per `OrelseAssociative`).
@@ -160,9 +162,9 @@ pub enum TacticCombinator {
     /// goal).
     Solve(Box<TacticCombinator>),
 
-    /// Apply `t` to every open goal.  At the per-goal dispatcher
+    /// Apply `t` to every open goal. At the per-goal dispatcher
     /// level the operational semantics is identity (single-goal in,
-    /// list-of-goals out — same as `t`).  The catalogue law
+    /// list-of-goals out — same as `t`). The catalogue law
     /// `all-goals-of-skip-is-skip` lands at the simplifier level:
     /// `AllGoals(skip) ↪ skip`.
     AllGoals(Box<TacticCombinator>),
@@ -230,6 +232,7 @@ pub struct TacticStats {
 
 /// Thread-safe statistics for parallel tactic execution.
 ///
+
 /// Used internally by `ParOr` combinator to aggregate statistics
 /// from multiple parallel tactic executions.
 #[derive(Debug)]
@@ -325,6 +328,7 @@ impl AtomicTacticStats {
 
 /// Strategy builder for complex proof search
 ///
+
 /// Note: In z3 0.19.4, Context is thread-local and doesn't need to be stored.
 pub struct StrategyBuilder {
     /// Current strategy
@@ -422,6 +426,7 @@ impl StrategyBuilder {
 
 /// Tactic executor for applying strategies
 ///
+
 /// Note: In z3 0.19.4, Context is thread-local and doesn't need to be stored.
 #[derive(Debug)]
 pub struct TacticExecutor {
@@ -529,9 +534,9 @@ impl TacticExecutor {
                 }
             }
             TacticCombinator::FirstOf(branches) => {
-                // First-success choice.  Iterate through branches in
+                // First-success choice. Iterate through branches in
                 // order; return the first non-empty + succeeded
-                // result.  Empty branches list ⇒ fail (empty result).
+                // result. Empty branches list ⇒ fail (empty result).
                 for branch in branches.iter() {
                     let goals = self.apply_combinator(goal, branch);
                     if !goals.is_empty() && self.stats.succeeded {
@@ -541,8 +546,8 @@ impl TacticExecutor {
                 List::new()
             }
             TacticCombinator::Solve(inner) => {
-                // Total-discharge gate.  Run `inner`; if the result
-                // is empty (proof complete), succeed.  Otherwise
+                // Total-discharge gate. Run `inner`; if the result
+                // is empty (proof complete), succeed. Otherwise
                 // mark stats.succeeded=false and return empty.
                 let goals = self.apply_combinator(goal, inner);
                 if goals.is_empty() {
@@ -617,23 +622,28 @@ impl TacticExecutor {
 
     /// Apply a tactic combinator with timeout enforcement.
     ///
+
     /// Uses a separate thread with channel communication to enforce timeout.
     /// When the timeout is exceeded, returns an empty goal list (tactic failure)
     /// and increments the timeout counter in statistics.
     ///
+
     /// # Arguments
     /// * `goal` - The goal to apply the tactic to
     /// * `combinator` - The tactic combinator to apply
     /// * `timeout` - Maximum duration to wait for the tactic to complete
     ///
+
     /// # Returns
     /// List of resulting goals, or empty list if timeout exceeded
     ///
+
     /// # Implementation Strategy
     /// Due to Z3's thread-local context model, we use a hybrid approach:
     /// 1. For leaf tactics (Single), we use Z3's native timeout via Params
     /// 2. For compound tactics, we monitor elapsed time and abort early
     ///
+
     /// This ensures thread safety while still providing timeout guarantees.
     fn apply_combinator_with_timeout(
         &mut self,
@@ -657,6 +667,7 @@ impl TacticExecutor {
 
     /// Internal helper for timeout-aware combinator application.
     ///
+
     /// Recursively applies the combinator while checking elapsed time.
     /// For leaf tactics, injects Z3 timeout parameters.
     fn apply_combinator_with_timeout_tracking(
@@ -815,11 +826,14 @@ impl TacticExecutor {
 
     /// Apply tactics in parallel with timeout enforcement.
     ///
+
     /// Similar to `apply_parallel_portfolio` but respects the overall timeout
     /// constraint. Each tactic gets the remaining time as its timeout.
     ///
+
     /// # Thread Safety
     ///
+
     /// Uses crossbeam scoped threads to run tactics in parallel while respecting
     /// Z3's thread-local context model. Tactics are tried in parallel to find
     /// which one succeeds fastest, then the winner is replayed on the main thread.
@@ -889,12 +903,14 @@ impl TacticExecutor {
                         // Creating a new context per thread is expensive and goal formulas cannot
                         // be directly transferred between contexts without serialization.
                         //
+
                         // Current approach: We create an empty goal and use parallel execution
                         // as a "racing" mechanism to identify which tactic is most likely to
                         // succeed quickly. The actual proof work is done in the sequential
                         // fallback section below, or by re-running the winning tactic on the
                         // main thread after parallel exploration.
                         //
+
                         // For production use cases with large goals:
                         // - Consider Z3's built-in parallel SAT solving (set parallel.enable=true)
                         // - Use process-based parallelism (spawn z3 subprocesses)
@@ -1024,6 +1040,7 @@ impl TacticExecutor {
 
     /// Apply a tactic combinator with custom parameters.
     ///
+
     /// Converts TacticParams to Z3 Params and applies them to the tactic execution.
     /// This enables fine-grained control over tactic behavior including:
     /// - Memory limits
@@ -1031,11 +1048,13 @@ impl TacticExecutor {
     /// - Timeout constraints
     /// - Custom boolean options
     ///
+
     /// # Arguments
     /// * `goal` - The goal to apply the tactic to
     /// * `combinator` - The tactic combinator to apply
     /// * `params` - Custom parameters to configure the tactic
     ///
+
     /// # Returns
     /// List of resulting goals from the parameterized tactic application
     fn apply_combinator_with_params(
@@ -1146,11 +1165,14 @@ impl TacticExecutor {
 
     /// Apply tactics in parallel with custom parameters.
     ///
+
     /// Similar to `apply_parallel_portfolio` but applies custom parameters
     /// to each tactic execution.
     ///
+
     /// # Thread Safety
     ///
+
     /// Uses crossbeam scoped threads to run tactics in parallel while respecting
     /// Z3's thread-local context model. Tactics are tried in parallel to find
     /// which one succeeds fastest, then the winner is replayed on the main thread.
@@ -1282,6 +1304,7 @@ impl TacticExecutor {
 
     /// Apply a single tactic with custom Z3 parameters.
     ///
+
     /// Converts TacticParams to Z3's native Params type and applies the tactic.
     fn apply_single_tactic_with_params(
         &mut self,
@@ -1309,6 +1332,7 @@ impl TacticExecutor {
 
     /// Convert TacticParams to Z3 Params.
     ///
+
     /// Maps our high-level parameter abstraction to Z3's native parameter system.
     /// Note: Z3 uses thread-local context, so Params::new() takes no arguments.
     fn convert_to_z3_params(params: &TacticParams) -> Params {
@@ -1362,24 +1386,30 @@ impl TacticExecutor {
 
     /// Apply tactics in parallel using a portfolio approach.
     ///
+
     /// This method executes all provided tactics concurrently using rayon's
     /// parallel iterator. The first successful tactic's result is returned,
     /// and other running tactics are allowed to complete (but their results
     /// are ignored).
     ///
+
     /// # Thread Safety
     ///
+
     /// Since Z3 Goal is not `Send`/`Sync`, we serialize the goal to SMT-LIB2
     /// format and recreate it in each thread's local Z3 context. This adds
     /// some overhead but ensures thread safety.
     ///
+
     /// # Arguments
     /// * `goal` - The goal to apply tactics to
     /// * `tactics` - List of tactics to try in parallel
     ///
+
     /// # Returns
     /// The result from the first successful tactic, or an empty list if all fail
     ///
+
     /// # Performance Considerations
     /// - Uses rayon's work-stealing for efficient parallel execution
     /// - Early termination signaling reduces wasted work (via AtomicBool)
@@ -1511,12 +1541,14 @@ impl TacticExecutor {
 
 /// Collection of predefined strategies for common scenarios.
 ///
+
 /// These strategies are designed to be robust and efficient for common
 /// verification scenarios. Each strategy is carefully composed with:
 /// - Preprocessing steps for formula simplification
 /// - Domain-specific tactics for the target theory
 /// - Fallback solvers to ensure completeness
 ///
+
 /// # Strategy Design Principles
 /// 1. Always start with simplification to reduce problem size
 /// 2. Use solve-eqs to eliminate trivially satisfiable equalities
@@ -1527,6 +1559,7 @@ pub struct PredefinedStrategies;
 impl PredefinedStrategies {
     /// Strategy for QF_LIA (Quantifier-Free Linear Integer Arithmetic) problems.
     ///
+
     /// This strategy:
     /// 1. Simplifies the formula
     /// 2. Solves trivial equations
@@ -1554,6 +1587,7 @@ impl PredefinedStrategies {
 
     /// Strategy for QF_BV (Quantifier-Free Bit-Vector) problems.
     ///
+
     /// This strategy:
     /// 1. Simplifies the formula
     /// 2. Propagates bit-vector bounds
@@ -1590,6 +1624,7 @@ impl PredefinedStrategies {
 
     /// Strategy for NLA (Non-Linear Arithmetic) problems.
     ///
+
     /// Non-linear arithmetic is undecidable in general, so this strategy
     /// uses multiple approaches:
     /// 1. Simplifies and purifies arithmetic
@@ -1616,10 +1651,12 @@ impl PredefinedStrategies {
 
     /// Strategy for **cubical** type theory goals (Phase B.3).
     ///
+
     /// The cubical strategy first normalizes the goal using the
     /// cubical normalizer (`verum_types::cubical::whnf`), then
     /// dispatches the residual to Z3.
     ///
+
     /// The normalization handles:
     /// * `transport refl x ↦ x` (identity transport)
     /// * `hcomp base (refl sides) ↦ base` (trivial composition)
@@ -1627,6 +1664,7 @@ impl PredefinedStrategies {
     /// * `refl(x) @ _ ↦ x` (refl elimination)
     /// * `sym(refl(x)) ↦ refl(x)`
     ///
+
     /// After normalization, the SMT backend handles the remaining
     /// propositional / arithmetic reasoning.
     pub fn cubical() -> TacticCombinator {
@@ -1648,12 +1686,14 @@ impl PredefinedStrategies {
 
     /// Strategy for **category law simplification** (Phase D.2).
     ///
+
     /// Normalizes categorical equations by repeatedly applying:
     /// 1. Associativity: `(f ∘ g) ∘ h = f ∘ (g ∘ h)`
     /// 2. Left identity: `id ∘ f = f`
     /// 3. Right identity: `f ∘ id = f`
     /// 4. Functoriality: `F(g ∘ f) = F(g) ∘ F(f)`, `F(id) = id`
     ///
+
     /// After normalization, residual goals are discharged by `auto`.
     /// This is the primary tactic for proving equations in category
     /// theory, used by `core/math/tactics.vr::category_law_*` theorems.
@@ -1675,11 +1715,13 @@ impl PredefinedStrategies {
 
     /// Strategy for **descent checking** (Phase D — ∞-topos verification).
     ///
+
     /// Verifies the descent condition for sheaves on a site:
     /// 1. Encodes the Čech nerve as SMT constraints
     /// 2. Checks that the canonical map is an equivalence
     /// 3. Reports obstruction data if descent fails
     ///
+
     /// Used by `core/math/infinity_topos.vr::check_descent()` for
     /// compile-time sheaf condition verification.
     pub fn descent_check() -> TacticCombinator {
@@ -1700,6 +1742,7 @@ impl PredefinedStrategies {
 
     /// Strategy for QF_LRA (Quantifier-Free Linear Real Arithmetic) problems.
     ///
+
     /// Similar to QF_LIA but for real arithmetic:
     /// 1. Simplifies the formula
     /// 2. Solves equations and purifies
@@ -1724,6 +1767,7 @@ impl PredefinedStrategies {
 
     /// Strategy for propositional (SAT) problems.
     ///
+
     /// For purely propositional problems:
     /// 1. Simplifies
     /// 2. Converts to CNF if needed
@@ -1740,12 +1784,14 @@ impl PredefinedStrategies {
 
     /// Aggressive simplification strategy.
     ///
+
     /// Applies multiple simplification passes to reduce formula complexity:
     /// 1. Basic simplification
     /// 2. Equation solving
     /// 3. Symmetry reduction
     /// 4. Macro finding
     ///
+
     /// The entire pipeline is repeated up to 3 times until fixpoint.
     pub fn aggressive_simplify() -> TacticCombinator {
         let single_pass = TacticCombinator::AndThen(
@@ -1764,6 +1810,7 @@ impl PredefinedStrategies {
 
     /// Context-aware simplification strategy.
     ///
+
     /// Uses the context solver simplifier which can find additional
     /// simplifications by considering the context of each subformula.
     pub fn context_simplify() -> TacticCombinator {
@@ -1775,6 +1822,7 @@ impl PredefinedStrategies {
 
     /// Portfolio strategy trying multiple approaches in parallel.
     ///
+
     /// This strategy runs multiple specialized solvers concurrently
     /// and returns the first successful result. Good for problems
     /// where the optimal strategy is unknown.
@@ -1790,6 +1838,7 @@ impl PredefinedStrategies {
 
     /// Adaptive strategy that selects tactics based on problem characteristics.
     ///
+
     /// Uses probes to analyze the goal and select appropriate tactics:
     /// - Propositional problems: SAT
     /// - QF_BV problems: bit-vector pipeline
@@ -1801,6 +1850,7 @@ impl PredefinedStrategies {
 
     /// Default strategy with timeout.
     ///
+
     /// A robust default strategy with the specified timeout:
     /// 1. Aggressive simplification
     /// 2. Adaptive solving
@@ -1891,29 +1941,35 @@ impl TacticAnalyzer {
 
 /// Tactic composition utility for building complex verification strategies
 ///
+
 /// This provides high-level combinators for composing tactics in powerful ways,
 /// enabling sophisticated proof search and verification workflows.
 ///
+
 /// ## Examples
 ///
+
 /// ```rust,ignore
 /// use verum_smt::tactics::{TacticComposer, TacticKind};
 ///
+
 /// // Sequential composition: (simplify; solve-eqs; smt)
 /// let tactic = TacticComposer::sequence(&[
-///     TacticKind::Simplify,
-///     TacticKind::SolveEqs,
-///     TacticKind::SMT,
+///  TacticKind::Simplify,
+///  TacticKind::SolveEqs,
+///  TacticKind::SMT,
 /// ]);
 ///
+
 /// // Parallel portfolio: try multiple strategies
 /// let tactic = TacticComposer::portfolio(&[
-///     TacticKind::QFLIA,
-///     TacticKind::QFBV,
-///     TacticKind::SMT,
+///  TacticKind::QFLIA,
+///  TacticKind::QFBV,
+///  TacticKind::SMT,
 /// ]);
 /// ```
 ///
+
 /// Tactic composition for modular verification. Composes Z3 tactics in sequence
 /// (try T1, then T2 on remaining goals) or parallel (portfolio: run both, take first result).
 /// Supports combining theory-specific tactics (QF_LIA, QF_BV, SMT) for multi-theory problems.
@@ -1924,12 +1980,15 @@ pub struct TacticComposer;
 impl TacticComposer {
     /// Compose tactics in sequence
     ///
+
     /// Creates (t1 ; t2 ; ... ; tn) where each tactic is applied after the previous.
     /// This is equivalent to the `then` combinator repeated.
     ///
+
     /// # Arguments
     /// * `tactics` - List of tactics to apply sequentially
     ///
+
     /// # Returns
     /// A TacticCombinator representing the sequential composition
     pub fn sequence(tactics: &[TacticKind]) -> TacticCombinator {
@@ -1954,12 +2013,15 @@ impl TacticComposer {
 
     /// Compose tactics as alternatives (portfolio approach)
     ///
+
     /// Creates (t1 | t2 | ... | tn) where tactics are tried in order until one succeeds.
     /// This is useful for portfolio-based solving strategies.
     ///
+
     /// # Arguments
     /// * `tactics` - List of tactics to try as alternatives
     ///
+
     /// # Returns
     /// A TacticCombinator representing the portfolio
     pub fn portfolio(tactics: &[TacticKind]) -> TacticCombinator {
@@ -1981,13 +2043,16 @@ impl TacticComposer {
 
     /// Compose tactics with retry logic
     ///
+
     /// Applies a tactic repeatedly until it reaches a fixpoint or max iterations.
     /// Useful for iterative simplification and refinement.
     ///
+
     /// # Arguments
     /// * `tactic` - The tactic to repeat
     /// * `max_iterations` - Maximum number of iterations
     ///
+
     /// # Returns
     /// A TacticCombinator representing the repeated application
     pub fn repeat(tactic: TacticKind, max_iterations: usize) -> TacticCombinator {
@@ -1996,15 +2061,18 @@ impl TacticComposer {
 
     /// Compose tactics with conditional branching
     ///
+
     /// Creates an if-then-else tactic based on a probe:
     /// - If probe succeeds, apply then_tactic
     /// - Otherwise, apply else_tactic
     ///
+
     /// # Arguments
     /// * `probe` - Condition to check
     /// * `then_tactic` - Tactic to apply if probe succeeds
     /// * `else_tactic` - Tactic to apply if probe fails
     ///
+
     /// # Returns
     /// A TacticCombinator representing the conditional
     pub fn conditional(
@@ -2021,12 +2089,14 @@ impl TacticComposer {
 
     /// Build a simplification pipeline
     ///
+
     /// Creates a standard simplification strategy:
     /// - Simplify
     /// - Solve equations
     /// - Symmetry reduction
     /// - Macro finding
     ///
+
     /// This is a common preprocessing step for verification.
     pub fn simplification_pipeline() -> TacticCombinator {
         Self::sequence(&[
@@ -2039,6 +2109,7 @@ impl TacticComposer {
 
     /// Build a bit-vector solving pipeline
     ///
+
     /// Creates a strategy optimized for QF_BV problems:
     /// - Simplify
     /// - Bit-vector bounds propagation
@@ -2055,6 +2126,7 @@ impl TacticComposer {
 
     /// Build an arithmetic solving pipeline
     ///
+
     /// Creates a strategy for linear/non-linear arithmetic:
     /// - Simplify
     /// - Purify arithmetic
@@ -2080,12 +2152,14 @@ impl TacticComposer {
 
     /// Build an adaptive solving strategy
     ///
+
     /// Creates a probe-driven strategy that adapts to problem characteristics:
     /// - If propositional: use SAT
     /// - If QF_BV: use bit-vector pipeline
     /// - If QF_LIA: use linear arithmetic solver
     /// - Otherwise: use general SMT
     ///
+
     /// This is the recommended default strategy for general verification.
     pub fn adaptive_strategy() -> TacticCombinator {
         use TacticKind::*;
@@ -2115,12 +2189,15 @@ impl TacticComposer {
 
     /// Compose with parameters
     ///
+
     /// Wraps a tactic combinator with execution parameters.
     ///
+
     /// # Arguments
     /// * `combinator` - The tactic to wrap
     /// * `params` - Parameters to apply
     ///
+
     /// # Returns
     /// A TacticCombinator with parameters attached
     pub fn with_params(combinator: TacticCombinator, params: TacticParams) -> TacticCombinator {
@@ -2129,12 +2206,15 @@ impl TacticComposer {
 
     /// Compose with timeout
     ///
+
     /// Wraps a tactic combinator with a timeout constraint.
     ///
+
     /// # Arguments
     /// * `combinator` - The tactic to wrap
     /// * `timeout` - Maximum execution time
     ///
+
     /// # Returns
     /// A TacticCombinator with timeout
     pub fn with_timeout(combinator: TacticCombinator, timeout: Duration) -> TacticCombinator {
@@ -2146,6 +2226,7 @@ impl TacticComposer {
 
 /// Result of analyzing a Z3 Bool formula for tactic selection.
 ///
+
 /// Contains detailed information about formula characteristics
 /// to enable optimal tactic selection.
 #[derive(Debug, Clone, Default)]
@@ -2174,20 +2255,24 @@ pub struct FormulaCharacteristics {
 
 /// Formula-based Goal Analyzer for automatic tactic selection.
 ///
+
 /// Analyzes Z3 Bool formulas using probes to determine optimal
 /// proof search strategies. This enables significant performance
 /// improvements by selecting theory-specific tactics.
 ///
+
 /// ## Performance Characteristics
 /// - Analysis overhead: <100us per formula
 /// - Tactic selection: 2-5x speedup on specialized problems
 /// - Cache-friendly: results can be memoized
 ///
+
 /// ## Usage
 /// ```rust,ignore
 /// use verum_smt::tactics::{FormulaGoalAnalyzer, auto_select_tactic};
 /// use z3::ast::Bool;
 ///
+
 /// let analyzer = FormulaGoalAnalyzer::new();
 /// let formula: Bool = /* ... */;
 /// let tactic = auto_select_tactic(&analyzer, &formula);
@@ -2199,6 +2284,7 @@ pub struct FormulaGoalAnalyzer {
 
 /// Probe lookup that survives unrecognised probe names.
 ///
+
 /// `z3::Probe::new(name)` calls into `Z3_mk_probe(ctx, cstr)`, which
 /// returns `Option<Z3_probe>` — `None` when Z3 doesn't recognise
 /// the name. The Rust binding then `.unwrap()`s that, panicking the
@@ -2206,6 +2292,7 @@ pub struct FormulaGoalAnalyzer {
 /// panic crosses no FFI frames so this is safe) and fall back to
 /// `0.0`, which the analyser interprets as "characteristic absent".
 ///
+
 /// Cost: one panic-hook installation per failed probe (no overhead
 /// on the success path — `catch_unwind` has only a stack-anchor
 /// cost when no panic actually fires).
@@ -2250,6 +2337,7 @@ impl FormulaGoalAnalyzer {
 
     /// Analyze a Z3 Bool formula and extract its characteristics.
     ///
+
     /// Uses Z3 probes for efficient theory detection:
     /// - `is-propositional`: No theory atoms
     /// - `is-qfbv`: Quantifier-free bit-vectors
@@ -2257,6 +2345,7 @@ impl FormulaGoalAnalyzer {
     /// - `is-qfnra`: Quantifier-free nonlinear real arithmetic
     /// - `has-quantifiers`: Contains forall/exists
     ///
+
     /// Performance: <100us for typical formulas
     pub fn analyze(&mut self, formula: &z3::ast::Bool) -> FormulaCharacteristics {
         let start = Instant::now();
@@ -2293,15 +2382,17 @@ impl FormulaGoalAnalyzer {
 
     /// Analyze a Z3 Goal and extract its characteristics.
     ///
+
     /// This is the internal implementation that works directly with Goals.
     ///
+
     /// All probe lookups go through [`safe_probe`] so an unrecognized
     /// probe name (e.g. removed in a future Z3 release) degrades to
     /// `0.0` instead of panicking inside `Probe::new`. The probe
     /// names here are the subset confirmed present in Z3 ≥ 4.13.0:
-    ///   `is-propositional`, `is-qfbv`, `is-qflia`, `is-qflra`,
-    ///   `is-qfnra`, `is-qfnia`, `has-quantifiers`, `is-qfauflia`,
-    ///   `is-qfufnra`, `num-consts`.
+    ///  `is-propositional`, `is-qfbv`, `is-qflia`, `is-qflra`,
+    ///  `is-qfnra`, `is-qfnia`, `has-quantifiers`, `is-qfauflia`,
+    ///  `is-qfufnra`, `num-consts`.
     pub fn analyze_goal(&self, goal: &Goal) -> FormulaCharacteristics {
         // Theory detection probes
         let is_propositional = safe_probe("is-propositional", goal) > 0.0;
@@ -2348,6 +2439,7 @@ impl FormulaGoalAnalyzer {
 
     /// Check if a formula is purely linear arithmetic (no nonlinear terms).
     ///
+
     /// Returns true for formulas in QF_LIA or QF_LRA.
     pub fn is_linear_arithmetic(&mut self, formula: &z3::ast::Bool) -> bool {
         let goal = Goal::new(false, false, false);
@@ -2363,6 +2455,7 @@ impl FormulaGoalAnalyzer {
 
     /// Check if a formula contains bit-vector operations.
     ///
+
     /// Returns true for formulas in QF_BV.
     pub fn has_bitvectors(&mut self, formula: &z3::ast::Bool) -> bool {
         let goal = Goal::new(false, false, false);
@@ -2372,6 +2465,7 @@ impl FormulaGoalAnalyzer {
 
     /// Check if a formula contains nonlinear arithmetic.
     ///
+
     /// Returns true for formulas in QF_NRA or QF_NIA (polynomial arithmetic).
     pub fn has_nonlinear(&mut self, formula: &z3::ast::Bool) -> bool {
         let goal = Goal::new(false, false, false);
@@ -2392,6 +2486,7 @@ impl FormulaGoalAnalyzer {
 
     /// Check if a formula is purely propositional (no theory atoms).
     ///
+
     /// Returns true for formulas with only boolean connectives.
     pub fn is_propositional(&mut self, formula: &z3::ast::Bool) -> bool {
         let goal = Goal::new(false, false, false);
@@ -2401,6 +2496,7 @@ impl FormulaGoalAnalyzer {
 
     /// Count the number of unique variables in a formula.
     ///
+
     /// Uses the `num-consts` probe for efficiency.
     pub fn num_variables(&mut self, formula: &z3::ast::Bool) -> usize {
         let goal = Goal::new(false, false, false);
@@ -2427,12 +2523,15 @@ impl Default for FormulaGoalAnalyzer {
 
 /// Automatically select the optimal tactic based on formula characteristics.
 ///
+
 /// This function analyzes the formula and returns a `TacticCombinator` that
 /// is optimized for the detected theory. The selection is based on Z3 probes
 /// that efficiently detect formula properties.
 ///
+
 /// ## Strategy Selection Matrix
 ///
+
 /// | Formula Type | Tactic Strategy |
 /// |--------------|-----------------|
 /// | Propositional | simplify -> tseitin-cnf -> sat |
@@ -2443,22 +2542,27 @@ impl Default for FormulaGoalAnalyzer {
 /// | Quantified | qe -> smt |
 /// | Default | smt |
 ///
+
 /// ## Performance
 /// - Analysis: <100us
 /// - Typical speedup: 2-5x for specialized problems
 ///
+
 /// ## Example
 /// ```rust,ignore
 /// use verum_smt::tactics::{FormulaGoalAnalyzer, auto_select_tactic, TacticExecutor};
 /// use z3::{ast::Bool, Goal};
 ///
+
 /// let mut analyzer = FormulaGoalAnalyzer::new();
 /// let x = Bool::new_const("x");
 /// let y = Bool::new_const("y");
 /// let formula = Bool::and(&[&x, &y]);
 ///
+
 /// let tactic = auto_select_tactic(&mut analyzer, &formula);
 ///
+
 /// // Apply the tactic
 /// let goal = Goal::new(false, false, false);
 /// goal.assert(&formula);
@@ -2475,6 +2579,7 @@ pub fn auto_select_tactic(
 
 /// Select tactic based on pre-computed formula characteristics.
 ///
+
 /// This is the internal implementation that maps characteristics to tactics.
 /// Useful when you've already analyzed the formula.
 pub fn select_tactic_from_characteristics(chars: &FormulaCharacteristics) -> TacticCombinator {
@@ -2585,6 +2690,7 @@ pub fn select_tactic_from_characteristics(chars: &FormulaCharacteristics) -> Tac
 
 /// Automatically select tactic for a Z3 Goal.
 ///
+
 /// This is a convenience function that works directly with Goals
 /// instead of Bool formulas.
 pub fn auto_select_tactic_for_goal(
@@ -2600,6 +2706,7 @@ pub fn auto_select_tactic_for_goal(
 impl TacticCombinator {
     /// Create a sequential composition of this tactic with another
     ///
+
     /// This is a convenience method for chaining tactics.
     pub fn then(self, next: TacticKind) -> Self {
         TacticCombinator::AndThen(Box::new(self), Box::new(TacticCombinator::Single(next)))
@@ -2607,6 +2714,7 @@ impl TacticCombinator {
 
     /// Create an alternative composition
     ///
+
     /// If this tactic fails, try the next one.
     pub fn or(self, alternative: TacticKind) -> Self {
         TacticCombinator::OrElse(
@@ -2628,6 +2736,7 @@ impl TacticCombinator {
 
 // ==================== Tactic Cache (#103) ====================
 //
+
 // `FormulaGoalAnalyzer::analyze` runs nine Z3 probes per formula
 // (≈100us total). Refinement/dependent-typed verification produces
 // many obligations whose probe-detected characteristics are
@@ -2636,6 +2745,7 @@ impl TacticCombinator {
 // build reduces verification wall-clock by skipping the redundant
 // Z3 round-trips.
 //
+
 // Backend scope: This cache lives strictly on the Z3 path. Verum's
 // SMT layer is dual-backend (Z3 + CVC5, dispatched by
 // `crate::capability_router`); the CVC5 side has its own
@@ -2646,21 +2756,22 @@ impl TacticCombinator {
 // statically impossible — a CVC5 obligation cannot accidentally
 // be looked up here.
 //
+
 // Design choices:
-//   * Cache value = `FormulaCharacteristics` (Copy-able 32-byte
-//     struct), not the full `TacticCombinator`. The cardinality of
-//     distinct characteristic tuples is < 64 in practice; rebuilding
-//     the combinator tree on every cache hit is a handful of `Box`
-//     allocations (≈ tens of nanoseconds), and decoupling the cache
-//     from the combinator strategy lets us tune the strategy
-//     without invalidating the cache.
-//   * Cache key = blake3 hash over the formula's S-expression
-//     rendering. Z3's `Display` impl is structurally deterministic;
-//     blake3 is the fastest cryptographic hash on x86_64/aarch64
-//     and gives 256-bit collision resistance — overkill for a
-//     local cache but cheap (≈ 1 GiB/s).
-//   * Storage = `dashmap::DashMap` for lock-free reads under
-//     contention (verification runs `rayon`-parallel across modules).
+//  * Cache value = `FormulaCharacteristics` (Copy-able 32-byte
+//  struct), not the full `TacticCombinator`. The cardinality of
+//  distinct characteristic tuples is < 64 in practice; rebuilding
+//  the combinator tree on every cache hit is a handful of `Box`
+//  allocations (≈ tens of nanoseconds), and decoupling the cache
+//  from the combinator strategy lets us tune the strategy
+//  without invalidating the cache.
+//  * Cache key = blake3 hash over the formula's S-expression
+//  rendering. Z3's `Display` impl is structurally deterministic;
+//  blake3 is the fastest cryptographic hash on x86_64/aarch64
+//  and gives 256-bit collision resistance — overkill for a
+//  local cache but cheap (≈ 1 GiB/s).
+//  * Storage = `dashmap::DashMap` for lock-free reads under
+//  contention (verification runs `rayon`-parallel across modules).
 
 /// Stable structural signature of a Z3 `Bool`/`Goal`, used as the
 /// [`TacticCache`] key. Computed via blake3 over the formula's
@@ -2691,6 +2802,7 @@ impl FormulaSignature {
 
 /// Aggregate cache statistics, snapshot-style.
 ///
+
 /// `hit_rate` is `hits / (hits + misses)` clamped to `0.0` when no
 /// lookups have been performed. Useful for telemetry to flag
 /// pathologically low cache utilisation (e.g. every formula
@@ -2711,12 +2823,14 @@ pub struct TacticCacheStats {
 /// Concurrent, sharded cache mapping [`FormulaSignature`] →
 /// cached [`FormulaCharacteristics`].
 ///
+
 /// Construct via [`TacticCache::new`] (default capacity) or
 /// [`TacticCache::with_capacity`]. Lookups go through
 /// [`auto_select_tactic_cached`] / [`auto_select_tactic_cached_global`].
 /// `Send + Sync` so it can sit on the verification context and be
 /// shared across rayon workers.
 ///
+
 /// The cache is *bounded by capacity hint only* — `DashMap` will
 /// grow past `capacity` if pushed; callers that need a hard cap
 /// should call [`TacticCache::clear`] periodically. In practice
@@ -2813,6 +2927,7 @@ impl Default for TacticCache {
 /// first call. The verification pipeline picks this up via
 /// [`auto_select_tactic_cached_global`] without explicit threading.
 ///
+
 /// Tests, benchmarks, and any code that wants isolation from other
 /// concurrent verification activity should construct their own
 /// [`TacticCache`] and use [`auto_select_tactic_cached`] directly
@@ -2824,11 +2939,13 @@ pub fn global_tactic_cache() -> &'static TacticCache {
 
 /// Cached variant of [`auto_select_tactic`].
 ///
+
 /// Computes the formula's [`FormulaSignature`], queries `cache`.
 /// On hit: skips the nine Z3 probes entirely and rebuilds the
 /// combinator from cached characteristics. On miss: runs the
 /// analyser, inserts the result, and returns the combinator.
 ///
+
 /// The returned [`TacticCombinator`] is bit-identical to what
 /// [`auto_select_tactic`] would produce — caching is observably
 /// transparent (modulo `analyzer.stats()` not advancing on hits).

@@ -3,14 +3,17 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.5
 //
+
 // Each opcode is classified by what state it observes and modifies.
 // The optimiser uses this to decide whether instructions can be:
 //
-//   * reordered (commutativity)
-//   * deduplicated (purity)
-//   * hoisted out of a loop (loop-invariance)
-//   * lifted across a transaction boundary
+
+//  * reordered (commutativity)
+//  * deduplicated (purity)
+//  * hoisted out of a loop (loop-invariance)
+//  * lifted across a transaction boundary
 //
+
 // Effects are a small bitset. We expose six independent facets so
 // new opcode authors don't have to invent ad-hoc classifications.
 // =============================================================================

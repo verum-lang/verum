@@ -1,21 +1,25 @@
 // `verum export` — certificate and cross-prover exchange.
 //
+
 // Walks every `.vr` file in the current project, collects every
 // theorem / lemma / axiom / corollary declaration (plus its
 // `@framework(name, "citation")` attribution if present), and emits
 // a per-format file containing one entry per declaration.
 //
+
 // Supported formats:
-//   dedukti   neutral exchange format — `<name> : <ty>.` statements.
-//   coq       `Axiom` / `Theorem ... Admitted.` scaffolds.
-//   lean      `axiom` / `theorem ... := sorry` scaffolds.
+//  dedukti neutral exchange format — `<name> : <ty>.` statements.
+//  coq `Axiom` / `Theorem ... Admitted.` scaffolds.
+//  lean `axiom` / `theorem ... := sorry` scaffolds.
 //
+
 // The current MVP emits each declaration's STATEMENT — proof bodies
 // are admitted (`Admitted.` / `sorry` / `(;;)` depending on target).
 // The statement carries the `@framework` citation as an inline
 // comment so external reviewers see the provenance without needing
 // the separate audit report.
 //
+
 // Full proof-term export (re-derivation through `verum_kernel` and
 // serialisation of the resulting CoreTerm) is a follow-up — it
 // requires the SMT proof-replay path which lands per-backend.
@@ -112,8 +116,10 @@ impl ExportFormat {
 /// per-target emitters can lower without re-walking the full AST.
 /// Currently the M0.A pattern is the only shape recognised:
 ///
-///   `proof { apply <name>(<args>); }`
+
+///  `proof { apply <name>(<args>); }`
 ///
+
 /// is captured as `SimpleApply { lemma, args }` with the args rendered
 /// to source-form text. Other tactic shapes (induction, cases, calc, …)
 /// are recorded as `Other` so the emitters keep falling through to
@@ -153,6 +159,7 @@ struct Declaration {
     /// target emitter then falls through to the V1 admitted
     /// scaffold so the export remains compilable.
     ///
+
     /// V4.2 lays the wiring; V4.3+ plumbs actual certificate
     /// loading from the kernel's certificate store. Until then
     /// this field is always `None` in production paths and the
@@ -173,6 +180,7 @@ struct Declaration {
     /// producing a real Lean / Coq / Agda / Dedukti / Metamath term
     /// instead of the static admitted scaffold.
     ///
+
     /// Populated whenever the proof body is `ProofBody::Term(expr)`
     /// or a structured proof with an extractable conclusion expression.
     /// `None` for axioms, for `ProofBody::Tactic(Apply{...})` (the
@@ -330,17 +338,19 @@ fn sidecar_path_for(main: &Path) -> PathBuf {
 /// versioned schema (`schema_version: 1`) with one entry per
 /// declaration carrying:
 ///
-///   - `name` / `kind` / `source_file`
-///   - `framework_name` + `framework_citation` when present
-///   - `discharge_strategy` ∈ {`statement_only`, `smt_replay_pending`}:
-///     today every entry is `statement_only` because the kernel-side
-///     SmtCertificate→target-language lowering is V2.1+ work; the
-///     field is reserved so future emitters can mark certificates
-///     where SMT replay landed without bumping the schema version.
-///   - `obligation_hash`: `null` until the kernel exposes per-decl
-///     SmtCertificate hashes through the export pipeline.
-///   - `proof_term`: `null` — V2.1+ slot for the lowered proof term.
+
+///  - `name` / `kind` / `source_file`
+///  - `framework_name` + `framework_citation` when present
+///  - `discharge_strategy` ∈ {`statement_only`, `smt_replay_pending`}:
+///  today every entry is `statement_only` because the kernel-side
+///  SmtCertificate→target-language lowering is V2.1+ work; the
+///  field is reserved so future emitters can mark certificates
+///  where SMT replay landed without bumping the schema version.
+///  - `obligation_hash`: `null` until the kernel exposes per-decl
+///  SmtCertificate hashes through the export pipeline.
+///  - `proof_term`: `null` — V2.1+ slot for the lowered proof term.
 ///
+
 /// Output is deterministic (declarations preserve emit order; field
 /// ordering is stable) so CI diffs stay clean across runs.
 fn emit_provenance_sidecar(decls: &[Declaration], format: ExportFormat) -> String {
@@ -518,6 +528,7 @@ fn collect_declaration(
 /// axioms / missing proof bodies, and falls through structured
 /// proofs that don't have an extractable conclusion expression.
 ///
+
 /// The lift is conservative: variants the lifter doesn't recognise
 /// surface as `CoreTerm::Var("<unsupported-expr>")`, which the
 /// proof_export lowerers in turn render as `sorry` / `Admitted` /
@@ -682,7 +693,7 @@ fn coq_body_for_proof(proof: &Option<SimpleProofBody>) -> String {
 // captured proof CoreTerm, returning a target-specific body string. The
 // `_for_decl` family is the canonical surface called by emit_<format> —
 // it consults SimpleApply first (M0.D shape; closer to user intent),
-// then the CoreTerm path (V2), then admitted fallback.
+// then the CoreTerm path , then admitted fallback.
 // -----------------------------------------------------------------------------
 
 fn lean_body_for_decl(d: &Declaration) -> String {
@@ -890,8 +901,9 @@ fn first_framework(attrs: &List<verum_ast::attr::Attribute>) -> Maybe<FrameworkA
 }
 
 // -----------------------------------------------------------------------------
-// Framework-lineage → target-library mapping 
+// Framework-lineage → target-library mapping
 //
+
 // When a `@framework(<lineage>, "...")` marker has a known mapping in a
 // target ecosystem, the exporter emits the corresponding `import` /
 // `Require` / dependency stanza so the resulting file is ready to check
@@ -900,6 +912,7 @@ fn first_framework(attrs: &List<verum_ast::attr::Attribute>) -> Maybe<FrameworkA
 // and are flagged in the output as comments so reviewers see the
 // missing hook.
 //
+
 // The table is intentionally small and curated — stdlib "standard
 // six-pack" plus a handful of widely-cited foundations.
 // User-authored packages extend this by shipping a `@lineage_map`
@@ -1099,9 +1112,9 @@ fn emit_dedukti(decls: &[Declaration], replay_registry: &verum_smt::proof_replay
                 }
                 _ => {
                     // V2 decision tree:
-                    //   1. SMT-replay via DeduktiProofReplay (cert-loaded)
-                    //   2. SimpleApply (M0.D) → CoreTerm lower (M-EXPORT V2)
-                    //   3. Admitted comment marker.
+                    //  1. SMT-replay via DeduktiProofReplay (cert-loaded)
+                    //  2. SimpleApply (M0.D) → CoreTerm lower (M-EXPORT V2)
+                    //  3. Admitted comment marker.
                     let proof = replay_or_admitted(
                         replay_registry,
                         "dedukti",
@@ -1249,17 +1262,20 @@ fn emit_coq(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::Pr
 
 /// Emit a Metamath (.mm) certificate.
 ///
+
 /// Metamath is "axiom system + proof step language". Statements are
 /// declared with `$a` (axiom) / `$p ... $.` (provable), and every
 /// statement must name its free variables in a `$v` line and provide
 /// a constant-typing header. For a Verum export that carries only
 /// statements (proofs admitted), we emit:
 ///
-///   $c wff |- $.               — constant declarations
-///   $v x y z $.                — placeholder variables
-///   ax-<name> $a wff <stmt> $. — for axioms
-///   th-<name> $p wff <stmt> $= ? $.   — for theorems (proof placeholder `?`)
+
+///  $c wff |- $. — constant declarations
+///  $v x y z $. — placeholder variables
+///  ax-<name> $a wff <stmt> $. — for axioms
+///  th-<name> $p wff <stmt> $= ? $. — for theorems (proof placeholder `?`)
 ///
+
 /// Framework citations ride along as `$( comment $)` blocks so the
 /// trusted boundary is visible. The `?` proof-step token is
 /// Metamath's own placeholder for "proof not yet supplied" — tools
@@ -1310,9 +1326,9 @@ fn emit_metamath(decls: &[Declaration], replay_registry: &verum_smt::proof_repla
                 }
                 _ => {
                     // Metamath theorem-step body. Decision tree:
-                    //   1. SMT-replay via MetamathProofReplay (cert-loaded)
-                    //   2. SimpleApply (M0.D) / CoreTerm (M-EXPORT V2)
-                    //   3. `$= ? $.` placeholder accepted by mmverify.py.
+                    //  1. SMT-replay via MetamathProofReplay (cert-loaded)
+                    //  2. SimpleApply (M0.D) / CoreTerm (M-EXPORT V2)
+                    //  3. `$= ? $.` placeholder accepted by mmverify.py.
                     let proof = replay_or_admitted(
                         replay_registry,
                         "metamath",
@@ -1413,12 +1429,12 @@ fn emit_lean(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
                 }
                 _ => {
                     // Three-step decision (M0.D Phase 1.5):
-                    //   1. SmtCertificate replay via LeanProofReplay
-                    //      when a cert is loaded (V-stage state).
-                    //   2. Verum-side `proof { apply X(c); }` body
-                    //      when the AST captured a M0.A simple-apply
-                    //      shape — emit `:= X c` term-style.
-                    //   3. Fall through to `:= sorry` scaffold.
+                    //  1. SmtCertificate replay via LeanProofReplay
+                    //  when a cert is loaded (V-stage state).
+                    //  2. Verum-side `proof { apply X(c); }` body
+                    //  when the AST captured a M0.A simple-apply
+                    //  shape — emit `:= X c` term-style.
+                    //  3. Fall through to `:= sorry` scaffold.
                     let proof = replay_or_admitted(
                         replay_registry,
                         "lean",
@@ -1463,18 +1479,22 @@ fn agda_mangle(name: &Text) -> String {
 
 /// Emit an Agda (.agda) certificate.
 ///
+
 /// Each declaration becomes a single-entry `postulate` block:
 ///
-///   -- theorem — lurie_htt — Lurie 2009 :: src/foo.vr
-///   postulate
-///     yoneda_full : Set
+
+///  -- theorem — lurie_htt — Lurie 2009 :: src/foo.vr
+///  postulate
+///  yoneda_full : Set
 ///
+
 /// The postulate-per-decl shape (rather than one big block) keeps each
 /// declaration's framework citation directly above its statement, which
 /// matches the per-decl comment placement of the Coq / Lean / Dedukti
 /// emitters and makes per-declaration grep / diff tractable. Agda
 /// accepts arbitrarily many `postulate` blocks per module.
 ///
+
 /// As with the other backends, statements are opaque (`: Set`) at the
 /// MVP level. Type-preserving export through verum_kernel lands when
 /// per-backend SMT proof-replay is wired in.
@@ -1702,6 +1722,7 @@ fn print_summary(
 // OWL 2 Functional Syntax emitter (Phase 3 B5)
 // -----------------------------------------------------------------------------
 //
+
 // Walks the Owl2Graph populated during the project parse and emits
 // W3C-compliant OWL 2 Functional Syntax (`.ofn`). Output is byte-
 // deterministic — every collection that contributes to the body is
@@ -1709,23 +1730,25 @@ fn print_summary(
 // order is alphabetical and the same project produces the same bytes
 // across runs and platforms.
 //
+
 // W3C OWL 2 FS Recommendation (Second Edition, 11 December 2012):
-//   https://www.w3.org/TR/owl2-syntax/
+//  https://www.w3.org/TR/owl2-syntax/
 //
+
 // Output sections, in order:
-//   Prefix(:=<base>#)
-//   Ontology(<base>
-//     Declaration(Class(:Name))      — one per class
-//     Declaration(ObjectProperty(:Name))  — one per property
-//     SubClassOf(:Sub :Sup)          — per direct subclass edge
-//     EquivalentClasses(:A :B :C)    — per equivalence partition (≥2)
-//     DisjointClasses(:A :B)         — per disjointness pair
-//     HasKey(:Class () (:p1 :p2))    — per @owl2_has_key
-//     ObjectPropertyDomain(:p :C)
-//     ObjectPropertyRange(:p :C)
-//     <Char>ObjectProperty(:p)        — per characteristic flag
-//     InverseObjectProperties(:p :q) — per @owl2_property(inverse_of)
-//   )
+//  Prefix(:=<base>#)
+//  Ontology(<base>
+//  Declaration(Class(:Name)) — one per class
+//  Declaration(ObjectProperty(:Name)) — one per property
+//  SubClassOf(:Sub :Sup) — per direct subclass edge
+//  EquivalentClasses(:A :B :C) — per equivalence partition (≥2)
+//  DisjointClasses(:A :B) — per disjointness pair
+//  HasKey(:Class () (:p1 :p2)) — per @owl2_has_key
+//  ObjectPropertyDomain(:p :C)
+//  ObjectPropertyRange(:p :C)
+//  <Char>ObjectProperty(:p) — per characteristic flag
+//  InverseObjectProperties(:p :q) — per @owl2_property(inverse_of)
+//  )
 
 /// Read the project's `[package].name` from `verum.toml` to derive a
 /// default ontology IRI. Falls back to `verum-export` when the manifest
@@ -1853,7 +1876,7 @@ fn emit_owl2_fs(graph: &crate::commands::owl2::Owl2Graph, manifest_name: &str) -
     // Section 5 — HasKey for every class with a key constraint. OWL 2 FS
     // splits keys into ObjectProperty and DataProperty parenthesised
     // groups; V1 emits all key properties as ObjectProperty (the most
-    // common case); V2 will route DataProperty-typed keys correctly.
+    // common case); Future work will route DataProperty-typed keys correctly.
     for (name, e) in &graph.entities {
         if !matches!(e.kind, Owl2EntityKind::Class) { continue; }
         for key in &e.keys {
@@ -2067,6 +2090,7 @@ mod format_tests {
     // -------------------------------------------------------------
     // lineage-import table contract.
     //
+
     // The LINEAGE_IMPORTS table is a curated map. The `lineage_import`
     // lookup is `O(n)` linear-scan but n is fixed and small; the
     // ordering invariant (alphabetical-by-slug) is what makes the

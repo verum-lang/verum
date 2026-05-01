@@ -6,6 +6,7 @@
 // Spec: internal/specs/tls-quic.md §7.1, §12 Phase 4 step 3
 // =============================================================================
 //
+
 // Phase 4 step 3: typed QUIC connection state machine that consumes
 // everything from Phases 0-4 so far (packet codec + frame codec +
 // crypto + recovery + stream SM + transport params). Ship as
@@ -15,57 +16,69 @@
 // phase; the two merge once the QUIC transport fully replaces the
 // FFI stack.
 //
+
 // # Top-level shape
 //
-//   QuicConnectionSm<S>  where S ∈ { Initial, Handshake, OneRtt, Closing, Draining }
+
+//  QuicConnectionSm<S> where S ∈ { Initial, Handshake, OneRtt, Closing, Draining }
 //
+
 // The inner state struct carries:
-//   * role (client / server)
-//   * version
-//   * dcid_local / dcid_peer / scid
-//   * LossDetection (from core.net.quic.recovery.LossDetection — holds
-//     the three PnSpaces + RTT estimator + CC)
-//   * TransportParams (local + remote)
-//   * ConnFlowControl (connection-level + stream-count FC)
-//   * Send/Recv stream tables
-//   * Crypto keys per PN space (InitialKeys / HandshakeKeys / AppKeys)
-//   * Optional HpKey per PN space for header protection
-//   * TLS handshake driver (ClientSm from Phase 2 step 2)
+//  * role (client / server)
+//  * version
+//  * dcid_local / dcid_peer / scid
+//  * LossDetection (from core.net.quic.recovery.LossDetection — holds
+//  the three PnSpaces + RTT estimator + CC)
+//  * TransportParams (local + remote)
+//  * ConnFlowControl (connection-level + stream-count FC)
+//  * Send/Recv stream tables
+//  * Crypto keys per PN space (InitialKeys / HandshakeKeys / AppKeys)
+//  * Optional HpKey per PN space for header protection
+//  * TLS handshake driver (ClientSm from Phase 2 step 2)
 //
+
 // Per phase, the SM exposes narrow APIs:
 //
-//   QuicConnectionSm<Initial>
-//     .handshake_step(inbound: &[Byte]) -> Result<Outbound, QuicError>
-//     .promote_to_handshake(hs_keys) -> QuicConnectionSm<Handshake>
+
+//  QuicConnectionSm<Initial>
+//  .handshake_step(inbound: &[Byte]) -> Result<Outbound, QuicError>
+//  .promote_to_handshake(hs_keys) -> QuicConnectionSm<Handshake>
 //
-//   QuicConnectionSm<Handshake>
-//     .handshake_step(inbound) -> Result<Outbound, QuicError>
-//     .promote_to_app(app_keys) -> QuicConnectionSm<OneRtt>
+
+//  QuicConnectionSm<Handshake>
+//  .handshake_step(inbound) -> Result<Outbound, QuicError>
+//  .promote_to_app(app_keys) -> QuicConnectionSm<OneRtt>
 //
-//   QuicConnectionSm<OneRtt>
-//     .open_bidi_stream() -> Result<SendStream, QuicError>
-//     .on_datagram(bytes) -> Result<(), QuicError>   — receive + decrypt + dispatch
-//     .drain_outbound() -> List<Datagram>             — pull encrypted UDP datagrams
-//     .close(error_code, reason) -> QuicConnectionSm<Closing>
+
+//  QuicConnectionSm<OneRtt>
+//  .open_bidi_stream() -> Result<SendStream, QuicError>
+//  .on_datagram(bytes) -> Result<(), QuicError> — receive + decrypt + dispatch
+//  .drain_outbound() -> List<Datagram> — pull encrypted UDP datagrams
+//  .close(error_code, reason) -> QuicConnectionSm<Closing>
 //
-//   QuicConnectionSm<Closing> / <Draining>
-//     .on_datagram — accept CONNECTION_CLOSE ack, handle echoes
-//     .is_expired() -> Bool
+
+//  QuicConnectionSm<Closing> / <Draining>
+//  .on_datagram — accept CONNECTION_CLOSE ack, handle echoes
+//  .is_expired() -> Bool
 //
+
 // This file lands the state struct + typed outer skeleton. Individual
 // phase methods that require the full frame codec + recovery + TLS
 // integration live in separate files (tx.vr / rx.vr / lifecycle.vr) —
 // a focused follow-up commit wires each up using the types exposed
 // here.
 //
+
 // # Module layout
 //
+
 // ```
 // core.net.quic.connection_sm
-// ├── mod.vr        ← this file — facade + QuicConnectionSm<S>
-// └── state.vr      — Initial / Handshake / OneRtt / Closing / Draining phantoms
+// ├── mod.vr ← this file — facade + QuicConnectionSm<S>
+// └── state.vr — Initial / Handshake / OneRtt / Closing / Draining phantoms
 // ```
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm;

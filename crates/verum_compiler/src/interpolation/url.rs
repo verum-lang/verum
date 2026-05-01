@@ -1,13 +1,16 @@
 //! Safe URL interpolation handler
 //!
+
 //! Safe interpolation handlers (compile-time literal protocol):
 //! Interpolation handlers registered via @interpolation_handler receive template
 //! strings and expression lists, returning injection-safe parameterized output.
 //! URL interpolation URL-encodes all interpolated values to prevent injection.
 //!
+
 //! Provides URL interpolation that prevents injection attacks by URL-encoding
 //! all interpolated values.
 //!
+
 //! # Example
 //! ```verum
 //! let query = "hello world";
@@ -21,6 +24,7 @@ use verum_common::Text;
 
 /// URL interpolation handler
 ///
+
 /// # Security
 /// This handler PREVENTS URL injection attacks by:
 /// 1. URL-encoding all interpolated values
@@ -55,18 +59,22 @@ pub enum UrlComponent {
 impl UrlInterpolationHandler {
     /// Handle URL interpolation at compile-time
     ///
+
     /// Safe interpolation: all interpolated values are URL-encoded before insertion
     /// into the template. The handler validates URL structure at compile-time and
     /// prevents protocol injection by checking scheme allowlists.
     ///
+
     /// # Arguments
     /// - `template`: The URL template string with {expr} placeholders
     /// - `interpolations`: The expressions to interpolate
     /// - `span`: Source location for error reporting
     ///
+
     /// # Returns
     /// A SafeUrl with properly encoded content
     ///
+
     /// # Safety
     /// This function generates SAFE URLs that prevent injection attacks.
     /// All interpolated values are URL-encoded before insertion.
@@ -222,6 +230,7 @@ impl UrlInterpolationHandler {
 
     /// URL-encode a string for safe inclusion in a URL path
     ///
+
     /// # Security
     /// This function encodes all characters that have special meaning in URLs.
     pub fn encode_path(input: &str) -> Text {
@@ -241,6 +250,7 @@ impl UrlInterpolationHandler {
 
     /// URL-encode a string for safe inclusion in a query parameter
     ///
+
     /// # Security
     /// This function encodes all characters that have special meaning in query strings.
     pub fn encode_query(input: &str) -> Text {
@@ -271,6 +281,7 @@ impl UrlInterpolationHandler {
 
     /// Validate that interpolations don't occur in the scheme
     ///
+
     /// # Security
     /// Prevents protocol injection attacks.
     pub fn validate_no_scheme_interpolation(

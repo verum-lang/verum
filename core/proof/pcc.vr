@@ -2,18 +2,23 @@
 // pcc.vr — Proof-Carrying Code Bundles
 // =============================================================================
 //
+
 // Layer: Standard Library / Proof
 //
+
 // Surface for `verum_smt.proof_carrying_code`. Necula-style PCC:
 // formal proof certificates bundled with bytecode, content-
 // addressed by goal hash, with audit-trail metadata.
 //
+
 // Trust relocates from the compiler pipeline to a small, auditable
 // proof checker. The recipient verifies proofs rather than
 // re-running analysis.
 //
+
 // ## Storage model
 //
+
 // Certificates are stored in a `Map<Text, ProofCertificate>` keyed
 // by goal-hash digest. Lookup is O(1) amortised — the natural
 // access pattern for content-addressed PCC where every recipient
@@ -21,11 +26,13 @@
 // `List<BundleCert>` storage was O(N) per lookup, putting an
 // N²-shaped scan on the proof-checking hot path of every consumer.
 //
+
 // `bundle_add` is idempotent on `(hash, cert)` pairs: re-adding a
 // certificate with the same goal hash replaces the prior entry and
 // adjusts `total_duration_ms` by the delta. Catches duplicate-add
 // in callers that batch-rebuild bundles across analysis re-runs.
 //
+
 // =============================================================================
 
 module core.proof.pcc;
@@ -90,6 +97,7 @@ public fn empty_bundle(compiler: Text, source: Text) -> ProofBundle {
 
 /// Add (or replace) a certificate in the bundle.
 ///
+
 /// Idempotent on goal-hash collision: re-adding the same hash
 /// replaces the prior certificate and adjusts `total_duration_ms`
 /// by `(new_dur - prior_dur)`; `certificate_count` stays unchanged.
@@ -168,7 +176,7 @@ implement Debug for GoalHash {
 }
 
 implement Eq for ProofCertificate {
-    /// Structural equality on every field.  Two certificates are
+    /// Structural equality on every field. Two certificates are
     /// equal iff they were emitted by the same solver for the same
     /// goal text with the same proof object, duration, and
     /// timestamp — useful for re-running deterministic-proof

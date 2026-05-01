@@ -1,5 +1,6 @@
 //! Session Types — typed protocols for bidirectional channels.
 //!
+
 //! A *session type* describes the sequence of sends, receives, and
 //! choices that two communicating parties must perform on a shared
 //! channel. Every channel end carries a session type indexing its
@@ -7,50 +8,62 @@
 //! time that both ends follow compatible (dual) protocols, ruling
 //! out deadlocks, protocol mismatches, and linearity violations.
 //!
+
 //! ## The session calculus
 //!
+
 //! ```text
-//!     S ::= !T. S          (send value of type T, then continue as S)
-//!         | ?T. S          (recv value of type T, then continue as S)
-//!         | S₁ ⊕ S₂        (offer the other party a choice of S₁ or S₂)
-//!         | S₁ & S₂        (select between S₁ and S₂ ourselves)
-//!         | end            (protocol complete)
+//!  S ::= !T. S (send value of type T, then continue as S)
+//!  | ?T. S (recv value of type T, then continue as S)
+//!  | S₁ ⊕ S₂ (offer the other party a choice of S₁ or S₂)
+//!  | S₁ & S₂ (select between S₁ and S₂ ourselves)
+//!  | end (protocol complete)
 //! ```
 //!
+
 //! ## Duality
 //!
+
 //! Two protocols `P` and `Q` are *dual* when they perform
 //! mirror-image actions:
 //!
+
 //! ```text
-//!     dual(!T. S)   = ?T. dual(S)
-//!     dual(?T. S)   = !T. dual(S)
-//!     dual(S ⊕ T)   = dual(S) & dual(T)
-//!     dual(S & T)   = dual(S) ⊕ dual(T)
-//!     dual(end)     = end
+//!  dual(!T. S) = ?T. dual(S)
+//!  dual(?T. S) = !T. dual(S)
+//!  dual(S ⊕ T) = dual(S) & dual(T)
+//!  dual(S & T) = dual(S) ⊕ dual(T)
+//!  dual(end) = end
 //! ```
 //!
+
 //! `dual(dual(P)) = P` — duality is an involution.
 //!
+
 //! ## Usage
 //!
+
 //! Session types integrate with the rest of Verum's type system as
 //! type-level descriptors on channel values. The channel's current
 //! protocol advances after every send/recv/offer/select:
 //!
+
 //! ```text
-//!     chan : Channel<!Int. ?Bool. end>
-//!     chan.send(42)    // chan now has type Channel<?Bool. end>
-//!     let b = chan.recv()  // chan now has type Channel<end>
-//!     chan.close()     // matched by `end`
+//!  chan : Channel<!Int. ?Bool. end>
+//!  chan.send(42) // chan now has type Channel<?Bool. end>
+//!  let b = chan.recv() // chan now has type Channel<end>
+//!  chan.close() // matched by `end`
 //! ```
 //!
+
 //! Linearity of channels (each handle used exactly once per step)
 //! is enforced by the QTT usage tracker — session types compose
 //! cleanly with `Quantity::One` on the channel handle.
 //!
+
 //! ## Implementation
 //!
+
 //! This module is the pure algebraic layer — `Protocol` values, the
 //! `dual` function, a compatibility predicate, and a protocol
 //! stepper. Integration into the surface syntax (parse
@@ -78,6 +91,7 @@ impl PayloadType {
 pub enum Protocol {
     /// Send a value of `payload` type, then continue as `rest`.
     ///
+
     /// Written `!T. S` in standard session-calculus notation.
     Send {
         payload: PayloadType,
@@ -86,6 +100,7 @@ pub enum Protocol {
 
     /// Receive a value of `payload` type, then continue as `rest`.
     ///
+
     /// Written `?T. S`.
     Recv {
         payload: PayloadType,
@@ -95,6 +110,7 @@ pub enum Protocol {
     /// Offer the other party a choice between `left` and `right`.
     /// We wait for their selection before continuing.
     ///
+
     /// Written `S₁ ⊕ S₂` (plus).
     Offer {
         left: Box<Protocol>,
@@ -104,6 +120,7 @@ pub enum Protocol {
     /// Select between `left` and `right` ourselves. The other party
     /// offers (dual action).
     ///
+
     /// Written `S₁ & S₂` (with).
     Select {
         left: Box<Protocol>,

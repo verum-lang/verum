@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §19.5
 //
+
 // `Authorizer` aggregates one or more `AuthorizerHook` impls. Calls to
 // `authorize(action)` invoke every hook in subscription order; the
 // final answer is the most-restrictive of all returned decisions.
 //
+
 // SQLite's `sqlite3_set_authorizer` allows only ONE authorizer at a
 // time. loom's multi-hook composition is a strict superset — when
 // only one hook is registered, behaviour is identical to upstream.

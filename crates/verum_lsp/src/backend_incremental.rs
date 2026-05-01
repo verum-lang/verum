@@ -1,5 +1,6 @@
 //! Incremental LSP backend implementation
 //!
+
 //! This module provides an enhanced LSP backend with incremental parsing
 //! and debounced diagnostics updates for optimal real-time performance.
 

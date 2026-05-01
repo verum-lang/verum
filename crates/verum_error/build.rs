@@ -1,5 +1,6 @@
 // Capture build-time metadata for the crash reporter.
 //
+
 // These `cargo:rustc-env` variables are available inside the crate as
 // `option_env!(...)` and flow into `CrashReport::environment` without
 // needing the user's dev environment to replicate them.

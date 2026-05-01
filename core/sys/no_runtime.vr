@@ -8,19 +8,22 @@ module sys.no_runtime;
 // Activated by: @cfg(runtime = "none") or @cfg(runtime = "embedded")
 // =============================================================================
 //
+
 // When building for embedded or bare-metal targets, the full Verum runtime
 // (async executor, CBGR generation tracker, thread pool, channels) is not
 // available. This module provides synchronous replacements for async
 // primitives so that code written with async/await can be compiled for
 // embedded targets without modification.
 //
+
 // Transformation rules:
-//   - async fn f() -> T  =>  fn f() -> T  (strip async)
-//   - await expr          =>  expr          (identity)
-//   - spawn(task)         =>  task()        (inline execution)
-//   - select { ... }      =>  first-ready poll (compile-time error if > 1)
-//   - channels            =>  compile-time error (no threads)
+//  - async fn f() -> T => fn f() -> T (strip async)
+//  - await expr => expr (identity)
+//  - spawn(task) => task() (inline execution)
+//  - select { ... } => first-ready poll (compile-time error if > 1)
+//  - channels => compile-time error (no threads)
 //
+
 // These stubs are only linked when the full runtime is absent.
 // =============================================================================
 

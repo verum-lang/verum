@@ -1,13 +1,17 @@
 //! Contract System: Precondition and Postcondition Validation
 //!
+
 //! Function contracts: "requires" for preconditions, "ensures" for postconditions, verified at compile-time (proof) or runtime
 //!
+
 //! This module implements compile-time validation of function contracts:
 //! - **Preconditions** (`requires`): Checked at call sites
 //! - **Postconditions** (`ensures`): Checked at function return
 //!
+
 //! # Architecture
 //!
+
 //! Contract validation uses the same SMT backend as refinement types,
 //! enabling verification of complex predicates involving:
 //! - Parameter values
@@ -15,8 +19,10 @@
 //! - Mathematical constraints
 //! - Relationships between parameters and return values
 //!
+
 //! # Performance Targets
 //!
+
 //! - Simple postconditions (syntactic): < 1ms
 //! - Complex postconditions (SMT): < 100ms
 //! - Precondition checking at call sites: < 10ms
@@ -95,6 +101,7 @@ impl ContractStats {
 
 /// Postcondition validator for function contracts
 ///
+
 /// Validates that function implementations satisfy their postconditions
 /// by checking all return paths against the `ensures` clauses.
 pub struct PostconditionValidator {
@@ -122,18 +129,23 @@ impl PostconditionValidator {
 
     /// Validate all postconditions for a function
     ///
+
     /// This is the main entry point for postcondition validation.
     /// It extracts all return expressions and verifies each against
     /// all postconditions.
     ///
+
     /// # Arguments
     ///
+
     /// * `func` - The function declaration to validate
     /// * `_return_type` - The inferred return type of the function
     /// * `_ctx` - Type context for verification
     ///
+
     /// # Returns
     ///
+
     /// * `Ok(())` if all postconditions are satisfied
     /// * `Err(TypeError)` with detailed diagnostic if validation fails
     pub fn validate_postconditions(
@@ -171,6 +183,7 @@ impl Default for PostconditionValidator {
 
 /// Precondition validator for function contracts
 ///
+
 /// Validates that preconditions are satisfied at call sites.
 pub struct PreconditionValidator {
     /// Statistics
@@ -192,15 +205,19 @@ impl PreconditionValidator {
 
     /// Validate preconditions at a call site
     ///
+
     /// # Arguments
     ///
+
     /// * `func` - The function being called
     /// * `_args` - The argument expressions at the call site
     /// * `call_span` - The span of the call expression
     /// * `_ctx` - Type context for verification
     ///
+
     /// # Returns
     ///
+
     /// * `Ok(())` if all preconditions are satisfied
     /// * `Err(TypeError)` if any precondition fails
     pub fn validate_preconditions(

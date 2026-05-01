@@ -14,8 +14,10 @@
 )]
 // Unit tests for affine type tracking module
 //
+
 // Higher-kinded types: type constructors parameterized by type-level functions
 //
+
 // Tests moved from src/affine.rs per project testing guidelines.
 
 use verum_ast::span::{FileId, Span};

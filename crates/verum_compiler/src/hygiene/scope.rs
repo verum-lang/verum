@@ -1,7 +1,9 @@
 //! Scope Definitions for Hygiene System
 //!
+
 //! Implements sets-of-scopes hygiene (Scheme/Racket model).
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -163,6 +165,7 @@ pub enum BindingKind {
 
 /// A set of scopes (for sets-of-scopes hygiene)
 ///
+
 /// An identifier's meaning is determined by the set of scopes it carries.
 /// Resolution finds the binding whose scopes are a subset of the identifier's
 /// scopes, preferring the most specific (largest subset).

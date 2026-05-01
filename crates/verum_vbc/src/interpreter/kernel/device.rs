@@ -1,5 +1,6 @@
 //! Device detection and management for tensor operations.
 //!
+
 //! This module provides runtime detection of available compute devices
 //! (CPU, GPU) and their capabilities for optimal kernel dispatch.
 

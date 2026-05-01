@@ -228,12 +228,15 @@ pub struct Manifest {
 
 /// Formal-verification configuration (the `[verify]` section).
 ///
+
 /// Lets projects customize default verification behavior without needing
 /// to annotate every function with `@verify(...)`. Strategy names here are
 /// semantic (backend-agnostic) — see grammar/verum.ebnf for the full list.
 ///
+
 /// ## Example `verum.toml`
 ///
+
 /// ```toml
 /// [verify]
 /// default_strategy = "formal"
@@ -241,6 +244,7 @@ pub struct Manifest {
 /// enable_telemetry = true
 /// persist_stats = true
 ///
+
 /// # Per-module overrides
 /// [verify.modules."crypto.signing"]
 /// strategy = "certified"
@@ -250,6 +254,7 @@ pub struct Manifest {
 pub struct VerifyConfig {
     /// Default verification strategy when no `@verify(...)` attribute is present.
     ///
+
     /// Valid values: `runtime`, `static`, `formal`, `fast`, `thorough`,
     /// `certified`, `synthesize`. Defaults to `formal`.
     #[serde(default = "default_verify_strategy")]
@@ -276,6 +281,7 @@ pub struct VerifyConfig {
 
     /// Treat any cross-validation divergence as a hard build error.
     ///
+
     /// When true (default), if a `@verify(certified)` goal produces
     /// divergent results between independent verifiers, the build fails.
     /// When false, divergences are logged but do not stop compilation
@@ -285,6 +291,7 @@ pub struct VerifyConfig {
 
     /// Per-module verification overrides.
     ///
+
     /// Keys are module paths (e.g., `"crypto.signing"`); values are the
     /// same fields as the top-level `[verify]` section but narrowed to
     /// that module and its descendants.
@@ -354,28 +361,34 @@ pub struct VerifyConfig {
 
     /// Named verification profiles — e.g. `release`, `ci`, `dev`.
     ///
+
     /// Each profile inherits every field from the top-level `[verify]`
     /// section and overrides only what it names. Selected via
     /// `verum verify --profile <name>`. Matches the documented
     /// workflow in `docs/verification/cli-workflow.md §9`.
     ///
+
     /// Example:
     ///
+
     /// ```toml
     /// [verify]
     /// default_strategy = "formal"
     /// solver_timeout_ms = 10000
     ///
+
     /// [verify.profiles.release]
     /// default_strategy = "certified"
     /// solver_timeout_ms = 300000
     /// fail_on_divergence = true
     ///
+
     /// [verify.profiles.ci]
     /// default_strategy = "fast"
     /// solver_timeout_ms = 3000
     /// ```
     ///
+
     /// CLI flags STILL override profile values — selection order is:
     /// CLI flag > profile override > base `[verify]` > default.
     #[serde(default)]
@@ -384,6 +397,7 @@ pub struct VerifyConfig {
 
 /// Per-profile override block in the `[verify.profiles.<name>]` section.
 ///
+
 /// Every field is optional — profile inheritance means unset fields
 /// fall through to the base `[verify]` section. This preserves a
 /// "specify only what differs" ergonomics without losing parent
@@ -443,11 +457,13 @@ impl VerifyConfig {
     /// Apply a named profile's overrides on top of the base config,
     /// producing the effective `VerifyConfig` the CLI should use.
     ///
+
     /// Inheritance policy: profile values override base values; unset
     /// profile fields leave base values intact. Per-module overrides
     /// (`modules`) are NOT merged — profiles cannot change per-module
     /// settings in this release (see task #81 follow-up).
     ///
+
     /// Returns `Err` if the named profile does not exist.
     pub fn with_profile(self, name: &str) -> std::result::Result<Self, Text> {
         let profile = self
@@ -554,22 +570,25 @@ fn default_true() -> bool {
 
 /// Advanced type-system features (the `[types]` section).
 ///
+
 /// Controls which advanced type-theoretic features the compiler enables.
 /// Disabling features skips associated checks and may speed up compilation
 /// at the cost of less expressive types.
 ///
+
 /// ## Example
 ///
+
 /// ```toml
 /// [types]
-/// dependent = true          # Pi/Sigma types, length-indexed vectors
-/// refinement = true         # Int{> 0}, Text{len(it) > 0}
-/// cubical = true            # Path types, transport, hcomp (HoTT)
-/// higher_kinded = true      # F: Type -> Type in generic params
-/// universe_polymorphism = false  # Type(u), @universe_poly
-/// coinductive = true        # codata declarations + copatterns
-/// quotient = true           # HIT-based quotient types
-/// instance_search = true    # Automatic protocol-impl resolution
+/// dependent = true # Pi/Sigma types, length-indexed vectors
+/// refinement = true # Int{> 0}, Text{len(it) > 0}
+/// cubical = true # Path types, transport, hcomp (HoTT)
+/// higher_kinded = true # F: Type -> Type in generic params
+/// universe_polymorphism = false # Type(u), @universe_poly
+/// coinductive = true # codata declarations + copatterns
+/// quotient = true # HIT-based quotient types
+/// instance_search = true # Automatic protocol-impl resolution
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypesConfig {
@@ -637,12 +656,14 @@ fn default_coherence_depth() -> u32 {
 
 /// Runtime system configuration (the `[runtime]` section).
 ///
+
 /// Controls memory management, async execution, and low-level runtime behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeConfig {
     /// CBGR reference mode: `managed` (~15ns), `checked` (0ns, static proof),
     /// `unsafe` (0ns, no safety), `mixed` (auto-select per reference).
     ///
+
     /// Default: `mixed`.
     #[serde(default = "default_cbgr_mode")]
     pub cbgr_mode: Text,
@@ -703,6 +724,7 @@ fn default_panic_strategy() -> Text { Text::from("unwind") }
 
 /// Code-generation configuration (the `[codegen]` section).
 ///
+
 /// Controls the compiler's execution tiers and target-specific code output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodegenConfig {
@@ -821,6 +843,7 @@ fn default_stage_limit() -> u32 { 2 }
 pub struct ProtocolsConfig {
     /// Specialization coherence: `strict`, `lenient`, `unchecked`.
     ///
+
     /// - `strict` (default): orphan rules enforced, no overlapping impls
     /// - `lenient`: allow orphan impls in same crate (Rust-like)
     /// - `unchecked`: skip coherence checking (unsafe)
@@ -1152,46 +1175,51 @@ pub struct BuildConfig {
     /// Windows subsystem selection — controls whether the produced
     /// PE binary allocates a console window when launched.
     ///
+
     /// `None` (default) means "unset" — the source-level
     /// `@gui` / `@console` attribute on `fn main` will fill in the
-    /// value at codegen time.  `Some(Console)` / `Some(Gui)` is an
+    /// value at codegen time. `Some(Console)` / `Some(Gui)` is an
     /// explicit manifest-level choice that overrides the source
     /// attribute (manifest is more authoritative than per-binary
     /// source code, since manifests are the project-level
     /// configuration).
     ///
+
     /// Maps to `/SUBSYSTEM:CONSOLE` vs `/SUBSYSTEM:WINDOWS` at link
-    /// time.  Ignored on non-Windows targets.
+    /// time. Ignored on non-Windows targets.
     ///
+
     /// Resolution order, highest precedence first:
-    ///   1. CLI `--windows-subsystem` flag.
-    ///   2. Manifest `[build].windows_subsystem` (this field).
-    ///   3. Source-level `@gui` / `@console` attribute on `fn main`.
-    ///   4. Default Console.
+    ///  1. CLI `--windows-subsystem` flag.
+    ///  2. Manifest `[build].windows_subsystem` (this field).
+    ///  3. Source-level `@gui` / `@console` attribute on `fn main`.
+    ///  4. Default Console.
     #[serde(default)]
     pub windows_subsystem: Option<WindowsSubsystem>,
 }
 
-/// Windows PE subsystem selection.  Determines whether the loader
+/// Windows PE subsystem selection. Determines whether the loader
 /// allocates a console window on process start.
 ///
+
 /// **Console** is the default and matches the historical Verum
-/// behaviour (every binary is a CLI app).  **Gui** suppresses the
+/// behaviour (every binary is a CLI app). **Gui** suppresses the
 /// console allocation — required for Win32 GUI applications, where
 /// a flashing console window on launch is a UX defect.
 ///
+
 /// The runtime's `print()` / stdout helpers gracefully degrade under
 /// `Gui`: `GetStdHandle(STD_OUTPUT_HANDLE)` returns
 /// `INVALID_HANDLE_VALUE` when there's no console, and the
 /// `verum_os_write` IR short-circuits to a no-op rather than
-/// blocking on `WriteFile`.  This means the same Verum source can
+/// blocking on `WriteFile`. This means the same Verum source can
 /// be compiled either way without code changes — an important
 /// property for libraries that incidentally `print()` (e.g. tracing
 /// when `RUST_LOG`-style env-var is unset).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum WindowsSubsystem {
-    /// `/SUBSYSTEM:CONSOLE` — standard console app.  Default.
+    /// `/SUBSYSTEM:CONSOLE` — standard console app. Default.
     #[default]
     Console,
     /// `/SUBSYSTEM:WINDOWS` — GUI app, no console window allocated.
@@ -1199,7 +1227,7 @@ pub enum WindowsSubsystem {
 }
 
 impl WindowsSubsystem {
-    /// Parse a free-form subsystem name (case-insensitive).  Returns
+    /// Parse a free-form subsystem name (case-insensitive). Returns
     /// `None` on unknown values so the caller can produce a friendly
     /// CLI / manifest diagnostic.
     pub fn parse(s: &str) -> Option<Self> {
@@ -1211,7 +1239,7 @@ impl WindowsSubsystem {
     }
 
     /// The literal `/SUBSYSTEM:` value passed to `link.exe` /
-    /// `lld-link`.  Used by the linker driver to assemble the
+    /// `lld-link`. Used by the linker driver to assemble the
     /// command line.
     pub fn as_link_flag(self) -> &'static str {
         match self {
@@ -1327,28 +1355,32 @@ pub enum ReferenceMode {
 
 // Verification levels — full VVA §2.3 9-strategy ladder.
 //
+
 // The ladder is *strictly monotone* under the ν-coordinate
 // (`MsfsCoord.nu`); each strategy is sound, but completeness and
 // cost grow strictly. A strategy at ν_i discharges every obligation
 // a strategy at ν_j ≤ ν_i can, plus more.
 //
-// | Strategy   | Meaning                                                        | ν       |
+
+// | Strategy | Meaning | ν |
 // |------------|----------------------------------------------------------------|---------|
-// | `none`     | No verification (unsafe!).                                     | —       |
-// | `runtime`  | Emit runtime assertions; no compile-time discharge.            | 0       |
-// | `static`   | Conservative dataflow / constant folding / CBGR.               | 1       |
-// | `fast`     | Bounded SMT (single solver, ≤ 100 ms / goal).                  | 2       |
-// | `formal`   | Full SMT portfolio (Z3 + CVC5) with decision procedures.       | ω       |
-// | `proof`    | User tactic proof; kernel re-checks.                           | ω+1     |
-// | `thorough` | `formal` + mandatory invariant/frame/termination obligations.  | ω·2     |
-// | `reliable` | `thorough` + cross-solver agreement (Z3 ∧ CVC5 must agree).    | ω·2+1   |
-// | `certified`| `reliable` + certificate re-check + cross-format export.       | ω·2+2   |
-// | `synthesize`| Inverse proof search + dispatch to strictest non-synth.       | ≤ ω·3+1 |
+// | `none` | No verification (unsafe!). | — |
+// | `runtime` | Emit runtime assertions; no compile-time discharge. | 0 |
+// | `static` | Conservative dataflow / constant folding / CBGR. | 1 |
+// | `fast` | Bounded SMT (single solver, ≤ 100 ms / goal). | 2 |
+// | `formal` | Full SMT portfolio (Z3 + CVC5) with decision procedures. | ω |
+// | `proof` | User tactic proof; kernel re-checks. | ω+1 |
+// | `thorough` | `formal` + mandatory invariant/frame/termination obligations. | ω·2 |
+// | `reliable` | `thorough` + cross-solver agreement (Z3 ∧ CVC5 must agree). | ω·2+1 |
+// | `certified`| `reliable` + certificate re-check + cross-format export. | ω·2+2 |
+// | `synthesize`| Inverse proof search + dispatch to strictest non-synth. | ≤ ω·3+1 |
 //
+
 // Direction: `@verify(proof)` on a function compiling under
 // `@verify(runtime)` is always accepted (lax → strict). The reverse
 // requires re-proof and is rejected by the level-inference pass.
 //
+
 // Wire format: `[serde(rename_all = "lowercase")]` so verum.toml
 // uses the lowercase identifiers (`verification = "certified"`,
 // `default_strategy = "synthesize"`, etc.).
@@ -1660,6 +1692,7 @@ impl Manifest {
         // `[linker].lto = "thin" | "full"` (handled by
         // verum_compiler::linker_config::LinkerSection).
         //
+
         // Closes the inert-defense pattern at the only loader
         // entry-point (validate() runs once per manifest read)
         // so embedders see when their `[optimization]` /
@@ -1752,14 +1785,15 @@ impl Manifest {
         // incremental / lto / codegen_units / panic) at line ~148,
         // but no consumer reads any of these fields. The active
         // controls today are:
-        //   - target → `[llvm].target_triple` + CLI `--target`
-        //   - opt_level → `[profile.<dev|release>].optimization`
-        //   - lto → `[linker].lto = "thin" | "full"`
-        //   (handled by linker_config::LinkerSection)
+        //  - target → `[llvm].target_triple` + CLI `--target`
+        //  - opt_level → `[profile.<dev|release>].optimization`
+        //  - lto → `[linker].lto = "thin" | "full"`
+        //  (handled by linker_config::LinkerSection)
         // The remaining fields (incremental, codegen_units, panic)
         // are forward-looking — not yet threaded into the toolchain
         // invocation.
         //
+
         // Emit a debug-level trace when any field is set to a
         // non-default value so embedders writing `[build] lto = true`
         // or `[build] codegen_units = 16` see the section was
@@ -1789,20 +1823,21 @@ impl Manifest {
         // After #301, `verify.persist_stats` and
         // `verify.enable_telemetry` are LOAD-BEARING through the
         // build command:
-        //   * `persist_stats` OR-combines with the CLI `--smt-stats`
-        //     flag — either source asking for persistence drives a
-        //     write to `$VERUM_STATE_DIR/smt-stats.json`.
-        //   * `enable_telemetry = false` short-circuits the persist
-        //     block entirely (CLI flag plus manifest = no-op with a
-        //     `--smt-stats requested but [verify].enable_telemetry =
-        //     false` warning so the user understands why).
+        //  * `persist_stats` OR-combines with the CLI `--smt-stats`
+        //  flag — either source asking for persistence drives a
+        //  write to `$VERUM_STATE_DIR/smt-stats.json`.
+        //  * `enable_telemetry = false` short-circuits the persist
+        //  block entirely (CLI flag plus manifest = no-op with a
+        //  `--smt-stats requested but [verify].enable_telemetry =
+        //  false` warning so the user understands why).
         //
+
         // `verify.fail_on_divergence` REMAINS forward-looking: no
         // production compiler phase constructs `SmtBackendSwitcher`
-        // (the switcher only appears in examples).  The flag's
+        // (the switcher only appears in examples). The flag's
         // semantic — "fail builds on cross-validation mismatch" —
         // requires a phase that actually runs cross-validated
-        // verification.  Wiring it would land alongside a separate
+        // verification. Wiring it would land alongside a separate
         // task that introduces switcher-driven verification phases
         // into the production pipeline.
         if !self.verify.fail_on_divergence {

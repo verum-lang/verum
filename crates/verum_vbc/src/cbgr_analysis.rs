@@ -1,52 +1,65 @@
 //! VBC-level CBGR escape analysis for reference tier promotion.
 //!
+
 //! This module implements a lightweight escape analysis pass that operates on
 //! decoded VBC instructions (between VBC codegen and LLVM lowering). It determines
 //! which `&T` references can be promoted from Tier 0 (full runtime CBGR checks,
 //! ~15ns overhead) to Tier 1 (`&checked T`, compiler-proven safe, zero overhead).
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! VBC Codegen -> VbcEscapeAnalyzer -> Tier Decisions -> LLVM Lowering
-//!                      |
-//!                      v
-//!              Map<(FunctionId, usize), CbgrTier>
+//!  |
+//!  v
+//!  Map<(FunctionId, usize), CbgrTier>
 //! ```
 //!
+
 //! # Promotion Rules (MVP)
 //!
+
 //! A `Ref`/`RefMut` instruction at offset `i` in function `f` is promoted to
 //! Tier 1 when ALL of the following hold:
 //!
+
 //! 1. **Local source**: The source register was defined by a local instruction
-//!    (LoadK, LoadI, LoadTrue/False, New with stack-local semantics, arithmetic,
-//!    or Mov from another local). References to function parameters stay Tier 0.
+//!  (LoadK, LoadI, LoadTrue/False, New with stack-local semantics, arithmetic,
+//!  or Mov from another local). References to function parameters stay Tier 0.
 //!
+
 //! 2. **Non-escaping**: The destination register of the Ref/RefMut is never:
-//!    - Passed as an argument to `Call`, `CallM`, `CallClosure`, `TailCall`
-//!    - Stored into a heap object (`SetF`, `SetE` where the object is heap-allocated)
-//!    - Captured by a closure (`NewClosure`)
-//!    - Sent to another thread (`Spawn`, `NurserySpawn`, channel send)
-//!    - Returned from the function (`Ret`)
+//!  - Passed as an argument to `Call`, `CallM`, `CallClosure`, `TailCall`
+//!  - Stored into a heap object (`SetF`, `SetE` where the object is heap-allocated)
+//!  - Captured by a closure (`NewClosure`)
+//!  - Sent to another thread (`Spawn`, `NurserySpawn`, channel send)
+//!  - Returned from the function (`Ret`)
 //!
+
 //! 3. **Bounded lifetime**: The reference does not outlive the function scope
-//!    (implied by non-escaping for this MVP).
+//!  (implied by non-escaping for this MVP).
 //!
+
 //! Everything else defaults to Tier 0.
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_vbc::cbgr_analysis::VbcEscapeAnalyzer;
 //! use verum_vbc::module::VbcFunction;
 //!
+
 //! let functions: Vec<VbcFunction> = /* decoded functions */;
 //! let analyzer = VbcEscapeAnalyzer::new();
 //! let result = analyzer.analyze(&functions);
 //!
+
 //! for ((func_id, offset), tier) in &result.decisions {
-//!     // Use tier decision during LLVM lowering
+//!  // Use tier decision during LLVM lowering
 //! }
 //! ```
 
@@ -62,6 +75,7 @@ use crate::types::CbgrTier;
 
 /// Result of VBC-level escape analysis.
 ///
+
 /// Maps `(FunctionId, instruction_offset)` to the decided CBGR tier for each
 /// `Ref` or `RefMut` instruction in the module.
 #[derive(Debug, Clone)]
@@ -102,6 +116,7 @@ impl EscapeAnalysisStats {
 
 /// VBC-level escape analyzer for CBGR tier promotion.
 ///
+
 /// Performs a conservative analysis over decoded VBC instructions to determine
 /// which references can skip runtime generation checks.
 pub struct VbcEscapeAnalyzer {
@@ -116,6 +131,7 @@ impl VbcEscapeAnalyzer {
 
     /// Analyze a set of decoded VBC functions and produce tier decisions.
     ///
+
     /// For each `Ref` or `RefMut` instruction, determines whether it can be
     /// promoted to Tier 1 (zero-cost) or must remain Tier 0 (runtime-checked).
     pub fn analyze(&self, functions: &[VbcFunction]) -> EscapeAnalysisResult {
@@ -182,6 +198,7 @@ impl VbcEscapeAnalyzer {
 
     /// Decide the CBGR tier for a single Ref/RefMut instruction.
     ///
+
     /// Returns Tier1 if both:
     /// - The source register has local provenance (not a param, not heap-derived)
     /// - The destination register (the reference) does not escape
@@ -207,6 +224,7 @@ impl VbcEscapeAnalyzer {
 
     /// Build a provenance map for all registers in the function.
     ///
+
     /// Each register is classified as:
     /// - `Local`: defined by a local computation (let binding, literal, arithmetic)
     /// - `Param`: comes from a function parameter
@@ -314,6 +332,7 @@ impl VbcEscapeAnalyzer {
 
     /// Find all registers that "escape" the current function scope.
     ///
+
     /// A register escapes if it is:
     /// - Passed as a call argument (Call, CallM, CallClosure, TailCall, CallG)
     /// - Returned from the function (Ret)
@@ -419,6 +438,7 @@ enum RegisterProvenance {
 impl EscapeAnalysisResult {
     /// Look up the decided tier for a specific instruction.
     ///
+
     /// Returns `None` if the instruction at the given offset is not a Ref/RefMut,
     /// or was not analyzed.
     pub fn get_tier(&self, func_id: FunctionId, offset: usize) -> Option<CbgrTier> {
@@ -427,6 +447,7 @@ impl EscapeAnalysisResult {
 
     /// Look up the tier, defaulting to Tier 0 if not found.
     ///
+
     /// This is the recommended API for LLVM lowering: if no analysis result
     /// exists for an instruction, fall back to the safe default (full checks).
     pub fn tier_or_default(&self, func_id: FunctionId, offset: usize) -> CbgrTier {
@@ -469,7 +490,7 @@ mod tests {
     #[test]
     fn test_local_ref_promoted_to_tier1() {
         // let x = 42;
-        // let r = &x;    // Should be Tier 1: x is local, r doesn't escape.
+        // let r = &x; // Should be Tier 1: x is local, r doesn't escape.
         let instrs = vec![
             Instruction::LoadI {
                 dst: Reg(0),
@@ -498,7 +519,7 @@ mod tests {
     #[test]
     fn test_param_ref_stays_tier0() {
         // fn foo(x: Int) {
-        //     let r = &x;  // Should stay Tier 0: x is a parameter.
+        //  let r = &x; // Should stay Tier 0: x is a parameter.
         // }
         let instrs = vec![
             // r0 is the parameter
@@ -525,7 +546,7 @@ mod tests {
     fn test_returned_ref_stays_tier0() {
         // let x = 42;
         // let r = &x;
-        // return r;  // Escapes via return.
+        // return r; // Escapes via return.
         let instrs = vec![
             Instruction::LoadI {
                 dst: Reg(0),
@@ -553,7 +574,7 @@ mod tests {
     fn test_ref_passed_to_call_stays_tier0() {
         // let x = 42;
         // let r = &x;
-        // foo(r);  // Escapes via call argument.
+        // foo(r); // Escapes via call argument.
         let instrs = vec![
             Instruction::LoadI {
                 dst: Reg(0),
@@ -587,9 +608,9 @@ mod tests {
 
     #[test]
     fn test_heap_deref_ref_stays_tier0() {
-        // let h = Heap(42);    // New -> heap
-        // let v = *h;          // Deref -> heap-derived
-        // let r = &v;          // Should stay Tier 0: v is heap-derived
+        // let h = Heap(42); // New -> heap
+        // let v = *h; // Deref -> heap-derived
+        // let r = &v; // Should stay Tier 0: v is heap-derived
         let instrs = vec![
             Instruction::New {
                 dst: Reg(0),
@@ -622,7 +643,7 @@ mod tests {
     fn test_closure_capture_escapes() {
         // let x = 42;
         // let r = &x;
-        // let c = || { r };  // r captured -> escapes
+        // let c = || { r }; // r captured -> escapes
         let instrs = vec![
             Instruction::LoadI {
                 dst: Reg(0),
@@ -655,7 +676,7 @@ mod tests {
     fn test_ref_stored_in_field_escapes() {
         // let x = 42;
         // let r = &x;
-        // obj.field = r;  // Escapes via SetF.
+        // obj.field = r; // Escapes via SetF.
         let instrs = vec![
             Instruction::LoadI {
                 dst: Reg(0),
@@ -688,8 +709,8 @@ mod tests {
     fn test_multiple_refs_mixed_tiers() {
         // let x = 42;
         // let y = 99;
-        // let rx = &x;     // Local, non-escaping -> Tier 1
-        // let ry = &y;     // Local, but escaping via return -> Tier 0
+        // let rx = &x; // Local, non-escaping -> Tier 1
+        // let ry = &y; // Local, but escaping via return -> Tier 0
         // return ry;
         let instrs = vec![
             Instruction::LoadI {
@@ -732,8 +753,8 @@ mod tests {
     #[test]
     fn test_mov_propagates_provenance() {
         // let x = 42;
-        // let y = x;      // Mov: propagates Local provenance
-        // let r = &y;     // Should be Tier 1
+        // let y = x; // Mov: propagates Local provenance
+        // let r = &y; // Should be Tier 1
         let instrs = vec![
             Instruction::LoadI {
                 dst: Reg(0),
@@ -764,7 +785,7 @@ mod tests {
     #[test]
     fn test_refmut_same_rules() {
         // let mut x = 42;
-        // let r = &mut x;  // Local, non-escaping -> Tier 1
+        // let r = &mut x; // Local, non-escaping -> Tier 1
         let instrs = vec![
             Instruction::LoadI {
                 dst: Reg(0),

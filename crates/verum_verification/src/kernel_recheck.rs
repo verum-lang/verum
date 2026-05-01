@@ -1,6 +1,7 @@
 //! Kernel-rule recheck pass — naturality / categorical-coherence /
 //! modal-depth wiring.
 //!
+
 //! This module bridges `verum_kernel`'s trusted-base K-rules
 //! (`check_eps_mu_coherence`, `check_universe_ascent`,
 //! `check_refine_omega`) into the gradual-verification pipeline so
@@ -8,8 +9,10 @@
 //! (`@verify(certified)` and the three `@verify(coherent*)`
 //! variants) can honour their certificate-recheck semantics.
 //!
+
 //! # The structural problem this module solves
 //!
+
 //! Before this module landed, `verum_kernel` had **zero** downstream
 //! Rust dependents — the K-rules were tested in isolation but never
 //! invoked from any compiler phase. Per the VVA architecture
@@ -19,20 +22,24 @@
 //! `@verify(reliable)` semantics — emitting certificates that no
 //! re-check actually validated.
 //!
-//! # V0 surface (this revision)
+
+//! #
 //!
-//! V0 ships a **kernel-recheck façade** in pure Rust:
+
+//! ships a **kernel-recheck façade** in pure Rust:
 //!
-//!   * [`KernelRecheck`] — a thin handle around the K-rule entry
-//!     points.
-//!   * [`refine_omega`] — call-site for `K-Refine-omega`. Given a
-//!     refinement type's binder + base + predicate **already lifted
-//!     to `CoreTerm`**, returns `Ok(())` or a [`KernelRecheckError`]
-//!     wrapping the underlying [`KernelError`].
-//!   * [`universe_ascent`] — call-site for `K-Universe-Ascent`.
-//!   * [`eps_mu_coherence`] — call-site for `K-Eps-Mu`.
+
+//!  * [`KernelRecheck`] — a thin handle around the K-rule entry
+//!  points.
+//!  * [`refine_omega`] — call-site for `K-Refine-omega`. Given a
+//!  refinement type's binder + base + predicate **already lifted
+//!  to `CoreTerm`**, returns `Ok(())` or a [`KernelRecheckError`]
+//!  wrapping the underlying [`KernelError`].
+//!  * [`universe_ascent`] — call-site for `K-Universe-Ascent`.
+//!  * [`eps_mu_coherence`] — call-site for `K-Eps-Mu`.
 //!
-//! V1 will add the AST-to-CoreTerm lifting helpers so the
+
+//! Future work will add the AST-to-CoreTerm lifting helpers so the
 //! verification pipeline can call these directly on the typed AST
 //! without the caller pre-lifting.
 
@@ -121,6 +128,7 @@ impl KernelRecheck {
     /// `K-Refine-omega` recheck **gated by `@require_extension(vfe_7)`
     /// policy** (M-VVA Sub-2.4 — VVA spec L170, deferred policy wiring).
     ///
+
     /// Routes through [`check_refine_omega`] only when the configured
     /// [`ExtensionPolicy`] declares `vfe_7` active for the consuming
     /// scope. When the extension is opt-out (policy = `OptInOnly` and
@@ -129,6 +137,7 @@ impl KernelRecheck {
     /// the VVA Year-0–2 rollout default of "extensions off unless
     /// explicitly opted in".
     ///
+
     /// **Soundness.** Skipping the rule is sound under the rollout
     /// calendar: K-Refine-omega's transfinite stratification check is
     /// strictly stronger than the always-on K-Refine rule (finite
@@ -138,6 +147,7 @@ impl KernelRecheck {
     /// off — only from gating ON when the program author's intent was
     /// to opt into the weaker rule.
     ///
+
     /// **Backward-compat.** Existing callers continue using
     /// [`KernelRecheck::refine_omega`] (the unconditional form). The
     /// gated form is opt-in for new callers wiring policy-aware passes.
@@ -196,13 +206,15 @@ impl KernelRecheck {
     /// error into [`KernelRecheckError::RoundTrip`] tagged with the
     /// callsite context.
     ///
-    /// Admit-set (V0/V1):
-    ///   - structural identity (`α == α`),
-    ///   - K-Adj-Unit shape `AlphaOf(EpsilonOf(F)) ↔ F`,
-    ///   - K-Adj-Counit shape `EpsilonOf(AlphaOf(F)) ↔ F`,
-    ///   - β-/ι-/δ-equivalence (definitional_eq).
+
+    /// Admit-set ():
+    ///  - structural identity (`α == α`),
+    ///  - K-Adj-Unit shape `AlphaOf(EpsilonOf(F)) ↔ F`,
+    ///  - K-Adj-Counit shape `EpsilonOf(AlphaOf(F)) ↔ F`,
+    ///  - β-/ι-/δ-equivalence (definitional_eq).
     ///
-    /// V2 (preprint-blocked on Diakrisis 16.10) adds the universal
+
+    /// Preprint-blocked: adds the universal
     /// canonicalize algorithm.
     pub fn round_trip(
         lhs: &CoreTerm,
@@ -217,15 +229,17 @@ impl KernelRecheck {
         })
     }
 
-    /// V2 universal-canonicalize K-Round-Trip recheck.
+    /// universal-canonicalize K-Round-Trip recheck.
     ///
+
     /// Strictly stronger than [`Self::round_trip`]: every pair the
-    /// V0/V1 algorithm admits is also admitted by V2 with an EMPTY
-    /// audit trail. Pairs that V2 admits but V0/V1 reject (modal-
+    ///  algorithm admits is also admitted by V2 with an EMPTY
+    /// audit trail. Pairs that admits but reject (modal-
     /// idempotent / cohesive-idempotent / refine-fold pairs) produce
     /// a non-empty [`BridgeAudit`] surfacing every Diakrisis admit
     /// invoked.
     ///
+
     /// External auditors enumerate the audit trail to see WHICH
     /// preprint-blocked claims (16.10 / 16.7 / 14.3) the proof
     /// relies on. An empty audit means the proof is fully
@@ -243,11 +257,12 @@ impl KernelRecheck {
         })
     }
 
-    /// V3-final K-Eps-Mu recheck with explicit Diakrisis A-3
+    /// K-Eps-Mu recheck with explicit Diakrisis A-3
     /// τ-witness audit trail.
     ///
+
     /// Strictly stronger than [`Self::eps_mu_coherence`]: every pair
-    /// V3-incremental admits is also admitted by V3-final, with the
+    /// admits is also admitted by V3-final, with the
     /// audit trail recording the σ_α / π_α witness construction
     /// reliance for non-identity canonical naturality squares.
     /// Identity sub-cases (structural / β-equiv) produce an empty
@@ -295,9 +310,10 @@ impl KernelRecheck {
     /// arbitrary κ-tower domain (KappaN(n) for n ≥ 1) with explicit
     /// Diakrisis Lemma 131.L4 bridge admit for ascents beyond κ_2.
     ///
+
     /// Strictly stronger than [`Self::universe_ascent`] (which
-    /// operates on the V0 3-tier domain {Truncated, Kappa1, Kappa2}):
-    /// V0-decidable pairs produce empty audit; κ_n for n ≥ 3 and
+    /// operates on the 3-tier domain {Truncated, Kappa1, Kappa2}):
+    /// decidable pairs produce empty audit; κ_n for n ≥ 3 and
     /// multi-step ascents produce a `DrakeReflectionExtended` admit.
     /// Tier inversions are still rejected uniformly.
     pub fn universe_ascent_v2(
@@ -315,7 +331,7 @@ impl KernelRecheck {
         }
     }
 
-    /// V1 convenience — directly recheck a refinement type
+    /// convenience — directly recheck a refinement type
     /// `{binder : base | predicate}` from its AST form. Performs
     /// the AST → CoreTerm lift via [`lift_type_to_core`] +
     /// [`lift_expr_to_core`] (best-effort), pulls the binder name
@@ -348,9 +364,10 @@ impl KernelRecheck {
     /// (tuples, references, slices, arrays, function-types, bounded-
     /// types) so refinements nested inside generics are not missed.
     ///
+
     /// V3 is what the production verification pipeline calls
     /// (`crates/verum_verification/src/passes.rs::SmtVerificationPass::
-    /// verify_function`); V0/V1/V2 entry points remain available
+    /// verify_function`); /V2 entry points remain available
     /// for unit-test isolation and direct kernel-rule invocation.
     pub fn recheck_function(
         func: &FunctionDecl,
@@ -467,15 +484,18 @@ impl KernelRecheck {
     /// want to drive the full module re-check uniformly without
     /// dispatching across `ItemKind` variants.
     ///
+
     /// Recognises (matches the per-decl helpers above):
     ///
-    ///   * `Theorem` / `Lemma` / `Corollary` → [`recheck_theorem`]
-    ///   * `Axiom`                            → [`recheck_axiom`]
-    ///   * `Function`                         → [`recheck_function`]
-    ///   * Nested module / impl block         → recurse into items
+
+    ///  * `Theorem` / `Lemma` / `Corollary` → [`recheck_theorem`]
+    ///  * `Axiom` → [`recheck_axiom`]
+    ///  * `Function` → [`recheck_function`]
+    ///  * Nested module / impl block → recurse into items
     ///
+
     /// Returns one entry per `(item_name, kind_label, outcome)`
-    /// triple.  Items that aren't kernel-recheckable (Type, Const,
+    /// triple. Items that aren't kernel-recheckable (Type, Const,
     /// Use, etc.) are silently skipped — they have their own
     /// verification phases.
     pub fn recheck_module(
@@ -489,7 +509,7 @@ impl KernelRecheck {
         out
     }
 
-    /// V2 convenience — directly recheck a refinement type from
+    /// convenience — directly recheck a refinement type from
     /// the post-typecheck `verum_types::Type` IR. This is the
     /// flavour the production verification phase actually consumes
     /// (the AST-level lifter exists for unit-test isolation).
@@ -601,7 +621,7 @@ fn recheck_signature_into<'a, I>(
 }
 
 // =============================================================================
-// V4 — function-body walker for let-binding refinements 
+// V4 — function-body walker for let-binding refinements
 // =============================================================================
 
 /// Walk an AST [`Block`] for refinement-type-bearing constructs in
@@ -668,9 +688,9 @@ pub(crate) fn walk_ast_block_for_recheck(
 /// of producing per-decl cost records, it folds outcomes into the
 /// caller's `out` list under the parent function's label so the
 /// diagnostic surface stays anchored on the visible scope.
-/// Module-level walker (#121).  Single-pass dispatch across every
+/// Module-level walker (#121). Single-pass dispatch across every
 /// kernel-recheckable item kind; nested modules / impl blocks
-/// recurse into their items.  The unified result list pairs each
+/// recurse into their items. The unified result list pairs each
 /// per-name outcome with a short kind label (`"theorem"` /
 /// `"axiom"` / `"function"` / `"lemma"` / `"corollary"` / nested
 /// `"impl-method"`) for diagnostics.
@@ -859,8 +879,9 @@ pub(crate) fn walk_ast_expr_for_recheck(
 /// `Var("<kind-tag>")` placeholder so the `m_depth_omega` walker
 /// treats it as rank 0.
 ///
-/// The richer translation (Π / Σ / App / Pair / etc.) is V2 work —
-/// V1 covers the cases that actually trigger
+
+/// The richer translation (Π / Σ / App / Pair / etc.) is future work —
+/// covers the cases that actually trigger
 /// `K-Refine-omega` rejection in user code (modal predicates over
 /// atomic base types).
 pub fn lift_type_to_core(ty: &AstType) -> CoreTerm {
@@ -886,12 +907,12 @@ pub fn lift_type_to_core(ty: &AstType) -> CoreTerm {
         }
         TypeKind::Refined { base, .. } => lift_type_to_core(base),
         // Other shapes — materialise as opaque atomic so the K-rule
-        // sees a well-formed CoreTerm. V2 lifts the structure.
+        // sees a well-formed CoreTerm. Future work lifts the structure.
         _ => CoreTerm::Var(Text::from("<unsupported-type>")),
     }
 }
 
-/// V2 sister of [`lift_type_to_core`] — same conservative
+/// sister of [`lift_type_to_core`] — same conservative
 /// best-effort lift, but operating on the post-typecheck
 /// [`TypesType`] IR. The verification phase consumes
 /// `verum_types::Type` because that's what type-inference
@@ -921,28 +942,28 @@ pub fn lift_types_type_to_core(ty: &TypesType) -> CoreTerm {
         }
         TypesType::Generic { name, .. } => CoreTerm::Var(name.clone()),
         TypesType::Refined { base, .. } => lift_types_type_to_core(base),
-        // V3 composite shapes — fold operands into App chains so
+        // composite shapes — fold operands into App chains so
         // m_depth_omega computes max-rank correctly for nested
-        // refinements. Pre-V3 these collapsed to opaque Var.
+        // refinements. Previously, these collapsed to opaque Var.
         TypesType::Function {
             params,
             return_type,
             ..
         } => {
-            // V3 + fold params + return_type into an
+            // + fold params + return_type into an
             // App chain. The `..` deliberately discards
             // `contexts: Option<ContextExpr>` and
             // `properties: Option<PropertySet>` from the lift:
-            //   • ContextExpr::Concrete wraps ContextRequirement
-            //     which is `Set<ContextRef>`; ContextRef is just
-            //     (name: Text, type_id: TypeId) — no inline Type
-            //     to recurse into. The TypeId is an indirection
-            //     into the type registry; following it would
-            //     require ambient registry access the structural
-            //     lifter doesn't (and shouldn't) have.
-            //   • PropertySet is `Set<ComputationalProperty>` —
-            //     a flat enum (Pure / IO / Async / Fallible /
-            //     Mutates) with no inline Type fields.
+            //  • ContextExpr::Concrete wraps ContextRequirement
+            //  which is `Set<ContextRef>`; ContextRef is just
+            //  (name: Text, type_id: TypeId) — no inline Type
+            //  to recurse into. The TypeId is an indirection
+            //  into the type registry; following it would
+            //  require ambient registry access the structural
+            //  lifter doesn't (and shouldn't) have.
+            //  • PropertySet is `Set<ComputationalProperty>` —
+            //  a flat enum (Pure / IO / Async / Fallible /
+            //  Mutates) with no inline Type fields.
             // Refinements arriving via these channels surface
             // via the type_id back-references, which are walked
             // by other compiler phases (typecheck, contract-
@@ -1001,6 +1022,7 @@ where
 /// operator support is wired so K-Refine-omega correctly rejects
 /// over-stratified predicates (the canonical V1 use case).
 ///
+
 /// composite-expression coverage. Previously
 /// `Binary` / `Unary` / `Call` / `If` / `Match` / `Block` /
 /// `Literal` collapsed to opaque `Var("<unsupported-expr>")`
@@ -1011,29 +1033,31 @@ where
 /// `CoreTerm::App(left, right)` so `m_depth_omega` correctly
 /// computes `max` over the operands.
 ///
+
 /// Coverage:
 ///
-///   • `ExprKind::Path` → `CoreTerm::Var("<last-segment>")`.
-///   • `ExprKind::Paren(e)` → recurse on `e`.
-///   • Method-call shape `x.box()` / `x.diamond()` /
-///     `x.necessarily()` / `x.possibly()` → `ModalBox(x)` /
-///     `ModalDiamond(x)`. Other methods → `App(receiver, args...)`
-///     so the K-rule sees the receiver's modal structure.
-///   • `ExprKind::Binary { left, _, right }` → `App(left, right)`
-///     (operator is irrelevant to `m_depth_omega`; the rank is the
-///     max of the operand ranks).
-///   • `ExprKind::Unary { _, expr }` → recurse on `expr` (unary
-///     operators don't add structural depth).
-///   • `ExprKind::Call { func, args }` → fold args into a
-///     left-associated `App` chain rooted at the callee.
-///   • `ExprKind::If { _, then_branch, else_branch }` → `App(lift(then),
-///     lift(else))` so the rule sees the max-rank branch.
-///   • `ExprKind::Match { _, arms }` → fold all arm bodies into
-///     an `App` chain (max rank across arms).
-///   • `ExprKind::Block(b)` → lift the trailing expression if any,
-///     else `Var("<empty-block>")`.
-///   • `ExprKind::Literal(_)` → `Var("<lit>")` (atomic, rank 0).
-///   • Everything else → `Var("<unsupported-expr>")` placeholder.
+
+///  • `ExprKind::Path` → `CoreTerm::Var("<last-segment>")`.
+///  • `ExprKind::Paren(e)` → recurse on `e`.
+///  • Method-call shape `x.box()` / `x.diamond()` /
+///  `x.necessarily()` / `x.possibly()` → `ModalBox(x)` /
+///  `ModalDiamond(x)`. Other methods → `App(receiver, args...)`
+///  so the K-rule sees the receiver's modal structure.
+///  • `ExprKind::Binary { left, _, right }` → `App(left, right)`
+///  (operator is irrelevant to `m_depth_omega`; the rank is the
+///  max of the operand ranks).
+///  • `ExprKind::Unary { _, expr }` → recurse on `expr` (unary
+///  operators don't add structural depth).
+///  • `ExprKind::Call { func, args }` → fold args into a
+///  left-associated `App` chain rooted at the callee.
+///  • `ExprKind::If { _, then_branch, else_branch }` → `App(lift(then),
+///  lift(else))` so the rule sees the max-rank branch.
+///  • `ExprKind::Match { _, arms }` → fold all arm bodies into
+///  an `App` chain (max rank across arms).
+///  • `ExprKind::Block(b)` → lift the trailing expression if any,
+///  else `Var("<empty-block>")`.
+///  • `ExprKind::Literal(_)` → `Var("<lit>")` (atomic, rank 0).
+///  • Everything else → `Var("<unsupported-expr>")` placeholder.
 pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
     match &expr.kind {
         ExprKind::Path(path) => {
@@ -1126,19 +1150,20 @@ pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
 
         // ----- composite expression coverage (#99 hardening) ----------------
         //
+
         // Pre-this-pass, every variant below collapsed to
         // `Var("<unsupported-expr>")` (rank-0 atom) — modal-typed
         // predicates nested inside any composite shape silently passed
-        // `K-Refine-omega`.  Each arm now folds children into the same
+        // `K-Refine-omega`. Each arm now folds children into the same
         // App-chain shape the typed lift uses for `Call` / `Match`,
         // so `m_depth_omega` computes max-rank correctly through:
-        //   Tuple / Array / Record / Map / Set / Tensor / Comprehension /
-        //   Pipeline / NullCoalesce / Cast / Field / OptionalChain /
-        //   TupleIndex / Index / NamedArg / InterpolatedString /
-        //   Try / TryBlock / TryRecover / TryFinally / TryRecoverFinally /
-        //   Loop / While / For / ForAwait /
-        //   Return / Throw / Yield / Await / Typeof / Async / Spawn /
-        //   Closure / Select / Nursery / Unsafe / Meta.
+        //  Tuple / Array / Record / Map / Set / Tensor / Comprehension /
+        //  Pipeline / NullCoalesce / Cast / Field / OptionalChain /
+        //  TupleIndex / Index / NamedArg / InterpolatedString /
+        //  Try / TryBlock / TryRecover / TryFinally / TryRecoverFinally /
+        //  Loop / While / For / ForAwait /
+        //  Return / Throw / Yield / Await / Typeof / Async / Spawn /
+        //  Closure / Select / Nursery / Unsafe / Meta.
 
         // ----- access / projection -----
         ExprKind::Field { expr, .. }
@@ -1313,7 +1338,7 @@ fn lift_array_expr_to_core(arr: &verum_ast::expr::ArrayExpr) -> CoreTerm {
 
 fn lift_field_init_to_core(f: &verum_ast::expr::FieldInit) -> CoreTerm {
     // FieldInit carries an optional `value` (None for shorthand
-    // `{ x }` ≡ `{ x: x }`).  When the value is omitted the field
+    // `{ x }` ≡ `{ x: x }`). When the value is omitted the field
     // contributes only its bound name — atomic, rank 0.
     match &f.value {
         verum_common::Maybe::Some(v) => lift_expr_to_core(v),
@@ -1391,6 +1416,7 @@ mod tests {
 
     // ---- K-Refine-omega gated by @require_extension(vfe_7) ----
     //
+
     // M-VVA Sub-2.4 — VVA spec L170 deferred policy wiring. The gate
     // ensures K-Refine-omega only runs when the consuming scope opts
     // in via `@require_extension(vfe_7)`. Year-0–2 default (`OptInOnly`)
@@ -1529,6 +1555,7 @@ mod tests {
 
     // ---- K-Round-Trip façade ----
     //
+
     // M-VVA Sub-2.1 closure (round_trip kernel rule integration).
     // The façade lifts `verum_kernel::check_round_trip` to a typed
     // KernelRecheckError variant.
@@ -1781,7 +1808,7 @@ mod tests {
         }
     }
 
-    // ---- V3 lifter extension: composite expression shapes  ----
+    // ---- lifter extension: composite expression shapes ----
 
     use verum_ast::expr::{BinOp, Block, IfCondition, UnOp};
     use verum_ast::literal::{IntLit, Literal, LiteralKind};
@@ -1933,7 +1960,7 @@ mod tests {
     fn refine_omega_from_ast_rejects_modal_inside_binary() {
         // V3: `Int{ p.box().box() && q }` — modal nested in BinOp.
         // Predicate ranks at 2, base at 0; 2 < 0+1 = 1 ⇒ reject.
-        // Pre-V3 this would have been opaque rank 0 → silently
+        // Previously, this would have been opaque rank 0 → silently
         // accepted.
         let bad = binary_expr(
             box_call(box_call(path_expr("p"))),
@@ -2094,7 +2121,7 @@ mod tests {
         // refine_omega_from_types is only meaningful when called
         // ON a refinement. Calling it on a Function type would
         // misuse the API. The structural lifter test above is the
-        // V3 coverage point.
+        // coverage point.
         let pred = TypesRefinementPredicate::inline(path_expr("p"), span());
         assert!(KernelRecheck::refine_omega_from_types(&TypesType::Int, &pred).is_ok());
     }
@@ -2161,7 +2188,7 @@ mod tests {
 
     #[test]
     fn round_trip_v2_admits_v0_pairs_with_empty_audit() {
-        // Identity pair → V2 admits with empty audit (decidable).
+        // Identity pair → admits with empty audit (decidable).
         let f = core_var("F");
         let audit = KernelRecheck::round_trip_v2(&f, &f, "test").unwrap();
         assert!(audit.is_decidable(),
@@ -2170,8 +2197,8 @@ mod tests {
 
     #[test]
     fn round_trip_v2_admits_modal_idempotent_pair() {
-        // ModalBox(ModalBox(F)) ≡ ModalBox(F) via V2 canonicalize.
-        // V0/V1 reject this; V2 admits decidably (modal-idem rewrite).
+        // ModalBox(ModalBox(F)) ≡ ModalBox(F) via canonicalize.
+        //  reject this; admits decidably (modal-idem rewrite).
         let f = core_var("F");
         let bbf = CoreTerm::ModalBox(verum_common::Heap::new(
             CoreTerm::ModalBox(verum_common::Heap::new(f.clone()))));
@@ -2252,14 +2279,14 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // K-Universe-Ascent V2 façade tests (#35)
+    // K-Universe-Ascent façade tests (#35)
     // -------------------------------------------------------------------------
 
     use verum_kernel::KappaTier;
 
     #[test]
     fn universe_ascent_v2_admits_v0_pair_with_empty_audit() {
-        // κ_1 → κ_2 — canonical V0 ascent; V2 must produce empty audit.
+        // κ_1 → κ_2 — canonical ascent; V2 must produce empty audit.
         let audit = KernelRecheck::universe_ascent_v2(
             KappaTier::KappaN(1), KappaTier::KappaN(2), "κ_1→κ_2"
         ).unwrap();
@@ -2311,9 +2338,9 @@ mod tests {
     #[test]
     fn full_audit_aggregation_pipeline_combines_per_rule_audits() {
         // Compose three rule invocations into a single audit:
-        //   - K-Round-Trip V2 with Modal-Idem (decidable, empty)
-        //   - K-Eps-Mu V3-final non-identity (A-3 admit)
-        //   - K-Universe-Ascent V2 κ_3 → κ_3 (131.L4 admit)
+        //  - K-Round-Trip with Modal-Idem (decidable, empty)
+        //  - K-Eps-Mu non-identity (A-3 admit)
+        //  - K-Universe-Ascent κ_3 → κ_3 (131.L4 admit)
         // Aggregate via merge_audits.
         let f = core_var("F");
 
@@ -2585,7 +2612,7 @@ mod tests {
     #[test]
     fn lift_no_more_unsupported_expr_placeholder_for_canonical_shapes() {
         // Pin: every variant we walk above is a previously-degraded
-        // shape.  Verify none of them produce the
+        // shape. Verify none of them produce the
         // `<unsupported-expr>` placeholder Var any more.
         fn contains_unsupported(t: &CoreTerm) -> bool {
             match t {
@@ -2676,7 +2703,7 @@ mod tests {
 
     #[test]
     fn recheck_module_skips_non_recheckable_items_silently() {
-        // Empty module → empty result.  Pin the contract that non-
+        // Empty module → empty result. Pin the contract that non-
         // recheckable items (Type / Const / Use / etc.) don't
         // surface noise in the result list.
         let m = empty_module();

@@ -1,28 +1,31 @@
 //! Stdlib + project + cog module discovery, parsing, and loading.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 13). Houses the
 //! module-graph plumbing that populates `self.modules` /
 //! `self.project_modules` before semantic analysis runs.
 //!
+
 //! Methods:
 //!
-//!   * `load_stdlib_modules` — primary entry; two-tier-cached
-//!     stdlib loader (registry cache → module cache → cold parse).
-//!     Called once per `Compiler` lifecycle before any user code.
-//!   * `load_external_cog_modules` — pulls modules from
-//!     externally-registered cogs (verum-add deps,
-//!     `dependencies` in script-mode frontmatter).
-//!   * `load_project_modules` — discovers + parses sibling .vr
-//!     files in multi-file projects (cross-file `mount foo.bar`
-//!     resolution).
-//!   * `discover_vr_files_recursive` — directory walker.
-//!   * `extract_all_exports` — module → ExportTable conversion.
-//!   * `discover_stdlib_files` + `discover_stdlib_files_recursive`
-//!     — embedded-stdlib unpacking helpers.
-//!   * `parse_stdlib_module` — single-file stdlib parser
-//!     (with diagnostic emission).
-//!   * `parse_and_register` — atomic parse + register-with-session
-//!     for general-purpose use.
+
+//!  * `load_stdlib_modules` — primary entry; two-tier-cached
+//!  stdlib loader (registry cache → module cache → cold parse).
+//!  Called once per `Compiler` lifecycle before any user code.
+//!  * `load_external_cog_modules` — pulls modules from
+//!  externally-registered cogs (verum-add deps,
+//!  `dependencies` in script-mode frontmatter).
+//!  * `load_project_modules` — discovers + parses sibling .vr
+//!  files in multi-file projects (cross-file `mount foo.bar`
+//!  resolution).
+//!  * `discover_vr_files_recursive` — directory walker.
+//!  * `extract_all_exports` — module → ExportTable conversion.
+//!  * `discover_stdlib_files` + `discover_stdlib_files_recursive`
+//!  — embedded-stdlib unpacking helpers.
+//!  * `parse_stdlib_module` — single-file stdlib parser
+//!  (with diagnostic emission).
+//!  * `parse_and_register` — atomic parse + register-with-session
+//!  for general-purpose use.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -56,22 +59,27 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Load and parse all stdlib modules into self.modules.
     ///
+
     /// This enables cross-file imports from std.* modules.
     /// Must be called before processing user modules.
     ///
+
     /// # Performance Optimization (Registry Caching)
     ///
+
     /// This function implements a two-level caching strategy:
     /// 1. **Registry cache (FAST PATH)**: If we have a fully-populated registry
-    ///    cached, we deep_clone it (~1ms) instead of re-registering all modules
+    ///  cached, we deep_clone it (~1ms) instead of re-registering all modules
     /// 2. **Module cache (FALLBACK)**: If no registry cache, we use cached parsed
-    ///    modules to avoid re-parsing, then populate and cache the registry
+    ///  modules to avoid re-parsing, then populate and cache the registry
     ///
+
     /// The registry cache provides ~500ms speedup per compilation by avoiding:
     /// - Module registration in ModuleRegistry (~166 modules)
     /// - Export extraction from each module
     /// - Glob re-export resolution (iterative)
     ///
+
     /// Loads stdlib with two-tier caching: (1) registry cache from prior compilation,
     /// (2) parsed module cache to avoid re-parsing ~166 stdlib modules.
     pub(super) fn load_stdlib_modules(&mut self) -> Result<()> {
@@ -106,7 +114,7 @@ impl<'s> CompilationPipeline<'s> {
                 // is Map (HashMap-backed via verum_common::Map), so raw
                 // iteration order leaks Rust's per-process random hasher
                 // seed into downstream codegen, producing non-deterministic
-                // bytecode (see #143).  Path-sorted iteration is stable
+                // bytecode (see #143). Path-sorted iteration is stable
                 // across runs.
                 let session_registry = self.session.module_registry();
                 let reg = session_registry.read();
@@ -137,6 +145,7 @@ impl<'s> CompilationPipeline<'s> {
         // - StdlibBootstrap mode: Use the configured stdlib_path directly
         // - Normal mode: Find workspace root and look for core/
         //
+
         // ARCHITECTURE NOTE: The embedded stdlib (embedded_stdlib.rs) contains all
         // core/*.vr sources compressed in the binary. Currently we still resolve from
         // the filesystem for dev mode (workspace core/). In production builds, the
@@ -149,9 +158,10 @@ impl<'s> CompilationPipeline<'s> {
             }
             BuildMode::Normal => {
                 // Stdlib (core cog) resolution:
-                //   1. VERUM_STDLIB_PATH env var (explicit override)
-                //   2. Workspace core/ directory (dev mode — binary in target/)
+                //  1. VERUM_STDLIB_PATH env var (explicit override)
+                //  2. Workspace core/ directory (dev mode — binary in target/)
                 //
+
                 // NOTE: ~/.verum/core/ resolution commented out — embedded stdlib
                 // replaces filesystem-based production installs.
                 let stdlib_candidates: Vec<(PathBuf, Option<PathBuf>)> = {
@@ -167,6 +177,7 @@ impl<'s> CompilationPipeline<'s> {
 
                     // 2. Workspace root (dev mode).
                     //
+
                     // T6.0.2 — only accept the candidate when
                     // `core/mod.vr` is present. A bare `core/`
                     // directory (e.g. inside a user cog that
@@ -185,10 +196,10 @@ impl<'s> CompilationPipeline<'s> {
 
                     // 3. ~/.verum/core/ — DISABLED: embedded stdlib replaces this
                     // if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-                    //     let verum_core = PathBuf::from(&home).join(".verum").join("core");
-                    //     if verum_core.exists() {
-                    //         candidates.push((verum_core, None));
-                    //     }
+                    //  let verum_core = PathBuf::from(&home).join(".verum").join("core");
+                    //  if verum_core.exists() {
+                    //  candidates.push((verum_core, None));
+                    //  }
                     // }
 
                     candidates
@@ -406,11 +417,13 @@ impl<'s> CompilationPipeline<'s> {
 
         // After all modules are loaded, resolve re-exports in two phases:
         //
+
         // Phase 1: Resolve ExportKind for specific item re-exports FIRST
         // This handles `public import path.{Item1, Item2}` where the kind was
         // defaulted to Type during initial extraction. Now we look up the actual
         // kind from the source module (e.g., Some is a Function, not a Type).
         //
+
         // Phase 2: Resolve glob re-exports SECOND
         // This processes `public import path.*` statements, copying exports from
         // source modules. By running this AFTER specific kind resolution, the
@@ -496,6 +509,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Load project modules from the input file's directory.
     ///
+
     /// When the input file resides in a directory containing a `mod.vr` file,
     /// that directory is treated as a multi-file project. All sibling `.vr` files
     /// are discovered, parsed, and registered as modules, enabling cross-file
@@ -506,6 +520,7 @@ impl<'s> CompilationPipeline<'s> {
     /// (script-mode `dependencies = [...]`, `verum add`, etc.) instead
     /// of the manifest's project tree.
     ///
+
     /// Each cog's filesystem root is walked recursively; every `.vr`
     /// file is parsed in library mode and registered under the dotted
     /// path `<cog_name>.<relative_path>` (with `mod.vr` collapsing to
@@ -513,6 +528,7 @@ impl<'s> CompilationPipeline<'s> {
     /// entry source resolves through the same registry as workspace
     /// modules — the consumer can't tell the difference.
     ///
+
     /// No-op when no resolver is installed (project mode, plain
     /// scripts without `dependencies = [...]`).
     pub(super) fn load_external_cog_modules(&mut self) -> Result<()> {
@@ -708,9 +724,9 @@ impl<'s> CompilationPipeline<'s> {
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
             // Build dotted module path from relative directory components
             // e.g. project_dir/sub/foo.vr -> "project.sub.foo"
-            //      project_dir/sub/mod.vr -> "project.sub"
-            //      project_dir/foo.vr     -> "project.foo"
-            //      project_dir/mod.vr     -> "project"
+            //  project_dir/sub/mod.vr -> "project.sub"
+            //  project_dir/foo.vr -> "project.foo"
+            //  project_dir/mod.vr -> "project"
             let module_path_str = {
                 let rel = file_path.parent()
                     .and_then(|p| p.strip_prefix(&input_dir).ok())
@@ -732,7 +748,7 @@ impl<'s> CompilationPipeline<'s> {
             // Detect E_MODULE_PATH_COLLISION: two files reach the same
             // dotted module path. The most-common shape is `foo.vr` (Rule 2,
             // file form) AND `foo/mod.vr` (Rule 4, directory form) both
-            // declaring module `<project>.foo`.  Surface this as a hard
+            // declaring module `<project>.foo`. Surface this as a hard
             // diagnostic with both sources cited, and skip the loser so the
             // rest of the project can keep building (the user gets a
             // clear actionable message instead of silent loss).
@@ -1018,6 +1034,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Register inline modules (modules defined with `public module name { ... }`)
     ///
+
     /// This is needed for modules like `std.prelude` which are defined inline
     /// in `core/mod.vr` rather than in their own file.
     fn register_inline_modules(

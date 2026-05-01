@@ -33,7 +33,7 @@ public fn fragmentation_percent(r: &FreelistCountReading) -> Int {
     frac as Int
 }
 
-// Decision: should we VACUUM now?  Threshold is a percentage (0..100).
+// Decision: should we VACUUM now? Threshold is a percentage (0..100).
 public type VacuumAdvice is
     | VaSkip
     | VaConsider

@@ -3,27 +3,33 @@
 // =============================================================================
 // Layer: 0 (Foundation)
 //
+
 // Provides utilities for working with IEEE 754 binary floating-point format,
 // including classification, bit manipulation, and special value handling.
 //
+
 // # IEEE 754 Binary64 (Float64) Format
 //
+
 // ```
-// [63]     [62-52]        [51-0]
-// sign     exponent       mantissa
-// 1 bit    11 bits        52 bits
-//          (bias: 1023)   (implicit leading 1)
+// [63] [62-52] [51-0]
+// sign exponent mantissa
+// 1 bit 11 bits 52 bits
+//  (bias: 1023) (implicit leading 1)
 // ```
 //
+
 // # IEEE 754 Binary32 (Float32) Format
 //
+
 // ```
-// [31]     [30-23]        [22-0]
-// sign     exponent       mantissa
-// 1 bit    8 bits         23 bits
-//          (bias: 127)    (implicit leading 1)
+// [31] [30-23] [22-0]
+// sign exponent mantissa
+// 1 bit 8 bits 23 bits
+//  (bias: 127) (implicit leading 1)
 // ```
 //
+
 // Spec: docs/architecture/math-spec.md Section 1.1
 // =============================================================================
 

@@ -15,6 +15,7 @@
 )]
 // Contract Literals System Tests
 //
+
 // Comprehensive tests for the contract#"..." compiler intrinsic
 // Contract literals (contract#"...") are a compiler intrinsic (NOT user-extensible)
 // providing Hoare-logic style contracts verified at compile time via SMT solvers.
@@ -23,8 +24,10 @@
 // (quantifiers). Verification mode set by @verify(proof/runtime/assume).
 // Workflow: parse contract DSL -> translate to SMT-LIB -> check via Z3/CVC5.
 //
+
 // # Test Categories
 //
+
 // 1. **Parser Tests** - Contract DSL parsing
 // 2. **AST Tests** - Contract expression structure
 // 3. **SMT Translation Tests** - Conversion to SMT-LIB format

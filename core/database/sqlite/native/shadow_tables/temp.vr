@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §17 (TEMP database)
 //
+
 // `sqlite_temp_master` has the same shape as `sqlite_master`, but is
 // scoped to the TEMP database (created by `CREATE TEMP TABLE`,
 // `CREATE TEMP VIEW`, etc.) and dropped on Connection close.

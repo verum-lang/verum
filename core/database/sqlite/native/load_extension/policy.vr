@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3_enable_load_extension(db, 1)    → C-level  ON
-//   sqlite3_enable_load_extension(db, 0)    → C-level  OFF
-//   SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION   → separate SQL-level toggle
+
+//  sqlite3_enable_load_extension(db, 1) → C-level ON
+//  sqlite3_enable_load_extension(db, 0) → C-level OFF
+//  SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION → separate SQL-level toggle
 //
+
 // The C-level and SQL-level toggles are independent; SQLite allows
 // C-level loading while keeping the SQL `load_extension()` function
-// disabled.  The catalogue models both independently.
+// disabled. The catalogue models both independently.
 // =============================================================================
 
 module core.database.sqlite.native.load_extension.policy;

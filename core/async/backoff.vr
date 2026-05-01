@@ -5,50 +5,58 @@
 // Dependencies: core, core.time, core.base.random
 // =============================================================================
 //
+
 // Pure-computation backoff helpers for use outside the Weft service
 // graph: raw HTTP client loops, database reconnect, async-task
 // retries, distributed-lock acquire, etc.
 //
+
 // # Strategies
 //
-//   * `ExponentialNoJitter`   — base × 2^attempt, capped at max.
-//   * `ExponentialFullJitter` — uniform random in [0, base × 2^attempt].
-//                               AWS Architecture Blog recommendation.
-//   * `ExponentialDecorrelated` — uniform random in [base, prev × 3].
-//                               Smooths adjacent retry clusters best
-//                               for large fleets — see AWS Exponential
-//                               Backoff and Jitter whitepaper.
-//   * `FibonacciFullJitter`  — Fibonacci sequence × base, jittered.
-//                               Gentler ramp than exponential.
+
+//  * `ExponentialNoJitter` — base × 2^attempt, capped at max.
+//  * `ExponentialFullJitter` — uniform random in [0, base × 2^attempt].
+//  AWS Architecture Blog recommendation.
+//  * `ExponentialDecorrelated` — uniform random in [base, prev × 3].
+//  Smooths adjacent retry clusters best
+//  for large fleets — see AWS Exponential
+//  Backoff and Jitter whitepaper.
+//  * `FibonacciFullJitter` — Fibonacci sequence × base, jittered.
+//  Gentler ramp than exponential.
 //
+
 // # Usage
 //
+
 // ```
 // let mut bo = Backoff.exponential_full_jitter(
-//     Duration.from_millis(100),    // base
-//     Duration.from_secs(30),        // cap
+//  Duration.from_millis(100), // base
+//  Duration.from_secs(30), // cap
 // );
 // loop {
-//     match try_operation() {
-//         Ok(r)  => return r,
-//         Err(e) if !retryable(&e) => return Err(e),
-//         Err(_) => {
-//             match bo.next_delay() {
-//                 Some(d) => async_sleep(d).await,
-//                 None    => return Err(LastError),
-//             }
-//         }
-//     }
+//  match try_operation() {
+//  Ok(r) => return r,
+//  Err(e) if !retryable(&e) => return Err(e),
+//  Err(_) => {
+//  match bo.next_delay() {
+//  Some(d) => async_sleep(d).await,
+//  None => return Err(LastError),
+//  }
+//  }
+//  }
 // }
 // ```
 //
+
 // # Precision + safety
 //
+
 // All internal arithmetic is integer over microseconds. Overflow is
 // guarded: once `base × 2^attempt` would overflow UInt64 we saturate
 // to `cap_us`, so pathological `max_attempts` values simply plateau
 // at the configured ceiling.
 //
+
 // =============================================================================
 
 module core.async.backoff;

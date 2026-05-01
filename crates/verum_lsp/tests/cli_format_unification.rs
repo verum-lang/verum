@@ -1,6 +1,7 @@
 //! Contract: the LSP `textDocument/formatting` route and `verum fmt`
 //! produce byte-identical output for any input.
 //!
+
 //! Both surfaces eventually pipe through `verum fmt --stdin`, so
 //! this test is the regression gate that catches any future
 //! divergence — e.g. someone adding LSP-only post-processing.

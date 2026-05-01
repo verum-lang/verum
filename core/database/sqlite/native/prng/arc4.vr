@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.1
 //
+
 // SQLite uses a textbook RC4 (a.k.a. ARC4) variant for its randomness:
 // 256-byte permutation state + two indices i,j. Each call to `step`
 // updates the state and returns one byte of keystream.

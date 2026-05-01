@@ -14,6 +14,7 @@
 )]
 //! Feature coverage tests for under-tested Verum language features.
 //!
+
 //! This file covers:
 //! - Context system: using clauses, provide statements, scoped provide
 //! - CBGR three-tier references: &T, &checked T, &unsafe T

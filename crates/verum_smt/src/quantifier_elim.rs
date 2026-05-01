@@ -1,45 +1,56 @@
 //! Quantifier Elimination Module for Verum SMT
 //!
+
 //! This module provides comprehensive quantifier elimination (QE) capabilities using Z3's
 //! powerful QE tactics and model-based projection. QE is essential for:
 //!
+
 //! - **Loop Invariant Synthesis**: Generate loop invariants by eliminating loop-local variables
 //! - **Precondition/Postcondition Synthesis**: Derive contracts from implementations
 //! - **Variable Projection**: Project formulas onto subsets of variables
 //! - **Formula Simplification**: Reduce formula complexity via QE
 //! - **Counterexample Minimization**: Extract minimal failing conditions
 //!
+
 //! ## Quantifier Elimination Techniques
 //!
+
 //! 1. **QE-Lite**: Lightweight QE for linear arithmetic (fastest, ~15ns overhead)
 //! 2. **QE-SAT**: SAT-based QE with model enumeration
 //! 3. **Model-Based Projection**: Project models to variable subsets
 //! 4. **Skolemization**: Replace existential quantifiers with fresh constants
 //! 5. **Full QE**: Complete quantifier elimination with all tactics
 //!
+
 //! ## Performance Targets
 //!
+
 //! - QE-Lite: < 100μs for linear arithmetic formulas
 //! - Model projection: < 500μs for typical refinement types
 //! - Full QE: < 5s timeout for complex cases
 //! - Invariant synthesis: 15-25% improvement over manual approaches
 //!
+
 //! ## Example Usage
 //!
+
 //! ```ignore
 //! use verum_smt::{QuantifierEliminator, QEConfig};
 //! use z3::Context;
 //! use std::sync::Arc;
 //!
+
 //! let ctx = Arc::new(Context::thread_local());
 //! let mut qe = QuantifierEliminator::new(ctx.clone());
 //!
+
 //! // Eliminate existential quantifiers
-//! // ∃x. (x > 0 ∧ y = x + 1)  =>  y > 1
+//! // ∃x. (x > 0 ∧ y = x + 1) => y > 1
 //! // let formula = ...; // Build Z3 formula
 //! // let simplified = qe.eliminate_existential(&formula, &["x"]);
 //! ```
 //!
+
 //! Refinement type verification: Verum's type system combines HM inference with refinement
 //! types (e.g., `Int{> 0}`, `Text where valid_email`). Refinements are verified via SMT
 //! solvers. QE simplifies refinement predicates by eliminating local variables, enabling
@@ -62,13 +73,16 @@ use verum_common::{List, Map, Maybe, Set, Text, option_to_maybe};
 
 /// Extract free variable names from a Z3 Bool formula
 ///
+
 /// This function analyzes the string representation of a Z3 formula
 /// and extracts all variable names that appear in it. Variables are
 /// identified as identifiers that are not Z3 keywords or operators.
 ///
+
 /// # Arguments
 /// * `formula` - The Z3 Boolean formula to analyze
 ///
+
 /// # Returns
 /// A Set of variable names found in the formula
 fn extract_variables_from_formula(formula: &Bool) -> Set<Text> {
@@ -78,6 +92,7 @@ fn extract_variables_from_formula(formula: &Bool) -> Set<Text> {
 
 /// Extract variable names from a formula string representation
 ///
+
 /// Parses the S-expression format used by Z3 and identifies variable names.
 /// Z3 keywords and operators are filtered out.
 fn extract_variables_from_string(formula_str: &str) -> Set<Text> {
@@ -195,6 +210,7 @@ fn extract_variables_from_string(formula_str: &str) -> Set<Text> {
 
 /// Tokenize an SMT-LIB style formula string
 ///
+
 /// Handles S-expressions by splitting on whitespace and parentheses
 /// while preserving tokens.
 fn tokenize_smt_formula(formula_str: &str) -> List<Text> {
@@ -249,6 +265,7 @@ fn tokenize_smt_formula(formula_str: &str) -> List<Text> {
 
 /// S-expression AST node for proper SMT formula parsing
 ///
+
 /// This provides accurate parsing of SMT-LIB format formulas,
 /// enabling precise analysis of formula structure for:
 /// - Non-linearity detection
@@ -265,6 +282,7 @@ pub enum SExpr {
 impl SExpr {
     /// Parse an S-expression from a string
     ///
+
     /// Implements a recursive descent parser for SMT-LIB S-expressions.
     /// Handles nested parentheses, strings, and atoms.
     pub fn parse(input: &str) -> Result<SExpr, Text> {
@@ -318,6 +336,7 @@ impl SExpr {
 
     /// Collect all variable names in this S-expression
     ///
+
     /// Returns atoms that are not keywords or numbers
     pub fn collect_variables(&self) -> Set<Text> {
         let mut vars = Set::new();
@@ -342,9 +361,11 @@ impl SExpr {
 
     /// Check if a variable appears in a non-linear context
     ///
+
     /// A variable is in non-linear context if it appears in a multiplication
     /// with another variable (not just constants).
     ///
+
     /// Examples:
     /// - `(* x 2)` - linear (x * constant)
     /// - `(* x y)` - non-linear (x * y)
@@ -536,6 +557,7 @@ fn is_numeric_literal(token: &str) -> bool {
 
 /// Compute remaining variables after elimination
 ///
+
 /// Given a formula and the set of eliminated variables, returns
 /// the variables that remain in the formula (free variables minus eliminated).
 fn compute_remaining_vars(formula: &Bool, eliminated_vars: &[&str]) -> List<Text> {
@@ -552,6 +574,7 @@ fn compute_remaining_vars(formula: &Bool, eliminated_vars: &[&str]) -> List<Text
 
 /// Analysis result for a variable's eliminability
 ///
+
 /// Contains detailed information about whether and how a variable
 /// can be eliminated from a formula.
 #[derive(Debug, Clone)]
@@ -636,6 +659,7 @@ impl fmt::Display for VariableAnalysis {
 
 /// Analyze how a variable is used in a formula string
 ///
+
 /// This performs syntactic analysis of the formula to determine:
 /// - How many times the variable appears
 /// - Whether it appears in linear or non-linear contexts
@@ -704,10 +728,12 @@ fn is_identifier_char(c: char) -> bool {
 
 /// Check if a variable appears in a non-linear context (multiplication with other variables)
 ///
+
 /// Uses proper S-expression parsing to accurately detect non-linear contexts.
 /// A variable is in a non-linear context if it appears in multiplication
 /// with another variable (not just constants).
 ///
+
 /// Examples:
 /// - `(* x 2)` - linear (x * constant)
 /// - `(* x y)` - non-linear (x * y)
@@ -968,6 +994,7 @@ pub enum InvariantSynthesisMethod {
 
 /// Main quantifier eliminator struct
 ///
+
 /// Z3 0.19+ resolves Context via thread-local storage at tactic-construction
 /// time, so this struct holds only configuration and per-call statistics.
 pub struct QuantifierEliminator {
@@ -989,6 +1016,7 @@ impl QuantifierEliminator {
 
     /// Create with custom configuration
     ///
+
     /// The `simplify_tactic` is built from `config.simplify_level`
     /// so the documented `0-3` range maps to escalating Z3 tactic
     /// chains:
@@ -996,8 +1024,9 @@ impl QuantifierEliminator {
     /// - `1`: `simplify` only (cheap rewriting)
     /// - `2`: `simplify` + `propagate-values` (default)
     /// - `>=3`: `simplify` + `propagate-values` + `ctx-simplify`
-    ///   (context-sensitive, more expensive)
+    ///  (context-sensitive, more expensive)
     ///
+
     /// This is the wiring for `QEConfig.simplify_level`: prior
     /// builds always used a bare `Tactic::new("simplify")`
     /// regardless of the configured level, so the field was
@@ -1089,12 +1118,15 @@ impl QuantifierEliminator {
 
     /// Eliminate existential quantifiers from a formula
     ///
+
     /// Given ∃x₁...xₙ. φ(x₁...xₙ, y₁...yₘ), produce φ'(y₁...yₘ)
     ///
+
     /// # Arguments
     /// * `formula` - Formula with existential quantifiers
     /// * `vars` - Variables to eliminate (empty = all quantified vars)
     ///
+
     /// # Returns
     /// Quantifier-free formula equivalent to the input
     pub fn eliminate_existential(
@@ -1150,8 +1182,10 @@ impl QuantifierEliminator {
 
     /// Eliminate universal quantifiers from a formula
     ///
+
     /// Given ∀x₁...xₙ. φ(x₁...xₙ, y₁...yₘ), produce φ'(y₁...yₘ)
     ///
+
     /// Uses negation: ∀x. φ ≡ ¬∃x. ¬φ
     pub fn eliminate_universal(&mut self, formula: &Bool, vars: &[&str]) -> Result<QEResult, Text> {
         // ∀x. φ ≡ ¬∃x. ¬φ
@@ -1163,6 +1197,7 @@ impl QuantifierEliminator {
 
     /// Project a model to a subset of variables
     ///
+
     /// Given a model M and variables V, produce formula φ such that
     /// φ is satisfied by the projection of M onto V
     pub fn project_model_to_vars(
@@ -1246,6 +1281,7 @@ impl QuantifierEliminator {
 
     /// Synthesize a loop invariant
     ///
+
     /// Given precondition P, loop body B, and postcondition Q,
     /// synthesize invariant I such that:
     /// - P ⇒ I (invariant holds initially)
@@ -1353,6 +1389,7 @@ impl QuantifierEliminator {
 
     /// Convert an interpolant to a loop invariant
     ///
+
     /// Interpolants from A ∧ B ⇒ false can serve as invariants
     /// by eliminating temporary variables
     pub fn interpolant_to_invariant(
@@ -1383,6 +1420,7 @@ impl QuantifierEliminator {
 
     /// QE-Lite: Lightweight QE for linear arithmetic
     ///
+
     /// Fast path that works well for simple linear constraints.
     /// Typically completes in < 100μs.
     fn qe_lite(&self, formula: &Bool, vars: &[&str]) -> Result<QEResult, Text> {
@@ -1497,12 +1535,14 @@ impl QuantifierEliminator {
 
     /// Model-based projection for QE
     ///
+
     /// This method implements model-based quantifier elimination by:
     /// 1. Finding a satisfying model for the formula
     /// 2. Extracting variable values from the model using Z3's model iteration API
     /// 3. Creating equality constraints for remaining (non-eliminated) variables
     /// 4. Building a projected formula that captures the model's projection
     ///
+
     /// The projection is incomplete but useful for:
     /// - Generating candidate invariants
     /// - Finding concrete counterexamples
@@ -1598,6 +1638,7 @@ impl QuantifierEliminator {
 
     /// Create an equality constraint from a model for a specific variable
     ///
+
     /// Attempts to extract the value of a constant from the model and create
     /// an equality constraint (var = value). Supports integers, booleans, and reals.
     fn create_model_constraint(
@@ -1666,33 +1707,41 @@ impl QuantifierEliminator {
 
     /// Skolemization approach to QE
     ///
+
     /// Skolemization replaces existential quantifiers with fresh Skolem functions:
     /// - ∃x. φ(x, y₁...yₙ) becomes φ(f(y₁...yₙ), y₁...yₙ)
     /// - f is a fresh Skolem function depending on free variables
     /// - If no free variables, f is just a constant (0-arity function)
     ///
+
     /// ## Soundness vs Completeness
     ///
+
     /// Skolemization is sound but loses completeness:
     /// - **Sound**: If original formula is satisfiable, skolemized version is satisfiable
     /// - **Not Complete**: Skolemized version may be satisfiable even if original is not
     /// - Direction: ∃x. φ(x) ⟹ φ(sk()), but NOT ⟸
     ///
+
     /// ## Algorithm
     ///
+
     /// 1. Extract free variables from the formula (variables not being eliminated)
     /// 2. For each existential variable x:
-    ///    a. Create fresh Skolem function/constant sk_x(free_vars)
-    ///    b. Substitute all occurrences of x with sk_x(free_vars)
+    ///  a. Create fresh Skolem function/constant sk_x(free_vars)
+    ///  b. Substitute all occurrences of x with sk_x(free_vars)
     /// 3. Return the substituted formula (quantifier-free)
     ///
+
     /// ## Use Cases
     ///
+
     /// - Fast approximation when full QE is too expensive
     /// - Generating witness terms for satisfiability
     /// - Counterexample generation (Skolem constants are witnesses)
     /// - First-order theorem proving (Skolemization is standard)
     ///
+
     /// Skolemization: replaces existential quantifiers with fresh Skolem constants.
     /// Used as a fast approximation when full QE is too expensive, and for generating
     /// witness terms (Skolem constants serve as satisfiability witnesses).
@@ -1749,10 +1798,12 @@ impl QuantifierEliminator {
 
     /// Generate a fresh Skolem name for a variable
     ///
+
     /// Naming convention:
     /// - If no free variables: sk_x (Skolem constant)
     /// - If free variables: sk_x_y1_y2_..._yn (Skolem function applied to args)
     ///
+
     /// This ensures freshness and avoids name collisions with existing variables.
     fn generate_skolem_name(&self, var_name: &str, free_vars: &List<Text>) -> Text {
         if free_vars.is_empty() {
@@ -1772,6 +1823,7 @@ impl QuantifierEliminator {
 
     /// Apply skolemization to a formula
     ///
+
     /// This performs the actual substitution of existential variables with
     /// Skolem functions/constants. The implementation uses Z3's substitution
     /// mechanism when possible, otherwise falls back to syntactic substitution.
@@ -1922,6 +1974,7 @@ impl QuantifierEliminator {
 
     /// Eliminate specified variables from a formula
     ///
+
     /// This is a wrapper around existential QE with variable selection
     pub fn eliminate_variables(
         &mut self,
@@ -1933,11 +1986,13 @@ impl QuantifierEliminator {
 
     /// Find variables that can be safely eliminated
     ///
+
     /// A variable can be eliminated if:
     /// - It appears only linearly (for QE-lite)
     /// - It's not constrained by non-linear terms
     /// - Elimination won't cause exponential blowup
     ///
+
     /// This analysis examines the formula structure to identify variables
     /// that are good candidates for quantifier elimination.
     pub fn find_eliminable_vars(&self, formula: &Bool) -> List<Text> {
@@ -1983,6 +2038,7 @@ impl QuantifierEliminator {
 
     /// Analyze a specific variable's eliminability in a formula
     ///
+
     /// Returns detailed analysis of whether the variable can be eliminated
     /// and at what cost.
     pub fn analyze_variable_eliminability(&self, formula: &Bool, var: &str) -> VariableAnalysis {
@@ -1992,6 +2048,7 @@ impl QuantifierEliminator {
 
     /// Verify that elimination preserves semantics
     ///
+
     /// Check that: ∃vars. original ⟺ eliminated
     pub fn preserve_semantics(
         &self,

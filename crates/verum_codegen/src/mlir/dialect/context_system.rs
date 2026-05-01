@@ -1,28 +1,35 @@
 //! Comprehensive Context System dialect operations for Verum.
 //!
+
 //! The context system provides dependency injection (DI) capabilities in Verum,
 //! allowing functions to declare required contexts and receive them implicitly.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
-//! │                      Context Stack                               │
+//! │ Context Stack │
 //! ├─────────────────────────────────────────────────────────────────┤
-//! │  Frame N:   { Database, Logger, Config }                        │
-//! │  Frame N-1: { Database, Config }                                │
-//! │  Frame 0:   { Config }  ← root contexts                         │
+//! │ Frame N: { Database, Logger, Config } │
+//! │ Frame N-1: { Database, Config } │
+//! │ Frame 0: { Config } ← root contexts │
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Context Lookup (~5-30ns overhead)
 //!
+
 //! 1. Check current frame for context
 //! 2. Walk up the stack if not found
 //! 3. Monomorphization pass can eliminate lookups
 //!
+
 //! # Operations
 //!
+
 //! - `context_get`: Retrieve context value
 //! - `context_provide`: Provide new context value
 //! - `context_scope`: Scoped context provision
@@ -112,11 +119,12 @@ pub enum ContextResolution {
 
 /// Context get operation - retrieves a context value.
 ///
+
 /// ```mlir
 /// %db = verum.context_get "Database" {
-///     resolution = "direct",
-///     cached = true,
-///     fallback = none
+///  resolution = "direct",
+///  cached = true,
+///  fallback = none
 /// } : !verum.context<Database>
 /// ```
 pub struct ContextGetOp;
@@ -189,6 +197,7 @@ impl ContextGetOp {
 
 /// Context get with fallback operation.
 ///
+
 /// ```mlir
 /// %db = verum.context_get_or "Database", %default : !verum.context<Database>
 /// ```
@@ -216,6 +225,7 @@ impl ContextGetOrOp {
 
 /// Context try-get operation - returns Maybe<T>.
 ///
+
 /// ```mlir
 /// %maybe_db = verum.context_try_get "Database" : !verum.maybe<!verum.context<Database>>
 /// ```
@@ -245,10 +255,11 @@ impl ContextTryGetOp {
 
 /// Context provide operation - provides a context value.
 ///
+
 /// ```mlir
 /// verum.context_provide "Database" = %db {
-///     lifetime = "scoped",
-///     inherit = true
+///  lifetime = "scoped",
+///  inherit = true
 /// } : !verum.context<Database>
 /// ```
 pub struct ContextProvideOp;
@@ -298,6 +309,7 @@ impl ContextProvideOp {
 
 /// Context provide with alias operation.
 ///
+
 /// ```mlir
 /// verum.context_provide_as "Database", "db" = %conn : !verum.context<Database>
 /// ```
@@ -334,10 +346,11 @@ impl ContextProvideAsOp {
 
 /// Context scope operation - provides context for a region.
 ///
+
 /// ```mlir
 /// %result = verum.context_scope ["Database" = %db, "Logger" = %log] {
-///     // body uses provided contexts
-///     verum.context_yield %value : T
+///  // body uses provided contexts
+///  verum.context_yield %value : T
 /// } : T
 /// ```
 pub struct ContextScopeOp;
@@ -392,9 +405,10 @@ impl ContextYieldOp {
 
 /// Context require operation - asserts context availability.
 ///
+
 /// ```mlir
 /// verum.context_require ["Database", "Logger"] {
-///     message = "Database and Logger contexts required"
+///  message = "Database and Logger contexts required"
 /// }
 /// ```
 pub struct ContextRequireOp;
@@ -432,6 +446,7 @@ impl ContextRequireOp {
 
 /// Context check operation - returns bool for context availability.
 ///
+
 /// ```mlir
 /// %has_db = verum.context_has "Database" : i1
 /// ```
@@ -462,11 +477,12 @@ impl ContextHasOp {
 
 /// Context with operation - transforms a context value.
 ///
+
 /// ```mlir
 /// %result = verum.context_with "Database" {
-///     ^bb0(%db: !verum.context<Database>):
-///         // transform db
-///         verum.context_with_yield %transformed : T
+///  ^bb0(%db: !verum.context<Database>):
+///  // transform db
+///  verum.context_with_yield %transformed : T
 /// } : T
 /// ```
 pub struct ContextWithOp;
@@ -513,6 +529,7 @@ impl ContextWithYieldOp {
 
 /// Context push frame operation - for manual stack management.
 ///
+
 /// ```mlir
 /// %frame = verum.context_push_frame : !verum.context_frame
 /// ```
@@ -533,6 +550,7 @@ impl ContextPushFrameOp {
 
 /// Context pop frame operation.
 ///
+
 /// ```mlir
 /// verum.context_pop_frame %frame : !verum.context_frame
 /// ```
@@ -557,10 +575,11 @@ impl ContextPopFrameOp {
 
 /// Context monomorphize marker - marks a context access for monomorphization.
 ///
+
 /// ```mlir
 /// %db = verum.context_mono "Database" {
-///     concrete_type = !my.database_impl,
-///     inline_access = true
+///  concrete_type = !my.database_impl,
+///  inline_access = true
 /// } : !verum.context<Database>
 /// ```
 pub struct ContextMonoOp;

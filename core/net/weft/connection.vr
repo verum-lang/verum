@@ -2,7 +2,7 @@
 // core/net/weft/connection.vr — Per-connection HTTP/1.1 pipeline
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §4.4, §6.1
+// Spec: internal/specs/net-framework.md §4.4, §6.1
 // =============================================================================
 
 module core.net.weft.connection;
@@ -42,14 +42,14 @@ public type ConnectionConfig is {
     /// links (mobile hotspots), aggressive enough to evict the
     /// classic slowloris.
     header_deadline_ms: Int,
-    /// Per-request deadline for reading the body.  Body is
+    /// Per-request deadline for reading the body. Body is
     /// usually larger than headers + may stream over a slow
-    /// uplink, so the budget is more generous.  0 = no deadline.
+    /// uplink, so the budget is more generous. 0 = no deadline.
     /// Default 30 s.
     body_deadline_ms: Int,
-    /// Idle deadline between keep-alive requests.  Prevents
+    /// Idle deadline between keep-alive requests. Prevents
     /// holding a connection slot indefinitely after a successful
-    /// response.  0 = no deadline.  Default 60 s.
+    /// response. 0 = no deadline. Default 60 s.
     idle_deadline_ms: Int,
 };
 
@@ -82,11 +82,11 @@ implement Clone for ConnectionConfig {
 public type ConnError is
     | ClientClosed
     | Cancelled
-    /// Underlying I/O error from the transport.  #324: stores the
+    /// Underlying I/O error from the transport. #324: stores the
     /// typed `IoError` directly instead of pre-formatted Text.
     /// Pre-fix every Err path on the read/write hot path allocated
     /// a fresh Text by formatting the IoError — exactly when the
-    /// system is already stressed by network errors.  Post-fix
+    /// system is already stressed by network errors. Post-fix
     /// the typed error propagates without allocation; Display
     /// renders the message at presentation time only.
     | Io(IoError)
@@ -94,7 +94,7 @@ public type ConnError is
     | TooLarge
     | UnsupportedTransferEncoding(Text)
     /// Header-read or body-read deadline elapsed (slowloris guard,
-    /// redteam §2).  Connection is closed; client receives 408 if
+    /// redteam §2). Connection is closed; client receives 408 if
     /// the deadline fired during header reading and the partial
     /// state still permits a write.
     | ReadTimeout
@@ -154,6 +154,7 @@ type KeepAlive is
 /// Generic over any `WeftTransport` — plain TCP, TLS-wrapped TCP, or
 /// future UDS / vsock carriers all share one pipeline.
 ///
+
 /// Accepts an optional `draining` flag from the owning listener — when
 /// raised, the next response is stamped `Connection: close` and the
 /// loop exits after that message (§7.8 phase-2 "Listener closure").
@@ -221,10 +222,11 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
         // this request frame to the parser's `Done` verdict.
         // Pre-fix `read_cancellable` blocked indefinitely under a
         // slowloris drip-feed; the only escape was the listener-wide
-        // shutdown token.  Post-fix the read races against a timer;
+        // shutdown token. Post-fix the read races against a timer;
         // the loser is a bounded ConnError::ReadTimeout that closes
         // the connection cleanly with 408.
         //
+
         // 0 disables the deadline (NOT recommended; allows
         // hostile peers to hold connections indefinitely).
         let rr = if config.header_deadline_ms > 0 {
@@ -253,11 +255,11 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
             return Err(ConnError.ClientClosed);
         }
         // Pre-read budget check (redteam §5): enforce
-        // `max_request_size` BEFORE the per-byte append.  Pre-fix
+        // `max_request_size` BEFORE the per-byte append. Pre-fix
         // the post-read check ran after the loop's push had already
         // committed a coalesced TCP read of arbitrary size — a peer
         // that delivered the entire excess in one syscall could
-        // overshoot by up to one chunk before rejection.  The
+        // overshoot by up to one chunk before rejection. The
         // check now fires on the projected post-append size.
         if accum.len() + n > config.max_request_size {
             let _ = write_response(stream, &mk_413()).await;
@@ -376,25 +378,28 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     let req = WeftRequest.new(method, path, raw_query, headers, body)
         .with_peer(*peer_addr);
 
-    // Handler-panic fence (redteam §9, #35).  Pre-fix an unwinding
+    // Handler-panic fence (redteam §9, #35). Pre-fix an unwinding
     // panic during `app.handle(req).await` killed the spawned
     // connection task silently — connection RST, no 500 response,
-    // no metric, no log.  The classic "request vanishes into the
+    // no metric, no log. The classic "request vanishes into the
     // void" production-debugging hell.
     //
+
     // Post-fix `panic_safe(...)` (`core/async/panic_fence.vr`)
     // wraps the inner future so panics during poll() are caught
-    // and surfaced as `Err(IntrinsicPanicInfo)`.  We then have a
+    // and surfaced as `Err(IntrinsicPanicInfo)`. We then have a
     // three-layer outcome:
     //
-    //   * `Ok(Ok(r))`   — handler succeeded; render r.
-    //   * `Ok(Err(e))`  — handler returned typed error; render it
-    //                     via the existing `IntoResponse` path.
-    //   * `Err(panic)`  — handler unwound; render generic 500 with
-    //                     the panic message digested into a stable
-    //                     correlation-id.  Connection survives;
-    //                     keep-alive's next request still works.
+
+    //  * `Ok(Ok(r))` — handler succeeded; render r.
+    //  * `Ok(Err(e))` — handler returned typed error; render it
+    //  via the existing `IntoResponse` path.
+    //  * `Err(panic)` — handler unwound; render generic 500 with
+    //  the panic message digested into a stable
+    //  correlation-id. Connection survives;
+    //  keep-alive's next request still works.
     //
+
     // The fence is local to the handler call — sibling spawned
     // tasks (background writers, heartbeats, etc.) keep their
     // own panic semantics; the runtime's own panic paths (OOM,
@@ -555,18 +560,20 @@ fn mk_408() -> Response {
 
 /// 500 Internal Server Error — handler panicked (redteam §9).
 ///
-/// Generic message + Connection: close.  The panic message is NOT
+
+/// Generic message + Connection: close. The panic message is NOT
 /// echoed in the body (security — panics may carry stack traces or
-/// secret values from the handler's local state).  Operators get
+/// secret values from the handler's local state). Operators get
 /// the structured panic info via the side-channel: the connection
 /// pipeline above this fence increments
 /// `weft.handler.panic{path,method}` and logs a JSON record with
 /// a stable correlation-id that links to the request.
 ///
+
 /// `Connection: close` because the panic may have left
 /// per-request state corrupt; restarting the keep-alive cycle on
 /// the same socket would risk leaking that state into the next
-/// request.  Defensive close is the safer default.
+/// request. Defensive close is the safer default.
 fn mk_500_panic(_panic_info: &core.intrinsics.control.IntrinsicPanicInfo) -> Response {
     resp_with_body_text(
         resp_with_header(
@@ -609,7 +616,7 @@ async fn read_chunked_body<T: WeftTransport>(
                 return Ok(out);
             }
             ChunkProgress.ChunkNeedMore => {
-                // Read more bytes and re-feed.  Post-#316 the
+                // Read more bytes and re-feed. Post-#316 the
                 // transport hands out `List<Byte>` directly.
                 let mut chunk: List<Byte> = List.with_capacity(4096);
                 // Body-deadline wrap (redteam §2): chunked
@@ -641,8 +648,8 @@ async fn read_chunked_body<T: WeftTransport>(
     }
 }
 
-/// Return a fresh `List<Byte>` containing `src[start..]`.  Sub-slice
-/// helper used by chunked-body decoding.  Could be replaced by a
+/// Return a fresh `List<Byte>` containing `src[start..]`. Sub-slice
+/// helper used by chunked-body decoding. Could be replaced by a
 /// proper byte-slice view once weft adopts a zero-copy buffer
 /// abstraction; for now this is one bulk copy per ChunkNeedMore
 /// retry instead of the prior per-byte int→byte mask + cast.

@@ -1,27 +1,34 @@
 //! Refinement-Aware Exhaustiveness
 //!
+
 //! This module enhances exhaustiveness checking by leveraging refinement types.
 //! When the scrutinee has a refinement type, we can eliminate impossible cases
 //! and provide more precise exhaustiveness analysis.
 //!
+
 //! ## Example
 //!
+
 //! ```verum
 //! type Positive = Int{x: x > 0};
 //!
+
 //! fn classify(n: Positive) -> Text =
-//!     match n {
-//!         1 => "one",
-//!         2 => "two",
-//!         _ => "many"  // Wildcard only covers positive integers
-//!     }
+//!  match n {
+//!  1 => "one",
+//!  2 => "two",
+//!  _ => "many" // Wildcard only covers positive integers
+//!  }
 //! ```
 //!
+
 //! Without refinement awareness, we might warn that negative integers aren't
 //! covered. With refinement awareness, we know those cases are impossible.
 //!
+
 //! ## Integration
 //!
+
 //! This module integrates with:
 //! - `verum_smt` for constraint solving
 //! - `crate::ty::Type::Refined` for refinement type information

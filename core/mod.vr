@@ -4,11 +4,14 @@
 // Version: 0.1.0
 // =============================================================================
 //
+
 // # Verum Standard Library
 //
+
 // The standard library follows a layered architecture where each layer
 // depends only on lower layers:
 //
+
 // ```
 // Layer 6: Cognitive (GPU, Tensors, Autodiff, Neural)
 // Layer 5: Network (TCP, HTTP, TLS, WebSocket)
@@ -23,36 +26,45 @@
 // Layer M: Meta (Compile-time) - Code Generation, Reflection, Macros
 // ```
 //
+
 // # V-LLSI Migration Status
 //
+
 // As of V-LLSI migration, the stdlib no longer depends on Rust FFI
 // (verum_bootstrap, verum_runtime). All operations use native implementations:
 //
+
 // - Memory: Native CBGR allocator (mem/allocator.vr)
 // - Panic: Native sys/init.vr panic handler
 // - Context: Native TLS context system (sys/common.vr)
 // - Async: Native completion-based I/O (io_uring/kqueue/IOCP)
 // - Time: Native platform syscalls (sys/{linux,darwin,windows}/time.vr)
 //
+
 // Spec: docs/architecture/new-arch-spec.md
 //
+
 // # Usage
 //
+
 // ```verum
-// mount core.base.*;           // Core types and protocols
-// mount core.collections.*;    // List, Map, Set
-// mount core.io.*;             // File operations
-// mount core.async.*;          // Async/await support
+// mount core.base.*; // Core types and protocols
+// mount core.collections.*; // List, Map, Set
+// mount core.io.*; // File operations
+// mount core.async.*; // Async/await support
 // ```
 //
+
 // # Design Principles
 //
+
 // 1. **Semantic Honesty**: Types describe meaning (List, Text, Map),
-//    not implementation (Vec, String, HashMap)
+//  not implementation (Vec, String, HashMap)
 // 2. **No Magic**: All dependencies explicit via `mount`
 // 3. **Gradual Safety**: Three-tier references (Tier0/1/2)
 // 4. **Zero-Cost Abstractions**: CBGR enables memory safety at ~15ns
 //
+
 // =============================================================================
 
 module core;
@@ -247,9 +259,9 @@ public module net;
 
 // User-facing observability umbrella — composes layer-local CBGR
 // (mem.diagnostics) and async runtime (async.diagnostics) snapshot
-// surfaces into a single import target.  Future folds: tracing/metrics
+// surfaces into a single import target. Future folds: tracing/metrics
 // observability handle, capability audit log, symbolicated panic stack,
-// live_allocations iterator.  Tracked in #197.
+// live_allocations iterator. Tracked in #197.
 // Spec: docs/architecture/observability.md (TODO)
 public module diagnostics;
 
@@ -293,6 +305,7 @@ public module mesh;
 // (`verify_epsilon`, `gauge_consistency`, streaming
 // `CoherenceMonitor`).
 //
+
 // Pre-fix `core.action` was reachable only via direct file-path
 // mounting (`mount core.action.articulation`) — it had NO
 // declaration in `core/mod.vr`, so it was missing from the
@@ -309,6 +322,7 @@ public module action;
 // Layer A: Verification + Logic Foundations (Depends on: math, base, smt)
 // =============================================================================
 //
+
 // Eight modules that sit alongside `core.action` as the
 // verification + logic foundation layer. Pre-fix every one of these
 // was unrooted in `core/mod.vr` despite shipping production code
@@ -319,23 +333,24 @@ public module action;
 // the children with a doc-header tying the module into the
 // architectural layering.
 //
-//   * `core.proof`        — verification kernel surface
-//                           (contracts_old, kernel_bridge, pcc,
-//                           reflection, tactics)
-//   * `core.types`        — research-grade type machinery
-//                           (poly_kinds, qtt, two_level)
-//   * `core.verify`       — first-class verification API
-//                           (level, attempt, certificate, coherence)
-//   * `core.logic`        — non-classical logic kernels
-//                           (kripke, linear)
-//   * `core.concurrency`  — typed concurrency models
-//                           (process, session)
-//   * `core.eval`         — evaluation strategies
-//                           (cbpv)
-//   * `core.control`      — control-flow primitives
-//                           (continuation)
-//   * `core.database`     — Spindle DB client framework
-//                           (common, sqlite, postgres, mysql)
+
+//  * `core.proof` — verification kernel surface
+//  (contracts_old, kernel_bridge, pcc,
+//  reflection, tactics)
+//  * `core.types` — research-grade type machinery
+//  (poly_kinds, qtt, two_level)
+//  * `core.verify` — first-class verification API
+//  (level, attempt, certificate, coherence)
+//  * `core.logic` — non-classical logic kernels
+//  (kripke, linear)
+//  * `core.concurrency` — typed concurrency models
+//  (process, session)
+//  * `core.eval` — evaluation strategies
+//  (cbpv)
+//  * `core.control` — control-flow primitives
+//  (continuation)
+//  * `core.database` — Spindle DB client framework
+//  (common, sqlite, postgres, mysql)
 public module proof;
 public module types;
 public module verify;

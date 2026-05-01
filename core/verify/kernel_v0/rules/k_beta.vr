@@ -2,49 +2,63 @@
 // kernel_v0 — T-Beta (β-conversion) inference rule + soundness lemma (ADMITTED)
 // =============================================================================
 //
+
 // **Rule**
 //
-//   ┌─────────────────────────────────────────────────────────┐
-//   │ Γ ⊢ t : T1                                                 │
-//   │ T1 ≡_β T2                                                  │
-//   │ ────────────────────────────────────────  T-Beta            │
-//   │ Γ ⊢ t : T2                                                 │
-//   └─────────────────────────────────────────────────────────┘
+
+//  ┌─────────────────────────────────────────────────────────┐
+//  │ Γ ⊢ t : T1 │
+//  │ T1 ≡_β T2 │
+//  │ ──────────────────────────────────────── T-Beta │
+//  │ Γ ⊢ t : T2 │
+//  └─────────────────────────────────────────────────────────┘
 //
+
 // **What this captures**
 //
+
 // β-conversion is the propositional equality between a redex
-// `App(Lam(A, body), x)` and its contractum `body[x/0]`.  When two
+// `App(Lam(A, body), x)` and its contractum `body[x/0]`. When two
 // types differ only by β-equivalence, T-Beta lets the same term
 // inhabit both — the kernel's ONLY way to identify
 // definitionally-equal types.
 //
+
 // **Soundness lemma** (ADMITTED — Church-Rosser confluence IOU)
 //
-//   For every Γ, t, T1, T2 satisfying the premises, the term t
-//   inhabits T2 in the categorical model.
+
+//  For every Γ, t, T1, T2 satisfying the premises, the term t
+//  inhabits T2 in the categorical model.
 //
+
 // **Why admitted (not yet proved)**
 //
+
 // β-equivalence is a SEMANTIC equivalence, not a syntactic identity.
 // Soundness reduces to:
 //
-//     ⟦T1⟧ = ⟦T2⟧  whenever  T1 ≡_β T2
+
+//  ⟦T1⟧ = ⟦T2⟧ whenever T1 ≡_β T2
 //
+
 // which is the Church-Rosser confluence theorem (Barendregt 1985,
-// Theorem 3.2.8) lifted from terms to types.  The proof is textbook
+// Theorem 3.2.8) lifted from terms to types. The proof is textbook
 // but combinatorially involved — requires the diamond-property
 // argument applied to parallel β-reduction.
 //
+
 // **Discharge plan** (#173 Phase 2)
 //
-//   1. Formalize `church_rosser` lemma as a separate Verum theorem.
-//   2. Cross-discharge via Coq's `confluence` tactic library.
+
+//  1. Formalize `church_rosser` lemma as a separate Verum theorem.
+//  2. Cross-discharge via Coq's `confluence` tactic library.
 //
+
 // **Why this is the cleanest IOU**
 //
+
 // Church-Rosser is a self-contained syntactic theorem with no
-// dependency on the rest of the kernel.  It's the most amenable
+// dependency on the rest of the kernel. It's the most amenable
 // admitted rule to discharge first.
 // =============================================================================
 
@@ -58,6 +72,7 @@ mount super.super.judgment.{Derivation, DefinitionalEquality};
 /// Construct a T-Beta derivation from a base derivation and a
 /// β-equality witness.
 ///
+
 /// The `equality_witness` is a `DefinitionalEquality::Beta` (or a
 /// composition via `Trans`) proving `original_type ≡_β new_type`.
 public fn introduce_beta(
@@ -76,16 +91,19 @@ public fn introduce_beta(
 
 /// **Soundness lemma — ADMITTED.**
 ///
+
 /// `∀ ctx t T1 T2.
-///     Γ ⊢ t : T1
-///     → T1 ≡_β T2
-///     → Γ ⊢ t : T2.`
+///  Γ ⊢ t : T1
+///  → T1 ≡_β T2
+///  → Γ ⊢ t : T2.`
 ///
+
 /// **IOU** (recorded in audit bundle `soundness-iou.json`):
 /// Church-Rosser confluence — the diamond-property of parallel
-/// β-reduction (Barendregt 1985 §3.2).  Independent of every other
+/// β-reduction (Barendregt 1985 §3.2). Independent of every other
 /// admitted rule; cleanest discharge target.
 ///
+
 /// **Discharge target**: lemma `church_rosser_confluence` in
 /// `core/verify/kernel_v0/lemmas/beta.vr` (Phase-1 work).
 @verify(formal)

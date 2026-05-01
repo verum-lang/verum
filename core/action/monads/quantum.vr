@@ -2,49 +2,54 @@
 // core.action.monads.quantum — α_quantum effect class (VVA §18.4)
 // =============================================================================
 //
+
 // `Quantum<A>` — the quantum-state-and-measurement monad realising
 // the α_quantum effect class per Abramsky-Coecke 2004 (symmetric
 // monoidal closed category + †-compact structure).
 //
+
 // Quantum is **commutative** under tensor product (parallel
 // preparation of independent qubit registers) but NON-commutative
 // under sequential composition that includes measurement (the act
 // of measuring collapses the wavefunction). The conditional
 // commutativity is recorded via two distinct axioms:
 //
-//   • `quantum_tensor_commutativity` — true for pre-measurement
-//     parallel composition.
-//   • `quantum_sequential_non_commutativity` — measurement
-//     instances DO NOT commute (the post-measurement state
-//     depends on measurement-order).
+
+//  • `quantum_tensor_commutativity` — true for pre-measurement
+//  parallel composition.
+//  • `quantum_sequential_non_commutativity` — measurement
+//  instances DO NOT commute (the post-measurement state
+//  depends on measurement-order).
 //
+
 // ε-coordinate: ω for pre-measurement quantum operations
 // (preparation, gates, tensor); ω + 1 for measurement-inclusive
 // programs (where the act of measurement breaks pure-state
 // commutativity).
 //
+
 // V0 (this file) ships protocol-level surface + Diakrisis-corpus
-// citations. V1 will:
-//   1. Wire Hilbert-space-vector representation (complex amplitudes
-//      indexed by computational basis states).
-//   2. Add canonical gates (Hadamard, Pauli-X/Y/Z, CNOT, Toffoli).
-//   3. Add measurement primitives (computational basis, arbitrary
-//      observable).
-//   4. Demonstrate Grover search correctness via @verify(coherent).
+// citations. Future work will:
+//  1. Wire Hilbert-space-vector representation (complex amplitudes
+//  indexed by computational basis states).
+//  2. Add canonical gates (Hadamard, Pauli-X/Y/Z, CNOT, Toffoli).
+//  3. Add measurement primitives (computational basis, arbitrary
+//  observable).
+//  4. Demonstrate Grover search correctness via @verify(coherent).
 // =============================================================================
 
-/// `Quantum<A>` — V0 protocol surface for the quantum-state monad.
+/// `Quantum<A>` — protocol surface for the quantum-state monad.
 /// Concrete representation deferred to V1; the V0 type is opaque
 /// so users can pattern-match on the protocol via the canonical
 /// strong-monad operations (`pure / bind / strength`).
 @derive(Clone)
 public type Quantum<A> is {
-    /// V0 placeholder — V1 will replace with `List<Complex>` indexed
+    /// placeholder — Future work will replace with `List<Complex>` indexed
     /// by computational-basis states (or a sparse alternative for
     /// large register sizes).
     state_tag: Text,
-    /// V0 carrier — wraps the result type so the monad shape is
-    /// well-typed at the AST level. V1 will integrate proper
+    /// carrier — wraps the result type so the monad shape is
+    /// well-typed at the AST level. Future work will integrate proper
     /// Hilbert-space semantics.
     value: A,
 };
@@ -59,8 +64,8 @@ public fn quantum_unit<A>(a: A) -> Quantum<A> {
 }
 
 /// `bind : Quantum<A> -> (A -> Quantum<B>) -> Quantum<B>` —
-/// sequence two quantum operations. V0 form preserves the result
-/// type-tag; V1 will route through proper unitary composition or
+/// sequence two quantum operations. current form preserves the result
+/// type-tag; Future work will route through proper unitary composition or
 /// CPTP-map composition depending on whether measurements are
 /// involved.
 public fn quantum_bind<A, B>(
@@ -83,13 +88,14 @@ public fn quantum_strength<A, B>(a: A, mb: Quantum<B>) -> Quantum<(A, B)> {
 // Monad laws + non-commutativity (V2 — witness-parameterised theorems)
 // =============================================================================
 //
+
 // V0 Quantum<A> wraps `(state_tag, value)` opaquely. The monad
 // laws are decidable AT THE V0 SHAPE — the value-projection part is
-// a structural pattern-match. V1 (Hilbert-space representation)
+// a structural pattern-match. Future Hilbert-space representation will
 // will add density-matrix equality as the proper notion of
 // quantum-state equivalence; until then, V2 here ships value-
 // equality theorems that the V1 promotion will strengthen to full
-// state equality via the K-Round-Trip V2 Diakrisis 14.3 cohesive
+// state equality via the K-Round-Trip Diakrisis 14.3 cohesive
 // adjunction bridge.
 
 /// **Left identity** at V0 value-projection: `bind(unit(a), f).value
@@ -108,10 +114,10 @@ public theorem quantum_left_identity<A, B>(
 {
     proof {
         // ── Step 1: build the unit Quantum.
-        //   quantum_unit(a) = Quantum { state_tag: "pure", value: a } (definition)
+        //  quantum_unit(a) = Quantum { state_tag: "pure", value: a } (definition)
         let unit_a: Quantum<A> = quantum_unit(a.clone());
         // ── Step 2: quantum_bind unfolds:
-        //   quantum_bind(unit_a, f) = f(unit_a.value) = f(a)         (β-app + def)
+        //  quantum_bind(unit_a, f) = f(unit_a.value) = f(a) (β-app + def)
         let bound: Quantum<B> = quantum_bind(unit_a, f.clone());
         // ── Step 3: direct application — the spec's RHS.
         let direct: Quantum<B> = f(a);
@@ -130,8 +136,8 @@ public theorem quantum_right_identity<A>(m: Quantum<A>) -> Bool
         // ── Step 1: name the wrapped value.
         let mv: A = m.value.clone();
         // ── Step 2: quantum_bind(m, quantum_unit) reduces:
-        //   quantum_bind(m, quantum_unit) = quantum_unit(m.value)    (β-app: f = quantum_unit)
-        //                                = Quantum{state_tag: "pure", value: mv} (definition)
+        //  quantum_bind(m, quantum_unit) = quantum_unit(m.value) (β-app: f = quantum_unit)
+        //  = Quantum{state_tag: "pure", value: mv} (definition)
         let bound: Quantum<A> = quantum_bind(m.clone(), quantum_unit);
         // ── Step 3: bound.value = mv = m.value.
         let _ = mv;
@@ -157,17 +163,17 @@ public theorem quantum_associativity<A, B, C>(
         let b: B = fa.value.clone();
         let gb: Quantum<C> = g(b.clone());
         // ── Step 2: LHS — left-associated.
-        //   bind(bind(m, f), g):
-        //     inner_m = bind(m, f) = f(a) = fa                       (β-app)
-        //     bind(inner_m, g) = g(fa.value) = g(b) = gb              (β-app)
+        //  bind(bind(m, f), g):
+        //  inner_m = bind(m, f) = f(a) = fa (β-app)
+        //  bind(inner_m, g) = g(fa.value) = g(b) = gb (β-app)
         let lhs: Quantum<C> = quantum_bind(
             quantum_bind(m.clone(), f.clone()),
             g.clone(),
         );
         // ── Step 3: RHS — right-associated.
-        //   bind(m, |x| bind(f(x), g)):
-        //     inner_lambda = (|x| bind(f(x), g))(a)
-        //                  = bind(f(a), g) = bind(fa, g) = g(b) = gb (β-app + β-app)
+        //  bind(m, |x| bind(f(x), g)):
+        //  inner_lambda = (|x| bind(f(x), g))(a)
+        //  = bind(f(a), g) = bind(fa, g) = g(b) = gb (β-app + β-app)
         let rhs: Quantum<C> = quantum_bind(
             m,
             |x: A| quantum_bind(f(x), g.clone()),
@@ -180,7 +186,7 @@ public theorem quantum_associativity<A, B, C>(
 
 /// **Tensor commutativity, pre-measurement** (Corollary 17.C2):
 /// independent quantum registers compose symmetrically. V0
-/// surface-level value-projection version (V1 strengthens to
+/// surface-level value-projection version (Future work strengthens to
 /// density-matrix equality via Diakrisis 14.3 cohesive bridge).
 @framework(diakrisis, "Corollary 17.C2 (Quantum tensor-commutativity, pre-measurement)")
 public theorem quantum_tensor_commutativity<A, B>(
@@ -207,10 +213,10 @@ public theorem quantum_tensor_commutativity<A, B>(
         let a: A = m1.value.clone();
         let b: B = m2.value.clone();
         // ── Step 2: LHS — m1 outer, m2 inner; produces ((a, b), tag).
-        //   bind(m1, |x| bind(m2, |y| unit((x, y)))):
-        //     inner = (|y| unit((a, y)))(b) = unit((a, b))
-        //     mid   = bind(m2, |y| ...) = (|y| unit((a, y)))(m2.value=b) = unit((a, b))
-        //     result = bind(m1, |x| mid) = (|x| mid)(m1.value=a) = unit((a, b))
+        //  bind(m1, |x| bind(m2, |y| unit((x, y)))):
+        //  inner = (|y| unit((a, y)))(b) = unit((a, b))
+        //  mid = bind(m2, |y| ...) = (|y| unit((a, y)))(m2.value=b) = unit((a, b))
+        //  result = bind(m1, |x| mid) = (|x| mid)(m1.value=a) = unit((a, b))
         let lhs: Quantum<(A, B)> = quantum_bind(
             m1.clone(),
             |x: A| quantum_bind(m2.clone(),
@@ -223,7 +229,7 @@ public theorem quantum_tensor_commutativity<A, B>(
                 |x: A| quantum_unit((x, y))),
         );
         // ── Step 4: pre-measurement V0 has no entanglement-introducing
-        //   op; both sides project to (a, b) regardless of bind order.
+        //  op; both sides project to (a, b) regardless of bind order.
         let _ = a; let _ = b;
         lhs.value == rhs.value
     }
@@ -232,10 +238,11 @@ public theorem quantum_tensor_commutativity<A, B>(
 /// **NEGATIVE sequential-measurement commutativity**: measurement
 /// instances DO NOT commute. V0 encodes this as a witness pair where
 /// the `state_tag` differs after measurement — full quantum
-/// formulation requires V1 Hilbert-space rep + Diakrisis A-3
+/// formulation requires future Hilbert-space representation + Diakrisis A-3
 /// τ-witness for the projector non-commutativity.
 ///
-/// V0 conservatively returns the policy-gate boolean: `IF measurement
+
+/// conservatively returns the policy-gate boolean: `IF measurement
 /// is in the program AND order is altered THEN observable behaviour
 /// MAY differ` — encoded as the ensures clause checking whether the
 /// caller's marker bit signals measurement presence.
@@ -251,15 +258,15 @@ public theorem quantum_sequential_non_commutativity(
 {
     proof {
         // ── Step 1: case-analyse the three Bool inputs.
-        //   The implication !(measurement ∧ order_altered) ∨ !strict_commute
-        //   simplifies:
-        //     - if has_measurement is false:    !(false ∧ _) = true → ensures holds
-        //     - if order_altered is false:       !(_ ∧ false) = true → ensures holds
-        //     - if requires_strict_commute is false: !false = true → ensures holds
-        //     - else (m ∧ o ∧ s): !(true ∧ true) ∨ !true = false ∨ false = false
-        //       — but the contract DOCUMENTS this as the precondition the caller MUST
-        //       avoid: requesting strict-commute under post-measurement-reorder
-        //       is the unsound combination.
+        //  The implication !(measurement ∧ order_altered) ∨ !strict_commute
+        //  simplifies:
+        //  - if has_measurement is false: !(false ∧ _) = true → ensures holds
+        //  - if order_altered is false: !(_ ∧ false) = true → ensures holds
+        //  - if requires_strict_commute is false: !false = true → ensures holds
+        //  - else (m ∧ o ∧ s): !(true ∧ true) ∨ !true = false ∨ false = false
+        //  — but the contract DOCUMENTS this as the precondition the caller MUST
+        //  avoid: requesting strict-commute under post-measurement-reorder
+        //  is the unsound combination.
         let m_and_o: Bool = has_measurement && order_altered;
         let neg_premise: Bool = !m_and_o;
         let neg_strict: Bool = !requires_strict_commute;
@@ -269,8 +276,8 @@ public theorem quantum_sequential_non_commutativity(
 }
 
 /// **†-compact structure** (Abramsky-Coecke 2004): every quantum
-/// process has a canonical adjoint. The V0 surface returns the
-/// existence claim — V1 will produce the actual adjoint via the
+/// process has a canonical adjoint. The current surface returns the
+/// existence claim — Future work will produce the actual adjoint via the
 /// Hilbert-space transpose-conjugate operation. Routes through the
 /// Diakrisis Theorem 14.3 cohesive-adjunction bridge for the
 /// universal naturality result.
@@ -280,8 +287,8 @@ public theorem quantum_dagger_compact_structure() -> Bool
     ensures  true   // existence claim — full witness deferred to V1 Hilbert rep
 {
     proof {
-        // V0 placeholder: the existence of the dagger is asserted
-        // at the protocol level. V1 will produce the explicit
+        // placeholder: the existence of the dagger is asserted
+        // at the protocol level. Future work will produce the explicit
         // dagger functor as a structural witness; the V0 ensures
         // clause is phrased as `true` because the existence claim
         // has no decidable surface at V0 (no Hilbert-space rep yet).
@@ -291,7 +298,7 @@ public theorem quantum_dagger_compact_structure() -> Bool
 
 /// **CPTP-map factorisation** (Theorem 114.T link): every quantum
 /// process factors as a completely-positive trace-preserving map.
-/// V0 surface-existence claim; V1 produces the explicit Kraus
+/// surface-existence claim; V1 produces the explicit Kraus
 /// decomposition. Routes through Theorem 114.T
 /// (`core.math.frameworks.diakrisis_acts.performance_morphisms_are_cptp`).
 @framework(diakrisis, "Theorem 114.T link (CPTP factorisation in α_quantum)")
@@ -300,7 +307,7 @@ public theorem quantum_cptp_factorisation() -> Bool
     ensures  true   // existence claim — full Kraus decomposition deferred to V1
 {
     proof {
-        // V0 protocol-level placeholder. V1 promotion: replace
+        // V0 protocol-level placeholder. Future work: replace
         // ensures-clause with explicit CPTP-witness construction
         // via the Theorem 114.T `performance_morphisms_are_cptp`
         // framework axiom in `core.math.frameworks.diakrisis_acts`.

@@ -1,9 +1,11 @@
 //! File-based compilation commands
 //!
+
 //! This module provides single-file operations that work independently
 //! of Verum projects. These commands are useful for quick scripts,
 //! testing, and REPL-style development.
 //!
+
 //! Single-file compilation commands integrated into the main verum CLI.
 
 use anyhow::Result;
@@ -25,6 +27,7 @@ use verum_compiler::{
 
 /// Parse verify mode from string.
 ///
+
 /// Accepts the three core verify modes (`auto`, `runtime`, `proof`) plus
 /// the focused tactic-family aliases `cubical` and `dependent`. The
 /// tactic-family aliases route through the proof pipeline at the
@@ -223,6 +226,7 @@ pub fn run(file: &str, args: List<Text>, skip_verify: bool) -> Result<(), CliErr
 
 /// Run single file with tier selection
 ///
+
 /// Tier selection:
 /// - Tier 0 (interpreter): Direct interpretation, instant start
 /// - Tier 1 (aot): AOT compilation via LLVM, production quality
@@ -245,6 +249,7 @@ pub fn run_with_tier(
 
 /// Run single file with tier selection AND CLI permission overrides.
 ///
+
 /// Permission flags (`--allow`, `--allow-all`, `--deny-all`) merge
 /// with the script's frontmatter `permissions = [...]` declaration
 /// per the Deno-style precedence in [`build_permission_set`]:
@@ -288,18 +293,21 @@ pub fn run_with_tier_and_flags(
         0 => {
             // Tier 0: Direct interpretation via pipeline.
             //
+
             // For script-shaped sources (shebang at byte 0 or an inline
             // `// /// script` frontmatter block) the entry path runs
             // through `run_script_interpreted` which adds:
             //
-            //   • frontmatter validation (compiler version constraint
-            //     against the running build),
-            //   • permission resolution (frontmatter ∪ CLI flags),
-            //   • persistent VBC cache (lookup-skip-compile on hit;
-            //     compile + serialise + store on miss),
-            //   • lockfile placeholder (populated as
-            //     dependency resolution lands).
+
+            //  • frontmatter validation (compiler version constraint
+            //  against the running build),
+            //  • permission resolution (frontmatter ∪ CLI flags),
+            //  • persistent VBC cache (lookup-skip-compile on hit;
+            //  compile + serialise + store on miss),
+            //  • lockfile placeholder (populated as
+            //  dependency resolution lands).
             //
+
             // Plain `.vr` files (no shebang, no frontmatter) take the
             // legacy path that just runs the pipeline — no cache, no
             // ceremony, identical behaviour to before.
@@ -317,14 +325,14 @@ pub fn run_with_tier_and_flags(
 
             // Unify on `run_script_interpreted` regardless of whether
             // the source carries a shebang or `// /// script`
-            // frontmatter.  The function gracefully degrades when the
+            // frontmatter. The function gracefully degrades when the
             // frontmatter is absent (no version check, no permission
             // policy installation, no lockfile capture) — the pieces
             // it adds over the legacy plain path that ALWAYS apply
             // are the persistent VBC cache (lookup-skip-compile on
             // hit; compile + serialise + store on miss) and the
             // ScriptContext-driven cache key (source hash + compiler
-            // version + flags).  Pre-fix, plain `.vr` files hit a
+            // version + flags). Pre-fix, plain `.vr` files hit a
             // separate cache-disabled branch and paid the full
             // stdlib-recompile cost on every invocation (~18s for
             // typical script-mode runs); post-fix the cache is
@@ -528,6 +536,7 @@ impl Drop for ScriptTempFile {
 /// byte 0 so the script-mode parser engages — callers don't need
 /// to hand-shebang their inline expressions or stdin payloads.
 ///
+
 /// `kind` is a short descriptor (`"eval"` / `"stdin"`) embedded in
 /// the filename for diagnostic clarity. PID + nanosecond suffix
 /// disambiguates concurrent invocations.
@@ -632,16 +641,19 @@ fn check_frontmatter_version(
 /// frontmatter version validation, CLI permission flag merge,
 /// persistent VBC cache lookup-and-store, and lockfile capture.
 ///
+
 /// **Cache hit path** — deserialise the stored VBC and execute via
 /// `CompilationPipeline::run_compiled_vbc`, skipping every front-end
 /// phase (parse, typecheck, verify, codegen). Cold-start drops to
 /// roughly the cost of zstd decompression + interpreter setup.
 ///
+
 /// **Cache miss path** — run the full pipeline, capture the produced
 /// `VbcModule` from the session, serialise to the on-disk cache
 /// directory keyed by `(source_hash, compiler_version, extra_flags)`,
 /// then continue executing the same in-memory module.
 ///
+
 /// Cache failures are non-fatal: a corrupt entry, locked directory,
 /// or schema mismatch downgrades to the cache-miss path with a
 /// warning. Script execution is the primary contract; caching is an
@@ -675,7 +687,7 @@ fn run_script_interpreted(
     }
 
     // 1. Build the ScriptContext: read source, hash, extract+validate
-    //    frontmatter, merge CLI permission flags, compute cache key.
+    //  frontmatter, merge CLI permission flags, compute cache key.
     let ctx_opts = ScriptContextOptions {
         flags: permission_flags.clone(),
         compiler_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -686,9 +698,9 @@ fn run_script_interpreted(
     })?;
 
     // 2. Frontmatter version gate. A script with `verum = "X.Y"` that
-    //    doesn't match the running build fails fast with a clear
-    //    diagnostic instead of producing a confusing parse error
-    //    half a megabyte deeper into the pipeline.
+    //  doesn't match the running build fails fast with a clear
+    //  diagnostic instead of producing a confusing parse error
+    //  half a megabyte deeper into the pipeline.
     let mut script_cog_resolver: Option<verum_modules::cog_resolver::CogResolver> =
         None;
     if let Some(fm) = ctx.frontmatter.as_ref() {
@@ -709,11 +721,11 @@ fn run_script_interpreted(
     }
 
     // 3. Permission policy. Built only when the script's frontmatter
-    //    EXPLICITLY declares a `permissions = [...]` field. Plain
-    //    scripts with no permissions block keep the interpreter
-    //    router's default allow-all behaviour — explicit opt-in to
-    //    sandboxing, matching Deno's `--allow-*` philosophy without
-    //    breaking existing untouched scripts.
+    //  EXPLICITLY declares a `permissions = [...]` field. Plain
+    //  scripts with no permissions block keep the interpreter
+    //  router's default allow-all behaviour — explicit opt-in to
+    //  sandboxing, matching Deno's `--allow-*` philosophy without
+    //  breaking existing untouched scripts.
     let permission_policy = build_script_permission_policy(&ctx);
     if permission_policy.is_some() {
         ui::detail(
@@ -723,10 +735,10 @@ fn run_script_interpreted(
     }
 
     // 3. Persistent VBC cache. Best-effort: cache-open failures fall
-    //    back to a cache-disabled run. Tier-aware cache keys (already
-    //    encoded in `ScriptContextOptions::extra_cache_flags`) ensure
-    //    `--verify-mode runtime` and `--verify-mode auto` runs don't
-    //    poison each other's cache.
+    //  back to a cache-disabled run. Tier-aware cache keys (already
+    //  encoded in `ScriptContextOptions::extra_cache_flags`) ensure
+    //  `--verify-mode runtime` and `--verify-mode auto` runs don't
+    //  poison each other's cache.
     let cache: Option<ScriptCache> = ScriptCache::at_default().ok();
 
     // Cache hit short-circuit. Non-fatal on any error path (eviction
@@ -752,8 +764,8 @@ fn run_script_interpreted(
     }
 
     // 4. Cache miss: run the pipeline. The session captures the
-    //    compiled VBC via `record_compiled_vbc` so we can pull it
-    //    back here for cache-store.
+    //  compiled VBC via `record_compiled_vbc` so we can pull it
+    //  back here for cache-store.
     options.input = input.to_path_buf();
     ui::status("Running", &format!("{} (interpreter)", input.display()));
     let mut session = Session::new(options);
@@ -775,7 +787,7 @@ fn run_script_interpreted(
     }
 
     // 5. Cache store. Serialise the captured VBC module and persist.
-    //    Best-effort: a cache-write failure does not fail the run.
+    //  Best-effort: a cache-write failure does not fail the run.
     if let (Some(c), Some(vbc)) = (cache.as_ref(), session.take_compiled_vbc()) {
         match verum_vbc::serialize::serialize_module_compressed(
             &vbc,
@@ -791,10 +803,10 @@ fn run_script_interpreted(
     }
 
     // 6. Translate the script's recorded exit code to process exit.
-    //    The pipeline records via `Session::record_exit_code` instead
-    //    of calling `process::exit` directly, so the cache-store step
-    //    above runs first. `None` here means the script returned `()`
-    //    or a non-numeric value — exit 0 by convention.
+    //  The pipeline records via `Session::record_exit_code` instead
+    //  of calling `process::exit` directly, so the cache-store step
+    //  above runs first. `None` here means the script returned `()`
+    //  or a non-numeric value — exit 0 by convention.
     if let Some(code) = session.take_exit_code() {
         std::process::exit(code);
     }
@@ -845,32 +857,36 @@ fn execute_cached_vbc(
 /// Resolve a script's frontmatter dependencies into a populated
 /// `CogResolver` ready to be installed on the run-time `Session`.
 ///
+
 /// Three resolution kinds, all uniform from the resolver's POV
 /// (`register_cog(name, version, root_path)`):
 ///
-///   1. **Path-form** (`{ name = "foo", path = "./local-cogs/foo" }`):
-///      resolved relative to the script's directory, canonicalised
-///      so the script remains runnable from any cwd.  No I/O beyond
-///      `canonicalize`.
-///   2. **Registry-form** (short `"json@1"` or long `{ name = "json",
-///      version = "^1.0" }`): version constraint resolved via the
-///      registry HTTP client (`get_metadata` for exact versions,
-///      `get_latest_version` for bare names / range constraints
-///      since the registry doesn't yet expose `list_versions`),
-///      tarball downloaded into the cog cache (`<cache>/verum/cogs/
-///      <name>/<version>/<name>-<version>.tar.gz`), extracted into
-///      a sibling directory, registered with the resolver.  Cache
-///      hits (extracted dir already present) skip both download and
-///      extract.
-///   3. **Git-form** (`{ name = "x", git = "https://...", rev = "..." }`):
-///      cloned into `<cache>/verum/git/<name>-<rev>/`, checked out
-///      to the requested rev/branch/tag, registered with the
-///      resolver.  Cache hits skip the clone.
+
+///  1. **Path-form** (`{ name = "foo", path = "./local-cogs/foo" }`):
+///  resolved relative to the script's directory, canonicalised
+///  so the script remains runnable from any cwd. No I/O beyond
+///  `canonicalize`.
+///  2. **Registry-form** (short `"json@1"` or long `{ name = "json",
+///  version = "^1.0" }`): version constraint resolved via the
+///  registry HTTP client (`get_metadata` for exact versions,
+///  `get_latest_version` for bare names / range constraints
+///  since the registry doesn't yet expose `list_versions`),
+///  tarball downloaded into the cog cache (`<cache>/verum/cogs/
+///  <name>/<version>/<name>-<version>.tar.gz`), extracted into
+///  a sibling directory, registered with the resolver. Cache
+///  hits (extracted dir already present) skip both download and
+///  extract.
+///  3. **Git-form** (`{ name = "x", git = "https://...", rev = "..." }`):
+///  cloned into `<cache>/verum/git/<name>-<rev>/`, checked out
+///  to the requested rev/branch/tag, registered with the
+///  resolver. Cache hits skip the clone.
 ///
+
 /// All three kinds emit a `LockedDep` for the script's lockfile
 /// (`path+<dir>` / `registry+<url>` / `git+<url>#<sha>`) so a
 /// `verum lockfile verify` can fail-closed on supply-chain drift.
 ///
+
 /// Network errors during registry/git resolution surface as
 /// `CliError` (the script run aborts) rather than warn-and-continue —
 /// silently dropping a declared dependency would let
@@ -982,7 +998,7 @@ struct ResolvedDepEntry {
 }
 
 /// Parse a short-form dep spec `"name@version"` or `"name"` into
-/// `(name, Option<version_req>)`.  Returns `None` on malformed input.
+/// `(name, Option<version_req>)`. Returns `None` on malformed input.
 fn parse_short_dep(spec: &str) -> Option<(String, Option<String>)> {
     let trimmed = spec.trim();
     if trimmed.is_empty() {
@@ -1016,13 +1032,13 @@ fn resolve_registry_dep(
     let cache_dir = crate::registry::cache_dir()?;
     let cache_manager = CacheManager::new(cache_dir.clone())?;
 
-    // Version resolution.  The registry doesn't expose a
+    // Version resolution. The registry doesn't expose a
     // `list_versions` endpoint yet, so:
-    //   - No constraint → `get_latest_version`.
-    //   - Pure-numeric `"1.4.0"` (parses as `semver::Version`) → as-is.
-    //   - Range `"^1.0"`, `">=2.0"` → fall back to `get_latest_version`
-    //     and pin the resolved version in the lockfile (subsequent
-    //     runs hit a stable target regardless of registry drift).
+    //  - No constraint → `get_latest_version`.
+    //  - Pure-numeric `"1.4.0"` (parses as `semver::Version`) → as-is.
+    //  - Range `"^1.0"`, `">=2.0"` → fall back to `get_latest_version`
+    //  and pin the resolved version in the lockfile (subsequent
+    //  runs hit a stable target regardless of registry drift).
     let version: String = match version_req {
         None => client.get_latest_version(name)?.as_str().to_string(),
         Some(req) => {
@@ -1142,7 +1158,7 @@ fn looks_extracted(dir: &std::path::Path) -> bool {
 }
 
 /// Heuristic: a version string is "exact" when it parses as a bare
-/// `semver::Version` (no operator prefix like `^`, `~`, `>=`).  Used
+/// `semver::Version` (no operator prefix like `^`, `~`, `>=`). Used
 /// to decide whether `get_metadata` (exact) vs `get_latest_version`
 /// (range) is the right registry call.
 fn is_exact_version(req: &str) -> bool {
@@ -1150,7 +1166,7 @@ fn is_exact_version(req: &str) -> bool {
 }
 
 /// Sanitize a git rev/branch/tag identifier into a filesystem-safe
-/// directory-name fragment.  Rev SHAs are already safe; branch / tag
+/// directory-name fragment. Rev SHAs are already safe; branch / tag
 /// names with `/` or other non-portable chars get replaced with `_`.
 /// Truncated to 64 chars to keep cache-dir names manageable.
 fn sanitize_git_pin(pin: &str) -> String {
@@ -1171,15 +1187,18 @@ fn sanitize_git_pin(pin: &str) -> String {
 /// Persist (or verify+refresh) a script's resolved dependencies as
 /// a sidecar `<script>.lock` next to the source.
 ///
+
 /// **First run** (no lockfile present) → write a fresh lockfile
 /// from `locked_deps`.
 ///
+
 /// **Subsequent run** (lockfile exists) → call `verify_against` to
 /// detect drift in `(source_hash, compiler_version)`. On stale,
 /// rewrite. Always re-hash on every run so a deps swap (path
 /// repointed, integrity changed) is reflected in the lockfile —
 /// drift must be observable, not silent.
 ///
+
 /// I/O failures are non-fatal: the script run is the contract;
 /// the lockfile is reproducibility metadata. A read-only mount or
 /// a permission glitch warns and continues.
@@ -1252,6 +1271,7 @@ const WILDCARD_TARGET_ID: u64 = 0;
 /// Allow HashMap; the runtime gate hashes the same string at the
 /// call site and looks up the result.
 ///
+
 /// blake3-32-bit truncated. Collisions over the script's grant
 /// set are vanishingly improbable (≈2⁻³² for unrelated strings)
 /// and would only over-grant — never under-grant — because the
@@ -1295,22 +1315,25 @@ fn cli_kind_to_router_scope(
 /// router's default), preserving the legacy behaviour for the wide
 /// existing surface that hasn't opted into sandboxing.
 ///
+
 /// When the frontmatter DOES declare permissions, the returned
 /// policy enforces deny-by-default coarse-grained gating: each
 /// runtime check against a `PermissionScope` is granted iff the
 /// script's `PermissionSet` carries at least one grant of the
 /// matching `PermissionKind`. The mapping:
 ///
-/// | Scope          | Granted iff PermissionSet has any of                    |
+
+/// | Scope | Granted iff PermissionSet has any of |
 /// |----------------|---------------------------------------------------------|
-/// | `Syscall`      | `ffi`                                                   |
-/// | `FileSystem`   | `fs:read`, `fs:write`                                   |
-/// | `Network`      | `net`                                                   |
-/// | `Process`      | `run`                                                   |
-/// | `Memory`       | (always allowed — no script-level memory grants exist)  |
-/// | `Cryptography` | (always allowed — covered by language-level audits)     |
-/// | `Time`         | `time`, `random`                                        |
+/// | `Syscall` | `ffi` |
+/// | `FileSystem` | `fs:read`, `fs:write` |
+/// | `Network` | `net` |
+/// | `Process` | `run` |
+/// | `Memory` | (always allowed — no script-level memory grants exist) |
+/// | `Cryptography` | (always allowed — covered by language-level audits) |
+/// | `Time` | `time`, `random` |
 ///
+
 /// **Coarse-by-construction.** The current `PermissionAssert`
 /// dispatch carries a u64 `target_id` that, for raw syscalls, is
 /// the syscall NUMBER — not the path / host / etc. that a
@@ -1326,21 +1349,24 @@ fn cli_kind_to_router_scope(
 /// lowerer can bake into the generated binary at every
 /// `PermissionAssert` site.
 ///
+
 /// `None` is returned for scripts whose `ctx.permissions` is empty —
 /// the trusted-application path. The lowerer treats `None` as
 /// allow-all (no-op every gate), matching the interpreter's default
 /// when no script policy is wired.
 ///
+
 /// The mapping mirrors `build_script_permission_policy` exactly so
 /// the two execution tiers agree on which scope/target combinations
 /// are allowed:
 ///
+
 /// * `Memory` and `Cryptography` go into `always_allow` (no script
-///   permission kind maps to them today).
+///  permission kind maps to them today).
 /// * Wildcard CLI-scope grants populate the `wildcards` set.
 /// * Specific-target grants populate `specific` with the same
-///   `(scope_tag, target_id)` pairs — `target_id` hashed via
-///   `hash_grant_target` to match the runtime gate's input shape.
+///  `(scope_tag, target_id)` pairs — `target_id` hashed via
+///  `hash_grant_target` to match the runtime gate's input shape.
 fn build_aot_permission_policy(
     ctx: &crate::script::context::ScriptContext,
 ) -> Option<verum_codegen::llvm::AotPermissionPolicy> {
@@ -1408,6 +1434,7 @@ fn build_script_permission_policy(
     // the same target at call time and probes both the specific
     // entry and the wildcard fallback before denying.
     //
+
     // O(1) at check time (one HashSet lookup), bounded by
     // grant count at build time. No allocation in the hot path.
     let mut allow_set: HashSet<(PermissionScope, u64)> = HashSet::new();

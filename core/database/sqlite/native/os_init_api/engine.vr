@@ -28,7 +28,7 @@ public fn new_engine() -> OsInitEngine {
 
 implement OsInitEngine {
     /// sqlite3_os_init — transitions Fresh → Initialised and also
-    /// TornDown → Initialised.  Returns SQLITE_OK (0); idempotent when
+    /// TornDown → Initialised. Returns SQLITE_OK (0); idempotent when
     /// already initialised.
     pub fn sqlite3_os_init(&mut self) -> Int {
         self.init_calls = self.init_calls + 1_i64;

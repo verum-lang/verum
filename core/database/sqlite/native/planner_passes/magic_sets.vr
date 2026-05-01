@@ -3,17 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.5
 //
+
 // Magic Sets is a planner technique for recursive queries that
 // constrains each iteration of the recursive branch to only generate
 // rows that are *reachable* from the seed values supplied by the
 // outer query. Without it, a `WITH RECURSIVE descendants(id) AS (
-//   SELECT id FROM employees WHERE manager = 'alice'
-//   UNION ALL
-//   SELECT e.id FROM employees e JOIN descendants d ON e.manager = d.id
+//  SELECT id FROM employees WHERE manager = 'alice'
+//  UNION ALL
+//  SELECT e.id FROM employees e JOIN descendants d ON e.manager = d.id
 // )` runs the recursive branch over the WHOLE employee table on every
 // step; with Magic Sets, only rows whose `manager` is in the running
 // frontier are scanned.
 //
+
 // We model it as: when a `Recursive` node is found, decorate it with
 // a synthetic `MagicFilter` predicate that the codegen materialises
 // as `WHERE manager IN (frontier)`. The filter starts empty and is

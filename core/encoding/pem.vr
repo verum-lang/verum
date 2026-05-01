@@ -5,62 +5,75 @@
 // Dependencies: core, core.collections, core.encoding.base64
 // =============================================================================
 //
+
 // RFC 7468 — textual encoding for DER blobs used by X.509
 // certificates, PKCS#8 private keys, PKCS#1 RSA keys, SSH public
 // keys (in the PEM variant), TLS certificate bundles, and every
 // other cryptographic object that ships as a file.
 //
+
 // # Block shape
 //
+
 // ```
 // -----BEGIN <LABEL>-----
 // <base64 body, wrapped at 64 chars>
 // -----END <LABEL>-----
 // ```
 //
+
 // Multiple blocks concatenate. Text between blocks is the
 // "preamble" (RFC 7468 §2) and MUST be ignored on decode —
 // common labels have preambles like `Subject: ...` / `Issuer: ...`
 // from `openssl x509 -text` style dumps.
 //
+
 // # API
 //
+
 // ```
 // // Encode one block.
 // let pem: Text = pem.encode_block("CERTIFICATE", cert_der.as_slice());
 //
+
 // // Decode one or many concatenated blocks.
 // let blocks: List<PemBlock> = pem.decode_all(&pem_text)?;
 // for b in blocks {
-//     match b.label.as_bytes() {
-//         b"CERTIFICATE"     => feed_to_x509_parser(&b.contents),
-//         b"PRIVATE KEY"     => load_pkcs8_key(&b.contents),
-//         b"RSA PRIVATE KEY" => load_pkcs1_rsa_key(&b.contents),
-//         _                  => /* unknown label; skip */,
-//     }
+//  match b.label.as_bytes() {
+//  b"CERTIFICATE" => feed_to_x509_parser(&b.contents),
+//  b"PRIVATE KEY" => load_pkcs8_key(&b.contents),
+//  b"RSA PRIVATE KEY" => load_pkcs1_rsa_key(&b.contents),
+//  _ => /* unknown label; skip */,
+//  }
 // }
 //
+
 // // Single-block convenience.
 // let block: PemBlock = pem.decode_one(&pem_text)?;
 // ```
 //
+
 // # Labels (§4)
 //
+
 // Callers are the authority on which labels they accept. Common ones:
 //
-//   "CERTIFICATE"         — X.509 cert (leaf / CA)
-//   "X509 CRL"            — CRL
-//   "CERTIFICATE REQUEST" — PKCS#10 CSR
-//   "PUBLIC KEY"          — SPKI
-//   "PRIVATE KEY"         — PKCS#8 unencrypted
-//   "ENCRYPTED PRIVATE KEY" — PKCS#8 encrypted
-//   "RSA PRIVATE KEY"     — PKCS#1 (legacy)
-//   "EC PRIVATE KEY"      — RFC 5915 (legacy)
-//   "DH PARAMETERS"       — DH group (legacy OpenSSL)
+
+//  "CERTIFICATE" — X.509 cert (leaf / CA)
+//  "X509 CRL" — CRL
+//  "CERTIFICATE REQUEST" — PKCS#10 CSR
+//  "PUBLIC KEY" — SPKI
+//  "PRIVATE KEY" — PKCS#8 unencrypted
+//  "ENCRYPTED PRIVATE KEY" — PKCS#8 encrypted
+//  "RSA PRIVATE KEY" — PKCS#1 (legacy)
+//  "EC PRIVATE KEY" — RFC 5915 (legacy)
+//  "DH PARAMETERS" — DH group (legacy OpenSSL)
 //
+
 // This module is label-agnostic — it parses / emits without
 // interpreting them.
 //
+
 // =============================================================================
 
 module core.encoding.pem;
@@ -125,12 +138,14 @@ implement Eq for PemError {
 /// Hard cap on a single PEM block's base64 body length (bytes BEFORE
 /// decode). 16 MiB is well above any realistic certificate / key blob:
 ///
-///   * X.509 leaf cert         ~  1-3 KiB
-///   * Full chain (3-5 certs)  ~  4-15 KiB
-///   * RSA-4096 PKCS#8 key     ~  3-4 KiB
-///   * ECDSA P-256 key         ~  240 bytes
-///   * Largest sensible bundle ~ 200 KiB (fat CA bundles)
+
+///  * X.509 leaf cert ~ 1-3 KiB
+///  * Full chain (3-5 certs) ~ 4-15 KiB
+///  * RSA-4096 PKCS#8 key ~ 3-4 KiB
+///  * ECDSA P-256 key ~ 240 bytes
+///  * Largest sensible bundle ~ 200 KiB (fat CA bundles)
 ///
+
 /// 16 MiB is "absurdly conservative" — anything past it is a DoS
 /// attempt against the base64 decoder + DER parser allocator.
 public const PEM_MAX_BODY_BYTES: Int = 16 * 1024 * 1024;
@@ -152,9 +167,10 @@ pub const PEM_MAX_LABEL_BYTES: Int = 256;
 
 /// Build a single PEM block with the RFC 7468 canonical form:
 ///
-///   -----BEGIN <label>-----\n
-///   <base64>                \n      (line-wrapped at 64 chars)
-///   -----END <label>-----\n
+
+///  -----BEGIN <label>-----\n
+///  <base64> \n (line-wrapped at 64 chars)
+///  -----END <label>-----\n
 public fn encode_block(label: &str, contents: &[Byte]) -> Text {
     let b64 = b64_encode(contents);
     let b64b = b64.as_bytes();

@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.6 (fuzz harness)
 //
+
 // Each `CorpusEntry` records ONE input the fuzzer found interesting:
 // it survived a mutation cycle, and it either crashed (rare!) or
 // covered new code paths (common).
 //
+
 // Aging policy: entries that haven't increased coverage in N cycles
 // get dropped to keep the corpus from drifting into the entropy
 // equilibrium where every mutator just emits noise.

@@ -14,10 +14,12 @@
 )]
 //! Comprehensive Pattern Parser Tests
 //!
+
 //! This test suite provides exhaustive coverage for ALL PatternKind variants.
 //! Tests use direct pattern parsing for structure verification and contextual
 //! parsing for integration testing.
 //!
+
 //! Pattern kinds tested:
 //! 1. Wildcard - `_`
 //! 2. Rest - `..`

@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.7
 //
+
 // The CI gate requires hitting per-phase pass-rate thresholds across
 // L0..L4 and the differential suite. `CoverageReport` accumulates
 // pass/fail tallies per stratum and answers `meets_phase(p) -> Bool`

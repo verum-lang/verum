@@ -5,13 +5,16 @@
 // Dependencies: core, collections
 // =============================================================================
 //
+
 // Fixed 99-entry table of frequently-used HTTP header name/value
 // pairs. Decoder looks up by `index`; encoder by `(name, value)` or
 // name-only match (for "insert with name reference" encoding).
 //
+
 // Entries 0..=98 per RFC 9204 Appendix A. Any index ≥ 99 is a
 // decoding error per RFC 9204 §3.2.1.
 //
+
 // =============================================================================
 
 module core.net.h3.qpack.static_table;
@@ -68,12 +71,14 @@ fn text_eq(a: &Text, b: &Text) -> Bool {
 // The 99-entry table (RFC 9204 Appendix A).
 // =============================================================================
 //
+
 // Indexed access via `entry(n)` rather than a pre-allocated List so
 // module initialisation stays lazy. Benchmark measurements show
 // lookup overhead here is <20ns on hot-path (vs 15ns on a
 // pre-materialised List<QpackStaticEntry>) — well below the parse /
 // HPACK Huffman decode cost and off the critical HTTP hot path.
 //
+
 // =============================================================================
 
 fn entry(i: Int) -> QpackStaticEntry {

@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Five subsystems initialised by sqlite3_initialize, torn down by
 // sqlite3_shutdown in reverse order.
 // =============================================================================

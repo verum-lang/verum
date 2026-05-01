@@ -1,27 +1,32 @@
 //! Verum scripting-mode end-to-end CLI contract.
 //!
+
 //! Exercises the **three execution-mode contract** end-to-end through
 //! the real `verum` binary:
 //!
-//!   1. **Interpreter** — `verum run file.vr` with `fn main()` in source.
-//!   2. **AOT** — `verum run --aot file.vr` (smoke-tested separately;
-//!      not in this file because LLVM availability gates it).
-//!   3. **Script** — bare `verum file.vr` (or shebang exec `./file.vr`)
-//!      requires a `#!` shebang line at byte 0; top-level statements are
-//!      folded into a synthesised `__verum_script_main` wrapper. Files
-//!      lacking the shebang must use `verum run`.
+
+//!  1. **Interpreter** — `verum run file.vr` with `fn main()` in source.
+//!  2. **AOT** — `verum run --aot file.vr` (smoke-tested separately;
+//!  not in this file because LLVM availability gates it).
+//!  3. **Script** — bare `verum file.vr` (or shebang exec `./file.vr`)
+//!  requires a `#!` shebang line at byte 0; top-level statements are
+//!  folded into a synthesised `__verum_script_main` wrapper. Files
+//!  lacking the shebang must use `verum run`.
 //!
+
 //! Coverage class:
 //!
-//!   * **Mode dispatch** — argv-rewriter routes correctly; advisory fires
-//!     for `.vr` files without shebang.
-//!   * **Wrapper synthesis** — top-level let/expr/decl mix produces
-//!     correct output ordering.
-//!   * **Exit-code propagation** — tail Int / Bool / explicit `fn main()
-//!     -> Int` all reach the OS via `process::exit`.
-//!   * **Shebang exec** — Unix kernel-level shebang dispatch (gated on
-//!     `cfg(unix)` because Windows lacks shebang exec).
+
+//!  * **Mode dispatch** — argv-rewriter routes correctly; advisory fires
+//!  for `.vr` files without shebang.
+//!  * **Wrapper synthesis** — top-level let/expr/decl mix produces
+//!  correct output ordering.
+//!  * **Exit-code propagation** — tail Int / Bool / explicit `fn main()
+//!  -> Int` all reach the OS via `process::exit`.
+//!  * **Shebang exec** — Unix kernel-level shebang dispatch (gated on
+//!  `cfg(unix)` because Windows lacks shebang exec).
 //!
+
 //! Test isolation: each fixture is built in `$TMPDIR/verum_script_*`
 //! with a PID-suffix to avoid cross-test contamination under parallel
 //! `cargo test`. No `verum.toml` is created for the script-mode tests

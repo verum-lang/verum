@@ -1,8 +1,10 @@
 //! Scope Marks for Macro Expansion Phases
 //!
+
 //! Marks track macro expansion phases to distinguish between different
 //! expansions of the same macro.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

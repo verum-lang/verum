@@ -2,16 +2,20 @@
 // lib.math.s_definable — class S_S + Lemma 3.4 facade
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §3.3 — Definition 3.3 (class
 // S_S of S-definable structures) and §3.4 — Lemma 3.4 (S-definability).
 //
+
 // Re-exports:
 //
-//   • `class_s_s.vr` — Definition 3.3 + closure operations O1–O6
-//                      + accessibility / U_2-smallness facts.
-//   • `lemma_3_4.vr` — the *central* technical lemma making
-//                      Theorem 5.1 a one-paragraph proof.
+
+//  • `class_s_s.vr` — Definition 3.3 + closure operations O1–O6
+//  + accessibility / U_2-smallness facts.
+//  • `lemma_3_4.vr` — the *central* technical lemma making
+//  Theorem 5.1 a one-paragraph proof.
 //
+
 // CRITICAL: this module is the linchpin of the entire MSFS proof
 // architecture. Every flagship theorem (5.1, 6.1, 7.1, 8.6, 9.6,
 // 10.4) cites Lemma 3.4 transitively.

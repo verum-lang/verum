@@ -5,27 +5,32 @@
 // Dependencies: core, core.time, quic.{frame, recovery.{rtt, pn_space}}
 // =============================================================================
 //
+
 // RFC 9002 §6 loss detection runs two detection mechanisms in parallel:
 //
-//   (1) Threshold-based (§6.1):
-//       A packet is declared lost if a later packet (by PN) has been
-//       acknowledged AND either:
-//         - the packet is more than `kPacketThreshold = 3` PNs behind
-//           the largest acked, OR
-//         - the packet's time_sent is more than `max(kTimeThreshold *
-//           max(smoothed_rtt, latest_rtt), kGranularity)` before the
-//           ack arrival (§6.1.2; kTimeThreshold = 9/8).
+
+//  (1) Threshold-based (§6.1):
+//  A packet is declared lost if a later packet (by PN) has been
+//  acknowledged AND either:
+//  - the packet is more than `kPacketThreshold = 3` PNs behind
+//  the largest acked, OR
+//  - the packet's time_sent is more than `max(kTimeThreshold *
+//  max(smoothed_rtt, latest_rtt), kGranularity)` before the
+//  ack arrival (§6.1.2; kTimeThreshold = 9/8).
 //
-//   (2) Probe timeout (§6.2):
-//       If no ACK arrives for max_ack_delay + PTO = max_ack_delay +
-//       smoothed_rtt + max(4 * rttvar, kGranularity), the timer fires
-//       and the sender MUST emit a probe packet. PTO back-off
-//       doubles (pto_count++) on each fire, reset on any valid ACK.
+
+//  (2) Probe timeout (§6.2):
+//  If no ACK arrives for max_ack_delay + PTO = max_ack_delay +
+//  smoothed_rtt + max(4 * rttvar, kGranularity), the timer fires
+//  and the sender MUST emit a probe packet. PTO back-off
+//  doubles (pto_count++) on each fire, reset on any valid ACK.
 //
+
 // Per-space state lives in `PnSpace.sent_packets` / `largest_acked_sent`.
 // This module ties those fields together with the RttEstimator and
 // a CongestionCtrl impl.
 //
+
 // =============================================================================
 
 module core.net.quic.recovery.loss_detection;

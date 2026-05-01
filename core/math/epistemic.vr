@@ -3,6 +3,7 @@
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
 //
+
 // Epistemic framework for formally-represented theories. A Theory
 // is represented as an ∞-category of Claims equipped with an
 // EpistemicFunctor (assigning epistemic status to each claim), a
@@ -11,20 +12,22 @@
 // propagating status across theory morphisms. Building block for
 // theory-interop consumers (see `core.theory_interop`).
 //
+
 // Key constructions:
-//   * EpistemicStatus   — ordered variant type for proof strength
-//   * Claim / ClaimType — first-class mathematical statements
-//   * Theory            — ∞-category of claims with epistemic functor
-//   * EpistemicTopology — GrothendieckTopology on theory_site with REAL
-//                         joint-faithfulness checking
-//   * propagate_status  — BFS status propagation over dependency graph
-//   * compute_kan_extension — comma-category construction for Left/Right Kan
-//   * compute_obstruction   — counit deviation (soundness measure)
+//  * EpistemicStatus — ordered variant type for proof strength
+//  * Claim / ClaimType — first-class mathematical statements
+//  * Theory — ∞-category of claims with epistemic functor
+//  * EpistemicTopology — GrothendieckTopology on theory_site with REAL
+//  joint-faithfulness checking
+//  * propagate_status — BFS status propagation over dependency graph
+//  * compute_kan_extension — comma-category construction for Left/Right Kan
+//  * compute_obstruction — counit deviation (soundness measure)
 //
+
 // See also:
-//   - core/math/infinity_topos.vr  (InfinityTopos, GrothendieckTopology, Site)
-//   - core/math/infinity_category.vr (InfinityCategory, InfinityFunctor)
-//   - core/math/kan_extension.vr   (InfLeftKanExtension, InfRightKanExtension)
+//  - core/math/infinity_topos.vr (InfinityTopos, GrothendieckTopology, Site)
+//  - core/math/infinity_category.vr (InfinityCategory, InfinityFunctor)
+//  - core/math/kan_extension.vr (InfLeftKanExtension, InfRightKanExtension)
 // =============================================================================
 
 module core.math.epistemic;
@@ -57,13 +60,15 @@ mount core.base.maybe.{Maybe, Some, None};
 /// The epistemic weight of a mathematical claim, ordered from weakest
 /// (Retracted) to strongest (Theorem).
 ///
+
 /// Ordering (weakest → strongest):
-///   Retracted < Interpretation < Postulate < Hypothesis
-///              < Definition < Conditional < Theorem
+///  Retracted < Interpretation < Postulate < Hypothesis
+///  < Definition < Conditional < Theorem
 ///
+
 /// The ordering reflects derivation strength: a Theorem is the highest
 /// epistemic certificate; a Retraction is the lowest (the claim has been
-/// withdrawn).  Definition is above Hypothesis because a definition is
+/// withdrawn). Definition is above Hypothesis because a definition is
 /// accepted by fiat within the theory, while Conditional is above Definition
 /// because a conditional proof depends on explicit assumptions that have
 /// themselves been acknowledged.
@@ -192,11 +197,11 @@ public type ClaimType is
 // 3. Claim — a first-class mathematical statement
 // =============================================================================
 
-/// A mathematical claim living inside a Theory.  Each claim carries:
-///   * `id`         — unique identifier within the theory
-///   * `claim_type` — logical category (Axiom, Theorem, …)
-///   * `content`    — the statement itself (opaque text or formula handle)
-///   * `status`     — current epistemic status (may change via propagation)
+/// A mathematical claim living inside a Theory. Each claim carries:
+///  * `id` — unique identifier within the theory
+///  * `claim_type` — logical category (Axiom, Theorem, …)
+///  * `content` — the statement itself (opaque text or formula handle)
+///  * `status` — current epistemic status (may change via propagation)
 public type Claim is {
     id:         Text,
     claim_type: ClaimType,
@@ -235,15 +240,16 @@ implement Claim {
 // =============================================================================
 
 /// A mathematical theory presented as:
-///   * `name`        — display name
-///   * `claims`      — an ∞-category whose objects are Claims
-///   * `functor`     — the epistemic functor ε_T : C_T → EpistemicStatus
-///   * `statements`  — flat list of claim ids in dependency order
-///   * `dependencies`— forward adjacency list: each claim id maps to the
-///                     ids of claims it directly depends on
-///   * `claim_store` — runtime map from id to Claim for O(1) lookup
+///  * `name` — display name
+///  * `claims` — an ∞-category whose objects are Claims
+///  * `functor` — the epistemic functor ε_T : C_T → EpistemicStatus
+///  * `statements` — flat list of claim ids in dependency order
+///  * `dependencies`— forward adjacency list: each claim id maps to the
+///  ids of claims it directly depends on
+///  * `claim_store` — runtime map from id to Claim for O(1) lookup
 ///
-/// `dependencies` encodes the dependency ∞-functor.  The `functor` field
+
+/// `dependencies` encodes the dependency ∞-functor. The `functor` field
 /// is an opaque handle to the associated InfinityFunctor value; concrete
 /// implementations supply it through `implement Theory`.
 public type Theory is {
@@ -256,7 +262,7 @@ public type Theory is {
 };
 
 implement Theory {
-    /// Look up a claim by id.  Returns None if the id is not present.
+    /// Look up a claim by id. Returns None if the id is not present.
     public fn get_claim(&self, id: &Text) -> Maybe<Claim> {
         self.claim_store.get(id)
     }
@@ -306,22 +312,26 @@ implement Theory {
 // 5. EpistemicTopology — Grothendieck topology on the theory site
 // =============================================================================
 //
+
 // Design: Joint Faithfulness
 // --------------------------
 // A cover family { f_i : T_i → T } is jointly faithful when:
 //
-//   for every pair of distinct claims a ≠ b ∈ T.statements there exists
-//   some i and some claim c ∈ T_i such that f_i maps c into the
-//   dependency neighbourhood of a or b in a way that distinguishes them.
+
+//  for every pair of distinct claims a ≠ b ∈ T.statements there exists
+//  some i and some claim c ∈ T_i such that f_i maps c into the
+//  dependency neighbourhood of a or b in a way that distinguishes them.
 //
+
 // In the discrete-status model the morphisms f_i are represented as
-// id-to-status maps (`Map<Text, EpistemicStatus>`).  The faithfulness
+// id-to-status maps (`Map<Text, EpistemicStatus>`). The faithfulness
 // condition becomes: for every claim id `x` in the target theory, the
 // statuses supplied by at least one source theory agree with T's own
 // status for `x` (i.e. the cover "witnesses" the status of every claim).
 // A claim whose status is NOT witnessed by any source is a faithfulness
 // gap — if any gap exists the cover is NOT faithful.
 //
+
 // This is the non-trivial check that replaces the prior `true` stub.
 
 /// An entry in the cover family for `EpistemicTopology.is_covering`.
@@ -337,6 +347,7 @@ public type CoverMorphism is {
 
 /// A Grothendieck topology on the theory ∞-site.
 ///
+
 /// Objects are Claims (represented by Int handles in the generic
 /// `GrothendieckTopology` protocol; here we decode them via `Theory`).
 /// A sieve on a claim `c` is **covering** iff the status-maps in the
@@ -352,9 +363,11 @@ public type EpistemicTopology is {
 implement EpistemicTopology {
     /// Core joint-faithfulness check.
     ///
+
     /// `target_ids` is the list of claim ids in the target theory.
-    /// `cover`      is the family of `CoverMorphism`s forming the sieve.
+    /// `cover` is the family of `CoverMorphism`s forming the sieve.
     ///
+
     /// Returns true iff for every claim id `x` in `target_ids` there exists
     /// at least one `CoverMorphism` whose `status_map` contains `x`.
     /// (If a morphism maps `x` but with a weaker status, we record a
@@ -385,7 +398,7 @@ implement EpistemicTopology {
 
     /// Status-coherence refinement: every claim id witnessed by the cover
     /// must be witnessed with a status no weaker than the theory's own
-    /// assignment.  This catches covers that include a claim but
+    /// assignment. This catches covers that include a claim but
     /// downgrade it relative to the target theory.
     public fn status_coherent(
         target:     &Theory,
@@ -421,10 +434,12 @@ implement GrothendieckTopology<InfinityCategory> for EpistemicTopology {
     /// jointly faithful AND status-coherent (see `jointly_faithful` and
     /// `status_coherent` above).
     ///
+
     /// Parameters encode runtime handles:
-    ///   `c` — opaque int identifying the target claim in `self.theory`
-    ///   `s` — opaque int identifying a list of `CoverMorphism` handles
+    ///  `c` — opaque int identifying the target claim in `self.theory`
+    ///  `s` — opaque int identifying a list of `CoverMorphism` handles
     ///
+
     /// The concrete runtime resolves these handles; the logic here is the
     /// faithfulness predicate expressed in terms of the theory's claim ids.
     fn is_covering(c: &Int, s: &Int) -> Bool {
@@ -449,6 +464,7 @@ implement GrothendieckTopology<InfinityCategory> for EpistemicTopology {
     /// Maximality: the maximal sieve (containing the identity morphism,
     /// which maps every claim to itself with its own status) is covering.
     ///
+
     /// Proof sketch: the identity cover has `status_map = { id → c.status
     /// for each c in T }`, so every claim is witnessed with its own status.
     /// Hence `jointly_faithful` returns true and `status_coherent` returns
@@ -464,6 +480,7 @@ implement GrothendieckTopology<InfinityCategory> for EpistemicTopology {
     /// Stability: the pullback of a covering sieve along any morphism
     /// `f : c' → c` is a covering sieve of `c'`.
     ///
+
     /// Proof sketch: if the cover witnesses all claims of `T` faithfully,
     /// and `f` maps `T'` into `T`, then restricting the cover along `f`
     /// witnesses all claims of `T'` faithfully (since `T'.statements ⊆
@@ -476,6 +493,7 @@ implement GrothendieckTopology<InfinityCategory> for EpistemicTopology {
     /// Transitivity: if `R` is a covering sieve of `c` and every morphism
     /// in `R` has a covering pullback-sieve of `S`, then `S` is covering.
     ///
+
     /// Proof sketch: composing jointly faithful cover families yields a
     /// jointly faithful family — faithfulness is preserved under
     /// composition of sieve morphisms.
@@ -492,6 +510,7 @@ implement GrothendieckTopology<InfinityCategory> for EpistemicTopology {
 /// The epistemic topology J_ep satisfies all three Grothendieck axioms:
 /// maximality, stability, and transitivity.
 ///
+
 /// This locks in the claim that `EpistemicTopology` is a genuine
 /// Grothendieck topology and not merely a mock.
 @verify(formal)
@@ -536,10 +555,12 @@ theorem jep_is_grothendieck_topology()
 /// on `theory_site`. By the general theory (HTT §6.2.2), this is
 /// an ∞-topos.
 ///
+
 /// This ∞-topos is the semantic universe in which formally-
 /// represented knowledge lives: a claim is "true" in a theory
 /// iff the corresponding sheaf has a global section.
 ///
+
 /// Exposed to downstream theory-interop consumers via
 /// `core.theory_interop`. The legacy identifier `mathesis_topos`
 /// is retained as a compatibility alias during the
@@ -576,17 +597,19 @@ public type StatusChange is {
 /// Propagate epistemic status through `theory` using breadth-first
 /// traversal.
 ///
+
 /// Algorithm (monotone downgrade fixpoint):
-///   1. Initialise the BFS queue with all claim ids in `theory.statements`.
-///   2. Dequeue a claim id `id`.  Skip if already processed in this round.
-///   3. Compute `min_dep_status = meet { dep.status | dep ∈ deps(id) }`.
-///      Unknown dependencies are treated conservatively as `Hypothesis`.
-///   4. If `claim.status > min_dep_status`, downgrade `claim.status` to
-///      `min_dep_status`, record a `StatusChange`, and enqueue all reverse
-///      dependents of `id` for re-evaluation.
-///   5. Repeat until the queue is empty (finite fixpoint because statuses
-///      can only decrease and there are only 7 ranks).
+///  1. Initialise the BFS queue with all claim ids in `theory.statements`.
+///  2. Dequeue a claim id `id`. Skip if already processed in this round.
+///  3. Compute `min_dep_status = meet { dep.status | dep ∈ deps(id) }`.
+///  Unknown dependencies are treated conservatively as `Hypothesis`.
+///  4. If `claim.status > min_dep_status`, downgrade `claim.status` to
+///  `min_dep_status`, record a `StatusChange`, and enqueue all reverse
+///  dependents of `id` for re-evaluation.
+///  5. Repeat until the queue is empty (finite fixpoint because statuses
+///  can only decrease and there are only 7 ranks).
 ///
+
 /// Returns the list of all status changes applied (in BFS order).
 public fn propagate_status(theory: &mut Theory) -> List<StatusChange> {
     let mut changes: List<StatusChange> = [];
@@ -680,13 +703,15 @@ public type EpistemicKanDirection is Left | Right;
 /// An object of the comma category `ι / c` for the left Kan extension,
 /// or `c / ι` for the right Kan extension.
 ///
+
 /// In the epistemic setting:
-///   * `Left`  direction: `source_id` is a subsite claim that has a
-///     dependency path TO `target_id`  (i.e. `target_id` transitively
-///     depends on `source_id`).
-///   * `Right` direction: `source_id` is a claim reachable FROM
-///     `target_id` via the reverse dependency graph.
+///  * `Left` direction: `source_id` is a subsite claim that has a
+///  dependency path TO `target_id` (i.e. `target_id` transitively
+///  depends on `source_id`).
+///  * `Right` direction: `source_id` is a claim reachable FROM
+///  `target_id` via the reverse dependency graph.
 ///
+
 /// `morphism_rank` records the "distance" (number of dependency hops)
 /// used as a weight in the (co)limit computation.
 public type EpistemicCommaObject is {
@@ -701,7 +726,8 @@ public type EpistemicCommaObject is {
 
 /// The result of a Kan extension computation on the finite theory subsite.
 ///
-/// `direction`     — whether this is a left or right extension
+
+/// `direction` — whether this is a left or right extension
 /// `comma_objects` — the comma category ι / c (or c / ι) used in the computation
 /// `pointwise_map` — maps each claim id to its (co)limit status value
 /// `functor_handle`— opaque Int handle for downstream ∞-functor plumbing
@@ -726,23 +752,30 @@ implement EpistemicKanExtensionResult {
 /// Compute the left or right Kan extension of the epistemic functor F
 /// restricted to `subsite_ids` along the inclusion ι into `theory_site`.
 ///
-/// ### Left Kan extension  (direction = Left)
+
+/// ### Left Kan extension (direction = Left)
 ///
-///   (Lan_ι F)(c)  =  hocolim_{ι / c}  F
+
+///  (Lan_ι F)(c) = hocolim_{ι / c} F
 ///
+
 /// The comma category `ι / c` has objects `(a, f : ι(a) → c)` where
 /// `a ∈ subsite_ids` and `f` is a dependency-path from `a` to `c`.
 /// In the discrete status model the hocolimit is the JOIN (maximum) of
 /// F(a) over all `a` that transitively reach `c` via the dependency graph.
 ///
-/// ### Right Kan extension  (direction = Right)
+
+/// ### Right Kan extension (direction = Right)
 ///
-///   (Ran_ι F)(c)  =  holim_{c / ι}  F
+
+///  (Ran_ι F)(c) = holim_{c / ι} F
 ///
+
 /// The comma category `c / ι` has objects `(a, g : c → ι(a))` where
 /// `a ∈ subsite_ids` and `g` is a reverse dependency path from `c` to `a`.
 /// The holimit is the MEET (minimum) of F(a) over all such `a`.
 ///
+
 /// Returns a `EpistemicKanExtensionResult` containing the comma objects and the
 /// pointwise status map.
 public fn compute_kan_extension(
@@ -766,7 +799,7 @@ public fn compute_kan_extension(
             // path a →* c (i.e. `c` transitively depends on `a`).
             for c_id in &theory.statements {
                 // Collect all subsite claims reachable via reverse deps to c.
-                // (c depends on a  ⟺  a is in reachable_deps(c))
+                // (c depends on a ⟺ a is in reachable_deps(c))
                 let reachable = theory.reachable_deps(c_id);
                 let mut join_status: EpistemicStatus = EpistemicStatus.Retracted;
                 let mut hop = 0;
@@ -857,9 +890,10 @@ public fn compute_kan_extension(
 /// A single point at which the counit of the Kan adjunction fails to
 /// be an isomorphism.
 ///
-/// `claim_id`  — the claim where the obstruction is observed
-/// `deviation` — the rank difference  original_rank − double_ext_rank  (> 0)
-/// `severity`  — normalised deviation in [0.0, 1.0] (deviation / 6.0)
+
+/// `claim_id` — the claim where the obstruction is observed
+/// `deviation` — the rank difference original_rank − double_ext_rank (> 0)
+/// `severity` — normalised deviation in [0.0, 1.0] (deviation / 6.0)
 public type EpistemicObstructionPoint is {
     claim_id:  Text,
     deviation: Int,
@@ -868,10 +902,11 @@ public type EpistemicObstructionPoint is {
 
 /// The full obstruction data for a finite subsite.
 ///
-/// `points`         — list of claims where the counit is not an equivalence
-/// `max_deviation`  — the worst-case rank difference across all claims
-/// `is_faithful`    — true iff no obstruction points were found (subsite is
-///                    epistemically faithful to the full theory)
+
+/// `points` — list of claims where the counit is not an equivalence
+/// `max_deviation` — the worst-case rank difference across all claims
+/// `is_faithful` — true iff no obstruction points were found (subsite is
+///  epistemically faithful to the full theory)
 public type EpistemicObstructionData is {
     points:        List<EpistemicObstructionPoint>,
     max_deviation: Int,
@@ -884,25 +919,29 @@ public type EpistemicObstructionData is {
 
 /// Measure the obstruction to the counit
 ///
-///     ε_c : (Ran_ι (Lan_ι F))(c) → F(c)
+
+///  ε_c : (Ran_ι (Lan_ι F))(c) → F(c)
 ///
+
 /// being an equivalence, for every claim `c` in the theory.
 ///
+
 /// Algorithm:
-///   1. Compute the left Kan extension `Lan = compute_kan_extension(subsite, Left)`.
-///      `Lan.pointwise_map` gives the extended status at each claim.
-///   2. Treat `Lan` as a new "pseudo-theory" and compute the right Kan
-///      extension of `Lan` along ι:
-///        `Ran_ι Lan(c) = holim_{c / ι} Lan`
-///      i.e. the meet of `Lan(a)` over all subsite claims `a` reachable
-///      from `c`.  This is the "double extension" approximating
-///      `(Ran_ι ∘ Lan_ι)(F)(c)`.
-///   3. The obstruction at `c` is
-///        deviation(c) = max(0, F(c).rank − double_ext(c).rank)
-///      where `F(c)` is the original theory status.
-///   4. A positive deviation signals that the finite subsite loses
-///      epistemic information at claim `c`.
+///  1. Compute the left Kan extension `Lan = compute_kan_extension(subsite, Left)`.
+///  `Lan.pointwise_map` gives the extended status at each claim.
+///  2. Treat `Lan` as a new "pseudo-theory" and compute the right Kan
+///  extension of `Lan` along ι:
+///  `Ran_ι Lan(c) = holim_{c / ι} Lan`
+///  i.e. the meet of `Lan(a)` over all subsite claims `a` reachable
+///  from `c`. This is the "double extension" approximating
+///  `(Ran_ι ∘ Lan_ι)(F)(c)`.
+///  3. The obstruction at `c` is
+///  deviation(c) = max(0, F(c).rank − double_ext(c).rank)
+///  where `F(c)` is the original theory status.
+///  4. A positive deviation signals that the finite subsite loses
+///  epistemic information at claim `c`.
 ///
+
 /// Returns `EpistemicObstructionData` summarising all obstruction points.
 public fn compute_obstruction(
     theory:      &Theory,
@@ -1003,7 +1042,7 @@ theorem retracted_is_minimal()
     proof by auto;
 
 /// The rank ordering is consistent with the meet operation:
-///   meet(a, b).rank() == min(a.rank(), b.rank())
+///  meet(a, b).rank() == min(a.rank(), b.rank())
 @verify(formal)
 theorem meet_is_min(a: EpistemicStatus, b: EpistemicStatus)
     ensures a.meet(&b).rank() == (if a.rank() <= b.rank() { a.rank() } else { b.rank() })
@@ -1047,7 +1086,7 @@ theorem propagation_terminates(theory: &mut Theory)
     proof by auto;
 
 /// Left Kan extension satisfies the pointwise colimit formula:
-///   (Lan_ι F)(c) = join { F(a) | a ∈ ι/c }
+///  (Lan_ι F)(c) = join { F(a) | a ∈ ι/c }
 /// which in the status lattice is the maximum status among subsite claims
 /// that transitively reach c.
 @verify(formal)
@@ -1066,7 +1105,7 @@ theorem left_kan_is_pointwise_join(
     proof by auto;
 
 /// Right Kan extension satisfies the pointwise limit formula:
-///   (Ran_ι F)(c) = meet { F(a) | a ∈ c/ι }
+///  (Ran_ι F)(c) = meet { F(a) | a ∈ c/ι }
 @verify(formal)
 theorem right_kan_is_pointwise_meet(
     subsite_ids: &List<Text>,
@@ -1107,17 +1146,19 @@ public let theory_site: Site = Site {
 
 /// The theory ∞-topos: Sh_∞(Th, J_ep).
 ///
+
 /// The central semantic object — the computational ∞-topos
 /// where formally-represented theories live as sheaves.
 /// Constructed from `theory_site` via the sheafification functor.
 ///
+
 /// Properties (by construction):
-///   - Has all small colimits and finite limits (Giraud G1-G2)
-///   - Colimits are universal (Giraud G3)
-///   - Coproducts are disjoint (Giraud G4)
-///   - Groupoid objects are effective (Giraud G5)
-///   - Yoneda embedding y : Th → <topos> is fully faithful
-///   - Every theory T maps to a sheaf y(T) in the topos
+///  - Has all small colimits and finite limits (Giraud G1-G2)
+///  - Colimits are universal (Giraud G3)
+///  - Coproducts are disjoint (Giraud G4)
+///  - Groupoid objects are effective (Giraud G5)
+///  - Yoneda embedding y : Th → <topos> is fully faithful
+///  - Every theory T maps to a sheaf y(T) in the topos
 public let theory_universe: SheafInfinityTopos =
     @builtin_construct_sheaf_topos(theory_site);
 

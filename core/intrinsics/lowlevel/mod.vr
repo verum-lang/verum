@@ -4,25 +4,32 @@
 // Layer: Stdlib (1)
 // Dependencies: LLVM AOT compilation
 //
+
 // This module provides low-level, architecture-specific intrinsics that
 // cannot execute in the VBC interpreter. Most functions are @llvm_only.
 //
+
 // # @llvm_only Attribute
 //
+
 // Functions marked @llvm_only:
 // - Contain inline assembly (`asm { }`)
 // - Access privileged CPU registers (ring 0)
 // - Use platform-specific hardware features
 //
+
 // Attempting to run @llvm_only functions in interpreter mode will produce:
 // "Cannot execute @llvm_only intrinsic '{name}' in interpreter mode. Use --tier aot."
 //
+
 // # Platform Modules
 //
+
 // - x86_64: SSE/AVX/AVX-512, CPUID, MSR, port I/O, CR* registers
 // - aarch64: NEON/SVE, system registers, barriers, cache operations
 // - kernel: Platform entry points, naked functions
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 

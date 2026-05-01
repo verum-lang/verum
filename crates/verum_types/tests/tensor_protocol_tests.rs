@@ -14,8 +14,10 @@
 )]
 //! Comprehensive tests for FromTensorLiteral protocol
 //!
+
 //! Tensor protocol: operations on Tensor<T, Shape> including element-wise ops, reductions, reshaping with compile-time shape validation — Tensor Literal Protocol
 //!
+
 //! These tests verify:
 //! - Protocol registration in the type checker
 //! - Shape validation at compile-time

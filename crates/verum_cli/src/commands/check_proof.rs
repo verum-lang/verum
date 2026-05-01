@@ -1,39 +1,47 @@
 //! `verum check-proof <file.vproof>` — re-verify a proof-term
 //! certificate via the minimal kernel (#157).
 //!
+
 //! ## What this command does
 //!
+
 //! Reads a JSON `.vproof` file containing a [`Certificate`] —
 //! `{ term, claimed_type, metadata }` — and runs
 //! [`verum_kernel::proof_checker`]'s 6-rule kernel against it.
 //!
+
 //! ## Trust delegation
 //!
+
 //! After this command exits 0, the user has verified the proof
 //! against EXACTLY:
 //!
-//!   1. `verum_kernel::proof_checker` (633 LOC, hand-auditable).
-//!   2. The Rust compiler's correctness.
-//!   3. The serde-json deserialiser (the `.vproof` format).
+
+//!  1. `verum_kernel::proof_checker` (633 LOC, hand-auditable).
+//!  2. The Rust compiler's correctness.
+//!  3. The serde-json deserialiser (the `.vproof` format).
 //!
+
 //! Nothing else in the Verum pipeline is relevant: no SMT, no
-//! cross-format gate, no foreign tools, no audit gates.  The verdict
+//! cross-format gate, no foreign tools, no audit gates. The verdict
 //! is the smallest possible trusted base in the proof-assistant
 //! world.
 //!
+
 //! ## Example
 //!
+
 //! ```bash
 //! $ cat trivial.vproof
 //! {
-//!   "term": { "Lam": [{"Universe": 0}, {"Var": 0}] },
-//!   "claimed_type": { "Pi": [{"Universe": 0}, {"Universe": 0}] },
-//!   "metadata": { "name": "identity_at_universe_0" }
+//!  "term": { "Lam": [{"Universe": 0}, {"Var": 0}] },
+//!  "claimed_type": { "Pi": [{"Universe": 0}, {"Universe": 0}] },
+//!  "metadata": { "name": "identity_at_universe_0" }
 //! }
 //! $ verum check-proof trivial.vproof
 //! ▶ Re-verifying trivial.vproof against minimal proof-term checker
-//!   ✓ identity_at_universe_0: certificate verified
-//!     (633 LOC trusted base; CIC fragment with 6 inference rules)
+//!  ✓ identity_at_universe_0: certificate verified
+//!  (633 LOC trusted base; CIC fragment with 6 inference rules)
 //! ```
 
 use crate::error::{CliError, Result};
@@ -55,7 +63,7 @@ pub fn execute(path: &str) -> Result<()> {
         path,
     ));
 
-    // Read + parse the certificate.  The .vproof format is JSON for
+    // Read + parse the certificate. The .vproof format is JSON for
     // v0 (structured s-expression is a future refinement; the JSON
     // shape is the schema, not the exchange).
     let text = std::fs::read_to_string(&file_path).map_err(|e| {
@@ -99,9 +107,9 @@ pub fn execute(path: &str) -> Result<()> {
     }
 }
 
-/// Approximate LOC count of the trusted base.  Updated as
+/// Approximate LOC count of the trusted base. Updated as
 /// `proof_checker.rs` evolves; the constant lives here so the user-
-/// facing message reflects the actual file.  Should stay < 1000 per
+/// facing message reflects the actual file. Should stay < 1000 per
 /// the architectural invariant.
 fn approx_trusted_base_loc() -> usize {
     // Bump on every proof_checker.rs change; CI test below pins the

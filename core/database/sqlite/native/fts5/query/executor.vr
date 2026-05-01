@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2
 //
+
 // The executor walks the AST and intersects/unions per-term posting
 // lists pulled from the inverted index. Phrase + NEAR are handled by
 // position-comparison after rowid intersection.

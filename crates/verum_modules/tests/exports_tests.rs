@@ -15,6 +15,7 @@
 // Tests for exports module
 // Migrated from src/exports.rs per CLAUDE.md standards
 //
+
 // Tests refined type tracking across module boundaries: export, re-export,
 // predicate visibility (public/crate-local/private), and accessibility validation.
 

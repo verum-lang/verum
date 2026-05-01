@@ -1,10 +1,13 @@
 //! Dependency Graph Analysis Intrinsics (Tier 1 - Requires MetaTypes)
 //!
+
 //! Provides compile-time dependency graph analysis for module relationships.
 //! Uses the module registry from MetaContext to build and query the dependency graph.
 //!
+
 //! ## Dependency Query Functions
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `dep_dependencies_of(module)` | `(Text) -> List<Text>` | Direct dependencies |
@@ -12,8 +15,10 @@
 //! | `dep_dependents_of(module)` | `(Text) -> List<Text>` | Who depends on this |
 //! | `dep_depth(module)` | `(Text) -> Int` | Max depth in dep tree |
 //!
+
 //! ## Graph Analysis Functions
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `dep_find_cycles()` | `() -> List<List<Text>>` | Find all cycles |
@@ -23,8 +28,10 @@
 //! | `dep_root_modules()` | `() -> List<Text>` | Modules nothing depends on |
 //! | `dep_strongly_connected_components()` | `() -> List<List<Text>>` | SCCs (Tarjan's) |
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 1**: All functions require `using [MetaTypes]` context.
 
 use std::collections::{HashMap, HashSet};
@@ -649,6 +656,7 @@ fn meta_dep_topological_order(
 
 /// Get optimized compilation order
 ///
+
 /// Same as topological order but with additional heuristics:
 /// - Leaf modules first (they have no dependencies)
 /// - Within the same depth level, sort alphabetically for determinism
@@ -752,9 +760,9 @@ mod tests {
         let mut ctx = MetaContext::new();
 
         // Build a simple dependency graph:
-        //   app -> lib_a -> core
-        //   app -> lib_b -> core
-        //   lib_b -> lib_a
+        //  app -> lib_a -> core
+        //  app -> lib_b -> core
+        //  lib_b -> lib_a
         let core_info = ModuleInfo::new();
         // core has no dependencies
 

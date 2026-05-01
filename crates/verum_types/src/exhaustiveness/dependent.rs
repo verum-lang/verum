@@ -1,30 +1,37 @@
 //! Dependent Pattern Matching Integration
 //!
+
 //! This module bridges the exhaustiveness checking module with dependent type
 //! pattern matching. It provides index-aware exhaustiveness checking that
 //! understands type indices and can identify absurd patterns.
 //!
+
 //! # Overview
 //!
+
 //! When pattern matching on indexed types (like `List<T, n>` where `n` is a
 //! type-level natural), some patterns may be impossible based on index
 //! constraints. For example:
 //!
+
 //! ```verum
 //! fn head<T, n>(xs: List<T, Succ(n): meta Nat>) -> T =
-//!     match xs {
-//!         Cons(x, _) => x
-//!         // No Nil case needed - type ensures non-empty
-//!     }
+//!  match xs {
+//!  Cons(x, _) => x
+//!  // No Nil case needed - type ensures non-empty
+//!  }
 //! ```
 //!
+
 //! This module handles:
 //! 1. Filtering absurd constructors based on index constraints
 //! 2. Integrating with the matrix-based exhaustiveness algorithm
 //! 3. Generating appropriate diagnostics for dependent types
 //!
+
 //! # References
 //!
+
 //! - Dependent pattern matching: patterns that refine types in branches, with coverage checking
 //! - Pattern exhaustiveness checking: ensuring match expressions cover all possible values
 
@@ -105,6 +112,7 @@ pub struct IndexRefinement {
 
 /// Dependent exhaustiveness checker
 ///
+
 /// Combines the matrix-based exhaustiveness algorithm with dependent type
 /// awareness for index-refined pattern matching.
 pub struct DependentExhaustivenessChecker<'a> {
@@ -146,6 +154,7 @@ impl<'a> DependentExhaustivenessChecker<'a> {
 
     /// Check exhaustiveness with dependent type awareness
     ///
+
     /// This is the main entry point for dependent exhaustiveness checking.
     /// It combines index-aware filtering with the matrix algorithm.
     pub fn check_exhaustiveness(
@@ -191,6 +200,7 @@ impl<'a> DependentExhaustivenessChecker<'a> {
 
     /// Check exhaustiveness for a dependent match expression
     ///
+
     /// This handles the full dependent match case with motive inference
     /// and branch type refinement.
     pub fn check_dependent_match(
@@ -622,6 +632,7 @@ impl<'a> DependentExhaustivenessChecker<'a> {
 
 /// Unified exhaustiveness check that handles both dependent and non-dependent cases
 ///
+
 /// This is the recommended entry point for exhaustiveness checking in Verum.
 /// It automatically detects whether dependent type features are needed and
 /// uses the appropriate algorithm.
@@ -637,6 +648,7 @@ pub fn check_exhaustiveness_unified(
 
 /// Check a dependent match expression
 ///
+
 /// This handles the full dependent match case including motive inference
 /// and index refinement.
 pub fn check_dependent_match_unified(
@@ -717,28 +729,30 @@ mod tests {
 /// higher-order unification strategy
 /// for dependent pattern-match coverage checking.
 ///
+
 /// Q#11 picks **`MillerPatternFragment`** as the
 /// production default. Rationale:
 ///
+
 /// * **Decidable** — Miller's pattern fragment is decidable by
-///   first-order unification on the linear-pattern subset.
-///   Termination is guaranteed; the checker never diverges.
+///  first-order unification on the linear-pattern subset.
+///  Termination is guaranteed; the checker never diverges.
 /// * **Sufficient in practice** — Coq, Lean, and Agda all use
-///   Miller-pattern style for their dependent-pattern coverage.
-///   Real-world index-dependent patterns (length-indexed lists,
-///   dimension-indexed vectors, depth-indexed trees) fall in
-///   the pattern fragment.
+///  Miller-pattern style for their dependent-pattern coverage.
+///  Real-world index-dependent patterns (length-indexed lists,
+///  dimension-indexed vectors, depth-indexed trees) fall in
+///  the pattern fragment.
 /// * **Aligned with VVA philosophy** — `Zero-Cost Abstractions`
-///   and `No Magic`: an undecidable HOU would surprise users
-///   with non-termination on innocent-looking patterns.
+///  and `No Magic`: an undecidable HOU would surprise users
+///  with non-termination on innocent-looking patterns.
 /// * **Forward-compat path** — `RestrictedHigherOrderMatching`
-///   reserved for future extensions that need patterns slightly
-///   outside Miller's fragment (linearity-violating but
-///   structurally-decidable). `FullHigherOrderUnification` is
-///   exposed for explicit opt-in only — turning it on means the
-///   checker may diverge on adversarial patterns and the kernel
-///   refuses to admit such programs without `@verify(thorough)`
-///   or higher.
+///  reserved for future extensions that need patterns slightly
+///  outside Miller's fragment (linearity-violating but
+///  structurally-decidable). `FullHigherOrderUnification` is
+///  exposed for explicit opt-in only — turning it on means the
+///  checker may diverge on adversarial patterns and the kernel
+///  refuses to admit such programs without `@verify(thorough)`
+///  or higher.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HouStrategy {
     /// Decidable: Miller's pattern fragment. Production default.

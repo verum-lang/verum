@@ -3,15 +3,17 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.1
 //
+
 // `CachedStatement` is what the cache stores per key. We carry:
 //
-//   * `key`           — the CacheKey it was registered under
-//   * `program_id`    — opaque ID into the L4 VDBE program pool
-//   * `last_used_ns`  — monotonic timestamp for LRU ordering
-//   * `use_count`     — total reuse count for LFU + telemetry
-//   * `is_pinned`     — pinned entries are never evicted (e.g. the
-//                       compiled trigger sub-program a transaction
-//                       is currently executing)
+
+//  * `key` — the CacheKey it was registered under
+//  * `program_id` — opaque ID into the L4 VDBE program pool
+//  * `last_used_ns` — monotonic timestamp for LRU ordering
+//  * `use_count` — total reuse count for LFU + telemetry
+//  * `is_pinned` — pinned entries are never evicted (e.g. the
+//  compiled trigger sub-program a transaction
+//  is currently executing)
 // =============================================================================
 
 module core.database.sqlite.native.stmt_cache.entry;

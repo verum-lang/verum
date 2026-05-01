@@ -3,8 +3,10 @@
 // =============================================================================
 // VACUUM INTO (SQLite 3.27+):
 //
-//   VACUUM [schema_name] INTO 'filename';
+
+//  VACUUM [schema_name] INTO 'filename';
 //
+
 // Writes a defragmented snapshot of the database to a new file without
 // disturbing the live connection's schema or data. When combined with a
 // schema-name it can snapshot an ATTACHed database.

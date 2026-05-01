@@ -3,14 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md §17
 //
+
 // Five operations supported (matches upstream SQLite + DROP COLUMN
 // from 3.35.0):
 //
-//   * `RenameTable(old_name → new_name)`
-//   * `RenameColumn(table, old_col → new_col)`
-//   * `AddColumn(table, col_def)`
-//   * `DropColumn(table, col_name)`
-//   * `AlterColumnDefault(table, col, new_default_expr)`
+
+//  * `RenameTable(old_name → new_name)`
+//  * `RenameColumn(table, old_col → new_col)`
+//  * `AddColumn(table, col_def)`
+//  * `DropColumn(table, col_name)`
+//  * `AlterColumnDefault(table, col, new_default_expr)`
 // =============================================================================
 
 module core.database.sqlite.native.alter.op;

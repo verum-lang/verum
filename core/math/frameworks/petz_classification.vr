@@ -2,14 +2,16 @@
 // Petz classification of monotone quantum metrics — framework axiom package
 // =============================================================================
 //
+
 // Source: D. Petz, "Monotone metrics on matrix spaces", Linear Algebra
 // and its Applications 244 (1996), 81–96. Extended by Petz and
 // Sudar, "Geometries of quantum states" (1996).
 //
+
 // Classifies the monotone Riemannian metrics on the interior of the
 // state space D(H) of a finite-dimensional Hilbert space H by
 // operator-monotone functions f : (0, ∞) → (0, ∞) satisfying
-//   f(1) = 1,  f(t) = t · f(1/t).
+//  f(1) = 1, f(t) = t · f(1/t).
 // The Bures, Wigner–Yanase, Kubo–Mori, and Bogoliubov metrics are
 // particular choices of f.
 // =============================================================================

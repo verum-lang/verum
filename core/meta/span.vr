@@ -4,30 +4,35 @@
 // Version: 0.1.0
 // =============================================================================
 //
+
 // # Source Spans
 //
+
 // Spans track source code locations for error reporting and code generation.
 // They enable precise diagnostic messages and accurate source mapping.
 //
+
 // ## MetaSpan Resolution
 //
+
 // ```
 // ┌─────────────────────────────────────────────────────────────────────────────┐
-// │                         SPAN RESOLUTION SITES                               │
+// │ SPAN RESOLUTION SITES │
 // ├─────────────────────────────────────────────────────────────────────────────┤
-// │                                                                             │
-// │  call_site()  ─────►  Location where macro is invoked                      │
-// │                       Used for: most generated code                         │
-// │                                                                             │
-// │  def_site()   ─────►  Location where macro is defined                      │
-// │                       Used for: hygiene, internal helpers                   │
-// │                                                                             │
-// │  mixed_site() ─────►  Hybrid: call_site() location + def_site() hygiene   │
-// │                       Used for: advanced hygiene control                    │
-// │                                                                             │
+// │ │
+// │ call_site() ─────► Location where macro is invoked │
+// │ Used for: most generated code │
+// │ │
+// │ def_site() ─────► Location where macro is defined │
+// │ Used for: hygiene, internal helpers │
+// │ │
+// │ mixed_site() ─────► Hybrid: call_site() location + def_site() hygiene │
+// │ Used for: advanced hygiene control │
+// │ │
 // └─────────────────────────────────────────────────────────────────────────────┘
 // ```
 //
+
 // =============================================================================
 
 module meta.span;
@@ -40,31 +45,38 @@ mount core.{Maybe, Text, Ordering};
 
 /// Source code span
 ///
+
 /// Represents a range in source code, used for error reporting and
 /// tracking the origin of generated code.
 ///
+
 /// ## Hygiene
 ///
+
 /// Spans carry hygiene information that determines how identifiers
 /// are resolved. This prevents accidental name collisions between
 /// macro-generated code and user code.
 ///
+
 /// ## Example
 ///
+
 /// ```verum
 /// meta fn my_macro(input: TokenStream) -> TokenStream using [AstAccess, CompileDiag] {
-///     let call = AstAccess.call_site();
+///  let call = AstAccess.call_site();
 ///
-///     if input.is_empty() {
-///         CompileDiag.emit_error("Expected input", call);
-///         return TokenStream.empty();
-///     }
+
+///  if input.is_empty() {
+///  CompileDiag.emit_error("Expected input", call);
+///  return TokenStream.empty();
+///  }
 ///
-///     quote {
-///         // This code will have span pointing to macro invocation
-///         let result = process($input);
-///         result
-///     }
+
+///  quote {
+///  // This code will have span pointing to macro invocation
+///  let result = process($input);
+///  result
+///  }
 /// }
 /// ```
 @repr(C)
@@ -99,6 +111,7 @@ implement MetaSpan {
 
     /// Get span of current macro invocation site
     ///
+
     /// This is the location where the macro is called in user code.
     /// Use this for most generated code.
     @compiler_intrinsic
@@ -106,6 +119,7 @@ implement MetaSpan {
 
     /// Get span of macro definition site
     ///
+
     /// This is the location where the macro is defined.
     /// Use this for internal helper identifiers that should
     /// not conflict with user code.
@@ -114,6 +128,7 @@ implement MetaSpan {
 
     /// Get mixed site span
     ///
+
     /// Has call_site() location but def_site() hygiene.
     /// Use for advanced hygiene control.
     @compiler_intrinsic
@@ -121,6 +136,7 @@ implement MetaSpan {
 
     /// Create synthetic span with no source location
     ///
+
     /// Used for purely generated code with no meaningful source location.
     @compiler_intrinsic
     public fn synthetic() -> Self;
@@ -131,6 +147,7 @@ implement MetaSpan {
 
     /// Get source location information
     ///
+
     /// Returns None for synthetic spans or if source info unavailable.
     @compiler_intrinsic
     public fn location(&self) -> Maybe<SourceLocation>;
@@ -169,9 +186,11 @@ implement MetaSpan {
 
     /// Join two spans into one covering both
     ///
+
     /// # Arguments
     /// - `other`: MetaSpan to join with
     ///
+
     /// # Returns
     /// MetaSpan covering from start of self to end of other,
     /// or self if spans are from different files.
@@ -180,10 +199,12 @@ implement MetaSpan {
 
     /// Get subspan from byte offset
     ///
+
     /// # Arguments
     /// - `start`: Start offset relative to span start
     /// - `end`: End offset relative to span start
     ///
+
     /// # Returns
     /// Subspan, or self if offsets invalid
     @compiler_intrinsic
@@ -191,18 +212,21 @@ implement MetaSpan {
 
     /// Get source text covered by this span
     ///
+
     /// Returns None if span is synthetic or source unavailable.
     @compiler_intrinsic
     public fn source_text(&self) -> Maybe<Text>;
 
     /// Resolve span to call site hygiene
     ///
+
     /// Creates new span with same location but call_site hygiene.
     @compiler_intrinsic
     public fn resolved_at_call_site(&self) -> Self;
 
     /// Resolve span to def site hygiene
     ///
+
     /// Creates new span with same location but def_site hygiene.
     @compiler_intrinsic
     public fn resolved_at_def_site(&self) -> Self;
@@ -260,6 +284,7 @@ implement Debug for MetaSpan {
 
 /// Source file location
 ///
+
 /// Human-readable location information (file, line, column).
 public type SourceLocation is {
     /// File path (relative to project root)
@@ -307,6 +332,7 @@ implement Eq for SourceLocation {
 
 /// Range of spans with start and end locations
 ///
+
 /// Used for multi-span diagnostics covering a range of code.
 public type SpanRange is {
     /// Start span
@@ -354,6 +380,7 @@ implement SpanRange {
 
 /// Collection of spans for complex diagnostics
 ///
+
 /// Used when a diagnostic refers to multiple locations in the source.
 public type MultiSpan is {
     /// Primary span (main location)

@@ -4,17 +4,21 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // This module provides type conversion intrinsics that map directly to
 // LLVM/CPU instructions. All operations are zero-allocation and VBC-compatible.
 //
+
 // # Categories
 //
+
 // - Integer/Float conversions: int_to_float, float_to_int
 // - Precision changes: fpext, fptrunc, sext, zext, itrunc
 // - Bit reinterpretation: bitcast
 // - Byte conversions: to_le_bytes, from_be_bytes, etc.
 // - Endianness: to_le, to_be, from_le, from_be
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 
@@ -61,6 +65,7 @@ public fn itrunc<S, D>(x: S) -> D { @intrinsic("trunc", x) }
 
 /// Reinterpret the bits of `x` as a value of type `D`.
 ///
+
 /// **Unsafe contract:** sizes of `S` and `D` MUST match
 /// (`S.size == D.size`). The compiler does NOT enforce this at the
 /// generic-instantiation site; bitcast between mismatched sizes
@@ -68,6 +73,7 @@ public fn itrunc<S, D>(x: S) -> D { @intrinsic("trunc", x) }
 /// source value, may write past the end of the destination — the
 /// LLVM `bitcast` instruction is silently UB on mismatched sizes).
 ///
+
 /// Use the size-typed convenience wrappers below
 /// (`f32_to_bits` / `f32_from_bits` / `f64_to_bits` /
 /// `f64_from_bits`) when working with the canonical IEEE 754
@@ -75,6 +81,7 @@ public fn itrunc<S, D>(x: S) -> D { @intrinsic("trunc", x) }
 /// is fixed in the intrinsic name (`bitcast` of `Float32` ↔
 /// `UInt32` and `Float64` ↔ `UInt64` is always size-matched).
 ///
+
 /// Marked `unsafe` to surface the size-match contract; the prior
 /// safe declaration let arbitrary callers silently UB. No
 /// existing call site in `core/` is affected — only the size-

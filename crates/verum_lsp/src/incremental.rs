@@ -1,17 +1,22 @@
 //! Incremental parsing infrastructure
 //!
+
 //! This module provides the core incremental parsing system for the LSP server.
 //! It enables efficient re-parsing of documents by tracking changes and reusing
 //! unchanged AST subtrees.
 //!
+
 //! # Performance Characteristics
 //!
+
 //! - Document sync: <10ms for typical changes
 //! - Incremental parse: <50ms for 1000 LOC files
 //! - Memory overhead: <10MB per open document
 //!
+
 //! # Architecture
 //!
+
 //! The incremental parsing system works by:
 //! 1. Tracking changed text ranges when documents are edited
 //! 2. Identifying which AST nodes are affected by the changes
@@ -19,8 +24,10 @@
 //! 4. Reusing cached, unchanged AST subtrees
 //! 5. Updating parent nodes incrementally
 //!
+
 //! # Integration with verum_syntax and verum_parser
 //!
+
 //! This module integrates with:
 //! - `verum_syntax::IncrementalEngine` for green tree manipulation
 //! - `verum_parser::IncrementalParserEngine` for parsing integration
@@ -335,14 +342,18 @@ pub fn calculate_hash(text: &str) -> u64 {
 
 /// Find AST nodes affected by a change range
 ///
+
 /// # Arguments
 ///
+
 /// * `module` - The AST module to search
 /// * `changed_range` - The LSP range that changed
 /// * `text` - The source text for byte-offset to line/column conversion
 ///
+
 /// # Returns
 ///
+
 /// A vector of spans that overlap with the changed range
 pub fn find_affected_nodes(module: &Module, changed_range: Range, text: &str) -> Vec<Span> {
     let mut affected = Vec::new();
@@ -359,16 +370,21 @@ pub fn find_affected_nodes(module: &Module, changed_range: Range, text: &str) ->
 
 /// Check if a Verum span overlaps with an LSP range
 ///
+
 /// This function converts the byte-offset span to an LSP range and checks for overlap.
 ///
+
 /// # Arguments
 ///
+
 /// * `span` - The byte-offset span to check
 /// * `range` - The LSP range to check against
 /// * `text` - The source text for byte-offset to line/column conversion
 ///
+
 /// # Returns
 ///
+
 /// `true` if the span overlaps with the range, `false` otherwise
 fn span_overlaps_range(span: &Span, range: &Range, text: &str) -> bool {
     use verum_common::span_utils::lsp::span_to_lsp_range;
@@ -579,7 +595,7 @@ mod tests {
 
         let source = "fn main() {\n    let x = 42;\n}\n";
         // "fn main() {" is bytes 0-11 (line 0, col 0 to line 0, col 11)
-        // "\n    let x = 42;" is bytes 11-27 (line 0, col 11 to line 1, col 15)
+        // "\n let x = 42;" is bytes 11-27 (line 0, col 11 to line 1, col 15)
 
         let span = Span::new(0, 11, FileId::new(0));
         let range = Range {
@@ -638,6 +654,7 @@ mod tests {
 
 /// A managed document with full incremental parsing support.
 ///
+
 /// This wraps `verum_parser::IncrementalDocument` for use in the LSP server,
 /// providing additional LSP-specific functionality like range conversion.
 #[derive(Debug)]

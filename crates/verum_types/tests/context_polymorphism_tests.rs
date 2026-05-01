@@ -14,9 +14,11 @@
 )]
 //! Type inference tests for Context Polymorphism.
 //!
+
 //! Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 17.2 (Context Polymorphism)
 //! Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage
 //!
+
 //! Tests that context polymorphism is correctly handled during type inference,
 //! including context variable binding, unification, and propagation.
 

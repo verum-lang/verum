@@ -14,9 +14,11 @@
 )]
 //! Tests for Verum generic syntax vs Rust turbofish syntax.
 //!
+
 //! Verum uses `foo<T>()` syntax for generic function calls,
 //! NOT Rust's turbofish `foo::<T>()` syntax.
 //!
+
 //! Tests for generic syntax with dot-separated paths (Verum uses `.` not `::`)
 
 use verum_ast::span::FileId;

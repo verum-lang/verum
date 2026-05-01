@@ -2,35 +2,41 @@
 // security/x509/ext/name_constraints.vr — RFC 5280 §4.2.1.10
 // =============================================================================
 //
+
 // NameConstraints ::= SEQUENCE {
-//     permittedSubtrees       [0]     GeneralSubtrees OPTIONAL,
-//     excludedSubtrees        [1]     GeneralSubtrees OPTIONAL
+//  permittedSubtrees [0] GeneralSubtrees OPTIONAL,
+//  excludedSubtrees [1] GeneralSubtrees OPTIONAL
 // }
 // GeneralSubtrees ::= SEQUENCE SIZE (1..MAX) OF GeneralSubtree
 // GeneralSubtree ::= SEQUENCE {
-//     base                    GeneralName,
-//     minimum         [0]     BaseDistance DEFAULT 0,
-//     maximum         [1]     BaseDistance OPTIONAL
+//  base GeneralName,
+//  minimum [0] BaseDistance DEFAULT 0,
+//  maximum [1] BaseDistance OPTIONAL
 // }
 //
+
 // RFC 5280 §4.2.1.10 mandates: `minimum` MUST be 0; `maximum` MUST
 // NOT be present. We enforce that — reject anything else as
 // MalformedDer (a violating cert would never validate under WebPKI
 // rules).
 //
+
 // Matching semantics per RFC 5280 §4.2.1.10 ("Name Constraints"):
 //
-//   * A certificate is excluded if any of its GeneralNames falls inside
-//     an excludedSubtrees entry.
-//   * A certificate is included only if every GeneralName (of matching
-//     type) falls inside at least one permittedSubtrees entry.
+
+//  * A certificate is excluded if any of its GeneralNames falls inside
+//  an excludedSubtrees entry.
+//  * A certificate is included only if every GeneralName (of matching
+//  type) falls inside at least one permittedSubtrees entry.
 //
+
 // For DNS names, a permitted subtree `foo.com` matches `foo.com`,
 // `sub.foo.com`, `deep.sub.foo.com`, etc., but NOT `barfoo.com`.
 // RFC 5280 notes the tricky case where `foo.com` does NOT match
 // `foo.com` exactly when ACME Baseline says it must — CAs have
 // historically disagreed; we follow the strict RFC 5280 reading.
 //
+
 // =============================================================================
 
 module core.security.x509.ext.name_constraints;
@@ -56,9 +62,9 @@ implement NameConstraints {
 
     /// Test whether the given hostname is acceptable under these
     /// constraints. Returns `true` when:
-    ///   - not excluded by any `excludedSubtrees` DNS entry, AND
-    ///   - either no `permittedSubtrees` DNS entry exists, or the name
-    ///     matches at least one permitted entry.
+    ///  - not excluded by any `excludedSubtrees` DNS entry, AND
+    ///  - either no `permittedSubtrees` DNS entry exists, or the name
+    ///  matches at least one permitted entry.
     public fn permits_dns(&self, host: &Text) -> Bool {
         let mut i: Int = 0;
         while i < self.excluded.len() {
@@ -189,15 +195,18 @@ fn parse_subtree(r: &mut DerReader) -> Result<GeneralSubtree, DerError> {
 // DNS subtree matching
 // =============================================================================
 //
+
 // RFC 5280 §4.2.1.10: "DNS name restrictions are expressed as foo.bar.com.
 // Any DNS name that can be constructed by simply adding zero or more
 // labels to the left-hand side of the name satisfies the name constraint.
 // For example, www.foo.bar.com satisfies the constraint foo.bar.com."
 //
+
 // Edge case: a leading "." in the constraint ("foo.bar.com" vs
 // ".foo.bar.com") is not recognised by RFC 5280 — we follow the
 // common practice of treating the two forms identically.
 //
+
 // =============================================================================
 
 fn dns_within_subtree(host: &Text, subtree: &Text) -> Bool {

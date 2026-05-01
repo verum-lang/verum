@@ -5,34 +5,42 @@
 // Dependencies: core, core.collections
 // =============================================================================
 //
+
 // RFC 9110 §12 — HTTP content negotiation. Every HTTP server needs
 // to parse the `Accept` family of request headers with their
 // q-factor preferences and pick the single best response variant.
 //
+
 // # Parse surface
 //
+
 // ```
 // // "text/html;q=0.9, application/json, */*;q=0.1"
 // let prefs: List<MediaRangeSpec> = parse_accept(&header_value);
 // ```
 //
+
 // Each `MediaRangeSpec` carries `(type, subtype, params, q)`. We
 // cap q at [0, 1]; missing q-values default to 1.0 per §12.4.1.
 //
+
 // # Select surface
 //
+
 // ```
 // let offers: List<Text> = ["application/json", "text/html"];
 // match select_best_media(&prefs, &offers) {
-//     Some(pick) => respond_with(pick),
-//     None       => respond_406_not_acceptable(),
+//  Some(pick) => respond_with(pick),
+//  None => respond_406_not_acceptable(),
 // }
 // ```
 //
+
 // Selection ranks first by q-factor (descending), then by
 // specificity (exact > wildcard-subtype > */*) per RFC 9110
 // §12.5.1.
 //
+
 // =============================================================================
 
 module core.net.content_negotiation;
@@ -173,10 +181,11 @@ fn parse_q_value(buf: &List<Byte>, offset: Int) -> Float {
 /// preferences. Returns the chosen offer or `None` when none match
 /// (caller responds with 406 Not Acceptable).
 ///
+
 /// Tie-breaking:
-///   1. Higher q wins.
-///   2. At equal q, more specific wildcard wins (exact > type/* > */*).
-///   3. At equal q + specificity, the caller's offer order wins.
+///  1. Higher q wins.
+///  2. At equal q, more specific wildcard wins (exact > type/* > */*).
+///  3. At equal q + specificity, the caller's offer order wins.
 public fn select_best_media(
     prefs:  &List<MediaRangeSpec>,
     offers: &List<Text>,

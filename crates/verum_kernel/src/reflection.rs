@@ -1,55 +1,64 @@
-//! # Kernel reflection — the meta-theory escape hatch (#158, V0 slice)
+//! # Kernel reflection — the meta-theory escape hatch (#158, current slice)
 //!
+
 //! ## Architectural role
 //!
+
 //! Reflective theorem provers let the kernel reason about ITS OWN
-//! syntax + semantics from inside the language.  ACL2's metafunctions,
+//! syntax + semantics from inside the language. ACL2's metafunctions,
 //! Coq's `Reflection` library, and Lean's `decide` / `native_decide`
-//! are the canonical examples.  Pre-this-module Verum has no
+//! are the canonical examples. Pre-this-module Verum has no
 //! reflective surface: every consumer of [`proof_checker::Term`] —
 //! the elaborator, the audit gates, future Verum-side meta-tactics —
 //! has to either re-import `proof_checker.rs` (widening the trusted
 //! base) or hand-roll its own term mirror (introducing a drift hazard).
 //!
+
 //! This module ships the **V0 reflective surface**: a serializable
 //! mirror of [`proof_checker::Term`] that carries the kernel's term
 //! grammar + judgment shape as **data**, exposed to non-trusted
 //! callers without dragging the trusted base across the API
-//! boundary.  A future Verum-side meta-tactic can then pattern-match
+//! boundary. A future Verum-side meta-tactic can then pattern-match
 //! on [`ReflectedTerm`] / [`ReflectedKernelRule`] without ever
 //! importing `proof_checker.rs` directly.
 //!
-//! ## V0 scope (this slice)
+
+//! ## scope (this slice)
 //!
+
 //! 1. [`ReflectedTerm`] — serializable mirror of [`proof_checker::Term`].
-//!    One variant per kernel term constructor.  `From<&Term>` +
-//!    `TryFrom<&ReflectedTerm>` give a total round-trip.
+//!  One variant per kernel term constructor. `From<&Term>` +
+//!  `TryFrom<&ReflectedTerm>` give a total round-trip.
 //! 2. [`ReflectedJudgment`] — `Γ ⊢ t : T` reified as data: context
-//!    depth + reflected term + reflected expected type.
+//!  depth + reflected term + reflected expected type.
 //! 3. [`ReflectedKernelRule`] — name + premise/conclusion judgments
-//!    for one of the six kernel rules (T-Var, T-Univ, T-Pi-Form,
-//!    T-Lam-Intro, T-App-Elim, T-Conv).
+//!  for one of the six kernel rules (T-Var, T-Univ, T-Pi-Form,
+//!  T-Lam-Intro, T-App-Elim, T-Conv).
 //! 4. [`reflect_kernel_rule`] — the lookup `rule_name -> Option<…>`.
 //! 5. [`is_reflected_well_formed`] — surface-level sanity check
-//!    (de Bruijn indices in range, reflected types reference live
-//!    binders, …).
+//!  (de Bruijn indices in range, reflected types reference live
+//!  binders, …).
 //!
-//! ## V0 non-goals (deferred to V1)
+
+//! ## non-goals (deferred to V1)
 //!
-//! - **Wiring into the elaborator.**  Reflection is a *data layer*
-//!   today; downstream callers can read the surface but no
-//!   elaborator path consumes it.  Wiring follows once the V0
-//!   shape stabilises through use.
-//! - **Verum-source surface.**  `core/verify/reflection.vr` is a
-//!   future deliverable.  V0 is Rust-only.
-//! - **Decision procedures over [`ReflectedTerm`].**  No
-//!   `reflected_def_eq` / `reflected_normalize` / `reflected_type_check`
-//!   yet — those compose with V1.
+
+//! - **Wiring into the elaborator.** Reflection is a *data layer*
+//!  today; downstream callers can read the surface but no
+//!  elaborator path consumes it. Wiring follows once the V0
+//!  shape stabilises through use.
+//! - **Verum-source surface.** `core/verify/reflection.vr` is a
+//!  future deliverable. V0 is Rust-only.
+//! - **Decision procedures over [`ReflectedTerm`].** No
+//!  `reflected_def_eq` / `reflected_normalize` / `reflected_type_check`
+//!  yet — those compose with V1.
 //!
+
 //! ## Structural sketch — what each kernel rule reflects to
 //!
+
 //! The `reflect_kernel_rule` builders ship **abstract structural
-//! sketches** of each rule.  These are intentionally *schematic*:
+//! sketches** of each rule. These are intentionally *schematic*:
 //! they record the SHAPE of premises + conclusion using stand-in
 //! `Var(0)` / `Universe(0)` placeholders, not the full higher-order
 //! quantification a kernel rule classically carries (e.g., `T-Pi-Form`
@@ -57,22 +66,27 @@
 //! sketch shows that with a two-premise / one-conclusion shape but
 //! plugs in concrete universe levels).
 //!
+
 //! The structural sketches are sufficient for V0 meta-tactics that
 //! enumerate "the kernel has six rules, here's their arity and
-//! premise count".  V1 will lift the sketches to fully-quantified
+//! premise count". Future work will lift the sketches to fully-quantified
 //! schemata once the pattern-matching DSL on the meta-tactic side
 //! lands.
 //!
+
 //! ## Mirror invariant
 //!
+
 //! The mirror invariant is:
 //!
+
 //! ```text
-//!   for every t : Term ,
-//!       Term::try_from(&ReflectedTerm::from(&t)) == Ok(t)
+//!  for every t : Term ,
+//!  Term::try_from(&ReflectedTerm::from(&t)) == Ok(t)
 //! ```
 //!
-//! Tests pin this for every variant.  Drift between [`Term`] and
+
+//! Tests pin this for every variant. Drift between [`Term`] and
 //! [`ReflectedTerm`] is the failure mode: adding a variant to one
 //! without the other breaks the round-trip.
 
@@ -88,11 +102,13 @@ use crate::proof_checker::Term;
 
 /// Serializable mirror of [`proof_checker::Term`].
 ///
+
 /// Variants are 1:1 with [`Term`]; the payloads are recursively
-/// reflected.  This indirection lets non-trusted callers (audit
+/// reflected. This indirection lets non-trusted callers (audit
 /// gates, future meta-tactics) consume the kernel's term grammar as
 /// data — *without* importing `proof_checker.rs` directly.
 ///
+
 /// The lossless round-trip [`Term`] ↔ [`ReflectedTerm`] is pinned by
 /// the test suite below.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,8 +157,9 @@ pub enum ReflectedTerm {
 
 /// Errors reported when reflecting (or de-reflecting) kernel data.
 ///
-/// V0 surface is intentionally narrow: the only failure mode today
-/// is a reflected term whose internal structure is malformed.  The
+
+/// current surface is intentionally narrow: the only failure mode today
+/// is a reflected term whose internal structure is malformed. The
 /// `From<&Term>` direction is total and never errors; the
 /// `TryFrom<&ReflectedTerm>` direction inherits the shape so it too
 /// is total *for V0 variants* — the error type exists for
@@ -151,7 +168,7 @@ pub enum ReflectedTerm {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ReflectionError {
     /// The reflected term references a de Bruijn index that exceeds
-    /// the surrounding binder depth.  Surfaced by
+    /// the surrounding binder depth. Surfaced by
     /// [`is_reflected_well_formed`] but not by `TryFrom` — the
     /// `TryFrom` direction is purely structural.
     #[error("de Bruijn index {index} out of range (max {max})")]
@@ -222,15 +239,16 @@ impl TryFrom<&ReflectedTerm> for Term {
 
 /// Reflected typing judgment `Γ ⊢ t : T`.
 ///
+
 /// The context `Γ` is summarised by its **depth** rather than its
 /// full reified contents — for V0 meta-tactics, the depth is what
 /// matters for de Bruijn validity (rule sketches don't yet need to
-/// inspect individual context entries, just their count).  V1 may
+/// inspect individual context entries, just their count). V1 may
 /// promote `context_depth` to `context: Vec<ReflectedTerm>` when the
 /// meta-tactic surface needs entry-level inspection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReflectedJudgment {
-    /// Number of binders in the surrounding context.  Used by
+    /// Number of binders in the surrounding context. Used by
     /// [`is_reflected_well_formed`] to bound legal de Bruijn indices.
     pub context_depth: usize,
 
@@ -271,22 +289,24 @@ impl ReflectedJudgment {
 
 /// Reflected kernel inference rule.
 ///
+
 /// Carries the rule's stable name + a structural sketch of its
-/// premises and conclusion as [`ReflectedJudgment`] values.  This is
+/// premises and conclusion as [`ReflectedJudgment`] values. This is
 /// the data a Verum-side meta-tactic enumerates when asking "what
 /// rules does the kernel know about?" — without ever touching
 /// `proof_checker.rs`.
 ///
+
 /// V0 sketches use stand-in `Var(0)` / `Universe(0)` placeholders
 /// where a fully-quantified schema would carry meta-variables; see
-/// the module-level docs for the V1 promotion path.
+/// the module-level docs for the Future-work promotion path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReflectedKernelRule {
     /// Stable rule name — one of `"T-Var"`, `"T-Univ"`, `"T-Pi-Form"`,
     /// `"T-Lam-Intro"`, `"T-App-Elim"`, `"T-Conv"`.
     pub name: String,
 
-    /// Premise judgments.  `T-Var` / `T-Univ` have zero premises;
+    /// Premise judgments. `T-Var` / `T-Univ` have zero premises;
     /// `T-Pi-Form` has two; the rest have one.
     pub premises: Vec<ReflectedJudgment>,
 
@@ -299,9 +319,10 @@ pub struct ReflectedKernelRule {
 // =============================================================================
 
 /// Stable list of kernel-rule names this V0 reflection surface
-/// recognises.  Mirrors the six rules implemented in
+/// recognises. Mirrors the six rules implemented in
 /// [`crate::proof_checker`].
 ///
+
 /// Adding a rule to `proof_checker.rs` requires extending this
 /// constant + adding a new branch in [`reflect_kernel_rule`].
 pub const KERNEL_RULE_NAMES: &[&str] = &[
@@ -314,22 +335,25 @@ pub const KERNEL_RULE_NAMES: &[&str] = &[
 ];
 
 /// Reflect one of the six kernel rules into its abstract structural
-/// sketch.  Returns `None` for any name not in [`KERNEL_RULE_NAMES`].
+/// sketch. Returns `None` for any name not in [`KERNEL_RULE_NAMES`].
 ///
+
 /// ## V0 sketch shapes
 ///
-/// | Rule          | Premise count | Sketch                                                 |
+
+/// | Rule | Premise count | Sketch |
 /// |---------------|---------------|--------------------------------------------------------|
-/// | `T-Var`       | 0             | `Γ ⊢ Var(0) : Var(0)` (axiomatic — context lookup)     |
-/// | `T-Univ`      | 0             | `Γ ⊢ Universe(0) : Universe(1)`                        |
-/// | `T-Pi-Form`   | 2             | `Γ⊢A:U(0)`, `Γ,A⊢B:U(0)` ⇒ `Γ⊢Π(A).B : U(0)`           |
-/// | `T-Lam-Intro` | 1             | `Γ,A ⊢ b : B` ⇒ `Γ ⊢ λ(A).b : Π(A).B`                  |
-/// | `T-App-Elim`  | 1             | `Γ ⊢ f : Π(A).B` ⇒ `Γ ⊢ App(f, Var(0)) : B`            |
-/// | `T-Conv`      | 1             | `Γ ⊢ t : A`, `A ≡_β B` ⇒ `Γ ⊢ t : B`                   |
+/// | `T-Var` | 0 | `Γ ⊢ Var(0) : Var(0)` (axiomatic — context lookup) |
+/// | `T-Univ` | 0 | `Γ ⊢ Universe(0) : Universe(1)` |
+/// | `T-Pi-Form` | 2 | `Γ⊢A:U(0)`, `Γ,A⊢B:U(0)` ⇒ `Γ⊢Π(A).B : U(0)` |
+/// | `T-Lam-Intro` | 1 | `Γ,A ⊢ b : B` ⇒ `Γ ⊢ λ(A).b : Π(A).B` |
+/// | `T-App-Elim` | 1 | `Γ ⊢ f : Π(A).B` ⇒ `Γ ⊢ App(f, Var(0)) : B` |
+/// | `T-Conv` | 1 | `Γ ⊢ t : A`, `A ≡_β B` ⇒ `Γ ⊢ t : B` |
 ///
+
 /// The placeholders use de Bruijn `Var(0)` to mean "the freshest
 /// binder in scope"; `Universe(0)` is `Type` and `Universe(1)` is
-/// `Type+1`.  The full quantified schemata land in V1.
+/// `Type+1`. The full quantified schemata land in V1.
 pub fn reflect_kernel_rule(rule_name: &str) -> Option<ReflectedKernelRule> {
     match rule_name {
         "T-Var" => Some(reflect_t_var()),
@@ -348,7 +372,7 @@ pub fn reflect_kernel_rule(rule_name: &str) -> Option<ReflectedKernelRule> {
 
 fn reflect_t_var() -> ReflectedKernelRule {
     // T-Var: under a context with at least one binder, Var(0) has the
-    // type recorded for it.  Schematic placeholder uses Var(0) twice
+    // type recorded for it. Schematic placeholder uses Var(0) twice
     // to encode "term and type are both reified placeholders".
     let conclusion = ReflectedJudgment::at_depth(
         1,
@@ -363,7 +387,7 @@ fn reflect_t_var() -> ReflectedKernelRule {
 }
 
 fn reflect_t_univ() -> ReflectedKernelRule {
-    // T-Univ: Universe(n) : Universe(n+1).  V0 sketch pins n=0.
+    // T-Univ: Universe(n) : Universe(n+1). V0 sketch pins n=0.
     let conclusion = ReflectedJudgment::closed(
         ReflectedTerm::Universe { level: 0 },
         ReflectedTerm::Universe { level: 1 },
@@ -453,7 +477,7 @@ fn reflect_t_app_elim() -> ReflectedKernelRule {
 fn reflect_t_conv() -> ReflectedKernelRule {
     // T-Conv: Γ ⊢ t : A, A ≡_β B ⇒ Γ ⊢ t : B.
     // V0 sketch elides the convertibility premise — it's a meta-side
-    // condition, not a typing judgment.  Only the typed premise +
+    // condition, not a typing judgment. Only the typed premise +
     // conclusion appear as data.
     let premise = ReflectedJudgment::closed(
         ReflectedTerm::Var { index: 0 },
@@ -476,17 +500,21 @@ fn reflect_t_conv() -> ReflectedKernelRule {
 
 /// Surface-level sanity check on a [`ReflectedJudgment`].
 ///
+
 /// Verifies:
 ///
-///   * Every de Bruijn `Var(i)` inside `term` and `expected_type`
-///     satisfies `i < context_depth + d`, where `d` is the number of
-///     binders crossed when descending into the term.
+
+///  * Every de Bruijn `Var(i)` inside `term` and `expected_type`
+///  satisfies `i < context_depth + d`, where `d` is the number of
+///  binders crossed when descending into the term.
 ///
+
 /// Returns `true` if the reflected judgment is syntactically
-/// well-formed under its declared context depth.  Returns `false`
+/// well-formed under its declared context depth. Returns `false`
 /// if any sub-term references an out-of-range de Bruijn index.
 ///
-/// **Not a type check.**  This routine doesn't run the kernel — it
+
+/// **Not a type check.** This routine doesn't run the kernel — it
 /// only catches the cheapest class of malformed reflected data.
 /// A well-formed reflected judgment may still be ill-typed; conversely
 /// the kernel's own `infer` is the verdict authority for actual
@@ -577,7 +605,7 @@ mod tests {
 
     #[test]
     fn roundtrip_polymorphic_identity() {
-        // λ(A : Type). λ(x : A). x  --- the polymorphic identity.
+        // λ(A : Type). λ(x : A). x --- the polymorphic identity.
         let poly_id = Term::lam(
             Term::Universe(0),
             Term::lam(Term::Var(0), Term::Var(0)),
@@ -744,7 +772,7 @@ mod tests {
     #[test]
     fn serde_tag_is_snake_case_kind() {
         // Pin the wire format: ReflectedTerm uses tag = "kind"
-        // with snake_case constructor names.  Audit-gate / external
+        // with snake_case constructor names. Audit-gate / external
         // tooling may key on this format, so it's stable surface.
         let t = ReflectedTerm::Var { index: 7 };
         let json = serde_json::to_string(&t).expect("serialise");

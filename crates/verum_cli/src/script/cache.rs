@@ -1,32 +1,41 @@
 //! Content-addressed cache for compiled Verum scripts.
 //!
+
 //! P1.7 — script cache lives at `~/.verum/script-cache/<blake3>/`. Each
 //! directory holds:
 //!
+
 //! ```text
 //! <blake3-hex>/
-//! ├── cog.vbc       — the compiled VBC bytecode
-//! └── meta.toml     — typed metadata (schema, key components, timestamps)
+//! ├── cog.vbc — the compiled VBC bytecode
+//! └── meta.toml — typed metadata (schema, key components, timestamps)
 //! ```
 //!
+
 //! # Cache key
 //!
+
 //! `CacheKey = blake3(source_bytes ++ compiler_version ++ flags)`.
 //!
+
 //! Both `compiler_version` and `flags` are part of the digest because a
 //! source file alone does NOT determine the compilation output:
 //!
-//!   * a different compiler version may emit different VBC for the same
-//!     source (e.g. an intrinsic-name change, a codegen optimisation
-//!     pass that landed mid-release);
-//!   * profile flags (verify mode, tier, opt-level) change the bytecode
-//!     materially.
+
+//!  * a different compiler version may emit different VBC for the same
+//!  source (e.g. an intrinsic-name change, a codegen optimisation
+//!  pass that landed mid-release);
+//!  * profile flags (verify mode, tier, opt-level) change the bytecode
+//!  materially.
 //!
+
 //! Including everything in the key means a cache hit is always a *valid*
 //! reuse — there is no "stale cache" failure mode.
 //!
+
 //! # Atomicity
 //!
+
 //! `store()` writes through a per-entry tempdir (`<blake3>.tmp.<pid>`) and
 //! atomically renames it into place. A crash between writing the VBC and
 //! renaming leaves a `.tmp.<pid>` directory that the next prune sweep
@@ -35,8 +44,10 @@
 //! immutable so the overwrite is byte-identical when both writers used
 //! the same key.
 //!
+
 //! # GC policy
 //!
+
 //! `gc_to_size(max_bytes)` evicts least-recently-accessed entries first
 //! until total disk usage falls under the budget. Access times are
 //! refreshed on every `lookup()`; this is best-effort (we update the
@@ -44,12 +55,14 @@
 //! lookup) and can be disabled via `[cache] track_access = false` in
 //! the user config when latency-sensitive.
 //!
+
 //! # Performance
 //!
+
 //! - `key_for`: single-pass blake3 over `source ++ compiler_version ++
-//!   flags`, ~1 GB/s on modern CPUs. A 10 KB source = ~10 µs.
+//!  flags`, ~1 GB/s on modern CPUs. A 10 KB source = ~10 µs.
 //! - `lookup`: 2 fs reads + 1 TOML parse. Cold lookup ~200 µs on SSD;
-//!   warm (page cache) ~30 µs.
+//!  warm (page cache) ~30 µs.
 //! - `store`: 2 fs writes + 1 atomic rename. ~500 µs on SSD.
 //! - `gc_to_size`: O(N) on the entry count, sorted by `last_accessed_at`.
 
@@ -128,6 +141,7 @@ impl std::fmt::Display for CacheKey {
 
 /// Compute the cache key for a source + compiler + flag set.
 ///
+
 /// The digest order is `source ++ b"\x00" ++ compiler ++ b"\x00" ++ flag1
 /// ++ b"\x00" ++ flag2 ++ ...` — null bytes between fields prevent
 /// length-extension collisions where, e.g., `("a", "bc")` and `("ab",
@@ -248,6 +262,7 @@ pub type CacheResult<T> = Result<T, CacheError>;
 
 /// Content-addressed cache rooted at a directory.
 ///
+
 /// Cheap to clone — internally just a `PathBuf`.
 #[derive(Debug, Clone)]
 pub struct ScriptCache {
@@ -268,6 +283,7 @@ pub struct ScriptCache {
 impl ScriptCache {
     /// Default cache location: `$HOME/.verum/script-cache/`.
     ///
+
     /// The directory is created if missing.
     pub fn at_default() -> CacheResult<Self> {
         let home = dirs::home_dir().ok_or_else(|| CacheError::Io {

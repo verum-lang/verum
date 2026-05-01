@@ -1,10 +1,13 @@
 //! Contract Literals System for Verum Verification
 //!
+
 //! This module implements the contract#"..." compiler intrinsic for Hoare-logic
 //! style contracts embedded directly in the language.
 //!
+
 //! # Contract DSL Syntax
 //!
+
 //! The contract DSL supports:
 //! - `requires` clauses (preconditions)
 //! - `ensures` clauses (postconditions)
@@ -13,28 +16,33 @@
 //! - `result` keyword for return values
 //! - `forall` and `exists` quantifiers
 //!
+
 //! # Example
 //!
+
 //! ```verum
 //! @verify(proof)
 //! fn transfer_funds(from: &mut Account, to: &mut Account, amount: Money) {
-//!     contract#"
-//!         requires from.balance >= amount;
-//!         ensures from.balance == old(from.balance) - amount;
-//!         ensures to.balance == old(to.balance) + amount;
-//!     "
-//!     // ... implementation
+//!  contract#"
+//!  requires from.balance >= amount;
+//!  ensures from.balance == old(from.balance) - amount;
+//!  ensures to.balance == old(to.balance) + amount;
+//!  "
+//!  // ... implementation
 //! }
 //! ```
 //!
+
 //! # Architecture
 //!
+
 //! The contract system consists of:
 //! 1. **ContractParser** - Parses contract#"..." literals into ContractSpec AST
 //! 2. **ContractSpec** - Structured representation of preconditions, postconditions, invariants
 //! 3. **SMT Translation** - Converts contracts to SMT-LIB for verification
 //! 4. **Runtime Instrumentation** - Generates runtime assertion code for @verify(runtime)
 //!
+
 //! The contract system is a compiler intrinsic (NOT a user-defined tagged literal).
 //! It integrates deeply with the type system, SMT solver, and verification modes.
 //! The 4-phase pipeline is: (1) parse contract literal into ContractSpec,
@@ -58,18 +66,20 @@ use verum_common::{List, Map, Text};
 
 /// A complete contract specification parsed from a contract# literal.
 ///
+
 /// Parsed from contract#"..." literals. Contains preconditions (caller must ensure
 /// at function entry), postconditions (function guarantees at exit), and invariants
 /// (hold at all program points). Supports `old(expr)` for pre-state values,
 /// `result` for return values, and `forall`/`exists` quantifiers.
 ///
+
 /// Example:
 /// ```verum
 /// contract#"
-///     requires x > 0;
-///     requires y > 0;
-///     ensures result == x + y;
-///     ensures result > x && result > y;
+///  requires x > 0;
+///  requires y > 0;
+///  ensures result == x + y;
+///  ensures result > x && result > y;
 /// "
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -119,6 +129,7 @@ impl ContractSpec {
 
     /// Validate semantic correctness of the contract.
     ///
+
     /// Checks:
     /// - `result` only appears in postconditions
     /// - `old(expr)` only appears in postconditions
@@ -210,6 +221,7 @@ pub enum ContractClause {
 
 /// A single predicate in a contract clause.
 ///
+
 /// Predicates are logical expressions that must evaluate to boolean.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Predicate {
@@ -274,17 +286,21 @@ impl fmt::Display for Predicate {
 
 /// Expression nodes for the contract DSL.
 ///
+
 /// Contract DSL expression nodes. Supports the full subset of expressions valid
 /// in contracts: comparison operators, logical connectives, arithmetic, quantifiers
 /// (forall/exists), old() value capture, and the result keyword. Provides:
 ///
+
 /// - **Type safety**: Distinct types for contract-specific constructs like `result` and `old()`
 /// - **SMT translation**: Direct conversion to SMT-LIB formulas via `to_formula()` and `to_smt_expr()`
 /// - **Scope tracking**: Free variable collection and bound variable tracking for quantifiers
 /// - **Validation**: Methods to check context-validity (e.g., `result` only in postconditions)
 ///
+
 /// ## Supported Contract DSL Keywords
 ///
+
 /// | Keyword | Meaning | Variant |
 /// |---------|---------|---------|
 /// | `result` | Return value | `ContractExpr::Result` |
@@ -293,8 +309,10 @@ impl fmt::Display for Predicate {
 /// | `exists x. P` | Existential quantifier | `ContractExpr::Exists` |
 /// | `let x = e in body` | Let binding | `ContractExpr::Let` |
 ///
+
 /// ## Conversion from verum_ast::Expr
 ///
+
 /// Use `ContractExpr::from_ast()` to convert from the general AST expression type.
 /// This conversion validates that the expression is valid in a contract context.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -537,7 +555,7 @@ impl ContractExpr {
             ContractExpr::Forall(binding, body) => {
                 let var = Variable::typed(binding.variable.clone(), VarType::Int);
                 let body_formula = if let Some(ref range) = binding.range {
-                    // forall x in [lo, hi). body  =>  forall x. (lo <= x < hi) => body
+                    // forall x in [lo, hi). body => forall x. (lo <= x < hi) => body
                     let lo = range.lower.to_smt_expr();
                     let hi = range.upper.to_smt_expr();
                     let x = SmtExpr::var(binding.variable.clone());
@@ -551,7 +569,7 @@ impl ContractExpr {
             ContractExpr::Exists(binding, body) => {
                 let var = Variable::typed(binding.variable.clone(), VarType::Int);
                 let body_formula = if let Some(ref range) = binding.range {
-                    // exists x in [lo, hi). body  =>  exists x. (lo <= x < hi) && body
+                    // exists x in [lo, hi). body => exists x. (lo <= x < hi) && body
                     let lo = range.lower.to_smt_expr();
                     let hi = range.upper.to_smt_expr();
                     let x = SmtExpr::var(binding.variable.clone());
@@ -787,6 +805,7 @@ impl fmt::Display for ContractUnOp {
 
 /// Captures the pre-state value of an expression.
 ///
+
 /// In postconditions, `old(expr)` refers to the value of `expr` at function entry.
 /// The compiler stores this value before executing the function body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -808,6 +827,7 @@ impl OldExpr {
 
     /// Get the storage variable name for this old expression.
     ///
+
     /// Generates a unique name like `__old_0`, `__old_1`, etc.
     pub fn storage_name(&self) -> Text {
         if let Some(ref name) = self.storage_var {
@@ -832,6 +852,7 @@ impl fmt::Display for OldExpr {
 
 /// Quantifier variable binding.
 ///
+
 /// Supports both unbounded quantification (forall x. P(x)) and
 /// bounded quantification over ranges (forall x in 0..N. P(x)).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -906,31 +927,34 @@ pub struct QuantifierRange {
 
 /// Parser for contract#"..." literals.
 ///
+
 /// Parses the contract DSL syntax from contract#"..." string literals.
 /// This is a compiler intrinsic parser -- unlike user-defined tagged literals,
 /// it is NOT registered via @tagged_literal and has deep integration with
 /// the type system and SMT solver.
 ///
+
 /// # Grammar
 ///
+
 /// ```text
-/// contract      ::= clause*
-/// clause        ::= ('requires' | 'ensures' | 'invariant') expr ';'
-/// expr          ::= logical_or
-/// logical_or    ::= logical_and ('||' logical_and)*
-/// logical_and   ::= comparison ('&&' comparison)*
-/// comparison    ::= implication (cmp_op implication)?
-/// implication   ::= additive ('=>' implication)?
-/// additive      ::= multiplicative (('+' | '-') multiplicative)*
+/// contract ::= clause*
+/// clause ::= ('requires' | 'ensures' | 'invariant') expr ';'
+/// expr ::= logical_or
+/// logical_or ::= logical_and ('||' logical_and)*
+/// logical_and ::= comparison ('&&' comparison)*
+/// comparison ::= implication (cmp_op implication)?
+/// implication ::= additive ('=>' implication)?
+/// additive ::= multiplicative (('+' | '-') multiplicative)*
 /// multiplicative ::= unary (('*' | '/' | '%') unary)*
-/// unary         ::= ('!' | '-')? postfix
-/// postfix       ::= primary ('.' ident | '[' expr ']' | '(' args ')' | '.' ident '(' args ')')*
-/// primary       ::= 'true' | 'false' | number | ident | 'result' | 'old' '(' expr ')'
-///                 | 'forall' binding '.' expr | 'exists' binding '.' expr
-///                 | 'let' ident '=' expr 'in' expr | 'if' expr 'then' expr 'else' expr
-///                 | '(' expr ')'
-/// binding       ::= ident (':' type)? ('in' range)?
-/// range         ::= expr '..' expr
+/// unary ::= ('!' | '-')? postfix
+/// postfix ::= primary ('.' ident | '[' expr ']' | '(' args ')' | '.' ident '(' args ')')*
+/// primary ::= 'true' | 'false' | number | ident | 'result' | 'old' '(' expr ')'
+///  | 'forall' binding '.' expr | 'exists' binding '.' expr
+///  | 'let' ident '=' expr 'in' expr | 'if' expr 'then' expr 'else' expr
+///  | '(' expr ')'
+/// binding ::= ident (':' type)? ('in' range)?
+/// range ::= expr '..' expr
 /// ```
 #[derive(Debug)]
 pub struct ContractParser {
@@ -1437,6 +1461,7 @@ impl ContractParser {
 
     /// Parse a primary expression for range bounds (no field access allowed).
     ///
+
     /// This uses parse_integer instead of parse_number to avoid consuming
     /// the '.' that serves as the quantifier body separator.
     fn parse_range_primary(&mut self) -> Result<ContractExpr, ContractError> {
@@ -1855,6 +1880,7 @@ enum ClauseKind {
 
 /// Translates a ContractSpec to SMT-LIB format for verification.
 ///
+
 /// Phase 2 of contract verification: lower function body to SSA, generate
 /// verification conditions (VC = forall params. preconditions => wp(body, postconditions)),
 /// and encode in SMT-LIB 2.0 format for Z3/CVC5 solving.
@@ -1877,6 +1903,7 @@ impl ContractSmtTranslator {
 
     /// Translate a contract spec to SMT-LIB format.
     ///
+
     /// Returns a complete SMT-LIB 2.6 script.
     pub fn translate(&mut self, spec: &ContractSpec, function_name: &str) -> Text {
         let mut output = Text::new();
@@ -2031,6 +2058,7 @@ impl Default for ContractSmtTranslator {
 
 /// Generates runtime assertion code for @verify(runtime) mode.
 ///
+
 /// For @verify(runtime) mode: converts contracts to runtime assertions.
 /// Preconditions become entry checks, old() values are captured before body
 /// execution, and postconditions become exit checks. Violations produce panics
@@ -2049,6 +2077,7 @@ impl RuntimeInstrumenter {
 
     /// Generate instrumentation code for a contract.
     ///
+
     /// Returns:
     /// 1. Precondition checks (inserted at function entry)
     /// 2. Old value storage statements
@@ -2373,14 +2402,18 @@ pub enum ContractError {
 
 /// Parse a contract#"..." literal into a ContractSpec.
 ///
+
 /// This is the main entry point for parsing contract literals.
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// use verum_verification::contract::parse_contract;
 /// use verum_ast::span::Span;
 ///
+
 /// let content = "requires x > 0; ensures result >= 0;";
 /// let spec = parse_contract(content, Span::dummy())?;
 /// assert_eq!(spec.preconditions.len(), 1);
@@ -2393,6 +2426,7 @@ pub fn parse_contract(content: &str, span: Span) -> Result<ContractSpec, Contrac
 
 /// Parse a contract literal without validation.
 ///
+
 /// This is primarily intended for testing validation separately from parsing.
 /// For production use, prefer `parse_contract` which includes validation.
 pub fn parse_contract_no_validate(
@@ -2405,6 +2439,7 @@ pub fn parse_contract_no_validate(
 
 /// Translate a contract specification to SMT-LIB format.
 ///
+
 /// Returns a complete SMT-LIB 2.6 script that can be sent to a solver.
 pub fn contract_to_smtlib(spec: &ContractSpec, function_name: &str) -> Text {
     let mut translator = ContractSmtTranslator::new();
@@ -2422,6 +2457,7 @@ pub fn generate_contract_vcs(
 
 /// Generate runtime instrumentation code for a contract.
 ///
+
 /// For use with @verify(runtime) mode.
 pub fn instrument_contract(spec: &ContractSpec, function_name: &str) -> InstrumentedContract {
     let mut instrumenter = RuntimeInstrumenter::new();

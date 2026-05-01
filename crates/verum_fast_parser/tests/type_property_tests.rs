@@ -14,8 +14,10 @@
 )]
 //! Tests for type property expression parsing.
 //!
+
 //! Tests for type property annotations on declarations
 //!
+
 //! Type properties provide compile-time access to type metadata:
 //! - size: Size in bytes
 //! - alignment: Alignment requirement in bytes
@@ -25,6 +27,7 @@
 //! - bits: Bit width (for numeric types)
 //! - name: Type name as string
 //!
+
 //! Examples:
 //! - `Int.size` returns the size of Int in bytes
 //! - `Float.alignment` returns the alignment of Float

@@ -98,26 +98,31 @@ unsafe extern "C" {
 
     /// Create an MCJIT execution engine for a module, with the given options.
     ///
+
     /// It is
     /// the responsibility of the caller to ensure that all fields in Options up to
     /// the given SizeOfOptions are initialized. It is correct to pass a smaller
     /// value of SizeOfOptions that omits some fields. The canonical way of using
     /// this is:
     ///
+
     /// ```c++
     /// LLVMMCJITCompilerOptions options;
     /// LLVMInitializeMCJITCompilerOptions(&options, sizeof(options));
     /// // ... fill in those options you care about
     /// LLVMCreateMCJITCompilerForModule(&jit, mod, &options, sizeof(options),
-    ///                                  &error);
+    ///  &error);
     /// ```
     ///
+
     /// Note that this is also correct, though possibly suboptimal:
     ///
+
     /// ```c++
     /// LLVMCreateMCJITCompilerForModule(&jit, mod, 0, 0, &error);
     /// ```
     ///
+
     /// 0 is returned on success, or 1 on failure.
     pub fn LLVMCreateMCJITCompilerForModule(
         OutJIT: *mut LLVMExecutionEngineRef,
@@ -185,13 +190,16 @@ unsafe extern "C" {
     // Operations on memory managers
     // Create a simple custom MCJIT memory manager.
     //
+
     // This memory manager can intercept allocations in a module-oblivious way. It will
     // return NULL if any of the passed functions are NULL.
     //
+
     // `AllocateCodeSection` and `AllocateDataSection` are called to allocate blocks
     // of memory for executable code and data, respectively. `FinalizeMemory` is called
     // to set page permissions and flush caches, returning 0 on success and 1 on error.
     //
+
     // `Opaque` will be passed to the callbacks.
     pub fn LLVMCreateSimpleMCJITMemoryManager(
         Opaque: *mut ::libc::c_void,

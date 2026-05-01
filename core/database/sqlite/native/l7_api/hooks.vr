@@ -5,51 +5,63 @@ module core.database.sqlite.native.l7_api.hooks;
 // =============================================================================
 // Layer: 7 — public API.
 // Spec: sqlite-native.md §13.6 (hooks); database.md §15.x (audit context);
-//       SQLite C API: sqlite3_commit_hook / sqlite3_rollback_hook /
-//                     sqlite3_update_hook.
+//  SQLite C API: sqlite3_commit_hook / sqlite3_rollback_hook /
+//  sqlite3_update_hook.
 //
-// Hooks are connection-bound observation / decision points.  Each
+
+// Hooks are connection-bound observation / decision points. Each
 // surface is a separate protocol in `ext.hooks`; this module exposes
 // thin sugar functions on `Database` that forward into the
 // connection's `FnRegistry` (accessible via `Database.registry_mut`).
 //
+
 // Eight hook surfaces exist (all in `ext.hooks`):
 //
-//     CommitHook        veto an in-progress COMMIT
-//     RollbackHook      observe ROLLBACKs
-//     UpdateHook        observe DML (INSERT / UPDATE / DELETE)
-//     PreUpdateHook     observe DML with old + new row images
-//     AuthorizerHook    pre-statement compile gate
-//     BusyHandler       SQLITE_BUSY retry policy
-//     ProgressHandler   per-N-instruction heartbeat
-//     TraceHook         observability surface
+
+//  CommitHook veto an in-progress COMMIT
+//  RollbackHook observe ROLLBACKs
+//  UpdateHook observe DML (INSERT / UPDATE / DELETE)
+//  PreUpdateHook observe DML with old + new row images
+//  AuthorizerHook pre-statement compile gate
+//  BusyHandler SQLITE_BUSY retry policy
+//  ProgressHandler per-N-instruction heartbeat
+//  TraceHook observability surface
 //
-// Last subscriber wins (matches SQLite semantics).  Calling `set_*`
+
+// Last subscriber wins (matches SQLite semantics). Calling `set_*`
 // twice replaces; `clear_*` removes.
 //
+
 // Hooks fire from these sites:
 //
-//   * commit_hook   — Connection.commit_tx, BEFORE the actual COMMIT.
-//                     Veto (`CdAbort(msg)`) turns the commit into a
-//                     forced rollback returning the message.
+
+//  * commit_hook — Connection.commit_tx, BEFORE the actual COMMIT.
+//  Veto (`CdAbort(msg)`) turns the commit into a
+//  forced rollback returning the message.
 //
-//   * rollback_hook — Connection.rollback_tx, AFTER state transition.
-//                     Observation only — no veto.
+
+//  * rollback_hook — Connection.rollback_tx, AFTER state transition.
+//  Observation only — no veto.
 //
-//   * update_hook   — fired by the L4 VDBE Insert / Update / Delete
-//                     opcodes (separate task — wiring lands when the
-//                     opcode handlers learn about the Connection's
-//                     registry).
+
+//  * update_hook — fired by the L4 VDBE Insert / Update / Delete
+//  opcodes (separate task — wiring lands when the
+//  opcode handlers learn about the Connection's
+//  registry).
 //
-//   * authorizer    — fired by the L5 SQL compiler before each DML /
-//                     DDL action (separate task — auth-on-compile
-//                     wiring lands with the prepare pipeline).
+
+//  * authorizer — fired by the L5 SQL compiler before each DML /
+//  DDL action (separate task — auth-on-compile
+//  wiring lands with the prepare pipeline).
 //
-//   * busy_handler  — fired by L1 pager when SQLITE_BUSY is returned.
+
+//  * busy_handler — fired by L1 pager when SQLITE_BUSY is returned.
 //
-//   * progress      — fired by L4 VDBE every N instructions.
+
+//  * progress — fired by L4 VDBE every N instructions.
 //
-//   * trace         — fired by L7 prepare / step / finalize.
+
+//  * trace — fired by L7 prepare / step / finalize.
 // =============================================================================
 
 mount core.*;
@@ -64,13 +76,13 @@ mount core.database.sqlite.native.l7_api.database.{Database};
 // CommitHook — veto in-progress COMMITs
 // -----------------------------------------------------------------------------
 
-/// Register a commit-hook on `db`.  Replaces any previously-set hook.
+/// Register a commit-hook on `db`. Replaces any previously-set hook.
 /// Equivalent to SQLite's `sqlite3_commit_hook(db, callback, arg)`.
 public fn set_commit_hook(db: &mut Database, h: Heap<dyn CommitHook>) {
     db.registry_mut().set_commit_hook(h);
 }
 
-/// Remove the commit-hook.  COMMIT proceeds without observation.
+/// Remove the commit-hook. COMMIT proceeds without observation.
 public fn clear_commit_hook(db: &mut Database) {
     db.registry_mut().clear_commit_hook();
 }

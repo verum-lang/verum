@@ -1,5 +1,6 @@
 //! Statement compilation for VBC codegen.
 //!
+
 //! Transforms Verum AST statements into VBC instructions.
 
 use super::{CodegenError, CodegenResult, VbcCodegen};
@@ -63,7 +64,7 @@ impl VbcCodegen {
             StmtKind::Item(item) => {
                 // Handle nested items:
                 // - Functions are compiled separately (already registered in collect_declarations)
-                //   They should NOT be compiled inline as it would reset the context.
+                //  They should NOT be compiled inline as it would reset the context.
                 // - Other items (types, constants) can be compiled inline.
                 match &item.kind {
                     verum_ast::ItemKind::Function(func) => {
@@ -149,6 +150,7 @@ impl VbcCodegen {
                             // standalone so the function is emitted at the
                             // module level and accessible by name.
                             //
+
                             // `compile_function` internally calls
                             // `begin_function`/`end_function`, which clear
                             // the current in_function / instructions /
@@ -159,6 +161,7 @@ impl VbcCodegen {
                             // with `in_function == false` → codegen error
                             // "return statement outside of function".
                             //
+
                             // Mirror the save/restore pattern used by
                             // compile_closure (see expressions.rs:11687).
                             let saved_function = self.ctx.current_function.clone();
@@ -607,6 +610,7 @@ impl VbcCodegen {
 
         // Compile initializer if present.
         //
+
         // Variant-name disambiguation: push the let-binding's type
         // annotation as `current_return_type_name` for the duration of the
         // initializer compile so that bare variant constructors in the RHS
@@ -990,6 +994,7 @@ impl VbcCodegen {
 
     /// Compiles a provide statement.
     ///
+
     /// Handles two cases:
     /// 1. Normal provide: `provide Ctx = expr;` — emits a single CtxProvide
     /// 2. Layer expansion: `provide LayerName;` — expands the layer into individual provides

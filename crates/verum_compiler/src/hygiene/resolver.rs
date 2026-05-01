@@ -1,7 +1,9 @@
 //! Identifier Resolution with Scope Awareness
 //!
+
 //! Implements sets-of-scopes resolution algorithm.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -88,6 +90,7 @@ impl ScopeResolver {
 
     /// Resolve an identifier using sets-of-scopes algorithm
     ///
+
     /// The algorithm finds all bindings for the name whose scopes are a
     /// subset of the identifier's scopes, then returns the most specific
     /// (largest subset).

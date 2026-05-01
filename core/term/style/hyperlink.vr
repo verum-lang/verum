@@ -5,16 +5,19 @@
 // Dependencies: core.io, raw/escape.vr, widget/paragraph.vr (Span)
 // =============================================================================
 //
+
 // Hyperlink support via OSC 8 escape sequences. Allows terminal text to
 // carry invisible URI attributes that modern terminals render as clickable
 // links (similar to HTML <a> tags).
 //
+
 // Usage:
 // ```verum
 // Span.styled("Click here", Style.new().fg(Color.Blue).underlined())
-//     .hyperlink("https://verum-lang.org")
+//  .hyperlink("https://verum-lang.org")
 // ```
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.3
 // =============================================================================
 
@@ -57,14 +60,16 @@ implement Span {
 /// hyperlink early and let subsequent bytes be interpreted as
 /// terminal escapes.
 ///
+
 /// Rejects ALL control characters (bytes < 0x20 and DEL = 0x7F).
 /// Specifically:
-///   * `\007` BEL — primary OSC terminator. Closes the hyperlink.
-///   * `\e` (0x1B) ESC — leads to ST `\e\\` and any other escape.
-///     Could change window title, set scrolling region, alter colors.
-///   * `\n` LF, `\r` CR — break renderer state, can inject lines.
-///   * Other C0 control chars — terminal-defined, generally unsafe.
+///  * `\007` BEL — primary OSC terminator. Closes the hyperlink.
+///  * `\e` (0x1B) ESC — leads to ST `\e\\` and any other escape.
+///  Could change window title, set scrolling region, alter colors.
+///  * `\n` LF, `\r` CR — break renderer state, can inject lines.
+///  * Other C0 control chars — terminal-defined, generally unsafe.
 ///
+
 /// Per RFC 3986 §2, valid URI characters are a subset of printable
 /// ASCII plus percent-encoded octets, so any control character in
 /// a URI is malformed input that we should reject before emit.
@@ -90,6 +95,7 @@ public fn is_safe_uri_for_osc(uri: &Text) -> Bool {
 /// Opens the link with OSC 8 ; params ; uri ST, writes the visible text,
 /// then closes with OSC 8 ;; ST.
 ///
+
 /// Returns `Err(IoError.InvalidInput(...))` if `uri` contains a
 /// control character that would close the OSC sequence early — see
 /// `is_safe_uri_for_osc` for the threat model. Without this check a

@@ -1,6 +1,7 @@
 //! Soundness regression: an unknown rewrite rule with cross-ExprKind
 //! source/target must NOT silently pass.
 //!
+
 //! Pre-fix `structurally_compatible` had a catch-all `_ => true` arm
 //! that made the "unknown rewrite rule" branch in
 //! `validate_apply_rewrite_rule` accept ANY source→target pair
@@ -8,10 +9,12 @@
 //! soundness pattern as the catch-all arm fixed in 8429bd4e and
 //! the quantifier rules in 80f43418.
 //!
+
 //! Post-fix the catch-all uses `std::mem::discriminant` so cross-kind
 //! pairs (e.g. Path source, Literal target where both arms aren't
 //! the explicit Literal↔Path cross-pair) reject.
 //!
+
 //! Note: the explicit Literal↔Path cross-pair stays accepted —
 //! definition unfolding legitimately swaps a constant for its name.
 //! This test pins the cross-kind rejection for OTHER pairs (Path
@@ -59,11 +62,13 @@ fn unknown_rewrite_with_cross_kind_pair_is_rejected() {
     // Pre-fix `_ => true` in `structurally_compatible` made the
     // "unknown rule" branch accept arbitrary pairs.
     //
+
     // We construct a Rewrite proof:
-    //   source: Path("p")  (a name that the validator won't unfold)
-    //   target: Binary(p AND p)  (a Binary expression)
-    //   rule:   "totally_made_up_rewrite"  (never registered)
+    //  source: Path("p") (a name that the validator won't unfold)
+    //  target: Binary(p AND p) (a Binary expression)
+    //  rule: "totally_made_up_rewrite" (never registered)
     //
+
     // The validator hits validate_standard_rewrite → unknown-rule
     // arm → structurally_compatible(Path, Binary) which now returns
     // false (different discriminants, not in the explicit

@@ -1,71 +1,85 @@
 //! 13-strategy verification ladder dispatcher — kernel-checkable.
 //!
+
 //! ## What this module is
 //!
+
 //! Verum's verification model is a strict ν-monotone ladder of 13
 //! strategies (VVA §12 + the existing
 //! [`verum_smt::verify_strategy::VerifyStrategy`] enum):
 //!
+
 //! ```text
-//!   runtime (0) < static (1) < fast (2) < complexity_typed (n<ω) <
-//!   formal (ω) < proof (ω+1) < thorough (ω·2) < reliable (ω·2+1) <
-//!   certified (ω·2+2) < coherent_static (ω·2+3) < coherent_runtime (ω·2+4) <
-//!   coherent (ω·2+5) < synthesize (≤ω·3+1)
+//!  runtime (0) < static (1) < fast (2) < complexity_typed (n<ω) <
+//!  formal (ω) < proof (ω+1) < thorough (ω·2) < reliable (ω·2+1) <
+//!  certified (ω·2+2) < coherent_static (ω·2+3) < coherent_runtime (ω·2+4) <
+//!  coherent (ω·2+5) < synthesize (≤ω·3+1)
 //! ```
 //!
+
 //! Every theorem carries an `@verify(<strategy>)` annotation; this
 //! module is the single dispatcher that:
 //!
-//!   1. Projects the annotation to a [`LadderStrategy`] enum.
-//!   2. Routes the obligation through the matching backend
-//!      (Z3 / CVC5 / kernel-recheck / certificate-replay / coherent
-//!      α-cert ⟺ ε-cert / inverse search).
-//!   3. Returns a typed [`LadderVerdict`] with a *kernel-checkable
-//!      witness* on success.
-//!   4. Enforces strict-ν-monotonicity at the dispatcher level: a
-//!      stricter strategy succeeding **lifts** to the same verdict
-//!      under every coarser strategy.
+
+//!  1. Projects the annotation to a [`LadderStrategy`] enum.
+//!  2. Routes the obligation through the matching backend
+//!  (Z3 / CVC5 / kernel-recheck / certificate-replay / coherent
+//!  α-cert ⟺ ε-cert / inverse search).
+//!  3. Returns a typed [`LadderVerdict`] with a *kernel-checkable
+//!  witness* on success.
+//!  4. Enforces strict-ν-monotonicity at the dispatcher level: a
+//!  stricter strategy succeeding **lifts** to the same verdict
+//!  under every coarser strategy.
 //!
+
 //! ## Why this is a fundamental refactor (not a wrapper)
 //!
+
 //! Pre-this-module the dispatch was scattered across
 //! `verum_smt::backend_switcher`, `verum_smt::tactics`,
 //! `verum_kernel::infer`, and the CLI command harness; per-strategy
 //! intent (`@verify(thorough)` vs `@verify(reliable)`) was recorded
-//! but rarely *enforced*.  This module provides a **single trait
+//! but rarely *enforced*. This module provides a **single trait
 //! boundary** for ladder dispatch with one method per strategy slot,
 //! making it impossible to silently fall through to a coarser
 //! strategy without a typed acknowledgement.
 //!
+
 //! Each backend adapter is a small, testable concern; the dispatcher
 //! itself is foundation-neutral and works against any obligation
 //! shape that maps onto Verum's [`verum_kernel::CoreTerm`].
 //!
-//! ## V0 surface (this commit)
+
+//! ## current surface (this commit)
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   * The full [`LadderStrategy`] / [`LadderVerdict`] /
-//!     [`LadderObligation`] / [`LadderDispatcher`] surface.
-//!   * Adapters for the 5 strategies whose backends already exist:
-//!     `Runtime`, `Static`, `Fast`, `Formal`, `Proof`.
-//!   * Honest `Pending` verdicts for the 8 strategies whose backends
-//!     are not yet wired (`ComplexityTyped`, `Thorough`, `Reliable`,
-//!     `Certified`, `CoherentStatic`, `CoherentRuntime`, `Coherent`,
-//!     `Synthesize`) — annotated with the existing infrastructure
-//!     hooks they will integrate with in V1+.
-//!   * A reference [`DefaultLadderDispatcher`] that wires the V0
-//!     adapters and refuses pending strategies with a typed
-//!     `LadderVerdict::DispatchPending` (the inverse of "silently
-//!     fall through to coarser strategy").
+
+//!  * The full [`LadderStrategy`] / [`LadderVerdict`] /
+//!  [`LadderObligation`] / [`LadderDispatcher`] surface.
+//!  * Adapters for the 5 strategies whose backends already exist:
+//!  `Runtime`, `Static`, `Fast`, `Formal`, `Proof`.
+//!  * Honest `Pending` verdicts for the 8 strategies whose backends
+//!  are not yet wired (`ComplexityTyped`, `Thorough`, `Reliable`,
+//!  `Certified`, `CoherentStatic`, `CoherentRuntime`, `Coherent`,
+//!  `Synthesize`) — annotated with the existing infrastructure
+//!  hooks they will integrate with in V1+.
+//!  * A reference [`DefaultLadderDispatcher`] that wires the V0
+//!  adapters and refuses pending strategies with a typed
+//!  `LadderVerdict::DispatchPending` (the inverse of "silently
+//!  fall through to coarser strategy").
 //!
+
 //! ## V1+ promotion path
 //!
+
 //! V1 lands the per-strategy backends behind the existing trait
-//! interface — no architectural change to consumers.  The
+//! interface — no architectural change to consumers. The
 //! `verum verify` CLI uses this dispatcher today; it will gain
 //! strictness as backends fill in.
 //!
+
 //! Aligned with Verum's "no magic, explicit dependencies" philosophy:
 //! per-strategy intent is a *first-class* dispatch contract, not an
 //! audit-time projection.
@@ -77,38 +91,38 @@ use verum_common::Text;
 // LadderStrategy — the 13 ν-monotone variants
 // =============================================================================
 
-/// A strategy slot on the verification ladder.  Mirrors
+/// A strategy slot on the verification ladder. Mirrors
 /// `verum_smt::verify_strategy::VerifyStrategy` but lives in this
 /// crate to avoid a `verum_verification → verum_smt` cycle (the
 /// dispatcher itself is foundation-neutral and consumes its
 /// adapters via the trait below).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LadderStrategy {
-    /// `@verify(runtime)` — runtime-only assertion.  ν = 0.
+    /// `@verify(runtime)` — runtime-only assertion. ν = 0.
     Runtime,
-    /// `@verify(static)` — dataflow / CBGR / constant folding.  ν = 1.
+    /// `@verify(static)` — dataflow / CBGR / constant folding. ν = 1.
     Static,
-    /// `@verify(fast)` — single-solver SMT, bounded timeout.  ν = 2.
+    /// `@verify(fast)` — single-solver SMT, bounded timeout. ν = 2.
     Fast,
-    /// `@verify(complexity_typed)` — bounded-arithmetic stratum.  ν = 3.
+    /// `@verify(complexity_typed)` — bounded-arithmetic stratum. ν = 3.
     ComplexityTyped,
-    /// `@verify(formal)` — portfolio SMT (Z3 + CVC5).  ν = ω.
+    /// `@verify(formal)` — portfolio SMT (Z3 + CVC5). ν = ω.
     Formal,
-    /// `@verify(proof)` — kernel re-check of `proof { … }` body.  ν = ω + 1.
+    /// `@verify(proof)` — kernel re-check of `proof { … }` body. ν = ω + 1.
     Proof,
-    /// `@verify(thorough)` — `formal` + `decreases` + `frame` + `invariant`.  ν = ω · 2.
+    /// `@verify(thorough)` — `formal` + `decreases` + `frame` + `invariant`. ν = ω · 2.
     Thorough,
-    /// `@verify(reliable)` — `thorough` + cross-solver agreement.  ν = ω · 2 + 1.
+    /// `@verify(reliable)` — `thorough` + cross-solver agreement. ν = ω · 2 + 1.
     Reliable,
-    /// `@verify(certified)` — `reliable` + cert materialisation + multi-format export.  ν = ω · 2 + 2.
+    /// `@verify(certified)` — `reliable` + cert materialisation + multi-format export. ν = ω · 2 + 2.
     Certified,
-    /// `@verify(coherent_static)` — α-cert + symbolic ε-claim.  ν = ω · 2 + 3.
+    /// `@verify(coherent_static)` — α-cert + symbolic ε-claim. ν = ω · 2 + 3.
     CoherentStatic,
-    /// `@verify(coherent_runtime)` — α-cert + runtime ε-monitor.  ν = ω · 2 + 4.
+    /// `@verify(coherent_runtime)` — α-cert + runtime ε-monitor. ν = ω · 2 + 4.
     CoherentRuntime,
-    /// `@verify(coherent)` — α/ε bidirectional discharge.  ν = ω · 2 + 5.
+    /// `@verify(coherent)` — α/ε bidirectional discharge. ν = ω · 2 + 5.
     Coherent,
-    /// `@verify(synthesize)` — inverse proof search (orthogonal).  ν ≤ ω · 3 + 1.
+    /// `@verify(synthesize)` — inverse proof search (orthogonal). ν ≤ ω · 3 + 1.
     Synthesize,
 }
 
@@ -215,7 +229,7 @@ impl LadderStrategy {
         !matches!(self, LadderStrategy::Synthesize)
     }
 
-    /// Comparison along the monotone backbone.  Returns `Some(Ordering)`
+    /// Comparison along the monotone backbone. Returns `Some(Ordering)`
     /// when both strategies are on the backbone; returns `None` when
     /// either is `Synthesize` (the orthogonal slot).
     pub fn backbone_cmp(self, other: LadderStrategy) -> Option<std::cmp::Ordering> {
@@ -236,8 +250,8 @@ fn backbone_index(s: LadderStrategy) -> Option<usize> {
 // LadderObligation — the input to dispatch
 // =============================================================================
 
-/// A proof obligation routed through the ladder dispatcher.  The
-/// V0 surface ships a thin shape that captures the essentials; V1
+/// A proof obligation routed through the ladder dispatcher. The
+/// current surface ships a thin shape that captures the essentials; V1
 /// will plumb in the full elaborated obligation (CoreTerm + Goal
 /// stack + tactic transcript).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,63 +263,64 @@ pub struct LadderObligation {
     /// Rendered obligation text (used by the trivial-tautology decider
     /// + diagnostics).
     pub obligation_text: Text,
-    /// Optional time budget in milliseconds.  Per-strategy default
+    /// Optional time budget in milliseconds. Per-strategy default
     /// applies when `None`.
     pub timeout_ms: Option<u64>,
-    /// **Typed kernel-side obligation** (#113 hardening).  When
+    /// **Typed kernel-side obligation** (#113 hardening). When
     /// present + an `axiom_registry` is supplied, the `Proof`
     /// strategy routes through `verum_kernel::infer::infer` for a
-    /// real kernel re-check.  Absent ⇒ falls back to the trivial-
+    /// real kernel re-check. Absent ⇒ falls back to the trivial-
     /// tautology decider.
     #[serde(default)]
     pub core_term: verum_common::Maybe<verum_kernel::CoreTerm>,
-    /// **Optional typed expectation** for the kernel re-check.  When
+    /// **Optional typed expectation** for the kernel re-check. When
     /// `core_term` and `expected_type` are both present, the `Proof`
     /// strategy uses `verum_kernel::infer::verify_full` to assert
     /// `core_term : expected_type` — strict definitional-equality
-    /// check.  When `expected_type` is absent, only `infer`
+    /// check. When `expected_type` is absent, only `infer`
     /// well-typedness is required.
     #[serde(default)]
     pub expected_type: verum_common::Maybe<verum_kernel::CoreTerm>,
-    /// Axiom registry for the kernel re-check.  Skipped from serde —
+    /// Axiom registry for the kernel re-check. Skipped from serde —
     /// registries are not on-wire artifacts; they're constructed at
     /// dispatch-time from the running session.
     #[serde(skip)]
     pub axiom_registry: Option<std::sync::Arc<verum_kernel::AxiomRegistry>>,
     /// **SMT assertions** for the Z3/portfolio path (#113 hardening).
     /// Each entry is a textual SMT-LIB2 formula that the SMT
-    /// translator parses on dispatch.  When non-empty + the strategy
+    /// translator parses on dispatch. When non-empty + the strategy
     /// requires an SMT backend (Fast / Formal / Thorough / Reliable /
     /// Certified), `BackendSwitcher::solve_with_strategy` runs the
     /// real solver(s) per the strategy's contract.
     #[serde(default)]
     pub smt_assertions: Vec<Text>,
     /// **Typed AST assertions** for the real SMT-backend path (#114
-    /// hardening).  The compiler's elaboration phase produces these
+    /// hardening). The compiler's elaboration phase produces these
     /// directly; passing them through preserves type information
-    /// the textual SMT-LIB form would discard.  When non-empty and
+    /// the textual SMT-LIB form would discard. When non-empty and
     /// the strategy is SMT-using (Fast / ComplexityTyped / Formal /
     /// Thorough / Reliable / Certified), `BackendSwitcher::
     /// solve_with_strategy` runs Z3 (Fast / CT / Formal),
     /// portfolio (Thorough), or cross-validate (Reliable / Certified)
-    /// per the strategy's contract.  Skipped from serde — AST exprs
+    /// per the strategy's contract. Skipped from serde — AST exprs
     /// are constructed at dispatch time from the running session's
     /// elaboration, not on-wire artifacts.
     #[serde(skip)]
     pub ast_assertions: Vec<verum_ast::expr::Expr>,
-    /// **ε-side coherence claim** (#115 hardening).  The
+    /// **ε-side coherence claim** (#115 hardening). The
     /// `@enact(epsilon = ...)` annotation projected to a typed
-    /// claim object.  Required by the Coherent triplet
+    /// claim object. Required by the Coherent triplet
     /// (CoherentStatic / CoherentRuntime / Coherent) — without it,
     /// these strategies fall through to the trivial-decider.
     /// When present, the dispatcher discharges:
     ///
-    ///   * α-side: via the kernel/SMT path on `core_term` /
-    ///     `ast_assertions` (same as Certified).
-    ///   * ε-side: per the strategy's contract — symbolic claim
-    ///     (CoherentStatic), deferred runtime monitor
-    ///     (CoherentRuntime), or kernel re-check of `claim_term`
-    ///     (Coherent strict).
+
+    ///  * α-side: via the kernel/SMT path on `core_term` /
+    ///  `ast_assertions` (same as Certified).
+    ///  * ε-side: per the strategy's contract — symbolic claim
+    ///  (CoherentStatic), deferred runtime monitor
+    ///  (CoherentRuntime), or kernel re-check of `claim_term`
+    ///  (Coherent strict).
     #[serde(default)]
     pub epsilon_claim: Option<EpsilonClaim>,
     /// **Pre-computed kernel re-check result** (#118 hardening).
@@ -316,7 +331,7 @@ pub struct LadderObligation {
     /// directly with a `kernel-recheck-theorem` witness, without
     /// requiring a typed `core_term` payload.
     /// `Some(Err)` records a kernel-rejection that the dispatcher
-    /// surfaces as `Open` instead of falling through.  `None` means
+    /// surfaces as `Open` instead of falling through. `None` means
     /// no recheck was performed — caller's other paths (typed
     /// CoreTerm, SMT, trivial-decider) take over.
     #[serde(default)]
@@ -324,7 +339,7 @@ pub struct LadderObligation {
 }
 
 /// Pre-computed outcome of a `KernelRecheck::recheck_theorem` call,
-/// projected to a serde-friendly shape.  Drives the `Proof`
+/// projected to a serde-friendly shape. Drives the `Proof`
 /// strategy when the elaboration phase has already attested the
 /// declaration, sparing the dispatcher a redundant kernel call.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -348,12 +363,12 @@ pub enum KernelRecheckOutcome {
 // =============================================================================
 
 /// The ε-side coherence claim attached to an obligation by the
-/// `@enact(epsilon = ...)` annotation.  Drives the ε-discharge
+/// `@enact(epsilon = ...)` annotation. Drives the ε-discharge
 /// path of the Coherent triplet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EpsilonClaim {
     /// Identifier of the `@enact` site that introduced this claim
-    /// (e.g. `"foo::bar:42"`).  Used for diagnostics + audit.
+    /// (e.g. `"foo::bar:42"`). Used for diagnostics + audit.
     pub site: Text,
     /// Symbolic claim text — the literal annotation argument.
     /// CoherentStatic accepts when this is non-empty (the symbolic
@@ -367,7 +382,7 @@ pub struct EpsilonClaim {
     pub claim_term: verum_common::Maybe<verum_kernel::CoreTerm>,
     /// True when the ε-side is wired to a runtime monitor (the
     /// `core.action.coherence_monitor` infrastructure runs the
-    /// check at execution time).  CoherentRuntime admits when this
+    /// check at execution time). CoherentRuntime admits when this
     /// is set + α-side admits.
     #[serde(default)]
     pub runtime_monitor: bool,
@@ -394,7 +409,7 @@ impl EpsilonClaim {
         }
     }
 
-    /// Attach a typed kernel projection of the claim.  Required by
+    /// Attach a typed kernel projection of the claim. Required by
     /// the strict `Coherent` strategy for kernel-side ε-discharge.
     pub fn with_claim_term(mut self, term: verum_kernel::CoreTerm) -> Self {
         self.claim_term = verum_common::Maybe::Some(term);
@@ -442,16 +457,16 @@ impl LadderObligation {
         }
     }
 
-    /// Attach a pre-computed kernel re-check outcome.  When
+    /// Attach a pre-computed kernel re-check outcome. When
     /// `Admitted`, the `Proof` strategy closes directly without
-    /// needing a `core_term` payload.  When `Rejected`, the
+    /// needing a `core_term` payload. When `Rejected`, the
     /// strategy returns `Open` with the recorded reason.
     pub fn with_kernel_recheck_outcome(mut self, outcome: KernelRecheckOutcome) -> Self {
         self.kernel_recheck_outcome = Some(outcome);
         self
     }
 
-    /// Attach a typed ε-side coherence claim.  Required by the
+    /// Attach a typed ε-side coherence claim. Required by the
     /// Coherent triplet (CoherentStatic / CoherentRuntime /
     /// Coherent) for the ε-discharge path.
     pub fn with_epsilon_claim(mut self, claim: EpsilonClaim) -> Self {
@@ -468,7 +483,7 @@ impl LadderObligation {
         self
     }
 
-    /// Attach a typed kernel obligation.  When set, the `Proof`
+    /// Attach a typed kernel obligation. When set, the `Proof`
     /// strategy routes through `verum_kernel::infer::infer`.
     pub fn with_core_term(
         mut self,
@@ -481,13 +496,13 @@ impl LadderObligation {
     }
 
     /// Attach an expected type for strict definitional-equality
-    /// re-check.  Requires `with_core_term` to have been called.
+    /// re-check. Requires `with_core_term` to have been called.
     pub fn with_expected_type(mut self, expected: verum_kernel::CoreTerm) -> Self {
         self.expected_type = verum_common::Maybe::Some(expected);
         self
     }
 
-    /// Attach SMT-LIB2 assertions.  When non-empty, the
+    /// Attach SMT-LIB2 assertions. When non-empty, the
     /// SMT-requiring strategies route through
     /// `BackendSwitcher::solve_with_strategy`.
     pub fn with_smt_assertions(mut self, assertions: Vec<Text>) -> Self {
@@ -524,7 +539,7 @@ pub enum LadderVerdict {
         reason: Text,
     },
     /// Backend dispatch is pending — the strategy is annotated by
-    /// users but no implementation path exists yet.  Producing this
+    /// users but no implementation path exists yet. Producing this
     /// verdict is a typed acknowledgement that we are NOT silently
     /// falling through to a coarser strategy.
     DispatchPending {
@@ -563,22 +578,24 @@ impl LadderVerdict {
 // LadderDispatcher — the trait boundary
 // =============================================================================
 
-/// The single dispatch interface for the 13-strategy ladder.  V0
-/// implementations include [`DefaultLadderDispatcher`].  V1+ may
+/// The single dispatch interface for the 13-strategy ladder. V0
+/// implementations include [`DefaultLadderDispatcher`]. V1+ may
 /// override individual strategies via custom impls (e.g. an LLM-tactic
 /// adapter for the `proof` slot, or a research-mode certified-cohort
 /// adapter for `certified`).
 ///
+
 /// The trait's contract:
 ///
-///   * `dispatch(obligation)` MUST return a verdict whose `strategy()`
-///     equals `obligation.declared_strategy`.
-///   * `Closed`-verdicts MUST carry a re-checkable witness.
-///   * `Open` verdicts MUST cite a concrete failure reason (no
-///     silent UNKNOWN-as-accept).
-///   * `DispatchPending` is the *only* legal way for a strategy to
-///     decline dispatch; downstream callers can then choose to
-///     fall back to a coarser strategy *with explicit acknowledgement*.
+
+///  * `dispatch(obligation)` MUST return a verdict whose `strategy()`
+///  equals `obligation.declared_strategy`.
+///  * `Closed`-verdicts MUST carry a re-checkable witness.
+///  * `Open` verdicts MUST cite a concrete failure reason (no
+///  silent UNKNOWN-as-accept).
+///  * `DispatchPending` is the *only* legal way for a strategy to
+///  decline dispatch; downstream callers can then choose to
+///  fall back to a coarser strategy *with explicit acknowledgement*.
 pub trait LadderDispatcher {
     /// Dispatch the obligation through the strategy declared on it.
     fn dispatch(&self, obligation: &LadderObligation) -> LadderVerdict;
@@ -598,7 +615,7 @@ pub trait LadderDispatcher {
     fn implementation_status(&self, strategy: LadderStrategy) -> LadderImplStatus;
 }
 
-/// Implementation status of a single strategy slot.  Used by
+/// Implementation status of a single strategy slot. Used by
 /// [`verify_monotonicity`] to enforce the downward-closure invariant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LadderImplStatus {
@@ -607,7 +624,7 @@ pub enum LadderImplStatus {
     Implemented,
     /// Backend dispatch falls through to a coarser strategy
     /// (typically `formal`); the annotated stricter intent is
-    /// recorded but not yet enforced.  V1 promotion target.
+    /// recorded but not yet enforced. V1 promotion target.
     Fallback,
     /// Strategy is annotated by users but no dispatch path exists yet.
     Pending,
@@ -633,18 +650,20 @@ impl LadderImplStatus {
 
 /// V0 reference implementation that wires the existing backends:
 ///
-///   * `Runtime` → CBGR runtime-assertion machinery (always
-///     `Closed`-by-construction at compile time; the runtime check
-///     fires at call site).
-///   * `Static`  → dataflow / constant folding (V0: structural
-///     check on the obligation text; V1: real `verum_cbgr` integration).
-///   * `Fast`    → single-solver SMT through `verum_smt::z3_backend`
-///     (V0 stub: returns `DispatchPending` with the existing
-///     infrastructure hook; V1 wires the actual call).
-///   * `Formal`  → portfolio SMT (V0 stub).
-///   * `Proof`   → kernel re-check of a `proof { … }` body via
-///     `verum_kernel::infer::check` (V0 stub).
+
+///  * `Runtime` → CBGR runtime-assertion machinery (always
+///  `Closed`-by-construction at compile time; the runtime check
+///  fires at call site).
+///  * `Static` → dataflow / constant folding (V0: structural
+///  check on the obligation text; V1: real `verum_cbgr` integration).
+///  * `Fast` → single-solver SMT through `verum_smt::z3_backend`
+///  (V0 stub: returns `DispatchPending` with the existing
+///  infrastructure hook; V1 wires the actual call).
+///  * `Formal` → portfolio SMT (V0 stub).
+///  * `Proof` → kernel re-check of a `proof { … }` body via
+///  `verum_kernel::infer::check` (V0 stub).
 ///
+
 /// All other strategies return `DispatchPending` with explicit V1
 /// hooks recorded in the verdict.
 #[derive(Debug, Clone, Default)]
@@ -677,7 +696,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
             },
             LadderStrategy::Fast => {
                 // #114 hardening — real SMT path when typed AST
-                // assertions are present.  Falls through to the
+                // assertions are present. Falls through to the
                 // trivial-tautology decider for text-only obligations.
                 if let Some(verdict) =
                     dispatch_via_smt_solver(obligation, LadderStrategy::Fast)
@@ -705,7 +724,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
             }
             LadderStrategy::ComplexityTyped => {
                 // #114 hardening — real SMT path with bounded-arithmetic
-                // capability routing.  Falls through to trivial.
+                // capability routing. Falls through to trivial.
                 if let Some(verdict) =
                     dispatch_via_smt_solver(obligation, LadderStrategy::ComplexityTyped)
                 {
@@ -790,7 +809,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 // #113 hardening — when the obligation carries a
                 // typed `core_term` + `axiom_registry`, route
                 // through the real kernel re-check via
-                // `verum_kernel::infer::{infer, verify_full}`.  This
+                // `verum_kernel::infer::{infer, verify_full}`. This
                 // is the production path: the kernel is the single
                 // trust boundary for `@verify(proof)` obligations.
                 if let Some(verdict) =
@@ -799,7 +818,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                     return verdict;
                 }
                 // Fallback: trivial-tautology decider for
-                // text-only obligations.  Strict ν-monotone lift —
+                // text-only obligations. Strict ν-monotone lift —
                 // anything Fast admits, Proof admits.
                 if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
                 {
@@ -823,7 +842,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
             LadderStrategy::Thorough => {
                 // Thorough is ν-strict above Proof on the backbone;
                 // by monotonicity, anything Proof admits via kernel
-                // re-check Thorough also admits.  SMT path runs the
+                // re-check Thorough also admits. SMT path runs the
                 // portfolio backend with race semantics.
                 if let Some(verdict) =
                     dispatch_proof_via_kernel(obligation, LadderStrategy::Thorough)
@@ -918,7 +937,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 // #115 hardening — when the obligation carries an
                 // ε-claim, route through the real α/ε dispatcher:
                 // α via kernel/SMT (Certified-grade), ε via the
-                // symbolic claim text.  Falls back to the trivial-
+                // symbolic claim text. Falls back to the trivial-
                 // tautology decider for back-compat when no claim.
                 if let Some(verdict) =
                     dispatch_coherent_via_alpha_epsilon(obligation, LadderStrategy::CoherentStatic)
@@ -973,7 +992,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
             }
             LadderStrategy::Coherent => {
                 // #115 hardening — α via kernel/SMT, ε via kernel
-                // re-check on `claim_term`.  Strict bidirectional.
+                // re-check on `claim_term`. Strict bidirectional.
                 if let Some(verdict) =
                     dispatch_coherent_via_alpha_epsilon(obligation, LadderStrategy::Coherent)
                 {
@@ -1031,17 +1050,20 @@ impl LadderDispatcher for DefaultLadderDispatcher {
 // =============================================================================
 
 /// Recognise structurally-trivial tautologies and return the rule
-/// name that admitted the obligation.  Returns `None` for shapes
+/// name that admitted the obligation. Returns `None` for shapes
 /// that need a real solver / kernel.
 ///
+
 /// The decidable subset:
 ///
-///   * `True` / `T` / `1` / `⊤`           — top constant
-///   * `~False` / `¬⊥`                    — negation of bottom
-///   * `x = x` / `x ≡ x`                  — textual reflexivity
-///   * `P -> P` / `P → P`                 — textual identity-implication
-///   * `Path A x x`                       — reflexive path
+
+///  * `True` / `T` / `1` / `⊤` — top constant
+///  * `~False` / `¬⊥` — negation of bottom
+///  * `x = x` / `x ≡ x` — textual reflexivity
+///  * `P -> P` / `P → P` — textual identity-implication
+///  * `Path A x x` — reflexive path
 ///
+
 /// Any whitespace-trimmed obligation matching one of these shapes
 /// admits at the Fast / Proof strategy without invoking a backend.
 /// The witness identifier records which rule fired so audit reports
@@ -1098,18 +1120,20 @@ pub fn trivial_tautology_rule(obligation_text: &str) -> Option<&'static str> {
 
 /// Route a `Proof`-strategy obligation through the real kernel
 /// re-check when typed payload (`core_term` + `axiom_registry`) is
-/// present.  Returns:
+/// present. Returns:
 ///
-///   * `Some(LadderVerdict::Closed)` — kernel admitted; carries the
-///     inferred type as witness.
-///   * `Some(LadderVerdict::Open)` — kernel rejected; carries the
-///     `KernelError` as the rejection reason.
-///   * `None` — the obligation has no typed payload; caller falls
-///     back to the trivial-tautology decider.
+
+///  * `Some(LadderVerdict::Closed)` — kernel admitted; carries the
+///  inferred type as witness.
+///  * `Some(LadderVerdict::Open)` — kernel rejected; carries the
+///  `KernelError` as the rejection reason.
+///  * `None` — the obligation has no typed payload; caller falls
+///  back to the trivial-tautology decider.
 ///
+
 /// When `expected_type` is also supplied, uses `verify_full` for a
 /// strict definitional-equality re-check (β-/ι-/δ-aware comparison
-/// of the inferred and expected types).  Without `expected_type`,
+/// of the inferred and expected types). Without `expected_type`,
 /// just runs `infer` for well-typedness.
 pub fn dispatch_proof_via_kernel(
     obligation: &LadderObligation,
@@ -1136,7 +1160,7 @@ pub fn dispatch_proof_via_kernel(
                 .map(|_| Text::from("kernel-verify-full: term inhabits expected type"))
         }
         Maybe::None => {
-            // Lenient mode: well-typedness only.  The inferred type
+            // Lenient mode: well-typedness only. The inferred type
             // travels in the witness so consumers can inspect.
             verum_kernel::infer(&ctx, term, registry).map(|inferred| {
                 Text::from(format!(
@@ -1191,19 +1215,21 @@ fn ladder_to_smt_strategy(s: LadderStrategy) -> verum_smt::verify_strategy::Veri
 /// `verum_smt::backend_switcher::SmtBackendSwitcher::solve_with_strategy`
 /// when typed AST assertions are present.
 ///
+
 /// Returns:
 ///
-///   * `Some(LadderVerdict::Closed)` — solver returned UNSAT (the
-///     assertions are jointly unsatisfiable; the negation of the
-///     theorem reduces to ⊥).
-///   * `Some(LadderVerdict::Open)`   — solver returned SAT (counter-
-///     example) or UNKNOWN (inconclusive within the strategy's
-///     budget).
-///   * `Some(LadderVerdict::DispatchPending)` — solver-side
-///     transport / setup error (CVC5 not on PATH, Z3 init failure,
-///     etc.); not the same as logical UNKNOWN.
-///   * `None` — the obligation has no typed AST payload; caller
-///     falls back to the kernel-recheck path or the trivial-decider.
+
+///  * `Some(LadderVerdict::Closed)` — solver returned UNSAT (the
+///  assertions are jointly unsatisfiable; the negation of the
+///  theorem reduces to ⊥).
+///  * `Some(LadderVerdict::Open)` — solver returned SAT (counter-
+///  example) or UNKNOWN (inconclusive within the strategy's
+///  budget).
+///  * `Some(LadderVerdict::DispatchPending)` — solver-side
+///  transport / setup error (CVC5 not on PATH, Z3 init failure,
+///  etc.); not the same as logical UNKNOWN.
+///  * `None` — the obligation has no typed AST payload; caller
+///  falls back to the kernel-recheck path or the trivial-decider.
 pub fn dispatch_via_smt_solver(
     obligation: &LadderObligation,
     strategy: LadderStrategy,
@@ -1234,7 +1260,7 @@ pub fn dispatch_via_smt_solver(
         None => {
             // Strategy doesn't require SMT (Runtime / Static / Proof
             // — the latter is handled separately by the kernel
-            // dispatcher, not here).  Fall back to other paths.
+            // dispatcher, not here). Fall back to other paths.
             return None;
         }
     };
@@ -1289,15 +1315,17 @@ pub fn dispatch_via_smt_solver(
 /// (kernel/SMT) and ε-side (claim/monitor) checks per the strategy's
 /// contract:
 ///
-///   * `CoherentStatic` — α via the certified-grade pipeline
-///     (kernel+SMT cross-validate); ε admitted symbolically when
-///     the claim text is non-empty.
-///   * `CoherentRuntime` — α via the certified pipeline; ε admitted
-///     as a deferred-runtime obligation when
-///     `epsilon_claim.runtime_monitor = true`.
-///   * `Coherent` (strict) — α via the certified pipeline; ε via
-///     kernel re-check on `epsilon_claim.claim_term`.
+
+///  * `CoherentStatic` — α via the certified-grade pipeline
+///  (kernel+SMT cross-validate); ε admitted symbolically when
+///  the claim text is non-empty.
+///  * `CoherentRuntime` — α via the certified pipeline; ε admitted
+///  as a deferred-runtime obligation when
+///  `epsilon_claim.runtime_monitor = true`.
+///  * `Coherent` (strict) — α via the certified pipeline; ε via
+///  kernel re-check on `epsilon_claim.claim_term`.
 ///
+
 /// Returns `None` when the obligation has no `epsilon_claim` —
 /// caller falls back to the trivial-decider for V0 back-compat.
 pub fn dispatch_coherent_via_alpha_epsilon(
@@ -1362,7 +1390,7 @@ pub fn dispatch_coherent_via_alpha_epsilon(
             }
         }
         LadderStrategy::CoherentRuntime => {
-            // Runtime monitor: must be flagged.  Admission records
+            // Runtime monitor: must be flagged. Admission records
             // the deferred-monitor obligation for runtime evaluation.
             if !claim.runtime_monitor {
                 Err(Text::from(
@@ -1377,7 +1405,7 @@ pub fn dispatch_coherent_via_alpha_epsilon(
             }
         }
         LadderStrategy::Coherent => {
-            // Strict: kernel re-check on claim_term.  Without a
+            // Strict: kernel re-check on claim_term. Without a
             // typed projection we can't run the kernel — reject.
             use verum_common::Maybe;
             let term = match &claim.claim_term {
@@ -1446,7 +1474,7 @@ pub fn dispatch_coherent_via_alpha_epsilon(
 /// implementation table: along the monotone backbone, the
 /// `Implemented` strategies form a downward-closed initial segment
 /// (if a stricter strategy is `Implemented`, every coarser one MUST
-/// be too).  Returns `Ok(())` when the invariant holds.
+/// be too). Returns `Ok(())` when the invariant holds.
 pub fn verify_monotonicity<D: LadderDispatcher>(d: &D) -> Result<(), Text> {
     let mut seen_non_impl: Option<LadderStrategy> = None;
     for &strat in &LadderStrategy::backbone() {
@@ -1472,7 +1500,7 @@ pub fn verify_monotonicity<D: LadderDispatcher>(d: &D) -> Result<(), Text> {
 // =============================================================================
 
 /// Diagnostic kind tag for a verdict, used inside [`StrategyStep`]
-/// and [`MonotonicityViolation`].  Owned-string-equivalent stable
+/// and [`MonotonicityViolation`]. Owned-string-equivalent stable
 /// labels: `closed` / `open` / `dispatch_pending` / `timeout`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VerdictKind {
@@ -1498,7 +1526,7 @@ impl VerdictKind {
     }
 }
 
-/// Per-strategy verdict in a backbone walk.  One row per ladder step
+/// Per-strategy verdict in a backbone walk. One row per ladder step
 /// from `Runtime` up to (and including) the obligation's declared
 /// strategy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1507,7 +1535,7 @@ pub struct StrategyStep {
     pub strategy: LadderStrategy,
     /// `true` iff the dispatch returned [`LadderVerdict::Closed`].
     pub closed: bool,
-    /// Verdict variant kind.  Preserved verbatim so the audit-side
+    /// Verdict variant kind. Preserved verbatim so the audit-side
     /// renderer doesn't need to reconstruct it from `closed` + reason.
     pub verdict_kind: VerdictKind,
     /// The verdict's reason text where the variant carries one;
@@ -1546,10 +1574,11 @@ impl StrategyStep {
     }
 }
 
-/// Result of walking the backbone for a single obligation.  Records
+/// Result of walking the backbone for a single obligation. Records
 /// the per-strategy verdict at every backbone slot from `Runtime`
 /// up to (and including) the obligation's `declared_strategy`.
 ///
+
 /// **Invariant**: `steps[i].strategy` is the i-th backbone strategy
 /// (Runtime / Static / Fast / ComplexityTyped / Formal / Proof / …);
 /// `steps.len()` equals `backbone_index(declared_strategy) + 1`.
@@ -1559,7 +1588,7 @@ pub struct LadderWalkReport {
     /// rendering).
     pub item_name: Text,
     /// The strategy declared by the user's `@verify(<strategy>)`
-    /// annotation.  The walk runs from `Runtime` up to AND including
+    /// annotation. The walk runs from `Runtime` up to AND including
     /// this strategy.
     pub declared_strategy: LadderStrategy,
     /// Per-step verdicts in monotone order.
@@ -1580,17 +1609,19 @@ impl LadderWalkReport {
 
 /// Walk the dispatcher's backbone for `obligation`, dispatching at
 /// every strategy from `Runtime` up to and including
-/// `obligation.declared_strategy`.  Returns a [`LadderWalkReport`]
+/// `obligation.declared_strategy`. Returns a [`LadderWalkReport`]
 /// recording the per-strategy verdict.
 ///
+
 /// `Synthesize`-declared obligations short-circuit to a single-step
 /// walk because `Synthesize` is orthogonal to the monotone backbone
 /// (it's not above any specific backbone strategy in the partial
 /// order).
 ///
+
 /// **Performance**: dispatches the obligation at most 12 times (the
-/// backbone size).  In practice ≤ N times where N is the
-/// declared-strategy's backbone index.  Each dispatch is independent
+/// backbone size). In practice ≤ N times where N is the
+/// declared-strategy's backbone index. Each dispatch is independent
 /// — no cumulative state, so the walk is safe to parallelise per
 /// obligation if needed.
 pub fn dispatch_ladder_walk<D: LadderDispatcher>(
@@ -1602,7 +1633,7 @@ pub fn dispatch_ladder_walk<D: LadderDispatcher>(
 
     if !declared.is_on_backbone() {
         // Synthesize is orthogonal — just one dispatch at the
-        // declared strategy.  No monotonicity check applies.
+        // declared strategy. No monotonicity check applies.
         let verdict = dispatcher.dispatch(obligation);
         return LadderWalkReport {
             item_name,
@@ -1617,7 +1648,7 @@ pub fn dispatch_ladder_walk<D: LadderDispatcher>(
 
     for &strat in LadderStrategy::backbone()[..=stop_at].iter() {
         // Build a copy of the obligation with the current backbone
-        // strategy as `declared_strategy`.  This is the canonical way
+        // strategy as `declared_strategy`. This is the canonical way
         // to drive the dispatcher at a different strategy without
         // assuming a setter on the obligation.
         let mut at_strat = obligation.clone();
@@ -1635,16 +1666,17 @@ pub fn dispatch_ladder_walk<D: LadderDispatcher>(
 
 /// A runtime ν-monotonicity violation in a single obligation's walk.
 ///
+
 /// **Definition** (strict ν-monotonicity for runtime walks): for
 /// every backbone walk, if the dispatcher returns `Closed` at
 /// strategy `S_strict`, it MUST return `Closed` at every coarser
-/// backbone strategy `S_coarser ≤ S_strict`.  A violation is a pair
+/// backbone strategy `S_coarser ≤ S_strict`. A violation is a pair
 /// `(S_coarser, S_strict)` where `S_coarser` is open / pending /
 /// timeout while `S_strict` is closed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonotonicityViolation {
     /// The coarser strategy that failed (open / pending / timeout)
-    /// despite a stricter strategy succeeding.  This is the
+    /// despite a stricter strategy succeeding. This is the
     /// architectural error.
     pub coarser_failed: LadderStrategy,
     /// The diagnostic kind of the coarser failure.
@@ -1656,34 +1688,38 @@ pub struct MonotonicityViolation {
 }
 
 /// Check the runtime ν-monotonicity invariant on a single
-/// [`LadderWalkReport`].  Returns the list of violations (empty when
+/// [`LadderWalkReport`]. Returns the list of violations (empty when
 /// the invariant holds).
 ///
+
 /// **Pure data check**: this is a structural inspection of the
-/// `steps` list — no dispatcher invocation.  Microsecond-scale cost.
+/// `steps` list — no dispatcher invocation. Microsecond-scale cost.
 ///
+
 /// The invariant is defensible:
 /// - `Runtime` is downward-closed by definition (always `Closed`).
 /// - Each next backbone slot strictly extends the previous's
-///   provable set (`Static` ⊋ `Runtime`, `Fast` ⊋ `Static`, …).
+///  provable set (`Static` ⊋ `Runtime`, `Fast` ⊋ `Static`, …).
 /// - So `Closed` at strategy `s_n` implies `Closed` at every
-///   `s_m` with `m ≤ n`.
+///  `s_m` with `m ≤ n`.
 ///
+
 /// A violation indicates EITHER (a) a bug in the dispatcher's
 /// strategy-specific backend OR (b) a real architectural defect in
-/// the obligation's coarse-strategy adapter.  Both cases warrant
+/// the obligation's coarse-strategy adapter. Both cases warrant
 /// CI failure.
 pub fn check_runtime_monotonicity(report: &LadderWalkReport) -> Vec<MonotonicityViolation> {
     let mut violations = Vec::new();
     // Walk the steps array; every step is at a backbone strategy.
     // For each step `i` that's `Closed`, every step `j > i` that's
-    // also `Closed` is consistent.  But every step `j` BEFORE step
+    // also `Closed` is consistent. But every step `j` BEFORE step
     // `i` that's NON-closed AND step `i` is closed → violation.
     //
+
     // Equivalent shape (stable across step orderings): scan
     // left-to-right; record each non-closed step; if a later step is
     // Closed, every earlier non-closed step is a violation against
-    // it.  We only report the FIRST stricter-success per coarser-
+    // it. We only report the FIRST stricter-success per coarser-
     // failure pair to keep the diagnostic noise bounded.
     let mut earliest_failures: Vec<(LadderStrategy, VerdictKind)> = Vec::new();
     for step in report.steps.iter() {
@@ -1696,7 +1732,7 @@ pub fn check_runtime_monotonicity(report: &LadderWalkReport) -> Vec<Monotonicity
                 });
             }
             // Once a stricter step succeeds, the coarser failures
-            // have been reported against it.  Clear the list so we
+            // have been reported against it. Clear the list so we
             // don't re-report against subsequent stricter successes
             // (they're transitively implied).
             earliest_failures.clear();
@@ -2143,7 +2179,7 @@ mod tests {
         verum_kernel::CoreTerm::Universe(verum_kernel::UniverseLevel::Concrete(0))
     }
 
-    /// Build a registry containing one axiom `name : ty`.  The
+    /// Build a registry containing one axiom `name : ty`. The
     /// kernel's `infer` arm for `CoreTerm::Axiom` looks up the name
     /// in the registry and returns the registered type — so the
     /// name must be registered before the lookup fires.
@@ -2158,10 +2194,10 @@ mod tests {
         std::sync::Arc::new(reg)
     }
 
-    /// Construct an `Axiom` CoreTerm referencing a typed name.  The
+    /// Construct an `Axiom` CoreTerm referencing a typed name. The
     /// kernel's `infer` looks up `name` in the registry and returns
     /// the registered type — the `ty` field on the node is
-    /// decorative.  Caller is responsible for registering the name.
+    /// decorative. Caller is responsible for registering the name.
     fn axiom_term(name: &str, ty: verum_kernel::CoreTerm) -> verum_kernel::CoreTerm {
         verum_kernel::CoreTerm::Axiom {
             name: Text::from(name),
@@ -2266,7 +2302,7 @@ mod tests {
     #[test]
     fn task_113_typed_payload_is_opt_in_back_compat() {
         // Pin: V0 callers passing only obligation_text continue to
-        // work unchanged.  Typed payload is opt-in.
+        // work unchanged. Typed payload is opt-in.
         let v = DefaultLadderDispatcher::new()
             .dispatch(&obligation_with_text(LadderStrategy::Static, "x = x"));
         assert!(matches!(v, LadderVerdict::Closed { .. }));
@@ -2286,7 +2322,7 @@ mod tests {
     #[test]
     fn ladder_to_smt_strategy_is_one_to_one() {
         // Pin: the LadderStrategy → VerifyStrategy projection
-        // covers every variant.  Exhaustive match guarantees this
+        // covers every variant. Exhaustive match guarantees this
         // at compile time, but we add a ν-ordinal monotonicity
         // sanity check at runtime.
         for s in LadderStrategy::all() {
@@ -2316,7 +2352,7 @@ mod tests {
     #[test]
     fn task_114_smt_path_engaged_when_ast_assertions_present() {
         // Pin: the dispatcher invokes the real SMT path (returns
-        // Some(...)) whenever ast_assertions is non-empty.  We
+        // Some(...)) whenever ast_assertions is non-empty. We
         // don't assert the verdict shape (Z3's behaviour for a
         // bare Bool-literal assertion is solver-version-dependent)
         // — only that the SMT path was engaged.
@@ -2414,7 +2450,7 @@ mod tests {
     #[test]
     fn coherent_strict_admits_with_typed_claim_term_and_registry() {
         // Strict Coherent: ε-side runs kernel re-check on
-        // `claim_term`.  Need both registry and a well-typed term.
+        // `claim_term`. Need both registry and a well-typed term.
         let registry = registry_with("eps_axiom", type_zero());
         let claim = EpsilonClaim::symbolic("foo:42", "strict_check")
             .with_claim_term(axiom_term("eps_axiom", type_zero()));
@@ -2586,7 +2622,7 @@ mod tests {
     fn task_115_full_backbone_real_dispatch_complete() {
         // Pin the architectural completion: every backbone strategy
         // has a real-dispatch path (kernel / SMT / α-ε) when the
-        // appropriate typed payload is supplied.  No strategy is
+        // appropriate typed payload is supplied. No strategy is
         // pure trivial-decider any more.
         // Static / Runtime are non-SMT; they're admitted unconditionally.
         let d = DefaultLadderDispatcher::new();
@@ -2660,7 +2696,7 @@ mod tests {
     fn task_112_full_backbone_covered_for_trivial_subset() {
         // Pin: every backbone strategy (12 of 13; Synthesize is the
         // off-backbone orthogonal slot) Implements the trivial-
-        // tautology subset.  Synthesize stays Pending — it's the
+        // tautology subset. Synthesize stays Pending — it's the
         // inverse-search slot, not a verification dispatcher.
         let d = DefaultLadderDispatcher::new();
         verify_monotonicity(&d).expect("monotonicity must hold");
@@ -2746,7 +2782,7 @@ mod tests {
     #[test]
     fn monotonicity_violation_when_coarser_open_but_stricter_closed() {
         // Synthesise a walk that's intentionally non-monotonic: Runtime
-        // = Closed, Static = Open, Fast = Closed.  This is a real
+        // = Closed, Static = Open, Fast = Closed. This is a real
         // architectural failure — Fast succeeded but Static (its
         // weaker cousin) failed, which contradicts strict ν-monotonicity.
         let report = LadderWalkReport {
@@ -2848,7 +2884,7 @@ mod tests {
     #[test]
     fn monotonicity_no_violation_when_all_steps_open() {
         // All strategies fail — no monotonicity violation (we don't
-        // require Closed).  The invariant is "Closed at strict ⇒
+        // require Closed). The invariant is "Closed at strict ⇒
         // Closed at coarser", not "anything must succeed".
         let report = LadderWalkReport {
             item_name: Text::from("all_open"),
@@ -2882,7 +2918,7 @@ mod tests {
     fn monotonicity_clears_failures_after_first_stricter_success() {
         // Once a stricter strategy succeeds, the coarser failures are
         // cleared — they're already accounted for against that
-        // success.  A LATER success doesn't double-report them.
+        // success. A LATER success doesn't double-report them.
         let report = LadderWalkReport {
             item_name: Text::from("tail_success"),
             declared_strategy: LadderStrategy::Formal,
@@ -2899,7 +2935,7 @@ mod tests {
                     verdict_kind: VerdictKind::Closed,
                     detail: Text::from("ok"),
                 },
-                // Static succeeded; Runtime → 1 violation.  After
+                // Static succeeded; Runtime → 1 violation. After
                 // this, the failures list is cleared.
                 StrategyStep {
                     strategy: LadderStrategy::Fast,

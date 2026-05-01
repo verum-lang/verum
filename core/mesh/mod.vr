@@ -5,9 +5,11 @@
 // Dependencies: core.net.http2, core.protobuf, core.net.tls, core.security.spiffe
 // =============================================================================
 //
+
 // Proxyless service-mesh primitives. Today covers Envoy xDS v3 (ADS)
 // for dynamic listener / cluster / route / endpoint configuration.
 //
+
 // Future subpackages will add:
 // - Istio control-plane integration (built on xDS)
 // - Consul Connect

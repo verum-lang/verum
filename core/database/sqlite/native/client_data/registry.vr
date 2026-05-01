@@ -36,7 +36,7 @@ implement ClientDataRegistry {
         -1
     }
 
-    /// Install (or overwrite) the slot.  If a previous entry existed
+    /// Install (or overwrite) the slot. If a previous entry existed
     /// and it had a destructor, bump the destructor counter.
     pub fn sqlite3_set_clientdata(&mut self, name: Text, handle: Int64, has_destructor: Bool) {
         let idx = self.find(&name);

@@ -3,11 +3,12 @@
 // =============================================================================
 // Layer: 7 (façade — statement tear-down / reset)
 // Spec: SQLite C API — sqlite3_finalize / sqlite3_reset /
-//       sqlite3_clear_bindings.
+//  sqlite3_clear_bindings.
 //
+
 // Submodules:
-//   * `action`   — which operation is being performed
-//   * `outcome`  — normalised return (OK vs ABORT-FROM-LAST-STEP)
+//  * `action` — which operation is being performed
+//  * `outcome` — normalised return (OK vs ABORT-FROM-LAST-STEP)
 // =============================================================================
 
 module core.database.sqlite.native.finalize;

@@ -5,9 +5,11 @@
 // Dependencies: core, spawn_config
 // =============================================================================
 //
+
 // Provides execute_with_retry for fault-tolerant task execution with
 // configurable retry counts and backoff delays.
 //
+
 // =============================================================================
 
 module spawn_with;
@@ -21,12 +23,14 @@ mount core.intrinsics.runtime.time.{monotonic_nanos};
 
 /// Execute a function with retry policy.
 ///
+
 /// Calls `f` up to `max_attempts` times. On failure, sleeps for
 /// `backoff_ms * attempt_number` milliseconds before retrying.
 /// Returns the first successful result or the last error.
 ///
+
 /// Example:
-///   let result = execute_with_retry(|| fetch_data(), 3, 100);
+///  let result = execute_with_retry(|| fetch_data(), 3, 100);
 public fn execute_with_retry<T>(
     f: fn() -> Result<T, Text>,
     max_attempts: Int,
@@ -51,6 +55,7 @@ public fn execute_with_retry<T>(
 
 /// Execute with retry using a RetryConfig.
 ///
+
 /// Uses exponential backoff as configured in the RetryConfig:
 /// delay = min(initial_delay_ms * backoff_factor^attempt, max_delay_ms)
 public fn execute_with_retry_config<T>(
@@ -91,6 +96,7 @@ public type CircuitState is
 
 /// A circuit breaker that prevents repeated calls to a failing service.
 ///
+
 /// - Closed: normal operation, failures counted
 /// - Open: calls rejected immediately after failure_threshold reached
 /// - HalfOpen: after reset_timeout, allow limited trial calls
@@ -139,6 +145,7 @@ implement CircuitBreaker {
 
     /// Check whether a call is currently allowed.
     ///
+
     /// Drives the Open → HalfOpen transition based on the
     /// `reset_timeout_ms` elapsed since the last recorded failure —
     /// exactly the contract the docstring promises. Takes `&mut self`
@@ -146,6 +153,7 @@ implement CircuitBreaker {
     /// `&self` view of the breaker would be a snapshot that's already
     /// stale by the time the caller acts on it.
     ///
+
     /// Without this transition the breaker was stuck Open forever
     /// once tripped (a real outage) — a dishonest implementation of
     /// the documented "after reset_timeout, allow limited trial

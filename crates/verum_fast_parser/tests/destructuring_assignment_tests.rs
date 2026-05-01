@@ -14,8 +14,10 @@
 )]
 //! Tests for destructuring assignment parsing
 //!
+
 //! Tests for unified destructuring: tuple, array, record patterns in assignment position
 //!
+
 //! Destructuring assignment allows extracting components from compound values
 //! and assigning them to multiple variables in a single expression:
 //! - Tuple: `(a, b) = (b, a)` for swap operations

@@ -1,5 +1,6 @@
 //! Pattern-related methods extracted from `infer.rs`.
 //!
+
 //! Contains 12 `TypeChecker` methods responsible for pattern binding,
 //! compound destructuring, variant payload matching, active pattern
 //! variable binding, exhaustive pattern collection, and capture analysis.
@@ -16,12 +17,14 @@ use verum_common::{List, Map, Maybe, Set, Text, ToText};
 impl TypeChecker {
     /// Check compound destructuring assignment: (x, y) += (dx, dy)
     ///
+
     /// For compound destructuring, all pattern variables must already exist and be mutable.
     /// This function validates:
     /// 1. Pattern structure matches value structure (tuple with tuple, array with array)
     /// 2. Each element supports the compound operation
     /// 3. All pattern identifiers refer to existing mutable variables
     ///
+
     /// Unified destructuring: consistent pattern syntax for let bindings, match arms, and function parameters
     pub(crate) fn check_compound_destructuring_pattern(
         &mut self,
@@ -207,6 +210,7 @@ impl TypeChecker {
 
     /// Bind a pattern to a type.
     //
+
     // Visibility note (Phase A audit): exposed as `pub` so integration
     // tests under `crates/verum_types/tests/` — `variant_pattern_tests.rs`,
     // `affine_module_tests.rs`, `registry_compilation_tests.rs`,
@@ -214,6 +218,7 @@ impl TypeChecker {
     // etc. — can drive pattern binding end-to-end without reaching through
     // `pub(crate)` internals.
     //
+
     // An earlier attempt at widening this to `pub` surfaced stack
     // overflows inside `bind_pattern_scheme` on deeply nested variant
     // patterns. The root cause was the default 8 MB Rust test thread
@@ -364,6 +369,7 @@ impl TypeChecker {
                 // This handles for loops like `for (a, b) in items.iter()` where
                 // the iterator yields &(T, U) but the pattern expects (T, U)
                 //
+
                 // When destructuring through a reference, each element gets the
                 // reference wrapper applied. So &(T, U) -> pattern (a, b) gives
                 // a: &T and b: &U (not T and U directly).
@@ -1426,6 +1432,7 @@ impl TypeChecker {
                     // This enables: match rtype { DNS_TYPE_A => ..., DNS_TYPE_AAAA => ... }
                     // where DNS_TYPE_A is a const Int = 1
                     //
+
                     // Also supports:
                     // - Guards: DNS_TYPE_A if condition => ...
                     // - Or-patterns: DNS_TYPE_CNAME | DNS_TYPE_NS => ...
@@ -1436,8 +1443,8 @@ impl TypeChecker {
                         if let Some(const_scheme) = self.ctx.env.lookup(tag) {
                             let const_ty = self.unifier.apply(&const_scheme.ty);
                             // Skip variant constructors from unrelated types — they are not
-                            // constants.  E.g., DnsRecordType.A should not match when
-                            // scrutinee is Int/Char/Bool/Float/Text.  Only true constants
+                            // constants. E.g., DnsRecordType.A should not match when
+                            // scrutinee is Int/Char/Bool/Float/Text. Only true constants
                             // should be considered for constant-pattern matching.
                             let is_variant_constructor = matches!(
                                 &const_ty,
@@ -1816,24 +1823,29 @@ impl TypeChecker {
                 // Active patterns (F#-style) - user-defined pattern matchers
                 // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 11 - Pattern Matching Enhancements
                 //
+
                 // Active patterns are functions that take a value and return:
                 // - Bool for total patterns (test-only, no binding)
                 // - Maybe<T> for partial patterns (extract and bind on match)
                 //
+
                 // Example:
-                //   pattern Even(n: Int) -> Bool = n % 2 == 0;
-                //   match x { Even() => "even", _ => "odd" }
+                //  pattern Even(n: Int) -> Bool = n % 2 == 0;
+                //  match x { Even() => "even", _ => "odd" }
                 //
-                //   pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
-                //   match s { ParseInt(n) => use(n), _ => error() }
+
+                //  pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
+                //  match s { ParseInt(n) => use(n), _ => error() }
                 //
+
                 // Type checking strategy:
                 // 1. Pattern parameters are expressions that must be type-checked
                 // 2. For partial patterns, bindings must be type-checked against
-                //    the inner type of Maybe<T>
+                //  the inner type of Maybe<T>
                 // 3. Full pattern definition lookup is deferred until pattern definitions
-                //    are properly tracked in the type environment
+                //  are properly tracked in the type environment
                 //
+
                 // Type-check parameter expressions
                 for arg in params.iter() {
                     let _ = self.synth_expr(arg)?;
@@ -1871,22 +1883,25 @@ impl TypeChecker {
                 // TypeTest pattern: `x is Type` or `x is VariantName` - type test with narrowing
                 // Type test patterns: "x is Type" narrows the type of x in the true branch (flow-sensitive typing)
                 //
+
                 // The binding variable gets the narrowed type in the match arm:
-                //   - For protocol/standalone types: `x is Showable`, `x is Int`
-                //   - For sum-type variants: `x is Dog`, `c is Circle`
+                //  - For protocol/standalone types: `x is Showable`, `x is Int`
+                //  - For sum-type variants: `x is Dog`, `c is Circle`
                 //
+
                 // Example:
-                //   match value { x is Int => x + 1, x is Text => x.len() }
-                //   match animal { x is Dog => "woof", x is Cat => "meow" }
+                //  match value { x is Int => x + 1, x is Text => x.len() }
+                //  match animal { x is Dog => "woof", x is Cat => "meow" }
 
                 // Convert AST type to internal type representation.
                 // Fallback: if the name is not a standalone type, check if it is a variant
                 // constructor of the scrutinee's sum type.
                 //
+
                 // CRITICAL: When the scrutinee is a variant type, variant tag names take
                 // priority over standalone type names. This handles cases like:
-                //   type Message is | Text { content: Text, sender: Text } | ...
-                //   match m { t is Text => t.sender }  // "Text" is the variant, not the primitive
+                //  type Message is | Text { content: Text, sender: Text } | ...
+                //  match m { t is Text => t.sender } // "Text" is the variant, not the primitive
                 let variant_name_str = match &test_type.kind {
                     verum_ast::ty::TypeKind::Path(path) if path.segments.len() == 1 => {
                         if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
@@ -1953,9 +1968,11 @@ impl TypeChecker {
                 // Stream pattern: stream[first, second, ...rest]
                 // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 18.3 - Stream Pattern Matching
                 //
+
                 // Stream patterns consume elements from an iterator and optionally bind
                 // the remaining iterator to a variable. The scrutinee must implement Iterator.
                 //
+
                 // Type checking strategy:
                 // 1. The scrutinee type should be an iterator producing items of type T
                 // 2. Each head_pattern binds to T
@@ -1990,6 +2007,7 @@ impl TypeChecker {
                 // Guard pattern: (pattern if expr)
                 // Spec: Rust RFC 3637 - Guard Patterns
                 //
+
                 // The guard is an expression that must evaluate to bool at runtime.
                 // For type binding purposes, we only need to bind the inner pattern.
                 // The guard expression is type-checked separately in match arm processing.
@@ -2098,6 +2116,7 @@ impl TypeChecker {
                 // This enables patterns like `match self { Prefix(s) => ... }` where self: &Component.
                 // Without this, the type checker fails with "variant pattern requires variant type, found &..."
                 //
+
                 // Spec: Variant patterns should implicitly dereference references, similar to Rust's
                 // match ergonomics that allow matching &T with T patterns.
                 let dereferenced_ty = self.unwrap_reference_type(ty);
@@ -2373,6 +2392,7 @@ impl TypeChecker {
                 // Guard pattern: (pattern if expr)
                 // Spec: Rust RFC 3637 - Guard Patterns
                 //
+
                 // Collect bindings from the inner pattern only.
                 // The guard expression doesn't introduce new bindings.
                 self.collect_pattern_bindings(pattern, ty)
@@ -2426,6 +2446,7 @@ impl TypeChecker {
 
     /// Bind patterns in a tuple-style variant payload.
     ///
+
     /// Examples:
     /// - `Some(x)` where Some has payload type T
     /// - `Ok(value, error)` where Ok has payload type (T, E)
@@ -2534,10 +2555,12 @@ impl TypeChecker {
 
     /// Bind patterns in a record-style variant payload.
     ///
+
     /// Examples:
     /// - `Error { code, message }` where Error has payload { code: Int, message: Text }
     /// - `Person { name, age, .. }` with rest pattern ignoring extra fields
     ///
+
     /// Record-style variant patterns: matching "Node { left, right }" to destructure named-field variants
     pub(crate) fn bind_variant_record_payload(
         &mut self,

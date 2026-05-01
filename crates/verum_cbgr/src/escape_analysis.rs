@@ -1,53 +1,66 @@
 //! Enhanced Escape Analysis for CBGR Optimization
 //!
+
 //! This module implements comprehensive escape analysis to automatically promote
 //! `&T` (managed, ~15ns) references to `&checked T` (0ns) when the compiler can
 //! prove the reference doesn't escape its scope.
 //!
+
 //! # Purpose
 //!
+
 //! Escape analysis is critical for CBGR performance. It enables automatic
 //! elimination of runtime checks for references that are provably local, transforming
 //! ~15ns CBGR overhead into 0ns.
 //!
+
 //! # CBGR Memory Alignment and Escape Analysis Requirements
 //!
+
 //! The CBGR allocation system uses careful memory alignment (MIN_ALIGNMENT=16,
 //! HEADER_SIZE=32, CACHE_LINE_SIZE=64). Each allocation has a 32-byte header
 //! containing generation counters and epoch information. Escape analysis must
 //! correctly track references through this header structure to determine if
 //! references can bypass CBGR validation:
 //!
+
 //! 1. **Track reference creation points**: Monitor all allocation sites
 //! 2. **Analyze all uses**: Determine if references escape to heap, return, etc.
 //! 3. **Skip CBGR validation**: References that don't escape can use direct pointers
-//!    (bypassing the generation check against the AllocationHeader)
+//!  (bypassing the generation check against the AllocationHeader)
 //! 4. **Mark `NoEscape` references**: Enable SBGL (Scope-Bound Generation-Less)
-//!    optimization where raw pointers replace ThinRef/FatRef internally
+//!  optimization where raw pointers replace ThinRef/FatRef internally
 //!
+
 //! # Escape Scenarios
 //!
+
 //! ```text
 //! ✅ NoEscape (0ns CBGR):
-//!    - Used only within local scope
-//!    - Passed to function by reference only (callee doesn't escape)
-//!    - Loop iteration variables
+//!  - Used only within local scope
+//!  - Passed to function by reference only (callee doesn't escape)
+//!  - Loop iteration variables
 //!
+
 //! ❌ Escapes (~15ns CBGR):
-//!    - Stored in heap-allocated structure
-//!    - Passed to function that stores it
-//!    - Returned from function
-//!    - Crosses thread boundaries
+//!  - Stored in heap-allocated structure
+//!  - Passed to function that stores it
+//!  - Returned from function
+//!  - Crosses thread boundaries
 //! ```
 //!
+
 //! # Performance Impact
 //!
+
 //! - **Hot loops**: 0ns (promoted to &checked T via escape analysis)
 //! - **Application code**: 0.5-1% overhead (many refs proven `NoEscape`)
 //! - **Complex flows**: 1-2% overhead (conservative CBGR where needed)
 //!
+
 //! # Algorithm
 //!
+
 //! 1. Build SSA form for precise data flow tracking
 //! 2. Perform forward dataflow analysis to track reference flow
 //! 3. Detect escape points (heap stores, returns, thread spawns)
@@ -68,6 +81,7 @@ use verum_common::{List, Map, Maybe, Set, Text};
 
 /// Escape state for a reference during analysis
 ///
+
 /// This enum represents the progressive understanding of whether a reference
 /// escapes, updated as we perform dataflow analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,6 +117,7 @@ impl EscapeState {
 
     /// Merge two escape states (conservative join)
     ///
+
     /// Used in dataflow analysis to combine states from different paths:
     /// - `NoEscape` + `NoEscape` = `NoEscape`
     /// - `NoEscape` + Escapes = Escapes
@@ -152,6 +167,7 @@ impl fmt::Display for EscapeState {
 
 /// Escape point - location where a reference escapes
 ///
+
 /// Tracks the exact program point where escape occurs for diagnostics
 /// and optimization feedback.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,31 +265,34 @@ pub struct SourceLocation {
 
 /// Enhanced escape analyzer with forward dataflow analysis
 ///
+
 /// This is the main escape analysis engine that determines which references
 /// can be optimized to 0ns overhead by proving they don't escape.
 ///
+
 /// # Architecture
 ///
+
 /// ```text
 /// ┌─────────────────────────────────────┐
-/// │   Enhanced Escape Analyzer          │
+/// │ Enhanced Escape Analyzer │
 /// ├─────────────────────────────────────┤
-/// │ 1. SSA Construction                 │
-/// │    └─ Build SSA form for precision  │
+/// │ 1. SSA Construction │
+/// │ └─ Build SSA form for precision │
 /// ├─────────────────────────────────────┤
-/// │ 2. Dataflow Analysis                │
-/// │    ├─ Forward propagation           │
-/// │    ├─ Escape point detection        │
-/// │    └─ State merging at joins        │
+/// │ 2. Dataflow Analysis │
+/// │ ├─ Forward propagation │
+/// │ ├─ Escape point detection │
+/// │ └─ State merging at joins │
 /// ├─────────────────────────────────────┤
-/// │ 3. Interprocedural Analysis         │
-/// │    ├─ Call graph integration        │
-/// │    ├─ Parameter flow tracking       │
-/// │    └─ Return value analysis         │
+/// │ 3. Interprocedural Analysis │
+/// │ ├─ Call graph integration │
+/// │ ├─ Parameter flow tracking │
+/// │ └─ Return value analysis │
 /// ├─────────────────────────────────────┤
-/// │ 4. Optimization Decision            │
-/// │    ├─ NoEscape → &checked T (0ns)   │
-/// │    └─ Escapes → &T (~15ns)          │
+/// │ 4. Optimization Decision │
+/// │ ├─ NoEscape → &checked T (0ns) │
+/// │ └─ Escapes → &T (~15ns) │
 /// └─────────────────────────────────────┘
 /// ```
 #[derive(Debug)]
@@ -372,6 +391,7 @@ impl EscapeAnalysisStats {
 
     /// Get estimated CBGR overhead reduction
     ///
+
     /// Assumes each `NoEscape` reference saves ~150ns per function
     /// (10 derefs * 15ns each)
     #[must_use]
@@ -468,11 +488,14 @@ impl EnhancedEscapeAnalyzer {
 
     /// Run escape analysis on all references
     ///
+
     /// This is the main entry point. It performs complete escape analysis
     /// and returns results for all references.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Initialize all references to Unknown state
     /// 2. Perform forward dataflow analysis
     /// 3. Detect escape points
@@ -555,20 +578,23 @@ impl EnhancedEscapeAnalyzer {
 
     /// Perform forward dataflow analysis
     ///
+
     /// This is the core analysis engine. It iterates over the CFG in
     /// topological order, tracking escape states and detecting escape points.
     ///
+
     /// # Algorithm
     ///
+
     /// ```text
     /// WorkList = {entry block}
     /// while WorkList not empty:
-    ///     block = WorkList.pop()
-    ///     old_state = state[block]
-    ///     new_state = transfer(block, state)
-    ///     if new_state != old_state:
-    ///         state[block] = new_state
-    ///         WorkList.add(successors(block))
+    ///  block = WorkList.pop()
+    ///  old_state = state[block]
+    ///  new_state = transfer(block, state)
+    ///  if new_state != old_state:
+    ///  state[block] = new_state
+    ///  WorkList.add(successors(block))
     /// ```
     fn perform_dataflow_analysis(&mut self) {
         let mut worklist = List::new();
@@ -711,6 +737,7 @@ impl EnhancedEscapeAnalyzer {
 
     /// Check if use is a heap store
     ///
+
     /// Uses SSA representation to precisely determine if a use site stores
     /// a reference to the heap. A heap store means the reference escapes
     /// and cannot be promoted to a stack-based lifetime.
@@ -765,6 +792,7 @@ impl EnhancedEscapeAnalyzer {
 
     /// Check if reference is passed to escaping function
     ///
+
     /// Uses the call graph to determine if a reference passed to a function
     /// at a call site may escape. A reference escapes if the called function:
     /// - Stores it to the heap
@@ -772,6 +800,7 @@ impl EnhancedEscapeAnalyzer {
     /// - Passes it to a thread spawn
     /// - Is not a known safe function
     ///
+
     /// Uses interprocedural call graph analysis: queries CallGraph::may_retain() to check
     /// if the callee may store, return, or thread-spawn the reference. Known-safe functions
     /// (pure stdlib functions that don't retain references) are excluded from escape.
@@ -821,6 +850,7 @@ impl EnhancedEscapeAnalyzer {
 
             // Check if any call in the same block targets a thread-spawning function.
             //
+
             // Gated on `EscapeAnalysisConfig.enable_thread_analysis`
             // (default true). Pre-fix the field was set in defaults
             // but no path consulted it — disabling thread analysis

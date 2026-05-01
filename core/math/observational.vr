@@ -2,14 +2,17 @@
 // observational.vr — Observational Type Theory (OTT)
 // =============================================================================
 //
+
 // Layer: Standard Library / Mathematics
 //
+
 // Surface for `verum_types.observational_equality`. Type-directed
 // equality alternative to cubical: two values' equality is
 // *defined by what we can observe about them*. Products decompose
 // into component equality; functions decompose into pointwise
 // (funext); decidable types decide directly.
 //
+
 // =============================================================================
 
 module core.math.observational;
@@ -45,6 +48,7 @@ public type OttEqResult is
 /// observational equality on functions only via η-expansion at
 /// the elaborator layer.
 ///
+
 /// Per VVA OTT §observational: equality at a product type is
 /// decidable iff equality at each component type is decidable.
 /// `OttStuck` propagates: if either component returns Stuck,

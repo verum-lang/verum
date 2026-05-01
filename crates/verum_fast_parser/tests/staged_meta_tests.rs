@@ -1,16 +1,21 @@
 //! Tests for staged metaprogramming syntax: `meta(N) fn`.
 //!
+
 //! # Staged Metaprogramming Overview
 //!
+
 //! Verum supports N-level staged metaprogramming where functions execute
 //! at different compilation stages:
 //!
+
 //! - **Stage 0**: Runtime execution (normal functions)
 //! - **Stage 1**: Compile-time execution (`meta fn`, most common)
 //! - **Stage N**: N-th level meta (`meta(N) fn`, generates Stage N-1 code)
 //!
+
 //! # Stage Coherence Rule
 //!
+
 //! A Stage N function can only DIRECTLY generate Stage N-1 code.
 //! To generate lower-stage code, the output must contain meta functions
 //! that perform further generation.

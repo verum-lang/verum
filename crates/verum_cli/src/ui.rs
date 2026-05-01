@@ -3,20 +3,21 @@
 // and user-friendly formatting that reflects Verum's philosophy of semantic honesty
 // and cost transparency.
 //
+
 // Visibility levels (from most to least visible):
-//   - error()    — always shown (stderr)
-//   - warn()     — shown unless --quiet
-//   - status()   — shown unless --quiet (Cargo-style "   Compiling ...")
-//   - success()  — shown unless --quiet
-//   - step()     — shown unless --quiet
-//   - note()     — shown unless --quiet (dimmed supplementary info)
-//   - detail()   — shown unless --quiet (key-value pair)
-//   - output()   — shown unless --quiet (raw output)
-//   - info()     — verbose only
-//   - section()  — verbose only
-//   - header()   — verbose only
-//   - build_header() — verbose only (branded box)
-//   - debug()    — verbose + debug build only
+//  - error() — always shown (stderr)
+//  - warn() — shown unless --quiet
+//  - status() — shown unless --quiet (Cargo-style " Compiling ...")
+//  - success() — shown unless --quiet
+//  - step() — shown unless --quiet
+//  - note() — shown unless --quiet (dimmed supplementary info)
+//  - detail() — shown unless --quiet (key-value pair)
+//  - output() — shown unless --quiet (raw output)
+//  - info() — verbose only
+//  - section() — verbose only
+//  - header() — verbose only
+//  - build_header() — verbose only (branded box)
+//  - debug() — verbose + debug build only
 
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -51,11 +52,13 @@ pub fn init(verbose: bool, quiet: bool, color: &str) -> crate::error::Result<()>
     // set VERUM_LOG=warn manually — real problems like the
     // "Conflicting export" phantom duplicates silently vanished.
     //
+
     // Level selection:
-    //   * quiet   → error only
-    //   * verbose → debug (everything except trace)
-    //   * default → warn  (errors + warnings; no info chatter)
+    //  * quiet → error only
+    //  * verbose → debug (everything except trace)
+    //  * default → warn (errors + warnings; no info chatter)
     //
+
     // VERUM_LOG env var overrides if set — same semantics as
     // RUST_LOG, forwarded through EnvFilter.
     let default_level = if quiet {
@@ -142,15 +145,18 @@ fn shown_verbose() -> bool {
 
 /// Cargo-style status line, shown by default.
 ///
+
 /// ```text
-///    Compiling main.vr (AOT, release)
-///     Checking 42 contracts...
-///     Linking target/debug/my_project
-///    Finished release in 1.32s (CBGR: 87% checks eliminated)
+///  Compiling main.vr (AOT, release)
+///  Checking 42 contracts...
+///  Linking target/debug/my_project
+///  Finished release in 1.32s (CBGR: 87% checks eliminated)
 /// ```
 ///
+
 /// The verb is right-aligned to 12 characters, green bold. Message in default color.
 ///
+
 /// Tooling output (status/success/warn/step/info) always goes to stderr, matching
 /// Cargo. This keeps the program's stdout clean for `verum run` so downstream
 /// consumers (test runners, shell pipes, etc.) get only what the program actually
@@ -219,9 +225,10 @@ pub fn note(msg: &str) {
 
 /// Detail — key-value output shown by default.
 ///
+
 /// ```text
-///       Binary target/debug/main (4.2 MB)
-///         CBGR 87% checks eliminated (234/269)
+///  Binary target/debug/main (4.2 MB)
+///  CBGR 87% checks eliminated (234/269)
 /// ```
 pub fn detail(key: &str, value: &str) {
     if shown_by_default() {
@@ -242,10 +249,11 @@ pub fn output(msg: &str) {
 
 /// Print a branded build header in a Unicode box (verbose only).
 ///
+
 /// ```text
-///   ╔══════════════════════════════════════╗
-///   ║  verum build · AOT (LLVM 21)        ║
-///   ╚══════════════════════════════════════╝
+///  ╔══════════════════════════════════════╗
+///  ║ verum build · AOT (LLVM 21) ║
+///  ╚══════════════════════════════════════╝
 /// ```
 pub fn build_header(command: &str, detail_text: &str) {
     if !shown_verbose() {
@@ -317,10 +325,11 @@ impl CbgrStats {
 
 /// Print a compilation summary block.
 ///
+
 /// ```text
-///    Finished release [optimized] target(s) in 1.32s
-///      Binary target/debug/my_project (4.2 MB)
-///        CBGR 87% checks eliminated (234/269)
+///  Finished release [optimized] target(s) in 1.32s
+///  Binary target/debug/my_project (4.2 MB)
+///  CBGR 87% checks eliminated (234/269)
 /// ```
 pub fn print_build_summary(
     duration: Duration,
@@ -383,11 +392,13 @@ pub fn print_build_summary(
 
 /// Print a diagnostic summary line.
 ///
+
 /// On failure:
 /// ```text
 /// error: could not compile `my_project` due to 3 previous errors; 2 warnings emitted
 /// ```
 ///
+
 /// On success with warnings:
 /// ```text
 /// warning: 2 warnings emitted
@@ -503,6 +514,7 @@ pub enum TreeColor {
 
 /// Print a tree with colored branches.
 ///
+
 /// Each item is `(depth, text)`. Root nodes (depth 0) are bold white,
 /// branch glyphs are dim gray.
 pub fn print_tree(items: &[(usize, Text)]) {

@@ -2,8 +2,10 @@
 //! in the closure-hash incremental verification cache (#79 / #88 /
 //! #89 hardening pass).
 //!
+
 //! ## The problem this module solves
 //!
+
 //! [`closure_cache::ClosureFingerprint`] is hashed from
 //! `signature_payload`, `body_payload`, and `citations` byte slices.
 //! Before this module those payloads were produced via
@@ -14,38 +16,46 @@
 //! invalidate the entire on-disk cache, defeating the purpose of
 //! `KERNEL_VERSION`-based invalidation.
 //!
+
 //! [`CanonicalRepr`] replaces that with an explicitly-stable
 //! representation:
 //!
-//!   * Serialise via `serde_json` (which is API-stable).
-//!   * Recursively sort every JSON object's keys (so AST struct field
-//!     order at the source level is irrelevant — only field *names*
-//!     and value types matter).
-//!   * Emit canonical bytes (UTF-8 JSON with sorted keys) suitable
-//!     for blake3 hashing.
+
+//!  * Serialise via `serde_json` (which is API-stable).
+//!  * Recursively sort every JSON object's keys (so AST struct field
+//!  order at the source level is irrelevant — only field *names*
+//!  and value types matter).
+//!  * Emit canonical bytes (UTF-8 JSON with sorted keys) suitable
+//!  for blake3 hashing.
 //!
+
 //! ## Schema-stability contract
 //!
+
 //! These canonical bytes are stable so long as:
 //!
-//!   1. The set of fields on each AST node is unchanged.
-//!   2. Field *names* are unchanged (renaming a field is a schema
-//!      break — bump `KERNEL_VERSION` or run `verum cache-closure
-//!      clear`).
-//!   3. Enum variant names are unchanged (variant rename is a schema
-//!      break).
-//!   4. The mapping from Rust `Vec<T>` → JSON array preserves order
-//!      (this is intrinsic to serde_json).
+
+//!  1. The set of fields on each AST node is unchanged.
+//!  2. Field *names* are unchanged (renaming a field is a schema
+//!  break — bump `KERNEL_VERSION` or run `verum cache-closure
+//!  clear`).
+//!  3. Enum variant names are unchanged (variant rename is a schema
+//!  break).
+//!  4. The mapping from Rust `Vec<T>` → JSON array preserves order
+//!  (this is intrinsic to serde_json).
 //!
+
 //! Adding a new optional field with a default is *not* a schema break
 //! provided the existing serialiser still emits the same bytes when
-//! the field has its default value.  Reordering fields in source is
+//! the field has its default value. Reordering fields in source is
 //! never a schema break (we sort).
 //!
+
 //! ## Why not `bincode` or `postcard`?
 //!
+
 //! `serde_json` is already a workspace dependency and is the format
-//! the rest of `closure_cache` uses for on-disk entries.  Sorted-keys
+//! the rest of `closure_cache` uses for on-disk entries. Sorted-keys
 //! JSON is human-readable, which makes cache-debugging
 //! (`cat target/.verum_cache/closure-hashes/X.json`) tractable.
 //! Performance is not a bottleneck — fingerprint cost is dominated by
@@ -63,8 +73,9 @@ use verum_common::Text;
 
 /// Produce a deterministic byte-level representation for fingerprinting.
 ///
+
 /// Default impl: serialise via serde JSON, recursively sort object
-/// keys, emit UTF-8 bytes.  Override only if the default would
+/// keys, emit UTF-8 bytes. Override only if the default would
 /// produce a non-canonical form (e.g. if `Serialize` for a node
 /// includes timestamps or random IDs — which AST nodes don't).
 pub trait CanonicalRepr {
@@ -84,7 +95,7 @@ pub trait CanonicalRepr {
     }
 }
 
-/// Blanket impl for any `Serialize` value.  Concrete AST nodes use
+/// Blanket impl for any `Serialize` value. Concrete AST nodes use
 /// this transparently — no `impl CanonicalRepr for Expr {}` boilerplate
 /// required.
 impl<T: Serialize> CanonicalRepr for T {
@@ -97,9 +108,9 @@ impl<T: Serialize> CanonicalRepr for T {
 // canonical_json_bytes — recursive key-sort JSON encoder
 // =============================================================================
 
-/// Serialise `value` to canonical JSON bytes.  Object keys are
+/// Serialise `value` to canonical JSON bytes. Object keys are
 /// recursively sorted lexicographically; arrays preserve source
-/// order.  This is the **single point of byte-level determinism**
+/// order. This is the **single point of byte-level determinism**
 /// for the cache fingerprint.
 pub fn canonical_json_bytes<T: Serialize>(value: &T) -> Vec<u8> {
     // First convert to a Value tree so we can rewrite map keys.
@@ -112,14 +123,14 @@ pub fn canonical_json_bytes<T: Serialize>(value: &T) -> Vec<u8> {
 }
 
 /// Recursively rewrite every `Value::Object` so its keys are sorted
-/// lexicographically.  Other variants (Null / Bool / Number / String /
+/// lexicographically. Other variants (Null / Bool / Number / String /
 /// Array) are passed through.
 fn canonicalise(v: Value) -> Value {
     match v {
         Value::Object(map) => {
             // `serde_json::Map` is backed by a `BTreeMap` when the
             // `preserve_order` feature is **off** (the default), in
-            // which case keys are already sorted.  But we don't rely
+            // which case keys are already sorted. But we don't rely
             // on that — we re-insert into a fresh BTreeMap to be
             // independent of the workspace's serde_json features.
             let mut sorted: std::collections::BTreeMap<String, Value> =
@@ -143,15 +154,16 @@ fn canonicalise(v: Value) -> Value {
 // =============================================================================
 
 /// Canonical bytes of a theorem's *signature*: name + requires +
-/// ensures + proposition + return_type + generics + params.  Two
+/// ensures + proposition + return_type + generics + params. Two
 /// theorems with the same signature bytes are interchangeable from
 /// the kernel's standpoint as far as obligation shape is concerned.
 ///
+
 /// Excludes proof body (separate payload), attributes (separate
 /// payload), and span (location is not part of meaning).
 pub fn theorem_signature_bytes(thm: &TheoremDecl) -> Vec<u8> {
     // Use a small typed helper struct so the JSON shape is explicit
-    // and stable.  Field names are part of the schema-stability
+    // and stable. Field names are part of the schema-stability
     // contract.
     #[derive(Serialize)]
     struct SignatureView<'a> {
@@ -180,7 +192,7 @@ pub fn theorem_signature_bytes(thm: &TheoremDecl) -> Vec<u8> {
 }
 
 /// Canonical bytes of a theorem's *proof body* (or the absence
-/// thereof).  This is the ProofBody alone — span / attributes are
+/// thereof). This is the ProofBody alone — span / attributes are
 /// elsewhere.
 pub fn theorem_body_bytes(thm: &TheoremDecl) -> Vec<u8> {
     canonical_json_bytes(&thm.proof)
@@ -198,12 +210,12 @@ pub fn theorem_citations(thm: &TheoremDecl) -> Vec<String> {
             continue;
         }
         // We don't inspect the AttributeArgs structure here — its
-        // canonical bytes are what counts.  A canonical-bytes string
+        // canonical bytes are what counts. A canonical-bytes string
         // collision across two distinct framework attribute payloads
         // would already require a blake3 collision.
         let bytes = canonical_json_bytes(attr);
         // Use the canonical bytes as the citation token; the cache
-        // fingerprint then sorts + dedups them.  (Hex-encoded so the
+        // fingerprint then sorts + dedups them. (Hex-encoded so the
         // citation list is plain ASCII for cache-file readability.)
         let mut hex = String::with_capacity(64);
         for b in blake3::hash(&bytes).as_bytes() {

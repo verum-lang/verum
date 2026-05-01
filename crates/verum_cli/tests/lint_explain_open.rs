@@ -1,5 +1,6 @@
 //! `verum lint --explain RULE --open` contract tests.
 //!
+
 //! The actual browser launch is non-deterministic in CI, so we
 //! gate on `VERUM_OPEN_DRY_RUN=1` which prints the URL instead of
 //! dispatching the platform `open`/`xdg-open`/`start` command.

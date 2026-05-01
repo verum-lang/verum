@@ -15,9 +15,11 @@
 // Integration tests for the compilation pipeline
 // Tests the full compilation process from source to execution
 //
+
 // These tests must run serially because they change the working directory
 // which is global state shared across all threads.
 //
+
 // NOTE: Updated to use verum_compiler (the unified compiler) instead of
 // the old verum_cli::compiler module.
 
@@ -57,6 +59,7 @@ profile = "application"
 
 /// Helper to run code in a temp directory context.
 ///
+
 /// Runs the closure on a thread with a 64 MB stack to accommodate deep
 /// recursion during stdlib loading and type inference.
 fn with_temp_project<F>(f: F)

@@ -1,19 +1,23 @@
 //! Parallel module loading infrastructure.
 //!
+
 //! Provides async parallel loading of independent modules using tokio.
 //! Modules at the same dependency level can be loaded concurrently,
 //! significantly improving compilation times for large projects.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
-//! Level 0: [A, B, C]  ──── Parallel Load ────┐
-//!                                            │
-//! Level 1: [D, E]     ──── Parallel Load ────┤──► Results
-//!                                            │
-//! Level 2: [F]        ──── Sequential Load ──┘
+//! Level 0: [A, B, C] ──── Parallel Load ────┐
+//!  │
+//! Level 1: [D, E] ──── Parallel Load ────┤──► Results
+//!  │
+//! Level 2: [F] ──── Sequential Load ──┘
 //! ```
 //!
+
 //! Modules at the same dependency level (determined by the dependency graph's
 //! independent_groups algorithm) can be loaded concurrently, significantly
 //! improving compilation times for large projects.
@@ -97,17 +101,22 @@ impl ParallelLoadConfig {
 
 /// Parallel module loader using tokio for async concurrent loading.
 ///
+
 /// Loads modules in dependency order, processing independent modules
 /// in parallel within each dependency level.
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// use verum_modules::{ParallelLoader, ModuleLoader, DependencyGraph};
 ///
+
 /// let loader = ModuleLoader::new("src/");
 /// let mut parallel = ParallelLoader::new(loader);
 ///
+
 /// // Load all modules in parallel based on dependency graph
 /// let results = parallel.load_all(&graph).await?;
 /// ```
@@ -151,15 +160,20 @@ impl ParallelLoader {
 
     /// Load all modules in the dependency graph in parallel.
     ///
+
     /// Processes modules level by level, loading modules at the same
     /// dependency level concurrently.
     ///
+
     /// # Arguments
     ///
+
     /// * `graph` - The dependency graph defining module order
     ///
+
     /// # Returns
     ///
+
     /// Map of module IDs to loaded ModuleInfo, or error if any load fails
     /// (when continue_on_error is false).
     pub async fn load_all(
@@ -264,6 +278,7 @@ impl ParallelLoader {
 
     /// Load specific modules in parallel (not using dependency graph).
     ///
+
     /// Use this when you have a known set of independent modules.
     pub async fn load_modules(
         &mut self,
@@ -343,17 +358,22 @@ impl std::fmt::Debug for ParallelLoader {
 
 /// Synchronous parallel module loader using rayon.
 ///
+
 /// For environments where async is not available or preferred,
 /// this provides parallel loading using rayon's thread pool.
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// use verum_modules::{SyncParallelLoader, ModuleLoader, DependencyGraph};
 ///
+
 /// let loader = ModuleLoader::new("src/");
 /// let mut parallel = SyncParallelLoader::new(loader);
 ///
+
 /// let results = parallel.load_all(&graph)?;
 /// ```
 pub struct SyncParallelLoader {

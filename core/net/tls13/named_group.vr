@@ -4,17 +4,21 @@
 // Layer: 5 (Network)
 // =============================================================================
 //
+
 // NamedGroup enumerates the EC / FFDHE / PQ curves a client advertises
 // in the `supported_groups` + `key_share` extensions. Each entry is a
 // 16-bit IANA code.
 //
+
 // Warp ships:
-//   * x25519         (RFC 8446 §4.2.7 — mandatory MUST for 1.3)
-//   * secp256r1      (RFC 8446 §4.2.7 — mandatory MUST for WebPKI)
-//   * secp384r1      (optional but widely supported)
+//  * x25519 (RFC 8446 §4.2.7 — mandatory MUST for 1.3)
+//  * secp256r1 (RFC 8446 §4.2.7 — mandatory MUST for WebPKI)
+//  * secp384r1 (optional but widely supported)
 //
+
 // X448 / secp521r1 / FFDHE / ML-KEM — not v1.
 //
+
 // =============================================================================
 
 module core.net.tls13.named_group;

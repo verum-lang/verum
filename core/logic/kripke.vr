@@ -2,27 +2,34 @@
 // kripke.vr — Kripke Semantics for Modal Logic
 // =============================================================================
 //
+
 // Layer: Standard Library / Logic
 //
+
 // User-facing surface for the Kripke-semantics analysis core
 // (`verum_types.kripke`). A Kripke frame is a set of *worlds*
 // plus an *accessibility* relation; modal formulas `□φ` and `◇φ`
 // are evaluated over the frame.
 //
+
 // ## Frame classes
 //
+
 // Different modal logics correspond to constraints on
 // accessibility:
 //
-//   K    no constraints
-//   T    reflexive               (every world sees itself)
-//   B    symmetric
-//   4    transitive               (S4 = T + 4)
-//   5    Euclidean
-//   S5   equivalence              (refl + sym + trans)
+
+//  K no constraints
+//  T reflexive (every world sees itself)
+//  B symmetric
+//  4 transitive (S4 = T + 4)
+//  5 Euclidean
+//  S5 equivalence (refl + sym + trans)
 //
+
 // ## Example
 //
+
 // ```verum
 // // p holds at w1; w0 → w1, so □p holds at w0.
 // let f: KripkeFrame = ...;
@@ -30,6 +37,7 @@
 // assert(evaluate(modal_box(modal_atom("p")), f, v, world("0")));
 // ```
 //
+
 // =============================================================================
 
 module core.logic.kripke;
@@ -79,12 +87,14 @@ public fn accessible(f: KripkeFrame, w: World) -> List<World> {
 // 1b. Kripke frame as a canonical Graph<World, ()>
 // =============================================================================
 //
+
 // A Kripke frame IS a labelled directed graph — the accessibility
 // relation is its edge set. Exposing the frame through
 // `core.math.graph.Graph<World, ()>` means every graph algorithm
 // (BFS, DFS, reachable, topological_sort, dijkstra) immediately
 // applies to modal-logic semantics without bespoke traversal code.
 //
+
 // The wiring is a small shim because the field names differ:
 // Kripke's `KripkeEdge { from, to }` vs graph.vr's `KripkeEdge<V, L> { src, tgt, label }`.
 // The shim converts on the fly; concrete `impl Graph for KripkeFrame`
@@ -92,6 +102,7 @@ public fn accessible(f: KripkeFrame, w: World) -> List<World> {
 // wrapper once the modal-logic library promotes the frame to a
 // full Graph instance; the shim functions below cover the interim.
 //
+
 // For now, expose the graph view as a free function.
 
 /// Convert a Kripke edge to the canonical graph KripkeEdge shape.
@@ -263,6 +274,7 @@ public fn evaluate(formula: ModalForm, f: KripkeFrame, v: Valuation, w: World) -
 /// True iff `formula` evaluates to `true` at every world of `f`
 /// under the valuation `v`. The standard "valid in frame" judgement.
 ///
+
 /// Cost: O(|worlds| · evaluate_cost(formula)).
 public fn valid_in_frame(f: KripkeFrame, v: Valuation, formula: ModalForm) -> Bool {
     let mut i: Int = 0;
@@ -304,15 +316,18 @@ public fn semantically_equivalent(
 // 6. Frame-property predicates (axiom-system identification)
 // =============================================================================
 //
+
 // Modal-logic axioms each correspond to a structural property of
 // the accessibility relation. The classical correspondence:
 //
-//     T  (□p → p)            reflexive frames
-//     4  (□p → □□p)          transitive frames
-//     5  (◇p → □◇p)          euclidean frames
-//     B  (p → □◇p)           symmetric frames
-//     D  (□p → ◇p)           serial frames
+
+//  T (□p → p) reflexive frames
+//  4 (□p → □□p) transitive frames
+//  5 (◇p → □◇p) euclidean frames
+//  B (p → □◇p) symmetric frames
+//  D (□p → ◇p) serial frames
 //
+
 // Identifying a frame's properties tells you which axiom system
 // it validates, which is the bridge from `evaluate` to formal
 // proof obligations.
@@ -459,7 +474,7 @@ implement Debug for World {
 }
 
 implement Eq for ModalForm {
-    /// Structural (syntactic) equality on modal formulas.  `□¬¬p`
+    /// Structural (syntactic) equality on modal formulas. `□¬¬p`
     /// and `□p` compare unequal even though they are
     /// classically-equivalent under double-negation elimination —
     /// callers needing semantic equality should normalise first.
@@ -494,15 +509,15 @@ implement Eq for ModalForm {
 
 implement Display for ModalForm {
     /// Renders a modal formula in standard logic notation:
-    ///   `True`        → `⊤`
-    ///   `False`       → `⊥`
-    ///   `Atom { p }`  → `p`
-    ///   `Not { φ }`   → `¬φ`
-    ///   `And { φ, ψ }`     → `(φ ∧ ψ)`
-    ///   `Or { φ, ψ }`      → `(φ ∨ ψ)`
-    ///   `Implies { φ, ψ }` → `(φ → ψ)`
-    ///   `Box { φ }`        → `□φ`
-    ///   `Diamond { φ }`    → `◇φ`
+    ///  `True` → `⊤`
+    ///  `False` → `⊥`
+    ///  `Atom { p }` → `p`
+    ///  `Not { φ }` → `¬φ`
+    ///  `And { φ, ψ }` → `(φ ∧ ψ)`
+    ///  `Or { φ, ψ }` → `(φ ∨ ψ)`
+    ///  `Implies { φ, ψ }` → `(φ → ψ)`
+    ///  `Box { φ }` → `□φ`
+    ///  `Diamond { φ }` → `◇φ`
     /// Parens around binary connectives preserve precedence
     /// across nested rendering.
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {

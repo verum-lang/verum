@@ -3,28 +3,35 @@
 // =============================================================================
 // Layer: API (Progressive Disclosure Level 4)
 //
+
 // This module exposes low-level primitives for library development.
 // NOT intended for application code - requires @allow(internal_api).
 //
+
 // # Warning
 //
+
 // These APIs are:
 // - Unstable: May change without notice
 // - Unsafe: Can violate memory safety if misused
 // - Expert-only: Require deep understanding of VBC internals
 //
+
 // # Usage
 //
+
 // ```verum
 // @allow(internal_api)
 // mount core.math.internal.*;
 //
+
 // fn custom_kernel_impl(input: &TensorHandle) -> TensorHandle {
-//     let ptr = tensor_ptr(input);
-//     // ... low-level manipulation
+//  let ptr = tensor_ptr(input);
+//  // ... low-level manipulation
 // }
 // ```
 //
+
 // Spec: docs/architecture/math-spec.md Section 6.4 - Internal API
 // =============================================================================
 
@@ -39,16 +46,18 @@ mount super.linalg.Numeric;
 
 //Emit a raw VBC opcode with operands
 //
+
 //# Safety
 //- Opcode must be valid
 //- Operand count and types must match opcode specification
 //- Incorrect usage can corrupt interpreter state
 //
+
 //# Example
 //```verum
 //@allow(internal_api)
 //fn custom_add(a: Value, b: Value) -> Value {
-//    emit_raw_opcode(0x30, &[a, b])  // 0x30 = AddF opcode
+//  emit_raw_opcode(0x30, &[a, b]) // 0x30 = AddF opcode
 //}
 //```
 @intrinsic("verum.vbc.emit_raw")
@@ -56,6 +65,7 @@ public fn emit_raw_opcode(opcode: U8, operands: &[Value]) -> Value;
 
 //Emit a TensorExtended sub-opcode
 //
+
 //TensorExtended (0xFF) uses sub-opcodes for specialized operations.
 @intrinsic("verum.vbc.emit_tensor_extended")
 public fn emit_tensor_extended(sub_opcode: U8, operands: &[Value]) -> Value;
@@ -70,19 +80,22 @@ public fn emit_arith_extended(sub_opcode: U8, operands: &[Value]) -> Value;
 
 //Emit a direct MLIR operation
 //
+
 //Bypasses VBC and emits directly to MLIR for AOT compilation.
 //No-op in interpreter mode.
 //
+
 //# Parameters
 //- `dialect`: MLIR dialect name (e.g., "linalg", "tensor", "gpu")
 //- `operation`: Operation name (e.g., "matmul", "fill")
 //- `operands`: Operation operands
 //
+
 //# Example
 //```verum
 //@allow(internal_api)
 //fn linalg_fill(tensor: &TensorHandle, value: Float) -> TensorHandle {
-//    emit_mlir("linalg", "fill", &[Value.from(tensor), Value.from(value)])
+//  emit_mlir("linalg", "fill", &[Value.from(tensor), Value.from(value)])
 //}
 //```
 @intrinsic("verum.mlir.emit")

@@ -14,11 +14,13 @@
 )]
 // Comprehensive Tests for Dependent Types Support
 //
+
 // Tests cover all aspects of dependent types as specified in
 // Verum Dependent Types Extension (v2.0+): Pi types `(x: A) -> B(x)`, Sigma types
 // `(x: A, B(x))`, equality types, type-level computation, universe hierarchy,
 // inductive/coinductive types, and pattern matching with dependent refinements.
 //
+
 // Test categories:
 // 1. Pi Types (dependent functions)
 // 2. Sigma Types (dependent pairs)
@@ -27,6 +29,7 @@
 // 5. Pattern matching with dependent types
 // 6. Integration with SMT backend
 //
+
 // IMPORTANT: These tests reference modules and types that do not exist in the
 // current implementation (dependent::*, type_level_computation::*, etc.). They
 // appear to be stubs for future dependent types implementation and are disabled
@@ -1252,8 +1255,8 @@ fn test_higher_inductive_type_circle() {
 
     // Circle type from spec:
     // hott inductive Circle : Type {
-    //     base : Circle,
-    //     loop : base = base
+    //  base : Circle,
+    //  loop : base = base
     // }
     let base_expr = make_var("base");
     let circle = HigherInductiveType::new(Text::from("Circle"))
@@ -1666,9 +1669,9 @@ fn test_induction_principle_list_type() {
 
     // The principle for List should have the form:
     // ∀P: (List<T> -> Type).
-    //   P(Nil) ->
-    //   (∀ head: T, tail: List<T>. P(tail) -> P(Cons(head, tail))) ->
-    //   (∀ l: List<T>. P(l))
+    //  P(Nil) ->
+    //  (∀ head: T, tail: List<T>. P(tail) -> P(Cons(head, tail))) ->
+    //  (∀ l: List<T>. P(l))
     if let Maybe::Some(principle) = &list.induction_principle {
         assert!(
             matches!(&principle.kind, ExprKind::Forall { .. }),
@@ -1738,10 +1741,11 @@ fn test_induction_principle_binary_tree() {
 
     // The principle for Tree should have the form:
     // ∀P: (Tree -> Type).
-    //   P(Leaf) ->
-    //   (∀ left: Tree, right: Tree. P(left) -> P(right) -> P(Node(left, right))) ->
-    //   (∀ t: Tree. P(t))
+    //  P(Leaf) ->
+    //  (∀ left: Tree, right: Tree. P(left) -> P(right) -> P(Node(left, right))) ->
+    //  (∀ t: Tree. P(t))
     //
+
     // Note: This requires TWO inductive hypotheses (P(left) and P(right))
     if let Maybe::Some(principle) = &tree.induction_principle {
         assert!(

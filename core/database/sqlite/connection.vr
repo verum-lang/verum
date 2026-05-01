@@ -5,25 +5,29 @@
 // Spec: internal/specs/database.md §6.2
 // =============================================================================
 //
+
 // `SqliteConnection` is the user-facing handle for the Spindle SQLite
 // adapter. It wraps loom's L7 `Database` (synchronous, in-memory or
 // file-backed via PosixVfs once that lands) and surfaces the unified
 // `core.database.common.error.DbError` shape so user code is portable.
 //
+
 // Surface (vendor-idiomatic, sync — SQLite is local I/O):
 //
-//   * `SqliteConnection.open_in_memory(mode)` / `open_path(path, mode)`
-//   * `.execute(sql)`              — DDL / DML / TX statements
-//   * `.execute_with(sql, params)` — same with positional bindings
-//   * `.query_first(sql)`          — first row as `List<Value>`
-//   * `.query_all(sql)`            — all rows as `List<List<Value>>`
-//   * `.begin()` / `.begin_immediate()` / `.commit()` / `.rollback()`
-//   * `.close()`                   — affine consume (loom Database is
-//                                    `move`-by-construction)
+
+//  * `SqliteConnection.open_in_memory(mode)` / `open_path(path, mode)`
+//  * `.execute(sql)` — DDL / DML / TX statements
+//  * `.execute_with(sql, params)` — same with positional bindings
+//  * `.query_first(sql)` — first row as `List<Value>`
+//  * `.query_all(sql)` — all rows as `List<List<Value>>`
+//  * `.begin()` / `.begin_immediate()` / `.commit()` / `.rollback()`
+//  * `.close()` — affine consume (loom Database is
+//  `move`-by-construction)
 //
+
 // `SqliteValue` is the protocol-neutral cell type for a row column —
 // the variants mirror SQLite's storage classes (Null / Int / Real /
-// Text / Blob).  Higher-level user types (Email, UserId, Timestamp)
+// Text / Blob). Higher-level user types (Email, UserId, Timestamp)
 // decode via the future `Row` derive once T12 (sql#) lands; in the
 // meantime authors decode by hand.
 // =============================================================================
@@ -95,7 +99,7 @@ mount core.database.sqlite.native.l4_vdbe.{Register, RNull, RInt, RReal, RText, 
 
 /// A single column value as it sits in a SQLite record. Mirrors
 /// SQLite's five storage classes (NULL / INTEGER / REAL / TEXT /
-/// BLOB).  We keep this distinct from `loom.Register` so the public
+/// BLOB). We keep this distinct from `loom.Register` so the public
 /// surface is independent of loom's internal layout.
 public type SqliteValue is
       SvNull
@@ -249,7 +253,7 @@ implement SqliteConnection {
     // -------------------------------------------------------------------------
 
     /// Run a no-result statement (DDL / INSERT / UPDATE / DELETE / TX
-    /// control).  Returns `()` on success — for affected-row counts use
+    /// control). Returns `()` on success — for affected-row counts use
     /// the future `execute_with` overload once parameter binding is
     /// wired through the public surface.
     public fn execute(&mut self, sql: &Text) -> Result<(), DbError> {
@@ -291,11 +295,12 @@ implement SqliteConnection {
     // Transaction — affine handle API (database.md §4.1+§5.5)
     // -------------------------------------------------------------------------
     //
+
     // Spindle façade forwards directly to the loom L7 affine surface.
     // `Transaction` is exposed under the same name; commit_tx/rollback_tx
     // consume it; `with_transaction(body)` wraps both.
 
-    /// Begin a deferred transaction.  Returns the affine handle the
+    /// Begin a deferred transaction. Returns the affine handle the
     /// caller MUST consume via `commit_tx` / `rollback_tx`.
     public fn begin_tx(&mut self) -> Result<Transaction, DbError> {
         match self.inner.begin_tx() {
@@ -336,14 +341,15 @@ implement SqliteConnection {
     // Backup — online copy to a destination database
     // -------------------------------------------------------------------------
     //
+
     // Surface mirrors `core.database.sqlite.native.l7_api.backup` —
-    // see that module for full semantics.  Every call forwards through
+    // see that module for full semantics. Every call forwards through
     // the loom L7 API; the only adapter-side translation is the loom
     // `DbError` (a per-connection sum) into the unified Spindle
     // `DbError` (a cross-vendor sum) via `dberr_from_loom`.
 
     /// Initialise an online backup that will copy this connection's
-    /// data into a fresh database at `dst_path`.  Returns the affine
+    /// data into a fresh database at `dst_path`. Returns the affine
     /// `BackupSession` the caller MUST consume via `backup_step` +
     /// `backup_finish`.
     public fn backup_init_to_path(&self, dst_path: &Text)
@@ -356,7 +362,7 @@ implement SqliteConnection {
     }
 
     /// Initialise a backup writing into an already-open destination
-    /// loom Database.  Used by tests with `:memory:` destinations and
+    /// loom Database. Used by tests with `:memory:` destinations and
     /// by advanced flows that have already tuned the destination.
     public fn backup_init_into(&self, dst: core.database.sqlite.native.l7_api.database.Database)
         -> Result<BackupSession, DbError>
@@ -367,7 +373,7 @@ implement SqliteConnection {
         }
     }
 
-    /// Copy up to `pages` source pages into the destination.  Returns
+    /// Copy up to `pages` source pages into the destination. Returns
     /// `BackupOutcome::BoOk` while progress remains, `BoDone` on
     /// completion, `BoFailed { code, reason }` on I/O failure.
     public fn backup_step(
@@ -446,6 +452,7 @@ implement SqliteConnection {
     // Pragma — typed get / set without raw SQL
     // -------------------------------------------------------------------------
     //
+
     // Wraps the loom `pragma_api` surface: typed `PragmaKind` /
     // `PragmaValue` instead of `PRAGMA name = value` strings; closes
     // the SQLite-C footgun where typo'd PRAGMAs silently no-op.

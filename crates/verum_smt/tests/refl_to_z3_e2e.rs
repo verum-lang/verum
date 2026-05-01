@@ -2,16 +2,19 @@
 //! `ProofSearchEngine` actually flows through to the Z3 solver
 //! during proof discharge.
 //!
+
 //! The test injects a tiny reflected definition `add(a, b) = a + b`
 //! and confirms two things:
 //!
+
 //! 1. The registry's SMT-LIB block parses cleanly through Z3
-//!    via `Solver::from_string` (no syntax errors, no unknown
-//!    sorts on the surface form).
+//!  via `Solver::from_string` (no syntax errors, no unknown
+//!  sorts on the surface form).
 //! 2. After installation, the reflected axiom is queryable from
-//!    the engine's public accessor, demonstrating the registry
-//!    survives engine setup and is available at proof time.
+//!  the engine's public accessor, demonstrating the registry
+//!  survives engine setup and is available at proof time.
 //!
+
 //! The actual SMT round-trip — asserting the axiom into Z3,
 //! then proving a goal that needs to unfold `add` — uses the
 //! Z3 solver directly to keep this test independent of the

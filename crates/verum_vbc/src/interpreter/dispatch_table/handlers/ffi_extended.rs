@@ -25,6 +25,7 @@ use super::method_dispatch::{monotonic_nanos_shared, realtime_nanos_shared};
 /// runtime enforces against — every name listed here is a known
 /// resource boundary.
 ///
+
 /// Returning `None` lets the FFI call through unconditionally
 /// (math, allocation, formatting, etc.). Returning `Some(scope)`
 /// triggers a `state.check_permission(scope, 0)` call before the
@@ -114,6 +115,7 @@ fn ffi_symbol_permission_scope(
 /// preserving zero-cost dispatch for math / allocation / format
 /// FFIs that aren't security-relevant.
 ///
+
 /// Stdio is flushed before the panic so the user sees any prior
 /// `print(...)` output even when the script terminates abruptly.
 fn check_ffi_permission(
@@ -153,6 +155,7 @@ fn check_ffi_permission(
 
 /// Maximum allowed allocation/copy size for FFI memory operations (1 GiB).
 ///
+
 /// This cap prevents denial-of-service and memory-safety issues when untrusted
 /// register values are passed as sizes to raw memory operations
 /// (`CMemcpy`, `CMemset`, `CMemmove`, `CMemcmp`).
@@ -163,6 +166,7 @@ const MAX_FFI_ALLOCATION_SIZE: usize = 1 << 30; // 1 GiB
 
 /// FfiExtended (0xBC) - FFI and memory operations.
 ///
+
 /// Handles FFI calling conventions, memory operations, and byte array allocation.
 pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
@@ -236,12 +240,14 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         Some(FfiSubOpcode::CSecureZero) => {
             // Format: dst_ptr:reg, size:reg
             //
-            // Volatile zero of `size` bytes at `dst_ptr`.  In the
+
+            // Volatile zero of `size` bytes at `dst_ptr`. In the
             // interpreter the volatile property is moot — there's no
             // optimiser pass that could elide writes — so we just
             // perform `write_volatile` on each byte to mirror the
             // ABI contract that the AOT path enforces.
             //
+
             // Audit: `internal/specs/tls-quic-security-audit.md` §2
             // Action #2.
             let dst_reg = read_reg(state)?;
@@ -263,7 +269,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 
             if !dst_ptr.is_null() && size > 0 {
                 // SAFETY: size is bounded to <= MAX_FFI_ALLOCATION_SIZE and
-                // dst_ptr has been null-checked.  Volatile writes
+                // dst_ptr has been null-checked. Volatile writes
                 // ensure the compiler doesn't elide the loop on the
                 // host side either (defence-in-depth — the
                 // interpreter's runtime ABI ought to be observable
@@ -686,9 +692,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         Some(FfiSubOpcode::StructFieldAddr) => {
             // Get the raw heap address of a struct field.
             //
+
             // Format: dst:reg, obj:reg, field_offset_lo:u8, field_offset_hi:u8
             // Returns: dst = obj_heap_ptr + OBJECT_HEADER_SIZE + field_offset
             //
+
             // Used by the codegen path for `&self.field as *const T`
             // — without this, the cast falls through compile_cast's
             // generic _ arm (a passthrough), and the resulting Value
@@ -705,7 +713,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // The struct receiver lives in the register either as an
             // Object/Pointer Value (heap-allocated struct) or — for
             // some single-field receivers — as the inline payload
-            // itself.  Treat both: if it's a pointer Value, take the
+            // itself. Treat both: if it's a pointer Value, take the
             // raw address; otherwise read as i64 (already the
             // address, e.g. when the field-of-self pattern was
             // pre-stabilised through an integer slot).
@@ -759,6 +767,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // semantics and matches the AOT lowering. `read_unaligned` handles
             // arbitrary alignment.
             //
+
             // Extension policy (root fix for Issue #2 — continuation from
             // `handle_get_index`): `DerefRaw` is emitted by typed-array
             // reads and by any intrinsic that lowers to a raw memory read.
@@ -787,20 +796,22 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         }
 
         Some(FfiSubOpcode::DerefRawSigned) => {
-            // Sign-extending sibling of `DerefRaw`.  Format and layout
+            // Sign-extending sibling of `DerefRaw`. Format and layout
             // identical (`dst:reg, ptr:reg, size:u8`) — only the
             // extension policy differs: we read `size` bytes through
             // the pointer and **sign-extend** the result to i64.
             //
+
             // This is the load-bearing read for typed signed C
             // primitives at FFI boundaries — `int8_t` / `int16_t` /
             // `int32_t` slots whose high bit can flip the sign of the
-            // i64 representation.  errno is the canonical user (a
+            // i64 representation. errno is the canonical user (a
             // positive errno fits either policy, but the engine should
             // not depend on errno staying non-negative — kernel APIs
             // that return signed i32 results in pointer-deref form
             // need this sign-fidelity).
             //
+
             // See `DerefRaw`'s comment block above for the historical
             // CRC32 zero-extension rationale that motivated keeping the
             // two opcodes separate.
@@ -818,9 +829,9 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 return Err(InterpreterError::NullPointer);
             }
 
-            // SAFETY: `ptr` was null-checked above.  The caller is
+            // SAFETY: `ptr` was null-checked above. The caller is
             // responsible for the pointer being valid for reads of
-            // `size` bytes per the FFI contract.  `read_unaligned`
+            // `size` bytes per the FFI contract. `read_unaligned`
             // handles arbitrary alignment.
             let value = unsafe {
                 match size {
@@ -865,6 +876,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // values (e.g. heap-allocated Variant Some(v) writes via
             // `*ptr = Some(value)` in user code) round-trip correctly.
             //
+
             // The previous impl always called `.as_i64()`, which debug-
             // asserts the value is Int-tagged and therefore panicked
             // with "Expected int, got Some(0)" for any pointer-tagged
@@ -1428,7 +1440,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         // ================================================================
         Some(FfiSubOpcode::CallFfiC) => {
             // Format: symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
-            //         mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
+            //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
             let symbol_idx = read_u32(state)?;
             let arg_count = read_u8(state)? as usize;
             let ret_reg = read_reg(state)?;
@@ -2257,7 +2269,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 
         Some(FfiSubOpcode::CallFfiVariadic) => {
             // Format: symbol_idx:u32, fixed_count:u8, variadic_count:u8, ret_reg:reg, [arg_regs...],
-            //         mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
+            //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
             let symbol_idx = read_u32(state)?;
             let fixed_count = read_u8(state)? as usize;
             let variadic_count = read_u8(state)? as usize;
@@ -2376,7 +2388,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 
         Some(FfiSubOpcode::CallFfiIndirect) => {
             // Format: ptr_reg:reg, signature_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
-            //         mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
+            //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
             let _ptr_reg = read_reg(state)?;
             let _signature_idx = read_u32(state)?;
             let arg_count = read_u8(state)? as usize;
@@ -2586,12 +2598,14 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         // Shared<T>, Heap<T>, List/Map internals, and any code path that
         // calls the stdlib `cbgr_alloc(size, align)` / `cbgr_dealloc`.
         //
+
         // In the Tier 0 interpreter we bypass the stdlib allocator
         // (allocator.vr -> os_mmap -> FFI mmap) entirely and allocate
         // through Rust's std allocator, then register the allocation in
         // `state.cbgr_allocations` so that subsequent CBGR validation
         // ops (ChkRef, GetGeneration, etc.) see a live allocation.
         //
+
         // The result is a tuple `(ptr, generation, epoch)` matching the
         // shape of `AllocResult` in `core/mem/allocator.vr`. We package it
         // as a heap-allocated tuple object so pattern-matching
@@ -2636,10 +2650,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             let align: usize = (raw_align as usize).next_power_of_two().max(8);
             // `Layout::from_size_align` rejects size+align combinations
             // that overflow isize::MAX — possible with adversarial
-            // bytecode requesting a near-max size.  The previous
+            // bytecode requesting a near-max size. The previous
             // implementation chained two attempts, the second of which
             // unwrapped — meaning a hostile size could still panic the
-            // interpreter (DoS via crafted CbgrAlloc operand).  Treat
+            // interpreter (DoS via crafted CbgrAlloc operand). Treat
             // any unrepresentable layout as an OOM-equivalent: return
             // nil so the caller's `Err(e) => ...` arm fires, matching
             // the existing pattern at the null-pointer branch below.
@@ -2691,7 +2705,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             let tuple_val = Value::from_ptr(tuple_obj.as_ptr());
 
             // Wrap in Ok(tuple). Result layout (from `handle_make_variant`):
-            //   [tag: u32][field_count: u32][payload: Value * N]
+            //  [tag: u32][field_count: u32][payload: Value * N]
             // Ok = tag 0, single payload field holding the tuple.
             let variant_size = 8 + std::mem::size_of::<Value>();
             let variant_obj = state.heap.alloc_with_init(
@@ -2745,6 +2759,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 /// Extract MemProt flags from a struct object.
 /// MemProt layout: ObjectHeader + [read: Bool, write: Bool, exec: Bool]
 ///
+
 /// On Unix, returns POSIX PROT_* flags. On other platforms, returns a
 /// platform-neutral bitmask (read=1, write=2, exec=4) that callers
 /// translate to platform-specific constants.
@@ -2795,6 +2810,7 @@ pub(in super::super) fn extract_memprot_flags(_state: &InterpreterState, val: Va
 /// Extract MapFlags flags from a struct object.
 /// MapFlags layout: ObjectHeader + [shared: Bool, is_private: Bool, anonymous: Bool, fixed: Bool]
 ///
+
 /// Returns platform-neutral bitmask flags. On Unix, these match POSIX MAP_*
 /// constants. Callers on other platforms translate as needed.
 pub(in super::super) fn extract_mapflags(_state: &InterpreterState, val: Value) -> i32 {
@@ -2877,9 +2893,11 @@ pub(in super::super) fn extract_filedesc(state: &InterpreterState, val: Value) -
 #[cfg(feature = "ffi")]
 /// Apply error protocol checking to an FFI return value.
 ///
+
 /// Mirrors the LLVM lowering's `emit_ffi_error_protocol_check` for differential
 /// correctness between interpreter (Tier 0) and AOT (Tier 1).
 ///
+
 /// Convention: for protocols that detect errors, the return value is negated errno
 /// (negative i64) on error, or the raw return value on success.
 fn apply_error_protocol(

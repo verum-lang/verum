@@ -1,8 +1,10 @@
 //! Complete semantic types implementation with full API
 //!
+
 //! This module provides newtype wrappers around Rust standard types with
 //! comprehensive APIs to support all stdlib needs.
 //!
+
 //! Verum's semantic honesty principle: types describe meaning (List, Text, Map),
 //! not implementation (Vec, String, HashMap). These wrappers provide rich APIs
 //! while maintaining the semantic naming convention.
@@ -172,8 +174,10 @@ impl Text {
 
     /// Get mutable str
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure that:
     /// - The resulting mutable reference is not used to write invalid UTF-8
     /// - No other references to the string content exist during mutation
@@ -399,8 +403,10 @@ impl Text {
 
     /// Create from UTF-8 without validation (unsafe)
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure that:
     /// - The bytes are valid UTF-8
     pub unsafe fn from_utf8_unchecked(bytes: Vec<u8>) -> Text {
@@ -882,8 +888,10 @@ impl<T> List<T> {
 
     /// Create from raw parts
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure that:
     /// - `ptr` must be allocated via the global allocator with proper layout for T
     /// - `length` must be <= `capacity`
@@ -1258,8 +1266,10 @@ impl<T> List<T> {
 
     /// Get unchecked (unsafe)
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure that:
     /// - `index` is within bounds (index < self.len())
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
@@ -1269,8 +1279,10 @@ impl<T> List<T> {
 
     /// Get unchecked mutable (unsafe)
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure that:
     /// - `index` is within bounds (index < self.len())
     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
@@ -1838,36 +1850,45 @@ where
 
     /// Get multiple mutable references to different keys simultaneously.
     ///
+
     /// Returns `None` if any keys are duplicates or if any key is not found.
     /// This ensures safe aliasing - all returned references point to different values.
     ///
+
     /// # Safety Guarantees
     ///
+
     /// This implementation uses unsafe code internally but maintains full safety by:
     /// 1. Checking that all keys are unique (no aliasing)
     /// 2. Verifying all keys exist before creating any mutable references
     /// 3. Using raw pointers to bypass Rust's borrow checker limitations
     ///
+
     /// # Example
     ///
+
     /// ```
     /// use verum_common::semantic_types::Map;
     ///
+
     /// let mut map = Map::new();
     /// map.insert("a", 1);
     /// map.insert("b", 2);
     /// map.insert("c", 3);
     ///
+
     /// if let Some([a, b]) = map.get_many_mut(["a", "b"]) {
-    ///     *a += 10;
-    ///     *b += 20;
+    ///  *a += 10;
+    ///  *b += 20;
     /// }
     /// assert_eq!(map.get(&"a"), Some(&11));
     /// assert_eq!(map.get(&"b"), Some(&22));
     ///
+
     /// // Returns None if keys are duplicated
     /// assert!(map.get_many_mut(["a", "a"]).is_none());
     ///
+
     /// // Returns None if any key is missing
     /// assert!(map.get_many_mut(["a", "missing"]).is_none());
     /// ```
@@ -1898,6 +1919,7 @@ where
         // 2. All keys exist in the map
         // 3. We have exclusive access to the map via &mut self
         //
+
         // We use raw pointers to get mutable references to different values,
         // which is safe because HashMap guarantees each key maps to a unique value.
         // The borrow checker cannot verify this at compile time, but we've checked

@@ -5,38 +5,45 @@
 // Dependencies: mem/capability (for CAP_* mask values)
 // =============================================================================
 //
+
 // `CapEvent` is the load-bearing record type for forensic reconstruction
-// of CBGR capability changes.  Where `MemHeaderView` snapshots an
+// of CBGR capability changes. Where `MemHeaderView` snapshots an
 // allocation's *current* state, a sequence of `CapEvent`s lets observers
 // reconstruct the *history* of capability and generation changes that
 // led there — essential for diagnosing use-after-free, capability
 // underflow, double-revoke, and ref-count leak bugs.
 //
+
 // # Architecture
 //
+
 // This file defines only the *event type* — the format-stable boundary
-// that observers code against.  The producer-side ring buffer and
+// that observers code against. The producer-side ring buffer and
 // integration with `header.vr`'s `try_revoke` / `increment_ref_count` /
 // `attenuate_capabilities` writers lands separately under
 // `@cfg(feature = "diagnostics")` so that the CBGR hot path retains its
 // ~0.93ns budget for builds that opt out of recording.
 //
+
 // Splitting the type from the recording infrastructure follows the
 // established pattern in `mem/diagnostics.vr` (MemHeaderView ships before
 // `live_allocations` iterator) and `async/diagnostics.vr` (TaskInfo
 // ships before per-executor `snapshot_tasks` walker).
 //
+
 // # Anti-goals
 //
-// - No reflection escape hatch.  CapEvent fields are scalar values
-//   (UInt32 / UInt16 / UInt64) — no raw pointers, no type-erased
-//   payloads.
-// - No global mutable state in the type.  Storage / ring buffer is
-//   future producer-side work.
-// - No allocation per record event.  Every field is by-value; events
-//   live on the stack and are copy-out into the (future) ring buffer
-//   via plain memcpy.
+
+// - No reflection escape hatch. CapEvent fields are scalar values
+//  (UInt32 / UInt16 / UInt64) — no raw pointers, no type-erased
+//  payloads.
+// - No global mutable state in the type. Storage / ring buffer is
+//  future producer-side work.
+// - No allocation per record event. Every field is by-value; events
+//  live on the stack and are copy-out into the (future) ring buffer
+//  via plain memcpy.
 //
+
 // Spec: docs/architecture/observability.md (TODO)
 // =============================================================================
 
@@ -52,25 +59,27 @@ mount super.capability.{
 // =============================================================================
 
 /// Discriminator over the categories of CBGR state transition that an
-/// audit event records.  Mirrors the writer entry points in `header.vr`
+/// audit event records. Mirrors the writer entry points in `header.vr`
 /// so callers can correlate events back to the source operation.
 ///
+
 /// # Variants
 ///
+
 /// - `Revoke` — Successful `try_revoke` CAS: generation bumped,
-///   capabilities cleared.  Emitted *exactly once* per allocation
-///   transition from live → dead.  A failed (lost-race) revoke does
-///   NOT emit an event.
+///  capabilities cleared. Emitted *exactly once* per allocation
+///  transition from live → dead. A failed (lost-race) revoke does
+///  NOT emit an event.
 /// - `Attenuate` — Capability narrowing via
-///   `attenuate_capabilities` (monotonic — only clears bits).
-/// - `RefIncr` — Reference count increment.  Emitted on the slow path
-///   (`increment_ref_count`) only — fast-path `&checked` borrows do
-///   NOT touch ref_count and are therefore not audited.
+///  `attenuate_capabilities` (monotonic — only clears bits).
+/// - `RefIncr` — Reference count increment. Emitted on the slow path
+///  (`increment_ref_count`) only — fast-path `&checked` borrows do
+///  NOT touch ref_count and are therefore not audited.
 /// - `RefDecr` — Reference count decrement.
 /// - `GenBump` — Explicit `increment_generation` (segment reuse,
-///   distinct from revoke).
+///  distinct from revoke).
 /// - `EpochAdvance` — Epoch counter advanced past the
-///   generation-wraparound watermark.
+///  generation-wraparound watermark.
 public type CapEventKind is
     | Revoke
     | Attenuate
@@ -124,40 +133,42 @@ implement Eq for CapEventKind {
 // CapEvent — single auditable CBGR state transition
 // =============================================================================
 
-/// One auditable CBGR state transition.  Every field is by-value; an
+/// One auditable CBGR state transition. Every field is by-value; an
 /// event is a flat 48-byte record (3× UInt64 + 2× UInt32 + 2× UInt16
 /// + 1× UInt8 padding) suitable for direct memcpy into the (future)
 /// ring buffer slot.
 ///
+
 /// # Field provenance
 ///
+
 /// - `kind` records the category of writer that emitted the event
-///   (see `CapEventKind`).
+///  (see `CapEventKind`).
 /// - `seq` is a monotonic, globally-unique sequence number assigned
-///   by the audit ring on event commit.  Used by observers to total-
-///   order events across threads (the `timestamp_ns` clock alone is
-///   not sufficient because monotonic-clock reads can collide on
-///   coarse-resolution timers).  `0` indicates an un-committed event
-///   (caller built the record but did not emit it).
+///  by the audit ring on event commit. Used by observers to total-
+///  order events across threads (the `timestamp_ns` clock alone is
+///  not sufficient because monotonic-clock reads can collide on
+///  coarse-resolution timers). `0` indicates an un-committed event
+///  (caller built the record but did not emit it).
 /// - `ptr_id` is the CBGR user-pointer address as `Int.bitcast`-ed to
-///   UInt64.  This is the stable identity observers use to group
-///   events for the same allocation.  CBGR ensures generation
-///   wraparound does not reuse pointers within a single epoch, so
-///   `(ptr_id, generation_after)` is unique within an epoch.
+///  UInt64. This is the stable identity observers use to group
+///  events for the same allocation. CBGR ensures generation
+///  wraparound does not reuse pointers within a single epoch, so
+///  `(ptr_id, generation_after)` is unique within an epoch.
 /// - `generation_before` / `generation_after` capture the generation
-///   counter on entry / exit.  Equal for non-generation-bumping
-///   events (Attenuate, RefIncr, RefDecr).
+///  counter on entry / exit. Equal for non-generation-bumping
+///  events (Attenuate, RefIncr, RefDecr).
 /// - `capabilities_before` / `capabilities_after` capture the
-///   capability mask on entry / exit.  Equal for non-capability-
-///   modifying events (RefIncr, RefDecr, GenBump, EpochAdvance).
-/// - `timestamp_ns` is a monotonic-clock nanosecond timestamp.  `0`
-///   when the platform's clock is unsupported or the recorder opted
-///   out of timestamps for performance.
+///  capability mask on entry / exit. Equal for non-capability-
+///  modifying events (RefIncr, RefDecr, GenBump, EpochAdvance).
+/// - `timestamp_ns` is a monotonic-clock nanosecond timestamp. `0`
+///  when the platform's clock is unsupported or the recorder opted
+///  out of timestamps for performance.
 public type CapEvent is {
     /// Category of state transition (Revoke, Attenuate, ...).
     kind: CapEventKind,
 
-    /// Monotonic global sequence number.  `0` = un-committed.
+    /// Monotonic global sequence number. `0` = un-committed.
     seq: UInt64,
 
     /// CBGR user-pointer address as UInt64 (stable identity).
@@ -166,23 +177,23 @@ public type CapEvent is {
     /// Generation counter on entry to the writer.
     generation_before: UInt32,
 
-    /// Generation counter on exit from the writer.  Equal to
+    /// Generation counter on exit from the writer. Equal to
     /// `generation_before` for events that don't bump generation.
     generation_after: UInt32,
 
     /// Capability mask on entry to the writer.
     capabilities_before: UInt16,
 
-    /// Capability mask on exit from the writer.  Equal to
+    /// Capability mask on exit from the writer. Equal to
     /// `capabilities_before` for events that don't modify caps.
     capabilities_after: UInt16,
 
-    /// Monotonic-clock nanosecond timestamp.  `0` when unsupported.
+    /// Monotonic-clock nanosecond timestamp. `0` when unsupported.
     timestamp_ns: UInt64,
 };
 
 implement CapEvent {
-    /// Construct an un-committed event (seq=0).  The producer-side
+    /// Construct an un-committed event (seq=0). The producer-side
     /// ring buffer assigns `seq` on commit; callers should not set
     /// it by hand.
     public fn new(
@@ -207,7 +218,7 @@ implement CapEvent {
     }
 
     /// True iff this event bumped the generation counter (Revoke or
-    /// GenBump).  Useful for filtering out non-lifetime-affecting
+    /// GenBump). Useful for filtering out non-lifetime-affecting
     /// events when reconstructing a use-after-free trace.
     @inline
     public fn bumped_generation(&self) -> Bool {
@@ -215,14 +226,14 @@ implement CapEvent {
     }
 
     /// True iff this event modified the capability mask (Revoke or
-    /// Attenuate).  RefIncr / RefDecr / GenBump / EpochAdvance leave
+    /// Attenuate). RefIncr / RefDecr / GenBump / EpochAdvance leave
     /// the mask unchanged.
     @inline
     public fn modified_capabilities(&self) -> Bool {
         self.capabilities_before != self.capabilities_after
     }
 
-    /// Bitmask of capabilities cleared by this event.  Returns 0
+    /// Bitmask of capabilities cleared by this event. Returns 0
     /// when no capabilities were cleared (Attenuate is monotonic, so
     /// `cleared = before AND NOT after`).
     @inline
@@ -230,7 +241,7 @@ implement CapEvent {
         self.capabilities_before & !self.capabilities_after
     }
 
-    /// True iff the event is committed (seq != 0).  Un-committed
+    /// True iff the event is committed (seq != 0). Un-committed
     /// events exist only inside the recorder's stack frame and are
     /// not visible to readers.
     @inline
@@ -238,8 +249,8 @@ implement CapEvent {
         self.seq != 0
     }
 
-    /// Format as a panic-context block.  Two-space indented so it
-    /// composes with multi-line panic messages.  Single allocation
+    /// Format as a panic-context block. Two-space indented so it
+    /// composes with multi-line panic messages. Single allocation
     /// per call.
     public fn format_panic_context(&self) -> Text {
         let mut out: Text = "  CBGR cap-audit event:\n".clone();
@@ -286,15 +297,17 @@ implement Debug for CapEvent {
 // Semantic record helpers
 // =============================================================================
 //
+
 // Thin convenience wrappers over `cap_audit_ring.commit` that build
-// the `CapEvent` from per-writer arguments.  These are the entry points
+// the `CapEvent` from per-writer arguments. These are the entry points
 // CBGR write sites in `header.vr` (try_revoke, attenuate_capabilities,
 // increment_ref_count, decrement_ref_count, increment_generation) call
 // after their atomic state transition succeeds — so the ring captures
 // the *committed* delta, not a speculative attempt.
 //
+
 // All helpers are `@inline` and call into the ring buffer's lock-free
-// `commit` path.  Future hot-path optimisation: gate the body with
+// `commit` path. Future hot-path optimisation: gate the body with
 // `@cfg(feature = "diagnostics")` so non-audit builds compile to a
 // literal no-op (preserves the ~0.93ns CBGR hot-path budget).
 // =============================================================================
@@ -303,9 +316,10 @@ mount super.cap_audit_ring;
 
 /// Record a successful `try_revoke` event (generation bumped, no
 /// capability change — the revoke caps clear is a separate
-/// transition).  Caller passes the user-pointer address as `ptr_id`
+/// transition). Caller passes the user-pointer address as `ptr_id`
 /// for stable allocation identity.
 ///
+
 /// `timestamp_ns` is `0` when the platform's monotonic clock is
 /// unsupported or the recorder opted out.
 @inline
@@ -415,7 +429,7 @@ public fn record_gen_bump(
 }
 
 /// Record an `epoch_advance` event (epoch counter advanced past the
-/// generation-wraparound watermark).  The single global epoch event
+/// generation-wraparound watermark). The single global epoch event
 /// is independent of any specific allocation, so `ptr_id` is `0`.
 @inline
 public fn record_epoch_advance(

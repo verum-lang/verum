@@ -1,22 +1,26 @@
 //! Continuation Calculus — delimited control as a first-class
 //! computational primitive.
 //!
+
 //! Where ordinary control flow (return, throw, return-via-Result)
 //! is *limited* — you can only escape one level at a time —
 //! delimited continuations let a computation reify "what to do
 //! next" as a value and pass it around. The classical operators
 //! are:
 //!
+
 //! ```text
-//!     reset { e }            install a delimiter (prompt)
-//!     shift k. e             capture the rest up to the nearest
-//!                            reset, bind it to k, run e
+//!  reset { e } install a delimiter (prompt)
+//!  shift k. e capture the rest up to the nearest
+//!  reset, bind it to k, run e
 //! ```
 //!
+
 //! With these, programmers can express coroutines, nondeterministic
 //! search, backtracking, and full algebraic-effect handlers as a
 //! library — without language-level effect machinery.
 //!
+
 //! Verum chose contexts + specialized constructs (async/Iterator/
 //! Result) over general handlers. This module provides delimited
 //! continuations as a **standalone analysis core**: callers that
@@ -24,31 +28,39 @@
 //! translate other languages with shift/reset into Verum's
 //! semantics get the core algebra here.
 //!
+
 //! ## Core syntax
 //!
+
 //! ```text
-//!     M ::= v                  (value)
-//!         | x                  (variable)
-//!         | λx. M              (lambda)
-//!         | M N                (application)
-//!         | reset M            (delimiter)
-//!         | shift k. M         (capture)
-//!         | k @ M              (resume captured continuation)
+//!  M ::= v (value)
+//!  | x (variable)
+//!  | λx. M (lambda)
+//!  | M N (application)
+//!  | reset M (delimiter)
+//!  | shift k. M (capture)
+//!  | k @ M (resume captured continuation)
 //! ```
 //!
+
 //! ## Reduction
 //!
+
 //! The cardinal computation rule is the **shift-reset reaction**:
 //!
+
 //! ```text
-//!     reset (E[shift k. M])   ↦   reset (M[k := λx. reset E[x]])
+//!  reset (E[shift k. M]) ↦ reset (M[k := λx. reset E[x]])
 //! ```
 //!
+
 //! where `E[]` is the evaluation context inside the nearest reset.
 //! When no shift remains, `reset v ↦ v`.
 //!
+
 //! ## Status
 //!
+
 //! Algebraic core: term language, capture-avoiding substitution,
 //! single-step reduction at the redex `reset (E[shift k. M])`.
 //! Higher-level driver loops, type systems for shift/reset
@@ -200,12 +212,14 @@ impl CcTerm {
 /// Returns `None` if the term is already a value or no immediate
 /// redex applies.
 ///
+
 /// Reductions implemented:
 ///
-/// * **β**:   `(λx. M) N         ↦ M[x := N]`
-/// * **reset-value**: `reset v   ↦ v`
+
+/// * **β**: `(λx. M) N ↦ M[x := N]`
+/// * **reset-value**: `reset v ↦ v`
 /// * **shift**: `reset (shift k. M) ↦ reset (M[k := λx. reset x])`
-///   (the simplest, *empty-context* form of the shift-reset rule)
+///  (the simplest, *empty-context* form of the shift-reset rule)
 pub fn step(term: &CcTerm) -> Option<CcTerm> {
     match term {
         // β-reduction.
@@ -293,7 +307,7 @@ mod tests {
 
     #[test]
     fn beta_reduction_substitutes() {
-        // (λx. x) c  ↦  c
+        // (λx. x) c ↦ c
         let term = CcTerm::app(
             CcTerm::lam("x", CcTerm::var("x")),
             CcTerm::cnst("c"),
@@ -320,7 +334,7 @@ mod tests {
 
     #[test]
     fn reset_value_unwraps() {
-        // reset c  ↦  c
+        // reset c ↦ c
         let term = CcTerm::reset(CcTerm::cnst("c"));
         let r = step(&term).unwrap();
         assert_eq!(r, CcTerm::cnst("c"));
@@ -389,7 +403,7 @@ mod tests {
 
     #[test]
     fn substitute_preserves_lambda_binder() {
-        // (λx. y)[y := c]  ↦  λx. c
+        // (λx. y)[y := c] ↦ λx. c
         let term = CcTerm::lam("x", CcTerm::var("y"));
         let r = term.substitute(&t("y"), &CcTerm::cnst("c"));
         if let CcTerm::Lam { param, body } = r {
@@ -402,7 +416,7 @@ mod tests {
 
     #[test]
     fn substitute_skips_shadowed_binder() {
-        // (λx. x)[x := c]  ↦  λx. x  (unchanged — x is bound)
+        // (λx. x)[x := c] ↦ λx. x (unchanged — x is bound)
         let term = CcTerm::lam("x", CcTerm::var("x"));
         let r = term.substitute(&t("x"), &CcTerm::cnst("c"));
         assert_eq!(r, term);
@@ -410,7 +424,7 @@ mod tests {
 
     #[test]
     fn evaluate_terminates_at_normal_form() {
-        // (λx. x) c  ↦  c  (normal form after 1 step)
+        // (λx. x) c ↦ c (normal form after 1 step)
         let term = CcTerm::app(
             CcTerm::lam("x", CcTerm::var("x")),
             CcTerm::cnst("c"),

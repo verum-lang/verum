@@ -3,10 +3,11 @@
 // =============================================================================
 // Spec: SQLite C API — recover extension.
 //
-//   SQLITE_RECOVER_LOST_AND_FOUND     = 1   — name of "lost_and_found" table
-//   SQLITE_RECOVER_FREELIST_CORRUPT   = 2   — permit recovery past freelist corruption
-//   SQLITE_RECOVER_ROWIDS             = 3   — invent rowids for WITHOUT ROWID defects
-//   SQLITE_RECOVER_SLOWINDEXES        = 4   — re-create indexes (slow path)
+
+//  SQLITE_RECOVER_LOST_AND_FOUND = 1 — name of "lost_and_found" table
+//  SQLITE_RECOVER_FREELIST_CORRUPT = 2 — permit recovery past freelist corruption
+//  SQLITE_RECOVER_ROWIDS = 3 — invent rowids for WITHOUT ROWID defects
+//  SQLITE_RECOVER_SLOWINDEXES = 4 — re-create indexes (slow path)
 // =============================================================================
 
 module core.database.sqlite.native.recover.config;

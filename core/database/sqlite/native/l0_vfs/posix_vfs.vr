@@ -6,23 +6,28 @@ module core.database.sqlite.native.l0_vfs.posix_vfs;
 // Layer: 0
 // Spec: sqlite-native.md §7.3
 //
+
 // Real-file VFS backed by the platform's POSIX syscall surface:
 //
-//   * open / close / unlink  — via sys.linux.syscall (or sys.darwin.libsystem)
-//   * pread / pwrite          — via sys.common (atomic, no cursor)
-//   * fsync  (full or data)   — via sys.durability
-//   * byte-range locking      — via sys.locking (5-state layered on top
-//                               in l0_vfs.locking)
+
+//  * open / close / unlink — via sys.linux.syscall (or sys.darwin.libsystem)
+//  * pread / pwrite — via sys.common (atomic, no cursor)
+//  * fsync (full or data) — via sys.durability
+//  * byte-range locking — via sys.locking (5-state layered on top
+//  in l0_vfs.locking)
 //
+
 // Windows (Win32Vfs) is a separate module — its open/lock surface has
 // different semantics (HANDLE, OVERLAPPED, LockFileEx) and does not
 // benefit from sharing code with POSIX.
 //
+
 // The `fetch`/`unfetch` memory-mapped capability is flagged as Unsupported
 // in this v1 — the pager currently drives all I/O through pread/pwrite.
 // `shm_map`/`shm_lock` are also Unsupported until the L1 WAL-index
 // module lands (sqlite-native.md §8).
 //
+
 // Fully qualifies as a `SqliteFile` + `VfsProtocol` implementation.
 // =============================================================================
 
@@ -160,8 +165,8 @@ fn sys_open(path: &[Byte], oflag: Int, mode: Int) -> Result<FileDesc, OSError> {
 }
 
 /// Raw &Byte entry — bypasses the Tier-0 interpreter's `&[Byte]`
-/// parameter-coerce recursion.  Caller supplies a NUL-terminated
-/// buffer and casts its pointer.  Both platforms route through
+/// parameter-coerce recursion. Caller supplies a NUL-terminated
+/// buffer and casts its pointer. Both platforms route through
 /// raw-pointer entries: Darwin via `libsystem.safe_open_raw`,
 /// Linux via `syscall.open_raw` (both bypass &[Byte] coercion to
 /// avoid RUNTIME-3-DEEPER recursion in the interpreter).
@@ -275,16 +280,18 @@ implement SqliteFile for PosixFile {
         }
         // **Sync mode dispatch** (post-fix):
         //
-        //   `full=true`        → `full_fsync` (F_FULLFSYNC / fsync /
-        //                        FlushFileBuffers — write-through).
-        //   `data_only=true`   → `data_only_fsync` (fdatasync on
-        //                        Linux; fsync on Darwin; same as
-        //                        full on Windows).  ~5–20× faster
-        //                        per WAL-frame append.
-        //   neither flag       → `data_only_fsync` (defensive default).
+
+        //  `full=true` → `full_fsync` (F_FULLFSYNC / fsync /
+        //  FlushFileBuffers — write-through).
+        //  `data_only=true` → `data_only_fsync` (fdatasync on
+        //  Linux; fsync on Darwin; same as
+        //  full on Windows). ~5–20× faster
+        //  per WAL-frame append.
+        //  neither flag → `data_only_fsync` (defensive default).
         //
+
         // Pre-fix the function pessimistically called `full_fsync`
-        // every time, ignoring `flags.data_only` entirely.  WAL frame
+        // every time, ignoring `flags.data_only` entirely. WAL frame
         // appends fire at every commit; the per-frame cost dominated
         // throughput on rotational + datacenter SSDs that journal
         // metadata separately from data.
@@ -424,7 +431,7 @@ implement VfsProtocol for PosixVfs {
         // entry point — bypasses the Tier-0 interpreter's broken
         // `&[Byte]` parameter coercion (closes the
         // RUNTIME-3-DEEPER blocker; see
-        // `internal/diag/sqlite-real/FINDINGS.md`).  When the
+        // `internal/diag/sqlite-real/FINDINGS.md`). When the
         // interpreter coerce path is fixed this falls back to
         // `sys_open(&cp, ...)` cleanly — keeping the buffer build
         // inline here costs nothing.
@@ -484,9 +491,9 @@ implement VfsProtocol for PosixVfs {
 
     fn access(&self, path: &Text, kind: AccessKind) -> Result<Bool, VfsError> {
         // SQLite's three-valued probe maps onto POSIX access(2) modes:
-        //   Exists       → F_OK              (presence test only)
-        //   CanRead      → F_OK | R_OK
-        //   CanReadWrite → F_OK | R_OK | W_OK
+        //  Exists → F_OK (presence test only)
+        //  CanRead → F_OK | R_OK
+        //  CanReadWrite → F_OK | R_OK | W_OK
         // sys.common.access returns Ok(false) for ENOENT/EACCES/EROFS —
         // exactly what SQLite wants — and Err for genuine I/O faults.
         let mode: Int = match kind {
@@ -514,11 +521,12 @@ implement VfsProtocol for PosixVfs {
         // Required for unpredictable WAL header salts (sqlite-native.md
         // §6.5).
         //
+
         // Pre-fix the signature returned a bare `List<Byte>` and
         // funnelled entropy-source failures into an empty list,
         // which callers (WAL salt generator) would silently use as
         // zero bytes — letting an attacker forge WAL frames with
-        // predictable checksums.  Now every entropy-fetch failure
+        // predictable checksums. Now every entropy-fetch failure
         // surfaces as `Err(VfsError::IoError)` so callers MUST
         // explicitly handle the no-entropy case.
         if len <= 0 {

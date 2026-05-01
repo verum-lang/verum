@@ -2,8 +2,9 @@
 // session/combinator.vr — invert / concat / strip-table / filter
 // =============================================================================
 // Spec: sqlite-native.md §22 (CDC) —
-//       sqlite3changeset_invert / _concat / _strip
+//  sqlite3changeset_invert / _concat / _strip
 //
+
 // Pure operations on `ChangeSet`. None of these touch any storage —
 // they're tree rewrites that mirror upstream SQLite's combinator API.
 // =============================================================================
@@ -22,6 +23,7 @@ mount core.database.sqlite.native.session.change.{
 // invert
 // -----------------------------------------------------------------------------
 //
+
 // INSERT becomes DELETE; DELETE becomes INSERT; UPDATE swaps OLD/NEW.
 // Logically: applying a changeset then applying its inverse leaves
 // the database unchanged (modulo conflict handling).

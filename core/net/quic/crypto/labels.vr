@@ -4,18 +4,22 @@
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
+
 // QUIC uses TLS 1.3's HKDF-Expand-Label ("tls13 " prefix) for its own
 // labels:
 //
-//   * "client in" / "server in" — per-role initial secret derivation
-//     from the top-level initial secret (RFC 9001 §5.2).
-//   * "quic key" / "quic iv" — AEAD key / nonce for a given secret.
-//   * "quic hp" — header-protection key.
-//   * "quic ku" — key update.
+
+//  * "client in" / "server in" — per-role initial secret derivation
+//  from the top-level initial secret (RFC 9001 §5.2).
+//  * "quic key" / "quic iv" — AEAD key / nonce for a given secret.
+//  * "quic hp" — header-protection key.
+//  * "quic ku" — key update.
 //
+
 // The salt for the initial HKDF-Extract is a fixed 20-byte constant
 // per QUIC version (RFC 9001 §5.2 — version 1).
 //
+
 // =============================================================================
 
 module core.net.quic.crypto.labels;

@@ -31,9 +31,9 @@ public fn is_error(r: &DoubleQuotedResolution) -> Bool {
 }
 
 // Resolve a "quoted" token:
-//   * if it names a column / alias / table / identifier currently in scope → identifier
-//   * else if the current stmt-kind has DQS enabled → legacy string literal
-//   * else → error
+//  * if it names a column / alias / table / identifier currently in scope → identifier
+//  * else if the current stmt-kind has DQS enabled → legacy string literal
+//  * else → error
 public fn resolve(
     cfg: &DqsConfig,
     kind: &StmtKind,

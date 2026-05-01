@@ -1,47 +1,58 @@
 //! Cross-format foreign-system runner.
 //!
+
 //! ## What this module is
 //!
+
 //! `verum_kernel::cross_format_gate` ships pure types
 //! (`ExportFormat`, `FormatStatus`, `CrossFormatReport`); it cannot
-//! invoke external tools because the kernel is sandboxed.  This
+//! invoke external tools because the kernel is sandboxed. This
 //! module provides the **runner layer** that actually drives the
 //! foreign proof checkers and populates a `CrossFormatReport`.
 //!
+
 //! ## Architecture
 //!
+
 //! Single trait boundary [`ForeignSystemChecker`] with one
 //! implementation per format:
 //!
-//!   * [`CoqChecker`]      — `coqc <file>.v`
-//!   * [`LeanChecker`]     — `lean <file>.lean`
-//!   * [`IsabelleChecker`] — `isabelle build -d <dir> <session>`
-//!   * [`DeduktiChecker`]  — `kontroli check <file>.dk` (or `dkcheck`)
-//!   * [`AgdaChecker`]     — `agda --no-libraries <file>.agda`
-//!   * [`MetamathChecker`] — `metamath '...verify proof *' '...quit'`
+
+//!  * [`CoqChecker`] — `coqc <file>.v`
+//!  * [`LeanChecker`] — `lean <file>.lean`
+//!  * [`IsabelleChecker`] — `isabelle build -d <dir> <session>`
+//!  * [`DeduktiChecker`] — `kontroli check <file>.dk` (or `dkcheck`)
+//!  * [`AgdaChecker`] — `agda --no-libraries <file>.agda`
+//!  * [`MetamathChecker`] — `metamath '...verify proof *' '...quit'`
 //!
+
 //! Each checker:
 //!
-//!   1. Probes whether the foreign tool is installed
-//!      ([`ForeignSystemChecker::is_available`]).
-//!   2. Invokes it on a given file
-//!      ([`ForeignSystemChecker::check_file`]).
-//!   3. Returns a typed [`CheckResult`] capturing pass/fail/missing.
+
+//!  1. Probes whether the foreign tool is installed
+//!  ([`ForeignSystemChecker::is_available`]).
+//!  2. Invokes it on a given file
+//!  ([`ForeignSystemChecker::check_file`]).
+//!  3. Returns a typed [`CheckResult`] capturing pass/fail/missing.
 //!
+
 //! ## Foundation-neutral
 //!
+
 //! The runner is foundation-neutral: it cares only about EXIT-CODE
-//! verdicts from the foreign tool.  Any tool that follows the
+//! verdicts from the foreign tool. Any tool that follows the
 //! Unix-style "exit 0 = ok" convention plugs in via a new
 //! [`ForeignSystemChecker`] impl.
 //!
+
 //! ## Trust boundary
 //!
+
 //! The runner DOES NOT trust the foreign system's verdict
-//! unconditionally — it merely captures it.  The final gate verdict
+//! unconditionally — it merely captures it. The final gate verdict
 //! lives in `verum_kernel::cross_format_gate::evaluate_gate`, which
 //! requires every required format to report `Passed` before claiming
-//! cross-format mechanization.  The runner is the live signal source
+//! cross-format mechanization. The runner is the live signal source
 //! for those `FormatStatus` entries.
 
 use std::path::Path;
@@ -89,7 +100,7 @@ pub enum CheckResult {
 }
 
 impl CheckResult {
-    /// Lift the result into a kernel-side `FormatStatus`.  `Passed` →
+    /// Lift the result into a kernel-side `FormatStatus`. `Passed` →
     /// `Passed`; `Failed` / `RunnerError` → `Failed`; `ToolMissing` →
     /// `NotRun` (skipping a missing tool is the conservative choice;
     /// the gate still refuses to GREEN until the tool is run).
@@ -138,16 +149,18 @@ impl CheckResult {
 /// Single dispatch interface for checking certificate files in a
 /// foreign proof system.
 ///
+
 /// Implementations MUST:
 ///
-///   * Be cheap to construct (`Default::default()`-friendly).
-///   * Honour reasonable defaults for tool flags (no-libraries,
-///     no-network, deterministic).
-///   * Return `CheckResult::ToolMissing` (NOT `RunnerError`) when
-///     the tool is not on the system PATH; this is the
-///     differentially-meaningful signal.
-///   * Capture a bounded prefix of stdout/stderr for diagnostic
-///     display (avoid blowing up on tools that print MB of output).
+
+///  * Be cheap to construct (`Default::default()`-friendly).
+///  * Honour reasonable defaults for tool flags (no-libraries,
+///  no-network, deterministic).
+///  * Return `CheckResult::ToolMissing` (NOT `RunnerError`) when
+///  the tool is not on the system PATH; this is the
+///  differentially-meaningful signal.
+///  * Capture a bounded prefix of stdout/stderr for diagnostic
+///  display (avoid blowing up on tools that print MB of output).
 pub trait ForeignSystemChecker {
     /// The format this checker handles.
     fn format(&self) -> ExportFormat;
@@ -161,9 +174,9 @@ pub trait ForeignSystemChecker {
     /// One-line install hint for the user.
     fn install_hint(&self) -> &'static str;
 
-    /// Canonical foreign-system handle.  Default implementation
+    /// Canonical foreign-system handle. Default implementation
     /// converts [`format`](Self::format) via
-    /// [`ExportFormat::to_foreign_system`].  Lets consumers dispatch
+    /// [`ExportFormat::to_foreign_system`]. Lets consumers dispatch
     /// by typed enum without going through the format → ID mapping.
     fn foreign_system(&self) -> verum_kernel::foreign_system::ForeignSystem {
         self.format().to_foreign_system()
@@ -171,7 +184,7 @@ pub trait ForeignSystemChecker {
 }
 
 /// Helper: spawn a command, capture exit/stderr/stdout, return a
-/// [`CheckResult`].  Common implementation across most checkers.
+/// [`CheckResult`]. Common implementation across most checkers.
 fn run_external_tool(
     tool: &str,
     args: &[&str],
@@ -211,7 +224,7 @@ fn run_external_tool(
     }
 }
 
-/// Best-effort version probe (`<tool> --version`).  Used only for
+/// Best-effort version probe (`<tool> --version`). Used only for
 /// `Passed`-result diagnostics; failures are silent.
 fn tool_version_probe(tool: &str) -> Option<String> {
     let output = Command::new(tool).arg("--version").output().ok()?;
@@ -286,11 +299,11 @@ impl ForeignSystemChecker for LeanChecker {
     }
 }
 
-/// Agda — `agda --safe <file>.agda`.  The `--safe` flag rejects
+/// Agda — `agda --safe <file>.agda`. The `--safe` flag rejects
 /// postulates / unsafe primitives that would let the file
 /// "type-check" trivially via `Set` inhabitation; a clean
 /// `agda --safe` pass is meaningful (the closest analogue to
-/// `coqc -q` in strictness).  For files that legitimately use
+/// `coqc -q` in strictness). For files that legitimately use
 /// postulates (Verum's untranslated theorems), the checker omits
 /// `--safe` so postulates pass without rejection.
 #[derive(Debug, Default, Clone, Copy)]
@@ -306,7 +319,7 @@ impl ForeignSystemChecker for AgdaChecker {
         let p = path.to_string_lossy();
         // `--no-libraries` keeps the checker hermetic — it doesn't
         // try to resolve a stdlib import path that may be missing
-        // on the host.  Verum-emitted files import nothing by
+        // on the host. Verum-emitted files import nothing by
         // default; if a future emission imports stdlib, this flag
         // can be lifted.
         run_external_tool(
@@ -318,7 +331,7 @@ impl ForeignSystemChecker for AgdaChecker {
     }
 }
 
-/// Isabelle/HOL — `isabelle process -e 'use_thy "<file>"'`.  Lighter
+/// Isabelle/HOL — `isabelle process -e 'use_thy "<file>"'`. Lighter
 /// than `isabelle build -d`; works on standalone .thy files.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IsabelleChecker;
@@ -369,7 +382,7 @@ impl ForeignSystemChecker for DeduktiChecker {
 // Generic format → checker dispatch
 // =============================================================================
 
-/// Return the canonical checker for a format.  Total over the
+/// Return the canonical checker for a format. Total over the
 /// `ExportFormat` enum after #156 closed Agda (was the last gap).
 pub fn checker_for(format: ExportFormat) -> Option<Box<dyn ForeignSystemChecker>> {
     match format {
@@ -385,18 +398,20 @@ pub fn checker_for(format: ExportFormat) -> Option<Box<dyn ForeignSystemChecker>
 // Docker backend (#149 / MSFS-L4.15)
 // =============================================================================
 //
+
 // Turns the cross-format gate from observability (host needs coqc / lean
-// installed) into a load-bearing CI gate (host needs only Docker).  Each
+// installed) into a load-bearing CI gate (host needs only Docker). Each
 // foreign tool runs inside its canonical container image, mounted on a
 // host directory of emitted .v / .lean files.
 //
+
 // The backend is selected via the `--docker` flag on the audit gate and
 // (independently) via the `VERUM_FOREIGN_TOOL_BACKEND` env var (`docker`
-// or `native`; default `native`).  Image names are configurable per-
+// or `native`; default `native`). Image names are configurable per-
 // format via env (`VERUM_DOCKER_IMAGE_COQ`, `VERUM_DOCKER_IMAGE_LEAN`,
 // etc.) so CI can pin to a specific tag.
 
-/// Per-format Docker image configuration.  Defaults pin known-good
+/// Per-format Docker image configuration. Defaults pin known-good
 /// images for reproducible CI; override via env vars.
 #[derive(Debug, Clone)]
 pub struct DockerCheckerConfig {
@@ -415,7 +430,7 @@ pub struct DockerCheckerConfig {
 
 impl DockerCheckerConfig {
     /// Coq config — `coqorg/coq:8.18.0-flambda` runs `coqc` inside
-    /// `/work`.  The image's user is `coq` with HOME at `/home/coq`,
+    /// `/work`. The image's user is `coq` with HOME at `/home/coq`,
     /// but `coqc` doesn't need write access outside the mount point.
     pub fn coq_default() -> Self {
         Self {
@@ -444,7 +459,7 @@ impl DockerCheckerConfig {
 }
 
 /// Helper: invoke `docker run --rm -v <host_dir>:<mount> <image>
-/// <tool> <args...> <mount>/<filename>`.  Captures exit/stderr/stdout
+/// <tool> <args...> <mount>/<filename>`. Captures exit/stderr/stdout
 /// and lifts to a [`CheckResult`].
 fn run_docker_tool(
     config: &DockerCheckerConfig,
@@ -519,7 +534,7 @@ fn run_docker_tool(
     } else {
         let exit_code = output.status.code().unwrap_or(-1);
         // Distinguish docker-infrastructure failures from real
-        // foreign-tool failures.  When docker itself errors before the
+        // foreign-tool failures. When docker itself errors before the
         // tool runs (daemon down, image pull failure, etc.) we surface
         // `ToolMissing` so the gate doesn't conflate "infrastructure
         // unhealthy" with "the proof was rejected by coqc/lean".
@@ -543,7 +558,7 @@ fn run_docker_tool(
 
 /// Recognise stderr substrings that indicate docker itself failed
 /// before invoking the foreign tool — daemon-not-running, image-pull
-/// failure, permission errors on the socket, etc.  Used to surface
+/// failure, permission errors on the socket, etc. Used to surface
 /// these as `ToolMissing` (infrastructure issue) rather than `Failed`
 /// (proof failure).
 fn is_docker_infrastructure_error(stderr: &str) -> bool {
@@ -639,7 +654,7 @@ impl ForeignSystemChecker for DockerLeanChecker {
 /// Backend selection — native PATH-resolved tool vs Docker container.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckerBackend {
-    /// Use the host's PATH-resolved tool.  Default.
+    /// Use the host's PATH-resolved tool. Default.
     Native,
     /// Run the foreign tool inside its canonical Docker image.
     Docker,
@@ -647,9 +662,9 @@ pub enum CheckerBackend {
 
 impl CheckerBackend {
     /// Read backend selection from `VERUM_FOREIGN_TOOL_BACKEND`
-    /// environment variable.  Defaults to `Native`.  Recognises:
-    ///   * `docker` / `Docker` / `DOCKER` → `CheckerBackend::Docker`
-    ///   * anything else (incl. unset) → `CheckerBackend::Native`
+    /// environment variable. Defaults to `Native`. Recognises:
+    ///  * `docker` / `Docker` / `DOCKER` → `CheckerBackend::Docker`
+    ///  * anything else (incl. unset) → `CheckerBackend::Native`
     pub fn from_env() -> Self {
         match std::env::var("VERUM_FOREIGN_TOOL_BACKEND")
             .unwrap_or_default()
@@ -897,7 +912,7 @@ mod tests {
         let lean = checker_for_backend(ExportFormat::Lean4, CheckerBackend::Docker).unwrap();
         assert_eq!(lean.format(), ExportFormat::Lean4);
         // Isabelle / Dedukti Docker variants not yet wired — fall back
-        // to native (still some).  Pin the contract.
+        // to native (still some). Pin the contract.
         let isa = checker_for_backend(ExportFormat::Isabelle, CheckerBackend::Docker);
         assert!(isa.is_some());
     }

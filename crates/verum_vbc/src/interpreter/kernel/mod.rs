@@ -1,5 +1,6 @@
 //! Kernel dispatch layer for tensor operations.
 //!
+
 //! This module provides backend-specific implementations of tensor operations,
 //! with automatic dispatch based on device type and capabilities.
 
@@ -151,12 +152,14 @@ const MIN_GPU_SIZE: usize = 4096;
 // PrecisionContext for Kernel Operations
 // ============================================================================
 //
+
 // The PrecisionContext provides runtime precision configuration to kernel
 // operations. This allows operations to:
 // - Use lower precision for speed (F16, BF16)
 // - Control rounding behavior
 // - Flush denormals for performance
 //
+
 // PrecisionMode: controls Float32/Float64/Float128 precision and rounding mode
 // (NearestEven, TowardZero, TowardPosInf, TowardNegInf) for mathematical kernels.
 
@@ -165,6 +168,7 @@ pub use super::state::{PrecisionMode, FloatPrecision, RoundingMode};
 
 /// Precision context for kernel operations.
 ///
+
 /// This wraps PrecisionMode and provides additional methods for kernel-specific
 /// precision handling.
 #[derive(Debug, Clone, Copy)]
@@ -183,6 +187,7 @@ impl PrecisionContext {
 
     /// Returns the target DType for floating-point operations.
     ///
+
     /// Maps the precision setting to the corresponding DType.
     pub fn target_dtype(&self) -> DType {
         match self.mode.precision {
@@ -195,6 +200,7 @@ impl PrecisionContext {
 
     /// Returns true if the operation should use reduced precision.
     ///
+
     /// This is a hint to kernels that they can use lower precision
     /// intermediate values when the target precision is less than F64.
     pub fn use_reduced_precision(&self) -> bool {
@@ -228,6 +234,7 @@ impl PrecisionContext {
 
     /// Rounds an f64 value according to the rounding mode.
     ///
+
     /// Note: This is a software implementation. Hardware rounding mode
     /// changes would require platform-specific intrinsics.
     #[inline]
@@ -322,6 +329,7 @@ pub fn dispatch_binop(
 
 /// Dispatch binary operation with scalar broadcasting optimization.
 ///
+
 /// When one operand is a scalar (numel=1), uses optimized SIMD splat kernels
 /// instead of expanding the scalar to full tensor size.
 pub fn dispatch_binop_broadcast(
@@ -451,6 +459,7 @@ pub fn dispatch_unop(
 
 /// Dispatch reduction operation to appropriate kernel
 ///
+
 /// Uses Metal GPU for large F32 full reductions on macOS, falls back to CPU otherwise.
 pub fn dispatch_reduce(
     a: &TensorHandle,
@@ -525,6 +534,7 @@ pub fn dispatch_matmul(
 
 /// Dispatch softmax to appropriate kernel
 ///
+
 /// Uses Metal GPU for large F32 tensors on macOS, falls back to CPU otherwise.
 pub fn dispatch_softmax(
     a: &TensorHandle,
@@ -556,6 +566,7 @@ pub fn dispatch_softmax(
 
 /// Dispatch layer normalization to appropriate kernel
 ///
+
 /// Uses Metal GPU for large F32 2D tensors on macOS, falls back to CPU otherwise.
 pub fn dispatch_layer_norm(
     input: &TensorHandle,
@@ -714,6 +725,7 @@ fn compute_broadcast_strides(src_shape: &[usize], target_shape: &[usize]) -> Opt
 
 /// Dispatch Cholesky decomposition to appropriate kernel.
 ///
+
 /// Computes the Cholesky factorization of a symmetric positive-definite matrix.
 /// Returns L such that A = L * L^T (if upper=false) or U such that A = U^T * U (if upper=true).
 pub fn dispatch_cholesky(
@@ -729,8 +741,10 @@ pub fn dispatch_cholesky(
 
 /// Dispatch triangular solve to appropriate kernel.
 ///
+
 /// Solves A * x = b (or A^T * x = b) where A is triangular.
 ///
+
 /// Flags byte encoding:
 /// - bit 0: upper (1) or lower (0) triangular
 /// - bit 1: transpose (1) or normal (0)
@@ -750,6 +764,7 @@ pub fn dispatch_trisolve(
 
 /// Dispatch Einstein summation to appropriate kernel.
 ///
+
 /// Computes tensor contractions according to the einsum equation string.
 /// Supports common operations like:
 /// - Matrix multiplication: "ij,jk->ik"
@@ -781,11 +796,14 @@ pub fn dispatch_einsum(
 
 /// Dispatch Fast Fourier Transform to appropriate kernel.
 ///
+
 /// Computes 1D FFT along the specified dimension.
 ///
+
 /// - `dim`: dimension to transform (-1 = last dimension)
 /// - `inverse`: if true, compute inverse FFT
 ///
+
 /// Returns complex output (Complex64) for all input types.
 pub fn dispatch_fft(
     input: &TensorHandle,
@@ -802,8 +820,10 @@ pub fn dispatch_fft(
 
 /// Dispatch scaled dot-product attention to appropriate kernel.
 ///
+
 /// Computes: Attention(Q, K, V) = softmax(Q @ K^T / sqrt(d_k) + mask) @ V
 ///
+
 /// Supports both 3D [batch, seq, dim] and 4D [batch, heads, seq, dim] inputs.
 /// The mask is additive (e.g., -inf for masked positions).
 pub fn dispatch_attention(
@@ -822,8 +842,10 @@ pub fn dispatch_attention(
 
 /// Dispatch batched matrix multiplication to appropriate kernel.
 ///
+
 /// Computes C[b, i, j] = sum_k A[b, i, k] * B[b, k, j] for each batch b.
 ///
+
 /// Input shapes: A [batch, M, K], B [batch, K, N]
 /// Output: [batch, M, N]
 pub fn dispatch_bmm(
@@ -839,8 +861,10 @@ pub fn dispatch_bmm(
 
 /// Dispatch QR decomposition to appropriate kernel.
 ///
+
 /// Computes A = Q * R via Householder reflections.
 ///
+
 /// Input: A [M, N] where M >= N
 /// Output: (Q [M, M], R [M, N])
 pub fn dispatch_qr(
@@ -855,8 +879,10 @@ pub fn dispatch_qr(
 
 /// Dispatch SVD decomposition to appropriate kernel.
 ///
+
 /// Computes A = U * S * V^T via Jacobi algorithm.
 ///
+
 /// Input: A [M, N]
 /// Output: (U [M, M], S [min(M,N)], Vt [N, N])
 pub fn dispatch_svd(
@@ -871,8 +897,10 @@ pub fn dispatch_svd(
 
 /// Dispatch eigenvalue decomposition to appropriate kernel.
 ///
+
 /// Computes A = V * D * V^T for symmetric matrices via Jacobi algorithm.
 ///
+
 /// Input: A [N, N] (must be symmetric)
 /// Output: (eigenvalues [N], eigenvectors [N, N])
 pub fn dispatch_eig_symmetric(
@@ -887,12 +915,15 @@ pub fn dispatch_eig_symmetric(
 
 /// Dispatch least squares solve to appropriate kernel.
 ///
+
 /// Solves min_x ||A * x - b||_2 via QR decomposition.
 ///
+
 /// Input:
 /// - A [M, N] where M >= N
 /// - b [M] or [M, K]
 ///
+
 /// Output: x [N] or [N, K]
 pub fn dispatch_lstsq(
     a: &TensorHandle,
@@ -907,6 +938,7 @@ pub fn dispatch_lstsq(
 
 /// Dispatch vector/matrix norm to appropriate kernel.
 ///
+
 /// Computes various norms:
 /// - ord=0: L0 "norm" (count of non-zeros)
 /// - ord=1: L1 norm (sum of absolute values)
@@ -915,11 +947,13 @@ pub fn dispatch_lstsq(
 /// - ord=-inf: Min absolute value
 /// - General p-norm: (sum |x|^p)^(1/p)
 ///
+
 /// Input:
 /// - tensor of any shape
 /// - ord: norm order (default 2.0)
 /// - axis: reduce along this axis, or None for full tensor
 ///
+
 /// Output: scalar (axis=None) or tensor with axis dimension removed
 pub fn dispatch_norm(
     a: &TensorHandle,
@@ -935,12 +969,15 @@ pub fn dispatch_norm(
 
 /// Dispatch matrix-vector multiplication.
 ///
+
 /// Computes y = A @ x
 ///
+
 /// Input:
 /// - A [m, n] matrix
 /// - x [n] vector
 ///
+
 /// Output: y [m] vector
 pub fn dispatch_mv(
     a: &TensorHandle,
@@ -955,13 +992,16 @@ pub fn dispatch_mv(
 
 /// Dispatch diagonal extraction/creation.
 ///
+
 /// - 2D input [m, n]: extracts diagonal as 1D [min(m,n)]
 /// - 1D input [n]: creates diagonal matrix [n+|k|, n+|k|]
 ///
+
 /// Input:
 /// - tensor (1D or 2D)
 /// - k: diagonal offset (0=main, >0=above, <0=below)
 ///
+
 /// Output: 1D diagonal or 2D diagonal matrix
 pub fn dispatch_diag(
     a: &TensorHandle,
@@ -976,12 +1016,15 @@ pub fn dispatch_diag(
 
 /// Dispatch upper triangular extraction.
 ///
+
 /// Returns matrix with zeros below the k-th diagonal.
 ///
+
 /// Input:
 /// - A [m, n] matrix
 /// - k: diagonal offset (0=main, >0=above, <0=below)
 ///
+
 /// Output: [m, n] upper triangular matrix
 pub fn dispatch_triu(
     a: &TensorHandle,
@@ -996,12 +1039,15 @@ pub fn dispatch_triu(
 
 /// Dispatch lower triangular extraction.
 ///
+
 /// Returns matrix with zeros above the k-th diagonal.
 ///
+
 /// Input:
 /// - A [m, n] matrix
 /// - k: diagonal offset (0=main, >0=above, <0=below)
 ///
+
 /// Output: [m, n] lower triangular matrix
 pub fn dispatch_tril(
     a: &TensorHandle,
@@ -1016,11 +1062,14 @@ pub fn dispatch_tril(
 
 /// Dispatch matrix inverse.
 ///
+
 /// Computes A^(-1) via Gauss-Jordan elimination.
 ///
+
 /// Input: A [n, n] square non-singular matrix
 /// Output: A^(-1) [n, n]
 ///
+
 /// Returns None if matrix is singular.
 pub fn dispatch_inverse(
     a: &TensorHandle,
@@ -1038,6 +1087,7 @@ pub fn dispatch_inverse(
 
 /// Dispatch complex conjugate operation.
 ///
+
 /// Returns the complex conjugate: conj(a + bi) = a - bi
 pub fn dispatch_conj(a: &TensorHandle) -> Option<TensorHandle> {
     match a.dtype {
@@ -1049,6 +1099,7 @@ pub fn dispatch_conj(a: &TensorHandle) -> Option<TensorHandle> {
 
 /// Dispatch complex real part extraction.
 ///
+
 /// Returns the real component as a float tensor.
 pub fn dispatch_real(a: &TensorHandle) -> Option<TensorHandle> {
     match a.dtype {
@@ -1060,6 +1111,7 @@ pub fn dispatch_real(a: &TensorHandle) -> Option<TensorHandle> {
 
 /// Dispatch complex imaginary part extraction.
 ///
+
 /// Returns the imaginary component as a float tensor.
 pub fn dispatch_imag(a: &TensorHandle) -> Option<TensorHandle> {
     match a.dtype {
@@ -1074,9 +1126,11 @@ pub use cpu::ScatterMode;
 
 /// Dispatch cumulative sum to appropriate kernel.
 ///
+
 /// Computes cumulative sum along the specified axis.
 /// out[..., i, ...] = sum(input[..., 0:i+1, ...])
 ///
+
 /// Input: tensor of any shape
 /// Output: tensor with same shape, containing cumulative sums
 pub fn dispatch_cumsum(
@@ -1092,9 +1146,11 @@ pub fn dispatch_cumsum(
 
 /// Dispatch cumulative product to appropriate kernel.
 ///
+
 /// Computes cumulative product along the specified axis.
 /// out[..., i, ...] = prod(input[..., 0:i+1, ...])
 ///
+
 /// Input: tensor of any shape
 /// Output: tensor with same shape, containing cumulative products
 pub fn dispatch_cumprod(
@@ -1110,14 +1166,17 @@ pub fn dispatch_cumprod(
 
 /// Dispatch gather operation to appropriate kernel.
 ///
+
 /// Gathers values from input using indices along the specified axis.
-/// output[i][j][k] = input[index[i][j][k]][j][k]  (for axis=0)
+/// output[i][j][k] = input[index[i][j][k]][j][k] (for axis=0)
 ///
+
 /// Input:
 /// - input: source tensor
 /// - indices: integer tensor (I32 or I64)
 /// - axis: dimension to gather along
 ///
+
 /// Output: tensor with shape matching indices
 pub fn dispatch_gather(
     input: &TensorHandle,
@@ -1133,9 +1192,11 @@ pub fn dispatch_gather(
 
 /// Dispatch scatter operation to appropriate kernel.
 ///
+
 /// Scatters values from src into output at positions specified by indices.
-/// output[index[i][j][k]][j][k] = src[i][j][k]  (for axis=0)
+/// output[index[i][j][k]][j][k] = src[i][j][k] (for axis=0)
 ///
+
 /// Input:
 /// - input: destination tensor (cloned, not modified in place)
 /// - indices: integer tensor (I32 or I64)
@@ -1143,6 +1204,7 @@ pub fn dispatch_gather(
 /// - axis: dimension to scatter along
 /// - mode: scatter reduction mode (Replace, Add, Mul, Max, Min)
 ///
+
 /// Output: tensor with scattered values
 pub fn dispatch_scatter(
     input: &TensorHandle,
@@ -1160,12 +1222,15 @@ pub fn dispatch_scatter(
 
 /// Dispatch linear system solve to appropriate kernel.
 ///
+
 /// Solves Ax = b using LU decomposition with partial pivoting.
 ///
+
 /// Input:
 /// - A [N, N] coefficient matrix (must be square)
 /// - b [N] or [N, K] right-hand side
 ///
+
 /// Output: x [N] or [N, K]
 pub fn dispatch_solve(
     a: &TensorHandle,
@@ -1180,8 +1245,10 @@ pub fn dispatch_solve(
 
 /// Dispatch argmax to appropriate kernel.
 ///
+
 /// Returns indices of maximum values along the specified axis.
 ///
+
 /// Input: tensor of any shape
 /// Output: tensor with axis dimension removed, dtype I64
 pub fn dispatch_argmax(
@@ -1197,8 +1264,10 @@ pub fn dispatch_argmax(
 
 /// Dispatch argmin to appropriate kernel.
 ///
+
 /// Returns indices of minimum values along the specified axis.
 ///
+
 /// Input: tensor of any shape
 /// Output: tensor with axis dimension removed, dtype I64
 pub fn dispatch_argmin(
@@ -1214,13 +1283,16 @@ pub fn dispatch_argmin(
 
 /// Dispatch index select to appropriate kernel.
 ///
+
 /// Selects elements from input along the specified axis using 1D indices.
 ///
+
 /// Input:
 /// - input: source tensor
 /// - indices: 1D integer tensor (I32 or I64)
 /// - axis: dimension to select along
 ///
+
 /// Output: tensor with axis dimension size = len(indices)
 pub fn dispatch_index_select(
     input: &TensorHandle,
@@ -1236,8 +1308,10 @@ pub fn dispatch_index_select(
 
 /// Dispatch nansum to appropriate kernel.
 ///
+
 /// Sum along axis, ignoring NaN values.
 ///
+
 /// Input: tensor of any shape
 /// Output: reduced tensor
 pub fn dispatch_nansum(
@@ -1254,8 +1328,10 @@ pub fn dispatch_nansum(
 
 /// Dispatch nanmean to appropriate kernel.
 ///
+
 /// Mean along axis, ignoring NaN values.
 ///
+
 /// Input: tensor of any shape
 /// Output: reduced tensor
 pub fn dispatch_nanmean(
@@ -1272,8 +1348,10 @@ pub fn dispatch_nanmean(
 
 /// Dispatch flip to appropriate kernel.
 ///
+
 /// Flip tensor along specified axes.
 ///
+
 /// Input: tensor of any shape
 /// Output: flipped tensor
 pub fn dispatch_flip(
@@ -1289,8 +1367,10 @@ pub fn dispatch_flip(
 
 /// Dispatch roll to appropriate kernel.
 ///
+
 /// Roll tensor along axis by shift positions.
 ///
+
 /// Input: tensor of any shape
 /// Output: rolled tensor
 pub fn dispatch_roll(
@@ -1307,8 +1387,10 @@ pub fn dispatch_roll(
 
 /// Dispatch LU decomposition to appropriate kernel.
 ///
+
 /// LU decomposition with partial pivoting: PA = LU
 ///
+
 /// Input: 2D tensor (m x n matrix)
 /// Output: (P, L, U) where P is permutation, L is lower, U is upper triangular
 pub fn dispatch_lu(
@@ -1323,9 +1405,11 @@ pub fn dispatch_lu(
 
 /// Dispatch general eigenvalue decomposition to appropriate kernel.
 ///
+
 /// Computes eigenvalues and eigenvectors of a square matrix.
 /// Note: For matrices with complex eigenvalues, only real parts are returned.
 ///
+
 /// Input: 2D square tensor (n x n matrix)
 /// Output: (eigenvalues, eigenvectors)
 pub fn dispatch_eig(
@@ -1340,8 +1424,10 @@ pub fn dispatch_eig(
 
 /// Dispatch matrix rank computation to appropriate kernel.
 ///
+
 /// Computes the rank of a matrix using SVD.
 ///
+
 /// Input: 2D tensor (m x n matrix)
 /// tol: tolerance for singular values to be considered zero
 /// Output: integer rank
@@ -1358,8 +1444,10 @@ pub fn dispatch_rank(
 
 /// Dispatch matrix condition number computation to appropriate kernel.
 ///
+
 /// Computes the condition number of a matrix.
 ///
+
 /// Input: 2D tensor (m x n matrix)
 /// p: norm type (1 for 1-norm, 2 for 2-norm, -1 for infinity-norm)
 /// Output: condition number (f64)
@@ -1376,8 +1464,10 @@ pub fn dispatch_cond(
 
 /// Dispatch Schur decomposition to appropriate kernel.
 ///
+
 /// Schur decomposition: A = Z * T * Z^H
 ///
+
 /// Input: 2D square tensor (n x n matrix)
 /// Output: (T, Z) where T is upper triangular and Z is unitary
 pub fn dispatch_schur(
@@ -1396,6 +1486,7 @@ pub fn dispatch_schur(
 
 /// Dispatch Kronecker product to appropriate kernel.
 ///
+
 /// The Kronecker product of A (m x n) and B (p x q) is (mp x nq).
 /// (A ⊗ B)[i,j] = A[i/p, j/q] * B[i%p, j%q]
 pub fn dispatch_kron(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
@@ -1411,6 +1502,7 @@ pub fn dispatch_kron(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle>
 
 /// Dispatch cross product to appropriate kernel.
 ///
+
 /// Computes the cross product of two 3D vectors.
 /// c = a × b where c[0] = a[1]*b[2] - a[2]*b[1], etc.
 pub fn dispatch_cross(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
@@ -1426,6 +1518,7 @@ pub fn dispatch_cross(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle
 
 /// Dispatch tensor contraction to appropriate kernel.
 ///
+
 /// Contract tensors along specified axes.
 /// axis_a and axis_b specify which dimensions to contract.
 pub fn dispatch_contract(
@@ -1446,6 +1539,7 @@ pub fn dispatch_contract(
 
 /// Dispatch matrix power to appropriate kernel.
 ///
+
 /// Computes A^n for integer n using binary exponentiation.
 pub fn dispatch_matrix_power(input: &TensorHandle, n: i32) -> Option<TensorHandle> {
     match input.dtype {
@@ -1457,6 +1551,7 @@ pub fn dispatch_matrix_power(input: &TensorHandle, n: i32) -> Option<TensorHandl
 
 /// Dispatch matrix exponential to appropriate kernel.
 ///
+
 /// Computes e^A using scaling and squaring with Padé approximation.
 pub fn dispatch_expm(input: &TensorHandle) -> Option<TensorHandle> {
     match input.dtype {
@@ -1468,6 +1563,7 @@ pub fn dispatch_expm(input: &TensorHandle) -> Option<TensorHandle> {
 
 /// Dispatch matrix logarithm to appropriate kernel.
 ///
+
 /// Computes log(A) using inverse scaling and squaring.
 /// Requires A to have no eigenvalues on the negative real axis.
 pub fn dispatch_logm(input: &TensorHandle) -> Option<TensorHandle> {
@@ -1484,6 +1580,7 @@ pub fn dispatch_logm(input: &TensorHandle) -> Option<TensorHandle> {
 
 /// Dispatch parallel associative scan for State Space Models.
 ///
+
 /// Implements the Blelloch parallel scan algorithm for efficient SSM computation.
 /// The op parameter determines the associative operation (0=add, 1=mul, 2=matmul).
 pub fn dispatch_ssm_scan(
@@ -1517,6 +1614,7 @@ pub fn dispatch_ssm_scan(
 
 /// Dispatch real-to-complex FFT.
 ///
+
 /// Computes the one-dimensional discrete Fourier Transform for real input.
 /// Returns complex output with shape [..., n//2 + 1].
 pub fn dispatch_rfft(input: &TensorHandle, n: usize) -> Option<TensorHandle> {
@@ -1529,6 +1627,7 @@ pub fn dispatch_rfft(input: &TensorHandle, n: usize) -> Option<TensorHandle> {
 
 /// Dispatch complex-to-real inverse FFT.
 ///
+
 /// Computes the one-dimensional inverse discrete Fourier Transform for
 /// Hermitian-symmetric input, returning real output.
 pub fn dispatch_irfft(input: &TensorHandle, n: usize) -> Option<TensorHandle> {
@@ -1544,6 +1643,7 @@ pub fn dispatch_irfft(input: &TensorHandle, n: usize) -> Option<TensorHandle> {
 
 /// Dispatch complex multiplication.
 ///
+
 /// Performs element-wise multiplication of two complex tensors.
 pub fn dispatch_complex_mul(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.shape != b.shape {
@@ -1562,6 +1662,7 @@ pub fn dispatch_complex_mul(a: &TensorHandle, b: &TensorHandle) -> Option<Tensor
 
 /// Dispatch complex power operation.
 ///
+
 /// Computes base^exp for complex tensors.
 pub fn dispatch_complex_pow(base: &TensorHandle, exp: &TensorHandle) -> Option<TensorHandle> {
     if base.shape != exp.shape {
@@ -1583,6 +1684,7 @@ pub fn dispatch_complex_pow(base: &TensorHandle, exp: &TensorHandle) -> Option<T
 
 /// Dispatch uniform random tensor generation.
 ///
+
 /// Creates a tensor filled with uniformly distributed random values in [low, high).
 pub fn dispatch_uniform(
     shape: &[usize],
@@ -1599,18 +1701,21 @@ pub fn dispatch_uniform(
 
 /// Check if currently in training mode.
 ///
+
 /// **Note:** This function is deprecated. The dispatch handler now reads
 /// training mode directly from `state.context_stack.get_training_mode()`,
 /// which properly respects the scoped `TrainingMode` context.
 ///
+
 /// This function remains for backwards compatibility and testing, but
 /// will always return false. Use the context-based approach instead.
 ///
+
 /// # Example
 /// ```verum
 /// provide TrainingMode = true {
-///     // is_training() returns true here
-///     let dropout_active = is_training();
+///  // is_training() returns true here
+///  let dropout_active = is_training();
 /// }
 /// // is_training() returns false here
 /// ```
@@ -1644,6 +1749,7 @@ pub fn dispatch_random_float_01() -> f64 {
 
 /// Dispatch histogram binning (bincount).
 ///
+
 /// Counts occurrences of each value in the input tensor.
 pub fn dispatch_bincount(indices: &TensorHandle, num_bins: usize) -> Option<TensorHandle> {
     match indices.dtype {
@@ -1657,6 +1763,7 @@ pub fn dispatch_bincount(indices: &TensorHandle, num_bins: usize) -> Option<Tens
 
 /// Dispatch N-dimensional gather operation.
 ///
+
 /// Gathers values from input tensor using N-dimensional indices.
 pub fn dispatch_gather_nd(input: &TensorHandle, indices: &TensorHandle) -> Option<TensorHandle> {
     match input.dtype {
@@ -1670,6 +1777,7 @@ pub fn dispatch_gather_nd(input: &TensorHandle, indices: &TensorHandle) -> Optio
 
 /// Dispatch integer range tensor creation.
 ///
+
 /// Creates a 1D tensor with values from start to end (exclusive) with given step.
 pub fn dispatch_arange_usize(start: usize, end: usize, step: usize) -> Option<TensorHandle> {
     if step == 0 || (start >= end && step > 0) {
@@ -1682,6 +1790,7 @@ pub fn dispatch_arange_usize(start: usize, end: usize, step: usize) -> Option<Te
 
 /// Dispatch tensor repeat along new dimension.
 ///
+
 /// Repeats tensor `times` times along a new leading dimension.
 pub fn dispatch_repeat(input: &TensorHandle, times: usize) -> Option<TensorHandle> {
     if times == 0 {
@@ -1821,14 +1930,17 @@ pub fn dispatch_sample_temperature(logits: &TensorHandle, temperature: f64) -> O
 
 /// Paged attention for efficient KV cache.
 ///
+
 /// Computes attention output by gathering K,V from non-contiguous memory blocks.
 /// This enables memory-efficient serving with dynamic sequence lengths.
 ///
+
 /// Algorithm:
 /// 1. Gather K,V values from blocks specified in block_table
 /// 2. Compute attention: softmax(Q @ K^T / sqrt(head_dim)) @ V
 /// 3. Return output tensor
 ///
+
 /// # Arguments
 /// * `q` - Query tensor [batch, num_heads, seq_q, head_dim]
 /// * `kv_cache` - KV cache tensor [num_blocks, num_heads, block_size, head_dim * 2] (K and V concatenated)
@@ -1984,11 +2096,13 @@ pub fn dispatch_paged_attention(
 
 /// Parse tool call from action string.
 ///
+
 /// Supports multiple formats:
 /// - Python-style: `tool_name(arg1=value1, arg2=value2)`
 /// - JSON-style: `{"name": "tool_name", "arguments": {"arg1": "value1"}}`
 /// - Simple call: `tool_name()` (no arguments)
 ///
+
 /// Returns (tool_name, arguments_json) if successful.
 pub fn dispatch_parse_tool_call(action: &str) -> Option<(String, String)> {
     let action = action.trim();
@@ -2278,18 +2392,22 @@ pub fn dispatch_tensor_from_slice_usize(values: &[usize]) -> Option<TensorHandle
 
 /// Quantized matrix multiplication with dequantization.
 ///
+
 /// Performs efficient INT8 matrix multiplication using the formula:
 /// output = input @ dequantize(weight)
 /// where dequantize(w) = (w - zero_point) * scale
 ///
+
 /// This enables 2-4x memory reduction while maintaining reasonable accuracy.
 ///
+
 /// # Arguments
 /// * `input` - Float input tensor [batch, ..., in_features]
 /// * `weight` - INT8 quantized weights [out_features, in_features]
 /// * `scale` - Per-channel scale factors [out_features]
 /// * `zero_point` - Per-channel zero points [out_features]
 ///
+
 /// # Returns
 /// Float output tensor [batch, ..., out_features]
 pub fn dispatch_quantized_matmul(
@@ -2579,6 +2697,7 @@ pub fn dispatch_pmap_all_gather(tensor: &TensorHandle, _axis_name: &str) -> Opti
 
 /// Vmap transformation stub: vectorize a function over a batch dimension.
 ///
+
 /// Full vmap requires JIT tracing to capture the function body and vectorize it.
 /// The interpreter currently returns None (no-op). When a real tensor is available,
 /// use `dispatch_vmap_transform_tensor()` instead.
@@ -2589,11 +2708,13 @@ pub fn dispatch_vmap_transform() -> Option<()> {
 
 /// Vmap transformation on a concrete tensor: rearranges batch dimension.
 ///
+
 /// In the interpreter, vmap operates on tensors by:
 /// 1. Slicing the input tensor along the specified axis
 /// 2. Applying the function to each slice
 /// 3. Stacking the results back into a tensor
 ///
+
 /// This is a CPU-only implementation that processes slices sequentially.
 pub fn dispatch_vmap_transform_tensor(
     tensor: &TensorHandle,
@@ -2622,6 +2743,7 @@ pub fn dispatch_vmap_transform_tensor(
 
 /// Pmap transformation stub: parallelize a function across processes.
 ///
+
 /// Full pmap requires a distributed runtime. Returns None (no-op).
 /// When a real tensor is available, use `dispatch_pmap_transform_tensor()` instead.
 pub fn dispatch_pmap_transform() -> Option<()> {
@@ -2631,6 +2753,7 @@ pub fn dispatch_pmap_transform() -> Option<()> {
 
 /// Pmap transformation on a concrete tensor.
 ///
+
 /// In single-process mode, pmap is equivalent to vmap along the first axis.
 pub fn dispatch_pmap_transform_tensor(
     tensor: &TensorHandle,
@@ -3010,6 +3133,7 @@ pub fn dispatch_regex_split(pattern: &str, text: &str) -> Option<Vec<String>> {
 
 /// Find the FIRST match of a regex pattern in text.
 ///
+
 /// Returns `Some(matched_substring)` on a successful match, or
 /// `None` when either the pattern fails to compile (mirrors the
 /// bulk variants' error-collapse semantics) or no match is found.
@@ -3022,6 +3146,7 @@ pub fn dispatch_regex_find(pattern: &str, text: &str) -> Option<String> {
 
 /// Replace the FIRST match of a regex pattern in text.
 ///
+
 /// Returns `Some(text)` on successful pattern compile (whether or
 /// not a match was found — `regex::replace` returns the input
 /// unchanged when no match exists). `None` only when the pattern
@@ -3036,11 +3161,13 @@ pub fn dispatch_regex_replace(pattern: &str, text: &str, replacement: &str) -> O
 /// Run a capturing regex against `text` and return ordered group
 /// captures of the FIRST match.
 ///
+
 /// Layout: `result[0]` is always the entire match; `result[i]` for
 /// `i >= 1` is the i-th `(group)` capture. Non-participating
 /// groups become empty strings — callers preferring `Maybe<Text>`
 /// per group can re-check at the Verum side.
 ///
+
 /// Returns `None` when the pattern fails to compile or no match
 /// exists.
 pub fn dispatch_regex_captures(pattern: &str, text: &str) -> Option<Vec<String>> {

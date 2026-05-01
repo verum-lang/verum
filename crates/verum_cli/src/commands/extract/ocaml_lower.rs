@@ -1,5 +1,6 @@
 //! Verum AST → OCaml lowerer.
 //!
+
 //! Walks a [`verum_ast::expr::Expr`] (or [`verum_ast::expr::Block`])
 //! and emits the corresponding OCaml source text. The lowerer is
 //! **partial-coverage by design** — covering the common pure-
@@ -8,16 +9,17 @@
 //! its current vocabulary so the caller can gracefully fall back
 //! to the V12.1 metadata-comment scaffold.
 //!
+
 //! Architectural notes (per VVA semantic-honesty):
-//!   * Pure functional subset matches OCaml's strict-evaluation
-//!     ML core; effectful Verum constructs (mutation, async,
-//!     contexts) are deliberately out of V12.2 scope and surface
-//!     as `None`.
-//!   * Identifier mangling is conservative: alphanumeric +
-//!     underscore preserved, leading uppercase mapped to OCaml's
-//!     constructor-naming convention (Cons → `Cons`, none → `none`).
-//!   * Operator translation chooses the OCaml-canonical form
-//!     (`==` → structural `=`, `!=` → `<>`, `&&` / `||` keep).
+//!  * Pure functional subset matches OCaml's strict-evaluation
+//!  ML core; effectful Verum constructs (mutation, async,
+//!  contexts) are deliberately out of V12.2 scope and surface
+//!  as `None`.
+//!  * Identifier mangling is conservative: alphanumeric +
+//!  underscore preserved, leading uppercase mapped to OCaml's
+//!  constructor-naming convention (Cons → `Cons`, none → `none`).
+//!  * Operator translation chooses the OCaml-canonical form
+//!  (`==` → structural `=`, `!=` → `<>`, `&&` / `||` keep).
 
 use verum_ast::expr::{BinOp, Block, Expr, ExprKind, ConditionKind, IfCondition, UnOp};
 use verum_ast::literal::{LiteralKind, StringLit};
@@ -28,10 +30,10 @@ use verum_common::Maybe;
 /// the lowerer's coverage.
 pub(super) fn lower_block(block: &Block) -> Option<String> {
     // Strategy: walk statements in order.
-    //   * `let x = e` → emit `let x = <lower(e)> in `
-    //   * other stmts → unsupported (V12.2.1 may add side-effect
-    //     handling); for now return None.
-    //   * trailing tail expr → lower as the final expression.
+    //  * `let x = e` → emit `let x = <lower(e)> in `
+    //  * other stmts → unsupported (V12.2.1 may add side-effect
+    //  handling); for now return None.
+    //  * trailing tail expr → lower as the final expression.
     let mut out = String::new();
     for stmt in block.stmts.iter() {
         use verum_ast::stmt::StmtKind;

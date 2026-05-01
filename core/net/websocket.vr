@@ -3,11 +3,12 @@
 // =============================================================================
 // Layer: 5 (Network)
 // Dependencies: core.net.http, core.net.http_parser, core.security.hash.sha1,
-//               core.encoding.base64, core.io
+//  core.encoding.base64, core.io
 // Spec: https://datatracker.ietf.org/doc/html/rfc6455
-//       permessage-deflate: RFC 7692 (not yet implemented)
+//  permessage-deflate: RFC 7692 (not yet implemented)
 // =============================================================================
 //
+
 // Covers:
 // - Opening handshake (client + server) — Sec-WebSocket-Accept derivation
 // - WsFrame format (FIN/RSV/opcode + MASK/length/masking-key/payload)
@@ -15,12 +16,15 @@
 // - Close codes per §7.4
 // - Ping/pong control frames
 //
+
 // Deferred (tracked as follow-up):
 // - permessage-deflate extension (RFC 7692)
 // - Subprotocol negotiation helper beyond plain passthrough
 //
+
 // # Handshake
 //
+
 // Client → Server request:
 // ```
 // GET / HTTP/1.1
@@ -31,6 +35,7 @@
 // Sec-WebSocket-Version: 13
 // ```
 //
+
 // Server → Client response:
 // ```
 // HTTP/1.1 101 Switching Protocols
@@ -39,26 +44,29 @@
 // Sec-WebSocket-Accept: base64(sha1(key || MAGIC))
 // ```
 //
+
 // MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" (RFC 6455 §4.2.2).
 //
+
 // # WsFrame format (§5.2)
 //
+
 // ```
-//  0                   1                   2                   3
+//  0 1 2 3
 //  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 // +-+-+-+-+-------+-+-------------+-------------------------------+
-// |F|R|R|R| opcode|M| Payload len |    Extended payload length    |
-// |I|S|S|S|  (4)  |A|     (7)     |             (16/64)           |
-// |N|V|V|V|       |S|             |   (if payload len==126/127)   |
-// | |1|2|3|       |K|             |                               |
+// |F|R|R|R| opcode|M| Payload len | Extended payload length |
+// |I|S|S|S| (4) |A| (7) | (16/64) |
+// |N|V|V|V| |S| | (if payload len==126/127) |
+// | |1|2|3| |K| | |
 // +-+-+-+-+-------+-+-------------+ - - - - - - - - - - - - - - - +
-// |     Extended payload length continued, if payload len == 127  |
+// | Extended payload length continued, if payload len == 127 |
 // + - - - - - - - - - - - - - - - +-------------------------------+
-// |                               |Masking-key, if MASK set to 1  |
+// | |Masking-key, if MASK set to 1 |
 // +-------------------------------+-------------------------------+
-// |     Masking-key (continued)   |          Payload Data         |
+// | Masking-key (continued) | Payload Data |
 // +-------------------------------- - - - - - - - - - - - - - - - +
-// |                    Payload Data continued ...                 |
+// | Payload Data continued ... |
 // +---------------------------------------------------------------+
 // ```
 // =============================================================================

@@ -1,48 +1,56 @@
 //! Content-Addressed Storage (CAS) Layer
 //!
+
 //! Provides persistent, content-addressed storage for the semantic artifact cache.
 //! Artifacts are stored by their Blake3 hash, enabling deduplication across projects.
 //!
+
 //! ## Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
-//! │                     Content-Addressed Storage (CAS)                         │
-//! │  ┌─────────────────┐   ┌──────────────────┐   ┌───────────────────────────┐ │
-//! │  │  ContentStore   │   │  ArtifactStore   │   │  StorageBackend (trait)   │ │
-//! │  │  - hash_to_path │   │  - type_store    │   │  - LocalFS                │ │
-//! │  │  - read/write   │   │  - fn_store      │   │  - (future: S3, Redis)    │ │
-//! │  │  - gc_eviction  │   │  - verify_store  │   │                           │ │
-//! │  └─────────────────┘   └──────────────────┘   └───────────────────────────┘ │
+//! │ Content-Addressed Storage (CAS) │
+//! │ ┌─────────────────┐ ┌──────────────────┐ ┌───────────────────────────┐ │
+//! │ │ ContentStore │ │ ArtifactStore │ │ StorageBackend (trait) │ │
+//! │ │ - hash_to_path │ │ - type_store │ │ - LocalFS │ │
+//! │ │ - read/write │ │ - fn_store │ │ - (future: S3, Redis) │ │
+//! │ │ - gc_eviction │ │ - verify_store │ │ │ │
+//! │ └─────────────────┘ └──────────────────┘ └───────────────────────────┘ │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! ## Directory Structure
 //!
+
 //! ```text
 //! .verum/cas/
-//! ├── objects/              # Content-addressed objects (2-level fanout)
-//! │   ├── 00/
-//! │   │   └── ab3f8...      # Object file (hash = 00ab3f8...)
-//! │   ├── 01/
-//! │   └── ...
-//! ├── types/                # Type definition index
-//! │   └── index.bin
-//! ├── functions/            # Function signature/body index
-//! │   └── index.bin
-//! ├── verification/         # Verification result index
-//! │   └── index.bin
-//! └── metadata.json         # CAS metadata (version, stats)
+//! ├── objects/ # Content-addressed objects (2-level fanout)
+//! │ ├── 00/
+//! │ │ └── ab3f8... # Object file (hash = 00ab3f8...)
+//! │ ├── 01/
+//! │ └── ...
+//! ├── types/ # Type definition index
+//! │ └── index.bin
+//! ├── functions/ # Function signature/body index
+//! │ └── index.bin
+//! ├── verification/ # Verification result index
+//! │ └── index.bin
+//! └── metadata.json # CAS metadata (version, stats)
 //! ```
 //!
+
 //! ## Features
 //!
+
 //! - **Two-level fanout**: Objects stored in `objects/XX/YYY...` for filesystem efficiency
 //! - **Zstd compression**: Artifacts compressed with zstd level 3 by default
 //! - **Atomic writes**: Write to temp file, then atomic rename
 //! - **LRU eviction**: Optional garbage collection based on access time
 //! - **Cross-project sharing**: Global cache directory option
 //!
+
 //! Semantic artifact cache: content-addressed storage using semantic hashes
 //! for deduplication and cross-project artifact reuse.
 
@@ -84,6 +92,7 @@ const MAX_OBJECT_SIZE: usize = 100 * 1024 * 1024;
 
 /// Storage backend abstraction for content-addressed storage.
 ///
+
 /// This trait enables pluggable backends (local filesystem, S3, Redis, etc.)
 pub trait StorageBackend: Send + Sync {
     /// Check if an object exists by hash.

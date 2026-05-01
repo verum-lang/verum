@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — SQLITE_DBCONFIG_LOOKASIDE.
 //
+
 // Per-connection lookaside is a fixed-size slab of equal-length slots
 // used to satisfy small allocations without touching the heap.
 // =============================================================================

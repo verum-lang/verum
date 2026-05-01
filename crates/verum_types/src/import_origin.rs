@@ -1,5 +1,6 @@
 //! Import provenance — MOD-MED-2.
 //!
+
 //! Glob imports (`mount X.*`) without provenance discipline produced
 //! source-text-dependent name resolution: when two globs both
 //! re-export `Nil`, the second-encountered glob always overwrote the
@@ -8,17 +9,21 @@
 //! user's project must always have precedence over stdlib — and made
 //! glob-vs-glob shadowing observably non-deterministic across reorders.
 //!
+
 //! Fix: tag every glob-imported name with its `ImportOrigin` so that
 //! conflict resolution becomes a total ordering rather than
 //! source-position-dependent. Priority (lowest → highest):
 //!
-//!   Stdlib  <  External  <  Project
+
+//!  Stdlib < External < Project
 //!
+
 //! Same-origin ties default to first-wins (deterministic given the
 //! sorted import order in `import_all_from_module_impl`). When a
 //! project glob shadows a stdlib name, emit `W_STDLIB_SHADOW` so the
 //! user can audit the eviction.
 //!
+
 //! Explicit imports (`mount X.{Bar}`) always win over any glob —
 //! that rule predates this module and is enforced separately via the
 //! `explicit_imports` set.
@@ -49,9 +54,9 @@ impl ImportOrigin {
     pub fn classify(module_path: &str, current_cog_name: &str) -> Self {
         // The current cog is always `Project` regardless of how it's
         // referenced. We accept three shapes:
-        //   - `cog.…`            (canonical absolute prefix)
-        //   - `<cog_name>.…`     (the cog's user-visible name)
-        //   - `<cog_name>`       (the cog itself, no submodule)
+        //  - `cog.…` (canonical absolute prefix)
+        //  - `<cog_name>.…` (the cog's user-visible name)
+        //  - `<cog_name>` (the cog itself, no submodule)
         if module_path == "cog" || module_path.starts_with("cog.") {
             return ImportOrigin::Project;
         }
@@ -98,6 +103,7 @@ impl ImportOrigin {
 
 /// Provenance record stored alongside each glob-imported name.
 ///
+
 /// `module_path` keeps the original import source so the eviction
 /// warning can name both the loser and the winner.
 #[derive(Debug, Clone)]
@@ -115,11 +121,12 @@ impl ImportProvenance {
     /// provenance) be allowed to overwrite an existing entry whose
     /// provenance is `existing`?
     ///
+
     /// Rules:
-    ///   - Strictly higher priority → overwrite.
-    ///   - Strictly lower priority → preserve (return false).
-    ///   - Same priority (tie) → first wins (preserve, return false)
-    ///     for determinism across `mount` reorders.
+    ///  - Strictly higher priority → overwrite.
+    ///  - Strictly lower priority → preserve (return false).
+    ///  - Same priority (tie) → first wins (preserve, return false)
+    ///  for determinism across `mount` reorders.
     pub fn allows_overwrite(existing: &Self, incoming: &Self) -> bool {
         incoming.origin.priority() > existing.origin.priority()
     }

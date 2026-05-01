@@ -1,5 +1,6 @@
 //! Type representation for the Verum type system.
 //!
+
 //! This module defines the internal representation of types used during
 //! type checking and inference, including:
 //! - Primitive types (Int, Float, Bool, Text, Unit)
@@ -26,11 +27,13 @@ use crate::refinement::RefinementPredicate;
 /// Universe level for dependent type theory.
 /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
 ///
+
 /// Types have types (called universes) forming an infinite hierarchy:
 /// ```text
 /// Type₀ : Type₁ : Type₂ : ...
 /// ```
 ///
+
 /// This hierarchy prevents Girard's paradox (similar to Russell's paradox).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum UniverseLevel {
@@ -67,6 +70,7 @@ impl UniverseLevel {
     /// Successor universe level.
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Succ levels
     ///
+
     /// For concrete levels, directly computes n + 1.
     /// For variable levels, creates a Succ expression that will be resolved
     /// during constraint solving.
@@ -90,6 +94,7 @@ impl UniverseLevel {
     /// Maximum of two universe levels.
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Max levels
     ///
+
     /// For concrete levels, directly computes the maximum.
     /// For levels involving variables, creates constraint expressions
     /// that will be resolved during constraint solving via UniverseContext.
@@ -174,6 +179,7 @@ impl UniverseLevel {
     /// Check if this level is strictly less than another.
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
     ///
+
     /// Returns true only when we can definitively prove the relationship.
     /// For variable levels, returns false (conservative) and the constraint
     /// solver in UniverseContext handles these cases.
@@ -279,6 +285,7 @@ fn subscript(n: u32) -> String {
 /// Term representation for equality types.
 /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution
 ///
+
 /// Equality types compare terms, which can be variables, constants, or expressions.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EqTerm {
@@ -515,12 +522,15 @@ impl PathConstructor {
 
 /// A type in the Verum type system.
 ///
+
 /// This is the internal representation used during type checking.
 /// It's separate from the AST type representation to allow for
 /// type variables, substitutions, and inference artifacts.
 ///
+
 /// # Affine Type Tracking
 ///
+
 /// Some types (those declared with `type affine T is ...`) have affine
 /// semantics, meaning values can be used at most once. This is tracked
 /// per-type-name and enforced during type checking.
@@ -531,26 +541,32 @@ pub enum Type {
 
     /// Never type: ! (bottom type for diverging control flow)
     ///
+
     /// Represents computations that never return normally:
     /// - return statements
     /// - break/continue statements
     /// - infinite loops
     /// - panic/abort
     ///
+
     /// The Never type is a subtype of all types (can unify with anything).
     Never,
 
     /// Unknown type: unknown (top type for FFI and external boundaries)
     ///
+
     /// The dual of Never: any value can be assigned to unknown, but nothing
     /// can be done with it without explicit type narrowing.
     ///
+
     /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 13.2 - Unknown Type
     ///
+
     /// Subtyping rules:
     /// - T <: unknown (any type is a subtype of unknown)
     /// - unknown <: T only if T == unknown
     ///
+
     /// Use cases:
     /// - FFI boundaries where the exact type is unknown
     /// - Deserialization from external sources
@@ -577,6 +593,7 @@ pub enum Type {
 
     /// Named type (user-defined or protocol)
     ///
+
     /// Note: Affine tracking is done in the type context, not here.
     /// The `path` identifies the type, and the context tracks whether
     /// it's affine/linear based on its declaration.
@@ -584,29 +601,36 @@ pub enum Type {
 
     /// Generic type with simple name (convenience alias for common stdlib types)
     ///
+
     /// This is a simpler form of Named for standard library generics like
     /// List<T>, Maybe<T>, Map<K,V>, Result<T,E>, Set<T>.
     ///
+
     /// PERF: Uses Text name directly instead of Path for faster matching.
     Generic { name: Text, args: List<Type> },
 
     /// Function type: A -> B using [contexts] with properties
     ///
+
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration (DI contexts)
     /// Generic bounds tracking: type parameters carry protocol constraints (e.g., T: Ord) that are checked at instantiation sites
     /// Context system integration: function types carry context requirements ("using [Ctx]") checked at call sites
     /// Computational properties: compile-time tracking of Pure, IO, Async, Fallible, Mutates effects inferred from function bodies — (purity tracking)
     /// Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context requirements (DI)
     ///
+
     /// Example: `fn foo(x: Int) -> Bool using [Database, Logger]`
     /// Creates Function { params: [Int], return_type: Bool, contexts: Some(Concrete(...)), type_params: [], properties: Pure }
     ///
+
     /// Example with generics: `fn sort<T: Ord>(list: List<T>) -> List<T>`
     /// Creates Function { params: [List<T>], return_type: List<T>, contexts: None, type_params: [T: Ord], properties: Pure }
     ///
+
     /// Example with context polymorphism: `fn map<T, U, using C>(iter: I, f: fn(T) -> U using C) -> MapIter<T, U> using C`
     /// Creates Function with contexts: Some(Variable(C)) where C is unified with callback's contexts
     ///
+
     /// Example with properties: `async fn fetch(url: Text) -> Result<Data>`
     /// Creates Function { params: [Text], return_type: Result<Data>, contexts: None, type_params: [], properties: {Async, Fallible, IO} }
     Function {
@@ -637,20 +661,24 @@ pub enum Type {
     /// Extensible record type with row polymorphism: { field1: T1, field2: T2, ... | r }
     /// Pattern matching: exhaustiveness checking, type narrowing in match arms, irrefutable patterns — .1 - Row Polymorphism
     ///
+
     /// Row polymorphism allows functions to work with records that have at least
     /// certain fields, without requiring an exact match. The row variable `r`
     /// captures the "rest" of the record fields.
     ///
+
     /// Example:
     /// ```verum
     /// // This function works with any record that has an `x` field of type Int
     /// fn get_x<r>(point: {x: Int | r}) -> Int = point.x
     ///
-    /// let p2d = {x: 1, y: 2}       // {x: Int, y: Int}
+
+    /// let p2d = {x: 1, y: 2} // {x: Int, y: Int}
     /// let p3d = {x: 1, y: 2, z: 3} // {x: Int, y: Int, z: Int}
     ///
-    /// get_x(p2d)  // OK: r = {y: Int}
-    /// get_x(p3d)  // OK: r = {y: Int, z: Int}
+
+    /// get_x(p2d) // OK: r = {y: Int}
+    /// get_x(p3d) // OK: r = {y: Int, z: Int}
     /// ```
     ExtensibleRecord {
         /// Known fields of the record
@@ -685,6 +713,7 @@ pub enum Type {
 
     /// Volatile pointer for MMIO: *volatile T or *volatile mut T
     ///
+
     /// Volatile pointers guarantee that reads/writes are not optimized away
     /// or reordered by the compiler. Essential for memory-mapped I/O
     /// and hardware register access.
@@ -703,10 +732,12 @@ pub enum Type {
     /// Dynamic protocol object type: dyn Display + Debug
     /// Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Dynamic dispatch through protocol objects
     ///
+
     /// Unlike static protocol bounds, DynProtocol types perform runtime
     /// dynamic dispatch. The value is stored as a fat pointer containing
     /// both the data pointer and vtable pointer.
     ///
+
     /// Examples:
     /// - `dyn Display` - single protocol object
     /// - `dyn Display + Debug` - multiple protocol bounds
@@ -732,6 +763,7 @@ pub enum Type {
     /// - `Shape: meta [usize]` - compile-time usize array
     /// - `N: meta usize{> 0}` - with refinement constraint
     ///
+
     /// Meta parameters replace const generics with unified meta-system.
     /// All compile-time computation uses `meta` (no `const fn`, no `const N: usize`).
     Meta {
@@ -775,11 +807,13 @@ pub enum Type {
     /// Tensor type with compile-time shape parameters
     /// Tensor types: Tensor<T, Shape: meta [usize]> with compile-time shape tracking for N-dimensional arrays
     ///
+
     /// Examples:
-    /// - Tensor<f32, [4]>           // 1D vector (4 elements)
-    /// - Tensor<f32, [2, 3]>        // 2D matrix (2×3)
-    /// - Tensor<u8, [3, 224, 224]>  // 3D tensor (RGB image)
+    /// - Tensor<f32, [4]> // 1D vector (4 elements)
+    /// - Tensor<f32, [2, 3]> // 2D matrix (2×3)
+    /// - Tensor<u8, [3, 224, 224]> // 3D tensor (RGB image)
     ///
+
     /// The shape is validated at compile-time using meta parameters,
     /// and strides are computed for efficient row-major indexing.
     Tensor {
@@ -802,12 +836,14 @@ pub enum Type {
     /// Lifetime type parameter
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .2 - Lifetime parameters
     ///
+
     /// Verum uses CBGR for memory safety, but lifetimes can be explicitly
     /// specified for complex cases or interop with systems that use them.
     /// Common lifetimes:
     /// - 'a, 'b, etc. - Named lifetimes for tracking reference relationships
     /// - 'static - Lifetime of the entire program
     ///
+
     /// Note: Unlike Rust, Verum lifetimes are optional annotations.
     /// CBGR handles most memory safety concerns at runtime.
     Lifetime {
@@ -818,41 +854,48 @@ pub enum Type {
     /// Generation-aware reference: GenRef<T>
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .2 lines 143-193, Section 2.3 lines 533-547
     ///
+
     /// GenRef wraps a CBGR reference with explicit generation tracking,
     /// enabling lending iterators and self-referential types without lifetime annotations.
     ///
+
     /// # Memory Layout
     ///
+
     /// ```text
     /// GenRef<T> {
-    ///     ptr: *const T      // 8 bytes
-    ///     generation: u64    // 8 bytes
+    ///  ptr: *const T // 8 bytes
+    ///  generation: u64 // 8 bytes
     /// }
     /// Total: 16 bytes (overhead: ~20ns = 15ns CBGR + 5ns generation check)
     /// ```
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// type WindowIterator<T> {
-    ///     data: GenRef<List<T>>,
-    ///     window_size: usize,
-    ///     position: usize
+    ///  data: GenRef<List<T>>,
+    ///  window_size: usize,
+    ///  position: usize
     /// }
     ///
+
     /// implement<T> Iterator for WindowIterator<T> {
-    ///     type Item is [T]
+    ///  type Item is [T]
     ///
-    ///     fn next(&mut self) -> Maybe<GenRef<&[T]>> {
-    ///         let data = self.data.deref()?;
-    ///         if self.position + self.window_size <= data.len() {
-    ///             let slice = &data[self.position..self.position + self.window_size];
-    ///             self.position += 1;
-    ///             Some(GenRef.borrow(slice))
-    ///         } else {
-    ///             None
-    ///         }
-    ///     }
+
+    ///  fn next(&mut self) -> Maybe<GenRef<&[T]>> {
+    ///  let data = self.data.deref()?;
+    ///  if self.position + self.window_size <= data.len() {
+    ///  let slice = &data[self.position..self.position + self.window_size];
+    ///  self.position += 1;
+    ///  Some(GenRef.borrow(slice))
+    ///  } else {
+    ///  None
+    ///  }
+    ///  }
     /// }
     /// ```
     GenRef {
@@ -863,28 +906,34 @@ pub enum Type {
     /// Type constructor for higher-kinded types: F<_>
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .3 lines 410-437
     ///
+
     /// Represents a type constructor (a type-level function) that takes type arguments.
     /// Examples:
     /// - `List` has kind `* -> *` (takes one type, produces a type)
     /// - `Map` has kind `* -> * -> *` (takes two types, produces a type)
     /// - `Functor` protocol requires `type F<_>` (a type constructor)
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// protocol Functor {
-    ///     type F<_>  // Type constructor with arity 1
+    ///  type F<_> // Type constructor with arity 1
     ///
-    ///     fn map<A, B>(self: Self.F<A>, f: fn(A) -> B) -> Self.F<B>
+
+    ///  fn map<A, B>(self: Self.F<A>, f: fn(A) -> B) -> Self.F<B>
     /// }
     ///
+
     /// // List is a type constructor
     /// implement Functor for ListFunctor {
-    ///     type F<T> is List<T>  // TypeConstructor { name: "List", arity: 1, kind: * -> * }
+    ///  type F<T> is List<T> // TypeConstructor { name: "List", arity: 1, kind: * -> * }
     ///
-    ///     fn map<A, B>(self: List<A>, f: fn(A) -> B) -> List<B> {
-    ///         self.iter().map(f).collect()
-    ///     }
+
+    ///  fn map<A, B>(self: List<A>, f: fn(A) -> B) -> List<B> {
+    ///  self.iter().map(f).collect()
+    ///  }
     /// }
     /// ```
     TypeConstructor {
@@ -901,23 +950,29 @@ pub enum Type {
     /// Type application for higher-kinded types: F<T>
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .3 lines 410-437
     ///
+
     /// Applies a type constructor to type arguments to produce a concrete type.
     /// This is separate from Named types because it preserves the higher-kinded
     /// structure needed for protocol resolution and type inference.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// // Given: type F<_> is a type constructor
     /// // TypeApp applies F to Int to get F<Int>
     ///
+
     /// protocol Monad {
-    ///     type M<_>  // Type constructor
+    ///  type M<_> // Type constructor
     ///
-    ///     fn pure<T>(value: T) -> Self.M<T>
-    ///     fn bind<T, U>(self: Self.M<T>, f: fn(T) -> Self.M<U>) -> Self.M<U>
+
+    ///  fn pure<T>(value: T) -> Self.M<T>
+    ///  fn bind<T, U>(self: Self.M<T>, f: fn(T) -> Self.M<U>) -> Self.M<U>
     /// }
     ///
+
     /// // TypeApp { constructor: M, args: [Int] } represents M<Int>
     /// // TypeApp { constructor: M, args: [Bool] } represents M<Bool>
     /// ```
@@ -935,19 +990,23 @@ pub enum Type {
     /// Pi Type (Dependent Function): (x: A) -> B(x)
     /// Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case
     ///
+
     /// The return type B depends on the input value x.
     /// This is the foundation for dependent function types.
     ///
+
     /// # Examples
     /// ```text
     /// // Simple function type is special case
     /// i32 -> bool ≡ (_: i32) -> bool
     ///
+
     /// // Dependent function type
-    /// fn replicate<T>(n: Nat) -> List<T, n>  // Return type depends on n
+    /// fn replicate<T>(n: Nat) -> List<T, n> // Return type depends on n
     /// fn printf(fmt: Text) -> ParseFormat(fmt) -> Text
     /// ```
     ///
+
     /// # Type Theory
     /// Pi types are introduced by lambda abstraction and eliminated by function application.
     /// ```text
@@ -955,7 +1014,8 @@ pub enum Type {
     /// ─────────────────────── (Π-Intro)
     /// Γ ⊢ λx. b : (x: A) → B
     ///
-    /// Γ ⊢ f : (x: A) → B    Γ ⊢ a : A
+
+    /// Γ ⊢ f : (x: A) → B Γ ⊢ a : A
     /// ──────────────────────────────── (Π-Elim)
     /// Γ ⊢ f a : B[a/x]
     /// ```
@@ -971,34 +1031,41 @@ pub enum Type {
     /// Sigma Type (Dependent Pair): (x: A, B(x))
     /// Sigma types (dependent pairs): (x: A, B(x)) where second component type depends on first value, refinement types desugar to Sigma
     ///
+
     /// The type of the second component depends on the value of the first.
     /// Sigma types are used for existential quantification and dependent records.
     ///
+
     /// # Examples
     /// ```text
     /// // Dependent pair
     /// type BoundedInt is n: i32 where n >= 0 && n <= 100
     /// // Desugars to: Sigma<i32, \n -> Proof(n >= 0 && n <= 100)>
     ///
+
     /// // Parse result where success type depends on bool
     /// type ParseResult is (success: bool, if success then AST else Error)
     ///
+
     /// // Subset types
     /// type PositiveInt is n: i32 where n > 0
     /// // Desugars to: Sigma<i32, \n -> Proof(n > 0)>
     /// ```
     ///
+
     /// # Type Theory
     /// Sigma types are introduced by dependent pairs and eliminated by projection.
     /// ```text
-    /// Γ ⊢ a : A    Γ ⊢ b : B[a/x]
+    /// Γ ⊢ a : A Γ ⊢ b : B[a/x]
     /// ──────────────────────────────── (Σ-Intro)
     /// Γ ⊢ (a, b) : (x: A) × B
     ///
+
     /// Γ ⊢ p : (x: A) × B
     /// ────────────────── (Σ-Elim₁)
     /// Γ ⊢ fst p : A
     ///
+
     /// Γ ⊢ p : (x: A) × B
     /// ──────────────────────── (Σ-Elim₂)
     /// Γ ⊢ snd p : B[fst p/x]
@@ -1015,30 +1082,37 @@ pub enum Type {
     /// Equality Type: Eq<A, x, y> or x = y
     /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution
     ///
+
     /// Propositional equality between two values of the same type.
     ///
+
     /// # Examples
     /// ```text
     /// // Reflexivity
     /// refl<A, x: A> : Eq<A, x, x>
     ///
+
     /// // Symmetry (derivable)
     /// fn sym<A, x: A, y: A>(eq: x = y) -> y = x
     ///
+
     /// // Transitivity (derivable)
     /// fn trans<A, x: A, y: A, z: A>(eq1: x = y, eq2: y = z) -> x = z
     ///
+
     /// // Substitution principle
     /// fn subst<A, P: A -> Type, x: A, y: A>(eq: x = y, px: P(x)) -> P(y)
     /// ```
     ///
+
     /// # Type Theory (Identity Type)
     /// ```text
     /// Γ ⊢ a : A
     /// ─────────────────── (Id-Intro / refl)
     /// Γ ⊢ refl : a = a
     ///
-    /// Γ ⊢ p : a = b    Γ, x: A, h: a = x ⊢ C : Type    Γ ⊢ c : C[a/x, refl/h]
+
+    /// Γ ⊢ p : a = b Γ, x: A, h: a = x ⊢ C : Type Γ ⊢ c : C[a/x, refl/h]
     /// ─────────────────────────────────────────────────────────────────────── (J-Elim)
     /// Γ ⊢ J(p, c) : C[b/x, p/h]
     /// ```
@@ -1053,36 +1127,43 @@ pub enum Type {
 
     /// Cubical Path Type: Path<A>(a, b)
     ///
+
     /// The type of paths (equalities with computational content) in cubical
     /// type theory (Cohen–Coquand–Huber–Mörtberg 2015). A path from `a` to `b`
     /// in type `A` is a function from the abstract interval `I` to `A` that
     /// computes to `a` at `i0` and to `b` at `i1`.
     ///
+
     /// # Examples
     /// ```verum
     /// // Path between two values
     /// let p: Path<Int>(3, 3) = refl(3);
     ///
+
     /// // Path in a function type (function extensionality)
     /// let q: Path<fn(Int) -> Int>(f, g) = funext(h);
     ///
+
     /// // Path in a universe (univalence)
     /// let r: Path<Type>(A, B) = ua(equiv);
     /// ```
     ///
+
     /// # Relation to Eq
     /// `Path<A>(a, b)` is the cubical refinement of `Eq<A, a, b>`. While `Eq`
     /// uses J-elimination (path induction), `Path` has direct computational
     /// content via transport and hcomp. The cubical normalizer in `cubical.rs`
     /// provides reduction rules for Path terms.
     ///
+
     /// # Type Theory
     /// ```text
-    /// Γ, i: I ⊢ e : A    e[i0/i] ≡ a    e[i1/i] ≡ b
+    /// Γ, i: I ⊢ e : A e[i0/i] ≡ a e[i1/i] ≡ b
     /// ─────────────────────────────────────────────────── (Path-Intro)
     /// Γ ⊢ λ(i). e : Path<A>(a, b)
     ///
-    /// Γ ⊢ p : Path<A>(a, b)    Γ ⊢ r : I
+
+    /// Γ ⊢ p : Path<A>(a, b) Γ ⊢ r : I
     /// ───────────────────────────────────── (Path-Elim)
     /// Γ ⊢ p @ r : A
     /// ```
@@ -1097,20 +1178,24 @@ pub enum Type {
 
     /// Abstract Interval Type: I
     ///
+
     /// The abstract interval with two endpoints `i0` and `i1`. Not a regular
     /// type in the universe hierarchy — it is a "cofibrant" object used only
     /// for constructing paths. Variables of type `I` are dimension variables.
     ///
+
     /// # Properties
     /// - `I` is not in any universe (`I : ☐` where ☐ is outside the hierarchy)
     /// - De Morgan algebra: meets, joins, reversals on interval expressions
     /// - Functions `I → A` represent paths in `A`
     ///
+
     /// # Examples
     /// ```verum
     /// // Dimension variable
     /// fn my_path(i: I) -> A { ... }
     ///
+
     /// // Interval endpoints
     /// let start: I = i0;
     /// let end: I = i1;
@@ -1119,22 +1204,26 @@ pub enum Type {
 
     /// Partial Element Type: Partial<A>(φ)
     ///
+
     /// A partial element of type A defined on the extent where the face
     /// formula φ holds. Used in homogeneous composition (hcomp) to
     /// specify the boundary data of a cube filling.
     ///
+
     /// # Examples
     /// ```verum
     /// // A partial element defined when i = i0 or i = i1
     /// let walls: Partial<A>(φ) = ...;
     ///
+
     /// // hcomp uses partial elements for its side faces
     /// hcomp<A>(φ, walls, base) : A
     /// ```
     ///
+
     /// # Type Theory
     /// ```text
-    /// Γ ⊢ A : Type    Γ ⊢ φ : I    Γ, (φ = i1) ⊢ u : A
+    /// Γ ⊢ A : Type Γ ⊢ φ : I Γ, (φ = i1) ⊢ u : A
     /// ───────────────────────────────────────────────────── (Partial-Intro)
     /// Γ ⊢ [φ ↦ u] : Partial<A>(φ)
     /// ```
@@ -1148,6 +1237,7 @@ pub enum Type {
     /// Universe Level: Type_n
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
     ///
+
     /// Types have types (called universes) forming a hierarchy that prevents paradoxes.
     /// ```text
     /// Type : Type₁
@@ -1156,12 +1246,14 @@ pub enum Type {
     /// ... (infinite hierarchy)
     /// ```
     ///
+
     /// # Cumulative Universes
     /// Types at level n are implicitly at level n+1:
     /// ```text
     /// If A : Type_n, then A : Type_{n+1} (cumulativity)
     /// ```
     ///
+
     /// # Universe Polymorphism
     /// Functions can be universe-polymorphic:
     /// ```text
@@ -1175,23 +1267,28 @@ pub enum Type {
     /// Proposition universe: Prop
     /// Inductive types: recursive type definitions with structural recursion, termination checking — .1
     ///
+
     /// Proof-irrelevant propositions. All proofs of a proposition are equal.
     /// Used for logical reasoning without computational content.
     ///
+
     /// # Properties
     /// - Proof irrelevance: ∀ P: Prop, p1 p2: P → p1 = p2
     /// - Impredicativity: ∀ P: Prop, (∀ x: A. P) : Prop
     /// - Squash: |A| : Prop (erases computational content)
     ///
+
     /// # Examples
     /// ```verum
     /// // All proofs of a proposition are equal
     /// axiom proof_irrelevance:
-    ///     [P: Prop] -> (p1: P) -> (p2: P) -> p1 = p2
+    ///  [P: Prop] -> (p1: P) -> (p2: P) -> p1 = p2
     ///
+
     /// // Squash types into propositions
     /// type Squash<A: Type> : Prop is ∃(_: A). True
     ///
+
     /// // Subset types with irrelevant proofs
     /// type BoundedInt is n: i32 where 0 <= n && n <= 100 :~ Prop
     /// ```
@@ -1200,27 +1297,31 @@ pub enum Type {
     /// Inductive Type Definition
     /// Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .1
     ///
+
     /// Inductive types are defined by constructors and eliminated by pattern matching.
     /// They form the basis for algebraic data types with dependent indices.
     ///
+
     /// # Examples
     /// ```verum
     /// // Natural numbers
     /// inductive Nat : Type {
-    ///     zero : Nat,
-    ///     succ : Nat -> Nat
+    ///  zero : Nat,
+    ///  succ : Nat -> Nat
     /// }
     ///
+
     /// // Indexed list (length-tracked)
     /// inductive List<A: Type> : Nat -> Type {
-    ///     nil : List<A, zero>,
-    ///     cons : <n> -> A -> List<A, n> -> List<A, succ(n)>
+    ///  nil : List<A, zero>,
+    ///  cons : <n> -> A -> List<A, n> -> List<A, succ(n)>
     /// }
     ///
+
     /// // Finite sets
     /// inductive Fin : Nat -> Type {
-    ///     FZero : <n> -> Fin<succ(n)>,
-    ///     FSucc : <n> -> Fin<n> -> Fin<succ(n)>
+    ///  FZero : <n> -> Fin<succ(n)>,
+    ///  FSucc : <n> -> Fin<n> -> Fin<succ(n)>
     /// }
     /// ```
     Inductive {
@@ -1239,27 +1340,31 @@ pub enum Type {
     /// Coinductive Type Definition
     /// Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .2
     ///
+
     /// Coinductive types are defined by destructors and support infinite structures.
     /// They are the dual of inductive types.
     ///
+
     /// # Examples
     /// ```verum
     /// // Infinite streams
     /// coinductive Stream<A: Type> : Type {
-    ///     head : Stream<A> -> A,
-    ///     tail : Stream<A> -> Stream<A>
+    ///  head : Stream<A> -> A,
+    ///  tail : Stream<A> -> Stream<A>
     /// }
     ///
+
     /// // Infinite stream of naturals
     /// fn nats_from(n: Nat) : Stream<Nat> = {
-    ///     head = n,
-    ///     tail = nats_from(succ(n))
+    ///  head = n,
+    ///  tail = nats_from(succ(n))
     /// }
     ///
+
     /// // Productivity must be checked (no infinite unfolding)
     /// fn map<A, B>(f: A -> B, s: Stream<A>) : Stream<B> = {
-    ///     head = f(s.head),
-    ///     tail = map(f, s.tail)  // Productive recursive call
+    ///  head = f(s.head),
+    ///  tail = map(f, s.tail) // Productive recursive call
     /// }
     /// ```
     Coinductive {
@@ -1274,29 +1379,33 @@ pub enum Type {
     /// Higher Inductive Type (HIT)
     /// Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .3
     ///
+
     /// Higher inductive types extend inductive types with path constructors
     /// that generate equality proofs. Used in Homotopy Type Theory.
     ///
+
     /// # Examples
     /// ```verum
     /// // Circle with a loop
     /// hott inductive Circle : Type {
-    ///     base : Circle,
-    ///     loop : base = base  // Path constructor
+    ///  base : Circle,
+    ///  loop : base = base // Path constructor
     /// }
     ///
+
     /// // Torus with paths and surface
     /// hott inductive Torus : Type {
-    ///     point : Torus,
-    ///     meridian : point = point,
-    ///     longitude : point = point,
-    ///     surface : meridian · longitude = longitude · meridian  // 2-path
+    ///  point : Torus,
+    ///  meridian : point = point,
+    ///  longitude : point = point,
+    ///  surface : meridian · longitude = longitude · meridian // 2-path
     /// }
     ///
+
     /// // Quotient types
     /// hott inductive Quotient<A: Type, R: A -> A -> Type> : Type {
-    ///     class : A -> Quotient<A, R>,
-    ///     relate : (x, y: A) -> R(x, y) -> class(x) = class(y)
+    ///  class : A -> Quotient<A, R>,
+    ///  relate : (x, y: A) -> R(x, y) -> class(x) = class(y)
     /// }
     /// ```
     HigherInductive {
@@ -1313,25 +1422,31 @@ pub enum Type {
     /// Quantified Type (Quantitative Type Theory)
     /// Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .4
     ///
+
     /// Track resource usage with quantities (0, 1, ω).
     /// Enables linear and affine type semantics.
     ///
+
     /// # Quantities
     /// - 0: Erased (not used at runtime)
     /// - 1: Linear (used exactly once)
     /// - ω: Unrestricted (used any number of times)
     ///
+
     /// # Examples
     /// ```verum
     /// // Linear types (use exactly once)
     /// fn linear_use(x: Text @1) -> Text @1 = x
     ///
+
     /// // Affine types (use at most once)
     /// fn affine_use(x: File @0..1) -> Maybe<Text> @0..1
     ///
+
     /// // Unrestricted (use any number of times)
     /// fn normal_use(x: i32 @ω) -> i32 @ω = x + x
     ///
+
     /// // Graded modalities
     /// fn graded<T, n: Nat>(x: Resource @n) -> Result<T> @n
     /// ```
@@ -1344,20 +1459,24 @@ pub enum Type {
 
     /// Placeholder type for order-independent (two-pass) type resolution.
     ///
+
     /// During the first pass of type checking, type names are registered as
     /// placeholders before their definitions are fully resolved. This allows
     /// forward references between types:
     ///
+
     /// ```verum
     /// type SearchRequest is {
-    ///     sort_by: SortOrder,  // SortOrder referenced before definition
+    ///  sort_by: SortOrder, // SortOrder referenced before definition
     /// };
     /// type SortOrder is Relevance | Downloads;
     /// ```
     ///
+
     /// In the first pass, `SortOrder` is registered as `Placeholder { name: "SortOrder", span }`.
     /// In the second pass, it is resolved to the actual variant type.
     ///
+
     /// Any `Placeholder` types remaining after the second pass indicate
     /// unresolved type references, which should be reported as errors.
     Placeholder {
@@ -1370,16 +1489,19 @@ pub enum Type {
     /// Capability-restricted type: T with [Capabilities]
     /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 12 - Capability Attenuation as Types
     ///
+
     /// Represents a type with a restricted set of capabilities. This is used
     /// for capability-based method filtering where:
     /// - T with [A, B, C] <: T with [A, B] (more caps = subtype of fewer caps)
     /// - Method calls requiring capability C are only valid if C is in the set
     ///
+
     /// # Examples
     /// ```verum
     /// // Database context with read-only capability
     /// fn read_data(db: Database with [Query]) -> Result<Data>
     ///
+
     /// // Attenuated context in function parameter
     /// fn process(ctx: AppContext with [ReadOnly, Logging]) -> ()
     /// ```
@@ -1407,6 +1529,7 @@ impl Type {
 
     /// Check if this type is the Never type (bottom type).
     ///
+
     /// Handles both Type::Never and Type::Named("Never") which can occur
     /// when the Never type is imported from core.base.panic.
     pub fn is_never(&self) -> bool {
@@ -1426,10 +1549,12 @@ impl Type {
 
     /// Returns the display name for primitive type variants.
     ///
+
     /// This is the single source of truth for converting primitive Type variants
     /// to their string representation. All crates should use this instead of
     /// duplicating match arms.
     ///
+
     /// Returns `None` for non-primitive variants (Named, Var, Function, etc.)
     /// which require more context to format.
     pub fn primitive_name(&self) -> Option<&'static str> {
@@ -1797,18 +1922,22 @@ impl Type {
     /// Create a Lifetime type
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .2 - Lifetime parameters
     ///
+
     /// Represents a lifetime parameter like 'a, 'b, or 'static.
     /// While Verum uses CBGR for memory safety, lifetimes can be
     /// explicitly tracked for complex cases or FFI interop.
     ///
+
     /// # Examples
     /// ```
     /// use verum_types::Type;
     /// use verum_common::Text;
     ///
+
     /// // Named lifetime 'a
     /// let lifetime_a = Type::lifetime(Text::from("a"));
     ///
+
     /// // Static lifetime 'static
     /// let lifetime_static = Type::lifetime(Text::from("static"));
     /// ```
@@ -1827,16 +1956,20 @@ impl Type {
     /// Create a GenRef type (generation-aware reference)
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .2 lines 143-193
     ///
+
     /// GenRef provides explicit generation tracking for CBGR, enabling
     /// lending iterators and self-referential types without lifetimes.
     ///
+
     /// # Examples
     /// ```
     /// use verum_types::Type;
     ///
+
     /// // GenRef<Int>
     /// let genref_int = Type::genref(Type::int());
     ///
+
     /// // GenRef<&List<T>>
     /// let genref_ref = Type::genref(Type::reference(false, Type::text()));
     /// ```
@@ -1849,27 +1982,31 @@ impl Type {
     /// Create a type constructor for higher-kinded types
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .3 lines 410-437
     ///
+
     /// Type constructors are type-level functions that take type arguments.
     /// They enable higher-kinded polymorphism in protocols like Functor and Monad.
     ///
+
     /// # Examples
     /// ```
     /// use verum_types::Type;
     /// use verum_types::advanced_protocols::Kind;
     /// use verum_common::Text;
     ///
+
     /// // List has kind * -> * (unary type constructor)
     /// let list_ctor = Type::type_constructor(
-    ///     Text::from("List"),
-    ///     1,
-    ///     Kind::unary_constructor()
+    ///  Text::from("List"),
+    ///  1,
+    ///  Kind::unary_constructor()
     /// );
     ///
+
     /// // Map has kind * -> * -> * (binary type constructor)
     /// let map_ctor = Type::type_constructor(
-    ///     Text::from("Map"),
-    ///     2,
-    ///     Kind::binary_constructor()
+    ///  Text::from("Map"),
+    ///  2,
+    ///  Kind::binary_constructor()
     /// );
     /// ```
     pub fn type_constructor(
@@ -1883,20 +2020,25 @@ impl Type {
     /// Create a type application (apply type constructor to arguments)
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .3 lines 410-437
     ///
+
     /// Applies a type constructor to concrete type arguments, producing
     /// a fully-applied type. This preserves higher-kinded structure for
     /// protocol resolution and type inference.
     ///
+
     /// # Examples
     /// ```ignore
     /// use verum_types::Type;
     ///
+
     /// // Given a type constructor F<_>
     /// let f_ctor = Type::type_constructor(...);
     ///
+
     /// // Apply F to Int to get F<Int>
     /// let f_int = Type::type_app(f_ctor, vec![Type::int()]);
     ///
+
     /// // Apply F to Bool to get F<Bool>
     /// let f_bool = Type::type_app(f_ctor, vec![Type::bool()]);
     /// ```
@@ -1913,14 +2055,17 @@ impl Type {
     /// Create a Pi type (dependent function): (x: A) -> B(x)
     /// Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case
     ///
+
     /// # Examples
     /// ```
     /// use verum_types::Type;
     /// use verum_common::Text;
     ///
+
     /// // Simple identity function: (n: Nat) -> Nat
     /// let pi = Type::pi(Text::from("n"), Type::int(), Type::int());
     ///
+
     /// // Dependent function: (n: Nat) -> List<T, n>
     /// // (return type references n)
     /// ```
@@ -1935,14 +2080,17 @@ impl Type {
     /// Create a Sigma type (dependent pair): (x: A, B(x))
     /// Sigma types (dependent pairs): (x: A, B(x)) where second component type depends on first value, refinement types desugar to Sigma
     ///
+
     /// # Examples
     /// ```
     /// use verum_types::Type;
     /// use verum_common::Text;
     ///
+
     /// // Non-dependent pair: (Int, Bool)
     /// let sigma = Type::sigma(Text::from("_"), Type::int(), Type::bool());
     ///
+
     /// // Dependent pair: (n: Nat, List<T, n>)
     /// // (second type references n)
     /// ```
@@ -2130,12 +2278,14 @@ impl Type {
     /// Compute the type of a type (its universe).
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — , Section 6.1
     ///
+
     /// This implements the universe rules:
     /// - Type₀ : Type₁
     /// - Type₁ : Type₂
     /// - Prop : Type₁ (proof-irrelevant propositions live in Type₁)
     /// - Most types : Type₀
     ///
+
     /// # Examples
     /// ```ignore
     /// Type::Bool.type_of() // => Type::Universe { level: 0 } (Type₀)
@@ -2227,18 +2377,21 @@ impl Type {
     /// Create a Tensor type with compile-time shape parameters
     /// Tensor types: Tensor<T, Shape: meta [usize]> with compile-time shape tracking for N-dimensional arrays
     ///
+
     /// Computes row-major strides automatically for efficient indexing.
     ///
+
     /// # Examples
     /// ```ignore
     /// // 1D vector: Tensor<f32, [4]>
     /// let vec_ty = Type::tensor(Type::float(), vec![ConstValue::UInt(4)], span);
     ///
+
     /// // 2D matrix: Tensor<f32, [2, 3]>
     /// let mat_ty = Type::tensor(
-    ///     Type::float(),
-    ///     vec![ConstValue::UInt(2), ConstValue::UInt(3)],
-    ///     span
+    ///  Type::float(),
+    ///  vec![ConstValue::UInt(2), ConstValue::UInt(3)],
+    ///  span
     /// );
     /// ```
     pub fn tensor(element: Type, shape: List<verum_common::ConstValue>, span: Span) -> Self {
@@ -2274,6 +2427,7 @@ impl Type {
     /// pass through unchanged so nominal types keep their exact
     /// identity.
     ///
+
     /// Used by every type-compatibility / dispatch path that
     /// receives types spelled either way (the grammar accepts both,
     /// but only canonical forms make it out of `*_refined` literal
@@ -3286,9 +3440,11 @@ fn format_path(path: &Path) -> Text {
 /// Compute row-major strides from tensor shape dimensions
 /// Tensor types: Tensor<T, Shape: meta [usize]> with compile-time shape tracking for N-dimensional arrays
 ///
+
 /// Strides are computed as: strides[i] = product(shape[i+1..])
 /// This enables efficient multi-dimensional indexing in row-major layout.
 ///
+
 /// # Examples
 /// ```ignore
 /// // Shape [2, 3, 4] -> Strides [12, 4, 1]

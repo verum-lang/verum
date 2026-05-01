@@ -1,25 +1,31 @@
 //! CBGR Generation Tracking Predicate Types
 //!
+
 //! CBGR Generation Tracking Predicates for SMT Verification:
 //! Provides type definitions for generation counter predicates used by the SMT
 //! solver to verify reference safety at compile time. The actual SMT encoding
 //! and verification logic is in verum_smt.
 //!
+
 //! # CBGR Memory Model
 //!
+
 //! ```text
 //! ThinRef<T>:
-//!   ptr: *const T      // 8 bytes
-//!   generation: u64    // 8 bytes (48-bit generation + 16-bit epoch)
-//!   Total: 16 bytes
+//!  ptr: *const T // 8 bytes
+//!  generation: u64 // 8 bytes (48-bit generation + 16-bit epoch)
+//!  Total: 16 bytes
 //!
+
 //! Generation counter layout (64-bit):
-//!   Bits 0-47:  Generation (48 bits, ~281 trillion)
-//!   Bits 48-63: Epoch (16 bits, 65536 epochs)
+//!  Bits 0-47: Generation (48 bits, ~281 trillion)
+//!  Bits 48-63: Epoch (16 bits, 65536 epochs)
 //! ```
 //!
+
 //! # Predicates
 //!
+
 //! - `generation(ref)` - Extract generation counter from reference
 //! - `epoch(ref)` - Extract epoch counter from reference
 //! - `valid(ref)` - Check if reference is still valid
@@ -86,19 +92,22 @@ pub struct CBGRStats {
 
 /// CBGR predicate for generation tracking
 ///
+
 /// These predicates are used in refinement types to reason about
 /// generation counters and reference validity.
 ///
+
 /// Example:
 /// ```verum
 /// // Refinement type ensuring reference is valid
 /// type ValidRef<T> = &T where valid(it)
 ///
+
 /// // Refinement ensuring same allocation
 /// fn compare_refs<T>(a: &T, b: &T) -> Bool
-///     where same_allocation(a, b)
+///  where same_allocation(a, b)
 /// {
-///     // ...
+///  // ...
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +168,7 @@ pub enum ComparisonOp {
 
 /// Generation predicate for use in refinement types
 ///
+
 /// This is a simplified version of CBGRPredicate that's easier to
 /// construct and use in the type checker.
 #[derive(Debug, Clone)]

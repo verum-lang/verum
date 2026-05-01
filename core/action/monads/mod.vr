@@ -2,35 +2,40 @@
 // core.action.monads — concrete strong-monad implementations (VVA-9 V1)
 // =============================================================================
 //
+
 // Concrete data-type-and-impl pairs for each effect declared in
 // `core.action.effects` per Theorem 17.T1 (effects ≃ Perf(α_linear)
 // projections via Kleisli embedding). The protocol surface lives in
 // `core.action.effects`; this module ships the witness data types.
 //
+
 // V1 scope (this module): the four most-used monads — `Pure` (identity),
 // `Reader<R, A>` (env-reading), `Writer<W, A>` (append-only output),
 // and `State<S, A>` (mutable cell). Together they cover:
 //
-//   • the canonical commutative monads (`Pure`, `Reader`, `Writer`)
-//     that compose under @verify(coherent_concurrent) per Theorem 17.C2;
-//   • the canonical non-commutative monad (`State`) that DOES NOT
-//     compose under coherent-concurrent without explicit
-//     synchronisation — used by VVA §11.2 to demonstrate the gate.
+
+//  • the canonical commutative monads (`Pure`, `Reader`, `Writer`)
+//  that compose under @verify(coherent_concurrent) per Theorem 17.C2;
+//  • the canonical non-commutative monad (`State`) that DOES NOT
+//  compose under coherent-concurrent without explicit
+//  synchronisation — used by VVA §11.2 to demonstrate the gate.
 //
+
 // V1.5 COMPLETE — every effect in the Theorem 17.T1 catalogue now
 // has a concrete monad implementation: Pure, Reader, Writer, State
-// (V1) + Probability, Quantum (Tier-A V0) + Exception, Nondeterm
+// + Probability, Quantum (Tier-A V0) + Exception, Nondeterm
 // (List monad, renamed to avoid the collection-type clash), Io
-// (this commit). V2 will lift the monad-laws from V1 trusted-
+// (this commit). Future work will lift the monad-laws from V1 trusted-
 // boundary axioms to `@verify(formal)`-discharged proofs.
 //
+
 // Each monad ships:
-//   - data type with the canonical Kleisli shape;
-//   - `pure` / `bind` / `strength` standalone functions
-//     (protocol-implementation form pending VVA §11.5 protocol-impl
-//     syntax landing for parameterised types);
-//   - three monad-law axioms (left identity / right identity /
-//     associativity).
+//  - data type with the canonical Kleisli shape;
+//  - `pure` / `bind` / `strength` standalone functions
+//  (protocol-implementation form pending VVA §11.5 protocol-impl
+//  syntax landing for parameterised types);
+//  - three monad-law axioms (left identity / right identity /
+//  associativity).
 // =============================================================================
 
 public mount core.action.monads.pure;

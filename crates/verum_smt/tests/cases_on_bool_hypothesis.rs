@@ -1,5 +1,6 @@
 //! Locks the metadata-driven Bool case-analysis path in `try_cases_on`.
 //!
+
 //! Pre-fix `is_boolean_hypothesis` was a permanently-false stub:
 //! ```ignore
 //! fn is_boolean_hypothesis(&self, _hyp: &Expr) -> bool { false }
@@ -8,12 +9,14 @@
 //! unreachable. Any `cases_on h` where `h` was a Bool variable fell
 //! through to the catch-all "not case-analyzable" error.
 //!
+
 //! Post-fix the engine carries an externally-populated
 //! `bool_typed_hypotheses` set; the case-split arm produces two subgoals
 //! whose labels reflect the chosen branch and whose hypotheses include
 //! `h == true` / `h == false` equalities so downstream SMT discharge can
 //! substitute the value into the goal.
 //!
+
 //! The engine still ships with **zero** hardcoded knowledge — names like
 //! `b`, `flag`, `cond` are NOT recognized as Bool until the caller calls
 //! `register_bool_hypothesis`.

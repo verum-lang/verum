@@ -1,5 +1,6 @@
 //! Property-based testing runner.
 //!
+
 //! A `@property` function differs from `@test` in that the runner calls
 //! it N times with randomly-generated inputs rather than once with no
 //! arguments. On failure the harness performs Hedgehog-style integrated
@@ -7,17 +8,19 @@
 //! seed in `target/test/pbt-regressions.json`, and replays stored seeds
 //! first on subsequent runs (Hypothesis convention).
 //!
+
 //! Design rationale lives in `docs/testing/reference-quality-roadmap.md`;
 //! the TL;DR is:
 //!
-//!   * Runner is Rust-side (owns the VBC interpreter, AST, RNG).
-//!   * Each generator produces a lazy rose-tree `Tree<T>` — integrated
-//!     shrinking means `.value` and `.shrinks` can never disagree, and
-//!     refinement-type bounds are respected by construction.
-//!   * The runner emits a one-line replay command on failure so CI
-//!     output copy-pasted into a terminal reproduces the bug.
-//!   * Regression DB is best-effort: corrupt or missing file is a
-//!     warning, not a hard error — we always want fresh seeds to work.
+
+//!  * Runner is Rust-side (owns the VBC interpreter, AST, RNG).
+//!  * Each generator produces a lazy rose-tree `Tree<T>` — integrated
+//!  shrinking means `.value` and `.shrinks` can never disagree, and
+//!  refinement-type bounds are respected by construction.
+//!  * The runner emits a one-line replay command on failure so CI
+//!  output copy-pasted into a terminal reproduces the bug.
+//!  * Regression DB is best-effort: corrupt or missing file is a
+//!  warning, not a hard error — we always want fresh seeds to work.
 
 use crate::error::{CliError, Result};
 use std::fs;
@@ -135,6 +138,7 @@ impl Generator {
     /// Pick a generator for a Verum type (AST `TypeKind`) with optional
     /// refinement bounds extracted by `extract_refinement_bounds`.
     ///
+
     /// Returns `None` for unsupported types so the caller can skip the
     /// property with a clear diagnostic rather than invent random data.
     pub fn for_type(ty: &verum_ast::Type) -> Option<Self> {
@@ -204,6 +208,7 @@ impl TreeValue {
     /// One step of shrinking — returns candidates *closer to a minimal
     /// case* than self. Empty vec means "already minimal".
     ///
+
     /// Shrinks are filtered to stay within the generator's domain:
     /// a refined `Int{ 1..=100 }` never shrinks to 0, preserving the
     /// refinement invariant by construction.
@@ -684,6 +689,7 @@ fn shrink_failure(
 // Helper: call a VBC function with arguments and run dispatch_loop_table
 // --------------------------------------------------------------------
 //
+
 // `Interpreter::call` as published does NOT allocate register slots in
 // the register file — only frames the call stack. Executing the body
 // then tries to pop register ranges that were never allocated, which

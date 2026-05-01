@@ -1,5 +1,6 @@
 // Escape Analysis Performance Benchmarks
 //
+
 // Validates that escape analysis completes within <100ms for 10K LOC target
 // CBGR escape analysis determines whether references can be promoted from
 // &T (15-50ns runtime check) to &checked T (0ns, statically verified).

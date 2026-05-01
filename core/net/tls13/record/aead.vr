@@ -5,27 +5,34 @@
 // Dependencies: core.security.aead.{aes_gcm, chacha20_poly1305}
 // =============================================================================
 //
+
 // AEAD seal/open for TLS 1.3 records. Per-direction state:
 //
-//   AeadState {
-//       key:  key material (16 or 32 bytes),
-//       iv:   static initialization vector (12 bytes),
-//       seq:  u64 sequence counter (incremented each record),
-//   }
+
+//  AeadState {
+//  key: key material (16 or 32 bytes),
+//  iv: static initialization vector (12 bytes),
+//  seq: u64 sequence counter (incremented each record),
+//  }
 //
+
 // Per-record nonce = iv XOR big-endian(seq) right-aligned into the
 // 12-byte IV slot. Sequence overflow at 2^64 is a fatal alert per
 // RFC 8446 §5.3 — we panic preemptively well below that.
 //
+
 // AAD (additional authenticated data) is the outer 5-byte record
 // header (RFC 8446 §5.2):
 //
-//   opaque_type (1) || legacy_record_version (2) || length (2)
+
+//  opaque_type (1) || legacy_record_version (2) || length (2)
 //
+
 // `opaque_type` is always `application_data` (0x17) after handshake
 // keys are installed; `length` is the ciphertext length including
 // AEAD tag.
 //
+
 // =============================================================================
 
 module core.net.tls13.record.aead;
@@ -145,9 +152,10 @@ implement AeadState {
 
     /// Seal a TLS 1.3 record. `content` is the plaintext payload for
     /// this record; `content_type` is the inner type (Handshake,
-    /// ApplicationData, or Alert).  `padding_len` lets callers insert
+    /// ApplicationData, or Alert). `padding_len` lets callers insert
     /// zero padding for traffic-analysis resistance (0 = no padding).
     ///
+
     /// Returns the full wire record — 5-byte header followed by
     /// AEAD-sealed inner plaintext.
     public fn seal(

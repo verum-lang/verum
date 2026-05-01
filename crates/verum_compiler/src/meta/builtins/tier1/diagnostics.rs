@@ -1,18 +1,24 @@
 //! Compiler Diagnostics (Tier 1 - Requires CompileDiag)
 //!
+
 //! Functions for emitting compile-time errors and warnings.
 //!
+
 //! ## Functions
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `compile_error(msg)` | `(Text) -> !` | Emit compile-time error |
 //! | `compile_warning(msg)` | `(Text) -> ()` | Emit compile-time warning |
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 1**: Requires `using [CompileDiag]` context.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -97,7 +103,7 @@ fn meta_compile_warning(ctx: &mut MetaContext, args: List<ConstValue>) -> Result
     ctx.warning_count += 1;
 
     // Resolve `ctx.call_site_span` via the global source-file
-    // registry (sibling fix to `meta_compile_error`).  See its
+    // registry (sibling fix to `meta_compile_error`). See its
     // comment for the rationale; closes #239 for the compile_warning
     // builtin.
     let span = verum_common::global_span_to_line_col(ctx.call_site_span);
@@ -131,13 +137,13 @@ mod tests {
     /// diagnostic carries a LineColSpan resolved from the global
     /// source-file registry — file path + line:column — instead of
     /// the file="<meta>", line=byte-offset, column=1 garbage the
-    /// previous construction produced.  Closes #239 for
+    /// previous construction produced. Closes #239 for
     /// `meta_compile_error`.
     #[test]
     fn compile_error_anchors_at_call_site_when_source_registered() {
         // Register a synthetic source file with the global registry
         // so the byte-offset → line:col conversion has content to
-        // index into.  The text "abcde\nfghij" gives line 1 (cols
+        // index into. The text "abcde\nfghij" gives line 1 (cols
         // 1–6) and line 2 (cols 1–6).
         let file_id = FileId::new(0xCAFE_BABE);
         verum_common::register_source_file(file_id, "test.vr", "abcde\nfghij");

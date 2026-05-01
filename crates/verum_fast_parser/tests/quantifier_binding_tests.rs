@@ -14,10 +14,11 @@
 )]
 //! Tests for enhanced quantifier binding syntax.
 //!
+
 //! Grammar Reference:
-//!   forall_expr = 'forall' quantifier_binding { ',' quantifier_binding } '.' expression
-//!   exists_expr = 'exists' quantifier_binding { ',' quantifier_binding } '.' expression
-//!   quantifier_binding = pattern [ ':' type_expr ] [ 'in' expression ] [ 'where' expression ]
+//!  forall_expr = 'forall' quantifier_binding { ',' quantifier_binding } '.' expression
+//!  exists_expr = 'exists' quantifier_binding { ',' quantifier_binding } '.' expression
+//!  quantifier_binding = pattern [ ':' type_expr ] [ 'in' expression ] [ 'where' expression ]
 
 use verum_ast::span::FileId;
 use verum_ast::{Expr, ExprKind};

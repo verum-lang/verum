@@ -5136,7 +5136,6 @@ dependencies = [
  "verum_llvm_sys",
  "verum_lsp",
  "verum_modules",
- "verum_parser",
  "verum_smt",
  "verum_types",
  "verum_vbc",
@@ -5204,6 +5203,8 @@ dependencies = [
  "clap",
  "colored",
  "criterion",
+ "crossbeam",
+ "dashmap 6.1.0",
  "filetime",
  "hex",
  "indexmap",
@@ -5506,7 +5507,6 @@ dependencies = [
  "verum_diagnostics",
  "verum_fast_parser",
  "verum_lexer",
- "verum_parser",
 ]
 
 [[package]]
@@ -5618,8 +5618,8 @@ dependencies = [
  "verum_common",
  "verum_diagnostics",
  "verum_error",
+ "verum_fast_parser",
  "verum_modules",
- "verum_parser",
  "verum_protocol_types",
  "verum_smt",
  "z3",
@@ -5655,8 +5655,8 @@ dependencies = [
  "verum_ast",
  "verum_cbgr",
  "verum_common",
+ "verum_fast_parser",
  "verum_lexer",
- "verum_parser",
  "windows-sys 0.59.0",
  "zstd",
 ]

@@ -3,12 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — CDC + replication)
 //
+
 // Tracks two lag axes per replica:
 //
-//   * Position lag — primary_position - replica_position (in frames)
-//   * Time lag     — wall-clock ns elapsed since the latest frame
-//                    primary committed but the replica hasn't acked
+
+//  * Position lag — primary_position - replica_position (in frames)
+//  * Time lag — wall-clock ns elapsed since the latest frame
+//  primary committed but the replica hasn't acked
 //
+
 // Alerts fire when EITHER axis crosses its configured threshold.
 // =============================================================================
 

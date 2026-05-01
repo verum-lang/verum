@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: internal/specs/database.md §6.1
 //
+
 // Typed connection configuration. Spindle prefers TLS-`verify-full`
 // by default; `verify-ca` requires opt-in; `disable` is a compile-
 // warning unless the call site has `@allow_plaintext_db`. v0.1 ships
@@ -100,7 +101,7 @@ implement PgConfig {
     }
 
     /// Display string for the host:port pair — never includes the
-    /// password.  Used in metric labels and tracing spans.
+    /// password. Used in metric labels and tracing spans.
     public fn target_label(&self) -> Text {
         let mut out: Text = self.host.clone();
         out.push_str(&":".clone());

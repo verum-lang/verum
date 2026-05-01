@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_vtab_distinct(pIdx) returns one of four codes telling the
 // vtab how much work the core is doing on distinctness.
 //
-//   0  — caller wants no distinctness help from the vtab
-//   1  — "distinct rows" — grouping is not needed
-//   2  — "distinct grouping" — rows may arrive in any order
-//   3  — "distinct rows in order" — rows already sorted
+
+//  0 — caller wants no distinctness help from the vtab
+//  1 — "distinct rows" — grouping is not needed
+//  2 — "distinct grouping" — rows may arrive in any order
+//  3 — "distinct rows in order" — rows already sorted
 // =============================================================================
 
 module core.database.sqlite.native.vtab_helpers.distinct;

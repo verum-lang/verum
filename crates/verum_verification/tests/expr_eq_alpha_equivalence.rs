@@ -1,10 +1,12 @@
 //! Locks the α-equivalence path in `expr_eq_with_binding`.
 //!
+
 //! Pre-fix the function ignored its `bound_var` parameter and just
 //! delegated to `expr_eq` (strict structural equality). It said in a
 //! comment "In a full implementation, this would track the bound
 //! variable for proper alpha-equivalence checking" — but never did.
 //!
+
 //! Post-fix the function uses the existing `expr_eq_impl` binding-map
 //! machinery: each side gets `bound_var ↦ depth 0` pre-populated, so
 //! Path occurrences of `bound_var` register as bound-at-the-same-depth

@@ -14,9 +14,11 @@
 )]
 //! Integration tests for tensor refinement type system
 //!
+
 //! Tests the integration between tensor shape verification and
 //! Verum's refinement type system.
 //!
+
 // REQUIRES API MIGRATION: TensorSort.dimensions type changed to List<usize>
 
 #![cfg(feature = "tensor_refinement_tests_disabled")]

@@ -3,28 +3,31 @@
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
 // Spec: HoTT Book (Univalent Foundations Program, 2013)
-//       CCHM cubical type theory (Cohen–Coquand–Huber–Mörtberg, 2015)
+//  CCHM cubical type theory (Cohen–Coquand–Huber–Mörtberg, 2015)
 //
+
 // Complete cubical HoTT library providing:
-//   §1  Interval and HottPath primitives (I, i0, i1, HottPath, transport, hcomp)
-//   §2  HottPath algebra (refl, sym, trans, ap, apd, cong)
-//   §3  Equivalences (IsEquiv, Equiv, half-adjoint, biinvertible)
-//   §4  Truncation levels (IsContr, IsProp, IsSet, IsGroupoid, n-Type)
-//   §5  Fibers and contractible maps
-//   §6  Univalence and function extensionality
-//   §7  Higher inductive types (S¹, Susp, Truncation, Quotient)
-//   §8  Hedberg's theorem and decidable equality
-//   §9  Transport lemmas and path-over
-//   §10 Proven theorems (SMT-discharged)
+//  §1 Interval and HottPath primitives (I, i0, i1, HottPath, transport, hcomp)
+//  §2 HottPath algebra (refl, sym, trans, ap, apd, cong)
+//  §3 Equivalences (IsEquiv, Equiv, half-adjoint, biinvertible)
+//  §4 Truncation levels (IsContr, IsProp, IsSet, IsGroupoid, n-Type)
+//  §5 Fibers and contractible maps
+//  §6 Univalence and function extensionality
+//  §7 Higher inductive types (S¹, Susp, Truncation, Quotient)
+//  §8 Hedberg's theorem and decidable equality
+//  §9 Transport lemmas and path-over
+//  §10 Proven theorems (SMT-discharged)
 //
+
 // All witness types use HottPath<A>(a, b) — no Bool placeholders.
 // The cubical normalizer (crates/verum_types/src/cubical.rs) provides
 // 8 reduction rules for computational content.
 //
+
 // See also:
-//   core/math/logic.vr      — Prop, Proof<P>, logical connectives
-//   core/math/category.vr   — Category, Functor, Yoneda, Topos
-//   core/math/simplicial.vr — SimplicialSet, KanComplex, ∞-Groupoid
+//  core/math/logic.vr — Prop, Proof<P>, logical connectives
+//  core/math/category.vr — Category, Functor, Yoneda, Topos
+//  core/math/simplicial.vr — SimplicialSet, KanComplex, ∞-Groupoid
 // =============================================================================
 
 module core.math.hott;
@@ -37,10 +40,11 @@ module core.math.hott;
 /// Variables of type `I` are dimension variables in cubical type theory.
 /// `I` is not in any universe — it is outside the type hierarchy.
 ///
+
 /// De Morgan algebra operations:
-///   i0, i1            — endpoints
-///   1 - i             — reversal
-///   i ∧ j, i ∨ j      — meet and join
+///  i0, i1 — endpoints
+///  1 - i — reversal
+///  i ∧ j, i ∨ j — meet and join
 public type I is @builtin_interval;
 
 /// Left endpoint of the interval.
@@ -51,46 +55,52 @@ public let i1: I = @builtin_i1;
 
 /// HottPath type: the type of paths from `a` to `b` in type `A`.
 ///
+
 /// A term `p : HottPath<A>(a, b)` is a function `f : I → A` such that
 /// `f(i0) ≡ a` and `f(i1) ≡ b` (definitional equalities).
 ///
+
 /// Introduction: `λ(i : I). e(i)` where `e(i0) ≡ a` and `e(i1) ≡ b`
-/// Elimination:  `p @ r` for `r : I`, yielding a value of type `A`
+/// Elimination: `p @ r` for `r : I`, yielding a value of type `A`
 ///
+
 /// Key reduction rules (from cubical.rs):
-///   (λi. e) @ j         ↦ e[i := j]     (β-rule)
-///   λi. (p @ i)         ↦ p             (η-rule)
-///   refl(x) @ _         ↦ x             (refl elimination)
-///   transport(refl, x)  ↦ x             (identity transport)
-///   transport(ua(e), x) ↦ e.forward(x)  (computational univalence)
+///  (λi. e) @ j ↦ e[i := j] (β-rule)
+///  λi. (p @ i) ↦ p (η-rule)
+///  refl(x) @ _ ↦ x (refl elimination)
+///  transport(refl, x) ↦ x (identity transport)
+///  transport(ua(e), x) ↦ e.forward(x) (computational univalence)
 public type HottPath<A>(a: A, b: A) is @builtin_path;
 
 /// Reflexivity: the constant path at a point.
-///   refl(x) : HottPath<A>(x, x)
-///   refl(x) = λ(i : I). x
+///  refl(x) : HottPath<A>(x, x)
+///  refl(x) = λ(i : I). x
 public fn refl<A>(x: A) -> HottPath<A>(x, x) {
     @builtin_refl(x)
 }
 
 /// Transport: move a value along a path of types.
-///   transport(p, x) : B   where p : HottPath<Type>(A, B) and x : A
+///  transport(p, x) : B where p : HottPath<Type>(A, B) and x : A
 ///
+
 /// Key reductions:
-///   transport(refl, x)       ↦ x
-///   transport(ua(e), x)      ↦ e.forward(x)
-///   transport(sym(ua(e)), x) ↦ e.inverse(x)
+///  transport(refl, x) ↦ x
+///  transport(ua(e), x) ↦ e.forward(x)
+///  transport(sym(ua(e)), x) ↦ e.inverse(x)
 public fn transport<A, B>(p: HottPath<Type>(A, B), x: A) -> B {
     @builtin_transport(p, x)
 }
 
 /// Homogeneous composition: fill a cube given a base and compatible sides.
-///   hcomp(φ, walls, base) : A
+///  hcomp(φ, walls, base) : A
 ///
+
 /// Given a partial element `walls` defined on the face `φ` that agrees
 /// with `base` at `i0`, hcomp produces the missing `i1` face.
 ///
+
 /// Key reduction:
-///   hcomp(φ, const, base) ↦ base   (when sides are constant)
+///  hcomp(φ, const, base) ↦ base (when sides are constant)
 public fn hcomp<A>(phi: I, walls: fn(I) -> A, base: A) -> A {
     @builtin_hcomp(phi, walls, base)
 }
@@ -100,27 +110,27 @@ public fn hcomp<A>(phi: I, walls: fn(I) -> A, base: A) -> A {
 // =============================================================================
 
 /// HottPath symmetry (inversion): `sym(p) : HottPath<A>(b, a)` given `p : HottPath<A>(a, b)`.
-///   sym(p) = λ(i). p @ (1 - i)
+///  sym(p) = λ(i). p @ (1 - i)
 public fn sym<A>(a: A, b: A, p: HottPath<A>(a, b)) -> HottPath<A>(b, a) {
     @builtin_sym(p)
 }
 
 /// HottPath transitivity (composition): compose two paths.
-///   trans(p, q) : HottPath<A>(a, c)   given p : HottPath<A>(a, b), q : HottPath<A>(b, c)
+///  trans(p, q) : HottPath<A>(a, c) given p : HottPath<A>(a, b), q : HottPath<A>(b, c)
 public fn trans<A>(a: A, b: A, c: A, p: HottPath<A>(a, b), q: HottPath<A>(b, c)) -> HottPath<A>(a, c) {
     @builtin_trans(p, q)
 }
 
 /// Action on paths (ap / cong): apply a function to a path.
-///   ap(f, p) : HottPath<B>(f(a), f(b))   given f : A → B, p : HottPath<A>(a, b)
-///   ap(f, p) = λ(i). f(p @ i)
+///  ap(f, p) : HottPath<B>(f(a), f(b)) given f : A → B, p : HottPath<A>(a, b)
+///  ap(f, p) = λ(i). f(p @ i)
 public fn ap<A, B>(f: fn(A) -> B, a: A, b: A, p: HottPath<A>(a, b)) -> HottPath<B>(f(a), f(b)) {
     @builtin_ap(f, p)
 }
 
 /// Dependent action on paths (apd): apply a dependent function along a path.
-///   apd(f, p) : PathOver<B>(p, f(a), f(b))
-///   given f : (x : A) → B(x), p : HottPath<A>(a, b)
+///  apd(f, p) : PathOver<B>(p, f(a), f(b))
+///  given f : (x : A) → B(x), p : HottPath<A>(a, b)
 public fn apd<A, B: fn(A) -> Type>(
     f: fn(x: A) -> B(x),
     a: A,
@@ -147,10 +157,10 @@ public fn concat<A>(a: A, b: A, c: A, p: HottPath<A>(a, b), q: HottPath<A>(b, c)
 
 /// Half-adjoint equivalence: the standard coherent notion.
 /// A function `f : A → B` is an equivalence when equipped with:
-///   - An inverse `g : B → A`
-///   - Section: `f ∘ g ~ id_B`
-///   - Retraction: `g ∘ f ~ id_A`
-///   - Coherence: the two ways of showing `f(g(f(a))) = f(a)` agree
+///  - An inverse `g : B → A`
+///  - Section: `f ∘ g ~ id_B`
+///  - Retraction: `g ∘ f ~ id_A`
+///  - Coherence: the two ways of showing `f(g(f(a))) = f(a)` agree
 public type IsEquiv<A, B> is {
     forward: fn(A) -> B,
     inverse: fn(B) -> A,
@@ -165,6 +175,7 @@ public type IsEquiv<A, B> is {
 
 /// An equivalence between types A and B.
 ///
+
 /// Carries the usual quasi-inverse pair `(forward, backward)` that
 /// every user-level equivalence needs, plus the full `IsEquiv` proof
 /// object that HoTT / univalent-foundations code relies on to
@@ -209,22 +220,26 @@ public fn id_equiv<A>() -> Equiv<A, A> {
 // Equivalence-coherence laws (HoTT Book §4.2)
 // -----------------------------------------------------------------------------
 //
+
 // `IsEquiv` is the half-adjoint equivalence: section + retraction +
 // COHERENCE 2-cell witnessing that `ap(forward, retraction(a))` and
 // `section(forward(a))` are the *same* path in B. Without coherence,
 // the equivalence type is not a proposition (multiple isEquiv proofs
 // for the same f exist) and univalence breaks.
 //
+
 // Pre-fix `equiv_inv`, `equiv_compose`, `ua_inv`, the fiber-based
 // equiv constructor, and `propext` populated `coherence` with
 // `fn(_) -> refl(refl(...))` — a misleading PLACEHOLDER that:
 //
-//   1. Was structurally wrong for the coherence type (refl-of-refl
-//      lives in `HottPath<HottPath<X>(x,x)>(refl(x), refl(x))` —
-//      not the required `HottPath<HottPath<Y>(p, q)>` over the
-//      derived endpoints).
-//   2. Hid the actual proof obligation.
+
+//  1. Was structurally wrong for the coherence type (refl-of-refl
+//  lives in `HottPath<HottPath<X>(x,x)>(refl(x), refl(x))` —
+//  not the required `HottPath<HottPath<Y>(p, q)>` over the
+//  derived endpoints).
+//  2. Hid the actual proof obligation.
 //
+
 // Architectural fix: declare each coherence law as an explicit
 // `public axiom` with the full HoTT-Book type signature and a
 // `@framework(hott, ...)` annotation documenting the meta-theory
@@ -238,17 +253,21 @@ public fn id_equiv<A>() -> Equiv<A, A> {
 
 /// **HoTT Book §4.2.4**: inverting an equivalence preserves IsEquiv.
 ///
+
 /// For `e : A ≃ B`, the inverted equivalence `e' : B ≃ A` (with
 /// `forward = e.inverse`, `inverse = e.forward`, `section =
 /// e.retraction`, `retraction = e.section`) satisfies:
 ///
-///   `ap(e.inverse, e.section(b)) ≡ e.retraction(e.inverse(b))`
+
+///  `ap(e.inverse, e.section(b)) ≡ e.retraction(e.inverse(b))`
 ///
+
 /// Both sides are paths in `A` from `e.inverse(e.forward(e.inverse(b)))`
 /// to `e.inverse(b)`. The 2-cell witnessing this equality is
 /// derivable from `e.coherence` via the cubical naturality
 /// square (HoTT-Book Lemma 2.4.4 + §4.2.4).
 ///
+
 /// Discharge IOU: `kernel_equiv_inv_coherence(e, b)` — applies the
 /// naturality square + ap-functoriality at the cubical level.
 @framework(hott, "HoTT Book §4.2.4 — equiv_inv preserves IsEquiv")
@@ -268,11 +287,13 @@ public axiom equiv_inv_coherence_law<A, B>(
 
 /// **HoTT Book §4.2.5**: composing equivalences preserves IsEquiv.
 ///
+
 /// For `e1 : A ≃ B` and `e2 : B ≃ C`, the composite `e2 ∘ e1 : A ≃ C`
 /// satisfies the coherence square over the composed section /
 /// retraction. The 2-cell is derivable from `e1.coherence` and
 /// `e2.coherence` via two applications of the naturality square.
 ///
+
 /// Discharge IOU: `kernel_equiv_compose_coherence(e1, e2, a)` —
 /// applies HoTT-Book Lemma 4.2.5's explicit construction.
 @framework(hott, "HoTT Book §4.2.5 — equivalences compose")
@@ -311,6 +332,7 @@ public axiom equiv_compose_coherence_law<A, B, C>(
 
 /// Inverse equivalence: if A ≃ B then B ≃ A.
 ///
+
 /// The inverted equivalence's coherence is provided by
 /// `equiv_inv_coherence_law` — replaces the prior
 /// `refl(refl(b))` placeholder which was both type-wrong and
@@ -333,6 +355,7 @@ public fn equiv_inv<A, B>(e: Equiv<A, B>) -> Equiv<B, A> {
 
 /// Compose equivalences: if A ≃ B and B ≃ C then A ≃ C.
 ///
+
 /// The composite equivalence's coherence is provided by
 /// `equiv_compose_coherence_law` — replaces the prior
 /// `refl(refl(a))` placeholder. The section and retraction are
@@ -376,21 +399,21 @@ public fn equiv_compose<A, B, C>(e1: Equiv<A, B>, e2: Equiv<B, C>) -> Equiv<A, C
 // =============================================================================
 
 /// Contractible type (h-level −2): exactly one element up to paths.
-///   center : A
-///   contraction : ∀ (a : A). HottPath<A>(center, a)
+///  center : A
+///  contraction : ∀ (a : A). HottPath<A>(center, a)
 public type IsContr<A> is {
     center: A,
     contraction: fn(a: A) -> HottPath<A>(center, a),
 };
 
 /// Proposition (h-level −1): any two elements are path-equal.
-///   all_paths : ∀ (a b : A). HottPath<A>(a, b)
+///  all_paths : ∀ (a b : A). HottPath<A>(a, b)
 public type IsProp<A> is {
     all_paths: fn(a: A, b: A) -> HottPath<A>(a, b),
 };
 
 /// Set (h-level 0): path types are propositions (UIP).
-///   uip : ∀ (a b : A) (p q : HottPath<A>(a,b)). HottPath<HottPath<A>(a,b)>(p, q)
+///  uip : ∀ (a b : A) (p q : HottPath<A>(a,b)). HottPath<HottPath<A>(a,b)>(p, q)
 public type IsSet<A> is {
     uip: fn(a: A, b: A, p: HottPath<A>(a, b), q: HottPath<A>(a, b)) -> HottPath<HottPath<A>(a, b)>(p, q),
 };
@@ -401,8 +424,8 @@ public type IsGroupoid<A> is {
 };
 
 /// General n-truncation: `IsTrunc<A, n>`.
-///   IsTrunc<A, -2> ≡ IsContr<A>
-///   IsTrunc<A, n+1> ≡ ∀ (a b : A). IsTrunc<HottPath<A>(a,b), n>
+///  IsTrunc<A, -2> ≡ IsContr<A>
+///  IsTrunc<A, n+1> ≡ ∀ (a b : A). IsTrunc<HottPath<A>(a,b), n>
 public type IsTrunc<A, N: meta Int> is protocol {
     fn trunc_level(&self) -> Int;
     @verify(formal)
@@ -426,7 +449,7 @@ public type HSet is NType<0>;
 // =============================================================================
 
 /// The homotopy fiber of `f : A → B` over `b : B`.
-///   Fiber(f, b) = Σ(a : A). HottPath<B>(f(a), b)
+///  Fiber(f, b) = Σ(a : A). HottPath<B>(f(a), b)
 public type Fiber<A, B>(f: fn(A) -> B, b: B) is {
     point: A,
     path: HottPath<B>(f(point), b),
@@ -441,12 +464,14 @@ public type IsContrMap<A, B>(f: fn(A) -> B) is {
 /// **HoTT Book Theorem 4.4.6**: equivalence-from-contractible-fibers
 /// preserves IsEquiv coherence.
 ///
+
 /// For `f : A → B` with all fibers contractible, the derived
 /// `IsEquiv<A,B>` has section and retraction extracted from the
 /// fiber center / contraction. The coherence 2-cell is derivable
 /// from the contractible-fiber proof via the centred-fiber
 /// uniqueness lemma.
 ///
+
 /// Discharge IOU: `kernel_contr_fiber_coherence(cm, a)` —
 /// applies HoTT-Book §4.4 derivation.
 @framework(hott, "HoTT Book §4.4 — equiv_from_contr_map preserves IsEquiv")
@@ -497,22 +522,25 @@ public fn equiv_from_contr_map<A, B>(f: fn(A) -> B, cm: IsContrMap<A, B>(f)) -> 
 // =============================================================================
 
 /// The univalence axiom (Voevodsky): equivalences of types are paths in Type.
-///   ua : Equiv<A, B> → HottPath<Type>(A, B)
+///  ua : Equiv<A, B> → HottPath<Type>(A, B)
 ///
+
 /// Computational content via cubical normalizer:
-///   transport(ua(e), x)       ↦ e.forward(x)
-///   transport(sym(ua(e)), x)  ↦ e.inverse(x)
-///   ua(id_equiv)              ↦ refl(A)
+///  transport(ua(e), x) ↦ e.forward(x)
+///  transport(sym(ua(e)), x) ↦ e.inverse(x)
+///  ua(id_equiv) ↦ refl(A)
 public axiom ua<A, B>(e: Equiv<A, B>) -> HottPath<Type>(A, B);
 
 /// **HoTT Book §2.10**: transport-equivalence coherence.
 ///
+
 /// For `p : HottPath<Type>(A, B)`, the equivalence
 /// `ua_inv(p) = (transport(p, _), transport(sym(p), _))` satisfies
 /// the half-adjoint coherence: the two ways of round-tripping
 /// `transport(p, a)` agree up to a 2-cell. In CCHM cubical TT
 /// this 2-cell is built from `transport_roundtrip` + `hcomp`.
 ///
+
 /// Discharge IOU: `kernel_transport_coherence(p, a)` — applies
 /// the cubical-TT transport-iso square.
 @framework(hott, "HoTT Book §2.10 — transport equivalence coherence")
@@ -531,8 +559,9 @@ public axiom transport_coherence_law<A, B>(
 );
 
 /// Inverse of univalence: a path of types induces an equivalence.
-///   ua_inv(p) builds the equivalence from transport along p.
+///  ua_inv(p) builds the equivalence from transport along p.
 ///
+
 /// Coherence is provided by `transport_coherence_law` — the
 /// cubical-TT roundtrip square. Replaces the prior
 /// `refl(refl(fwd(a)))` placeholder which was structurally
@@ -557,8 +586,8 @@ public fn ua_inv<A, B>(p: HottPath<Type>(A, B)) -> Equiv<A, B> {
 }
 
 /// Function extensionality: pointwise equal functions are path-equal.
-///   funext(h) : HottPath<fn(A) → B>(f, g)
-///   given h : ∀ (x : A). HottPath<B>(f(x), g(x))
+///  funext(h) : HottPath<fn(A) → B>(f, g)
+///  given h : ∀ (x : A). HottPath<B>(f(x), g(x))
 public axiom funext<A, B>(
     f: fn(A) -> B,
     g: fn(A) -> B,
@@ -566,8 +595,8 @@ public axiom funext<A, B>(
 ) -> HottPath<fn(A) -> B>(f, g);
 
 /// Inverse of funext: extract pointwise paths from a function path.
-///   happly(p, x) : HottPath<B>(f(x), g(x))
-///   given p : HottPath<fn(A) → B>(f, g)
+///  happly(p, x) : HottPath<B>(f(x), g(x))
+///  given p : HottPath<fn(A) → B>(f, g)
 public fn happly<A, B>(
     f: fn(A) -> B,
     g: fn(A) -> B,
@@ -580,12 +609,14 @@ public fn happly<A, B>(
 /// **HoTT Book §3.3**: equivalence between propositions has trivial
 /// coherence (all paths in a proposition are equal).
 ///
+
 /// For propositions P and Q with mutual functions f, g, the
 /// half-adjoint coherence reduces to the proposition-uniqueness
 /// principle: every two paths in Q are themselves path-equal.
 /// Specifically `q_prop.all_paths` upgrades to a 2-cell because
 /// the path-space of a proposition is itself contractible.
 ///
+
 /// Discharge IOU: `kernel_prop_coherence(q_prop, p1, p2)` —
 /// applies HoTT-Book Lemma 3.3.5 (paths in a Prop are unique).
 @framework(hott, "HoTT Book §3.3 — propositional equivalence coherence")
@@ -602,6 +633,7 @@ public axiom prop_equiv_coherence_law<P, Q>(
 
 /// Univalence for propositions: logically equivalent props are equal.
 ///
+
 /// Coherence is provided by `prop_equiv_coherence_law` — uses the
 /// proposition-uniqueness principle (paths in a Prop are
 /// themselves equal) to derive the 2-cell from the underlying
@@ -633,13 +665,14 @@ public fn propext<P, Q>(
 // =============================================================================
 
 /// The circle S¹: one point and one non-trivial loop.
-///   Constructors:
-///     base : S1
-///     loop : HottPath<S1>(base, base)
+///  Constructors:
+///  base : S1
+///  loop : HottPath<S1>(base, base)
 ///
-///   Eliminator:
-///     S1_elim(P, b, l) : (x : S1) → P(x)
-///     where b : P(base), l : PathOver<P>(loop, b, b)
+
+///  Eliminator:
+///  S1_elim(P, b, l) : (x : S1) → P(x)
+///  where b : P(base), l : PathOver<P>(loop, b, b)
 public type S1 is
     | base
     | loop_path() = base..base;
@@ -657,18 +690,19 @@ public fn s1_rec<B>(b: B, l: HottPath<B>(b, b)) -> fn(S1) -> B {
 }
 
 /// Suspension: Susp(A) has north, south, and a path for each a : A.
-///   north : Susp(A)
-///   south : Susp(A)
-///   merid : A → HottPath<Susp(A)>(north, south)
+///  north : Susp(A)
+///  south : Susp(A)
+///  merid : A → HottPath<Susp(A)>(north, south)
 public type Susp<A> is
     | north
     | south
     | merid(a: A) = north..south;
 
 /// Propositional truncation: ||A|| is the free proposition on A.
-///   |a| : ||A||             (constructor)
-///   trunc : IsProp<||A||>   (truncation)
+///  |a| : ||A|| (constructor)
+///  trunc : IsProp<||A||> (truncation)
 ///
+
 /// The `trunc_path` constructor is a binary path-combinator; since any two
 /// elements of Trunc<A> are path-equal, we record the endpoints abstractly
 /// via the quantifier form.
@@ -677,9 +711,9 @@ public type Trunc<A> is
     | trunc_path(x: Trunc<A>, y: Trunc<A>) = x..y;
 
 /// Quotient type: A/R — identifies elements related by R.
-///   class(a) : A/R
-///   relate(a, b, r) : HottPath<A/R>(class(a), class(b))   when r : R(a, b)
-///   set_trunc : IsSet<A/R>
+///  class(a) : A/R
+///  relate(a, b, r) : HottPath<A/R>(class(a), class(b)) when r : R(a, b)
+///  set_trunc : IsSet<A/R>
 public type Quotient<A, R: fn(A, A) -> Type> is protocol {
     type Q;
     fn class(a: A) -> Q;
@@ -703,7 +737,7 @@ public type DecidableEq<A> is protocol {
 };
 
 /// Hedberg's theorem: decidable equality implies set truncation.
-///   If A has decidable equality, then A is a set (UIP holds).
+///  If A has decidable equality, then A is a set (UIP holds).
 @verify(formal)
 public theorem hedberg<A: DecidableEq>()
     -> IsSet<A>
@@ -728,7 +762,7 @@ proof {
 // =============================================================================
 
 /// HottPath-over: a path in a dependent type lying over a base path.
-///   PathOver<B>(p, u, v) where p : HottPath<A>(a, b), u : B(a), v : B(b)
+///  PathOver<B>(p, u, v) where p : HottPath<A>(a, b), u : B(a), v : B(b)
 /// is equivalent to HottPath<B(b)>(transport(ap(B, p), u), v).
 public type PathOver<A, B: fn(A) -> Type>(
     a: A, b: A,
@@ -913,6 +947,7 @@ public fn unit_is_contr() -> IsContr<()> {
 
 /// Unit type is a proposition.
 ///
+
 /// There is only one inhabitant `()`, so any two values are
 /// definitionally the same and the witness is just `refl`.
 public fn unit_is_prop() -> IsProp<()> {
@@ -934,6 +969,7 @@ public fn void_is_prop() -> IsProp<Void> {
 
 /// Bool is a set (via Hedberg: decidable equality implies UIP).
 ///
+
 /// The API accepts two `Bool` witnesses so call sites can pass the
 /// concrete pair of interest (the returned `IsSet<Bool>` captures the
 /// global UIP statement, so the arguments are evidence, not restriction).
@@ -946,8 +982,8 @@ public fn bool_is_set(_a: Bool, _b: Bool) -> IsSet<Bool> {
 // =============================================================================
 
 /// HottPath in a Sigma type: a path in Σ(a : A). B(a) is a pair of
-///   - a path p : HottPath<A>(a₁, a₂) in the base
-///   - a path-over PathOver<B>(p, b₁, b₂) in the fiber
+///  - a path p : HottPath<A>(a₁, a₂) in the base
+///  - a path-over PathOver<B>(p, b₁, b₂) in the fiber
 public fn sigma_path<A, B: fn(A) -> Type>(
     a1: A, b1: B(a1),
     a2: A, b2: B(a2),

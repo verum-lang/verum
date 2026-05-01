@@ -6,24 +6,29 @@ module core.database.postgres.transaction;
 // Layer: 2-3 (Spindle adapter façade)
 // Spec: database.md §4.1 + §5.5; common/protocol.vr `affine Transaction`.
 //
+
 // PgTransaction mirrors the SQLite L7 affine Transaction shape (commit
 // 8eb1a847) — same safety contract: the type cannot be dropped without
 // being consumed by `commit_tx` / `rollback_tx`, so leaked transactions
 // are a compile-time error rather than a production bug.
 //
+
 // On the wire the operation is plain SQL — `BEGIN` / `BEGIN ISOLATION
-// LEVEL ...` to start, `COMMIT` / `ROLLBACK` to consume.  We piggy-back
+// LEVEL ...` to start, `COMMIT` / `ROLLBACK` to consume. We piggy-back
 // on the existing `simple_query` path so this module stays small.
 //
+
 // Capabilities the Postgres flavour adds over the SQLite shape:
 //
-//   * Isolation levels (`READ COMMITTED` is server-default; we expose
-//     `READ COMMITTED` / `REPEATABLE READ` / `SERIALIZABLE` plus the
-//     access mode `READ ONLY` / `READ WRITE` and `DEFERRABLE`).
-//   * SAVEPOINT / RELEASE / ROLLBACK TO are accepted via plain SQL
-//     fragments routed through `tx.simple_query` — the affine guard
-//     covers the *outer* tx, savepoints are advisory.
+
+//  * Isolation levels (`READ COMMITTED` is server-default; we expose
+//  `READ COMMITTED` / `REPEATABLE READ` / `SERIALIZABLE` plus the
+//  access mode `READ ONLY` / `READ WRITE` and `DEFERRABLE`).
+//  * SAVEPOINT / RELEASE / ROLLBACK TO are accepted via plain SQL
+//  fragments routed through `tx.simple_query` — the affine guard
+//  covers the *outer* tx, savepoints are advisory.
 //
+
 // The connection's `tx_status: TxStatus` (pulled from every ReadyForQuery
 // frame) is used by `commit_tx` to verify we're still inside a tx
 // before issuing COMMIT — surfaces a `DbMisuse` rather than emitting a
@@ -54,7 +59,7 @@ public type PgTxKind is
     | PgTkRepeatableRead
     | PgTkSerializable;
 
-/// Read-only vs read-write access.  Spec database.md §5.4: read-only
+/// Read-only vs read-write access. Spec database.md §5.4: read-only
 /// transactions can be routed to standby replicas and skip WAL gates.
 public type PgAccessMode is PgAmReadWrite | PgAmReadOnly;
 
@@ -63,7 +68,7 @@ public type PgAccessMode is PgAmReadWrite | PgAmReadOnly;
 /// serialization-failure rollback.
 public type PgDeferrable is PgDfNone | PgDfDeferrable | PgDfNotDeferrable;
 
-/// Composite begin-spec.  Constructed via the chainable builder below.
+/// Composite begin-spec. Constructed via the chainable builder below.
 public type PgTxOpts is {
     isolation: PgTxKind,
     mode: PgAccessMode,
@@ -114,15 +119,16 @@ implement PgTxOpts {
 // PgTransaction — affine handle
 // -----------------------------------------------------------------------------
 
-/// Affine transaction handle.  Constructed by `begin_tx`;
-/// consumed by `commit_tx` or `rollback_tx`.  The compiler refuses to
+/// Affine transaction handle. Constructed by `begin_tx`;
+/// consumed by `commit_tx` or `rollback_tx`. The compiler refuses to
 /// drop a `PgTransaction` value out of scope — leaked-transaction
 /// becomes a compile-time error.
 ///
+
 /// The handle does NOT hold a reference to PgConnection — Verum's
 /// present field-type surface allows owned values but not borrowed
-/// references in struct fields.  Methods take `&mut PgConnection`
-/// alongside `Transaction` instead.  Identical safety; only API
+/// references in struct fields. Methods take `&mut PgConnection`
+/// alongside `Transaction` instead. Identical safety; only API
 /// difference is `commit_tx(&mut conn, tx)` vs `tx.commit()`.
 public type affine PgTransaction is {
     /// The isolation flavour BEGIN was issued with — surfaced for
@@ -182,7 +188,7 @@ pub fn begin_tx_read_only(conn: &mut PgConnection)
         .with_mode(PgAmReadOnly))
 }
 
-/// Consume the transaction and COMMIT.  Refuses to fire if the
+/// Consume the transaction and COMMIT. Refuses to fire if the
 /// connection's tx_status is not `TxInTransaction` — surfaces
 /// `DbMisuse` so the user notices the lifecycle mistake instead of
 /// silently emitting a "no transaction in progress" notice.
@@ -195,7 +201,7 @@ pub fn commit_tx(
         TxInTransaction => {}
         TxFailedTransaction => {
             // Postgres requires ROLLBACK after error; COMMIT here is
-            // server-error-equivalent.  Force the user to take the
+            // server-error-equivalent. Force the user to take the
             // recovery path explicitly.
             return Err(DbError.Adapter(AdapterSpecific {
                 adapter: AdPostgres,
@@ -219,7 +225,7 @@ pub fn commit_tx(
     }
 }
 
-/// Consume the transaction and ROLLBACK.  Tolerant of
+/// Consume the transaction and ROLLBACK. Tolerant of
 /// `TxFailedTransaction` (Postgres requires ROLLBACK after error) and
 /// of `TxIdle` (caller may rollback a tx the server-side already
 /// auto-rolled).
@@ -242,7 +248,7 @@ pub fn rollback_tx(
 // Savepoint helpers
 // -----------------------------------------------------------------------------
 
-/// Push a SAVEPOINT.  The name is interpolated into the SQL string
+/// Push a SAVEPOINT. The name is interpolated into the SQL string
 /// — the caller is responsible for ensuring it's a valid identifier
 /// (use `core.text.is_sql_identifier` if you're echoing user input).
 pub fn savepoint(conn: &mut PgConnection, name: &Text) -> Result<(), DbError> {
@@ -282,8 +288,8 @@ pub fn rollback_to_savepoint(conn: &mut PgConnection, name: &Text)
 // `with_transaction` callback combinator
 // -----------------------------------------------------------------------------
 
-/// Run `body` inside an automatically-managed transaction.  Begins,
-/// runs, commits on `Ok` / rolls back on `Err`.  This is the
+/// Run `body` inside an automatically-managed transaction. Begins,
+/// runs, commits on `Ok` / rolls back on `Err`. This is the
 /// recommended entry point for almost all transactional code — the
 /// affine PgTransaction value is created and consumed internally so
 /// the caller never has to thread it.
@@ -308,7 +314,7 @@ pub fn with_transaction<R>(
     }
 }
 
-/// SERIALIZABLE-mode variant.  Used with the `run_with_retry` helper
+/// SERIALIZABLE-mode variant. Used with the `run_with_retry` helper
 /// from `core.database.common.retry_run` to handle the
 /// `40001 serialization_failure` retry pattern transparently.
 pub fn with_transaction_serializable<R>(

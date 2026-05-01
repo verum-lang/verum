@@ -82,6 +82,6 @@ public fn persists_across_sessions(m: &JournalPragmaMode) -> Bool {
     }
 }
 
-// PRAGMA reply text: SQLite returns the *new* mode name on success.  Used
+// PRAGMA reply text: SQLite returns the *new* mode name on success. Used
 // by drivers to confirm the change actually applied.
 public fn reply_text(m: &JournalPragmaMode) -> Text { mode_name(m) }

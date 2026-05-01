@@ -1,5 +1,6 @@
 //! Call Graph Construction and Analysis
 //!
+
 //! Builds interprocedural analysis data structures for escape analysis.
 //! Interprocedural escape analysis requires tracking reference flow across function
 //! boundaries. A reference escapes if passed to a function that may retain it (store
@@ -7,12 +8,14 @@
 //! whole-program analysis: can_promote_to_checked() checks (1) no escape, (2) exclusive
 //! access, (3) lifetime dominance, and (4) no conflicting mutations across all callees.
 //!
+
 //! This module provides:
 //! - Call graph data structures for interprocedural analysis
 //! - Reference flow analysis between caller and callee
 //! - Known safe function tracking
 //! - Thread spawn detection for escape analysis
 //!
+
 //! Note: AST processing methods are provided separately in `verum_parser` to avoid
 //! circular dependencies. Use `CallGraphBuilder`'s programmatic API to build call
 //! graphs manually, or use the parser's integration module.
@@ -31,9 +34,11 @@ pub fn new_function_id() -> FunctionId {
 
 /// Reference flow information between caller and callee
 ///
+
 /// Tracks how references flow through function calls to determine
 /// if escape analysis can safely promote references.
 ///
+
 /// Formal escape analysis tracks per-parameter escape status: a parameter escapes if
 /// the callee returns it, stores it in heap, captures it in a closure, or passes it
 /// to another function that may retain it. This is the core data structure for
@@ -53,6 +58,7 @@ pub struct RefFlow {
 impl RefFlow {
     /// Conservative: assume everything escapes
     ///
+
     /// Used when analyzing unknown or external functions where we cannot
     /// determine the actual behavior statically.
     #[must_use]
@@ -67,6 +73,7 @@ impl RefFlow {
 
     /// Safe: nothing escapes (for known safe functions)
     ///
+
     /// Used for functions known to not retain references, such as
     /// pure functions and standard library accessors.
     #[must_use]
@@ -104,6 +111,7 @@ impl RefFlow {
 
     /// Merge two `RefFlows` (union - conservative)
     ///
+
     /// Used when a function has multiple call sites and we need to
     /// track the combined escape behavior.
     #[must_use]
@@ -285,9 +293,11 @@ impl CallEdge {
 
 /// Call graph for interprocedural analysis
 ///
+
 /// Provides the foundation for escape analysis by tracking how
 /// functions call each other and how references flow between them.
 ///
+
 /// Enables whole-program escape analysis: for each reference, we traverse the call
 /// graph to determine if any callee in the transitive closure may retain it. Known-safe
 /// functions (pure functions, standard library functions that don't store references)
@@ -341,9 +351,11 @@ impl CallGraph {
 
     /// Check if function may retain a reference passed as parameter
     ///
+
     /// This is the key query for escape analysis. Returns true if the
     /// function may keep the reference alive after returning.
     ///
+
     /// Checks whether a callee may store, return, or otherwise retain a reference
     /// passed at `param_idx`. If the function is in the known-safe set, returns false.
     /// Otherwise checks RefFlow data for per-parameter escape status. If no flow
@@ -380,6 +392,7 @@ impl CallGraph {
 
     /// Check if function may spawn threads
     ///
+
     /// Used by escape analysis to determine if references might
     /// escape to another thread.
     #[must_use]
@@ -425,6 +438,7 @@ impl CallGraph {
 
     /// Register a known safe function
     ///
+
     /// Safe functions are known to not retain references to their parameters
     /// beyond the duration of the call.
     pub fn register_safe_function(&mut self, name: impl Into<Text>) {
@@ -510,6 +524,7 @@ impl CallGraph {
 
     /// Compute transitive closure of calls
     ///
+
     /// Returns all functions reachable from the given function.
     #[must_use]
     pub fn reachable_from(&self, func: FunctionId) -> Set<FunctionId> {
@@ -536,6 +551,7 @@ impl CallGraph {
 
     /// Compute strongly connected components (for recursive call analysis)
     ///
+
     /// Uses Tarjan's algorithm to find cycles in the call graph.
     #[must_use]
     pub fn compute_sccs(&self) -> List<Set<FunctionId>> {
@@ -665,6 +681,7 @@ impl Default for CallGraph {
 
 /// Call graph builder
 ///
+
 /// Provides an incremental API for building call graphs from AST
 /// or other sources.
 pub struct CallGraphBuilder {
@@ -684,6 +701,7 @@ impl CallGraphBuilder {
 
     /// Register standard library safe functions
     ///
+
     /// These functions are known to not retain references to their parameters.
     pub fn register_stdlib_safe_functions(&mut self) {
         // List iteration and access (read-only, don't retain)

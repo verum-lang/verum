@@ -5,25 +5,32 @@
 // Dependencies: core, core.collections, core.security.mac.hmac
 // =============================================================================
 //
+
 // RFC 8018 §5.2 — Password-Based Key Derivation Function 2. The
 // FIPS-approved baseline KDF; still dominant for WPA2, WebCrypto,
 // and in-database password stretching (SCRAM family).
 //
+
 // Memory-hard alternatives (Argon2id, scrypt) are stronger against
 // GPU/ASIC attacks and are what new deployments should reach for —
 // but PBKDF2 remains the required fallback under FIPS 140.
 //
+
 // # API
 //
-//   pbkdf2_hmac_sha256(password, salt, iterations, out_len) -> List<Byte>
-//   pbkdf2_hmac_sha384(password, salt, iterations, out_len) -> List<Byte>
-//   pbkdf2_hmac_sha512(password, salt, iterations, out_len) -> List<Byte>
+
+//  pbkdf2_hmac_sha256(password, salt, iterations, out_len) -> List<Byte>
+//  pbkdf2_hmac_sha384(password, salt, iterations, out_len) -> List<Byte>
+//  pbkdf2_hmac_sha512(password, salt, iterations, out_len) -> List<Byte>
 //
+
 // # Recommended parameters (NIST SP 800-63B, as of 2026)
 //
-//   HMAC-SHA256 — ≥ 600_000 iterations for interactive auth.
-//   HMAC-SHA512 — ≥ 210_000 iterations (one hash block larger).
+
+//  HMAC-SHA256 — ≥ 600_000 iterations for interactive auth.
+//  HMAC-SHA512 — ≥ 210_000 iterations (one hash block larger).
 //
+
 // =============================================================================
 
 module core.security.kdf.pbkdf2;
@@ -38,7 +45,7 @@ public type Pbkdf2Error is
     | BadOutputLength;
 
 // Display + Debug + Eq for Pbkdf2Error — standard
-// stdlib protocol impls.  Pre-fix had no impls; callers
+// stdlib protocol impls. Pre-fix had no impls; callers
 // wanting to log/format/compare these errors had to roll
 // their own match block.
 
@@ -81,13 +88,13 @@ implement Eq for Pbkdf2Error {
 /// 1 MiB in this API to keep List<Byte> allocation sane.
 const MAX_OUT_LEN: Int = 1_048_576;
 
-/// Maximum permitted iteration count.  Without this, callers passing
+/// Maximum permitted iteration count. Without this, callers passing
 /// attacker-controlled iteration counts (e.g. parsed from a PHC
 /// string, JWT header, or wire-format key descriptor) could pin
-/// CPU on a single derive call.  10M is well above OWASP 2023
+/// CPU on a single derive call. 10M is well above OWASP 2023
 /// recommendations (600k for SHA-256, 210k for SHA-512) and any
 /// realistic deployment, but bounded enough to keep verify-time
-/// on the order of seconds.  Mirrors the matching cap at the
+/// on the order of seconds. Mirrors the matching cap at the
 /// password_hash wrapper layer (fe510d3d).
 public const MAX_PBKDF2_ITERATIONS: UInt32 = 10_000_000_u32;
 

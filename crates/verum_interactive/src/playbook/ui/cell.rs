@@ -1,10 +1,11 @@
 //! Cell widget for rendering individual cells with inline output.
 //!
+
 //! Each cell renders as:
-//! ┌ ▸ [3] ✓ source preview...                        0.2ms ┐
-//! │   full source code with syntax highlighting             │
-//! │   -> result : Type                                      │
-//! │   stdout output here                                    │
+//! ┌ ▸ [3] ✓ source preview... 0.2ms ┐
+//! │ full source code with syntax highlighting │
+//! │ -> result : Type │
+//! │ stdout output here │
 //! └────────────────────────────────────────────────────────┘
 
 use ratatui::prelude::*;
@@ -448,7 +449,7 @@ impl<'a> Widget for CellWidget<'a> {
         let source = self.cell.source.as_str();
         let source_line_count = source.lines().count().max(1);
         let gutter_width = if self.cell.is_code() {
-            // Gutter: "  1 │ " — adapt width to line count
+            // Gutter: " 1 │ " — adapt width to line count
             (source_line_count.to_string().len() + 3) as u16
         } else {
             2 // markdown gets simple indent

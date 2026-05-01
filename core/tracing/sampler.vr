@@ -115,6 +115,7 @@ implement Sampler for AlwaysOff {
 // TraceIdRatio — deterministic ratio sampling by TraceId high 64 bits
 // =============================================================================
 //
+
 // Sample if trace_id_high_u64 < ratio_threshold, where ratio_threshold
 // scales the u64 space by `ratio` ∈ [0.0, 1.0]. Identical TraceIds will
 // always produce the same decision, so parent + child spans agree.

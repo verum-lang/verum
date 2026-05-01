@@ -2,21 +2,25 @@
 // core/net/proxy/health_check.vr — Active / passive upstream health checks
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §9.3
+// Spec: internal/specs/net-framework.md §9.3
 // =============================================================================
 //
+
 // Health-check machinery for upstream origins. Two flavours:
 //
-//   * Active  — periodic background probe (HTTP GET to a configurable
-//               path; 2xx → healthy, otherwise → unhealthy).
-//   * Passive — observe live traffic; after `unhealthy_threshold`
-//               consecutive failures mark the upstream unhealthy until
-//               `recovery_check_interval_ms` passes.
+
+//  * Active — periodic background probe (HTTP GET to a configurable
+//  path; 2xx → healthy, otherwise → unhealthy).
+//  * Passive — observe live traffic; after `unhealthy_threshold`
+//  consecutive failures mark the upstream unhealthy until
+//  `recovery_check_interval_ms` passes.
 //
+
 // A single `ProxyHealthStatus` snapshot is queried by the load-balancer on
 // every request pick. Updates are cheap atomic writes — probing tasks
 // run on the shared runtime via `core.async.task.spawn`.
 //
+
 // =============================================================================
 
 module core.net.proxy.health_check;
@@ -120,12 +124,14 @@ implement HealthCheck {
 // ActiveHealthChecker — runs a periodic GET probe loop per upstream
 // =============================================================================
 //
+
 // One ActiveHealthChecker holds a (Upstream, ProxyHealthStatus) pair plus a
 // configured `HealthCheck.Active`. The `run` method is the loop entry
 // point that callers spawn into a nursery — it never returns (until
 // the cancellation token fires) and updates the status atomically on
 // each tick.
 //
+
 // Spec §9.3 Phase 2 follow-up: "Active health-check runner (inspect
 // HTTP GET → bump ProxyHealthStatus)".
 
@@ -182,9 +188,11 @@ implement ActiveHealthChecker {
     /// Apply a single observed outcome to the bound `ProxyHealthStatus`.
     /// Threshold semantics follow `HealthCheck.Active.{healthy,unhealthy}_threshold`:
     ///
-    ///   * After `healthy_threshold` consecutive OKs → `mark_healthy`.
-    ///   * After `unhealthy_threshold` consecutive failures → `mark_unhealthy`.
+
+    ///  * After `healthy_threshold` consecutive OKs → `mark_healthy`.
+    ///  * After `unhealthy_threshold` consecutive failures → `mark_unhealthy`.
     ///
+
     /// Other outcomes leave the status unchanged but still bump the
     /// internal counters so the next transition fires correctly.
     public fn record_outcome(&self, ok: Bool) {

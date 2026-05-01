@@ -14,6 +14,7 @@
 )]
 //! Tests for loop annotations (invariant, decreases)
 //!
+
 //! Tests parsing of verification annotations on loops:
 //! - `loop invariant expr { ... }`
 //! - `while cond invariant expr decreases expr { ... }`

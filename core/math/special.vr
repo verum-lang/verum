@@ -3,6 +3,7 @@
 // =============================================================================
 // Layer: 1 (Scalar Mathematics)
 //
+
 // Provides special mathematical functions used in statistics, physics,
 // and engineering:
 // - Gamma functions: gamma, lgamma, digamma, beta
@@ -10,11 +11,14 @@
 // - Bessel functions: j0, j1, y0, y1
 // - Other: zeta, polylog, fresnel
 //
+
 // # Precision
 //
+
 // Implementations use established algorithms (Lanczos for gamma,
 // Chebyshev for Bessel) achieving < 1 ULP accuracy in most cases.
 //
+
 // Spec: docs/architecture/math-spec.md Section 4
 // =============================================================================
 
@@ -31,6 +35,7 @@ mount super.ieee754.{is_nan, is_infinite, copysign};
 // Gamma function Γ(x)
 // Domain: x ∈ ℝ \ {0, -1, -2, ...}
 //
+
 // For positive integers: Γ(n) = (n-1)!
 // Uses Lanczos approximation for high precision.
 public fn gamma(x: Float) -> Float {
@@ -171,8 +176,10 @@ public fn lbeta(a: Float, b: Float) -> Float {
 // Error function erf(x)
 // Domain: (-∞, ∞), Range: (-1, 1)
 //
+
 // erf(x) = (2/√π) ∫₀ˣ e^(-t²) dt
 //
+
 // Used in statistics: normal CDF = 0.5 * (1 + erf(x / √2))
 public fn erf(x: Float) -> Float{it >= -1.0 && it <= 1.0} {
     if is_nan(x) { return NAN; }
@@ -228,6 +235,7 @@ public fn erfc(x: Float) -> Float {
 // Inverse error function erfinv(x)
 // Domain: (-1, 1), Range: (-∞, ∞)
 //
+
 // erfinv(erf(x)) = x
 public fn erfinv(x: Float) -> Float {
     if x <= -1.0 { return NEG_INFINITY; }

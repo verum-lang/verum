@@ -1,5 +1,6 @@
 //! Contract Verification Diagnostics
 //!
+
 //! Specialized diagnostic builders for contract verification errors and warnings.
 //! Provides clear, actionable error messages with counterexamples and suggestions.
 

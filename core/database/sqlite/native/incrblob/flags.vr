@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_blob_open's `flags` parameter
 //
+
 // Two writable values:
 //
-//   0  — READONLY (default; calls to write fail)
-//   1  — READWRITE (read + write allowed)
+
+//  0 — READONLY (default; calls to write fail)
+//  1 — READWRITE (read + write allowed)
 // =============================================================================
 
 module core.database.sqlite.native.incrblob.flags;

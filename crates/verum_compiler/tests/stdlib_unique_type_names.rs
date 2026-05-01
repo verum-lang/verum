@@ -1,58 +1,67 @@
 //! Guardrail: every public stdlib type must have a unique simple name
 //! across all of `core/`.
 //!
+
 //! Background. The VBC codegen indexes the variant-constructor table by
-//! simple type name (`Type.Variant`).  Two stdlib `public type Foo is …`
+//! simple type name (`Type.Variant`). Two stdlib `public type Foo is …`
 //! declarations with the same simple name in different modules collide:
 //! `register_type_constructors` runs with `prefer_existing_functions =
 //! true` (stdlib loading mode), hits the `has_variants_for_type` first-
 //! wins gate on the second module, and silently skips the second type's
 //! variant registration entirely.
 //!
+
 //! Symptom: bodies that write `MyType { lock_state: Unlocked, … }`
 //! compile to `[lenient] SKIP <fn>: undefined variable: Unlocked` and
-//! disappear from the runtime function table.  Callers later panic with
+//! disappear from the runtime function table. Callers later panic with
 //! `method 'X.Y' not found on value`, far from the source.
 //!
+
 //! Concrete past incident (task #160): three stdlib modules each defined
 //! `public type LockKind`:
 //!
-//!   * `core/database/sqlite/native/l0_vfs/vfs_protocol.vr` —
-//!     5-state SQLite VFS protocol (Unlocked | Shared | Reserved |
-//!     Pending | Exclusive)
-//!   * `core/sys/common.vr` — fcntl byte-range lock
-//!     (Shared | Exclusive | Unlock)
-//!   * `core/sys/locking/mod.vr` — high-level file lock
-//!     (Shared | Exclusive)
+
+//!  * `core/database/sqlite/native/l0_vfs/vfs_protocol.vr` —
+//!  5-state SQLite VFS protocol (Unlocked | Shared | Reserved |
+//!  Pending | Exclusive)
+//!  * `core/sys/common.vr` — fcntl byte-range lock
+//!  (Shared | Exclusive | Unlock)
+//!  * `core/sys/locking/mod.vr` — high-level file lock
+//!  (Shared | Exclusive)
 //!
-//! The first to register won the simple-name slot.  Whichever module
+
+//! The first to register won the simple-name slot. Whichever module
 //! lost had its variants invisible to every body that referenced them
 //! by simple name, including bodies inside its own module.
 //!
+
 //! History. This test was originally a *ratchet* — it carried a
 //! `BASELINE_DUPLICATES` array of known-bad type names from before the
 //! invariant was enforced and only flagged NEW duplicates while letting
-//! known ones shrink over time.  Task #162 (closed) drove the baseline
+//! known ones shrink over time. Task #162 (closed) drove the baseline
 //! from 315 entries down to zero across roughly 165 disambiguation
-//! commits.  With every public stdlib type now uniquely named, the
+//! commits. With every public stdlib type now uniquely named, the
 //! ratchet plumbing is dead weight; this test is now a plain hard
 //! invariant: any duplicate, old or new, fails.
 //!
+
 //! When this test fails. Pick a domain-prefixed disambiguated name
 //! following the existing stdlib convention:
 //!
-//!   * Catalogue scope: `<CatalogueName><Type>` —
-//!     `BtreeBalanceStrategy`, `JournalTransitionMode`, `SqlOnConflict`.
-//!   * Layer pair (FFI vs runtime): `Raw<Type>` for the FFI-side —
-//!     `RawJoinHandleOpaque`, `RawExecutorHandle`.
-//!   * Platform-conditional: `Linux<Type>` / `Darwin<Type>` /
-//!     `Windows<Type>` for the @cfg(target_os = …) variants.
-//!   * Architecture-conditional: `Aarch64<Type>` / `X86<Type>`
-//!     for @cfg(target_arch = …) variants.
-//!   * Prefer the broader-scope or foundational module as canonical
-//!     (e.g. `core.metrics.instrument::Counter` > sqlite-internal
-//!     observability counter).
+
+//!  * Catalogue scope: `<CatalogueName><Type>` —
+//!  `BtreeBalanceStrategy`, `JournalTransitionMode`, `SqlOnConflict`.
+//!  * Layer pair (FFI vs runtime): `Raw<Type>` for the FFI-side —
+//!  `RawJoinHandleOpaque`, `RawExecutorHandle`.
+//!  * Platform-conditional: `Linux<Type>` / `Darwin<Type>` /
+//!  `Windows<Type>` for the @cfg(target_os = …) variants.
+//!  * Architecture-conditional: `Aarch64<Type>` / `X86<Type>`
+//!  for @cfg(target_arch = …) variants.
+//!  * Prefer the broader-scope or foundational module as canonical
+//!  (e.g. `core.metrics.instrument::Counter` > sqlite-internal
+//!  observability counter).
 //!
+
 //! Update every importer along with the rename — vcs/ smokes that
 //! mounted from the renamed site need their import path adjusted too.
 
@@ -66,9 +75,10 @@ const ROOT: &str = "core";
 /// declarations of the same simple name are mutually exclusive at
 /// codegen time and therefore cannot collide.
 ///
+
 /// Modelled as a conjunction of `key = value` constraints (e.g.
-/// `target_os = "linux"`).  An empty constraint set means "always
-/// active" (no `@cfg` annotation, or one we cannot model).  When the
+/// `target_os = "linux"`). An empty constraint set means "always
+/// active" (no `@cfg` annotation, or one we cannot model). When the
 /// `conservative` flag is set the cfg uses constructs the parser
 /// cannot decompose precisely (e.g. `any(...)`, bare predicates like
 /// `unix`); to stay sound the test then treats the declaration as
@@ -82,15 +92,17 @@ struct CfgConstraint {
 /// Keys whose different values prove mutual exclusion at build time.
 /// These are the cfg axes that pick exactly one value per build:
 ///
-///   target_os             — linux / macos / windows / …
-///   target_arch           — x86_64 / aarch64 / …
-///   target_family         — unix / windows / wasm / …
-///   target_endian         — little / big
-///   target_pointer_width  — 16 / 32 / 64
-///   runtime               — full / single_thread / no_async / no_heap /
-///                           embedded / none — at most one is selected
-///                           per `runtime` build profile
+
+///  target_os — linux / macos / windows / …
+///  target_arch — x86_64 / aarch64 / …
+///  target_family — unix / windows / wasm / …
+///  target_endian — little / big
+///  target_pointer_width — 16 / 32 / 64
+///  runtime — full / single_thread / no_async / no_heap /
+///  embedded / none — at most one is selected
+///  per `runtime` build profile
 ///
+
 /// Keys NOT in this list (notably `feature` and `debug_assertions`)
 /// are additive or independent: two cfgs with `feature = "A"` and
 /// `feature = "B"` can both be active when the build enables both
@@ -126,10 +138,10 @@ impl CfgConstraint {
     }
 }
 
-/// Parse an `@cfg(...)` line into a `CfgConstraint`.  Recognises:
-///   - `@cfg(K = "V")`            — single key=value
-///   - `@cfg(all(K1 = "V1", K2 = "V2", ...))` — conjunction
-///   - anything else → conservative (treat as always-active)
+/// Parse an `@cfg(...)` line into a `CfgConstraint`. Recognises:
+///  - `@cfg(K = "V")` — single key=value
+///  - `@cfg(all(K1 = "V1", K2 = "V2", ...))` — conjunction
+///  - anything else → conservative (treat as always-active)
 fn parse_cfg_attr(attr_line: &str) -> CfgConstraint {
     let trimmed = attr_line.trim();
     let inner = match trimmed.strip_prefix("@cfg(").and_then(|s| s.strip_suffix(")")) {
@@ -180,7 +192,7 @@ fn stdlib_public_type_names_are_unique() {
             continue;
         }
         // Two sites collide only if their cfgs overlap (i.e. are not
-        // mutually exclusive).  Build the colliding subset.
+        // mutually exclusive). Build the colliding subset.
         let colliding: Vec<&Site> = sites
             .iter()
             .enumerate()
@@ -235,12 +247,14 @@ fn stdlib_public_type_names_are_unique() {
 /// Walk a directory recursively, collecting `public type Name is …`
 /// declarations.
 ///
+
 /// `inherited_cfg` is the @cfg constraint accumulated from ancestor
 /// `mod.vr` files via the `@cfg(...) public module <child>;` pattern.
 /// Every type discovered in this directory (and all descendants)
 /// inherits that constraint, conjoined with any per-declaration
 /// @cfg attribute.
 ///
+
 /// The mod.vr-based child-cfg lookup is what lets the ratchet
 /// recognise that types in `core/sys/linux/*.vr` and
 /// `core/sys/darwin/*.vr` cannot collide — `core/sys/mod.vr`
@@ -254,7 +268,7 @@ fn walk_dir(
     sink: &mut BTreeMap<String, Vec<Site>>,
 ) {
     // Parse this dir's `mod.vr` once for the `@cfg(...) public module
-    // <name>;` map applied to children.  Re-open per dir is cheap
+    // <name>;` map applied to children. Re-open per dir is cheap
     // (one mod.vr per dir, parsing is a single pass over text lines).
     let child_cfg_map: BTreeMap<String, CfgConstraint> =
         parse_module_cfg_gates(&dir.join("mod.vr"));
@@ -287,9 +301,9 @@ fn walk_dir(
     }
 }
 
-/// Conjoin two CfgConstraints.  If either is `conservative` the
+/// Conjoin two CfgConstraints. If either is `conservative` the
 /// result is conservative (the parser couldn't model one of them
-/// precisely; stay safe).  Otherwise concatenate the constraint
+/// precisely; stay safe). Otherwise concatenate the constraint
 /// lists — duplicate (key, value) pairs collapse into one entry but
 /// don't change semantics, since the overlap check looks for
 /// matching keys with non-equal values.
@@ -308,10 +322,11 @@ fn merge_cfg(a: &CfgConstraint, b: &CfgConstraint) -> CfgConstraint {
 
 /// Scan a `mod.vr` file for `@cfg(...) public module <name>;`
 /// declarations and return a map from child-module name to the cfg
-/// that gates it.  Children declared without @cfg are absent from
+/// that gates it. Children declared without @cfg are absent from
 /// the map (caller treats them as inheriting the parent's cfg
 /// unchanged).
 ///
+
 /// Heuristic-only — same lenient-formatting policy as scan_file.
 fn parse_module_cfg_gates(mod_file: &Path) -> BTreeMap<String, CfgConstraint> {
     let mut out = BTreeMap::new();
@@ -358,11 +373,13 @@ fn parse_module_cfg_gates(mod_file: &Path) -> BTreeMap<String, CfgConstraint> {
 /// Records each match under its simple name + `@cfg` constraint in
 /// `sink`.
 ///
+
 /// Heuristic-only — the test is intentionally lenient about formatting
-/// (whitespace, generics, body kind).  Excludes `protocol` types since
+/// (whitespace, generics, body kind). Excludes `protocol` types since
 /// they cannot collide via the variant-constructor mechanism (no
 /// constructors).
 ///
+
 /// `@cfg(...)` attributes immediately preceding a type declaration
 /// (with `@repr(...)` / `@align(...)` / etc. allowed in between) are
 /// captured and attached to the site, so the uniqueness check can
@@ -447,7 +464,7 @@ fn scan_file(
             continue;
         }
         // Combine the inherited cfg from ancestor `mod.vr` gating
-        // with the per-decl @cfg attribute.  Both apply: a type
+        // with the per-decl @cfg attribute. Both apply: a type
         // gated by `@cfg(target_arch = "x86_64")` inside a module
         // gated by `@cfg(target_os = "linux")` is active only on
         // linux+x86_64.
@@ -464,8 +481,9 @@ fn scan_file(
 
 /// Convert a file path under `core/` into its dotted module path:
 ///
-///   core/sys/common.vr           -> core.sys.common
-///   core/sys/locking/mod.vr      -> core.sys.locking
+
+///  core/sys/common.vr -> core.sys.common
+///  core/sys/locking/mod.vr -> core.sys.locking
 fn file_to_module_path(repo_core_root: &Path, file: &Path) -> String {
     let rel = file.strip_prefix(repo_core_root).unwrap_or(file);
     let mut parts: Vec<String> = vec!["core".to_string()];
@@ -619,7 +637,7 @@ mod cfg_parsing_tests {
     fn feature_gates_are_additive_not_exclusive() {
         // Different `feature` values do NOT imply mutual exclusion —
         // both features can be enabled simultaneously in the same
-        // build.  Treating them as mutex would be unsound: if both
+        // build. Treating them as mutex would be unsound: if both
         // declarations land in the same build, they DO collide and
         // the test should flag it.
         let a = cfg(r#"@cfg(feature = "crypto-ring")"#);

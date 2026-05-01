@@ -5,6 +5,7 @@
 // Dependencies: core, text
 // =============================================================================
 //
+
 // Compile-time-driven, runtime-fast escaping of shell command arguments.
 // Provides the `ShellEscape` protocol (every value embedded in `sh#"...${x}..."`
 // must implement it) and the `Escaper` namespace with concrete strategies for
@@ -12,21 +13,24 @@
 // and PowerShell. Escaping is purely a string transformation — no IO, no
 // allocations beyond the result Text.
 //
+
 // Design goals:
-//   * Correct under any byte sequence: emoji, NUL bytes, embedded quotes.
-//   * Unforgeable: no input can break out of its quoted form.
-//   * Fast: > 10M args/sec on typical inputs (single-pass scan, in-place
-//     append into a pre-sized buffer; no regex, no substring search).
-//   * Idempotent over the union "already escaped" (escape(escape(x)) defines
-//     a coherent embedding, not garbage).
-//   * Pure: no IO, no Spawns, no global state — verifiable as such.
+//  * Correct under any byte sequence: emoji, NUL bytes, embedded quotes.
+//  * Unforgeable: no input can break out of its quoted form.
+//  * Fast: > 10M args/sec on typical inputs (single-pass scan, in-place
+//  append into a pre-sized buffer; no regex, no substring search).
+//  * Idempotent over the union "already escaped" (escape(escape(x)) defines
+//  a coherent embedding, not garbage).
+//  * Pure: no IO, no Spawns, no global state — verifiable as such.
 //
+
 // Threat model: shell injection. Every `${expr}` interpolation in a `sh#`
 // tagged literal is rewritten by the compiler into a call to the appropriate
 // `ShellEscape::shell_quote` impl, so no untrusted byte can ever reach the
 // shell parser unwrapped. Direct, unquoted bytes are reachable only via the
 // explicit `$unsafe{...}` opt-out which requires a `unsafe` block.
 //
+
 // =============================================================================
 
 module escape;
@@ -39,6 +43,7 @@ mount core.text.format.{Formatter, FormatError};
 // ShellFlavour — target shell dialect
 // =============================================================================
 //
+
 // Different shells have incompatible quoting rules. ShellFlavour selects
 // the strategy used by `Escaper::quote_for`. Default for `sh#"..."` literals
 // is `Posix` on Unix and `Cmd` on Windows; explicit override available.
@@ -92,10 +97,12 @@ public fn default_flavour() -> ShellFlavour {
 // ShellEscape protocol — embedded values must implement this
 // =============================================================================
 //
+
 // Compiler invariant: every interpolation `${expr}` in a `sh#"..."` literal
 // requires `typeof(expr): ShellEscape`. Failure is a hard compile error
 // (E[P403] in the diagnostics catalogue).
 //
+
 // Implementations are mandatorily pure (`@properties(Pure)`) — no IO, no
 // allocation beyond the result Text, fully deterministic. This is what
 // allows the compiler to fold escape calls during constant evaluation.
@@ -164,6 +171,7 @@ implement<T: ShellEscape> ShellEscape for Maybe<T> {
 // ShellRaw — opt-out wrapper, requires unsafe context
 // =============================================================================
 //
+
 // `$unsafe{x}` in a `sh#` literal is desugared to `ShellRaw(x).shell_quote(...)`.
 // The intent: very rare cases (constructed shell fragments, eval-style metaprogramming)
 // where the value is *known by the author* to be a literal shell expression, not
@@ -187,6 +195,7 @@ implement ShellEscape for ShellRaw {
 // Escaper — concrete strategies
 // =============================================================================
 //
+
 // Each method consumes a `&Text` and returns a `Text` that is guaranteed to be
 // a single shell-token equivalent under the named flavour. Methods are pure
 // and intended to be inlined by the optimiser.
@@ -208,6 +217,7 @@ implement Escaper {
     // POSIX single-quote escape
     // -------------------------------------------------------------------------
     //
+
     // Strategy: wrap the string in single quotes. Embedded single quotes are
     // closed-out, escaped via '\'' and reopened. Empty strings render as ''.
     // Always safe — single-quotes in POSIX shell are byte-literal, no
@@ -236,7 +246,7 @@ implement Escaper {
     }
 
     /// Predicate: true iff the string is safe to pass to a POSIX shell as
-    /// a single argument without any quoting.  Used by `posix()` for the
+    /// a single argument without any quoting. Used by `posix()` for the
     /// fast path. Mirrors the conservative shellescape lookup used by
     /// Python's shlex.quote() but slightly stricter (no comma).
     public fn posix_safe_unquoted(s: &Text) -> Bool {
@@ -265,6 +275,7 @@ implement Escaper {
     // Fish-shell escape
     // -------------------------------------------------------------------------
     //
+
     // fish single-quotes interpret \\ and \' but no other escapes. Closing
     // logic differs slightly from POSIX.
 
@@ -288,6 +299,7 @@ implement Escaper {
     // Windows cmd.exe escape
     // -------------------------------------------------------------------------
     //
+
     // cmd.exe quoting is famously broken. We follow the canonical algorithm
     // from MS docs: double-quote runs, double internal quotes, double trailing
     // backslashes that touch a quote, escape carets/percents/exclamation
@@ -349,6 +361,7 @@ implement Escaper {
     // PowerShell escape
     // -------------------------------------------------------------------------
     //
+
     // PowerShell single-quotes are byte-literal except for the doubled quote
     // (''' inside a single-quoted string is a literal quote). Backslash is
     // not special in single-quoted strings. We use this form.

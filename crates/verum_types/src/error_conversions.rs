@@ -1,5 +1,6 @@
 //! Conversions from verum_types::TypeError to verum_error::VerumError
 //!
+
 //! This module implements the `From` trait to convert type checking errors
 //! to the unified VerumError type, enabling seamless error propagation across
 //! crate boundaries.

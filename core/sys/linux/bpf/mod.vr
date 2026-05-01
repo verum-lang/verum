@@ -3,25 +3,29 @@
 // =============================================================================
 // Layer: 0 (Kernel — alongside sys/linux/io.vr)
 // Spec: https://docs.kernel.org/bpf/
-//       https://www.kernel.org/doc/html/latest/bpf/instruction-set.html
-//       https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/bpf.h
+//  https://www.kernel.org/doc/html/latest/bpf/instruction-set.html
+//  https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/bpf.h
 //
+
 // This module wraps the `bpf()` syscall family with typed Verum APIs
 // for program loading, map operations, and attachment to the standard
 // attach points (XDP, TC, socket filter, tracepoint, kprobe, cgroup).
 //
+
 // The Verum → eBPF bytecode codegen path (for writing "eBPF hot-path
 // predicates" directly in Verum) lives in verum_codegen; this module
 // only covers the kernel-facing runtime API.
 //
+
 // # Module layout
 //
+
 // ```
 // core.sys.linux.bpf
-// ├── mod.vr       — re-exports + constants
-// ├── program.vr   — Program types + load / attach
-// ├── map.vr       — Map types + lookup / update / delete
-// └── error.vr     — BpfError
+// ├── mod.vr — re-exports + constants
+// ├── program.vr — Program types + load / attach
+// ├── map.vr — Map types + lookup / update / delete
+// └── error.vr — BpfError
 // ```
 // =============================================================================
 

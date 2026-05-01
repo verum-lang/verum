@@ -2,7 +2,8 @@
 // core.action.enactments — composition, activation modality A, α ⊣ ε
 // =============================================================================
 //
-// Each Enactment carries the Articulation it enacts (VVA §11.3).  The
+
+// Each Enactment carries the Articulation it enacts (VVA §11.3). The
 // adjunction α ⊣ ε is realised by the pair `epsilon : Articulation →
 // Enactment` and `alpha_of : Enactment → Articulation`; for any
 // articulation α we have `alpha_of(epsilon(α)) ≡ α`, witnessed by
@@ -51,7 +52,7 @@ public fn compose(a: Enactment, b: Enactment) -> Enactment {
     };
     // Composition keeps a's articulation when both are raw; if either
     // side carries a non-raw articulation, that one wins (Actic absorbs
-    // into the articulated side).  When both are non-raw and distinct,
+    // into the articulated side). When both are non-raw and distinct,
     // the result becomes raw to flag the gauge mismatch.
     let articulation: Articulation = if is_raw_actic(a.articulation.clone()) {
         b.articulation.clone()
@@ -118,7 +119,7 @@ public fn alpha_of(e: Enactment) -> Articulation {
 }
 
 /// Witness for the unit / counit of α ⊣ ε:
-///   `is_adjoint(α, e)` ⇔ `alpha_of(e) ≡ α`.
+///  `is_adjoint(α, e)` ⇔ `alpha_of(e) ≡ α`.
 public fn is_adjoint(alpha: Articulation, e: Enactment) -> Bool {
     articulation_eq(alpha, alpha_of(e))
 }
@@ -129,11 +130,14 @@ public fn is_adjoint(alpha: Articulation, e: Enactment) -> Bool {
 
 /// V8 (#234) — round-trip witness `α → ε(α) → α`.
 ///
+
 /// Per Diakrisis 108.T (the AC ↔ OC duality theorem), the auto-induced
 /// epsilon-functor + alpha-of-functor form an adjunction, so:
 ///
-///     alpha_of(epsilon(α)) ≡ α   for every articulation α.
+
+///  alpha_of(epsilon(α)) ≡ α for every articulation α.
 ///
+
 /// This function returns `true` iff that round-trip identity holds for
 /// the supplied articulation. Used as a runtime invariant check and as
 /// the unit-of-the-adjunction witness.
@@ -160,24 +164,26 @@ public fn epsilon_alpha_epsilon_roundtrip_for_auto_induced(e: Enactment) -> Bool
 // Canonical Diakrisis-spelling aliases (12-actic/09-verum-stdlib-sketch.md)
 // -----------------------------------------------------------------------------
 //
+
 // The Diakrisis Verum-stdlib sketch (`12-actic/09-verum-stdlib-sketch.md` §2)
 // prescribes the following names; we ship them as direct aliases of the
 // existing operations so user code can be written against either Diakrisis-
 // canonical names or Verum-historic ones. Comparison `enact_par` is new
 // (Diakrisis prescribes it as parallel composition `A || B`).
 
-/// Sequential composition: `A then B`.  Alias of `compose`.
+/// Sequential composition: `A then B`. Alias of `compose`.
 public fn enact_then(a: Enactment, b: Enactment) -> Enactment {
     compose(a, b)
 }
 
-/// Parallel composition: `A || B`.  Both enactments contribute their
+/// Parallel composition: `A || B`. Both enactments contribute their
 /// step-lists; activation rank is the maximum of both; articulations
 /// follow the same absorption rule as `compose`.
 ///
+
 /// At this stdlib layer parallelism is *structural* — there is no
 /// process-calculus-style interleaving — so `enact_par` is currently
-/// observationally identical to `compose`.  The two are kept as separate
+/// observationally identical to `compose`. The two are kept as separate
 /// public surface so future refinements (true CCS-style parallelism with
 /// a different gauge canonicalisation) can specialise `enact_par` without
 /// breaking call sites that already chose semantic intent.
@@ -191,12 +197,12 @@ public fn enact_par(a: Enactment, b: Enactment) -> Enactment {
     }
 }
 
-/// A-modality activation.  Alias of `activation`.
+/// A-modality activation. Alias of `activation`.
 public fn activate(e: Enactment) -> Enactment {
     activation(e)
 }
 
-/// Transfinite-bounded activation by a finite step count.  Alias of
+/// Transfinite-bounded activation by a finite step count. Alias of
 /// `activation_iterate`. The Diakrisis sketch types `n: Ordinal`; we
 /// currently restrict to a finite Int so the kernel can decide
 /// termination at compile time. Transfinite n requires an Ordinal
@@ -209,10 +215,11 @@ public fn activate_n(e: Enactment, n: Int) -> Enactment {
 /// Autopoietic closure: the A^{ω²} fixed-point operation. For an
 /// enactment past the autopoietic threshold (`is_autopoietic(e) == true`)
 /// returns `canonicalise(e)` — the gauge-canonical representative which
-/// witnesses the fixed-point.  Below the threshold returns `e` unchanged
+/// witnesses the fixed-point. Below the threshold returns `e` unchanged
 /// so the operation is a closure on the autopoietic sub-class without
 /// silently coercing partial enactments.
 ///
+
 /// This pairs with the Diakrisis sketch's `verify_autopoiesis` (which
 /// lives at the @verify-decorator layer); the closure operation is
 /// *the operational* counterpart.
@@ -228,7 +235,7 @@ public fn autopoiesis(e: Enactment) -> Enactment {
 // =============================================================================
 
 implement Eq for Enactment {
-    /// Structural equality across all four fields.  Two enactments
+    /// Structural equality across all four fields. Two enactments
     /// are equal iff they share name, step sequence, activation
     /// rank, and articulation.
     fn eq(&self, other: &Enactment) -> Bool {
@@ -247,7 +254,7 @@ implement Eq for Enactment {
 
 implement Display for Enactment {
     /// Renders a compact one-line summary suitable for audit logs:
-    ///   `<name> [step1, step2, …] @<articulation> rank=<N>`
+    ///  `<name> [step1, step2, …] @<articulation> rank=<N>`
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(self.name.as_str())?;
         f.write_str(" [")?;

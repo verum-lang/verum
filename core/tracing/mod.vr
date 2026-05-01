@@ -3,11 +3,13 @@
 // =============================================================================
 // Layer: 4.9 (depends on core, text, collections, async, sync, time, net)
 // Spec: docs/detailed/tracing-architecture.md
-//       https://opentelemetry.io/docs/specs/otel/trace/api/
+//  https://opentelemetry.io/docs/specs/otel/trace/api/
 // =============================================================================
 //
+
 // OpenTelemetry-compatible tracing primitives. Provides:
 //
+
 // - TraceId / SpanId — opaque identifiers (128-bit / 64-bit)
 // - SpanContext — trace_id + span_id + flags + trace_state (W3C Trace Context)
 // - Span — unit of work, attributes, events, links, status
@@ -18,30 +20,36 @@
 // - TextMapPropagator — W3C traceparent / tracestate header codec
 // - Resource — process-wide attributes (service.name, service.version, ...)
 //
+
 // # Design choices
 //
+
 // - Zero runtime dependencies beyond core + sync + time.
 // - SpanContext is a 32-byte POD for cheap propagation.
 // - TextMapPropagator encodes/decodes in-place into caller-provided
-//   List<Byte> buffers — zero allocation for the hot path.
+//  List<Byte> buffers — zero allocation for the hot path.
 // - The global Tracer is behind an AtomicPtr for safe late-initialisation.
 // - Span attributes / events are append-only `List`s allocated per-span;
-//   reuse is via ObjectPool<Span> when the BatchProcessor releases.
+//  reuse is via ObjectPool<Span> when the BatchProcessor releases.
 //
+
 // # Minimal usage
 //
+
 // ```verum
 // mount core.tracing.*;
 //
+
 // // Configure once at startup
 // set_global_tracer_provider(
-//     TracerProvider.builder()
-//         .with_resource(Resource.service("weft-edge", "1.0"))
-//         .with_sampler(Sampler.parent_based(Sampler.always_on()))
-//         .with_processor(BatchProcessor.new(StdoutExporter.new()))
-//         .build()
+//  TracerProvider.builder()
+//  .with_resource(Resource.service("weft-edge", "1.0"))
+//  .with_sampler(Sampler.parent_based(Sampler.always_on()))
+//  .with_processor(BatchProcessor.new(StdoutExporter.new()))
+//  .build()
 // );
 //
+
 // // Use anywhere
 // let tracer = get_tracer("edge.handler", "1.0");
 // let span = tracer.start_span("handle_request");

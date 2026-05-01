@@ -5,24 +5,29 @@
 // Dependencies: core, io, net/tcp
 // =============================================================================
 //
+
 // Provides types and protocols for TLS/SSL encrypted communication.
 // This module defines the interface; actual cryptographic operations
 // are delegated to platform-native TLS libraries:
 //
+
 // - Linux: OpenSSL / rustls-style pure implementation
 // - macOS: Security.framework (SecureTransport)
 // - Windows: SChannel (Schannel SSP)
 //
+
 // # Example
 // ```verum
 // let config = TlsConfig.client()
-//     .with_root_certs(SystemCerts.load());
+//  .with_root_certs(SystemCerts.load());
 //
+
 // let tcp = TcpStream.connect("example.com:443").await?;
 // let tls = TlsStream.connect(tcp, "example.com", &config).await?;
 // tls.write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n").await?;
 // ```
 //
+
 // =============================================================================
 
 module net.tls;
@@ -123,6 +128,7 @@ implement Certificate {
 
     /// Parse a PEM-encoded certificate string.
     ///
+
     /// Expects the standard PEM format:
     /// ```
     /// -----BEGIN CERTIFICATE-----
@@ -309,21 +315,24 @@ implement Copy for CertVerifyMode {}
 
 /// TLS configuration for client or server connections.
 ///
+
 /// # Client Example
 /// ```verum
 /// let config = TlsConfig.client()
-///     .with_min_version(TlsVersion.Tls12)
-///     .with_root_certs(SystemCerts.load());
+///  .with_min_version(TlsVersion.Tls12)
+///  .with_root_certs(SystemCerts.load());
 /// ```
 ///
+
 /// # Server Example
 /// ```verum
 /// let cert = Certificate.from_pem(&cert_pem)?;
 /// let key = PrivateKey.from_pem(&key_pem)?;
 ///
+
 /// let config = TlsConfig.server()
-///     .with_identity(cert, key)
-///     .with_min_version(TlsVersion.Tls12);
+///  .with_identity(cert, key)
+///  .with_min_version(TlsVersion.Tls12);
 /// ```
 public type TlsConfig is {
     /// Minimum TLS version to accept.
@@ -405,6 +414,7 @@ implement TlsConfig {
 
     /// Set the identity certificate and private key.
     ///
+
     /// Required for TLS servers. Optional for clients (mutual TLS).
     public fn with_identity(self, cert: Certificate, key: PrivateKey) -> TlsConfig {
         TlsConfig {
@@ -416,6 +426,7 @@ implement TlsConfig {
 
     /// Set the certificate verification mode.
     ///
+
     /// WARNING: Setting to `None` disables certificate verification.
     /// Only use for testing or development.
     public fn with_verify_mode(self, mode: CertVerifyMode) -> TlsConfig {
@@ -424,6 +435,7 @@ implement TlsConfig {
 
     /// Set ALPN protocol names.
     ///
+
     /// Common values: ["h2", "http/1.1"] for HTTP, ["mqtt"] for MQTT.
     public fn with_alpn(self, protocols: List<Text>) -> TlsConfig {
         TlsConfig { alpn_protocols: protocols, ..self }
@@ -472,6 +484,7 @@ public type SystemCerts is ();
 implement SystemCerts {
     /// Load all trusted root certificates from the system store.
     ///
+
     /// Platform-specific:
     /// - Linux: reads from /etc/ssl/certs/ or /etc/pki/tls/certs/
     /// - macOS: reads from System Keychain via Security.framework
@@ -529,16 +542,19 @@ implement SystemCerts {
 
 /// A TLS-encrypted stream wrapping a TCP connection.
 ///
+
 /// Provides encrypted read/write operations over an underlying TCP stream.
 /// The TLS handshake is performed during `connect()` (client) or
 /// `accept()` (server).
 ///
+
 /// # Example
 /// ```verum
 /// let config = TlsConfig.client();
 /// let tcp = TcpStream.connect("example.com:443").await?;
 /// let tls = TlsStream.connect(tcp, "example.com", &config).await?;
 ///
+
 /// tls.write_all("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n".as_bytes()).await?;
 /// let mut buf = List.with_capacity(4096);
 /// let n = tls.read(&mut buf).await?;
@@ -556,6 +572,7 @@ public type TlsStream is {
 
 /// Opaque TLS session state.
 ///
+
 /// Managed by platform-specific TLS implementation.
 type TlsSession is {
     handle: Int,  // Platform-specific handle
@@ -564,6 +581,7 @@ type TlsSession is {
 implement TlsStream {
     /// Perform a TLS client handshake over an existing TCP connection.
     ///
+
     /// The `server_name` is used for SNI (Server Name Indication) and
     /// certificate verification.
     public async fn connect(
@@ -634,6 +652,7 @@ implement TlsStream {
 
     /// Perform a clean TLS shutdown.
     ///
+
     /// Sends a close_notify alert to the peer and waits for their
     /// close_notify in response.
     public async fn shutdown(&self) -> Result<(), LegacyTlsError> {
@@ -698,6 +717,7 @@ implement TlsStream {
 // AsyncRead / AsyncWrite — non-blocking TLS I/O
 // =============================================================================
 //
+
 // Readiness waits go through the underlying TcpStream reactor; the @intrinsic
 // layer does the TLS record decode/encode. A real backend (rustls/OpenSSL/HACL*)
 // is wired via `verum.tls.*` symbols in the runtime — see backend abstraction
@@ -726,6 +746,7 @@ implement AsyncWrite for TlsStream {
 implement TlsStream {
     /// Cancellable async read.
     ///
+
     /// `buf` is `&mut List<Byte>` (red-team §4 fix): plaintext bytes
     /// emerging from the TLS record layer are bytes, not 8-byte Ints.
     pub async fn read_cancellable(
@@ -741,6 +762,7 @@ implement TlsStream {
 
     /// Cancellable async write.
     ///
+
     /// `buf` is `&List<Byte>`.
     pub async fn write_cancellable(
         &mut self,
@@ -755,7 +777,8 @@ implement TlsStream {
 
     /// Ergonomic async read — returns `Result<Int, IoError>`.
     ///
-    /// `buf` is `&mut List<Byte>`.  Forwards directly to the AsyncRead
+
+    /// `buf` is `&mut List<Byte>`. Forwards directly to the AsyncRead
     /// protocol's `poll_read` — both speak `List<Byte>` end-to-end.
     pub async fn read_async(&mut self, buf: &mut List<Byte>) -> Result<Int, IoError> {
         let mut fut = TlsReadFut { stream: self, buf: buf };
@@ -764,7 +787,8 @@ implement TlsStream {
 
     /// Ergonomic async write.
     ///
-    /// `buf` is `&List<Byte>`.  Forwards directly to the AsyncWrite
+
+    /// `buf` is `&List<Byte>`. Forwards directly to the AsyncWrite
     /// protocol's `poll_write`.
     pub async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError> {
         let mut fut = TlsWriteFut { stream: self, buf: buf };
@@ -819,14 +843,17 @@ implement Debug for TlsStream {
 
 /// A reusable TLS client connector.
 ///
+
 /// Wraps a TlsConfig and provides a convenient interface for making
 /// TLS connections.
 ///
+
 /// # Example
 /// ```verum
 /// let connector = TlsConnector.new()
-///     .with_alpn(["h2", "http/1.1"]);
+///  .with_alpn(["h2", "http/1.1"]);
 ///
+
 /// let stream = connector.connect("example.com", 443).await?;
 /// ```
 public type TlsConnector is {
@@ -878,20 +905,23 @@ implement Debug for TlsConnector {
 
 /// A reusable TLS server acceptor.
 ///
+
 /// Wraps a TlsConfig and provides a convenient interface for accepting
 /// TLS connections on a server.
 ///
+
 /// # Example
 /// ```verum
 /// let cert = Certificate.from_pem(&cert_pem)?;
 /// let key = PrivateKey.from_pem(&key_pem)?;
 /// let acceptor = TlsAcceptor.new(cert, key);
 ///
+
 /// let listener = TcpListener.bind("0.0.0.0:443").await?;
 /// loop {
-///     let (tcp, addr) = listener.accept().await?;
-///     let tls = acceptor.accept(tcp).await?;
-///     // handle connection...
+///  let (tcp, addr) = listener.accept().await?;
+///  let tls = acceptor.accept(tcp).await?;
+///  // handle connection...
 /// }
 /// ```
 public type TlsAcceptor is {

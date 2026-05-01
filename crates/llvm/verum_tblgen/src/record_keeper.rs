@@ -2,6 +2,7 @@
 // Modified work Copyright 2023 Daan Vanoverloop
 // See the COPYRIGHT file at the top-level directory of this distribution.
 //
+
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
@@ -44,6 +45,7 @@ impl<'s> RecordKeeper<'s> {
 
     /// Returns an iterator over all classes.
     ///
+
     /// The iterator yields tuples of type `(String, Record)`.
     pub fn classes(&self) -> NamedRecordIter<'_, IsClass> {
         unsafe { NamedRecordIter::from_raw(tableGenRecordKeeperGetFirstClass(self.raw)) }
@@ -51,6 +53,7 @@ impl<'s> RecordKeeper<'s> {
 
     /// Returns an iterator over all definitions.
     ///
+
     /// The iterator yields tuples of type `(String, Record)`.
     pub fn defs(&self) -> NamedRecordIter<'_, IsDef> {
         unsafe { NamedRecordIter::from_raw(tableGenRecordKeeperGetFirstDef(self.raw)) }

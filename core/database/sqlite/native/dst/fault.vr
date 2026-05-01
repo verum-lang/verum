@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.5 (DST)
 //
+
 // `Fault` enumerates every byzantine event the harness can inject
 // against the simulated VFS / scheduler / clock. The `FaultSchedule`
 // pairs each fault with the op-index at which it should fire — same

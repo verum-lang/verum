@@ -6,39 +6,46 @@ module core.database.sqlite.native.l2_record.record;
 // Layer: 2
 // Spec: sqlite-native.md §6.3, sqlite.org/fileformat2.html §2.1
 //
+
 // Every row in a SQLite table is stored on disk as a `record`: a
 // header listing per-column serial-type codes, followed by the
 // concatenated column payloads.
 //
+
 // Header:
 //
-//     varint: header_length (including the length byte(s) themselves)
-//     varint: serial_type_0
-//     varint: serial_type_1
-//     ...
-//     varint: serial_type_{N-1}
+
+//  varint: header_length (including the length byte(s) themselves)
+//  varint: serial_type_0
+//  varint: serial_type_1
+//  ...
+//  varint: serial_type_{N-1}
 //
+
 // Body:
 //
-//     payload_0 ++ payload_1 ++ ... ++ payload_{N-1}
+
+//  payload_0 ++ payload_1 ++ ... ++ payload_{N-1}
 //
+
 // Serial-type codes (§6.3):
 //
-//     code | meaning                           | bytes
-//     -----+-----------------------------------+------
-//        0 | NULL                              | 0
-//        1 | i8                                | 1
-//        2 | i16 big-endian                    | 2
-//        3 | i24 big-endian                    | 3
-//        4 | i32 big-endian                    | 4
-//        5 | i48 big-endian                    | 6
-//        6 | i64 big-endian                    | 8
-//        7 | IEEE 754 double big-endian        | 8
-//        8 | INTEGER 0                         | 0
-//        9 | INTEGER 1                         | 0
-//     10,11| reserved                          | 0
-//       N≥12 even | BLOB, length=(N-12)/2      | variable
-//       N≥13 odd  | TEXT, length=(N-13)/2      | variable
+
+//  code | meaning | bytes
+//  -----+-----------------------------------+------
+//  0 | NULL | 0
+//  1 | i8 | 1
+//  2 | i16 big-endian | 2
+//  3 | i24 big-endian | 3
+//  4 | i32 big-endian | 4
+//  5 | i48 big-endian | 6
+//  6 | i64 big-endian | 8
+//  7 | IEEE 754 double big-endian | 8
+//  8 | INTEGER 0 | 0
+//  9 | INTEGER 1 | 0
+//  10,11| reserved | 0
+//  N≥12 even | BLOB, length=(N-12)/2 | variable
+//  N≥13 odd | TEXT, length=(N-13)/2 | variable
 // =============================================================================
 
 mount core.*;
@@ -71,7 +78,7 @@ public type RecordError is
     /// Header self-described length disagrees with serial-type
     /// stream — either an embedded varint overruns `header_end`
     /// (mid-byte truncation) or the stream falls short of the
-    /// declared length.  C-SQLite returns `SQLITE_CORRUPT` here.
+    /// declared length. C-SQLite returns `SQLITE_CORRUPT` here.
     | Corrupt;
 
 implement Display for RecordError {
@@ -195,7 +202,7 @@ public fn serial_type_is_variable(st: SerialType) -> Bool {
 // Record header encoding
 // -----------------------------------------------------------------------------
 
-/// Encode a list of `SerialType`s as a record header.  Returns the
+/// Encode a list of `SerialType`s as a record header. Returns the
 /// serialised header (varint-length + varints). Matches §6.3 exactly.
 public fn encode_record_header(types: &List<SerialType>) -> List<Byte> {
     // First pass — compute the total byte length of the varint payload,
@@ -211,8 +218,9 @@ public fn encode_record_header(types: &List<SerialType>) -> List<Byte> {
     // The leading varint encodes header_length *including itself*.
     // Compute header_length to fixed point: L = encoded_len(L) + payload.len().
     //
+
     // Pre-fix the loop ran exactly TWO rounds, leaving the SECOND
-    // result un-checked.  For payloads sitting on a varint-byte
+    // result un-checked. For payloads sitting on a varint-byte
     // boundary (e.g. payload = 127 → first round yields header_len
     // = 127 + 1 = 128 → varint(128) = 2 → second round yields
     // header_len = 127 + 2 = 129 → varint(129) is *still* 2, OK)

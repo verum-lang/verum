@@ -6,93 +6,108 @@
 
 //! Verum Code Generation (Dual-Path: LLVM + MLIR)
 //!
+
 //! This crate provides code generation for the Verum compiler with dual-path compilation:
 //!
+
 //! - **CPU Path**: VBC → LLVM IR (via `llvm::VbcToLlvmLowering`)
 //! - **GPU Path**: VBC → MLIR (via `mlir::VbcToMlirGpuLowering`)
 //!
+
 //! Both paths use VBC (Verum Bytecode) as the intermediate representation.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
-//! │                    VERUM COMPILATION PIPELINE                                │
+//! │ VERUM COMPILATION PIPELINE │
 //! ├─────────────────────────────────────────────────────────────────────────────┤
-//! │                                                                              │
-//! │   Verum AST → VBC Bytecode (verum_vbc::codegen)                             │
-//! │                      │                                                       │
-//! │         ┌────────────┴────────────┐                                         │
-//! │         │                         │                                         │
-//! │         ▼                         ▼                                         │
-//! │   ┌───────────────────┐    ┌───────────────────┐                           │
-//! │   │   CPU PATH        │    │   GPU PATH        │                           │
-//! │   │  (VBC → LLVM IR)  │    │  (VBC → MLIR)     │                           │
-//! │   ├───────────────────┤    ├───────────────────┤                           │
-//! │   │ Scalar/Vector ops │    │ Tensor operations │                           │
-//! │   │ Control flow      │    │ GPU kernels       │                           │
-//! │   │ CBGR memory       │    │ Flash attention   │                           │
-//! │   │ Tier 1/2 JIT      │    │ Device memory     │                           │
-//! │   └─────────┬─────────┘    └─────────┬─────────┘                           │
-//! │             │                         │                                     │
-//! │             ▼                         ▼                                     │
-//! │   ┌───────────────────┐    ┌───────────────────┐                           │
-//! │   │   LLVM Backend    │    │   MLIR Backend    │                           │
-//! │   │  x86_64/aarch64   │    │  gpu → nvvm/rocdl │                           │
-//! │   │  +SIMD/AVX/NEON   │    │  → spirv/metal    │                           │
-//! │   └─────────┬─────────┘    └─────────┬─────────┘                           │
-//! │             │                         │                                     │
-//! │             └──────────┬──────────────┘                                     │
-//! │                        ▼                                                    │
-//! │   ┌───────────────────────────────────────────────────────────────────┐    │
-//! │   │                      LLD LINKER                                    │    │
-//! │   │  • Static/dynamic libs  • Cross-platform  • Embedded in verum_lld │    │
-//! │   └───────────────────────────────────────────────────────────────────┘    │
-//! │                        │                                                    │
-//! │         ┌──────────────┼──────────────┬──────────────┐                     │
-//! │         ▼              ▼              ▼              ▼                     │
-//! │   ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐                │
-//! │   │   JIT   │    │  EXE    │    │  .so/   │    │  GPU    │                │
-//! │   │ Execute │    │ Binary  │    │ .dylib  │    │ Kernel  │                │
-//! │   └─────────┘    └─────────┘    └─────────┘    └─────────┘                │
-//! │                                                                            │
+//! │ │
+//! │ Verum AST → VBC Bytecode (verum_vbc::codegen) │
+//! │ │ │
+//! │ ┌────────────┴────────────┐ │
+//! │ │ │ │
+//! │ ▼ ▼ │
+//! │ ┌───────────────────┐ ┌───────────────────┐ │
+//! │ │ CPU PATH │ │ GPU PATH │ │
+//! │ │ (VBC → LLVM IR) │ │ (VBC → MLIR) │ │
+//! │ ├───────────────────┤ ├───────────────────┤ │
+//! │ │ Scalar/Vector ops │ │ Tensor operations │ │
+//! │ │ Control flow │ │ GPU kernels │ │
+//! │ │ CBGR memory │ │ Flash attention │ │
+//! │ │ Tier 1/2 JIT │ │ Device memory │ │
+//! │ └─────────┬─────────┘ └─────────┬─────────┘ │
+//! │ │ │ │
+//! │ ▼ ▼ │
+//! │ ┌───────────────────┐ ┌───────────────────┐ │
+//! │ │ LLVM Backend │ │ MLIR Backend │ │
+//! │ │ x86_64/aarch64 │ │ gpu → nvvm/rocdl │ │
+//! │ │ +SIMD/AVX/NEON │ │ → spirv/metal │ │
+//! │ └─────────┬─────────┘ └─────────┬─────────┘ │
+//! │ │ │ │
+//! │ └──────────┬──────────────┘ │
+//! │ ▼ │
+//! │ ┌───────────────────────────────────────────────────────────────────┐ │
+//! │ │ LLD LINKER │ │
+//! │ │ • Static/dynamic libs • Cross-platform • Embedded in verum_lld │ │
+//! │ └───────────────────────────────────────────────────────────────────┘ │
+//! │ │ │
+//! │ ┌──────────────┼──────────────┬──────────────┐ │
+//! │ ▼ ▼ ▼ ▼ │
+//! │ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ │
+//! │ │ JIT │ │ EXE │ │ .so/ │ │ GPU │ │
+//! │ │ Execute │ │ Binary │ │ .dylib │ │ Kernel │ │
+//! │ └─────────┘ └─────────┘ └─────────┘ └─────────┘ │
+//! │ │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # CPU Path (Recommended for General Code)
 //!
+
 //! ```rust,ignore
 //! use verum_codegen::llvm::VbcToLlvmLowering;
 //!
+
 //! // Create VBC from AST first (via verum_vbc)
 //! let vbc_module = verum_vbc::codegen::lower_module(&ast)?;
 //!
+
 //! // Lower VBC to LLVM IR
 //! let mut lowering = VbcToLlvmLowering::new(&llvm_ctx, &llvm_module)?;
 //! lowering.lower_module(&vbc_module)?;
 //!
+
 //! // JIT or AOT compile via LLVM
 //! ```
 //!
+
 //! # GPU Path (For Tensor/GPU Operations)
 //!
+
 //! ```rust,ignore
 //! use verum_codegen::mlir::{VbcToMlirGpuLowering, GpuLoweringConfig, GpuTarget};
 //!
+
 //! // Create VBC from AST first
 //! let vbc_module = verum_vbc::codegen::lower_module(&ast)?;
 //!
+
 //! // Lower VBC to MLIR for GPU
 //! let config = GpuLoweringConfig {
-//!     target: GpuTarget::Cuda,
-//!     opt_level: 2,
-//!     ..Default::default()
+//!  target: GpuTarget::Cuda,
+//!  opt_level: 2,
+//!  ..Default::default()
 //! };
 //! let ctx = verum_mlir::Context::new();
 //! let mut lowering = VbcToMlirGpuLowering::new(&ctx, config);
 //! lowering.lower_module(&vbc_module)?;
 //! ```
 //!
+
 //! The compilation pipeline flows: Source -> Lexer -> Parser -> AST -> Type Check
 //! -> VBC Bytecode -> LLVM IR -> Native Code (for AOT), or VBC -> Interpreter.
 //! MLIR is used for the GPU compilation path. The VBC-first architecture ensures
@@ -125,7 +140,7 @@ pub mod error;
 pub use error::{CodegenError, Result as CodegenResult};
 
 // Proof-term export — `verum_kernel::CoreTerm` → Lean 4 / Coq /
-// Agda syntax (M-VVA-FU Sub-2.5/2.6/2.7 V0/V1).
+// Agda syntax (M-VVA-FU Sub-2.5/2.6/2.7 ).
 pub mod proof_export;
 
 // Re-export verum_mlir for low-level access

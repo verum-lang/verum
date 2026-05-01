@@ -1,9 +1,11 @@
 //! Kernel error type — the diagnostic surface for ill-typed proof terms.
 //!
+
 //! Kernel errors are **never** rescued by downstream passes. If you
 //! see one, either the proof is wrong or a non-trusted component
 //! (tactic, elaborator, SMT backend) produced a malformed term.
 //!
+
 //! Split out of `lib.rs` for auditability (#198): grouping all error
 //! variants in a single file makes the diagnostic surface trivially
 //! greppable for documentation, format-string consistency checks,
@@ -16,6 +18,7 @@ use crate::CoreType;
 
 /// The error type reported by the kernel on ill-typed proof terms.
 ///
+
 /// Kernel errors are **never** rescued by downstream passes — if you
 /// see one, either the proof is wrong or a non-trusted component
 /// (tactic, elaborator, SMT backend) produced a malformed term.
@@ -62,6 +65,7 @@ pub enum KernelError {
     /// declaration outright; it does not partially admit a non-strict
     /// variant.
     ///
+
     /// `position` is a human-readable description of where the
     /// violation occurs — e.g. `"left of arrow inside constructor 'Wrap'
     /// arg #1"` — for diagnostic copy.
@@ -152,11 +156,12 @@ pub enum KernelError {
     /// predicate's M-iteration depth is strictly less than the
     /// comprehended object's depth.
     ///
+
     /// See:
-    ///   - `internal/specs/verification-architecture.md` §2.4, §4.4
-    ///   - Diakrisis `docs/02-canonical-primitive/02-axiomatics.md` T-2f*
-    ///   - Yanofsky N.S. 2003. *A Universal Approach to Self-Referential
-    ///     Paradoxes, Incompleteness and Fixed Points.*
+    ///  - `internal/specs/verification-architecture.md` §2.4, §4.4
+    ///  - Diakrisis `docs/02-canonical-primitive/02-axiomatics.md` T-2f*
+    ///  - Yanofsky N.S. 2003. *A Universal Approach to Self-Referential
+    ///  Paradoxes, Incompleteness and Fixed Points.*
     #[error(
         "kernel: K-Refine depth violation: predicate depth {pred_depth} \
          must be strictly less than base depth {base_depth} + 1 \
@@ -175,7 +180,7 @@ pub enum KernelError {
     /// The kernel attempted to verify the canonical 2-natural
     /// equivalence τ : ε ∘ M ≃ A ∘ ε of Proposition 5.1 / Corollary
     /// 5.10 and could not produce the τ-witness for the supplied
-    /// articulation. V0 ships the constructor + skeleton check; V1
+    /// articulation. ships the constructor + skeleton check; V1
     /// will wire the full naturality proof and reduce this error to
     /// concrete diagnostic content.
     #[error("kernel: K-Eps-Mu naturality witness failed: {context}")]
@@ -188,10 +193,11 @@ pub enum KernelError {
     /// `K-Round-Trip` — OC/DC translation round-trip equality
     /// rejected. The supplied articulation pair `(lhs, rhs)` does not
     /// satisfy `canonicalise(inverse(translate(α))) ≡ canonicalise(α)`
-    /// at any of the V0/V1 admit-set entries (structural equality,
+    /// at any of the admit-set entries (structural equality,
     /// `AlphaOf(EpsilonOf(_))`/`EpsilonOf(AlphaOf(_))` adjunction
     /// shapes, or β-/ι-/δ-equivalence).
     ///
+
     /// V2 (preprint-blocked on Diakrisis Theorem 16.10 algorithmic
     /// content) will extend the admit-set with the full canonicalize
     /// algorithm; until then non-identity round-trips need an
@@ -203,11 +209,11 @@ pub enum KernelError {
         context: Text,
     },
 
-    /// Modal-depth (V0) — `K-Refine-omega` modal-depth bound exceeded. A
+    /// Modal-depth — `K-Refine-omega` modal-depth bound exceeded. A
     /// refinement type's predicate has ordinal modal-depth `md^ω`
     /// strictly greater than the base type's depth + 1, violating
     /// the transfinite stratification of Theorem 136.T (T-2f***).
-    /// V0 ships the constructor; V1 wires the full ordinal-depth
+    /// ships the constructor; V1 wires the full ordinal-depth
     /// computation with well-founded recursion per Lemma 136.L0.
     #[error(
         "kernel: K-Refine-omega modal-depth violation: predicate \
@@ -250,6 +256,7 @@ pub enum KernelError {
     /// citing an axiom whose `(Fw, ν, τ)` coordinate sits at a
     /// strictly higher ν tier.
     ///
+
     /// Per item 2: a theorem at coordinate
     /// (Fw, ν, τ) may cite an axiom at coordinate (Fw', ν', τ')
     /// only when ν' ≤ ν (lex on [`crate::OrdinalDepth`]). Higher-
@@ -257,6 +264,7 @@ pub enum KernelError {
     /// imports the κ-tier-jump extension via
     /// `@require_extension(vfe_3)` (Categorical coherence K-Universe-Ascent).
     ///
+
     /// The diagnostic carries both framework slugs + rendered
     /// ordinal-depth strings so the user can navigate the
     /// `(Fw, ν)` mismatch precisely.
@@ -282,26 +290,30 @@ pub enum KernelError {
 
     /// V8 — `K-FwAx` body-is-Prop premise violated.
     ///
+
     /// Per `verification-architecture.md` §4.4, the K-FwAx rule
     /// has TWO independent soundness premises:
     ///
-    ///   1. `body : Prop` — the axiom asserts a *proposition*, not
-    ///      a non-trivial inhabitant of some `Type_n`. A
-    ///      framework axiom of type `Π A B. A → B` would let users
-    ///      postulate an arbitrary computable function and break
-    ///      strong normalisation; restricting bodies to `Prop`
-    ///      keeps the postulate at the propositional layer where
-    ///      SN is preserved by the standard "axioms-stuck"
-    ///      reduction strategy.
-    ///   2. `body` is a subsingleton (closed proposition or UIP
-    ///      regime) — see [`Self::AxiomNotSubsingleton`].
+
+    ///  1. `body : Prop` — the axiom asserts a *proposition*, not
+    ///  a non-trivial inhabitant of some `Type_n`. A
+    ///  framework axiom of type `Π A B. A → B` would let users
+    ///  postulate an arbitrary computable function and break
+    ///  strong normalisation; restricting bodies to `Prop`
+    ///  keeps the postulate at the propositional layer where
+    ///  SN is preserved by the standard "axioms-stuck"
+    ///  reduction strategy.
+    ///  2. `body` is a subsingleton (closed proposition or UIP
+    ///  regime) — see [`Self::AxiomNotSubsingleton`].
     ///
+
     /// shipped (2) but pre-V8 the kernel never enforced
     /// (1) at register time. This variant fires when an axiom's
     /// declared type, viewed as a CoreTerm via the empty Context,
     /// does NOT inhabit `Universe(Prop)` (or `Universe(Concrete(0))`
     /// under the set-theoretic reading where `Prop ⊆ Type_0`).
     ///
+
     /// `inferred_universe_shape` carries a coarse rendering of the
     /// universe the body actually inhabited (e.g.
     /// `"Concrete(2)"`) so the diagnostic message names which
@@ -327,15 +339,17 @@ pub enum KernelError {
     /// one inhabitant up to definitional equality) for subject
     /// reduction to hold. Two acceptance routes:
     ///
-    ///   1. **Closed-proposition route** — body mentions no free
-    ///      type-variables. Closed Props are forced unique by the
-    ///      framework lineage's intended interpretation.
-    ///   2. **UIP route** — body mentions free type-vars and the
-    ///      module explicitly imports
-    ///      `core.math.frameworks.uip`. (Mixing UIP with
-    ///      `core.math.frameworks.univalence` is rejected by
-    ///      `framework_compat::audit_framework_set`.)
+
+    ///  1. **Closed-proposition route** — body mentions no free
+    ///  type-variables. Closed Props are forced unique by the
+    ///  framework lineage's intended interpretation.
+    ///  2. **UIP route** — body mentions free type-vars and the
+    ///  module explicitly imports
+    ///  `core.math.frameworks.uip`. (Mixing UIP with
+    ///  `core.math.frameworks.univalence` is rejected by
+    ///  `framework_compat::audit_framework_set`.)
     ///
+
     /// This variant fires when neither route admits the body —
     /// the body has free vars AND the calling regime is
     /// [`crate::SubsingletonRegime::ClosedPropositionOnly`]. The
@@ -343,6 +357,7 @@ pub enum KernelError {
     /// diagnostic identifies precisely which symbols escape the
     /// closed-proposition condition.
     ///
+
     /// Pre-V8 the kernel only checked the UIP-shape syntactically
     /// (rejecting `Π A. ∀ a b p q. p = q` via `UipForbidden`).
     /// That catches one specific paradox but admits a wide class
@@ -373,6 +388,7 @@ pub enum KernelError {
     /// caller-supplied expected hash, so the certificate cannot be
     /// admitted as a proof of the caller's goal.
     ///
+
     /// Pre-V8 the kernel only checked that `obligation_hash` was
     /// non-empty (per `MissingObligationHash`); the doc comment on
     /// `replay_smt_cert` claimed "still checked against the
@@ -382,6 +398,7 @@ pub enum KernelError {
     /// context — soundness-fatal under the trust contract that
     /// puts the SMT backend OUTSIDE the TCB.
     ///
+
     /// V8 ships [`crate::support::replay_smt_cert_with_obligation`]
     /// which threads the expected hash through the replay and
     /// emits this variant on mismatch. The original
@@ -409,12 +426,14 @@ pub enum KernelError {
     /// producing the type-in-type rule `Universe(Concrete(u32::MAX))
     /// : Universe(Concrete(u32::MAX))` — soundness-fatal.
     ///
+
     /// Fix mirrors the B4 OrdinalDepth saturation hole: detect the
     /// overflow point and reject explicitly. Real Verum code uses
     /// universe levels in single digits (typical max is 2 or 3),
     /// so reaching `u32::MAX` in any honest workload is itself a
     /// strong indicator of an elaborator bug.
     ///
+
     /// Spec: `verification-architecture.md` §6.1 K-Univ rule;
     /// trusted-kernel.md rule 18 `Universe-Cumul` notes the
     /// implicit predicative-hierarchy invariant violated here.

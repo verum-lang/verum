@@ -1,12 +1,16 @@
 //! Context Requirements for Meta Builtins
 //!
+
 //! This module defines the unified context model for meta-system builtins.
 //! All meta functions are categorized into tiers based on their context requirements.
 //!
+
 //! ## Tier Model
 //!
+
 //! ### Tier 0: Core Primitives (Always Available)
 //!
+
 //! Pure functions that work on values without accessing any external state:
 //! - Arithmetic: `abs`, `min`, `max`
 //! - Type conversions: `int_to_text`, `text_to_int`
@@ -15,10 +19,13 @@
 //! - Quote/Unquote: `quote`, `unquote`, `stringify`
 //! - Identity operations: `concat_idents`, `format_ident`
 //!
+
 //! ### Tier 1: Capability-Gated Functions (Require Context)
 //!
+
 //! Functions that access compiler state, build configuration, or have side effects:
 //!
+
 //! | Context | Functions | Purpose |
 //! |---------|-----------|---------|
 //! | MetaTypes | `type_name`, `fields_of`, `variants_of`, `is_struct`, `implements`, `size_of`, `align_of` | Type registry access |
@@ -26,18 +33,22 @@
 //! | CompileDiag | `compile_error`, `compile_warning` | Compiler diagnostics |
 //! | BuildAssets | `load_text`, `include_bytes` | File system access |
 //!
+
 //! ## Design Rationale
 //!
+
 //! The previous design had a "double standard" where:
 //! - Context system required explicit `using [...]` declarations
 //! - Builtins were implicitly available to all meta functions
 //!
+
 //! This unified model ensures:
 //! 1. **Consistency**: All capabilities require explicit declaration
 //! 2. **Security**: Can sandbox meta functions with restricted reflection
 //! 3. **Testability**: Can mock contexts for unit testing
 //! 4. **Composability**: Build higher-level contexts from lower-level ones
 //!
+
 //! Meta context unification: all compile-time features desugar to meta-system
 //! operations, providing one coherent model with convenient syntax sugar.
 
@@ -50,12 +61,14 @@ use super::BuiltinMetaFn;
 
 /// Context required for a builtin function
 ///
+
 /// Each builtin is categorized into one of these contexts based on
 /// what external state it accesses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RequiredContext {
     /// Tier 0: Always available - pure computation
     ///
+
     /// These functions operate only on their input values without
     /// accessing any external state. Examples:
     /// - `abs(-5)` → `5`
@@ -65,6 +78,7 @@ pub enum RequiredContext {
 
     /// Tier 1: Type reflection access
     ///
+
     /// Functions that access the type registry to introspect types.
     /// Required for: `type_name`, `fields_of`, `variants_of`, `is_struct`,
     /// `is_enum`, `implements`, `size_of`, `align_of`, `stride_of`, etc.
@@ -72,6 +86,7 @@ pub enum RequiredContext {
 
     /// Tier 1: Build/platform information access
     ///
+
     /// Functions that access compile-time build configuration.
     /// Required for: `target_os`, `target_arch`, `env`, `has_feature`,
     /// `compiler_version`, `is_debug`, `opt_level`, etc.
@@ -79,18 +94,21 @@ pub enum RequiredContext {
 
     /// Tier 1: Compiler diagnostics interaction
     ///
+
     /// Functions that emit compile-time diagnostics.
     /// Required for: `compile_error`, `compile_warning`, `compile_note`
     CompileDiag,
 
     /// Tier 1: File system access for build assets
     ///
+
     /// Functions that read files at compile time.
     /// Required for: `load_text`, `include_bytes`, `include_str`
     BuildAssets,
 
     /// Tier 1: Source map context for generated code tracking
     ///
+
     /// Functions that manage source map scopes and span mappings.
     /// Required for: `source_map_enter_generated`, `source_map_exit_generated`,
     /// `source_map_current_scope`, `source_map_scope_path`, `source_map_map_span`,
@@ -99,6 +117,7 @@ pub enum RequiredContext {
 
     /// Tier 1: Project information context
     ///
+
     /// Functions that access project metadata from Verum.toml.
     /// Required for: `project_package_name`, `project_package_version`,
     /// `project_dependencies`, `project_target_os`, `project_is_debug`, etc.
@@ -106,6 +125,7 @@ pub enum RequiredContext {
 
     /// Tier 1: Meta benchmarking context
     ///
+
     /// Functions that measure compile-time performance of meta functions.
     /// Required for: `bench_start`, `bench_now_ns`, `bench_report`,
     /// `bench_memory_usage`, `bench_count`, `bench_all_results`, etc.
@@ -113,6 +133,7 @@ pub enum RequiredContext {
 
     /// Tier 1: Stage information context
     ///
+
     /// Functions that query and manage N-level staged metaprogramming.
     /// Required for: `stage_current`, `stage_max`, `stage_is_runtime`,
     /// `stage_is_compile_time`, `stage_quote_target`, `stage_unique_ident`,
@@ -157,6 +178,7 @@ impl RequiredContext {
     /// capability tiers a sandbox would forbid when sealing the
     /// language against reflective code generation.
     ///
+
     /// `MetaRuntime` (target_os, env vars), `BuildAssets`
     /// (file embedding), `SourceMap` (generated-code traceability),
     /// `ProjectInfo` / `MetaBench` / `StageInfo` are NOT classified
@@ -329,6 +351,7 @@ impl fmt::Debug for BuiltinInfo {
 
 /// Set of enabled contexts for a meta function execution
 ///
+
 /// This tracks which contexts are available based on the function's
 /// `using [...]` declaration.
 #[derive(Debug, Clone, Default)]
@@ -387,6 +410,7 @@ impl EnabledContexts {
 
     /// Parse contexts from `using [...]` clause identifiers
     ///
+
     /// This is a convenience method that ignores unknown contexts for backward
     /// compatibility. For better error handling, use `parse_using_clause` instead.
     pub fn from_using_clause(names: &[Text]) -> Self {
@@ -395,21 +419,24 @@ impl EnabledContexts {
 
     /// Parse contexts from `using [...]` clause with full error reporting
     ///
+
     /// Unlike `from_using_clause`, this method:
     /// - Reports warnings for possible typos of standard context names
     /// - Tracks user-defined contexts separately
     /// - Detects duplicate context declarations
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// let result = EnabledContexts::parse_using_clause(&[
-    ///     Text::from("MetaTypes"),
-    ///     Text::from("metatype"),  // Typo - will generate warning
-    ///     Text::from("MyCustomContext"),  // User-defined - will be tracked
+    ///  Text::from("MetaTypes"),
+    ///  Text::from("metatype"), // Typo - will generate warning
+    ///  Text::from("MyCustomContext"), // User-defined - will be tracked
     /// ]);
     /// assert!(result.enabled_contexts.is_enabled(RequiredContext::MetaTypes));
-    /// assert_eq!(result.warnings.len(), 1);  // Warning for "metatype"
+    /// assert_eq!(result.warnings.len(), 1); // Warning for "metatype"
     /// assert!(result.user_contexts.contains(&Text::from("MyCustomContext")));
     /// ```
     pub fn parse_using_clause(names: &[Text]) -> ParsedUsingClause {

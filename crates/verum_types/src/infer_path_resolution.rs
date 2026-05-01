@@ -1,5 +1,6 @@
 //! Path resolution methods extracted from `infer.rs`.
 //!
+
 //! Contains the 10 `TypeChecker` methods and 1 standalone function responsible
 //! for resolving type names, qualified paths, multi-segment paths, crate-rooted
 //! paths, super paths, self paths, variable field access, and inline module paths.
@@ -20,6 +21,7 @@ impl TypeChecker {
     /// Resolve a type name using module-aware resolution
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Cross-module type resolution
     ///
+
     /// Resolution order:
     /// 1. Check current module's type definitions
     /// 2. Use NameResolver to find the type across modules
@@ -496,12 +498,15 @@ impl TypeChecker {
     }
     /// Extract module path segments from a nested Field expression.
     ///
+
     /// When we have `outer.inner.func()`, the receiver is:
-    ///   Field { expr: Path("outer"), field: "inner" }
+    ///  Field { expr: Path("outer"), field: "inner" }
     ///
+
     /// This function recursively extracts the path segments: ["outer", "inner"]
     /// Returns None if the expression doesn't represent a module path.
     ///
+
     /// Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Nested Inline Modules
     pub(crate) fn extract_module_path_from_field<'a>(
         &self,
@@ -528,18 +533,22 @@ impl TypeChecker {
 
     /// Compute the parent module path from the current module path and a path with `super` segments.
     ///
+
     /// # Arguments
     /// * `current_path` - The current module path (e.g., "cog.outer.inner")
     /// * `segments` - The path segments starting with `Super` (e.g., [Super] or [Super, Name("sibling")])
     ///
+
     /// # Returns
     /// * `Some(parent_path)` - The resolved parent module path
     /// * `None` - If there are too many `super` segments
     ///
+
     /// # Example
     /// From "cog.outer.inner" with [Super], returns Some("cog.outer")
     /// From "cog.outer.inner" with [Super, Super], returns Some("cog")
     ///
+
     /// Circular import handling: detection and error reporting for cyclic module dependencies — Relative module paths
     pub(crate) fn compute_parent_module_path(
         &self,
@@ -584,8 +593,10 @@ impl TypeChecker {
 
     /// Resolve a multi-segment path expression
     ///
+
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Cross-module resolution
     ///
+
     /// Handles paths like:
     /// - `module::function` - Function from another module
     /// - `module::Type::associated_fn` - Associated function on a type
@@ -691,11 +702,13 @@ impl TypeChecker {
     /// Resolve a path that starts with an inline module.
     /// Handles paths like `api.v2.func()` where `api` is an inline module.
     ///
+
     /// Navigation:
     /// 1. Start with the first segment (inline module)
     /// 2. For each subsequent segment, look inside the current module's items
     /// 3. Final segment should be a function or type
     ///
+
     /// Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
     pub(crate) fn resolve_inline_module_path(&mut self, path: &Path, span: Span) -> Result<InferResult> {
         use verum_ast::ty::PathSegment;
@@ -869,6 +882,7 @@ impl TypeChecker {
     /// - `super::module::item` - Parent module path
     /// - `Type::associated_const` - Associated constant
     ///
+
     /// Resolution strategy:
     /// 1. Check for special keywords (cog, super, self)
     /// 2. Try to resolve as module path via NameResolver

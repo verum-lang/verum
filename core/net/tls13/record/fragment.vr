@@ -5,23 +5,28 @@
 // Spec: RFC 8446 §5.1 (fragmentation), §5.2 (ciphertext record cap)
 // =============================================================================
 //
+
 // TLS 1.3 records cap the inner-plaintext fragment at 2^14 bytes. Any
 // outgoing application payload larger than that must be split into
 // successive records by the sender. Conversely, large inbound messages
 // (e.g. a multi-KB certificate chain carried over multiple Handshake
 // records) must be concatenated back to a single logical payload.
 //
+
 // This module gives both directions:
 //
-//   seal_all / open_all:  Application-data convenience that invokes
-//                          AeadState.seal / open over a vector of
-//                          MAX_PLAINTEXT_SIZE slices.
+
+//  seal_all / open_all: Application-data convenience that invokes
+//  AeadState.seal / open over a vector of
+//  MAX_PLAINTEXT_SIZE slices.
 //
-//   HandshakeReassembler:  Concatenates Handshake-record bodies across
-//                          record boundaries (RFC 8446 §5.1 para 3 —
-//                          handshake messages MAY span multiple
-//                          records within the same flight).
+
+//  HandshakeReassembler: Concatenates Handshake-record bodies across
+//  record boundaries (RFC 8446 §5.1 para 3 —
+//  handshake messages MAY span multiple
+//  records within the same flight).
 //
+
 // =============================================================================
 
 module core.net.tls13.record.fragment;
@@ -76,16 +81,19 @@ public fn seal_all(
 // Inbound — reassemble handshake messages that span records
 // =============================================================================
 //
+
 // A Handshake message has its own 4-byte length prefix (type + 24-bit
 // length). The record layer might deliver the header and body split
 // across multiple records. The reassembler buffers opened-record
 // fragments until one or more complete handshake messages are available.
 //
+
 // Usage per record:
-//   1. Open the TLS record (obtain (ContentType.Handshake, bytes)).
-//   2. Push the body bytes into the reassembler.
-//   3. Drain complete messages by calling `take_next` in a loop.
+//  1. Open the TLS record (obtain (ContentType.Handshake, bytes)).
+//  2. Push the body bytes into the reassembler.
+//  3. Drain complete messages by calling `take_next` in a loop.
 //
+
 // The reassembler is content-type-agnostic; the caller ensures it is
 // only fed Handshake-content bytes. For ApplicationData there is
 // nothing to reassemble.

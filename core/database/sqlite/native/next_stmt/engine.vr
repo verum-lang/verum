@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `sqlite3_next_stmt(db, 0)` returns the head; subsequent calls with
-// the previous handle return the next entry.  Returns 0 (NULL) past
+// the previous handle return the next entry. Returns 0 (NULL) past
 // the end.
 // =============================================================================
 
@@ -17,7 +18,7 @@ mount core.database.sqlite.native.next_stmt.stmt_list.{
 };
 
 /// Returns the id immediately after `current` in `list`, or 0 if
-/// `current` is the tail or not present.  Passing `current == 0`
+/// `current` is the tail or not present. Passing `current == 0`
 /// returns the head.
 public fn sqlite3_next_stmt(list: &StmtList, current: Int64) -> Int64 {
     if list.len() == 0 { return 0 as Int64; }

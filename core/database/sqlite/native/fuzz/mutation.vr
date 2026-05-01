@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.6 (fuzz harness)
 //
+
 // Every mutator emits (or transforms) a `MutationKind`. The kind
 // is recorded alongside the candidate input so corpus stats can
 // answer "which mutation classes are finding bugs".

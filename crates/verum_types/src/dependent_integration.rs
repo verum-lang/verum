@@ -1,23 +1,27 @@
 //! Integration layer for dependent types SMT verification
 //!
+
 //! This module defines the *interface* between verum_types type checking and
 //! an SMT-based dependent type verifier. The concrete SMT-backed
 //! implementation (`SmtDependentTypeChecker`) lives in the `verum_smt`
 //! crate (`verum_smt::dependent_backend`) to avoid a circular dependency.
 //!
+
 //! Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Dependent Types Extension (v2.0+)
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! TypeChecker (verum_types)
-//!   ↓ uses trait
+//!  ↓ uses trait
 //! DependentTypeChecker trait (this module)
-//!   ↓ implemented by
+//!  ↓ implemented by
 //! SmtDependentTypeChecker (verum_smt::dependent_backend)
-//!   ↓ delegates to
+//!  ↓ delegates to
 //! verum_smt::DependentTypeBackend
-//!   ↓ uses
+//!  ↓ uses
 //! Z3 SMT Solver
 //! ```
 
@@ -32,11 +36,13 @@ use crate::refinement::{RefinementError, VerificationResult};
 
 /// Interface for dependent type verification
 ///
+
 /// This trait abstracts the dependent type checking operations that the
 /// type checker needs. The primary implementation delegates to verum_smt.
 pub trait DependentTypeChecker: Send + Sync {
     /// Verify a Pi type (dependent function type)
     ///
+
     /// Checks that (x: A) -> B(x) is well-formed, meaning:
     /// - A is a valid type
     /// - B(x) is a valid type for all x: A
@@ -51,6 +57,7 @@ pub trait DependentTypeChecker: Send + Sync {
 
     /// Verify a Sigma type (dependent pair type)
     ///
+
     /// Checks that (x: A, B(x)) is well-formed, meaning:
     /// - A is a valid type
     /// - B(x) is a valid type for all x: A
@@ -65,6 +72,7 @@ pub trait DependentTypeChecker: Send + Sync {
 
     /// Verify an equality type
     ///
+
     /// Checks that Eq<A, lhs, rhs> is well-formed:
     /// - Both sides have type A
     /// - The equality is decidable
@@ -78,6 +86,7 @@ pub trait DependentTypeChecker: Send + Sync {
 
     /// Verify Fin type constraint
     ///
+
     /// Checks that value < bound for Fin<n> types
     fn verify_fin_type(
         &mut self,
@@ -93,6 +102,7 @@ pub trait DependentTypeChecker: Send + Sync {
 impl crate::refinement::RefinementChecker {
     /// Verify a dependent type constraint
     ///
+
     /// This is the primary integration point. Called by the type checker when
     /// it encounters dependent types that need verification. Returns
     /// `VerificationResult::Unknown` when no dependent type checker has been
@@ -136,6 +146,7 @@ impl crate::refinement::RefinementChecker {
 
     /// Inject an SMT-backed dependent type checker.
     ///
+
     /// Call this with e.g. `verum_smt::dependent_backend::SmtDependentTypeChecker::new()`
     /// (boxed) to enable SMT verification. When unset, `verify_dependent_type`
     /// returns `Unknown`.
@@ -151,6 +162,7 @@ impl crate::refinement::RefinementChecker {
 
     /// Enable dependent type checking (legacy no-arg API).
     ///
+
     /// This used to construct an `SmtDependentTypeChecker` automatically.
     /// To preserve the circular-dependency-free `verum_types` crate, the
     /// SMT-backed implementation now lives in `verum_smt`. Downstream
@@ -175,6 +187,7 @@ impl crate::refinement::RefinementChecker {
 
 /// A dependent type constraint to be verified
 ///
+
 /// This enum represents the different kinds of dependent type constraints
 /// that the type checker needs to verify.
 #[derive(Debug, Clone)]

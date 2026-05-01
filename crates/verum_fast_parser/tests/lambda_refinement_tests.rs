@@ -14,10 +14,12 @@
 )]
 // Comprehensive test suite for lambda refinement types (Rule 2 and Rule 5).
 //
+
 // This test suite covers lambda-form refinement types in Verum:
 // - Rule 2: Lambda Refinements with explicit parameters: `Int where |x| x > 0`
 // - Rule 5: Bare `where` with implicit 'it' binding: `Int where it > 0`
 //
+
 // Tests for Verum v6 syntax compliance Section 3.2.4 "Five Binding Rules"
 // Five Binding Rules: (1) inline {pred}, (2) declarative `where pred`, (3) sigma `n: T where f(n)`
 
@@ -505,30 +507,34 @@ fn test_lambda_multiple_params_not_supported() {
 
 // Total test count: ~60 tests
 // - Rule 2 (Lambda): 35 tests
-//   - Simple cases: 5 tests
-//   - Compound predicates: 4 tests
-//   - Different types (Text, Float, Generic): 8 tests
-//   - Parameter name variations: 6 tests
-//   - Binding verification: 2 tests
-//   - Binding verified: 1 test
-//   - Real-world examples: 3 tests
+//  - Simple cases: 5 tests
+//  - Compound predicates: 4 tests
+//  - Different types (Text, Float, Generic): 8 tests
+//  - Parameter name variations: 6 tests
+//  - Binding verification: 2 tests
+//  - Binding verified: 1 test
+//  - Real-world examples: 3 tests
 //
+
 // - Rule 5 (Implicit it): 15 tests
-//   - Simple cases: 3 tests
-//   - Compound predicates: 2 tests
-//   - Different types: 4 tests
-//   - Generic and array: 2 tests
-//   - Binding verification: 2 tests
-//   - Binding verified: 1 test
+//  - Simple cases: 3 tests
+//  - Compound predicates: 2 tests
+//  - Different types: 4 tests
+//  - Generic and array: 2 tests
+//  - Binding verification: 2 tests
+//  - Binding verified: 1 test
 //
+
 // - Combined contexts: 4 tests
-//   - References, function params, function returns, tuples
+//  - References, function params, function returns, tuples
 //
+
 // - Real-world examples: 6 tests
 // - Edge cases: 8 tests
 // - Backward compatibility: 3 tests
 // - Error cases: 4 tests
 //
+
 // This comprehensive test suite ensures that lambda refinement types
 // (Rule 2 and Rule 5) are correctly parsed and distinguished from
 // inline refinements (Rule 1) and sigma-types (Rule 3).

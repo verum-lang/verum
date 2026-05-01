@@ -1,5 +1,6 @@
 //! SMT-based verification pass.
 //!
+
 //! Generates verification conditions for each function and
 //! discharges them through the Z3 SMT backend. Includes a kernel-
 //! recheck preamble (#186) that runs the K-rules before SMT — a
@@ -22,6 +23,7 @@ use super::{VerificationError, VerificationPass, VerificationResult};
 
 /// SMT-based verification pass that uses Z3 to verify generated VCs.
 ///
+
 /// 1. Generates verification conditions for each function.
 /// 2. Sends VCs to Z3 for automated theorem proving.
 /// 3. Collects results including counterexamples for failures.

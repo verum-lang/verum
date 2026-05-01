@@ -4,24 +4,29 @@
 // Layer: 5 (Network — TLS 1.3 core)
 // =============================================================================
 //
+
 // RFC 8701 reserves a set of IANA values that clients and servers MAY
 // advertise but that MUST be ignored when parsed. Their purpose is to
 // exercise peers' "ignore-unknown" paths so that real future
 // extensions are not blocked by brittle implementations that reject
 // anything they don't recognise.
 //
+
 // The spec recommends:
 //
-//   * Clients include at least one grease value from each of
-//     {cipher_suites, extensions, named_groups, signature_algorithms,
-//      supported_versions, psk_key_exchange_modes}.
-//   * Servers echo none of them; they MUST NOT fail the handshake on
-//     receipt.
+
+//  * Clients include at least one grease value from each of
+//  {cipher_suites, extensions, named_groups, signature_algorithms,
+//  supported_versions, psk_key_exchange_modes}.
+//  * Servers echo none of them; they MUST NOT fail the handshake on
+//  receipt.
 //
+
 // All reserved values have the pattern 0x?A?A where the two hex
 // digits are identical (16 values in total). `is_grease` recognises
 // them by the byte-level mask described in RFC 8701 §4.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.grease;

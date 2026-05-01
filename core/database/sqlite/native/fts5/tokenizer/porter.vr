@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 (FTS5 Porter tokenizer)
 //
+
 // Two-pass: first split + lowercase as `simple` does, then apply
 // the Porter algorithm to each token. The implementation here
 // covers the most-used suffix rules (steps 1a, 1b, 2 partial, 5);

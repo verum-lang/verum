@@ -8,16 +8,19 @@ module sys.darwin.io;
 // Platform: macOS (x86_64, arm64)
 // =============================================================================
 //
+
 // This module provides completion-based I/O using kqueue on macOS.
 // kqueue is the macOS/BSD equivalent of Linux's epoll/io_uring, providing
 // efficient event notification for file descriptors, timers, signals, etc.
 //
+
 // Key concepts:
 // - kqueue: The event queue (like epoll fd or io_uring ring)
 // - kevent: Register interest and receive events (struct + syscall)
 // - Filters: EVFILT_READ, EVFILT_WRITE, EVFILT_TIMER, etc.
 // - Flags: EV_ADD, EV_DELETE, EV_ONESHOT, EV_CLEAR, etc.
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.5
 // =============================================================================
 
@@ -340,6 +343,7 @@ implement KqueueDriver {
 
     /// Add a timer event.
     ///
+
     /// # Arguments
     /// * `ident` - Timer identifier
     /// * `timeout_ms` - Timeout in milliseconds
@@ -467,9 +471,11 @@ implement KqueueDriver {
 
     /// Poll for events with timeout.
     ///
+
     /// # Arguments
     /// * `timeout_ms` - Timeout in milliseconds (0 = no wait, -1 = infinite)
     ///
+
     /// # Returns
     /// Number of events ready
     public fn poll(&mut self, timeout_ms: Int) -> Result<Int, DarwinIoDriverError> {
@@ -527,6 +533,7 @@ implement KqueueDriver {
 
     /// Get a completed event by index.
     ///
+
     /// Only valid after poll() returns > 0, and for indices 0..n-1
     /// where n is the return value.
     public fn get_event(&self, index: Int) -> Maybe<DarwinIoCqe> {
@@ -647,6 +654,7 @@ implement DarwinIoDriver {
 
 /// Create the best available I/O driver.
 ///
+
 /// On macOS, this always returns a kqueue-based driver.
 public fn create_io_driver() -> Result<DarwinIoDriver, DarwinIoDriverError> {
     let kqueue = KqueueDriver.new()?;
@@ -655,6 +663,7 @@ public fn create_io_driver() -> Result<DarwinIoDriver, DarwinIoDriverError> {
 
 /// Check if kqueue is available.
 ///
+
 /// Always returns true on macOS.
 public fn is_kqueue_available() -> Bool {
     true
@@ -664,9 +673,11 @@ public fn is_kqueue_available() -> Bool {
 // IOEngine Protocol Implementation
 // =============================================================================
 //
+
 // This section implements the unified IOEngine protocol from sys/io_engine.vr
 // for the macOS-specific KqueueDriver.
 //
+
 // Note: kqueue is a readiness-based API, so we wrap it in completion semantics.
 // This means we register interest and perform actual I/O when fd is ready.
 
@@ -697,6 +708,7 @@ type PendingOp is {
 
 /// Implement IOEngine for KqueueDriver
 ///
+
 /// Note: kqueue is readiness-based, so this implementation:
 /// 1. Registers interest in fd readiness
 /// 2. When fd is ready, performs the actual I/O

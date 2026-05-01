@@ -1,11 +1,13 @@
 //! # Proof Obligations — Model-Theoretic Discharge of Protocol Axioms
 //!
+
 //! When an `implement P for T { ... }` block is compiled, every axiom
 //! declared in `P`'s body becomes a proof obligation for `T`. This
 //! module collects those obligations by substituting `Self` and
 //! `Self.X` references with the concrete items provided by the
 //! `implement` block.
 //!
+
 //! See `docs/architecture/model-theoretic-semantics.md` for the full
 //! specification.
 

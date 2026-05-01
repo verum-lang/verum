@@ -1,5 +1,6 @@
 //! End-to-end script-mode context (P3.3 + P1.7 + P2.2 + P3.1 glue).
 //!
+
 //! The script runner needs to gather a lot of state before it can
 //! execute: source bytes, source hash, frontmatter, merged permission
 //! set, cache key, lockfile path. Doing this inline at every call site
@@ -7,22 +8,24 @@
 //! [`ScriptContext`] value built in one shot from a path + caller
 //! options.
 //!
+
 //! ```text
-//!   path on disk
-//!        │
-//!        ▼
-//!   read bytes  ──►  blake3 hash  ──►  cache key
-//!        │
-//!        ▼
-//!   extract frontmatter  ──►  validate
-//!        │
-//!        ▼
-//!   merge frontmatter + CLI flags  ──►  PermissionSet
-//!        │
-//!        ▼
-//!   ScriptContext { everything above }
+//!  path on disk
+//!  │
+//!  ▼
+//!  read bytes ──► blake3 hash ──► cache key
+//!  │
+//!  ▼
+//!  extract frontmatter ──► validate
+//!  │
+//!  ▼
+//!  merge frontmatter + CLI flags ──► PermissionSet
+//!  │
+//!  ▼
+//!  ScriptContext { everything above }
 //! ```
 //!
+
 //! No I/O happens beyond `fs::read` of the script itself — cache and
 //! lockfile *paths* are computed but not opened. The caller decides
 //! when to consult them via [`ScriptContext::cache_lookup`] /

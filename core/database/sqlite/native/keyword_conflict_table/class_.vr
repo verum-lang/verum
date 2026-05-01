@@ -32,10 +32,10 @@ public fn requires_quoting_everywhere(c: &KeywordClass) -> Bool {
 
 // Whether a context-reserved keyword is usable as identifier at the given grammar position.
 // Positions:
-//   1 = column name / alias
-//   2 = table name
-//   3 = PRAGMA argument
-//   4 = generic expression identifier
+//  1 = column name / alias
+//  2 = table name
+//  3 = PRAGMA argument
+//  4 = generic expression identifier
 public fn context_reserved_usable_at(position: Int) -> Bool {
     // per SQLite: MOST context-reserved are usable at column/alias positions
     // (pos 1 and 4) but not at PRAGMA args.

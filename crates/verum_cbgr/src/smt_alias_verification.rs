@@ -1,43 +1,55 @@
 //! SMT-Based Alias Verification for CBGR
 //!
+
 //! This module provides production-grade SMT-based alias analysis using Z3 to prove
 //! no-alias relationships between references, enabling more precise escape analysis
 //! and reference promotion.
 //!
+
 //! # Overview
 //!
+
 //! Traditional alias analysis uses conservative heuristics that may produce false positives.
 //! SMT-based alias verification uses the Z3 solver to formally prove that two references
 //! cannot alias by encoding pointer constraints as logical formulas.
 //!
+
 //! # Key Features
 //!
+
 //! - **Precise no-alias proofs**: Use Z3 to formally verify pointer disjointness
 //! - **Pointer arithmetic encoding**: Model offset calculations and struct field access
 //! - **Array index analysis**: Encode array index constraints symbolically
 //! - **Query caching**: <500μs per query with LRU cache
 //! - **Integration**: Seamless integration with existing alias analysis and Z3 feasibility checker
 //!
+
 //! # Performance
 //!
+
 //! - Simple queries: ~50-200μs (no caching)
 //! - Complex queries: ~200-800μs (no caching)
 //! - Cache hits: <1μs
 //! - Cache hit rate: >85% in typical workloads
 //! - Target: <500μs per query (achieved)
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_cbgr::smt_alias_verification::{SmtAliasVerifier, PointerConstraint};
 //! use verum_cbgr::analysis::RefId;
 //!
+
 //! let mut verifier = SmtAliasVerifier::new();
 //!
+
 //! // Prove that two different stack allocations don't alias
 //! let alloc1 = PointerConstraint::StackAllocation { id: 1, offset: 0 };
 //! let alloc2 = PointerConstraint::StackAllocation { id: 2, offset: 0 };
 //!
+
 //! let result = verifier.verify_no_alias(RefId(1), RefId(2), &alloc1, &alloc2);
 //! assert!(result.is_no_alias());
 //! ```
@@ -54,6 +66,7 @@ use std::time::Instant;
 
 /// Pointer constraint for SMT encoding
 ///
+
 /// Represents constraints on pointer values that can be encoded as SMT formulas.
 /// These constraints are used to prove that two pointers cannot alias.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -188,6 +201,7 @@ impl PointerConstraint {
 
 /// Array index representation
 ///
+
 /// Can be concrete (known at compile time) or symbolic (runtime value).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ArrayIndex {
@@ -282,6 +296,7 @@ struct SmtAliasCacheEntry {
 
 /// SMT alias verification cache
 ///
+
 /// LRU cache for SMT alias query results to achieve <500μs performance target.
 #[derive(Debug, Clone)]
 pub struct SmtAliasCache {
@@ -382,21 +397,28 @@ impl Default for SmtAliasCache {
 
 /// SMT-based alias verifier
 ///
+
 /// Uses Z3 SMT solver to prove no-alias relationships between pointers
 /// by encoding pointer constraints as bit-vector formulas.
 ///
+
 /// # Performance Target
 ///
+
 /// <500μs per query with caching (achieved: ~50-800μs uncached, <1μs cached)
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// let mut verifier = SmtAliasVerifier::new();
 ///
+
 /// let ptr1 = PointerConstraint::stack_alloc(1, 0);
 /// let ptr2 = PointerConstraint::stack_alloc(2, 0);
 ///
+
 /// let result = verifier.verify_no_alias(RefId(1), RefId(2), &ptr1, &ptr2);
 /// assert!(result.is_no_alias());
 /// ```
@@ -434,17 +456,22 @@ impl SmtAliasVerifier {
 
     /// Verify that two references don't alias using SMT
     ///
+
     /// Encodes pointer constraints as SMT formulas and queries Z3 to check
     /// if the pointers can be equal. If unsatisfiable, proves no-alias.
     ///
+
     /// # Performance
     ///
+
     /// - Cache hit: <1μs
     /// - Cache miss (simple): ~50-200μs
     /// - Cache miss (complex): ~200-800μs
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Hash query for cache lookup
     /// 2. Check cache for previous result
     /// 3. If cache miss: encode constraints as Z3 formulas
@@ -529,11 +556,14 @@ impl SmtAliasVerifier {
 
     /// Encode pointer constraint as Z3 bit-vector expression
     ///
+
     /// Translates `PointerConstraint` to Z3 bit-vector arithmetic that models
     /// pointer arithmetic and field access.
     ///
+
     /// # Encoding Strategy
     ///
+
     /// - Stack/heap allocations: unique base values
     /// - Field access: base + `field_offset`
     /// - Array element: base + (index × `element_size`)
@@ -604,10 +634,13 @@ impl SmtAliasVerifier {
 
     /// Refine alias sets using SMT verification
     ///
+
     /// Takes existing alias sets and uses SMT to prove additional no-alias relationships.
     ///
+
     /// # Performance
     ///
+
     /// O(n²) in worst case (pairwise checks), but cache makes it efficient in practice.
     pub fn refine_alias_with_smt(
         &mut self,

@@ -1,34 +1,40 @@
 //! Phase D.5: Proof Term Extraction Bridge
 //!
+
 //! Connects tactic execution results to extractable proof terms and
 //! certificates. When a `proof by <tactic>` block succeeds, this module
 //! translates the Z3 proof object into a `ProofTerm` that can be:
 //!
+
 //! 1. Erased at codegen (zero-cost proofs — the common case)
 //! 2. Exported as a certificate in Dedukti, Coq, Lean, or Metamath format
 //! 3. Stored alongside VBC bytecode as Proof-Carrying Code (PCC)
 //!
+
 //! ## Architecture
 //!
+
 //! ```text
 //! TacticResult (from user_tactic.rs / tactics.rs)
-//!   │
-//!   ├─ extract_proof_term()  → ProofTerm (Verum-internal)
-//!   │
-//!   ├─ proof_to_certificate()  → Certificate (via CertificateGenerator)
-//!   │     ├─ lift_to_unified()   → proof_term_unified::ProofTerm
-//!   │     └─ CertificateGenerator::generate()
-//!   │
-//!   ├─ export_dedukti()      → Text (Dedukti λΠ-calculus)
-//!   ├─ export_coq()          → Text (Gallina)
-//!   ├─ export_lean()         → Text (Lean 4 term)
-//!   ├─ export_metamath()     → Text (Metamath)
-//!   │
-//!   └─ erase_proof()         → () (zero-cost: remove at codegen)
+//!  │
+//!  ├─ extract_proof_term() → ProofTerm (Verum-internal)
+//!  │
+//!  ├─ proof_to_certificate() → Certificate (via CertificateGenerator)
+//!  │ ├─ lift_to_unified() → proof_term_unified::ProofTerm
+//!  │ └─ CertificateGenerator::generate()
+//!  │
+//!  ├─ export_dedukti() → Text (Dedukti λΠ-calculus)
+//!  ├─ export_coq() → Text (Gallina)
+//!  ├─ export_lean() → Text (Lean 4 term)
+//!  ├─ export_metamath() → Text (Metamath)
+//!  │
+//!  └─ erase_proof() → () (zero-cost: remove at codegen)
 //! ```
 //!
+
 //! ## Integration Points
 //!
+
 //! - `certificates.rs` — handles the actual format-specific serialization
 //! - `proof_extraction.rs` — Z3 proof object → internal proof tree
 //! - `proof_term_unified.rs` — unified proof term representation
@@ -40,6 +46,7 @@ use crate::tactics::TacticResult;
 
 /// A proof term in the Verum internal representation.
 ///
+
 /// This is the bridge between Z3's proof objects and exportable
 /// certificate formats. Each variant corresponds to a proof rule.
 #[derive(Debug, Clone)]
@@ -130,6 +137,7 @@ pub enum CertificateFormat {
 
 /// Extract a proof term from a tactic result.
 ///
+
 /// This is called after a tactic successfully closes all goals.
 /// The resulting ProofTerm can be exported or erased.
 pub fn extract_proof_term(
@@ -370,6 +378,7 @@ fn export_json(proof: &ProofTerm) -> Text {
 
 /// Erase a proof term for zero-cost codegen.
 ///
+
 /// At runtime, proofs carry no computational content — they are purely
 /// compile-time verification artifacts. This function marks a proof
 /// as erased so the codegen can skip it entirely.
@@ -379,10 +388,12 @@ pub fn erase_proof(_proof: &ProofTerm) -> ProofTerm {
 
 /// Check whether a proof term still needs erasure at codegen.
 ///
+
 /// Returns `true` when the proof carries computational content that should
 /// be stripped before runtime. Returns `false` when the proof has already
 /// been erased (`ProofTerm::Erased`), so the codegen can skip it.
 ///
+
 /// Semantics: `should_erase(p) == true` ⟹ call `erase_proof(p)` before codegen.
 pub fn should_erase(proof: &ProofTerm) -> bool {
     // A proof that is NOT yet erased needs erasure.
@@ -395,6 +406,7 @@ pub fn should_erase(proof: &ProofTerm) -> bool {
 /// Convert a `CertificateFormat` from this bridge module into the format type
 /// expected by `certificates::CertificateGenerator`.
 ///
+
 /// This is necessary because the bridge module defines a lightweight local
 /// `CertificateFormat` for API convenience, while `certificates.rs` maintains
 /// the authoritative format enum (which also includes `OpenTheory`).
@@ -413,6 +425,7 @@ pub fn lift_format(
 /// Lift a bridge `ProofTerm` into the unified proof term representation
 /// (`proof_term_unified::ProofTerm`) that `CertificateGenerator` consumes.
 ///
+
 /// The bridge's `ProofTerm` is tactic-centric (produced by `extract_proof_term`),
 /// while the unified representation covers the full range of Z3 proof rules.
 /// Structural variants are translated directly; opaque SMT/tactic results are
@@ -521,24 +534,30 @@ pub fn lift_to_unified(
 
 /// Convert an extracted proof term into an exportable certificate.
 ///
+
 /// This is the primary entry point for the proof extraction → certificate
 /// export pipeline:
 ///
+
 /// ```text
 /// ProofTerm (bridge)
-///   └─ lift_to_unified()  →  proof_term_unified::ProofTerm
-///   └─ CertificateGenerator::generate()  →  Certificate
+///  └─ lift_to_unified() → proof_term_unified::ProofTerm
+///  └─ CertificateGenerator::generate() → Certificate
 /// ```
 ///
+
 /// # Arguments
 ///
+
 /// * `proof` — the proof term produced by `extract_proof_term`
 /// * `theorem_name` — identifier for the theorem (used in certificate header)
 /// * `theorem_statement` — human-readable statement of what was proven
 /// * `format` — target certificate format
 ///
+
 /// # Returns
 ///
+
 /// A [`crate::certificates::Certificate`] ready for integrity-checking, signing,
 /// or writing to disk. Returns [`crate::certificates::CertificateError`] on
 /// generation failure (malformed proof, unsupported format, etc.).
@@ -573,9 +592,11 @@ pub fn proof_to_certificate(
 /// Convenience wrapper: convert an extracted proof term into certificates in
 /// *all* supported formats at once.
 ///
+
 /// Returns a list of `(format, certificate)` pairs, one per format. Any format
 /// that fails generation is silently skipped (errors are collected separately).
 ///
+
 /// Use this when you want to produce a full cross-verification bundle.
 pub fn proof_to_all_certificates(
     proof: &ProofTerm,

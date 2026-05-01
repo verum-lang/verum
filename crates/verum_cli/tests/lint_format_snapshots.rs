@@ -1,11 +1,13 @@
 //! Format snapshot tests for `verum lint`.
 //!
+
 //! Each format renders a fixed list of issues and we assert that
 //! every documented field shows up in the expected place. These
 //! lock down the schema so a future formatting tweak that breaks a
 //! consumer (a CI parser, an LSP client, GitHub Code Scanning) is
 //! caught at PR time, not after deploy.
 //!
+
 //! The tests are *structural*, not byte-for-byte snapshot diffs —
 //! we assert the things that actually matter (well-formedness,
 //! every field present, schema version, level mapping) instead of

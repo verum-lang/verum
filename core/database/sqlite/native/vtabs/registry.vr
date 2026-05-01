@@ -4,12 +4,14 @@
 // Layer: 6
 // Spec: sqlite-native.md §16.5
 //
+
 // Carries the set of `name → factory` bindings registered with a
 // Connection. CREATE VIRTUAL TABLE foo USING module(...) looks up
 // `module` here, calls `factory.create(...)`, stores the resulting
 // schema in the SchemaCache, and links the cursor-open callback so
 // the L4 interpreter can stream rows on SELECT.
 //
+
 // We keep the registry data-only (no protocol-typed slots) — the
 // L6 layer attaches a closure-style dispatcher at runtime to bridge
 // generic protocols to dynamic dispatch.

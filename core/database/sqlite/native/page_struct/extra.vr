@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The pcache reserves `PCACHE_HDRSZ` bytes at the front of every
-// allocation for its own metadata.  SQLite queries this via
+// allocation for its own metadata. SQLite queries this via
 // SQLITE_CONFIG_PCACHE_HDRSZ and rounds up to a pointer-sized multiple.
 // =============================================================================
 
@@ -21,7 +22,7 @@ public type ExtraSlot is {
 }
 
 /// Round `n` up to the next multiple of `alignment` (must be power of
-/// two).  Used to match SQLite's "sqlite3_pcache_hdrsz" rounding.
+/// two). Used to match SQLite's "sqlite3_pcache_hdrsz" rounding.
 public fn round_up(n: Int, alignment: Int) -> Int {
     if n <= 0 || alignment <= 1 { return n; }
     let mask = alignment - 1;

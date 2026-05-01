@@ -9,10 +9,12 @@ mount core.base.coercion.{IntCoercible};
 // Platform: macOS (Darwin/XNU)
 // =============================================================================
 //
+
 // macOS runs on the XNU kernel which combines:
 // - Mach microkernel: VM, IPC, threads, scheduling
 // - BSD layer: POSIX syscalls, networking, filesystems
 //
+
 // This module exposes Mach-specific functionality not available through BSD.
 // Key features:
 // - Mach ports (IPC)
@@ -21,8 +23,10 @@ mount core.base.coercion.{IntCoercible};
 // - Mach time (high-precision timing)
 // - Thread primitives
 //
+
 // All calls go through libSystem.B.dylib (stable API).
 //
+
 // Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
 

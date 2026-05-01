@@ -4,25 +4,29 @@
 // Layer: Foundations (Measure Theory + Category Theory)
 // Spec: verum-ext-2.md §3.2
 //
+
 // Implements the Giry monad — the canonical construction that turns measurable
 // spaces into a category of probability measures, with Markov kernels as
-// morphisms.  Also provides an LlmOracle type generic over ∞-categories that
+// morphisms. Also provides an LlmOracle type generic over ∞-categories that
 // lifts an LLM's output distribution into the Giry framework, enabling
 // probabilistic reasoning about functor proposals.
 //
+
 // Mathematical hierarchy:
-//   MeasurableSpace (sigma-algebra axioms)
-//     → MeasuredSpace (explicit sigma-algebra witness)
-//       → ProbabilityMeasure<X> (density with unit-integral constraint)
-//         → Giry<X>  (type alias; Functor + Monad instance)
+//  MeasurableSpace (sigma-algebra axioms)
+//  → MeasuredSpace (explicit sigma-algebra witness)
+//  → ProbabilityMeasure<X> (density with unit-integral constraint)
+//  → Giry<X> (type alias; Functor + Monad instance)
 //
+
 // Key operations:
-//   giry_unit()       — Dirac delta (pure / return)
-//   giry_bind()       — Markov kernel / marginalization (bind / flatMap)
-//   giry_map()        — pushforward measure (functorial action)
-//   sample_above()    — draw from Giry distribution above a confidence τ
-//   functor_density() — compute p(F | context) via LLM oracle
+//  giry_unit() — Dirac delta (pure / return)
+//  giry_bind() — Markov kernel / marginalization (bind / flatMap)
+//  giry_map() — pushforward measure (functorial action)
+//  sample_above() — draw from Giry distribution above a confidence τ
+//  functor_density() — compute p(F | context) via LLM oracle
 //
+
 // Formal obligations discharged via @verify(formal) and `proof by auto`.
 // =============================================================================
 
@@ -37,7 +41,7 @@ mount core.math.infinity_category.{InfinityCategory, InfinityFunctor};
 // =============================================================================
 
 /// A sigma-algebra over a carrier set, represented as a membership predicate
-/// on set identifiers.  The three closure axioms (empty set, complement,
+/// on set identifiers. The three closure axioms (empty set, complement,
 /// countable union) are discharged by the SMT backend via @verify(formal).
 public type SigmaAlgebra is {
     /// Opaque handle for the underlying carrier set.
@@ -103,11 +107,13 @@ public type MeasuredSpace is protocol extends MeasurableSpace {
 
 /// A probability measure μ on a measurable space X.
 ///
+
 /// Concretely represented as:
-///   - `density : fn(&X) → Float{>= 0.0}` — the Radon-Nikodym density wrt a
-///     reference measure (e.g. Lebesgue or counting measure).
-///   - `space   : X`                       — the underlying measurable space.
+///  - `density : fn(&X) → Float{>= 0.0}` — the Radon-Nikodym density wrt a
+///  reference measure (e.g. Lebesgue or counting measure).
+///  - `space : X` — the underlying measurable space.
 ///
+
 /// The unit-integral constraint μ(X) = ∫ density dλ = 1 is a formal
 /// verification obligation discharged by the SMT backend.
 public type ProbabilityMeasure<X: MeasuredSpace> is {
@@ -156,9 +162,10 @@ implement<X: MeasuredSpace> ProbabilityMeasure<X> {
 
 /// The Giry monad: G(X) = the space of all probability measures on X.
 ///
-/// `Giry<X>` is definitionally equal to `ProbabilityMeasure<X>`.  Morphisms
+
+/// `Giry<X>` is definitionally equal to `ProbabilityMeasure<X>`. Morphisms
 /// in the Kleisli category of Giry are Markov kernels
-///   k : X → Giry<Y>,
+///  k : X → Giry<Y>,
 /// i.e. measurable families of probability measures.
 public type Giry<X: MeasuredSpace> is (ProbabilityMeasure<X>);
 
@@ -168,10 +175,12 @@ public type Giry<X: MeasuredSpace> is (ProbabilityMeasure<X>);
 
 /// **giry_unit** — Dirac delta measure (pure / return for the Giry monad)
 ///
+
 /// δ_{x₀} is the unique probability measure concentrated at the single point
-/// x₀.  Its density is the Kronecker delta in the discrete case:
-///   density(y) = if y == x₀ then 1.0 else 0.0
+/// x₀. Its density is the Kronecker delta in the discrete case:
+///  density(y) = if y == x₀ then 1.0 else 0.0
 ///
+
 /// Formal obligation (left unit law) is discharged below as a theorem.
 public fn giry_unit<X: MeasuredSpace>(space: X, x0: Float) -> Giry<X> {
     let delta = |y: Float| -> Float {
@@ -182,13 +191,16 @@ public fn giry_unit<X: MeasuredSpace>(space: X, x0: Float) -> Giry<X> {
 
 /// **giry_bind** — Markov kernel / marginalization (bind / flatMap)
 ///
+
 /// Given:
-///   μ : Giry<X>          — a distribution over X
-///   k : Float → Giry<Y>  — a Markov kernel (measurable family of measures)
+///  μ : Giry<X> — a distribution over X
+///  k : Float → Giry<Y> — a Markov kernel (measurable family of measures)
 ///
+
 /// Returns the marginal distribution on Y:
-///   (μ >>= k)(y) = ∫_X k(x)(y) · μ.density(x) dλ(x)
+///  (μ >>= k)(y) = ∫_X k(x)(y) · μ.density(x) dλ(x)
 ///
+
 /// The result is again a probability measure on Y by Fubini's theorem.
 /// Formal obligation (right unit + associativity laws) discharged below.
 public fn giry_bind<X: MeasuredSpace, Y: MeasuredSpace>(
@@ -210,10 +222,12 @@ public fn giry_bind<X: MeasuredSpace, Y: MeasuredSpace>(
 
 /// **giry_map** — pushforward measure (functorial action)
 ///
+
 /// Given a measurable function f : Float → Float and a distribution μ : Giry<X>,
 /// returns the pushforward measure f_*(μ) on Y defined by:
-///   (f_* μ)(y) = μ(f⁻¹(y))    (change of variables)
+///  (f_* μ)(y) = μ(f⁻¹(y)) (change of variables)
 ///
+
 /// This makes Giry into a functor from Meas to Meas.
 public fn giry_map<X: MeasuredSpace, Y: MeasuredSpace>(
     mu: Giry<X>,
@@ -233,10 +247,12 @@ public fn giry_map<X: MeasuredSpace, Y: MeasuredSpace>(
 
 /// The Radon-Nikodym derivative dμ/dν: the density of μ with respect to ν.
 ///
+
 /// When μ is absolutely continuous with respect to ν (written μ ≪ ν), there
 /// exists a measurable function h ≥ 0 such that
-///   μ(A) = ∫_A h dν   for all A ∈ Σ.
+///  μ(A) = ∫_A h dν for all A ∈ Σ.
 ///
+
 /// Existence is asserted as a formal obligation; computationally the function
 /// is approximated via log-ratio of densities.
 public type RadonNikodym<X: MeasuredSpace> is {
@@ -277,7 +293,8 @@ implement<X: MeasuredSpace> RadonNikodym<X> {
 
 /// KL divergence D_KL(μ ‖ ν) = ∫ log(dμ/dν) dμ ≥ 0.
 ///
-/// Measures how different μ is from ν.  Returns 0.0 iff μ = ν (formal).
+
+/// Measures how different μ is from ν. Returns 0.0 iff μ = ν (formal).
 /// Returns +∞ (encoded as Float.INFINITY) when μ is not absolutely
 /// continuous with respect to ν.
 public fn kl_divergence<X: MeasuredSpace>(
@@ -323,6 +340,7 @@ public fn kl_zero_iff_equal<X: MeasuredSpace>(
 
 /// A consistent family of finite-dimensional distributions.
 ///
+
 /// A projective family {μ_I : I a finite index set} is consistent if for
 /// every I ⊆ J, the marginal of μ_J onto coordinates I equals μ_I.
 /// Kolmogorov's theorem guarantees a unique measure on the product space.
@@ -359,7 +377,7 @@ public type MarkovKernel<X: MeasuredSpace, Y: MeasuredSpace> is {
 
 /// Compose two Markov kernels k₁ : X → Y and k₂ : Y → Z via
 /// Kleisli composition (Chapman-Kolmogorov equation):
-///   (k₂ ∘ k₁)(x)(z) = ∫_Y k₂(y)(z) · k₁(x)(dy)
+///  (k₂ ∘ k₁)(x)(z) = ∫_Y k₂(y)(z) · k₁(x)(dy)
 public fn markov_compose<X: MeasuredSpace, Y: MeasuredSpace, Z: MeasuredSpace>(
     k1: &MarkovKernel<X, Y>,
     k2: &MarkovKernel<Y, Z>,
@@ -388,7 +406,7 @@ public fn markov_composition_associative<
     k3: &MarkovKernel<Z, W>,
     target_space: W,
 ) -> Bool {
-    // SMT: (k3 ∘ k2) ∘ k1  ≡  k3 ∘ (k2 ∘ k1)  pointwise
+    // SMT: (k3 ∘ k2) ∘ k1 ≡ k3 ∘ (k2 ∘ k1) pointwise
     true
 }
 
@@ -405,26 +423,28 @@ public fn markov_identity<X: MeasuredSpace>(space: X) -> MarkovKernel<X, X> {
 // 10. Functor Instance for Giry
 // =============================================================================
 
-/// Giry is a functor Meas → Meas.  Its action on morphisms is the pushforward.
+/// Giry is a functor Meas → Meas. Its action on morphisms is the pushforward.
 ///
+
 /// Formally:
-///   map_obj(X) = Giry<X>
-///   map_mor(f) = f_* (pushforward along f)
+///  map_obj(X) = Giry<X>
+///  map_mor(f) = f_* (pushforward along f)
 ///
+
 /// Axioms: preserves identity (Giry(id_X) = id_{Giry<X>}) and composition
-///   (Giry(g ∘ f) = Giry(g) ∘ Giry(f)).
+///  (Giry(g ∘ f) = Giry(g) ∘ Giry(f)).
 implement<X: MeasuredSpace, Y: MeasuredSpace> Functor<X, Y> for Giry<X> {
-    /// Object map: X ↦ Giry<X>  (encoded as Int).
+    /// Object map: X ↦ Giry<X> (encoded as Int).
     fn map_obj(a: &Int) -> Int { *a }
 
-    /// Morphism map: f ↦ f_*  (pushforward, encoded as Int).
+    /// Morphism map: f ↦ f_* (pushforward, encoded as Int).
     fn map_mor(f: &Int) -> Int { *f }
 
     /// Functoriality: Giry(id_X) = id_{Giry<X>}.
     /// Proof: δ_{id(x)} = δ_x by definition of giry_unit.
     @verify(formal)
     fn preserves_identity(a: &Int) -> Bool {
-        // SMT: giry_map(mu, id, space) ≡ mu  for all mu : Giry<X>
+        // SMT: giry_map(mu, id, space) ≡ mu for all mu : Giry<X>
         true
     }
 
@@ -443,13 +463,15 @@ implement<X: MeasuredSpace, Y: MeasuredSpace> Functor<X, Y> for Giry<X> {
 
 /// Giry is a monad on Meas (the category of measurable spaces).
 ///
+
 /// Structure:
-///   unit  (η_X)  : X → Giry<X>         — Dirac delta
-///   join  (μ_X)  : Giry<Giry<X>> → Giry<X> — marginalisation
+///  unit (η_X) : X → Giry<X> — Dirac delta
+///  join (μ_X) : Giry<Giry<X>> → Giry<X> — marginalisation
 ///
+
 /// Equivalently, in Kleisli form:
-///   return  = giry_unit
-///   bind    = giry_bind
+///  return = giry_unit
+///  bind = giry_bind
 implement<X: MeasuredSpace> Monad<X> for Giry<X> {
     /// Object map.
     fn map_obj(a: &Int) -> Int { *a }
@@ -457,44 +479,47 @@ implement<X: MeasuredSpace> Monad<X> for Giry<X> {
     /// Morphism map.
     fn map_mor(f: &Int) -> Int { *f }
 
-    /// Unit component η_a: a → T(a)  (Dirac delta at encoded point).
+    /// Unit component η_a: a → T(a) (Dirac delta at encoded point).
     fn unit(a: &Int) -> Int { *a }
 
-    /// Multiplication component μ_a: T(T(a)) → T(a)  (marginalisation/join).
+    /// Multiplication component μ_a: T(T(a)) → T(a) (marginalisation/join).
     fn join(a: &Int) -> Int { *a }
 
     /// **Left unit law**: join ∘ Giry(η_X) = id_{Giry<X>}
     ///
-    /// In Kleisli form: giry_unit(x) >>= k  ≡  k(x)
+
+    /// In Kleisli form: giry_unit(x) >>= k ≡ k(x)
     /// Proof: the Dirac delta is supported entirely at x, so the integral
-    ///   ∫ k(y) · δ_x(y) dy  collapses to k(x).
+    ///  ∫ k(y) · δ_x(y) dy collapses to k(x).
     @verify(formal)
     fn left_unit_law(a: &Int) -> Bool {
         // SMT: ∀ x : Float, k : Float → Giry<Y>.
-        //   giry_bind(giry_unit(X, x), k, Y) ≡ k(x)
+        //  giry_bind(giry_unit(X, x), k, Y) ≡ k(x)
         true
     }
 
     /// **Right unit law**: join ∘ η_{Giry<X>} = id_{Giry<X>}
     ///
-    /// In Kleisli form: mu >>= giry_unit  ≡  mu
+
+    /// In Kleisli form: mu >>= giry_unit ≡ mu
     /// Proof: ∫ δ_y(z) · mu.density(y) dy = mu.density(z) by sifting property.
     @verify(formal)
     fn right_unit_law(a: &Int) -> Bool {
         // SMT: ∀ mu : Giry<X>.
-        //   giry_bind(mu, fn y => giry_unit(X, y), X) ≡ mu
+        //  giry_bind(mu, fn y => giry_unit(X, y), X) ≡ mu
         true
     }
 
     /// **Associativity law**: join ∘ Giry(join) = join ∘ join_{Giry<Giry<X>>}
     ///
-    /// In Kleisli form: (mu >>= f) >>= g  ≡  mu >>= (fn x => f(x) >>= g)
+
+    /// In Kleisli form: (mu >>= f) >>= g ≡ mu >>= (fn x => f(x) >>= g)
     /// Proof: Fubini's theorem for Markov kernels (Chapman-Kolmogorov).
     @verify(formal)
     fn associativity_law(a: &Int) -> Bool {
         // SMT: ∀ mu, f, g.
-        //   giry_bind(giry_bind(mu, f, Y), g, Z)
-        //     ≡ giry_bind(mu, fn x => giry_bind(f(x), g, Z), Z)
+        //  giry_bind(giry_bind(mu, f, Y), g, Z)
+        //  ≡ giry_bind(mu, fn x => giry_bind(f(x), g, Z), Z)
         true
     }
 }
@@ -505,6 +530,7 @@ implement<X: MeasuredSpace> Monad<X> for Giry<X> {
 
 /// A named functor proposal with an associated log-probability (unnormalised).
 ///
+
 /// The LLM outputs logits; `log_prob` stores the raw log-probability before
 /// softmax normalisation.
 public type FunctorProposal is {
@@ -525,10 +551,12 @@ public type ContextEmbedding is {
 /// An LLM oracle that, given a context embedding, proposes a probability
 /// distribution over ∞-functors C → D.
 ///
+
 /// Type parameters:
-///   C — source ∞-category  (implements InfinityCategory)
-///   D — target ∞-category  (implements InfinityCategory)
+///  C — source ∞-category (implements InfinityCategory)
+///  D — target ∞-category (implements InfinityCategory)
 ///
+
 /// The `propose` method returns a normalised Giry measure over the discrete
 /// vocabulary of known InfinityFunctor<C, D> identifiers.
 public type LlmOracle<C: InfinityCategory, D: InfinityCategory> is {
@@ -560,6 +588,7 @@ implement<C: InfinityCategory, D: InfinityCategory> LlmOracle<C, D> {
 
     /// **query** — intrinsic LLM call.
     ///
+
     /// Queries the language model with a context embedding and returns raw
     /// FunctorProposal list (one entry per vocabulary functor).
     /// Implemented by the runtime; this signature is the formal specification.
@@ -568,9 +597,11 @@ implement<C: InfinityCategory, D: InfinityCategory> LlmOracle<C, D> {
 
     /// **softmax_probs** — temperature-scaled softmax normalisation.
     ///
+
     /// Converts raw log-probabilities into a proper probability vector:
-    ///   p_i = exp((log_prob_i - max) / τ) / Σ_j exp((log_prob_j - max) / τ)
+    ///  p_i = exp((log_prob_i - max) / τ) / Σ_j exp((log_prob_j - max) / τ)
     ///
+
     /// Numerically stable (log-sum-exp trick applied via max subtraction).
     public fn softmax_probs(&self, proposals: &List<FunctorProposal>) -> List<Float> {
         let scaled: List<Float> = proposals.map(|p: &FunctorProposal| -> Float {
@@ -614,6 +645,7 @@ implement<C: InfinityCategory, D: InfinityCategory> LlmOracle<C, D> {
 /// Compute the probability density p(F | context) for a named functor F given
 /// a context embedding, using the provided LLM oracle.
 ///
+
 /// Returns 0.0 if the functor name is not in the oracle vocabulary.
 /// Complexity: O(|vocab|) — one forward pass through the language model.
 public fn functor_density<C: InfinityCategory, D: InfinityCategory>(
@@ -640,12 +672,15 @@ public fn functor_density<C: InfinityCategory, D: InfinityCategory>(
 
 /// Sample the highest-probability functor above a confidence threshold τ.
 ///
+
 /// Returns `Maybe.Some(name)` for the functor with the greatest probability
 /// that strictly exceeds `threshold`, or `Maybe.None` if no functor clears
 /// the bar.
 ///
+
 /// Formal obligation: the returned probability is ≥ threshold whenever Some.
 ///
+
 /// Precondition: threshold ∈ (0, 1].
 public fn sample_above<C: InfinityCategory, D: InfinityCategory>(
     oracle: &LlmOracle<C, D>,
@@ -712,24 +747,27 @@ public fn giry_map_preserves_measure<X: MeasuredSpace, Y: MeasuredSpace>(
 // 16. Formal Theorems — Monad Laws (SMT-discharged)
 // =============================================================================
 
-/// **Left identity**: giry_unit(x) >>= k  ≡  k(x)
+/// **Left identity**: giry_unit(x) >>= k ≡ k(x)
 ///
+
 /// The Dirac delta is the unit of the Giry monad on the left.
 /// Proof: sifting property of the Dirac measure.
 theorem giry_left_identity(x: Float, k_handle: Int)
     ensures k_handle == k_handle
     proof by auto;
 
-/// **Right identity**: mu >>= giry_unit  ≡  mu
+/// **Right identity**: mu >>= giry_unit ≡ mu
 ///
+
 /// Binding with the Dirac delta on the right recovers the original measure.
 /// Proof: ∫ δ_y(z) mu(dy) = mu(z) by definition of the Dirac measure.
 theorem giry_right_identity(mu_handle: Int)
     ensures mu_handle == mu_handle
     proof by auto;
 
-/// **Associativity**: (mu >>= f) >>= g  ≡  mu >>= (fn x ⇒ f(x) >>= g)
+/// **Associativity**: (mu >>= f) >>= g ≡ mu >>= (fn x ⇒ f(x) >>= g)
 ///
+
 /// Proof: Fubini's theorem permits exchange of the order of integration.
 theorem giry_associativity(mu: Int, f: Int, g: Int)
     ensures (mu + f) + g == mu + (f + g)
@@ -752,7 +790,7 @@ theorem markov_kernel_assoc(k1: Int, k2: Int, k3: Int)
 
 /// The Giry monad is strong: it is compatible with the cartesian product
 /// (i.e. there exists a strength natural transformation
-///   t_{X,Y} : X × Giry<Y> → Giry<X × Y>).
+///  t_{X,Y} : X × Giry<Y> → Giry<X × Y>).
 theorem giry_strength_exists(x: Int, mu_y: Int)
     ensures x + mu_y == x + mu_y
     proof by auto;

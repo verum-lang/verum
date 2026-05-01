@@ -14,8 +14,10 @@
 )]
 // Tests for contract literal parsing.
 //
+
 // Tests for contract annotations: requires, ensures, invariant, decreases
 //
+
 // Contract literals in various contexts:
 // - Function preconditions and postconditions
 // - Refinement types

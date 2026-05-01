@@ -1,56 +1,65 @@
 //! Continuous benchmarking — head-to-head vs Coq / Lean4 / Isabelle
 //! / Agda.
 //!
+
 //! ## Goal
 //!
+
 //! Establish Verum's quantitative leadership claim with
 //! **reproducible** benchmarks across the proof-assistant
-//! landscape.  Anyone can re-run the suite and verify the
-//! numbers.  No marketing claims, only verifiable measurements.
+//! landscape. Anyone can re-run the suite and verify the
+//! numbers. No marketing claims, only verifiable measurements.
 //!
+
 //! Per benchmark this module captures:
 //!
-//!   1. **Trusted Computing Base size** — kernel LOC + transitive
-//!      trust dependencies.
-//!   2. **Compilation / verification speed** — LOC/sec or
-//!      theorems/sec on a fixed reference corpus.
-//!   3. **Memory peak** — per-theorem peak RSS.
-//!   4. **Cross-format export coverage** — how many independent
-//!      kernels can re-check a given proof.
-//!   5. **Tactic library completeness** — percentage of standard
-//!      obligations closed by 1-line tactic invocations.
-//!   6. **Trust diversification** — number of independent kernels
-//!      that agree on each theorem.
-//!   7. **LLM-tactic acceptance rate** — fraction of LLM-proposed
-//!      proofs that pass the kernel (only Verum supports this
-//!      today; comparable systems baseline at 0%).
+
+//!  1. **Trusted Computing Base size** — kernel LOC + transitive
+//!  trust dependencies.
+//!  2. **Compilation / verification speed** — LOC/sec or
+//!  theorems/sec on a fixed reference corpus.
+//!  3. **Memory peak** — per-theorem peak RSS.
+//!  4. **Cross-format export coverage** — how many independent
+//!  kernels can re-check a given proof.
+//!  5. **Tactic library completeness** — percentage of standard
+//!  obligations closed by 1-line tactic invocations.
+//!  6. **Trust diversification** — number of independent kernels
+//!  that agree on each theorem.
+//!  7. **LLM-tactic acceptance rate** — fraction of LLM-proposed
+//!  proofs that pass the kernel (only Verum supports this
+//!  today; comparable systems baseline at 0%).
 //!
+
 //! ## Architectural pattern
 //!
+
 //! Same single-trait-boundary pattern as the rest of the
 //! integration arc:
 //!
-//!   * [`BenchmarkSystem`] enum — Verum / Coq / Lean4 / Isabelle /
-//!     Agda.
-//!   * [`BenchmarkMetric`] enum — typed measurement category.
-//!   * [`BenchmarkResult`] — typed per-(system, theorem, metric)
-//!     record.
-//!   * [`BenchmarkRunner`] trait — single dispatch interface.
-//!   * Reference impls: [`MockBenchmarkRunner`] (deterministic, for
-//!     tests + the CLI's `--mock` mode), and per-system stubs that
-//!     call out to the real tools when available.
-//!   * [`ComparisonMatrix`] aggregator — produces head-to-head
-//!     matrices across systems.
+
+//!  * [`BenchmarkSystem`] enum — Verum / Coq / Lean4 / Isabelle /
+//!  Agda.
+//!  * [`BenchmarkMetric`] enum — typed measurement category.
+//!  * [`BenchmarkResult`] — typed per-(system, theorem, metric)
+//!  record.
+//!  * [`BenchmarkRunner`] trait — single dispatch interface.
+//!  * Reference impls: [`MockBenchmarkRunner`] (deterministic, for
+//!  tests + the CLI's `--mock` mode), and per-system stubs that
+//!  call out to the real tools when available.
+//!  * [`ComparisonMatrix`] aggregator — produces head-to-head
+//!  matrices across systems.
 //!
+
 //! ## V0 contract
 //!
-//!   * The trait surface, result schema, and aggregator ship now.
-//!   * Production runners (running actual `coqc` / `lean` /
-//!     `isabelle` / `agda`) are V1+; this module ships the
-//!     `MockBenchmarkRunner` for tests and the protocol shape so
-//!     downstream runners plug in via the same trait.
-//!   * `VerumBenchmarkRunner` runs the local Verum corpus; it ships
-//!     today as a reference for comparison-only mode.
+
+//!  * The trait surface, result schema, and aggregator ship now.
+//!  * Production runners (running actual `coqc` / `lean` /
+//!  `isabelle` / `agda`) are V1+; this module ships the
+//!  `MockBenchmarkRunner` for tests and the protocol shape so
+//!  downstream runners plug in via the same trait.
+//!  * `VerumBenchmarkRunner` runs the local Verum corpus; it ships
+//!  today as a reference for comparison-only mode.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -102,7 +111,7 @@ impl BenchmarkSystem {
 // BenchmarkMetric — what we measure
 // =============================================================================
 
-/// One measurement category.  Each `BenchmarkResult` records the
+/// One measurement category. Each `BenchmarkResult` records the
 /// observed value for exactly one metric.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -110,20 +119,20 @@ pub enum BenchmarkMetric {
     /// Trusted Computing Base size (kernel + trust deps), in lines.
     /// Lower is better.
     KernelLoc,
-    /// Compilation / verification speed (lines per second).  Higher
+    /// Compilation / verification speed (lines per second). Higher
     /// is better.
     LinesPerSecond,
-    /// Theorems verified per second.  Higher is better.
+    /// Theorems verified per second. Higher is better.
     TheoremsPerSecond,
-    /// Per-theorem peak resident-set size in bytes.  Lower is
+    /// Per-theorem peak resident-set size in bytes. Lower is
     /// better.
     PeakRssBytes,
-    /// Per-theorem wall-clock duration in milliseconds.  Lower is
+    /// Per-theorem wall-clock duration in milliseconds. Lower is
     /// better.
     ElapsedMs,
     /// Number of independent kernel formats that successfully
     /// re-check the proof (`verum export` round-trip count).
-    /// Higher is better.  Verum target: 4 (Coq + Lean + Isabelle +
+    /// Higher is better. Verum target: 4 (Coq + Lean + Isabelle +
     /// Dedukti).
     CrossFormatExports,
     /// Percentage in `[0, 100]` of standard obligations the
@@ -131,10 +140,10 @@ pub enum BenchmarkMetric {
     /// Higher is better.
     TacticCoveragePercent,
     /// Number of distinct kernels in the trust circle that agree
-    /// on a theorem.  Higher is better.
+    /// on a theorem. Higher is better.
     TrustDiversificationCount,
     /// Fraction in `[0, 100]` of LLM-proposed proofs that pass the
-    /// kernel.  Higher is better.  Only Verum supports this today
+    /// kernel. Higher is better. Only Verum supports this today
     /// (LCF-style fail-closed loop, see #77); comparable systems
     /// baseline at 0%.
     LlmAcceptancePercent,
@@ -170,7 +179,7 @@ impl BenchmarkMetric {
         }
     }
 
-    /// True iff a higher value is better for this metric.  Used by
+    /// True iff a higher value is better for this metric. Used by
     /// the comparison matrix to pick the leader.
     pub fn higher_is_better(self) -> bool {
         match self {
@@ -209,17 +218,17 @@ pub struct BenchmarkResult {
     pub system: BenchmarkSystem,
     /// Suite identifier (e.g. `"mathcomp/basics"`).
     pub suite: Text,
-    /// Theorem identifier within the suite.  `None` for
+    /// Theorem identifier within the suite. `None` for
     /// suite-level metrics (e.g. `KernelLoc`).
     pub theorem: Option<Text>,
     pub metric: BenchmarkMetric,
-    /// Observed value.  Use floats so `LinesPerSecond` /
+    /// Observed value. Use floats so `LinesPerSecond` /
     /// `TacticCoveragePercent` etc. work uniformly.
     pub value: f64,
     /// Unix timestamp (seconds) when the measurement was taken.
     pub timestamp: u64,
     /// Optional reproducibility envelope: hash of the input corpus
-    /// + tool version.  When set, the same hash + same tool
+    /// + tool version. When set, the same hash + same tool
     /// version should reproduce the same value.
     pub repro_envelope: Option<Text>,
 }
@@ -301,9 +310,9 @@ pub trait BenchmarkRunner: std::fmt::Debug + Send + Sync {
 // BenchmarkSuite — input description
 // =============================================================================
 
-/// Description of a benchmark suite.  Runners interpret this
+/// Description of a benchmark suite. Runners interpret this
 /// uniformly: a suite name, a list of theorem identifiers, and an
-/// optional repro-envelope (hash of the input corpus).  Concrete
+/// optional repro-envelope (hash of the input corpus). Concrete
 /// runners may map theorem ids to per-system source files via a
 /// configured prefix (e.g. `mathcomp/basics → coq/mathcomp/basics.v`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -338,7 +347,7 @@ impl BenchmarkSuite {
 // =============================================================================
 
 /// Mock runner that emits canned results for every theorem in the
-/// suite.  Used for tests + the CLI's `--mock` mode.
+/// suite. Used for tests + the CLI's `--mock` mode.
 #[derive(Debug, Clone)]
 pub struct MockBenchmarkRunner {
     pub system: BenchmarkSystem,
@@ -438,21 +447,24 @@ impl BenchmarkRunner for MockBenchmarkRunner {
 // ProductionBenchmarkRunner — real tool invocation (#94 hardening)
 // =============================================================================
 //
+
 // V0 shipped only `MockBenchmarkRunner`, returning canned values
-// derived from the documented-landscape claims.  Hardening: real
+// derived from the documented-landscape claims. Hardening: real
 // runners that:
 //
-//   * Detect tool presence by invoking `<cmd> <version_flag>` and
-//     checking the exit code (no PATH gymnastics — `Command::new`
-//     resolves through PATH itself, surfacing `NotFound` cleanly).
-//   * Run `<cmd> <theorem-source>` per theorem, captures
-//     `elapsed_ms` via `Instant::now()`, exit-status as
-//     pass/fail, and per-theorem stdout-tail as detail.
-//   * Return `BenchmarkError::ToolMissing` when the tool isn't on
-//     PATH; the CLI's matrix logic already handles that.
+
+//  * Detect tool presence by invoking `<cmd> <version_flag>` and
+//  checking the exit code (no PATH gymnastics — `Command::new`
+//  resolves through PATH itself, surfacing `NotFound` cleanly).
+//  * Run `<cmd> <theorem-source>` per theorem, captures
+//  `elapsed_ms` via `Instant::now()`, exit-status as
+//  pass/fail, and per-theorem stdout-tail as detail.
+//  * Return `BenchmarkError::ToolMissing` when the tool isn't on
+//  PATH; the CLI's matrix logic already handles that.
 //
+
 // Runners are generic over `(command, version_flag, source_extension)`
-// so the same type is reused across systems.  Per-system
+// so the same type is reused across systems. Per-system
 // constructors below pin the conventions (`coqc` / `lean` /
 // `isabelle process` / `agda` / `verum`).
 
@@ -472,17 +484,17 @@ pub struct ProductionBenchmarkRunner {
     /// Directory holding `<theorem>.<extension>` source files.
     source_dir: std::path::PathBuf,
     /// Source-file extension (e.g. `"v"` for Coq, `"lean"` for
-    /// Lean4).  Empty means the theorem id IS the full filename.
+    /// Lean4). Empty means the theorem id IS the full filename.
     source_extension: Text,
-    /// Per-theorem wall-clock deadline.  Exceeding kills the
-    /// process and emits a timeout result.  V1 — currently the
+    /// Per-theorem wall-clock deadline. Exceeding kills the
+    /// process and emits a timeout result. V1 — currently the
     /// runner waits unconditionally; a future Wall-clock-budget
     /// extension lands here.
     pub timeout_secs: u64,
 }
 
 impl ProductionBenchmarkRunner {
-    /// Build a production runner for a generic system.  Per-system
+    /// Build a production runner for a generic system. Per-system
     /// helpers below ([`coq_production_runner`] etc.) pin the
     /// conventional command names so callers don't have to.
     pub fn new(
@@ -535,7 +547,7 @@ impl BenchmarkRunner for ProductionBenchmarkRunner {
     fn is_available(&self) -> bool {
         // `Command::new(cmd).arg(version_arg).output()` returns
         // `Err(io::Error)` (kind == NotFound) when `cmd` is missing
-        // from PATH.  Any successful spawn with a 0 exit code
+        // from PATH. Any successful spawn with a 0 exit code
         // (or a 0/non-zero status if the tool prints version to
         // stderr — Lean4's `lean --version` exits 0; Coq's
         // `coqc -v` ditto) is sufficient.
@@ -682,16 +694,16 @@ pub fn verum_production_runner(
 // runner_for — per-system reference dispatcher
 // =============================================================================
 
-/// Pick a reference runner for a system.  V0 ships
+/// Pick a reference runner for a system. ships
 /// `MockBenchmarkRunner` for every system (deterministic, no real
-/// tool invocation).  V1+ swaps in production runners that call
+/// tool invocation). V1+ swaps in production runners that call
 /// out to the actual tools when available; the trait surface is
 /// unchanged.
 pub fn mock_runner_for(system: BenchmarkSystem) -> MockBenchmarkRunner {
     let mut r = MockBenchmarkRunner::new(system);
     // Canned baseline values reflecting the documented landscape
     // claims — these are not measurements, they are placeholders
-    // for the protocol shape.  V1 production runners replace
+    // for the protocol shape. V1 production runners replace
     // every entry with real-tool measurements.
     let (kernel, lps, llm) = match system {
         BenchmarkSystem::Verum => (5_000.0, 50_000.0, 65.0),
@@ -716,7 +728,7 @@ pub fn mock_runner_for(system: BenchmarkSystem) -> MockBenchmarkRunner {
 // ComparisonMatrix — head-to-head aggregator
 // =============================================================================
 
-/// Aggregator for cross-system comparison output.  Indexed by
+/// Aggregator for cross-system comparison output. Indexed by
 /// `(metric, system) → value` and exposes leader detection per
 /// metric.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -733,17 +745,17 @@ impl ComparisonMatrix {
         }
     }
 
-    /// Ingest a batch of results.  Per `(metric, system)` the
+    /// Ingest a batch of results. Per `(metric, system)` the
     /// stored value is the last one ingested — duplicates from a
     /// per-theorem metric are AVERAGED across theorems before
-    /// storage.  See [`Self::ingest_aggregated`] for that path.
+    /// storage. See [`Self::ingest_aggregated`] for that path.
     pub fn ingest(&mut self, result: BenchmarkResult) {
         self.by_metric_and_system
             .insert((result.metric, result.system), result.value);
     }
 
     /// Ingest a batch and average per-theorem metrics across the
-    /// theorems in the same suite.  Suite-level metrics are
+    /// theorems in the same suite. Suite-level metrics are
     /// untouched.
     pub fn ingest_aggregated(&mut self, results: &[BenchmarkResult]) {
         let mut sums: BTreeMap<(BenchmarkMetric, BenchmarkSystem), (f64, usize)> =
@@ -761,7 +773,7 @@ impl ComparisonMatrix {
     }
 
     /// Return the system with the best value for the given metric.
-    /// `None` when no system has data.  Ties broken by alphabetical
+    /// `None` when no system has data. Ties broken by alphabetical
     /// system order (determinism).
     pub fn leader(&self, metric: BenchmarkMetric) -> Option<BenchmarkSystem> {
         let mut best: Option<(BenchmarkSystem, f64)> = None;
@@ -785,7 +797,7 @@ impl ComparisonMatrix {
         best.map(|(s, _)| s)
     }
 
-    /// Render a Markdown table.  Rows are metrics, columns are
+    /// Render a Markdown table. Rows are metrics, columns are
     /// systems, leader cells are decorated with `⭐`.
     pub fn to_markdown(&self) -> Text {
         let metrics_in_use: Vec<BenchmarkMetric> = {
@@ -1184,7 +1196,7 @@ mod tests {
     #[test]
     fn task_83_verum_leads_kernel_size_and_llm_acceptance() {
         // Pin the documented landscape claims as a
-        // shape-of-leadership test.  Real-tool runners will
+        // shape-of-leadership test. Real-tool runners will
         // produce the actual numbers; the protocol shape is what
         // we lock in here.
         let mut m = ComparisonMatrix::new("suite");

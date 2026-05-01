@@ -4,30 +4,36 @@
 // Layer: 5 (Network — TLS 1.3 core)
 // =============================================================================
 //
+
 // RFC 8879 adds a "compress_certificate" TLS extension (type 0x001B)
 // carrying the list of supported compression algorithms. If peer
 // advertises, server MAY send a `CompressedCertificate` (handshake
 // type 25) instead of a plain `Certificate` (type 11).
 //
+
 // Wire format (RFC 8879 §5):
 //
-//   struct {
-//       CertificateCompressionAlgorithm algorithms<2..2^8-2>;
-//   } CompressCertificate;
+
+//  struct {
+//  CertificateCompressionAlgorithm algorithms<2..2^8-2>;
+//  } CompressCertificate;
 //
-//   struct {
-//       CertificateCompressionAlgorithm algorithm;
-//       uint24 uncompressed_length;
-//       opaque compressed_certificate_message<1..2^24-1>;
-//   } CompressedCertificate;
+
+//  struct {
+//  CertificateCompressionAlgorithm algorithm;
+//  uint24 uncompressed_length;
+//  opaque compressed_certificate_message<1..2^24-1>;
+//  } CompressedCertificate;
 //
-//   enum {
-//       zlib(1),
-//       brotli(2),
-//       zstd(3),
-//       (65535)
-//   } CertificateCompressionAlgorithm;
+
+//  enum {
+//  zlib(1),
+//  brotli(2),
+//  zstd(3),
+//  (65535)
+//  } CertificateCompressionAlgorithm;
 //
+
 // Warp MUST decode the extension and the handshake message for
 // interop even when we don't initiate compression ourselves. The
 // decompressor (zlib/brotli/zstd) lives outside this module — the
@@ -35,6 +41,7 @@
 // raw bytes so integration code can delegate to
 // `core.compress.{zlib,brotli,zstd}`.
 //
+
 // =============================================================================
 
 module core.net.tls13.cert_compress;

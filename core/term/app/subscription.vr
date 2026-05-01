@@ -5,16 +5,19 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 12 (Subscriptions)
 // =============================================================================
 //
+
 // In The Elm Architecture, Commands describe *outgoing* side effects (one-shot
 // async tasks that produce a Msg), while Subscriptions describe *incoming*
 // message streams from external sources: timers, OS signals, file watchers,
 // custom async Streams.
 //
+
 // Each Subscription is hoisted to a detached task by the application
 // runtime and produces Msg values into the application message channel.
 // All subscription tasks observe a CancellationToken and terminate cleanly
 // on Quit.
 //
+
 // =============================================================================
 
 module subscription;
@@ -27,13 +30,14 @@ mount core.base.memory.Heap;
 /// message channel. The runtime spawns a detached task for each subscription
 /// and wires it to the global CancellationToken so cleanup is automatic.
 ///
+
 /// Variants:
-///   * `None`      — no subscription (identity element for combination).
-///   * `Interval`  — fire Msg every `period` until cancelled.
-///   * `Every`     — like Interval, but passes the tick timestamp.
-///   * `Once`      — fire Msg exactly once after `delay`.
-///   * `StreamSub` — wrap any `Stream<Item = Msg>` as a subscription.
-///   * `Batch`     — run several subscriptions concurrently.
+///  * `None` — no subscription (identity element for combination).
+///  * `Interval` — fire Msg every `period` until cancelled.
+///  * `Every` — like Interval, but passes the tick timestamp.
+///  * `Once` — fire Msg exactly once after `delay`.
+///  * `StreamSub` — wrap any `Stream<Item = Msg>` as a subscription.
+///  * `Batch` — run several subscriptions concurrently.
 public type Subscription<Msg> is
     | None
     | Interval(Duration, fn() -> Msg)

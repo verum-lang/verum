@@ -1,18 +1,23 @@
 //! CBGR Profiling Command
 //!
+
 //! P0 Feature for v1.0: Profile CBGR overhead and suggest optimizations
 //!
+
 //! # Example Output
 //!
+
 //! ```text
 //! $ verum profile --memory app.vr
 //!
+
 //! Performance Report:
-//!   hot_loop(): 15% time in CBGR checks
-//!     → Convert to %T for zero-cost: `fn hot_loop(data: %List<Int>)`
+//!  hot_loop(): 15% time in CBGR checks
+//!  → Convert to %T for zero-cost: `fn hot_loop(data: %List<Int>)`
 //!
-//!   safe_parse(): 0.1% CBGR overhead
-//!     → Keep &T, overhead negligible
+
+//!  safe_parse(): 0.1% CBGR overhead
+//!  → Keep &T, overhead negligible
 //! ```
 
 use anyhow::{Context, Result};
@@ -157,6 +162,7 @@ impl<'s> ProfileCommand<'s> {
 
     /// Run runtime sampling profiling
     ///
+
     /// This mode executes the program with profiling enabled and collects
     /// actual runtime statistics using sampling.
     fn run_runtime(&mut self, _output: Option<&Path>, _suggest: bool) -> Result<()> {
@@ -210,6 +216,7 @@ impl<'s> ProfileCommand<'s> {
 
     /// Profile a single function using real AST analysis
     ///
+
     /// This walks the entire function AST to count:
     /// - CBGR managed references (&T, &mut T)
     /// - Checked references (&checked T)

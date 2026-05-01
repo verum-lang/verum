@@ -1,19 +1,25 @@
 //! AST Sink - Converts green/red syntax tree to semantic AST.
 //!
+
 //! This module provides the `AstSink` that traverses a `SyntaxNode` (red tree)
 //! and builds the semantic AST types (Module, Item, Expr, Type, etc.).
 //!
+
 //! This enables single-pass parsing architecture:
 //!
+
 //! ```text
 //! Source → Events → GreenTree → AstSink → Module (semantic AST)
 //! ```
 //!
+
 //! # Architecture
 //!
+
 //! The AstSink traverses the red tree and converts each SyntaxKind
 //! to the appropriate AST type:
 //!
+
 //! - SOURCE_FILE → Module
 //! - FN_DEF → Item(FunctionDecl)
 //! - TYPE_DEF → Item(TypeDecl)
@@ -21,8 +27,10 @@
 //! - TYPE_* → Type
 //! - etc.
 //!
+
 //! # Error Handling
 //!
+
 //! The sink handles ERROR nodes gracefully by creating placeholder AST nodes
 //! that allow the rest of the tree to be processed. This enables IDE features
 //! to work on incomplete code.
@@ -57,6 +65,7 @@ pub struct AstSinkResult {
 
 /// Converts a lossless syntax tree to a semantic AST.
 ///
+
 /// The sink traverses the red tree (SyntaxNode) and builds the corresponding
 /// verum_ast types. It handles ERROR nodes gracefully to support incomplete code.
 pub struct AstSink {
@@ -1228,11 +1237,13 @@ impl AstSink {
 
     /// Convert an ATTRIBUTE node to an Attribute.
     ///
+
     /// Attributes in Verum use the `@` prefix syntax:
     /// - `@inline` - simple attribute without arguments
     /// - `@derive(Clone, Debug)` - attribute with expression arguments
     /// - `@verify(runtime)` - attribute with single argument
     ///
+
     /// The ATTRIBUTE node structure is:
     /// - AT token (`@`)
     /// - IDENT token (attribute name)
@@ -1322,16 +1333,18 @@ impl AstSink {
     }
     /// Convert a PROTOCOL_DEF node to a ProtocolDecl.
     ///
+
     /// Parses protocol definitions of the form:
     /// - `protocol { ... }` (inside type is)
     /// - `protocol extends Base { ... }`
     /// - `protocol extends A + B where T: Clone { ... }`
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// protocol_def = 'protocol' , [ 'extends' , trait_path , { '+' , trait_path } ] ,
-    ///                [ generic_where_clause ] ,
-    ///                '{' , protocol_items , '}' ;
+    ///  [ generic_where_clause ] ,
+    ///  '{' , protocol_items , '}' ;
     /// protocol_item = protocol_function | protocol_type | protocol_const ;
     /// ```
     fn convert_protocol_def(&mut self, node: &SyntaxNode) -> Option<ProtocolDecl> {
@@ -1578,6 +1591,7 @@ impl AstSink {
 
     /// Convert an IMPL_BLOCK node to an ImplDecl.
     ///
+
     /// Parses implementation blocks of the form:
     /// - Inherent impl: `implement Type { ... }`
     /// - Protocol impl: `implement Protocol for Type { ... }`
@@ -1857,6 +1871,7 @@ impl AstSink {
 
     /// Convert a MOUNT_STMT node to a MountDecl.
     ///
+
     /// Parses mount statements of the form:
     /// - `mount std.io.File;`
     /// - `mount std.io.File as MyFile;`
@@ -1864,6 +1879,7 @@ impl AstSink {
     /// - `mount std.io.*;`
     /// - `public mount std.io.File;` (re-export)
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// mount_stmt = 'mount' , mount_tree , [ 'as' , identifier ] , ';' ;
@@ -2057,14 +2073,16 @@ impl AstSink {
 
     /// Convert a CONST_DEF node to a ConstDecl.
     ///
+
     /// Parses const declarations of the form:
     /// - `const MAX_SIZE: Int = 100;`
     /// - `public const PI: Float = 3.14159;`
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// const_def = visibility , 'const' , identifier , ':' , type_expr
-    ///           , '=' , const_expr , ';' ;
+    ///  , '=' , const_expr , ';' ;
     /// ```
     fn convert_const_def(&mut self, node: &SyntaxNode) -> Option<ConstDecl> {
         let span = self.range_to_span(node.text_range());
@@ -2117,15 +2135,17 @@ impl AstSink {
 
     /// Convert a STATIC_DEF node to a StaticDecl.
     ///
+
     /// Parses static declarations of the form:
     /// - `static COUNTER: Int = 0;`
     /// - `static mut CACHE: Map<Text, Data> = Map.new();`
     /// - `public static CONFIG: Config = Config.default();`
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// static_def = visibility , 'static' , [ 'mut' ] , identifier
-    ///            , ':' , type_expr , '=' , const_expr , ';' ;
+    ///  , ':' , type_expr , '=' , const_expr , ';' ;
     /// ```
     fn convert_static_def(&mut self, node: &SyntaxNode) -> Option<StaticDecl> {
         let span = self.range_to_span(node.text_range());
@@ -2180,15 +2200,17 @@ impl AstSink {
 
     /// Convert a CONTEXT_DEF node to a ContextDecl.
     ///
+
     /// Parses context declarations of the form:
     /// - `context Database { fn query(&self) -> Data; }`
     /// - `context async Logger<T> { fn log(&self, msg: T); }`
     /// - `public context FileSystem { ... }`
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// context_def = visibility , 'context' , identifier , [ generics ]
-    ///             , '{' , { context_item } , '}' ;
+    ///  , '{' , { context_item } , '}' ;
     /// context_item = context_function | context_type | context_const ;
     /// ```
     fn convert_context_def(&mut self, node: &SyntaxNode) -> Option<ContextDecl> {
@@ -2250,11 +2272,13 @@ impl AstSink {
 
     /// Convert a MODULE_DEF node to a ModuleDecl.
     ///
+
     /// Parses module declarations of the form:
     /// - `module utils { ... }`
     /// - `module utils;` (external module)
     /// - `public module api { ... }`
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// module_def = visibility , 'module' , identifier , module_body ;
@@ -2714,6 +2738,7 @@ impl AstSink {
 
     /// Convert a REFERENCE_TYPE node to Type.
     ///
+
     /// Handles three-tier reference types from grammar:
     /// - `&T` - managed reference with CBGR
     /// - `&mut T` - mutable managed reference
@@ -2722,6 +2747,7 @@ impl AstSink {
     /// - `&unsafe T` - unsafe reference with no checks
     /// - `&unsafe mut T` - mutable unsafe reference
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// managed_reference_type = '&' , [ 'mut' ] , type_expr ;
@@ -2791,8 +2817,10 @@ impl AstSink {
 
     /// Convert a TUPLE_TYPE node to Type.
     ///
+
     /// Handles tuple types like `(A, B, C)`.
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// tuple_type = '(' , type_expr , { ',' , type_expr } , ')' ;
@@ -2819,8 +2847,10 @@ impl AstSink {
 
     /// Convert an ARRAY_TYPE node to Type.
     ///
+
     /// Handles array types like `[T; N]` and slice types like `[T]`.
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// array_type = '[' , type_expr , ';' , expression , ']' ;
@@ -2870,12 +2900,14 @@ impl AstSink {
 
     /// Convert a FUNCTION_TYPE node to Type.
     ///
+
     /// Handles function types like `fn(A, B) -> C`.
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// function_type = 'fn' , '(' , type_list , ')' , [ '->' , type_expr ] ;
-    /// type_list     = [ type_expr , { ',' , type_expr } ] ;
+    /// type_list = [ type_expr , { ',' , type_expr } ] ;
     /// ```
     fn convert_function_type(&mut self, node: &SyntaxNode) -> Option<Type> {
         let span = self.range_to_span(node.text_range());
@@ -2936,16 +2968,19 @@ impl AstSink {
 
     /// Convert a REFINED_TYPE node to Type.
     ///
+
     /// Handles refinement types like `{ x: T | predicate }`.
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
-    /// type_refinement       = inline_refinement | value_where_clause ;
-    /// inline_refinement     = '{' , refinement_predicates , '}' ;
+    /// type_refinement = inline_refinement | value_where_clause ;
+    /// inline_refinement = '{' , refinement_predicates , '}' ;
     /// refinement_predicates = refinement_predicate , { ',' , refinement_predicate } ;
-    /// refinement_predicate  = identifier , ':' , expression | expression ;
+    /// refinement_predicate = identifier , ':' , expression | expression ;
     /// ```
     ///
+
     /// Five Binding Rules: inline {pred}, declarative `where pred`, sigma `n: T where f(n)`
     fn convert_refined_type(&mut self, node: &SyntaxNode) -> Option<Type> {
         use verum_ast::ty::RefinementPredicate;
@@ -3012,13 +3047,15 @@ impl AstSink {
 
     /// Convert a GENERIC_TYPE node to Type.
     ///
+
     /// Handles generic types like `List<T>`, `Map<K, V>`, `Array<T, 10>`.
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
-    /// generic_type    = path , type_args ;
-    /// type_args       = '<' , type_arg , { ',' , type_arg } , '>' ;
-    /// type_arg        = extended_type_arg ;
+    /// generic_type = path , type_args ;
+    /// type_args = '<' , type_arg , { ',' , type_arg } , '>' ;
+    /// type_arg = extended_type_arg ;
     /// extended_type_arg = type_expr | expression | type_level_literal | meta_type_expr ;
     /// ```
     fn convert_generic_type(&mut self, node: &SyntaxNode) -> Option<Type> {
@@ -3092,6 +3129,7 @@ impl AstSink {
 
     /// Convert a type argument node to GenericArg.
     ///
+
     /// Type arguments can be:
     /// - Type arguments: `List<Int>`
     /// - Const arguments: `Array<T, 10>`
@@ -3163,13 +3201,15 @@ impl AstSink {
 
     /// Convert a RECORD_PAT node to Pattern.
     ///
+
     /// Handles record patterns: `Point { x, y }` or `Point { x: px, .. }`
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// record_pattern = path , '{' , field_patterns , '}' ;
     /// field_patterns = [ field_pattern , { ',' , field_pattern } , [ ',' , '..' ] ] ;
-    /// field_pattern  = identifier , [ ':' , pattern ] ;
+    /// field_pattern = identifier , [ ':' , pattern ] ;
     /// ```
     fn convert_record_pattern(&mut self, node: &SyntaxNode) -> Option<Pattern> {
         let span = self.range_to_span(node.text_range());
@@ -3188,16 +3228,18 @@ impl AstSink {
 
     /// Convert a VARIANT_PAT node to Pattern.
     ///
+
     /// Handles variant patterns:
     /// - Unit variant: `None`, `Color.Red`
     /// - Tuple variant: `Some(x)`, `Result.Ok(value)`
     /// - Record variant: `Event.UserCreated { id, name }`
     ///
+
     /// Grammar (from verum.ebnf):
     /// ```text
     /// variant_pattern = path , [ variant_pattern_data ] ;
     /// variant_pattern_data = '(' , pattern_list , ')'
-    ///                      | '{' , field_patterns , '}' ;
+    ///  | '{' , field_patterns , '}' ;
     /// ```
     fn convert_variant_pattern(&mut self, node: &SyntaxNode) -> Option<Pattern> {
         let span = self.range_to_span(node.text_range());
@@ -3216,6 +3258,7 @@ impl AstSink {
 
     /// Extract a path from a pattern node.
     ///
+
     /// Looks for IDENT tokens or PATH/PATH_TYPE child nodes to build the path.
     fn extract_path_from_pattern(&mut self, node: &SyntaxNode) -> Option<Path> {
         let mut segments = List::new();
@@ -3263,6 +3306,7 @@ impl AstSink {
 
     /// Extract field patterns from a record or variant pattern.
     ///
+
     /// Returns a tuple of (field patterns list, has rest flag).
     fn extract_field_patterns(&mut self, node: &SyntaxNode) -> (List<FieldPattern>, bool) {
         let mut fields = List::new();
@@ -3295,6 +3339,7 @@ impl AstSink {
 
     /// Convert a single field pattern node.
     ///
+
     /// Handles:
     /// - Shorthand: `x` (equivalent to `x: x`)
     /// - Full: `x: pattern`
@@ -3407,12 +3452,14 @@ impl AstSink {
 
     /// Convert an array expression.
     ///
+
     /// Grammar: array_expr = '[' , array_elements , ']'
-    ///          array_elements = expression_list | expression , ';' , expression
+    ///  array_elements = expression_list | expression , ';' , expression
     ///
+
     /// Examples:
-    /// - `[1, 2, 3]`  -> ArrayExpr::List
-    /// - `[0; 10]`    -> ArrayExpr::Repeat { value, count }
+    /// - `[1, 2, 3]` -> ArrayExpr::List
+    /// - `[0; 10]` -> ArrayExpr::Repeat { value, count }
     fn convert_array_expr(&mut self, node: &SyntaxNode) -> Option<Expr> {
         use verum_ast::ArrayExpr;
 
@@ -3460,14 +3507,16 @@ impl AstSink {
 
     /// Convert a record expression.
     ///
+
     /// Grammar: record_expr = path , '{' , field_inits , '}'
-    ///          field_inits = [ field_init , { ',' , field_init } , [ '..' , expression ] ]
-    ///          field_init  = identifier , [ ':' , expression ]
+    ///  field_inits = [ field_init , { ',' , field_init } , [ '..' , expression ] ]
+    ///  field_init = identifier , [ ':' , expression ]
     ///
+
     /// Examples:
     /// - `Point { x: 1, y: 2 }`
-    /// - `Point { x, y }`               (shorthand)
-    /// - `Point { x: 1, ..other }`      (struct update)
+    /// - `Point { x, y }` (shorthand)
+    /// - `Point { x: 1, ..other }` (struct update)
     fn convert_record_expr(&mut self, node: &SyntaxNode) -> Option<Expr> {
         use verum_ast::FieldInit;
 
@@ -3613,9 +3662,11 @@ impl AstSink {
 
     /// Convert a closure expression.
     ///
+
     /// Grammar: closure_expr = [ 'async' ] , closure_params , [ '->' , type_expr ] , expression
-    ///          closure_params = '|' , [ param_list_lambda ] , '|'
+    ///  closure_params = '|' , [ param_list_lambda ] , '|'
     ///
+
     /// Examples:
     /// - `|x| x + 1`
     /// - `|x: Int| -> Int { x + 1 }`
@@ -3753,8 +3804,10 @@ impl AstSink {
 
     /// Convert an async expression.
     ///
+
     /// Grammar: async_expr = 'async' , block_expr
     ///
+
     /// Example: `async { fetch().await }`
     fn convert_async_expr(&mut self, node: &SyntaxNode) -> Option<Expr> {
         let span = self.range_to_span(node.text_range());
@@ -3771,8 +3824,10 @@ impl AstSink {
 
     /// Convert an await expression.
     ///
+
     /// Grammar: postfix_op = '.' , 'await'
     ///
+
     /// Example: `future.await`
     fn convert_await_expr(&mut self, node: &SyntaxNode) -> Option<Expr> {
         let span = self.range_to_span(node.text_range());
@@ -3788,8 +3843,10 @@ impl AstSink {
 
     /// Convert a loop expression.
     ///
+
     /// Grammar: infinite_loop = 'loop' , { loop_annotation } , block_expr
     ///
+
     /// Examples:
     /// - `loop { ... }`
     /// - `'label: loop { ... }`
@@ -3826,9 +3883,11 @@ impl AstSink {
 
     /// Convert a while expression.
     ///
+
     /// Grammar: while_loop = 'while' , expression , { loop_annotation } , block_expr
-    ///          loop_annotation = 'invariant' , expression | 'decreases' , expression
+    ///  loop_annotation = 'invariant' , expression | 'decreases' , expression
     ///
+
     /// Examples:
     /// - `while cond { ... }`
     /// - `'label: while x > 0 { ... }`
@@ -3877,8 +3936,10 @@ impl AstSink {
 
     /// Convert a for expression.
     ///
+
     /// Grammar: for_loop = 'for' , pattern , 'in' , expression , { loop_annotation } , block_expr
     ///
+
     /// Examples:
     /// - `for x in iter { ... }`
     /// - `for (k, v) in map { ... }`
@@ -3979,15 +4040,17 @@ impl AstSink {
 
     /// Convert a range expression.
     ///
+
     /// Grammar: range_expr = logical_or_expr , [ range_op , logical_or_expr ]
-    ///          range_op = '..' | '..='
+    ///  range_op = '..' | '..='
     ///
+
     /// Examples:
-    /// - `0..10`    (exclusive)
-    /// - `0..=10`   (inclusive)
-    /// - `..10`     (from start)
-    /// - `0..`      (to end)
-    /// - `..`       (full range)
+    /// - `0..10` (exclusive)
+    /// - `0..=10` (inclusive)
+    /// - `..10` (from start)
+    /// - `0..` (to end)
+    /// - `..` (full range)
     fn convert_range_expr(&mut self, node: &SyntaxNode) -> Option<Expr> {
         let span = self.range_to_span(node.text_range());
         let mut start = Maybe::None;
@@ -4032,19 +4095,21 @@ impl AstSink {
 
     /// Convert a try expression from CST to AST.
     ///
+
     /// Grammar (EBNF v2.8):
     /// ```ebnf
-    /// try_expr        = 'try' , block_expr , [ try_handlers ] ;
-    /// try_handlers    = try_recovery , [ try_finally ]
-    ///                 | try_finally ;
-    /// try_recovery    = 'recover' , recover_body ;
-    /// recover_body    = recover_match_arms | recover_closure ;
+    /// try_expr = 'try' , block_expr , [ try_handlers ] ;
+    /// try_handlers = try_recovery , [ try_finally ]
+    ///  | try_finally ;
+    /// try_recovery = 'recover' , recover_body ;
+    /// recover_body = recover_match_arms | recover_closure ;
     /// recover_match_arms = '{' , match_arms , '}' ;
     /// recover_closure = closure_params , recover_closure_body ;
     /// recover_closure_body = block_expr | expression ;
-    /// try_finally     = 'finally' , block_expr ;
+    /// try_finally = 'finally' , block_expr ;
     /// ```
     ///
+
     /// Try expression with structured error recovery: `try { body } recover(e) { handler } finally { cleanup }`
     /// The recover clause binds the error, and finally runs unconditionally.
     fn convert_try_expr(&mut self, node: &SyntaxNode) -> Option<Expr> {

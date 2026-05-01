@@ -1,53 +1,66 @@
 //! Lifetime Analysis for Compile-Time Memory Safety
 //!
+
 //! This module implements compile-time lifetime analysis inspired by Rust's borrow checker,
 //! adapted for Verum's three-tier CBGR reference model. It enables:
 //!
+
 //! - **Lifetime Inference**: Automatically infer lifetimes for references
 //! - **Constraint Generation**: Generate lifetime constraints from code
 //! - **Constraint Solving**: Solve constraints to verify safety
 //! - **Outlives Checking**: Ensure references don't outlive referents
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! CFG → LifetimeAnalyzer → LifetimeAnalysisResult
-//!                               │
-//!                               ▼
-//!                   ┌───────────────────────────────┐
-//!                   │ Map<RefId, Lifetime>          │
-//!                   │ Set<LifetimeConstraint>       │
-//!                   │ List<LifetimeViolation>       │
-//!                   │ RegionGraph                   │
-//!                   └───────────────────────────────┘
+//!  │
+//!  ▼
+//!  ┌───────────────────────────────┐
+//!  │ Map<RefId, Lifetime> │
+//!  │ Set<LifetimeConstraint> │
+//!  │ List<LifetimeViolation> │
+//!  │ RegionGraph │
+//!  └───────────────────────────────┘
 //! ```
 //!
+
 //! # Lifetime Model
 //!
+
 //! Lifetimes in Verum follow a region-based model:
 //! - Each reference has an associated lifetime region
 //! - Lifetimes form a partial order based on outlives relationships
 //! - Lifetime constraints are gathered during analysis and solved
 //!
+
 //! # Integration with CBGR
 //!
+
 //! - **Tier 0**: Lifetimes used for optimization hints (runtime still validates)
 //! - **Tier 1**: Lifetimes MUST be proven for promotion (no runtime checks)
 //! - **Tier 2**: Lifetimes unchecked (manual safety proof required)
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_cbgr::lifetime_analysis::LifetimeAnalyzer;
 //!
+
 //! let analyzer = LifetimeAnalyzer::new(cfg);
 //! let result = analyzer.analyze();
 //!
+
 //! for violation in &result.violations {
-//!     println!("Lifetime violation: {:?}", violation);
+//!  println!("Lifetime violation: {:?}", violation);
 //! }
 //! ```
 //!
+
 //! Lifetime analysis determines whether references outlive their referents. For
 //! Tier 0, lifetimes provide optimization hints (runtime CBGR still validates).
 //! For Tier 1 (&checked T), lifetimes MUST be proven sound (no runtime fallback).
@@ -581,26 +594,29 @@ impl LifetimeAnalyzer {
 
     /// Perform lifetime analysis.
     ///
+
     /// Honours every config gate:
     ///
+
     /// * `infer_lifetimes` (default `true`) — gates Phase 1
-    ///   (create lifetimes for every reference). Disabling it
-    ///   skips Phase 1 entirely; downstream phases see an empty
-    ///   ref-lifetime map and degenerate to no-ops. Used by
-    ///   embedders that want to drive lifetime IDs themselves
-    ///   (e.g. import them from an upstream IR).
+    ///  (create lifetimes for every reference). Disabling it
+    ///  skips Phase 1 entirely; downstream phases see an empty
+    ///  ref-lifetime map and degenerate to no-ops. Used by
+    ///  embedders that want to drive lifetime IDs themselves
+    ///  (e.g. import them from an upstream IR).
     /// * `check_outlives` (default `true`) — gates Phase 4
-    ///   (constraint solving). Disabling it returns the empty
-    ///   violation list; the constraint vector is still surfaced
-    ///   in the result so callers can run their own analysis.
+    ///  (constraint solving). Disabling it returns the empty
+    ///  violation list; the constraint vector is still surfaced
+    ///  in the result so callers can run their own analysis.
     /// * `max_iterations` — already honoured by `compute_liveness`
-    ///   (line 635). Documented here for completeness.
+    ///  (line 635). Documented here for completeness.
     /// * `detailed_diagnostics` — flows into the
-    ///   `LifetimeAnalysisResult` so the diagnostics builder can
-    ///   decide whether to attach span/region detail or just emit
-    ///   a one-line summary; consumers query the field via the
-    ///   public `detailed_diagnostics()` accessor.
+    ///  `LifetimeAnalysisResult` so the diagnostics builder can
+    ///  decide whether to attach span/region detail or just emit
+    ///  a one-line summary; consumers query the field via the
+    ///  public `detailed_diagnostics()` accessor.
     ///
+
     /// Before this wire-up three of the four gates were inert —
     /// the fields existed and were configurable on `with_config`
     /// but `analyze` ignored them.

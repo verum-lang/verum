@@ -3,7 +3,7 @@
 // =============================================================================
 // PRAGMA user_version — 32-bit signed integer at byte 60 of the database
 // header, available to applications for their own use (typically schema
-// versioning).  Distinct from sqlite_schema.schema_cookie / data_version.
+// versioning). Distinct from sqlite_schema.schema_cookie / data_version.
 // Spec §1.3.
 // =============================================================================
 

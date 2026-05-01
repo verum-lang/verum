@@ -2,18 +2,22 @@
 // net/http2/hpack.vr — HPACK header compression (RFC 7541)
 // =============================================================================
 //
+
 // HPACK combines a static + dynamic index table with integer and string
 // literal encodings. The wire format is a stream of "representations":
 //
-//   - Indexed header field (0b1xxxxxxx)        — §6.1
-//   - Literal w/ incremental indexing (0b01x…) — §6.2.1
-//   - Literal w/o indexing (0b0000x…)          — §6.2.2
-//   - Literal never-indexed (0b0001x…)         — §6.2.3
-//   - Dynamic table size update (0b001x…)      — §6.3
+
+//  - Indexed header field (0b1xxxxxxx) — §6.1
+//  - Literal w/ incremental indexing (0b01x…) — §6.2.1
+//  - Literal w/o indexing (0b0000x…) — §6.2.2
+//  - Literal never-indexed (0b0001x…) — §6.2.3
+//  - Dynamic table size update (0b001x…) — §6.3
 //
+
 // The integer encoding uses a variable-length "N-bit prefix" scheme
 // (§5.1) that we implement generically.
 //
+
 // String literals may be raw or Huffman-encoded (§5.2); the bit-0 of
 // the length prefix byte selects.
 // =============================================================================

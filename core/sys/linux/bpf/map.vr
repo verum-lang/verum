@@ -91,9 +91,9 @@ public fn map_lookup(
 }
 
 /// Insert or replace a (key, value). `flags` is one of:
-///   0   — BPF_ANY (insert or overwrite)
-///   1   — BPF_NOEXIST (insert only; fail if present)
-///   2   — BPF_EXIST (update only; fail if absent)
+///  0 — BPF_ANY (insert or overwrite)
+///  1 — BPF_NOEXIST (insert only; fail if present)
+///  2 — BPF_EXIST (update only; fail if absent)
 public fn map_update(
     map: &MapDescriptor,
     key: &[Byte],

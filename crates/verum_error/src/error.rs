@@ -1,28 +1,34 @@
 //! Unified Error Hierarchy
 //!
+
 //! This module provides a **single unified error type** ([`VerumError`]) that consolidates
 //! all error types from across the Verum platform. This eliminates error type proliferation
 //! while maintaining rich error context and diagnostic information.
 //!
+
 //! # Core Concept
 //!
+
 //! Instead of many different error types:
 //! ```text
 //! IoError, ParseError, NetworkError, DatabaseError, ...
 //! ```
 //!
+
 //! Verum uses a single `VerumError` with categorized error kinds:
 //! ```text
 //! VerumError {
-//!     message: "...",
-//!     kind: ErrorKind::Parse,
-//!     context: Some("..."),
-//!     location: Some("src/main.rs:42:15"),
+//!  message: "...",
+//!  kind: ErrorKind::Parse,
+//!  context: Some("..."),
+//!  location: Some("src/main.rs:42:15"),
 //! }
 //! ```
 //!
+
 //! # Error Categories
 //!
+
 //! [`VerumError`] categorizes errors by kind:
 //! - **Parse** - Parsing or lexing failed
 //! - **Type** - Type checking failed
@@ -35,8 +41,10 @@
 //! - **NotFound** - Resource not found
 //! - And more...
 //!
+
 //! # Rich Context
 //!
+
 //! Errors capture:
 //! - **Message** - Human-readable description
 //! - **Kind** - Error category for filtering/handling
@@ -44,37 +52,47 @@
 //! - **Backtrace** - Full stack trace (when enabled)
 //! - **Context chain** - Multi-level error context
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_error::{VerumError, ErrorKind};
 //!
+
 //! // Create an error
 //! let err = VerumError::new("Invalid input", ErrorKind::Invalid);
 //!
+
 //! // Add context
 //! let err = err.with_context("Processing user input");
 //!
+
 //! // Add location
 //! let err = err.with_location("src/main.rs", 42, 15);
 //!
+
 //! // Display with full information
-//! eprintln!("{}", err);  // Shows message, kind, location, context
+//! eprintln!("{}", err); // Shows message, kind, location, context
 //! ```
 //!
+
 //! # Backtrace Support
 //!
+
 //! Backtraces are captured when `VERUM_BACKTRACE=1`:
 //! ```text
 //! error[E0001]: Invalid input (Processing user input)
-//!    at src/main.rs:42:15
+//!  at src/main.rs:42:15
 //!
+
 //! Backtrace:
-//!    0: parse_input
-//!    1: main
-//!    ...
+//!  0: parse_input
+//!  1: main
+//!  ...
 //! ```
 //!
+
 //! This module provides a unified error type that consolidates all error types
 //! from across the Verum platform into a single, composable hierarchy.
 
@@ -92,14 +110,18 @@ pub type Result<T, E = VerumError> = std::result::Result<T, E>;
 
 /// Unified error type for the Verum platform
 ///
+
 /// This type consolidates all error categories from across the platform,
 /// providing a single error type with rich context and diagnostic information.
 ///
+
 /// # Examples
 ///
+
 /// ```rust
 /// use verum_error::{VerumError, ErrorKind};
 ///
+
 /// let err = VerumError::new("out of bounds", ErrorKind::Memory);
 /// assert_eq!(err.kind(), ErrorKind::Memory);
 /// ```
@@ -166,6 +188,7 @@ impl fmt::Display for ErrorLocation {
 
 /// Error categories aligned with 5-level architecture
 ///
+
 /// Each kind maps to a specific level of the error handling system:
 /// - Level 0: Type/Refinement/Context errors (prevented at compile-time)
 /// - Level 1: Verification errors (SMT solver failures)

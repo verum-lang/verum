@@ -5,13 +5,16 @@
 // Dependencies: core, collections, text
 // =============================================================================
 //
+
 // Lowercase/uppercase hex encoding of byte sequences, matching the
 // conventions used by git, TLS certificate fingerprints, hash output, etc.
 //
-//   encode(&[Byte])          -> Text   // lowercase
-//   encode_upper(&[Byte])    -> Text   // uppercase
-//   decode(&Text)            -> Result<List<Byte>, HexError>
+
+//  encode(&[Byte]) -> Text // lowercase
+//  encode_upper(&[Byte]) -> Text // uppercase
+//  decode(&Text) -> Result<List<Byte>, HexError>
 //
+
 // Case-insensitive decoding. The input must have even length; odd-length
 // input is rejected with InvalidLength.
 // =============================================================================

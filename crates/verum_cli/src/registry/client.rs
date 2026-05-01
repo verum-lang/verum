@@ -30,6 +30,7 @@ impl RegistryClient {
 
     /// Create default registry client.
     ///
+
     /// Uses the hardcoded `DEFAULT_REGISTRY` URL. Surface a
     /// `tracing::debug!` when an active manifest carries
     /// `[registry].index` set to a non-default value, so

@@ -1,32 +1,38 @@
 //! Call-by-Push-Value (CBPV) — Levy's separation of values from
 //! computations.
 //!
+
 //! Most calculi treat values and computations as the same syntactic
 //! category: a function application is "just another expression" and
 //! the language designer must pick *call-by-value* or *call-by-name*
 //! evaluation. CBPV (Levy, 2003) factors this choice out by
 //! introducing two distinct kinds of terms:
 //!
+
 //! ```text
-//!     V ::= x | λx. C | thunk C       (values)
-//!     C ::= return V                  (computations)
-//!         | V to x. C                 (sequencing)
-//!         | force V
-//!         | V₁ V₂                      (application: V₁ a thunk-of-fn)
+//!  V ::= x | λx. C | thunk C (values)
+//!  C ::= return V (computations)
+//!  | V to x. C (sequencing)
+//!  | force V
+//!  | V₁ V₂ (application: V₁ a thunk-of-fn)
 //! ```
 //!
+
 //! `thunk` packages a computation as a value; `force` runs the
 //! computation back. `return V` lifts a value into a trivial
 //! computation; `to x. C` sequences. The two reduction rules are
 //! the eponymous β rules:
 //!
+
 //! ```text
-//!     force (thunk C)        ↦  C            (force-thunk)
-//!     return V to x. C       ↦  C[x := V]    (return-to)
+//!  force (thunk C) ↦ C (force-thunk)
+//!  return V to x. C ↦ C[x := V] (return-to)
 //! ```
 //!
+
 //! ## Why CBPV matters
 //!
+
 //! Both call-by-value and call-by-name lambda-calculi embed into
 //! CBPV through systematic translations, and effects (state, IO,
 //! exceptions) gain a clean denotational semantics where they
@@ -34,8 +40,10 @@
 //! canonical setting for monadic semantics, algebraic-effects
 //! research, and intermediate representations like Bauer-Pretnar's.
 //!
+
 //! ## Status
 //!
+
 //! Standalone algebraic core: term language for V/C, capture-
 //! avoiding substitution into both kinds, single-step reduction
 //! for the two CBPV β rules. The translation from λ-calculus and
@@ -218,9 +226,11 @@ impl CbpvComp {
 
 /// Single-step reduction. Implements the two CBPV β rules:
 ///
-/// * `force (thunk C)        ↦ C`
-/// * `return V to x. C       ↦ C[x := V]`
+
+/// * `force (thunk C) ↦ C`
+/// * `return V to x. C ↦ C[x := V]`
 ///
+
 /// Plus the standard left-to-right congruence on `App` (when the
 /// function position is a variable that hasn't been resolved, we
 /// can't reduce — the rule fires only when the function position
@@ -228,10 +238,10 @@ impl CbpvComp {
 /// explicit force first).
 pub fn step(c: &CbpvComp) -> Option<CbpvComp> {
     match c {
-        // force (thunk C)  ↦  C
+        // force (thunk C) ↦ C
         CbpvComp::Force(CbpvValue::Thunk(inner)) => Some((**inner).clone()),
 
-        // return V to x. body  ↦  body[x := V]
+        // return V to x. body ↦ body[x := V]
         CbpvComp::SeqTo { producer, binder, body } => {
             if let CbpvValue::Var(_) = producer {
                 // Producer is a bare variable — can't reduce yet.
@@ -242,6 +252,7 @@ pub fn step(c: &CbpvComp) -> Option<CbpvComp> {
             // left. We treat any concrete value (Lam, Thunk, or a
             // resolved Var) as ready.
             //
+
             // The classical rule fires at `(return V) to x. C`, but
             // since `producer` is already a value at this position
             // (we've dropped the `Return` wrapper into the
@@ -250,7 +261,7 @@ pub fn step(c: &CbpvComp) -> Option<CbpvComp> {
             Some(body.substitute(binder, producer))
         }
 
-        // V₁ V₂ where V₁ = λx. body  ↦  body[x := V₂]
+        // V₁ V₂ where V₁ = λx. body ↦ body[x := V₂]
         CbpvComp::App { func, arg } => {
             if let CbpvValue::Lam { param, body } = func {
                 return Some(body.substitute(param, arg));
@@ -284,7 +295,7 @@ mod tests {
 
     #[test]
     fn force_thunk_cancels() {
-        // force (thunk (return x))  ↦  return x
+        // force (thunk (return x)) ↦ return x
         let inner = CbpvComp::ret(CbpvValue::var("x"));
         let term = CbpvComp::force(CbpvValue::thunk(inner.clone()));
         assert_eq!(step(&term), Some(inner));
@@ -298,7 +309,7 @@ mod tests {
 
     #[test]
     fn app_lambda_beta_reduces() {
-        // (λx. return x) c  ↦  return c
+        // (λx. return x) c ↦ return c
         let lam = CbpvValue::lam("x", CbpvComp::ret(CbpvValue::var("x")));
         let term = CbpvComp::app(lam, CbpvValue::var("c"));
         let r = step(&term).unwrap();
@@ -313,7 +324,7 @@ mod tests {
 
     #[test]
     fn seq_to_substitutes_value() {
-        // c to x. return x  ↦  return c   (where c is a thunk value)
+        // c to x. return x ↦ return c (where c is a thunk value)
         let body = CbpvComp::ret(CbpvValue::var("x"));
         let term = CbpvComp::seq_to(
             CbpvValue::thunk(CbpvComp::ret(CbpvValue::var("v"))),
@@ -327,7 +338,7 @@ mod tests {
 
     #[test]
     fn seq_to_with_var_producer_doesnt_step() {
-        // x to y. return y  — producer is a bare var, no step.
+        // x to y. return y — producer is a bare var, no step.
         let term = CbpvComp::seq_to(
             CbpvValue::var("x"),
             "y",
@@ -338,7 +349,7 @@ mod tests {
 
     #[test]
     fn substitute_into_value_lam_skips_shadow() {
-        // (λx. return x)[x := c]  ↦  unchanged
+        // (λx. return x)[x := c] ↦ unchanged
         let lam = CbpvValue::lam("x", CbpvComp::ret(CbpvValue::var("x")));
         let r = lam.substitute(&t("x"), &CbpvValue::var("c"));
         assert_eq!(r, lam);
@@ -346,7 +357,7 @@ mod tests {
 
     #[test]
     fn substitute_into_value_lam_passes_through() {
-        // (λx. return y)[y := c]  ↦  λx. return c
+        // (λx. return y)[y := c] ↦ λx. return c
         let lam = CbpvValue::lam("x", CbpvComp::ret(CbpvValue::var("y")));
         let r = lam.substitute(&t("y"), &CbpvValue::var("c"));
         if let CbpvValue::Lam { body, .. } = r {
@@ -358,7 +369,7 @@ mod tests {
 
     #[test]
     fn substitute_through_thunk() {
-        // thunk (return x) [x := c]  ↦  thunk (return c)
+        // thunk (return x) [x := c] ↦ thunk (return c)
         let v = CbpvValue::thunk(CbpvComp::ret(CbpvValue::var("x")));
         let r = v.substitute(&t("x"), &CbpvValue::var("c"));
         if let CbpvValue::Thunk(c) = r {
@@ -368,7 +379,7 @@ mod tests {
 
     #[test]
     fn substitute_into_seq_to_skips_shadow() {
-        // (v to x. return x) [x := c]  ↦  v to x. return x  (binder shadows)
+        // (v to x. return x) [x := c] ↦ v to x. return x (binder shadows)
         let term = CbpvComp::seq_to(
             CbpvValue::var("v"),
             "x",
@@ -408,7 +419,7 @@ mod tests {
 
     #[test]
     fn evaluate_terminates_at_normal_form() {
-        // force (thunk (return x))  ↦  return x  (1 step then normal)
+        // force (thunk (return x)) ↦ return x (1 step then normal)
         let inner = CbpvComp::ret(CbpvValue::var("x"));
         let term = CbpvComp::force(CbpvValue::thunk(inner.clone()));
         assert_eq!(evaluate(&term, 100), inner);

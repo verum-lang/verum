@@ -14,16 +14,18 @@
 )]
 //! Tests for v6.0-BALANCED type system features.
 //!
+
 //! This module tests the advanced type system features introduced in v6.0:
 //! - TypeKind::Refined with an explicit binder (the canonical sigma form per
-//!   — `x: T where P(x)` parses to `Refined` with
-//!   `predicate.binding = Some(x)`)
+//!  — `x: T where P(x)` parses to `Refined` with
+//!  `predicate.binding = Some(x)`)
 //! - TypeKind::Ownership (mutable/immutable)
 //! - WherePredicateKind::Meta
 //! - WherePredicateKind::Value
 //! - WherePredicateKind::Ensures
 //! - Where clause disambiguation
 //!
+
 //! Tests for Verum's five refinement binding rules (inline, lambda, sigma, named, bare).
 //! Tests for where clause disambiguation (type, meta, value, postcondition).
 
@@ -46,6 +48,7 @@ fn test_ident(name: &str) -> Ident {
 // ============================================================================
 // Refinement (sigma surface form) Tests — Rule 3: x: T where P(x)
 //
+
 // Per the sigma surface form collapses onto `TypeKind::Refined` with
 // `predicate.binding = Some(name)`.
 // ============================================================================

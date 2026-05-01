@@ -1,24 +1,26 @@
 //! AOT permission policy lowering — IR-level guardrails.
 //!
+
 //! These tests build a minimal VBC module containing a single
 //! `PermissionAssert` site, lower it under each policy shape, and
 //! pin the emitted LLVM IR. The contract under test is the
 //! script-mode security gap closer (SCRIPT-5d):
 //!
+
 //! * **No policy installed.** AOT trusted-application path. The
-//!   assert is elided — the produced IR contains neither the
-//!   permission-denied message string nor an `_exit` call.
+//!  assert is elided — the produced IR contains neither the
+//!  permission-denied message string nor an `_exit` call.
 //! * **Policy denies the scope entirely.** Deny-by-default with no
-//!   matching grant. Lowering emits an unconditional panic — IR
-//!   contains the message and an `_exit(143)` call.
+//!  matching grant. Lowering emits an unconditional panic — IR
+//!  contains the message and an `_exit(143)` call.
 //! * **Policy grants the scope (wildcard).** Unconditional pass —
-//!   IR contains neither the message nor `_exit`.
+//!  IR contains neither the message nor `_exit`.
 //! * **Policy grants the scope (always-allow).** Same shape as
-//!   wildcard for IR purposes. Memory and Cryptography behave this
-//!   way under the script policy.
+//!  wildcard for IR purposes. Memory and Cryptography behave this
+//!  way under the script policy.
 //! * **Policy lists specific targets.** IR contains a `switch i64`
-//!   over the listed values; default case branches into the panic
-//!   block.
+//!  over the listed values; default case branches into the panic
+//!  block.
 
 use verum_codegen::llvm::permissions::AotPermissionPolicy;
 use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};

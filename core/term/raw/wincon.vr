@@ -6,10 +6,12 @@
 // Platform: Windows
 // =============================================================================
 //
+
 // Windows Console API backend for RawTerminal.
 // Uses Virtual Terminal Processing (VTP) for ANSI escape support on
 // Windows 10 1607+ and falls back to native Console API otherwise.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 4
 // =============================================================================
 

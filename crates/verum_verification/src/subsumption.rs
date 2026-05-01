@@ -1,30 +1,39 @@
 //! # Refinement Type Subsumption Checking
 //!
+
 //! Implements refinement type subtyping via logical implication.
 //!
+
 //! This module implements **subtype relationships** for refinement types through
 //! logical implication. Subsumption is critical for function calls, variable
 //! assignment, and type checking.
 //!
+
 //! ## Formal Rule
 //!
+
 //! ```text
-//! Γ ⊢ φ₁ ⇒ φ₂    (in SMT logic)
+//! Γ ⊢ φ₁ ⇒ φ₂ (in SMT logic)
 //! ─────────────────────────────────
 //! Γ ⊢ T{φ₁} <: T{φ₂}
 //! ```
 //!
+
 //! **Interpretation**: Type `T{φ₁}` is a **subtype** of `T{φ₂}` if predicate `φ₁`
 //! logically implies `φ₂`.
 //!
+
 //! ## Three-Mode Checking Algorithm
 //!
+
 //! 1. **Mode 1: Syntactic** - Pattern-based implication (< 1ms, ~60% cases)
 //! 2. **Mode 2: SMT-Based** - Full Z3 verification (10-500ms, ~35% cases)
 //! 3. **Mode 3: Fallback** - Runtime check with user notification (~5% cases)
 //!
+
 //! ## Performance Targets
 //!
+
 //! - Syntactic checks: < 1ms
 //! - SMT checks: 10-500ms (with configurable timeout)
 //! - Cache hit rate: > 90%
@@ -50,6 +59,7 @@ use verum_smt::{
 
 /// Result of subsumption checking
 ///
+
 /// T{phi1} <: T{phi2} iff phi1 => phi2. Checked via three modes:
 /// syntactic (fast), SMT-based (accurate), or fallback (runtime check).
 #[derive(Debug, Clone, PartialEq)]
@@ -120,6 +130,7 @@ impl Display for SubsumptionResult {
 
 /// Counterexample showing why subsumption fails
 ///
+
 /// When SMT returns SAT (implication fails), shows concrete values where
 /// phi1 holds but phi2 doesn't. Used to generate actionable error messages. φ₁ ⇒ φ₂,
 /// i.e., values where φ₁ holds but φ₂ doesn't.
@@ -163,6 +174,7 @@ impl Counterexample {
 
     /// Format as error message per spec
     ///
+
     /// Format as a user-facing error message showing variable assignments,
     /// which refinement holds, and which is violated.
     pub fn format_error(&self, provided_pred: &Text, required_pred: &Text) -> Text {
@@ -239,6 +251,7 @@ impl Display for Value {
 
 /// Configuration for subsumption checker
 ///
+
 /// SMT timeout default: 100ms. Cascading strategy: try syntactic first (<1ms),
 /// then SMT (10-500ms), then conservative rejection on timeout.
 #[derive(Debug, Clone)]
@@ -369,6 +382,7 @@ impl SubsumptionStats {
 
 /// Predicate for subsumption checking
 ///
+
 /// Represents boolean predicates over refinement type variables.
 /// These are used for syntactic pattern matching and SMT translation.
 #[derive(Debug, Clone, PartialEq)]
@@ -533,6 +547,7 @@ impl Predicate {
 
 /// Subsumption checker implementing three-mode algorithm
 ///
+
 /// Three-mode algorithm: (1) syntactic pattern matching for obvious cases like
 /// `> 0` implies `>= 0`, (2) SMT-based Z3 verification for complex predicates,
 /// (3) conservative rejection on timeout. Cache hit rate target: >90%.
@@ -573,9 +588,11 @@ impl SubsumptionChecker {
 
     /// Check subsumption: T{φ₁} <: T{φ₂}
     ///
+
     /// Returns `Holds` if φ₁ ⇒ φ₂ for all values, `Fails` with counterexample
     /// if there exists a value where φ₁ holds but φ₂ doesn't.
     ///
+
     /// Check if T{phi1} <: T{phi2} using the cascading strategy.
     /// Returns Holds if phi1 => phi2 for all values, Fails with counterexample
     /// if there exists a value where phi1 holds but phi2 doesn't.
@@ -666,6 +683,7 @@ impl SubsumptionChecker {
 
     /// Mode 1: Syntactic pattern matching (fast path)
     ///
+
     /// Fast path (<1ms): handles ~60% of practical cases via pattern matching.
     /// Common patterns:
     /// - `x > a` ⇒ `x > b` when a > b
@@ -746,6 +764,7 @@ impl SubsumptionChecker {
 
     /// Check if comparison (var op1 val1) implies (var op2 val2)
     ///
+
     /// Syntactic comparison implication: e.g., (x > 5) implies (x >= 0),
     /// (x >= 10) implies (x >= 0), (x > 5) implies (x != 0).
     fn check_comparison_implication(
@@ -863,6 +882,7 @@ impl SubsumptionChecker {
 
     /// Mode 2: SMT-based verification
     ///
+
     /// SMT-based verification (10-500ms): constructs query not(phi1 => phi2),
     /// equivalent to phi1 /\ not(phi2).
     /// If UNSAT: implication is valid
@@ -903,9 +923,11 @@ impl SubsumptionChecker {
 
     /// Extract counterexample from SMT model
     ///
+
     /// Production implementation that analyzes predicates to extract
     /// concrete values that demonstrate the subsumption failure.
     ///
+
     /// This uses a two-phase approach:
     /// 1. Extract variable bounds from both predicates
     /// 2. Find a value that satisfies pred1 but not pred2
@@ -941,21 +963,26 @@ impl SubsumptionChecker {
 
     /// Find a value that satisfies bound1 but not bound2 (using bound ranges)
     ///
+
     /// This function implements a comprehensive strategy for finding counterexamples
     /// when subsumption fails. The goal is to find a concrete value that:
     /// 1. Satisfies the antecedent predicate (bound1)
     /// 2. Violates the consequent predicate (bound2)
     ///
+
     /// ## Strategy
     ///
+
     /// The function uses a multi-tier approach:
     /// 1. Exploit gaps between pred1 and pred2 bounds (lower/upper mismatches)
     /// 2. Handle equality constraints where pred2 is more restrictive
     /// 3. Use pred1's bounds directly as valid counterexamples
     /// 4. Apply intelligent defaults based on common refinement patterns
     ///
+
     /// ## Performance
     ///
+
     /// This is a fast syntactic method that runs in O(1) time.
     /// For more complex predicates, the SMT solver provides definitive answers.
     fn find_counterexample_value_from_bounds(
@@ -1035,25 +1062,31 @@ impl SubsumptionChecker {
         // as simple comparison bounds (e.g., function calls, modular arithmetic,
         // disjunctions, or deeply nested expressions).
         //
+
         // Apply intelligent defaults based on common refinement type patterns:
         self.select_unbounded_counterexample(bound2)
     }
 
     /// Select an appropriate counterexample value when no bounds are available
     ///
+
     /// When syntactic bound extraction fails, this method uses domain knowledge
     /// about common refinement type patterns to select values likely to expose
     /// subsumption failures.
     ///
+
     /// ## Strategy
     ///
+
     /// We analyze the pred2 bounds (if any) to determine what values would violate it:
     /// - If pred2 has a lower bound, we go below it
     /// - If pred2 has an upper bound, we go above it
     /// - If pred2 has no bounds either, we use strategic edge-case values
     ///
+
     /// ## Common Patterns Considered
     ///
+
     /// - `Int{> 0}` (positive): Counter with 0 or -1
     /// - `Int{>= 0}` (non-negative): Counter with -1
     /// - `Int{< N}` (bounded above): Counter with N or N+1
@@ -1348,6 +1381,7 @@ impl SubsumptionChecker {
 
     /// Fallback: extract best-effort counterexample from syntactic analysis
     ///
+
     /// This method attempts to generate a concrete counterexample by:
     /// 1. Extracting bounds from pred1 (the antecedent)
     /// 2. Finding a value satisfying pred1 but potentially violating pred2

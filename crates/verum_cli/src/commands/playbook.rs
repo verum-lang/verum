@@ -1,10 +1,13 @@
 //! Playbook command - Interactive notebook environment for Verum
 //!
+
 //! The Playbook provides a Jupyter-like TUI notebook experience optimized
 //! for exploring Verum's capabilities:
 //!
+
 //! # Features
 //!
+
 //! - **Cell-based editing**: Code and Markdown cells with rich output
 //! - **Cross-cell state**: Variables persist across cells with dependency tracking
 //! - **Rich output**: Tensors, structured data, collections with smart formatting

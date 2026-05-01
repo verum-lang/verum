@@ -8,33 +8,39 @@ module sys.io_engine;
 // Platform: All (Linux, Darwin, Windows)
 // =============================================================================
 //
+
 // This module defines the unified IOEngine protocol for completion-based I/O
 // across all platforms:
-//   - Linux: io_uring (primary), epoll (fallback)
-//   - Darwin: kqueue
-//   - Windows: IOCP (I/O Completion Ports)
+//  - Linux: io_uring (primary), epoll (fallback)
+//  - Darwin: kqueue
+//  - Windows: IOCP (I/O Completion Ports)
 //
+
 // The IOEngine protocol provides:
-//   - Batch operation submission (single syscall for multiple ops)
-//   - Completion harvesting with configurable wait
-//   - Wake mechanism for cross-thread notification
-//   - Pending operation tracking
+//  - Batch operation submission (single syscall for multiple ops)
+//  - Completion harvesting with configurable wait
+//  - Wake mechanism for cross-thread notification
+//  - Pending operation tracking
 //
+
 // Design philosophy (io_uring-first):
-//   - All platforms use completion-based semantics
-//   - Readiness-based APIs (kqueue, epoll) are wrapped in completion semantics
-//   - User data correlation for async operation tracking
+//  - All platforms use completion-based semantics
+//  - Readiness-based APIs (kqueue, epoll) are wrapped in completion semantics
+//  - User data correlation for async operation tracking
 //
+
 // Advanced Verum features used:
-//   - Refinement types for compile-time validation (ValidFd, NonZeroDuration)
-//   - pure fn modifier for side-effect-free functions
-//   - @inline, @must_use attributes for optimization hints
-//   - Protocol constraints with where clauses
+//  - Refinement types for compile-time validation (ValidFd, NonZeroDuration)
+//  - pure fn modifier for side-effect-free functions
+//  - @inline, @must_use attributes for optimization hints
+//  - Protocol constraints with where clauses
 //
+
 // Note: Context system is NOT used here as it depends on TLS which is
 // implemented at this layer. Context-based IOEngine injection should be
 // implemented in higher-level modules (e.g., core/io/engine_context.vr)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.5
 // =============================================================================
 
@@ -59,6 +65,7 @@ public type BoundPort is Port{> 0};
 /// suitable for direct io_uring/kqueue submission without an extra
 /// serialization step.
 ///
+
 /// Renamed from `SocketAddr` to `RawSocketAddr` so that user code using
 /// `mount core.net.addr.{SocketAddr}` doesn't inadvertently resolve to
 /// this kernel-shape definition (which has a `addr: UInt32` field
@@ -235,9 +242,11 @@ implement ValidFd {
 
 /// Completion operation - describes what I/O to perform
 ///
+
 /// This is the unified operation type across all platforms.
 /// Platform-specific drivers translate these to native operations.
 ///
+
 /// Note: Most operations use ValidFd to ensure compile-time validation
 /// of file descriptor validity. Close accepts Fd since we may need to
 /// close descriptors that we can't statically prove are valid.
@@ -278,6 +287,7 @@ public type CompletionOp is
 
 /// I/O interest for readiness notifications.
 ///
+
 /// Used to specify what kind of I/O readiness to wait for on a file descriptor.
 public type IOInterest is
     /// Interest in read readiness (data available to read)
@@ -306,10 +316,12 @@ public type MsgHdr is {
 
 /// Completion result - returned after I/O completes
 ///
+
 /// Contains the user_data from submission for correlation,
 /// the result (bytes transferred or negative errno), and
 /// platform-specific flags.
 ///
+
 /// IMPORTANT: Results should not be ignored as they may indicate
 /// errors that must be handled.
 @repr(C)
@@ -588,7 +600,7 @@ implement EngineIoError {
             50 => NotSupported,             // ERROR_NOT_SUPPORTED
             // Preserve the Win32 error code so operators can
             // look it up in the System Error Codes
-            // documentation.  Pre-fix `Other("Windows error")`
+            // documentation. Pre-fix `Other("Windows error")`
             // discarded the number entirely.
             _ => Other(f"Win32 error: {err}"),
         }
@@ -667,25 +679,30 @@ implement EngineIoError {
 
 /// Completion-based I/O engine protocol
 ///
+
 /// All platform-specific drivers must implement this protocol to provide
 /// a unified interface for async I/O operations.
 ///
+
 /// The protocol is designed with io_uring semantics in mind:
 /// - Batch submission of multiple operations in single syscall
 /// - Completion harvesting with configurable wait
 /// - Wake mechanism for cross-thread notification
 /// - Zero-copy where possible
 ///
+
 /// Platform implementations:
 /// - Linux: IoUringDriver (io_uring), EpollDriver (fallback)
 /// - Darwin: KqueueDriver
 /// - Windows: IocpDriver
 ///
+
 /// Thread Safety:
 /// - submit(), wait(), flush(), shutdown() require &mut self (single-threaded access)
 /// - wake() uses &self and is safe to call from other threads
 /// - pending() uses &self for read-only access
 ///
+
 /// Performance Characteristics (approximate):
 /// - io_uring: O(1) submit, O(1) wait, batched syscalls
 /// - kqueue: O(1) submit, O(n) wait where n = ready events
@@ -693,18 +710,23 @@ implement EngineIoError {
 public type IOEngine is protocol {
     /// Submit batch of I/O operations.
     ///
+
     /// Each operation is paired with a user_data value that will be
     /// returned in the corresponding CompletionResult for correlation.
     ///
+
     /// Returns the number of successfully submitted operations.
     ///
+
     /// # Arguments
     /// * `ops` - Slice of (operation, user_data) pairs to submit
     ///
+
     /// # Errors
     /// * `SubmissionQueueFull` - Not enough space in SQ
     /// * `InvalidInput` - Invalid operation parameters
     ///
+
     /// # Performance
     /// - Prefer batching multiple ops in single submit() call
     /// - io_uring: Single syscall for entire batch
@@ -724,20 +746,25 @@ public type IOEngine is protocol {
 
     /// Wait for completions.
     ///
+
     /// Blocks until at least `min_complete` operations have completed,
     /// or the timeout expires.
     ///
+
     /// Returns the number of completions stored in `results`.
     ///
+
     /// # Arguments
     /// * `results` - Buffer to store completion results
     /// * `min_complete` - Minimum completions to wait for (0 = poll)
     /// * `timeout` - Optional timeout (None = wait indefinitely)
     ///
+
     /// # Errors
     /// * `Interrupted` - Wait was interrupted by signal
     /// * `TimedOut` - Timeout expired before min_complete reached
     ///
+
     /// # Note
     /// Results buffer must be large enough to hold expected completions.
     /// If buffer is too small, extra completions remain queued for next wait().
@@ -751,6 +778,7 @@ public type IOEngine is protocol {
 
     /// Poll for completions without blocking.
     ///
+
     /// Equivalent to wait() with min_complete=0 and timeout=0.
     /// Returns immediately with any available completions.
     fn poll(&mut self, results: &mut [CompletionResult]) -> Result<Int{>= 0}, EngineIoError> {
@@ -759,14 +787,17 @@ public type IOEngine is protocol {
 
     /// Wake up a blocked wait() from another thread.
     ///
+
     /// This is used for cross-thread notification, e.g., to signal
     /// that new work has been submitted or that shutdown is requested.
     ///
+
     /// Thread Safety: Safe to call from any thread while wait() is blocked.
     fn wake(&self) -> Result<(), EngineIoError>;
 
     /// Get number of pending (submitted but not completed) operations.
     ///
+
     /// Thread Safety: Read-only, safe to call concurrently with submit/wait.
     pure fn pending(&self) -> UInt32;
 
@@ -778,19 +809,23 @@ public type IOEngine is protocol {
 
     /// Flush any batched submissions to the kernel.
     ///
+
     /// Some implementations batch submissions for efficiency.
     /// Call this to ensure all submitted operations are in flight.
     ///
+
     /// Note: wait() implicitly flushes before blocking.
     fn flush(&mut self) -> Result<(), EngineIoError>;
 
     /// Shutdown the engine and cancel pending operations.
     ///
+
     /// After shutdown():
     /// - submit() returns Closed error
     /// - wait() returns immediately with pending completions (may be cancelled)
     /// - Engine resources are released
     ///
+
     /// Idempotent: safe to call multiple times.
     fn shutdown(&mut self) -> Result<(), EngineIoError>;
 
@@ -804,6 +839,7 @@ public type IOEngine is protocol {
 
 /// Create the best available IOEngine for the current platform.
 ///
+
 /// On Linux 5.1+, returns io_uring driver.
 /// On older Linux, returns epoll driver wrapped in completion semantics.
 /// On Darwin, returns kqueue driver.
@@ -841,11 +877,13 @@ public fn create_io_engine(num_concurrent: UInt32) -> Result<some E: IOEngine, E
 // Operation Builder Functions
 // =============================================================================
 //
+
 // These functions provide type-safe construction of CompletionOp values.
 // Using ValidFd ensures compile-time verification of file descriptor validity.
 
 /// Prepare a read operation
 ///
+
 /// # Arguments
 /// * `fd` - Valid file descriptor to read from
 /// * `buf` - Buffer to read into
@@ -857,6 +895,7 @@ public pure fn op_read(fd: ValidFd, buf: &mut [Byte], offset: Int64{>= -1}) -> C
 
 /// Prepare a write operation
 ///
+
 /// # Arguments
 /// * `fd` - Valid file descriptor to write to
 /// * `buf` - Buffer containing data to write
@@ -880,6 +919,7 @@ public pure fn op_writev(fd: ValidFd, iovecs: &[IOVec]) -> CompletionOp {
 
 /// Prepare an accept operation
 ///
+
 /// # Arguments
 /// * `fd` - Valid listening socket file descriptor
 /// * `addr` - Buffer to store peer address
@@ -890,6 +930,7 @@ public pure fn op_accept(fd: ValidFd, addr: &mut RawSocketAddr) -> CompletionOp 
 
 /// Prepare a connect operation
 ///
+
 /// # Arguments
 /// * `fd` - Valid socket file descriptor
 /// * `addr` - Remote address to connect to

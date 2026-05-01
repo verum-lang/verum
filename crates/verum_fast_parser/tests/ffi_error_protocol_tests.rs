@@ -14,6 +14,7 @@
 )]
 // Comprehensive FFI Error Protocol Parsing Tests
 //
+
 // Tests all 7 error protocol variants according to specification:
 // - None
 // - Errno
@@ -22,6 +23,7 @@
 // - ReturnValue(expr)
 // - ReturnValue(expr) with Errno
 //
+
 // Tests for Verum v6 syntax compliance#2.7.3 - FFI error protocol
 // Tests for FFI boundary declarations: C ABI bindings, contracts, memory effects#3.4 - Error handling protocols
 

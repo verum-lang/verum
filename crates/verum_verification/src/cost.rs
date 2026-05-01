@@ -1,11 +1,13 @@
 //! Verification Cost Reporting and Decision Making
 //!
+
 //! Implements cost tracking and analysis for verification operations:
 //! - Track verification time per function
 //! - Cost-benefit analysis for verification mode selection
 //! - Budget enforcement
 //! - Performance regression detection
 //!
+
 //! Tracks verification time per function, performs cost-benefit analysis for
 //! verification mode selection (runtime vs static vs proof), enforces compile-time
 //! budgets, and detects performance regressions across verification runs.

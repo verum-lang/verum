@@ -1,17 +1,20 @@
 //! K-Eps-Mu V1 shape-check tests.
 //!
+
 //! Naturality witness (incremental): tightens `check_eps_mu_coherence` from
 //! V0's permissive `(EpsilonOf(_), AlphaOf(_))` accept-anything
 //! skeleton to a structural shape check that:
 //!
-//!   • accepts the identity-naturality case (`lhs == rhs` structurally),
-//!   • accepts the canonical naturality-square shape
-//!     `(EpsilonOf(M_α), AlphaOf(EpsilonOf(α)))`,
-//!   • rejects malformed pairs like `(EpsilonOf(_), AlphaOf(t))`
-//!     where `t` is not itself an `EpsilonOf` constructor.
+
+//!  • accepts the identity-naturality case (`lhs == rhs` structurally),
+//!  • accepts the canonical naturality-square shape
+//!  `(EpsilonOf(M_α), AlphaOf(EpsilonOf(α)))`,
+//!  • rejects malformed pairs like `(EpsilonOf(_), AlphaOf(t))`
+//!  where `t` is not itself an `EpsilonOf` constructor.
 //!
+
 //! The full τ-witness construction (σ_α from Code_S morphism + π_α
-//! from Perform_{ε_math} naturality through axiom A-3) is V2 work
+//! from Perform_{ε_math} naturality through axiom A-3) is future work
 //! tracked under the multi-week K-Eps-Mu naturality witness item.
 
 use verum_common::{Heap, Text};
@@ -60,8 +63,9 @@ fn v3_non_identity_distinct_free_vars_rejected() {
     // with structurally different inner vars has free_vars(M_α) =
     // {M_α} ≠ {α} = free_vars(α), so no τ-witness can exist.
     //
-    // Pre-V3 this test was named *conservatively_accepted* because
-    // V1 / V2 had no free-vars check; V3-incremental rejects it
+
+    // Previously, this test was named *conservatively_accepted* because
+    // V1 / V2 had no free-vars check; rejects it
     // correctly with a free-var-mismatch diagnostic.
     let lhs = epsilon_of(var("M_α"));
     let rhs = alpha_of(epsilon_of(var("α")));
@@ -81,13 +85,14 @@ fn v3_non_identity_distinct_free_vars_rejected() {
 
 #[test]
 fn v3_non_identity_matching_free_vars_accepted() {
-    // V3-incremental still accepts non-identity M whose τ-witness
+    // still accepts non-identity M whose τ-witness
     // necessary conditions all pass. Here M acts on α via a wrapping
     // metaisation (modelled by the same Var name on both sides)
     // — free vars match, depths match, no β-redex distinction.
     //
+
     // The full sufficient witness construction (σ_α / π_α) is the
-    // V3-final step still tracked under #181; this test pins
+    // step still tracked under #181; this test pins
     // V3-incremental's accept path.
     let lhs = epsilon_of(var("α"));
     let rhs = alpha_of(epsilon_of(var("α")));
@@ -148,9 +153,10 @@ fn deeply_nested_identity_accepted_via_partial_eq() {
 // ============================================================================
 // V2 increment: modal-depth preservation pre-condition (#189)
 //
+
 // The natural-equivalence τ : ε ∘ M ≃ A ∘ ε is depth-preserving;
 // for non-identity M, m_depth_omega(M_α) must equal m_depth_omega(α)
-// or no τ-witness can possibly exist. V2 rejects such depth-
+// or no τ-witness can possibly exist. rejects such depth-
 // mismatched pairs (V1 conservatively accepted them).
 // ============================================================================
 
@@ -162,8 +168,8 @@ fn modal_box(t: CoreTerm) -> CoreTerm {
 fn v3_modal_box_distinct_inner_var_rejected() {
     // M_α = Box(α_prime), α = Box(α). Both have md^ω = 1 (depth
     // gate passes) but free_vars are {α_prime} ≠ {α} (V3 gate (b)
-    // rejects). Pre-V3 (V1 / V2) this was the canonical
-    // "depth-matched non-identity-M" *accept* fixture; V3-incremental
+    // rejects). Previously, (V1 / V2) this was the canonical
+    // "depth-matched non-identity-M" *accept* fixture;
     // tightens by also requiring free-var preservation.
     let lhs = epsilon_of(modal_box(var("α_prime")));
     let rhs = alpha_of(epsilon_of(modal_box(var("α"))));
@@ -196,7 +202,7 @@ fn v3_modal_box_same_inner_var_accepted() {
 #[test]
 fn v2_non_identity_with_mismatched_depths_rejected() {
     // M_α = Box(Box(α)) with rank 2; α = α with rank 0.
-    // Depth mismatch ⇒ no τ-witness possible ⇒ V2 rejects.
+    // Depth mismatch ⇒ no τ-witness possible ⇒ rejects.
     // V1 would have conservatively accepted.
     let lhs = epsilon_of(modal_box(modal_box(var("α"))));
     let rhs = alpha_of(epsilon_of(var("α")));
@@ -242,8 +248,8 @@ fn v2_identity_case_unaffected_by_depth_check() {
 #[test]
 fn v3_depth_check_uses_omega_aware_ranks_with_var_preservation() {
     // Both sides have rank 3 (Box × 3) and matching inner var names
-    // — V3-incremental accepts because depth + free-vars + β-eq
-    // all hold simultaneously. Pre-V3 the test only required depth
+    // — accepts because depth + free-vars + β-eq
+    // all hold simultaneously. Previously, the test only required depth
     // match; V3 adds the free-vars half of the necessary-condition
     // tuple.
     let m_alpha = modal_box(modal_box(modal_box(var("α"))));

@@ -8,16 +8,19 @@ module sys.windows.io;
 // Platform: Windows (x86_64)
 // =============================================================================
 //
+
 // This module provides completion-based I/O using I/O Completion Ports (IOCP)
 // on Windows. IOCP is the Windows equivalent of Linux's io_uring/epoll and
 // macOS's kqueue, providing efficient event notification for asynchronous I/O.
 //
+
 // Key concepts:
 // - IOCP: I/O completion port (the queue for completed operations)
 // - Overlapped: Structure for async I/O tracking
 // - Completion key: User-defined value associated with handles
 // - GetQueuedCompletionStatus: Dequeue completed I/O operations
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.5
 // =============================================================================
 
@@ -322,6 +325,7 @@ implement IocpDriver {
 
     /// Create a new IOCP driver with specified concurrency.
     ///
+
     /// # Arguments
     /// * `num_concurrent` - Number of concurrent threads (0 = num CPUs)
     public fn new_with_concurrency(num_concurrent: UInt32) -> Result<IocpDriver, WindowsIoDriverError> {
@@ -379,6 +383,7 @@ implement IocpDriver {
 
     /// Associate a file handle with this IOCP.
     ///
+
     /// After association, async I/O on the handle will complete via this IOCP.
     public fn associate(&mut self, file_handle: Handle, completion_key: Int) -> Result<(), WindowsIoDriverError> {
         if !self.open {
@@ -405,6 +410,7 @@ implement IocpDriver {
 
     /// Post a completion notification to wake up a waiting thread.
     ///
+
     /// This is useful for signaling threads to wake up without actual I/O.
     public fn post_completion(
         &mut self,
@@ -444,9 +450,11 @@ implement IocpDriver {
 
     /// Poll for completions with timeout.
     ///
+
     /// # Arguments
     /// * `timeout_ms` - Timeout in milliseconds (0 = no wait, INFINITE = infinite)
     ///
+
     /// # Returns
     /// Number of completions ready
     public fn poll(&mut self, timeout_ms: UInt32) -> Result<Int, WindowsIoDriverError> {
@@ -490,6 +498,7 @@ implement IocpDriver {
 
     /// Get a completion entry by index.
     ///
+
     /// Only valid after poll() returns > 0, and for indices 0..n-1
     /// where n is the return value.
     public fn get_entry(&self, index: Int) -> Maybe<WindowsIoCqe> {
@@ -628,6 +637,7 @@ implement WindowsIoDriver {
 
 /// Create the best available I/O driver.
 ///
+
 /// On Windows, this always returns an IOCP-based driver.
 public fn create_io_driver() -> Result<WindowsIoDriver, WindowsIoDriverError> {
     let iocp = IocpDriver.new()?;
@@ -636,6 +646,7 @@ public fn create_io_driver() -> Result<WindowsIoDriver, WindowsIoDriverError> {
 
 /// Check if IOCP is available.
 ///
+
 /// Always returns true on Windows NT 3.5+.
 public fn is_iocp_available() -> Bool {
     true
@@ -647,6 +658,7 @@ public fn is_iocp_available() -> Bool {
 
 /// Start an async read operation.
 ///
+
 /// Returns immediately. Completion will be posted to the associated IOCP.
 public fn async_read(
     handle: Handle,
@@ -680,6 +692,7 @@ public fn async_read(
 
 /// Start an async write operation.
 ///
+
 /// Returns immediately. Completion will be posted to the associated IOCP.
 public fn async_write(
     handle: Handle,
@@ -718,10 +731,12 @@ public fn async_write(
 implement IOEngine for IocpDriver {
     /// Submit batch of I/O operations.
     ///
+
     /// IOCP is inherently completion-based, but the submission model differs
     /// from io_uring. Each operation must be submitted individually using
     /// overlapped I/O or PostQueuedCompletionStatus for synthetic completions.
     ///
+
     /// For actual I/O, operations are submitted via ReadFile/WriteFile with
     /// overlapped structure, and completions arrive via IOCP. This method
     /// handles synthetic operations (Timeout, Nop, Cancel) via
@@ -839,6 +854,7 @@ implement IOEngine for IocpDriver {
 
     /// Wait for completions with timeout.
     ///
+
     /// Uses GetQueuedCompletionStatusEx for batch completion harvesting.
     @must_use
     fn wait(
@@ -925,6 +941,7 @@ implement IOEngine for IocpDriver {
 
     /// Wake up a blocked wait() from another thread.
     ///
+
     /// Posts a synthetic completion with WAKE_TOKEN user_data.
     fn wake(&self) -> Result<(), EngineIoError> {
         if !self.open {
@@ -957,6 +974,7 @@ implement IOEngine for IocpDriver {
 
     /// Flush pending operations.
     ///
+
     /// IOCP doesn't batch submissions like io_uring, so this is a no-op.
     fn flush(&mut self) -> Result<(), EngineIoError> {
         if !self.open {

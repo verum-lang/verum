@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Minimal bookkeeping: running total + monotone highwater + hard/soft
-// limits.  All fields are Int64 (bytes) to match sqlite3_*64 APIs.
+// limits. All fields are Int64 (bytes) to match sqlite3_*64 APIs.
 // =============================================================================
 
 module core.database.sqlite.native.memory_stats.counter;
@@ -15,9 +16,9 @@ mount base.{Bool};
 public type MemoryCounter is {
     bytes_used: Int64,
     highwater: Int64,
-    /// Cap — allocations beyond this return OOM.  0 disables.
+    /// Cap — allocations beyond this return OOM. 0 disables.
     hard_limit: Int64,
-    /// Above this, the engine proactively triggers releases.  0 disables.
+    /// Above this, the engine proactively triggers releases. 0 disables.
     soft_limit: Int64,
 }
 

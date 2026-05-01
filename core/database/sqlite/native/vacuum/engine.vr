@@ -3,15 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md §10.5
 //
+
 // Full VACUUM walks every database page in its source order, copies
 // the live pages into a target file (densely-packed starting at page
 // 1), records the (src, dst) mapping in a `Relocator`, then walks
 // the target file and rewrites every internal pointer.
 //
+
 // State machine:
 //
-//   Init → CountSourcePages → CopyAlive → RewritePointers → Swap → Done
+
+//  Init → CountSourcePages → CopyAlive → RewritePointers → Swap → Done
 //
+
 // `step()` advances by one page (Copy / Rewrite phases) or one
 // metadata pass (Init / Count / Swap). The L7 façade calls `step`
 // in a loop until `is_terminal()`.

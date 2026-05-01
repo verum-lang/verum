@@ -2,30 +2,35 @@
 // core.math.frameworks.registry — runtime catalogue of @framework declarations
 // =============================================================================
 //
+
 // VVA §18.7 — Verum-as-foundation-marketplace skeleton. Long-horizon
-// (5+ year) architectural vision per VVA §18.8 Tier C; this V0 ships
+// (5+ year) architectural vision per VVA §18.8 Tier C; this ships
 // the *runtime registry data structure* that the CLI surface
 // (`verum frameworks list / show / validate`) will plug into. The
 // CLI wiring is V1 work; this V0 is the schema + sample population.
 //
+
 // Architectural rationale (per VVA §18.7):
 //
-//     Verum-Foundation-Marketplace:
-//     ├── Standard frameworks (built-in)
-//     │   ├── ZFC, HoTT, MLTT, CIC, NCG, ∞-topos, cohesive
-//     ├── Verified extensions (community)
-//     │   ├── stack_model, (∞,∞), bounded_arithmetic_*,
-//     │   ├── linear_logic + ludics, giry_probability, α_quantum
-//     └── Experimental (research)
-//         ├── paraconsistent (LP, K3), relevance_logic,
-//         ├── intuitionistic_modal
+
+//  Verum-Foundation-Marketplace:
+//  ├── Standard frameworks (built-in)
+//  │ ├── ZFC, HoTT, MLTT, CIC, NCG, ∞-topos, cohesive
+//  ├── Verified extensions (community)
+//  │ ├── stack_model, (∞,∞), bounded_arithmetic_*,
+//  │ ├── linear_logic + ludics, giry_probability, α_quantum
+//  └── Experimental (research)
+//  ├── paraconsistent (LP, K3), relevance_logic,
+//  ├── intuitionistic_modal
 //
+
 // Each framework — standard, verified, experimental — gets a single
 // `FrameworkRecord` here. The (ν, τ) coordinates are read from the
 // canonical-coordinate prescriptive table (per VVA §10.4.1: the
 // meta-classifier `core.math.frameworks.diakrisis` defines the
 // coordinate space, the other frameworks are points in it).
 //
+
 // V0 (this file): record schema + sample-population helper.
 // V1: CLI wiring, schema-validation for community submissions.
 // V2: cross-translation map matrix (currently only owl2_to_htt
@@ -144,6 +149,7 @@ public fn registry_meta_classifier_unique(r: FrameworkRegistry) -> Bool {
 /// canonical-coordinate table (matching `core.theory_interop.coord
 /// ::known_ordinal` / `known_tau` lookup).
 ///
+
 /// Order: meta-classifier first, then coordinate-point frameworks
 /// in ν-ascending order so audit reports read top-down naturally.
 public fn populate_canonical_standard(r: &mut FrameworkRegistry) {

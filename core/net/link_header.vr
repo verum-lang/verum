@@ -5,37 +5,46 @@
 // Dependencies: core, core.collections
 // =============================================================================
 //
+
 // RFC 8288 — the `Link:` header that encodes hypermedia relations,
 // pagination, preload hints, canonical URLs, alternate languages,
 // and preconnect directives. Used by GitHub API pagination,
 // ActivityPub/ActivityStreams, W3C Annotations, HAL alternative
 // form, AS2 payloads, etc.
 //
+
 // # Wire format
 //
-//   Link: <uri>; param1=value1; param2="value2"
-//   Link: <u1>; rel="next", <u2>; rel="prev"
+
+//  Link: <uri>; param1=value1; param2="value2"
+//  Link: <u1>; rel="next", <u2>; rel="prev"
 //
+
 // Comma separates entries; semicolon separates params within an
 // entry. Parameter values may be bare tokens or quoted strings.
 // RFC 5987 `param*=charset'lang'pct-encoded` extended form is
 // accepted on parse and emitted verbatim on build.
 //
+
 // # API
 //
+
 // ```
 // let links: List<LinkEntry> = link_header.parse(&header_value)?;
 //
+
 // // Look up canonical pagination links.
 // match find_rel(&links, "next") {
-//     Some(entry) => crawl(&entry.uri),
-//     None        => stop,
+//  Some(entry) => crawl(&entry.uri),
+//  None => stop,
 // }
 //
+
 // // Build.
 // let header: Text = link_header.format(&list_of_entries);
 // ```
 //
+
 // =============================================================================
 
 module core.net.link_header;

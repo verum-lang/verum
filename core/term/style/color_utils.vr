@@ -4,6 +4,7 @@
 // Quick RGB from hex, color blending, and palette generation utilities
 // that wrap the core Rgb type with convenient one-liner APIs.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#16.3
 // =============================================================================
 

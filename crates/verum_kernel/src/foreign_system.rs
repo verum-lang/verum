@@ -1,23 +1,26 @@
 //! Canonical `ForeignSystem` enum — single source of truth for the
 //! external proof systems Verum interacts with.
 //!
+
 //! Verum talks to upstream proof assistants in five capacities:
 //!
-//!   1. **Cross-format export** — emit Verum theorems to Coq / Lean
-//!     for foreign re-check (`verum_kernel::soundness::corpus_export`).
-//!   2. **Kernel-soundness mirror** — emit the meta-circular kernel-
-//!      soundness corpus to Coq / Lean
-//!      (`verum_kernel::soundness::{coq, lean}`).
-//!   3. **Proof-term replay** — lower SMT certificates to Coq / Lean /
-//!      Agda / Dedukti / Metamath proof scripts
-//!      (`verum_smt::proof_replay`).
-//!   4. **Foreign-system import** — extract theorem skeletons from
-//!      Coq / Lean / Mizar / Isabelle source
-//!      (`verum_verification::foreign_import`).
-//!   5. **Re-check runner** — invoke the foreign toolchain (native
-//!      or Docker) to verify exported certificates
-//!      (`verum_smt::cross_format_runner`).
+
+//!  1. **Cross-format export** — emit Verum theorems to Coq / Lean
+//!  for foreign re-check (`verum_kernel::soundness::corpus_export`).
+//!  2. **Kernel-soundness mirror** — emit the meta-circular kernel-
+//!  soundness corpus to Coq / Lean
+//!  (`verum_kernel::soundness::{coq, lean}`).
+//!  3. **Proof-term replay** — lower SMT certificates to Coq / Lean /
+//!  Agda / Dedukti / Metamath proof scripts
+//!  (`verum_smt::proof_replay`).
+//!  4. **Foreign-system import** — extract theorem skeletons from
+//!  Coq / Lean / Mizar / Isabelle source
+//!  (`verum_verification::foreign_import`).
+//!  5. **Re-check runner** — invoke the foreign toolchain (native
+//!  or Docker) to verify exported certificates
+//!  (`verum_smt::cross_format_runner`).
 //!
+
 //! Each capacity historically had its own enumeration of supported
 //! systems (string IDs in `proof_replay`, `ExportFormat` in
 //! `cross_format_runner`, the 4-variant enum in `foreign_import`).
@@ -25,8 +28,9 @@
 //! references; the per-capacity surfaces stay specialized but agree
 //! on **which system** they're dispatching for.
 //!
+
 //! The enum lives in `verum_kernel` because that crate is the
-//! lowest-level domain crate every other layer depends on.  Putting
+//! lowest-level domain crate every other layer depends on. Putting
 //! it in `verum_common` would mix domain concepts into the
 //! foundation; placing it in `verum_verification` (which is its
 //! historical home) creates a dependency cycle with `verum_kernel`.
@@ -35,6 +39,7 @@ use serde::{Deserialize, Serialize};
 
 /// External proof system Verum interacts with.
 ///
+
 /// Variants are arranged by family: traditional CIC-family
 /// assistants (Coq / Lean) first, then non-CIC systems (Mizar,
 /// Isabelle), then minimal verifiers (Agda, Dedukti, Metamath).
@@ -72,8 +77,8 @@ impl ForeignSystem {
         }
     }
 
-    /// Parse a system tag from its diagnostic name.  Accepts
-    /// common aliases.  Returns `None` for unrecognised input.
+    /// Parse a system tag from its diagnostic name. Accepts
+    /// common aliases. Returns `None` for unrecognised input.
     pub fn from_name(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "coq" | "rocq" => Some(Self::Coq),
@@ -100,7 +105,7 @@ impl ForeignSystem {
         }
     }
 
-    /// Tag for `@framework(<tag>, "...")` attribution.  Matches the
+    /// Tag for `@framework(<tag>, "...")` attribution. Matches the
     /// keys used in `core/verify/kernel_v0/lemmas/` and
     /// `apply_graph::is_foreign_framework_target`.
     pub fn framework_tag(self) -> &'static str {
@@ -115,8 +120,8 @@ impl ForeignSystem {
         }
     }
 
-    /// Install hint for the system's verifier toolchain.  One short
-    /// sentence.  Used by checkers' install_hint() and CLI
+    /// Install hint for the system's verifier toolchain. One short
+    /// sentence. Used by checkers' install_hint() and CLI
     /// diagnostics when a foreign tool is missing.
     pub fn install_hint(self) -> &'static str {
         match self {
@@ -157,7 +162,7 @@ impl ForeignSystem {
     }
 
     /// Systems that have skeleton-import backends (statement-level
-    /// extraction from foreign source).  Excludes the proof-replay-
+    /// extraction from foreign source). Excludes the proof-replay-
     /// only targets (Agda / Dedukti / Metamath).
     pub fn with_importer() -> [ForeignSystem; 4] {
         [Self::Coq, Self::Lean4, Self::Mizar, Self::Isabelle]
@@ -170,7 +175,7 @@ impl ForeignSystem {
     }
 
     /// Whether this system has a hermetic re-check Checker (native
-    /// or Docker).  Currently only Coq + Lean4.
+    /// or Docker). Currently only Coq + Lean4.
     pub fn has_checker(self) -> bool {
         matches!(self, Self::Coq | Self::Lean4)
     }
@@ -182,6 +187,7 @@ impl ForeignSystem {
 /// the canonical [`ForeignSystem`] tag without reaching for the
 /// per-capacity trait it specialises in.
 ///
+
 /// The full collapse of the 5 capacity traits into one is a
 /// downstream refactor; this trait provides the unified handle so
 /// the migration can land incrementally.
@@ -189,7 +195,7 @@ pub trait ForeignSystemFacade {
     /// Which foreign system this facade represents.
     fn system(&self) -> ForeignSystem;
 
-    /// Whether this facade has a Checker capability.  Default: `false`.
+    /// Whether this facade has a Checker capability. Default: `false`.
     fn has_checker(&self) -> bool {
         self.system().has_checker()
     }

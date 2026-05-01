@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.2, Appendix C
 //
+
 // Approximately 180 SQLite VDBE opcodes are catalogued here. Wire
 // codes are stable — they are the values the interpreter (and any
 // VDBE bytecode persisted to disk) references. Names are the SQLite
 // canonical identifiers (matches `sqlite3_opcode_name`).
 //
+
 // We use a single `OpcodeKind` enum over the entire catalogue so the
 // optimiser, fuzz mutator, and EXPLAIN serialiser can pattern-match
 // exhaustively. Adding a new opcode here is a one-line insertion;

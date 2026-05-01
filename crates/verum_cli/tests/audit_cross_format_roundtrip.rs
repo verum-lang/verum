@@ -1,19 +1,20 @@
 //! Integration tests for `verum audit --cross-format-roundtrip`
 //! (#138 / MSFS-L4.5).
 //!
+
 //! Pin coverage:
-//!   - Empty project (no `@theorem` / `@lemma` / `@corollary`) →
-//!     0 theorems walked, exit 0, no files emitted.
-//!   - Single-theorem project → emits Coq + Lean files into
-//!     `target/audit-reports/cross-format-roundtrip/{coq,lean}/`.
-//!   - Per-theorem files have the right shape (Theorem … Admitted /
-//!     theorem … sorry) for proof-bearing decls; Axiom for proofless.
-//!   - JSON output carries the schema_version=1 envelope and per-
-//!     theorem rows.
-//!   - Tool-missing host: gate exits 0 (observability without
-//!     blocking) on a host without coqc / lean installed.
-//!   - Theorem-name sanitisation: weird characters → safe Verum-
-//!     prefixed identifiers.
+//!  - Empty project (no `@theorem` / `@lemma` / `@corollary`) →
+//!  0 theorems walked, exit 0, no files emitted.
+//!  - Single-theorem project → emits Coq + Lean files into
+//!  `target/audit-reports/cross-format-roundtrip/{coq,lean}/`.
+//!  - Per-theorem files have the right shape (Theorem … Admitted /
+//!  theorem … sorry) for proof-bearing decls; Axiom for proofless.
+//!  - JSON output carries the schema_version=1 envelope and per-
+//!  theorem rows.
+//!  - Tool-missing host: gate exits 0 (observability without
+//!  blocking) on a host without coqc / lean installed.
+//!  - Theorem-name sanitisation: weird characters → safe Verum-
+//!  prefixed identifiers.
 
 #![allow(unused_imports)]
 
@@ -102,7 +103,7 @@ public theorem trivial_thm()
 #[test]
 fn proofless_theorem_emits_axiom_form() {
     // Theorems without a `proof { … }` body emit `Axiom` / `axiom`,
-    // not `Theorem … Admitted` / `theorem … sorry`.  Pin this so a
+    // not `Theorem … Admitted` / `theorem … sorry`. Pin this so a
     // future refactor doesn't accidentally promote axioms to
     // admitted theorems (which would change the foreign-tool
     // semantics from "postulate" to "incomplete proof").
@@ -169,7 +170,7 @@ public theorem trivial_thm()
     for r in roundtrips {
         assert_eq!(r["theorem"], "trivial_thm");
         // verdict is one of: passed / failed / tool_missing /
-        // runner_error / no_checker.  When the tool is missing,
+        // runner_error / no_checker. When the tool is missing,
         // verdict_kind is `tool_missing` and gate still exits 0.
         let verdict = r["verdict"].as_str().unwrap();
         assert!(

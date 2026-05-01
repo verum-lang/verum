@@ -1,5 +1,6 @@
 //! Boundary-detection verification pass.
 //!
+
 //! Performs full call-graph analysis to detect verification
 //! boundaries between functions at different verification levels.
 //! Generates proof obligations at boundary crossings (proof-level
@@ -18,6 +19,7 @@ use super::{VerificationError, VerificationPass, VerificationResult};
 
 /// Boundary detection pass using call graph analysis.
 ///
+
 /// Detects where code transitions between verification levels
 /// (e.g., proof-level code calling runtime-level code) and
 /// generates proof obligations at those points.

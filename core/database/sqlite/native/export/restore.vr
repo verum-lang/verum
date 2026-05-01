@@ -3,16 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — dump / restore)
 //
+
 // `RestoreEngine` consumes a dump (typically the output of
 // `dump_schema(...)` followed by per-row `render_row(DfInsert, ...)`
 // concatenated with `;` terminators) and applies each statement
 // in order. The engine is dump-format-aware:
 //
-//   * skips blank + `--` comment lines
-//   * splits on un-quoted `;` (string literals + `--` comments
-//     mask the terminator)
-//   * tracks BEGIN/COMMIT so a partial restore aborts cleanly
+
+//  * skips blank + `--` comment lines
+//  * splits on un-quoted `;` (string literals + `--` comments
+//  mask the terminator)
+//  * tracks BEGIN/COMMIT so a partial restore aborts cleanly
 //
+
 // The engine doesn't take a hard dependency on l7_api.Database;
 // the caller passes a SQL-runner closure (same shape as the
 // migrations runner uses).

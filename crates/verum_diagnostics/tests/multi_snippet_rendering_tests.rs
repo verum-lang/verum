@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for multi-snippet error rendering
 //!
+
 //! Tests the ability to render diagnostics with multiple locations,
 //! including primary and secondary labels across different files.
 

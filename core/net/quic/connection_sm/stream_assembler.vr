@@ -5,40 +5,49 @@
 // Dependencies: core, collections, quic.{stream_sm, frame}
 // =============================================================================
 //
+
 // Pulls buffered app-level bytes from `SendStream.send_buf` + turns
 // them into STREAM frames for the outbound tx pipeline, respecting:
 //
-//   * Per-stream flow-control (max_stream_data from peer).
-//   * QuicConnection-level flow-control (max_data from peer).
-//   * CC window — `cc.window() - cc.bytes_in_flight()`.
-//   * Target packet budget — remaining bytes the caller is willing
-//     to fill this packet with.
+
+//  * Per-stream flow-control (max_stream_data from peer).
+//  * QuicConnection-level flow-control (max_data from peer).
+//  * CC window — `cc.window() - cc.bytes_in_flight()`.
+//  * Target packet budget — remaining bytes the caller is willing
+//  to fill this packet with.
 //
+
 // The assembler is careful about STREAM-frame type bits (RFC 9000
 // §19.8):
 //
-//   type = 0x08 | (OFF=0x04 | LEN=0x02 | FIN=0x01) flags
-//     OFF: offset field present (1 when stream.next_write_off > 0)
-//     LEN: length field present (always emit for multi-frame packets)
-//     FIN: final byte flag (set when emitting the whole tail + stream
-//          has close() scheduled)
+
+//  type = 0x08 | (OFF=0x04 | LEN=0x02 | FIN=0x01) flags
+//  OFF: offset field present (1 when stream.next_write_off > 0)
+//  LEN: length field present (always emit for multi-frame packets)
+//  FIN: final byte flag (set when emitting the whole tail + stream
+//  has close() scheduled)
 //
+
 // # Budget split — round-robin
 //
+
 // Multiple streams compete for the packet-budget. We rotate a
 // `next_stream_cursor` per connection so no stream can monopolise
 // the pipeline. Priority hints (extensions) land in the Phase 7
 // scheduler pass.
 //
+
 // # Output
 //
+
 // `assemble_stream_frames(...)` returns a list of Frame.StreamFrame
 // values the caller appends to the outbound packet's frame list.
 // It mutates:
-//   * SendStream.send_buf — drained by the emitted byte count.
-//   * SendStream.max_written — updated.
-//   * ConnFlowControl.bytes_sent — incremented.
+//  * SendStream.send_buf — drained by the emitted byte count.
+//  * SendStream.max_written — updated.
+//  * ConnFlowControl.bytes_sent — incremented.
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm.stream_assembler;
@@ -119,7 +128,7 @@ public fn assemble_stream_frames(
 }
 
 // Maximum varint overhead for one STREAM frame header:
-//   type (1 byte) + stream_id (≤ 8) + offset (≤ 8) + length (≤ 8) = 25.
+//  type (1 byte) + stream_id (≤ 8) + offset (≤ 8) + length (≤ 8) = 25.
 // We budget a fixed upper bound so the caller never over-packs.
 const STREAM_FRAME_OVERHEAD_MAX: Int = 25;
 

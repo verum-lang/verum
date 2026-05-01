@@ -1,12 +1,16 @@
 //! Meta Context Validation for Compile-Time Functions
 //!
+
 //! This module implements capability-based meta context validation for `meta fn`.
 //! Meta functions can only use compiler-provided meta contexts, not runtime contexts.
 //!
+
 //! # Meta Contexts
 //!
+
 //! The compiler provides 14 meta contexts (Spec: core/meta/contexts.vr):
 //!
+
 //! - **BuildAssets**: File loading during compilation
 //! - **TypeInfo**: Type introspection (fields_of, variants_of, etc.)
 //! - **AstAccess**: AST manipulation and parsing
@@ -22,10 +26,13 @@
 //! - **DepGraph**: Dependency graph analysis
 //! - **MetaBench**: Meta function benchmarking
 //!
+
 //! # Context Groups
 //!
+
 //! Convenience groups bundle related contexts (Spec: core/meta/contexts.vr lines 2847-3102):
 //!
+
 //! - **MetaCore**: [TypeInfo, AstAccess, CompileDiag, Hygiene] (most macros)
 //! - **MetaFull**: All 14 contexts
 //! - **MetaTypes**: [TypeInfo] only
@@ -42,27 +49,33 @@
 //! - **MetaProfiled**: [MetaBench, TypeInfo, AstAccess, CompileDiag]
 //! - **MetaTooling**: [CodeSearch, ProjectInfo, SourceMap, Schema, DepGraph, MetaBench, TypeInfo, AstAccess, CompileDiag, MacroState]
 //!
+
 //! # Example
 //!
+
 //! ```verum
 //! // Valid: uses meta context
 //! meta fn field_count<T>() -> Int using TypeInfo {
-//!     TypeInfo.fields_of::<T>().len()
+//!  TypeInfo.fields_of::<T>().len()
 //! }
 //!
+
 //! // Invalid: uses runtime context
-//! meta fn bad() using Database {  // E502: Database is not a meta context
-//!     ...
+//! meta fn bad() using Database { // E502: Database is not a meta context
+//!  ...
 //! }
 //! ```
 //!
+
 //! # Architecture
 //!
+
 //! The validation happens in three places (defense-in-depth):
 //! 1. **Type System** (this module): Validates context requirements at type check time
 //! 2. **Meta Linter**: Additional static analysis in lint passes
 //! 3. **Sandbox Runtime**: Runtime enforcement during meta evaluation
 //!
+
 //! Meta audit: validation that meta functions are pure and do not access runtime state
 
 use verum_ast::span::Span;
@@ -70,9 +83,11 @@ use verum_common::{List, Set, Text};
 
 /// Compiler-provided meta contexts.
 ///
+
 /// These are the only contexts that can be used in `meta fn`.
 /// Each maps to a compiler intrinsic implementation.
 ///
+
 /// Spec: core/meta/contexts.vr
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetaContext {
@@ -171,8 +186,10 @@ impl MetaContext {
 
 /// Predefined context groups for convenience.
 ///
+
 /// Groups bundle related meta contexts for common use cases.
 ///
+
 /// Spec: core/meta/contexts.vr lines 2847-3102
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetaContextGroup {
@@ -398,6 +415,7 @@ pub enum MetaContextValidation {
 
 /// Validator for meta function context requirements.
 ///
+
 /// Ensures that `meta fn` only uses compiler-provided meta contexts.
 pub struct MetaContextValidator {
     /// Set of valid meta context names.
@@ -443,12 +461,16 @@ impl MetaContextValidator {
 
     /// Validate a list of context requirements for a meta function.
     ///
+
     /// # Arguments
     ///
+
     /// * `context_names` - List of context names from the `using` clause
     ///
+
     /// # Returns
     ///
+
     /// - `MetaContextValidation::Valid` if all contexts are valid meta contexts
     /// - `MetaContextValidation::Invalid` if any runtime contexts are used
     pub fn validate(&self, context_names: &[Text]) -> MetaContextValidation {

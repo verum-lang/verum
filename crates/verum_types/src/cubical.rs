@@ -1,35 +1,45 @@
 //! Phase B.2: Cubical Type Theory Normalizer
 //!
+
 //! This module provides the reduction rules and WHNF (Weak Head Normal
 //! Form) computation for cubical type theory primitives:
 //!
+
 //! * **Path types**: `Path<A>(a, b)` — the type of paths from `a` to `b`
-//!   in type `A`. Corresponds to the Martin-Löf identity type but with
-//!   computational content from the interval.
+//!  in type `A`. Corresponds to the Martin-Löf identity type but with
+//!  computational content from the interval.
 //!
+
 //! * **Transport**: `transport(p, x)` — transport a value `x : A(i0)` along
-//!   a path `p : Path<Type>(A, B)` to get a value of type `B` (= `A(i1)`).
-//!   Key reduction: `transport(refl, x) ↦ x`.
+//!  a path `p : Path<Type>(A, B)` to get a value of type `B` (= `A(i1)`).
+//!  Key reduction: `transport(refl, x) ↦ x`.
 //!
+
 //! * **Hcomp** (homogeneous composition): `hcomp(base, sides)` — fill a cube
-//!   given a base and compatible sides. Key reduction: when sides are all
-//!   constant, `hcomp(base, const) ↦ base`.
+//!  given a base and compatible sides. Key reduction: when sides are all
+//!  constant, `hcomp(base, const) ↦ base`.
 //!
+
 //! * **Path lambda**: `λ(i). e(i)` — construct a path by abstracting over
-//!   an interval variable. This is the introduction form for Path types.
+//!  an interval variable. This is the introduction form for Path types.
 //!
+
 //! ## Reduction Rules
 //!
+
 //! The normalizer implements these core reductions:
 //!
-//! 1. `transport refl x           ↦ x`         (identity transport)
-//! 2. `transport p (transport p⁻¹ x) ↦ x`     (round-trip)
-//! 3. `hcomp (const base) sides   ↦ base`      (trivial composition)
-//! 4. `(λi. e) @ j               ↦ e[i := j]`  (path application β)
-//! 5. `λi. (p @ i)               ↦ p`          (path application η)
+
+//! 1. `transport refl x ↦ x` (identity transport)
+//! 2. `transport p (transport p⁻¹ x) ↦ x` (round-trip)
+//! 3. `hcomp (const base) sides ↦ base` (trivial composition)
+//! 4. `(λi. e) @ j ↦ e[i := j]` (path application β)
+//! 5. `λi. (p @ i) ↦ p` (path application η)
 //!
+
 //! ## Integration
 //!
+
 //! Called from `unify.rs` when two terms of `Path` type need to be
 //! compared: both sides are first reduced to WHNF via this module,
 //! then compared structurally.
@@ -179,6 +189,7 @@ impl CubicalTerm {
 
     /// Reduce a cubical term to Weak Head Normal Form.
     ///
+
     /// Applies the five core reduction rules until no more apply:
     /// 1. `transport refl x ↦ x`
     /// 2. `hcomp base (const sides) ↦ base`
@@ -195,7 +206,7 @@ impl CubicalTerm {
             }
 
             // Rule 6 (computational univalence — forward):
-            //     transport(ua(e), x) ↦ e.fwd(x)
+            //  transport(ua(e), x) ↦ e.fwd(x)
             // The transport along the univalence path of an
             // equivalence reduces to the forward action of that
             // equivalence on the value. This is the key
@@ -216,7 +227,7 @@ impl CubicalTerm {
             }
 
             // Rule 7 (computational univalence — backward):
-            //     transport(sym(ua(e)), x) ↦ e.bwd(x)
+            //  transport(sym(ua(e)), x) ↦ e.bwd(x)
             CubicalTerm::Transport { line, value }
                 if matches!(
                     line.as_ref(),
@@ -264,6 +275,7 @@ impl CubicalTerm {
 
             // Rule 8: ua of identity equivalence ↦ refl
             //
+
             // We model the identity equivalence opaquely by name:
             // when `Ua(Value("id_equiv"))` appears, it reduces to a
             // refl path at an opaque universe (we use Value("Type")

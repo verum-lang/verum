@@ -1,14 +1,17 @@
 //! K-Universe-Ascent integration tests (Categorical coherence, Theorem 131.T).
 //!
+
 //! The κ-tower kernel rule from `core.math.frameworks.diakrisis_stack_model`
 //! lifted to the kernel layer. Per Theorem 134.T (tight 2-inacc bound),
 //! only two non-trivial universe levels exist; valid transitions are:
 //!
-//!   • Truncated → Truncated   (Cat-baseline identity)
-//!   • κ_1 → κ_1                (identity at κ_1)
-//!   • κ_1 → κ_2                (Lemma 131.L1 ascent)
-//!   • κ_2 → κ_2                (Lemma 131.L3 Drake-reflection closure)
+
+//!  • Truncated → Truncated (Cat-baseline identity)
+//!  • κ_1 → κ_1 (identity at κ_1)
+//!  • κ_1 → κ_2 (Lemma 131.L1 ascent)
+//!  • κ_2 → κ_2 (Lemma 131.L3 Drake-reflection closure)
 //!
+
 //! All other transitions — Truncated → κ_*, κ_2 → κ_1, etc. — are
 //! rejected with `KernelError::UniverseAscentInvalid`.
 

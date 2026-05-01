@@ -5,16 +5,19 @@
 // Dependencies: sys.common (ctx_get, ctx_set)
 // =============================================================================
 //
+
 // This module provides the bridge functions that AOT-compiled code calls for
 // context operations. Instead of hardcoded LLVM IR in platform_ir.rs, the AOT
 // pipeline calls these compiled .vr functions which delegate to the platform's
 // TLS-based slot storage.
 //
+
 // Architecture:
-//   CtxGet VBC opcode → instruction.rs → env_ctx_get() → ctx_get() → TLS slot
-//   CtxProvide opcode → instruction.rs → env_ctx_provide() → ctx_set() → TLS slot
-//   Spawn opcode      → instruction.rs → fork_current_env() → shallow copy
+//  CtxGet VBC opcode → instruction.rs → env_ctx_get() → ctx_get() → TLS slot
+//  CtxProvide opcode → instruction.rs → env_ctx_provide() → ctx_set() → TLS slot
+//  Spawn opcode → instruction.rs → fork_current_env() → shallow copy
 //
+
 // This eliminates hardcoded context logic from the compiler, routing all
 // context operations through compiled Verum code.
 // =============================================================================
@@ -84,6 +87,7 @@ public fn env_active_slot_count() -> Int {
 /// Called by the spawn trampoline after thread creation.
 /// Takes a packed array of (slot_id, value) pairs.
 ///
+
 /// Defends against three classes of caller bug: negative count, integer
 /// overflow on the offset computation, and out-of-range slot_id payloads
 /// from a corrupted slots buffer.

@@ -5,14 +5,17 @@
 // Dependencies: protocols.vr, result.vr, maybe.vr
 // =============================================================================
 //
+
 // Provides the full Error protocol with source chaining and backtrace support.
 // This extends the simple Error type in result.vr with structured error
 // handling, stack traces, and error chain traversal.
 //
+
 // The Error protocol is the standard interface for all error types in Verum.
 // It builds on the Describable and ErrorSource protocols from protocols.vr
 // and adds backtrace capture support.
 //
+
 // =============================================================================
 
 module core.base.error;
@@ -31,6 +34,7 @@ mount core.ordering.{Ordering, Less, Equal, Greater};
 
 /// A single frame in a stack trace.
 ///
+
 /// Contains the function name, source file, and location within the file
 /// where the frame was captured.
 public type StackFrame is {
@@ -112,15 +116,18 @@ implement Eq for StackFrame {}
 
 /// A captured stack backtrace.
 ///
+
 /// Contains a list of stack frames representing the call stack at the point
 /// where the backtrace was captured. Used for error diagnostics.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// let bt = Backtrace.capture();
 /// for frame in bt.frames() {
-///     print(f"  at {frame.function} ({frame.file}:{frame.line})");
+///  print(f" at {frame.function} ({frame.file}:{frame.line})");
 /// }
 /// ```
 public type Backtrace is {
@@ -141,6 +148,7 @@ implement Backtrace {
 
     /// Capture the current stack backtrace.
     ///
+
     /// Returns a backtrace of the current call stack. The backtrace may be
     /// empty if capture is not supported or is disabled at runtime.
     public fn capture() -> Backtrace {
@@ -213,39 +221,46 @@ implement Default for Backtrace {
 
 /// The standard error protocol for all error types in Verum.
 ///
+
 /// This protocol extends ErrorSource (which extends Describable) to provide
 /// a complete error handling interface with:
 /// - Human-readable error messages via `message()`
 /// - Error chain traversal via `source()`
 /// - Optional backtrace capture via `backtrace()`
 ///
+
 /// All error types in the standard library implement this protocol.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// type IoError is {
-///     msg: Text,
-///     kind: IoErrorKind,
-///     cause: Maybe<Heap<dyn ErrorSource>>,
-///     bt: Maybe<Backtrace>,
+///  msg: Text,
+///  kind: IoErrorKind,
+///  cause: Maybe<Heap<dyn ErrorSource>>,
+///  bt: Maybe<Backtrace>,
 /// };
 ///
+
 /// implement ErrorProtocol for IoError {
-///     fn message(&self) -> Text {
-///         self.msg.clone()
-///     }
+///  fn message(&self) -> Text {
+///  self.msg.clone()
+///  }
 ///
-///     fn source(&self) -> Maybe<&dyn Describable> {
-///         match &self.cause {
-///             Some(e) => Some(e.as_ref()),
-///             None => None,
-///         }
-///     }
+
+///  fn source(&self) -> Maybe<&dyn Describable> {
+///  match &self.cause {
+///  Some(e) => Some(e.as_ref()),
+///  None => None,
+///  }
+///  }
 ///
-///     fn backtrace(&self) -> Maybe<Backtrace> {
-///         self.bt.clone()
-///     }
+
+///  fn backtrace(&self) -> Maybe<Backtrace> {
+///  self.bt.clone()
+///  }
 /// }
 /// ```
 public type ErrorProtocol is protocol extends ErrorSource {
@@ -266,14 +281,17 @@ public type ErrorProtocol is protocol extends ErrorSource {
 
 /// An iterator over an error chain.
 ///
+
 /// Traverses from the initial error through all source errors.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// let chain = ErrorChain.new(&my_error);
 /// for desc in chain {
-///     print(f"caused by: {desc}");
+///  print(f"caused by: {desc}");
 /// }
 /// ```
 public type ErrorChain is {
@@ -295,12 +313,14 @@ implement ErrorChain {
 
 /// Format an error and its immediate source for display.
 ///
+
 /// Produces output like:
 /// ```
 /// error: file not found
 /// caused by: permission denied
 /// ```
 ///
+
 /// Note: Only one level of source chaining is supported because
 /// `ErrorSource.source()` returns `&dyn Describable` (which lacks
 /// a `source()` method). For deeper chains, use `ErrorProtocol`

@@ -5,48 +5,60 @@
 // Dependencies: core, async/poll, async/waker, async/future, async/stream
 // =============================================================================
 //
+
 // Generators are functions that can yield multiple values lazily.
 // They are declared with `fn*` syntax and use `yield` to produce values.
 //
+
 // # Sync Generators
 //
+
 // A sync generator implements Iterator, producing values on demand:
 //
+
 // ```verum
 // fn* range(start: Int, end: Int) -> Int {
-//     let mut i = start;
-//     while i < end {
-//         yield i;
-//         i = i + 1;
-//     }
+//  let mut i = start;
+//  while i < end {
+//  yield i;
+//  i = i + 1;
+//  }
 // }
 //
+
 // for x in range(0, 5) {
-//     print(f"{x}");  // 0, 1, 2, 3, 4
+//  print(f"{x}"); // 0, 1, 2, 3, 4
 // }
 // ```
 //
+
 // # Async Generators
 //
+
 // An async generator implements Stream, producing values asynchronously:
 //
+
 // ```verum
 // async fn* fetch_pages(urls: List<Text>) -> Text {
-//     for url in urls {
-//         let page = fetch(url).await;
-//         yield page;
-//     }
+//  for url in urls {
+//  let page = fetch(url).await;
+//  yield page;
+//  }
 // }
 // ```
 //
+
 // # Generator Comprehensions
 //
+
 // Shorthand for simple generators:
 //
+
 // ```verum
 // let squares = gen { x * x for x in 0..10 };
 // ```
 //
+
 // =============================================================================
 
 module generator;
@@ -64,22 +76,28 @@ mount .stream.*;
 
 /// A generator that lazily produces a sequence of values.
 ///
+
 /// Created by calling a generator function (declared with `fn*`).
 /// The generator runs on a separate thread and communicates via
 /// futex-based synchronization.
 ///
+
 /// Implements Iterator so it can be used in `for` loops and with
 /// all iterator combinators.
 ///
+
 /// # Lifecycle
 ///
+
 /// 1. Created: Generator function called, thread spawned but paused
 /// 2. Running: `next()` resumes the generator body
 /// 3. Yielded: `yield value` pauses and returns `Some(value)`
 /// 4. Completed: Generator body returns, `next()` returns `None`
 ///
+
 /// # Memory Management
 ///
+
 /// Generators are automatically closed when dropped. The underlying
 /// thread is joined and all resources freed.
 public type Generator<T> is {
@@ -92,6 +110,7 @@ public type Generator<T> is {
 implement<T> Generator<T> {
     /// Check if the generator has more values.
     ///
+
     /// Returns `true` if calling `next()` may produce a value.
     /// Returns `false` if the generator has completed.
     public fn has_next(&self) -> Bool {
@@ -103,6 +122,7 @@ implement<T> Generator<T> {
 
     /// Close the generator early, releasing all resources.
     ///
+
     /// After closing, `next()` will always return `None`.
     /// This is called automatically when the generator is dropped.
     public fn close(&mut self) {
@@ -115,22 +135,25 @@ implement<T> Generator<T> {
 
 /// Iterator implementation for Generator<T>.
 ///
+
 /// This allows generators to be used in `for` loops:
 ///
+
 /// ```verum
 /// fn* fibonacci() -> Int {
-///     let mut a = 0;
-///     let mut b = 1;
-///     loop {
-///         yield a;
-///         let tmp = a + b;
-///         a = b;
-///         b = tmp;
-///     }
+///  let mut a = 0;
+///  let mut b = 1;
+///  loop {
+///  yield a;
+///  let tmp = a + b;
+///  a = b;
+///  b = tmp;
+///  }
 /// }
 ///
+
 /// for fib in fibonacci().take(10) {
-///     print(f"{fib}");
+///  print(f"{fib}");
 /// }
 /// ```
 implement<T> Iterator for Generator<T> {
@@ -171,24 +194,28 @@ implement<T> Drop for Generator<T> {
 
 /// An async generator that produces values asynchronously.
 ///
+
 /// Created by calling an async generator function (`async fn*`).
 /// Implements Stream, so it works with all stream combinators.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// async fn* ticker(interval_ms: Int) -> Int {
-///     let mut count = 0;
-///     loop {
-///         async_sleep_ms(interval_ms).await;
-///         count = count + 1;
-///         yield count;
-///     }
+///  let mut count = 0;
+///  loop {
+///  async_sleep_ms(interval_ms).await;
+///  count = count + 1;
+///  yield count;
+///  }
 /// }
 ///
+
 /// let stream = ticker(100).take(5);
 /// for await tick in stream {
-///     print(f"tick {tick}");
+///  print(f"tick {tick}");
 /// }
 /// ```
 public type AsyncGenerator<T> is {
@@ -218,6 +245,7 @@ implement<T> AsyncGenerator<T> {
 
 /// Stream implementation for AsyncGenerator<T>.
 ///
+
 /// Allows async generators to be used with `for await` and stream combinators.
 implement<T> Stream for AsyncGenerator<T> {
     type Item = T;
@@ -256,20 +284,24 @@ implement<T> Drop for AsyncGenerator<T> {
 
 /// Create a generator from a function that produces Maybe<T>.
 ///
+
 /// The function is called repeatedly. Each `Some(value)` becomes
 /// a yielded value. `None` terminates the generator.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let mut count = 0;
 /// let gen = generator_from_fn(|| {
-///     count = count + 1;
-///     if count <= 5 { Some(count) } else { None }
+///  count = count + 1;
+///  if count <= 5 { Some(count) } else { None }
 /// });
 ///
+
 /// for x in gen {
-///     print(f"{x}");  // 1, 2, 3, 4, 5
+///  print(f"{x}"); // 1, 2, 3, 4, 5
 /// }
 /// ```
 public fn generator_from_fn<T, F: fn() -> Maybe<T>>(f: F) -> FnGenerator<T, F> {
@@ -301,20 +333,24 @@ implement<T, F: fn() -> Maybe<T>> Iterator for FnGenerator<T, F> {
 
 /// Create an infinite generator from a state transition function.
 ///
+
 /// Starting from `initial`, repeatedly applies `f` to produce
 /// the next value and state.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// // Fibonacci sequence
 /// let fibs = generator_unfold((0, 1), |state| {
-///     let (a, b) = state;
-///     (a, (b, a + b))  // (yielded_value, next_state)
+///  let (a, b) = state;
+///  (a, (b, a + b)) // (yielded_value, next_state)
 /// });
 ///
+
 /// for fib in fibs.take(10) {
-///     print(f"{fib}");
+///  print(f"{fib}");
 /// }
 /// ```
 public fn generator_unfold<T, St, F: fn(St) -> (T, St)>(
@@ -350,11 +386,13 @@ implement<T, St, F: fn(St) -> (T, St)> Iterator for UnfoldGenerator<T, St, F> {
 
 /// Create a generator that yields values from a range.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// for x in generator_range(0, 10) {
-///     print(f"{x}");  // 0, 1, 2, ..., 9
+///  print(f"{x}"); // 0, 1, 2, ..., 9
 /// }
 /// ```
 public fn generator_range(start: Int, end: Int) -> RangeGenerator {
@@ -392,11 +430,13 @@ implement Iterator for RangeGenerator {
 
 /// Create an infinite generator that yields the same value.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// for x in generator_repeat(42).take(3) {
-///     print(f"{x}");  // 42, 42, 42
+///  print(f"{x}"); // 42, 42, 42
 /// }
 /// ```
 public fn generator_repeat<T: Clone>(value: T) -> RepeatGenerator<T> {
@@ -422,8 +462,10 @@ implement<T: Clone> Iterator for RepeatGenerator<T> {
 
 /// Create a generator that yields values from successive function calls.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let mut i = 0;
 /// let gen = generator_successors(0, |prev| prev + 1);

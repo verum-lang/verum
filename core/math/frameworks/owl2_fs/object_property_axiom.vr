@@ -2,12 +2,14 @@
 // owl2_fs.object_property_axiom — Shkotin 2019 Table 6 (Object Property Axioms)
 // =============================================================================
 //
+
 // §2.3.2 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 14 axioms
 // constraining object properties — sub-property hierarchy, domain /
 // range, and the seven characteristic flags (Functional,
 // InverseFunctional, Reflexive, Irreflexive, Symmetric, Asymmetric,
 // Transitive).
 //
+
 // V2 status (#134, 2026-04-25): all 14 axioms ship verbatim
 // W3C OWL 2 DS §5.5 bodies.
 // =============================================================================
@@ -32,7 +34,7 @@ public axiom SubObjectPropertyOf<I: Interpretation, P: ObjectPropertyExpression>
 
 /// `SubObjectPropertyOfChain(OPE₁..n, OPE)` (W3C §5.5.2/§5.5.3):
 /// the relational composition ⟦OPE₁⟧^I ∘ ⟦OPE₂⟧^I ∘ … ⊆ ⟦OPE⟧^I.
-/// V2 ships the binary-chain core (n=2); n-ary chains via
+/// ships the binary-chain core (n=2); n-ary chains via
 /// Verum-level fold over consecutive pairs.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.2 Table 6: SubObjectPropertyOfChain")
 public axiom SubObjectPropertyOfChain<I: Interpretation, P: ObjectPropertyExpression>(

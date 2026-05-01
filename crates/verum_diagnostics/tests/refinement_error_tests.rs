@@ -14,6 +14,7 @@
 )]
 // Unit tests for refinement_error.rs
 //
+
 // Migrated from src/refinement_error.rs to comply with CLAUDE.md test organization.
 
 use verum_common::Text;

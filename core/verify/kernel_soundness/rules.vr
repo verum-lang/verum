@@ -2,18 +2,21 @@
 // kernel_soundness.rules — premise/conclusion encoding of the 35 kernel rules
 // =============================================================================
 //
+
 // For each `KernelRule` the kernel imposes:
-//   * a list of *premise* judgments (Γ ⊢ tᵢ : Tᵢ),
-//   * a list of *side-conditions* (e.g., "axiom body inhabits Prop"),
-//   * a single *conclusion* judgment.
+//  * a list of *premise* judgments (Γ ⊢ tᵢ : Tᵢ),
+//  * a list of *side-conditions* (e.g., "axiom body inhabits Prop"),
+//  * a single *conclusion* judgment.
 //
+
 // This module produces those triples mechanically from a `Derivation`
 // node — given an instantiated `Derivation`, `rule_premises_required(d)`,
 // `rule_side_conditions_required(d)`, and `rule_conclusion_shape(d)`
 // describe what would have to hold for the rule to apply legitimately.
 //
+
 // **Architectural role**: rules.vr is the *specification*; theorems.vr
-// is the *correctness proof* that the spec is sound.  Cross-export
+// is the *correctness proof* that the spec is sound. Cross-export
 // emitters consume rules.vr to generate the foreign-tool premise lists.
 // They never invent premises — every emitted Coq/Lean lemma's hypothesis
 // chain matches `rule_premises_required` for the same rule, so a
@@ -32,21 +35,23 @@ mount core.verify.kernel_soundness.judgment.{
 // =============================================================================
 
 /// Symbolic premise: "this sub-derivation must conclude in a
-/// judgment whose shape matches `expected`."  `expected` describes
+/// judgment whose shape matches `expected`." `expected` describes
 /// the syntactic form of the conclusion the premise must produce.
 ///
+
 /// The four shape constructors cover everything any of the 35 rules
 /// asks for:
 ///
-///   * **TermHasType{ty_shape}** — the premise must conclude
-///     `Γ ⊢ t : T` where `T` reduces to a head matching `ty_shape`.
-///   * **TermHasUniverse{level_bound}** — the premise must show that
-///     `t` inhabits some `Universe(u)` with `u ≤ level_bound`.
-///   * **TermIsKnown{name}** — the premise must show `t` reduces to
-///     a specific named term (e.g., for KGlue's equivalence-condition).
-///   * **AnyTerm** — the rule cares only that the premise concludes
-///     *some* well-typed judgment; used by elimination rules whose
-///     soundness is independent of the scrutinee's type-head.
+
+///  * **TermHasType{ty_shape}** — the premise must conclude
+///  `Γ ⊢ t : T` where `T` reduces to a head matching `ty_shape`.
+///  * **TermHasUniverse{level_bound}** — the premise must show that
+///  `t` inhabits some `Universe(u)` with `u ≤ level_bound`.
+///  * **TermIsKnown{name}** — the premise must show `t` reduces to
+///  a specific named term (e.g., for KGlue's equivalence-condition).
+///  * **AnyTerm** — the rule cares only that the premise concludes
+///  *some* well-typed judgment; used by elimination rules whose
+///  soundness is independent of the scrutinee's type-head.
 public type PremiseShape is
     | TermHasType { ty_shape: CoreType }
     | TermHasUniverse { level_bound: UniverseLevel }
@@ -54,12 +59,13 @@ public type PremiseShape is
     | AnyTerm;
 
 /// `rule_premises_required(d)` returns the *expected shapes* of the
-/// derivation's premises.  The list length matches the number of
+/// derivation's premises. The list length matches the number of
 /// premises the rule needs; each entry's shape constrains what the
 /// corresponding sub-derivation must conclude.
 ///
-/// **Why a function and not a static table?**  Several rules' premise
-/// shapes depend on the *concrete* term being typed.  E.g., K-App-Elim
+
+/// **Why a function and not a static table?** Several rules' premise
+/// shapes depend on the *concrete* term being typed. E.g., K-App-Elim
 /// requires `head : Pi(x:A).B` where `A` is read off the argument's
 /// expected type; that's per-derivation, not per-rule.
 public pure fn rule_premises_required(d: Derivation) -> List<PremiseShape> {
@@ -226,13 +232,14 @@ public pure fn rule_premises_required(d: Derivation) -> List<PremiseShape> {
 }
 
 /// `rule_side_conditions_required(d)` projects the side-conditions a
-/// rule imposes beyond its premises.  Most rules return an empty
+/// rule imposes beyond its premises. Most rules return an empty
 /// list; the interesting ones — KFwAx, KPos, KSmt, KRefineOmega,
 /// KUniverseAscent, KQuotForm, KQuotElim — carry their respective
 /// non-judgmental obligations.
 ///
+
 /// The returned `SideCondition` values are *templates* — a function
-/// of `d`, not constants.  E.g., `KFwAx` produces a
+/// of `d`, not constants. E.g., `KFwAx` produces a
 /// `BodyInProp { axiom_body: <body of d.conclusion.term> }` so the
 /// soundness lemma in `theorems.vr` can pattern-match on the actual
 /// axiom body.
@@ -314,12 +321,12 @@ public pure fn rule_side_conditions_required(d: Derivation) -> List<SideConditio
 // =============================================================================
 
 /// `rule_conclusion_shape(d)` describes the syntactic form of the
-/// term the rule introduces/eliminates.  Used by:
-///   1. The audit gate, to ensure the derivation's `conclusion.term`
-///      structurally matches the rule (a KAppElim derivation must
-///      conclude in a `CoreTerm.App(...)`, not a `Lam`).
-///   2. The cross-export emitters, to choose which Coq/Lean tactic
-///      to invoke (intro vs. apply vs. constructor).
+/// term the rule introduces/eliminates. Used by:
+///  1. The audit gate, to ensure the derivation's `conclusion.term`
+///  structurally matches the rule (a KAppElim derivation must
+///  conclude in a `CoreTerm.App(...)`, not a `Lam`).
+///  2. The cross-export emitters, to choose which Coq/Lean tactic
+///  to invoke (intro vs. apply vs. constructor).
 public pure fn rule_conclusion_shape(d: Derivation) -> CoreType {
     match d.rule {
         // Universe formers — Pi/Sigma/PathTy/Refine/Glue/Quotient

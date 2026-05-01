@@ -1,25 +1,31 @@
 //! Differential-kernel testing harness (#159).
 //!
+
 //! Verum runs **two** kernel implementations in parallel:
 //!
+
 //! 1. The Rust trusted base — [`crate::proof_checker`] — 633 LOC of
-//!    bidirectional type-checking over a minimal CoC fragment, the
-//!    answer reviewers receive when they ask "what do I need to
-//!    trust to trust Verum?".
+//!  bidirectional type-checking over a minimal CoC fragment, the
+//!  answer reviewers receive when they ask "what do I need to
+//!  trust to trust Verum?".
 //!
+
 //! 2. The Verum-side scaffold — `core/verify/kernel_v0/` — a Verum-
-//!    self-hosted mirror of the same 10-rule bootstrap kernel, whose
-//!    soundness lemmas are enumerated by
-//!    [`crate::soundness::kernel_v0_manifest`].
+//!  self-hosted mirror of the same 10-rule bootstrap kernel, whose
+//!  soundness lemmas are enumerated by
+//!  [`crate::soundness::kernel_v0_manifest`].
 //!
+
 //! Differential testing checks that **both** implementations agree on
 //! every test certificate: either they both accept (`Both_Accept`),
 //! both reject (`Both_Reject`), or they disagree (`Disagreement`) —
 //! the last case being the audit failure mode that surfaces a kernel
 //! divergence before it reaches the trust boundary.
 //!
+
 //! ## Current status — Rust-side framework, Verum-side stub
 //!
+
 //! The Verum-side checker cannot be invoked live yet: the
 //! `core/verify/kernel_v0/` tree is partially blocked on a parser
 //! issue where soundness theorems silently drop from module exports.
@@ -27,25 +33,28 @@
 //! [`KernelVerdict::NotYetSelfHosting`] and the agreement field is
 //! [`DifferentialAgreement::NotYetSelfHosting`].
 //!
+
 //! This module is **load-bearing scaffolding**: the entire framework
 //! is in place — `DifferentialReport`, `run_differential_test`, the
 //! per-rule scaffold [`differential_test_rule`], the
 //! [`DifferentialOutcome`] aggregator — so that plugging in a real
 //! Verum-side checker is a **single-line addition** to
-//! [`run_differential_test_with_verum`].  The audit gate, the JSON
+//! [`run_differential_test_with_verum`]. The audit gate, the JSON
 //! emitter, the test harness, and the per-rule pin tests all consume
 //! this surface today and will continue to consume it unchanged once
 //! the Verum side comes online.
 //!
+
 //! ## What this module does NOT do
 //!
+
 //! - Does NOT fix the parser blocker on `core/verify/kernel_v0/`.
-//!   That's tracked separately as a multi-day Verum-compiler effort.
-//! - Does NOT shell out to a Verum binary.  When the Verum side
-//!   becomes self-checking the integration is via a Rust trait
-//!   implementation, not via process invocation.
-//! - Does NOT promote disagreement into a panic.  The harness
-//!   *records* divergence; the audit gate *interprets* it.
+//!  That's tracked separately as a multi-day Verum-compiler effort.
+//! - Does NOT shell out to a Verum binary. When the Verum side
+//!  becomes self-checking the integration is via a Rust trait
+//!  implementation, not via process invocation.
+//! - Does NOT promote disagreement into a panic. The harness
+//!  *records* divergence; the audit gate *interprets* it.
 
 #![warn(missing_docs)]
 
@@ -60,6 +69,7 @@ use crate::soundness::kernel_v0_manifest::{self, KernelV0Rule};
 
 /// One kernel's verdict on a [`Certificate`].
 ///
+
 /// Both kernels are queried independently; their answers are
 /// recorded here uniformly so the differential layer can compare
 /// them without caring which kernel is which.
@@ -69,7 +79,7 @@ pub enum KernelVerdict {
     /// The kernel accepted the certificate as a valid proof of its
     /// claimed type.
     Accepted,
-    /// The kernel rejected the certificate.  The `reason` is the
+    /// The kernel rejected the certificate. The `reason` is the
     /// kernel's own diagnostic surface — for the Rust side it's the
     /// `Display` of [`CheckError`]; for the Verum side it will be
     /// the equivalent formatted error once self-hosting lands.
@@ -78,7 +88,7 @@ pub enum KernelVerdict {
         reason: String,
     },
     /// The Verum-side kernel is not yet exercisable (parser blocker
-    /// on `core/verify/kernel_v0/`).  Used only by the Verum slot;
+    /// on `core/verify/kernel_v0/`). Used only by the Verum slot;
     /// the Rust slot never produces this verdict.
     NotYetSelfHosting,
 }
@@ -130,6 +140,7 @@ impl From<Result<(), CheckError>> for KernelVerdict {
 
 /// The differential layer's verdict on a pair of [`KernelVerdict`]s.
 ///
+
 /// `NotYetSelfHosting` is structurally distinct from `Disagreement`:
 /// the former is "the test ran but only one kernel had a verdict to
 /// offer" (architectural gap), the latter is "both kernels offered
@@ -137,13 +148,13 @@ impl From<Result<(), CheckError>> for KernelVerdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DifferentialAgreement {
-    /// Both kernels accepted the certificate.  The healthy path.
+    /// Both kernels accepted the certificate. The healthy path.
     BothAccept,
-    /// Both kernels rejected the certificate.  Also healthy — the
+    /// Both kernels rejected the certificate. Also healthy — the
     /// test harness includes negative cases that *should* be
     /// rejected, and we want both kernels to reject in lock-step.
     BothReject,
-    /// One kernel accepted, the other rejected.  The audit-failure
+    /// One kernel accepted, the other rejected. The audit-failure
     /// signal: the trusted bases have diverged on at least one
     /// certificate, and the audit gate must surface this loudly.
     Disagreement,
@@ -166,6 +177,7 @@ impl DifferentialAgreement {
 
     /// Classify two [`KernelVerdict`]s into the agreement category.
     ///
+
     /// `NotYetSelfHosting` on either side maps to
     /// `DifferentialAgreement::NotYetSelfHosting`; this preserves
     /// the architectural-gap signal even if the Rust side later
@@ -189,13 +201,14 @@ impl DifferentialAgreement {
 /// One differential-test result: rule under test + both kernel
 /// verdicts + the agreement classification.
 ///
+
 /// Reports are designed for serialisation into
 /// `target/audit-reports/differential.json` and consumption by
-/// `verum audit --kernel-differential` (planned).  Stable serde
+/// `verum audit --kernel-differential` (planned). Stable serde
 /// representation is part of the contract.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DifferentialReport {
-    /// The kernel rule under test (e.g. `"K-Var"`, `"K-Univ"`).  Mirrors
+    /// The kernel rule under test (e.g. `"K-Var"`, `"K-Univ"`). Mirrors
     /// the `name` field of [`KernelV0Rule`].
     pub rule_name: String,
     /// The Rust-side kernel's verdict (always concrete: `Accepted`
@@ -209,7 +222,7 @@ pub struct DifferentialReport {
 }
 
 impl DifferentialReport {
-    /// Construct a report from its components.  Computes
+    /// Construct a report from its components. Computes
     /// [`agreement`](Self::agreement) from the two verdicts so
     /// callers don't have to thread the classification manually.
     pub fn new(
@@ -234,7 +247,8 @@ impl DifferentialReport {
 /// Run a differential test: invoke both kernels on `certificate` and
 /// return a [`DifferentialReport`] describing the outcome.
 ///
-/// The Rust side is queried via [`Certificate::verify`].  The Verum
+
+/// The Rust side is queried via [`Certificate::verify`]. The Verum
 /// side is currently stubbed as [`KernelVerdict::NotYetSelfHosting`]
 /// pending the parser blocker on `core/verify/kernel_v0/`; once the
 /// Verum-side checker is invokable, plug it in via
@@ -251,12 +265,13 @@ pub fn run_differential_test(
 }
 
 /// Variant of [`run_differential_test`] that accepts a Verum-side
-/// verdict directly.  This is the **forward-compatible plug-in
+/// verdict directly. This is the **forward-compatible plug-in
 /// point**: once `core/verify/kernel_v0/` is self-checking, the
 /// caller obtains a [`KernelVerdict`] from it and passes it here.
 ///
+
 /// Exposed publicly so the future Verum-side adapter can route
-/// through it without touching this module.  Until then, callers
+/// through it without touching this module. Until then, callers
 /// pass [`KernelVerdict::NotYetSelfHosting`] explicitly when they
 /// want the future-proof shape (the standard
 /// [`run_differential_test`] supplies that default).
@@ -275,18 +290,21 @@ pub fn run_differential_test_with_verum(
 
 /// Run a stub differential test for the rule named `rule_name`.
 ///
+
 /// Looks the rule up in [`kernel_v0_manifest::manifest`], builds a
 /// trivial accept-path certificate (the polymorphic identity
 /// `λ(A:U₀). λ(x:A). x : Π(A:U₀). A → A`), and runs it through
-/// [`run_differential_test`].  Returns `None` if `rule_name` is not
+/// [`run_differential_test`]. Returns `None` if `rule_name` is not
 /// in the manifest.
 ///
+
 /// The certificate is the same one used by
 /// `core/verify/proof_term_examples/polymorphic_identity.vproof` —
 /// it covers T-Univ, T-Pi-Form, T-Lam-Intro, T-Var simultaneously,
 /// so even though we only test against one rule's *manifest entry*
 /// at a time, the actual verification exercises the full kernel.
 ///
+
 /// This is sufficient scaffolding for the framework to be
 /// load-bearing today; real per-rule certificates designed to
 /// exercise *only* one rule (and reject under perturbation) land as
@@ -300,12 +318,14 @@ pub fn differential_test_rule(rule_name: &str) -> Option<DifferentialReport> {
 }
 
 /// Build the canonical polymorphic-identity certificate used by the
-/// per-rule scaffolding.  Closed term, accept-path under the Rust
+/// per-rule scaffolding. Closed term, accept-path under the Rust
 /// kernel.
 ///
+
 /// Term: `λ(A:Universe(0)). λ(x:Var(0)). Var(0)`
 /// Type: `Π(A:Universe(0)). Π(x:Var(0)). Var(1)`
 ///
+
 /// (The body's `Var(1)` refers to the outer-bound `A`; the inner
 /// `Var(0)` is `x`; the outer Π's body has no `Var` reference to
 /// the binder, but the inner Π does — this matches
@@ -333,6 +353,7 @@ pub fn stub_polymorphic_identity_certificate() -> Certificate {
 
 /// Aggregate counts over a batch of [`DifferentialReport`]s.
 ///
+
 /// Used by the audit gate to report the corpus-wide differential
 /// status in a single JSON record:
 /// `{ accepted: N, rejected: M, disagreement: K, not_yet_self_hosting: L }`.
@@ -370,8 +391,8 @@ impl DifferentialOutcome {
         self.accepted + self.rejected + self.disagreement + self.not_yet_self_hosting
     }
 
-    /// Project: are there any divergences?  This is the audit-fail
-    /// predicate the gate consumes.  `NotYetSelfHosting` is *not* a
+    /// Project: are there any divergences? This is the audit-fail
+    /// predicate the gate consumes. `NotYetSelfHosting` is *not* a
     /// divergence (the Verum side simply isn't online); only
     /// `Disagreement` flips this to true.
     pub fn has_divergence(&self) -> bool {
@@ -404,7 +425,7 @@ mod tests {
     #[test]
     fn report_shape_carries_all_four_fields() {
         // Pin the public surface: a report exposes rule_name,
-        // rust_verdict, verum_verdict, agreement.  Drift here breaks
+        // rust_verdict, verum_verdict, agreement. Drift here breaks
         // the audit-gate JSON contract.
         let rule = synthetic_rule("K-Synth");
         let cert = stub_polymorphic_identity_certificate();
@@ -417,7 +438,7 @@ mod tests {
 
     #[test]
     fn both_accept_path_classifies_correctly() {
-        // Synthetic: both kernels accept.  This is the future
+        // Synthetic: both kernels accept. This is the future
         // healthy-path classification once the Verum side comes
         // online.
         let rust = KernelVerdict::Accepted;
@@ -430,7 +451,7 @@ mod tests {
 
     #[test]
     fn both_reject_path_classifies_correctly() {
-        // Synthetic: both kernels reject.  Negative-case healthy
+        // Synthetic: both kernels reject. Negative-case healthy
         // path — the harness includes invalid certificates that
         // *should* be rejected, and we want lock-step rejection.
         let rust = KernelVerdict::Rejected {
@@ -447,7 +468,7 @@ mod tests {
 
     #[test]
     fn disagreement_path_classifies_correctly() {
-        // Synthetic: Rust accepts, Verum rejects.  The audit-fail
+        // Synthetic: Rust accepts, Verum rejects. The audit-fail
         // signal — at least one kernel has a soundness or
         // completeness bug.
         let rust = KernelVerdict::Accepted;
@@ -473,10 +494,10 @@ mod tests {
 
     #[test]
     fn not_yet_self_hosting_path_classifies_correctly() {
-        // Pin the architectural-gap signal.  Either side reporting
+        // Pin the architectural-gap signal. Either side reporting
         // NotYetSelfHosting collapses the verdict to
         // NotYetSelfHosting, even if the other side has a concrete
-        // accept/reject answer.  This is what keeps the framework
+        // accept/reject answer. This is what keeps the framework
         // load-bearing today: every Verum-side query is
         // NotYetSelfHosting, and the harness records that distinctly
         // from real disagreement.
@@ -500,7 +521,7 @@ mod tests {
     #[test]
     fn kernel_v0_rule_lemma_symbol_is_consumable() {
         // Contract test: the manifest's `lemma_symbol` field is the
-        // hand-off point to the Verum-side checker.  Verify the
+        // hand-off point to the Verum-side checker. Verify the
         // first manifest rule's lemma_symbol obeys the
         // `k_<name>_sound` convention so the harness's future Verum-
         // side adapter can reach it by deterministic naming.

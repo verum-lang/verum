@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `sqlite3_busy_handler` and `sqlite3_busy_timeout` compete for the
-// same slot — installing one clears the other.  `BusyEngine` records
+// same slot — installing one clears the other. `BusyEngine` records
 // the currently-installed handler + a monotone attempt counter used
 // by the retry-decision function.
 // =============================================================================

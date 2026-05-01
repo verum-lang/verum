@@ -1,5 +1,6 @@
 //! Dedukti proof-replay backend.
 //!
+
 //! Lowers an [`SmtCertificate`] into a Dedukti `def ... :=` body
 //! using λΠ-modulo rewrite-rule style. Dedukti is the most
 //! minimal of the five targets: every proof is a λ-term in the

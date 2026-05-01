@@ -14,6 +14,7 @@
 )]
 //! End-to-End tests for IncrementalBackend with all LSP features
 //!
+
 //! This test suite validates that all 6 LSP features work correctly
 //! with the DocumentCache integration:
 //! - Completion

@@ -5,8 +5,10 @@
 // Dependencies: core (protocols, maybe, result, primitives), sys/
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI system interfaces:
 // - Linux: Uses sys/linux/syscall.write direct syscalls
 // - macOS: Uses sys/darwin/libsystem.safe_write via libSystem.B.dylib
@@ -14,14 +16,17 @@
 // - Native integer/float to string conversion (no FFI)
 // - No FFI dependencies on verum_runtime
 //
+
 // =============================================================================
 //
+
 // This module provides the formatting infrastructure for Verum:
 // - Extended TextFormatter with width, precision, alignment options
 // - Write protocol for output targets
 // - print/println/eprint/eprintln functions
 // - Debug && Display helper implementations
 //
+
 // =============================================================================
 
 module core.text.format;
@@ -64,6 +69,7 @@ const STDERR_FD: Int = 2;
 /// Convert an integer to decimal string representation.
 /// Returns the number of bytes written to the buffer.
 ///
+
 /// Correctly handles `Int.MIN` (= -9223372036854775808): the
 /// previous `let val = if negative { -value }` pattern silently
 /// overflowed back to `Int.MIN` in two's-complement and the
@@ -73,6 +79,7 @@ const STDERR_FD: Int = 2;
 /// `panic_fmt`, every `Display for Int` / `Debug for Int`
 /// path), so the fix here cascades broadly.
 ///
+
 /// Magnitude is accumulated in `UInt64` so every `Int`'s
 /// absolute value is exactly representable.
 @inline
@@ -594,11 +601,13 @@ implement TextFormatter {
 
     // Format integer in specified base.
     //
+
     // Correctly handles `Int.MIN`: magnitude is accumulated in
     // `UInt64` (same idiom as `int_to_string` above) so the
     // previous `if negative { -n }` overflow no longer silently
     // emits "-" with no digits.
     //
+
     // Replaces the old `Text → List<Char> → Text` reverse-and-
     // collect chain (~4× allocations + ~3× memcpy) with a
     // 64-byte stack buffer + single `Text.push_str` of the
@@ -1083,6 +1092,7 @@ implement<T: Debug> Debug for [T] {
 
 /// Format a value as lowercase hexadecimal (e.g., "ff", "deadbeef").
 ///
+
 /// Types implementing this protocol support `{:x}` formatting.
 public type LowerHex is protocol {
     fn fmt_lower_hex(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
@@ -1090,6 +1100,7 @@ public type LowerHex is protocol {
 
 /// Format a value as uppercase hexadecimal (e.g., "FF", "DEADBEEF").
 ///
+
 /// Types implementing this protocol support `{:X}` formatting.
 public type UpperHex is protocol {
     fn fmt_upper_hex(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
@@ -1097,6 +1108,7 @@ public type UpperHex is protocol {
 
 /// Format a value as binary (e.g., "1010", "11111111").
 ///
+
 /// Types implementing this protocol support `{:b}` formatting.
 public type Binary is protocol {
     fn fmt_binary(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
@@ -1104,6 +1116,7 @@ public type Binary is protocol {
 
 /// Format a value as octal (e.g., "77", "377").
 ///
+
 /// Types implementing this protocol support `{:o}` formatting.
 public type Octal is protocol {
     fn fmt_octal(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
@@ -1111,6 +1124,7 @@ public type Octal is protocol {
 
 /// Format a value in lowercase exponential notation (e.g., "1.5e2").
 ///
+
 /// Types implementing this protocol support `{:e}` formatting.
 public type LowerExp is protocol {
     fn fmt_lower_exp(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
@@ -1118,6 +1132,7 @@ public type LowerExp is protocol {
 
 /// Format a value in uppercase exponential notation (e.g., "1.5E2").
 ///
+
 /// Types implementing this protocol support `{:E}` formatting.
 public type UpperExp is protocol {
     fn fmt_upper_exp(&self, f: &mut TextFormatter) -> Result<(), FormatError>;
@@ -1249,6 +1264,7 @@ fn float_to_exp(value: Float, precision: Int, uppercase: Bool) -> Text {
 // Canonical integer-to-text conversion (#100, task #16)
 // =============================================================================
 //
+
 // These two functions are the canonical entry-points for any
 // caller that needs a `Text` from an `Int` (decimal or
 // arbitrary radix). They route through `int_to_string` (the
@@ -1263,6 +1279,7 @@ fn float_to_exp(value: Float, precision: Int, uppercase: Bool) -> Text {
 // asymmetry — see commits b274ab8b / 985336e3 / 35066491 /
 // f17f34ca for the per-site fixes).
 //
+
 // New code should use these helpers directly; the per-file
 // copies in stdlib subgraphs will be migrated to call into
 // them as task #16 follow-up.

@@ -5,33 +5,40 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI memory operations:
 // - Uses core/memory.vr native allocator (CBGR-backed)
 // - No FFI dependencies on verum_runtime
 //
+
 // =============================================================================
 //
+
 // Deque<T> is a double-ended queue implemented as a growable ring buffer.
 // Both front and back operations are O(1) amortized.
 //
+
 // Performance characteristics:
 // - push_front/push_back: O(1) amortized
 // - pop_front/pop_back: O(1)
 // - get by index: O(1)
 // - insert/remove in middle: O(n)
 //
+
 // Memory layout:
 // - Ring buffer with head and tail indices
 // - Capacity is always power of two for efficient modulo
 //
+
 // =============================================================================
 
 module core.collections.deque;
 mount core.*;
 mount core.base.ordering.{Ordering};
-// Allocator primitives for typed-OOM (#65, #68).  See list.vr for
+// Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale on the explicit mount.
 mount core.base.memory.{try_alloc, try_realloc};
 
@@ -316,15 +323,19 @@ implement<T> Deque<T> {
 
     /// Shrink capacity to at least `min_capacity`.
     ///
+
     /// The capacity will remain at least as large as both the current length
     /// and the supplied value. Capacity is always rounded up to a power of two
     /// since Deque requires power-of-two capacity for ring buffer indexing.
     ///
+
     /// Does nothing if the current capacity is already less than or equal to
     /// `min_capacity`.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut deque = Deque.with_capacity(100);
     /// deque.push_back(1);
@@ -428,6 +439,7 @@ implement<T> Deque<T> {
 
     /// Binary search with custom comparator.
     ///
+
     /// The comparator receives each element and should return:
     /// - Less if the element is less than the target
     /// - Greater if the element is greater than the target
@@ -763,8 +775,10 @@ implement<T> Deque<T> {
     /// Creates a draining iterator that removes and yields all elements.
     /// The deque will be empty after this call.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut deque = Deque.new();
     /// deque.push_back(1);
@@ -781,10 +795,13 @@ implement<T> Deque<T> {
     /// Returns a new deque containing elements from `at..len`.
     /// `self` retains elements from `0..at`.
     ///
+
     /// Panics if `at > len`.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut deque = Deque.new();
     /// deque.push_back(1);
@@ -813,8 +830,10 @@ implement<T> Deque<T> {
 
     /// Moves all the elements of `other` into `self`, leaving `other` empty.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut a = Deque.new();
     /// a.push_back(1);
@@ -833,11 +852,14 @@ implement<T> Deque<T> {
 
     /// Resizes the deque to `new_len` elements.
     ///
+
     /// If `new_len` is greater than the current length, the deque is extended
     /// with clones of `value`. If less, the deque is truncated.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut deque = Deque.new();
     /// deque.resize(5, 0);
@@ -858,6 +880,7 @@ implement<T> Deque<T> {
 
     /// Resizes the deque to `new_len` elements using a generator function.
     ///
+
     /// If `new_len` is greater than the current length, the deque is extended
     /// with values returned by `f()`. If less, the deque is truncated.
     public fn resize_with<F: fn() -> T>(&mut self, new_len: Int, f: F) {
@@ -903,6 +926,7 @@ implement<T> Deque<T> {
 
     /// Sort the deque in ascending order (stable).
     ///
+
     /// Makes the deque contiguous first, then delegates to slice sort.
     public fn sort(&mut self)
     where T: Ord
@@ -934,6 +958,7 @@ implement<T> Deque<T> {
 
     /// Sort the deque in ascending order (unstable, may reorder equal elements).
     ///
+
     /// May be faster than stable sort. Uses quicksort via slice sort_unstable.
     public fn sort_unstable(&mut self)
     where T: Ord
@@ -1345,6 +1370,7 @@ implement<T> Deque<T> {
     /// Remove all elements matching the predicate and return them as a List.
     /// Preserves the relative order of non-matching elements.
     ///
+
     /// # Example
     /// ```verum
     /// let mut d = Deque.from_list(&[1, 2, 3, 4, 5]);
@@ -1382,6 +1408,7 @@ implement<T> Deque<T> {
     /// Remove consecutive duplicate elements, keeping the first of each run.
     /// Returns the number of elements removed.
     ///
+
     /// # Example
     /// ```verum
     /// let mut d = Deque.from_list(&[1, 1, 2, 3, 3, 3, 2]);
@@ -1422,9 +1449,11 @@ implement<T> Deque<T> {
     /// Remove consecutive duplicate elements using a custom equality function.
     /// Returns the number of elements removed.
     ///
+
     /// The predicate receives two consecutive elements and should return true
     /// if they are considered equal (and the second should be removed).
     ///
+
     /// # Example
     /// ```verum
     /// let mut d = Deque.from_list(&[1, -1, 2, -2, 3]);
@@ -1463,6 +1492,7 @@ implement<T> Deque<T> {
     /// Remove consecutive duplicate elements by key, keeping the first of each run.
     /// Returns the number of elements removed.
     ///
+
     /// # Example
     /// ```verum
     /// let mut d = Deque.from_list(&[10, 11, 20, 21, 30]);

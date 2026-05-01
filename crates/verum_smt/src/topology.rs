@@ -1,10 +1,13 @@
 //! Formal Topology Theory with SMT Verification
 //!
+
 //! This module provides industrial-grade topological space verification using Z3 SMT solver.
 //! All topological properties are formally verified with proof term generation.
 //!
+
 //! ## Features
 //!
+
 //! - **Topological Spaces**: Verify topology axioms (unions, intersections, empty set, whole space)
 //! - **Continuity**: Verify continuous maps and homeomorphisms
 //! - **Separation Axioms**: T0, T1, T2 (Hausdorff), Regular, Normal spaces
@@ -12,33 +15,42 @@
 //! - **Connectedness**: Connected and path-connected spaces with component analysis
 //! - **Metric Spaces**: Complete metric space verification with Cauchy sequences
 //!
+
 //! ## Formal Mathematics Foundation
 //!
+
 //! Implements topological space verification from the formal proof system: topological
 //! spaces with open set axioms, continuous maps as preimage-preserving functions,
 //! separation axioms (T0-T4), compactness via finite subcovers, and metric space
 //! completeness via Cauchy sequence convergence. All proofs produce exportable
 //! proof terms compatible with Coq, Lean, and Dedukti proof checkers.
 //!
+
 //! ## Architecture
 //!
+
 //! All verification operations return `ProofTerm` evidence that can be:
 //! - Exported to proof assistants (Coq, Lean)
 //! - Used for gradual verification
 //! - Cached for incremental compilation
 //!
+
 //! ## Examples
 //!
+
 //! ```rust,ignore
 //! use verum_smt::topology::{TopologicalSpace, MetricSpace};
 //! use verum_std::{Set, List};
 //!
+
 //! // Create topological space
 //! let mut space = TopologicalSpace::discrete(vec!["a", "b", "c"].into());
 //!
+
 //! // Verify topology axioms
 //! let proof = space.verify_topology_axioms().unwrap();
 //!
+
 //! // Check separation properties
 //! assert!(space.is_hausdorff().unwrap());
 //! ```
@@ -54,14 +66,18 @@ use verum_common::ToText;
 /// A topological space consists of a set X and a collection of open sets
 /// satisfying the topology axioms.
 ///
+
 /// ## Topology Axioms
 ///
+
 /// 1. The empty set ∅ and X are open
 /// 2. Arbitrary unions of open sets are open
 /// 3. Finite intersections of open sets are open
 ///
+
 /// ## Implementation Note
 ///
+
 /// Points are represented as Text (names) rather than Expr to enable use in Set/Map.
 /// For symbolic verification, the names can be mapped to Z3 expressions.
 /// Open sets are stored in a List rather than Set since Set<Set<T>> requires Hash.
@@ -80,6 +96,7 @@ pub struct TopologicalSpace {
 impl TopologicalSpace {
     /// Create a new topological space
     ///
+
     /// Note: This does not verify the topology axioms. Use `verify_topology_axioms()`
     /// to ensure the space is well-formed.
     pub fn new(points: Set<Text>, open_sets: List<Set<Text>>, name: impl Into<Text>) -> Self {
@@ -93,6 +110,7 @@ impl TopologicalSpace {
 
     /// Create the discrete topology (all subsets are open)
     ///
+
     /// The discrete topology is the finest topology on a set.
     pub fn discrete<T: Into<Text> + Clone>(point_names: List<T>) -> Self {
         let points: Set<Text> = point_names.iter().map(|name| name.clone().into()).collect();
@@ -105,6 +123,7 @@ impl TopologicalSpace {
 
     /// Create the indiscrete (trivial) topology (only ∅ and X are open)
     ///
+
     /// The indiscrete topology is the coarsest topology on a set.
     pub fn indiscrete<T: Into<Text> + Clone>(point_names: List<T>) -> Self {
         let points: Set<Text> = point_names.iter().map(|name| name.clone().into()).collect();
@@ -118,6 +137,7 @@ impl TopologicalSpace {
 
     /// Verify that this collection satisfies the topology axioms
     ///
+
     /// Returns a proof term establishing that the space is a valid topological space.
     pub fn verify_topology_axioms(&mut self) -> Result<ProofTerm, TopologyError> {
         // Check cache first
@@ -279,6 +299,7 @@ impl TopologicalSpace {
 
     /// Compute the boundary of a set
     ///
+
     /// Boundary = Closure \ Interior
     pub fn boundary(&self, set: &Set<Text>) -> Set<Text> {
         let closure = self.closure(set);
@@ -445,6 +466,7 @@ impl TopologicalSpace {
 
     /// Verify that the space is compact
     ///
+
     /// A space is compact if every open cover has a finite subcover.
     pub fn verify_compact(&self) -> Result<ProofTerm, TopologyError> {
         // For finite spaces, we can check all possible open covers
@@ -533,6 +555,7 @@ impl TopologicalSpace {
 
     /// Verify that the space is connected
     ///
+
     /// A space is connected if it cannot be written as the union of two disjoint
     /// non-empty open sets.
     pub fn verify_connected(&self) -> Result<ProofTerm, TopologyError> {
@@ -692,6 +715,7 @@ impl TopologicalSpace {
 
 /// A continuous map between topological spaces
 ///
+
 /// f: X → Y is continuous if the preimage of every open set in Y is open in X
 #[derive(Debug, Clone)]
 pub struct ContinuousMap {
@@ -763,6 +787,7 @@ impl ContinuousMap {
 
     /// Verify that this map is a homeomorphism
     ///
+
     /// A homeomorphism is a bijective continuous map with continuous inverse
     pub fn verify_homeomorphism(&mut self) -> Result<ProofTerm, TopologyError> {
         // Check continuity
@@ -819,8 +844,10 @@ impl ContinuousMap {
 
 /// A metric space is a set with a distance function satisfying metric axioms
 ///
+
 /// ## Metric Axioms
 ///
+
 /// 1. d(x, y) >= 0 (non-negativity)
 /// 2. d(x, y) = 0 iff x = y (identity of indiscernibles)
 /// 3. d(x, y) = d(y, x) (symmetry)
@@ -840,6 +867,7 @@ pub struct MetricSpace {
 impl MetricSpace {
     /// Create a new metric space
     ///
+
     /// Note: This does not verify metric axioms. Use `verify_metric_axioms()`.
     pub fn new(
         points: Set<Text>,
@@ -1072,6 +1100,7 @@ impl MetricSpace {
 
     /// Verify completeness (all Cauchy sequences converge)
     ///
+
     /// For finite metric spaces, completeness is automatic
     pub fn verify_complete(&self) -> Result<ProofTerm, TopologyError> {
         // For finite spaces, every Cauchy sequence is eventually constant

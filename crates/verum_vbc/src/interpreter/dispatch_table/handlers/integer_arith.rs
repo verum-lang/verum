@@ -115,6 +115,7 @@ pub(in super::super) fn handle_modi(state: &mut InterpreterState) -> Interpreter
 
 /// Unsigned integer division: `dst = (a as u64) / (b as u64)`.
 ///
+
 /// Reinterprets the i64 register payloads as `u64` for the division,
 /// then stores the u64 result back as the same bit pattern. Required
 /// because `(u64::MAX) / 10 = 1844674407370955161` whereas

@@ -10,22 +10,26 @@ mount sys.mmio.{volatile_load, volatile_store};
 // Activated by: @cfg(runtime = "embedded")
 // =============================================================================
 //
+
 // Provides stack-only allocation for embedded targets where heap allocation
 // is unavailable or undesirable. All memory comes from a caller-provided
 // buffer (typically a static array or linker-placed section).
 //
+
 // Design constraints:
-//   - Zero OS dependencies
-//   - No heap (malloc/free never called)
-//   - No threads or async primitives
-//   - No CBGR runtime (static references only)
-//   - Deterministic allocation (bump allocator, O(1) alloc)
+//  - Zero OS dependencies
+//  - No heap (malloc/free never called)
+//  - No threads or async primitives
+//  - No CBGR runtime (static references only)
+//  - Deterministic allocation (bump allocator, O(1) alloc)
 //
+
 // Typical usage:
-//   let mut buf: [Int; 1024] = [0; 1024];
-//   let mut alloc = StackAllocator.new(@ptr_of(buf), 8192);
-//   let ptr = alloc.alloc(64, 8);  // 64 bytes, 8-byte aligned
+//  let mut buf: [Int; 1024] = [0; 1024];
+//  let mut alloc = StackAllocator.new(@ptr_of(buf), 8192);
+//  let ptr = alloc.alloc(64, 8); // 64 bytes, 8-byte aligned
 //
+
 // Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
 
@@ -42,6 +46,7 @@ type StackAllocator is {
 implement StackAllocator {
     /// Create a new stack allocator over the given buffer.
     ///
+
     /// `buffer` must be a valid pointer to at least `size` bytes of memory.
     /// The caller is responsible for ensuring the buffer outlives the allocator.
     public fn new(buffer: Int, size: Int) -> StackAllocator {
@@ -54,6 +59,7 @@ implement StackAllocator {
 
     /// Allocate `size` bytes with the given alignment.
     ///
+
     /// Returns the aligned pointer, or 0 if the allocator is exhausted.
     /// Alignment must be a power of two.
     public fn alloc(&mut self, size: Int, align: Int) -> Int {
@@ -70,6 +76,7 @@ implement StackAllocator {
 
     /// Reset the allocator, freeing all allocations at once.
     ///
+
     /// This is O(1) — simply resets the bump pointer to the start.
     /// All previously returned pointers become invalid.
     public fn reset(&mut self) {
@@ -152,6 +159,7 @@ implement RingBuffer {
 
     /// Push a byte into the ring buffer. Returns false if full.
     ///
+
     /// Writes via `volatile_store` to defeat load/store elimination —
     /// MMIO peripherals on embedded targets require every byte to hit
     /// the bus, not be coalesced or reordered by the optimiser.
@@ -172,6 +180,7 @@ implement RingBuffer {
 
     /// Pop a byte from the ring buffer. Returns -1 if empty.
     ///
+
     /// Reads via `volatile_load` for the same MMIO discipline as
     /// `push`. Returns the byte (0..=255) on success, -1 on empty —
     /// the negative sentinel doesn't collide with any valid byte.

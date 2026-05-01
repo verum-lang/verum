@@ -2,11 +2,13 @@
 //! from the `variant_map` + `variant_recursive_args` registries —
 //! NOT a hardcoded match on stdlib names.
 //!
+
 //! Pre-fix the function had a hardcoded match arm for "Nat" / "List" /
 //! "Tree" / "BinaryTree" / "Bool" with their constructors, and
 //! returned "Unknown inductive type" for everything else. User-defined
 //! variants couldn't drive `induction`.
 //!
+
 //! Post-fix: registered types resolve via metadata; non-recursive
 //! variants like `Color = Red | Green | Blue` work without recursion
 //! info; recursive types use the new

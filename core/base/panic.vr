@@ -4,9 +4,11 @@
 // Layer: 0 (Core)
 // Dependencies: None (self-contained)
 //
+
 // This module is self-contained to avoid circular dependencies.
 // All panic and exit functionality uses direct intrinsics and syscalls.
 //
+
 // =============================================================================
 
 module panic;
@@ -21,6 +23,7 @@ mount core.intrinsics.{spin_hint, unreachable as intrinsic_unreachable, catch_un
 // I/O and Process Exit
 // =============================================================================
 //
+
 // `write_stderr` and `exit_process` are resolved through the
 // platform_ir layer of `verum_codegen`: the AOT path emits these
 // as wrappers over libc `write(2, ...)` / `_exit(...)` (POSIX) or
@@ -75,6 +78,7 @@ fn write_stderr(s: &Text);
 
 /// Write an integer to stderr.
 ///
+
 /// Correctly handles `Int.MIN`: `-Int.MIN` overflows back to
 /// `Int.MIN` in two's-complement, so the naïve `let num = -n; while
 /// num > 0 { ... }` silently produces an empty digit run for the
@@ -128,6 +132,7 @@ public fn panic_fmt(args: FormatArgs) -> ! {
 
 /// Abort the process immediately without cleanup.
 ///
+
 /// This is more severe than panic - no unwinding, no cleanup.
 public fn abort() -> ! {
     exit_process(134)  // SIGABRT equivalent
@@ -201,6 +206,7 @@ public fn assert_err<T: Debug, E>(result: Result<T, E>, msg: Text = "assertion f
 /// comparison — direct equality on IEEE 754 is almost never what
 /// you want when the values came from arithmetic.
 ///
+
 /// NaN handling: any NaN operand fails the assertion. The naïve
 /// `if (left - right) > tolerance` silently passes when either
 /// operand is NaN, because every comparison against NaN is false —
@@ -252,6 +258,7 @@ public fn assert_contains<T: Eq>(list: &List<T>, needle: &T, msg: Text = "assert
 /// Assert that invoking `f` panics. If `f` returns normally, this
 /// itself panics with `msg`. Useful for testing error-handling code.
 ///
+
 /// Implemented via the `catch_unwind` intrinsic — panics that escape
 /// `f` are captured; normal returns fail the assertion.
 public fn assert_panics<T>(f: fn() -> T, msg: Text = "assertion failed: expected panic, function returned normally") {
@@ -308,6 +315,7 @@ public fn unreachable(msg: Text = "entered unreachable code") -> ! {
 /// the code is genuinely unreachable; reaching it is undefined
 /// behaviour.
 ///
+
 /// This is `unsafe` because reaching the release branch produces
 /// UB; only mark code with `unreachable_unchecked` when an external
 /// invariant rules out the case (e.g. a refinement-typed switch
@@ -465,6 +473,7 @@ public fn catch_unwind<T, F: fn() -> T>(f: F) -> Result<T, PanicInfo> {
 
 /// Resume an unwinding panic, preserving its full provenance.
 ///
+
 /// Forwards the original `(message, file, line, column)` so the
 /// resumed panic appears at the original site rather than at the
 /// `resume_unwind` call. Without this, panic chains across a
@@ -511,6 +520,7 @@ public meta fn current_location() -> Location {
 
 /// Format argument container for panic_fmt.
 ///
+
 /// Holds pre-formatted text pieces produced by the compiler from f-string
 /// or format macro expansion. The compiler lowers `panic(f"...")` into
 /// `panic_fmt(FormatArgs { pieces: &[...] })` with each piece already
@@ -521,6 +531,7 @@ type FormatArgs is {
 
 /// Concatenate format argument pieces into a single Text.
 ///
+
 /// This is the runtime half of format string handling. The compiler
 /// handles interpolation and type conversion at compile time; this
 /// function simply joins the resulting pieces.

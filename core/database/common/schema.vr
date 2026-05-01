@@ -5,29 +5,33 @@
 // Spec: internal/specs/database.md §5.3 (sql# meta-fn schema-aware mode)
 // =============================================================================
 //
+
 // `SchemaSnapshot` is the data the `verum db:introspect` tooling
 // emits as a `schema.snap.vr` file and the `sql#"..."` meta-fn loads
 // at compile time to derive typed row shapes ("SELECT id, name FROM
 // users" → `PreparedQuery<{id: UserId, name: Text}, ()>`).
 //
+
 // The snapshot carries vendor-neutral structure plus per-column
 // refinement-predicate text — when the user types a column with
 // `type Email is Text where rx#"^[^@]+@[^@]+\..+$".matches(s)`, the
 // introspector serialises that predicate into the snapshot so the
 // meta-fn can carry the refinement through to the result row type.
 //
+
 // Shape choices:
-//   * String-typed (`Text`) for vendor type names — the Verum-side
-//     mapping (`VARCHAR` → `Text`, `INTEGER` → `Int`, …) is per-vendor
-//     and lives in the adapter modules.
-//   * `nullable: Bool` per column — used by sql# to pick `T` vs
-//     `Maybe<T>` for the result row.
-//   * `pk: Bool` and `unique: Bool` per column — informational; the
-//     planner uses these to detect at-most-one-row queries (`WHERE
-//     id = ${id}` against a PK column → row-level result type).
-//   * `default_expr: Maybe<Text>` — informational; surfaces as a
-//     compile-time hint in INSERT-without-default sites.
+//  * String-typed (`Text`) for vendor type names — the Verum-side
+//  mapping (`VARCHAR` → `Text`, `INTEGER` → `Int`, …) is per-vendor
+//  and lives in the adapter modules.
+//  * `nullable: Bool` per column — used by sql# to pick `T` vs
+//  `Maybe<T>` for the result row.
+//  * `pk: Bool` and `unique: Bool` per column — informational; the
+//  planner uses these to detect at-most-one-row queries (`WHERE
+//  id = ${id}` against a PK column → row-level result type).
+//  * `default_expr: Maybe<Text>` — informational; surfaces as a
+//  compile-time hint in INSERT-without-default sites.
 //
+
 // The snapshot is intentionally portable: a Postgres snapshot can be
 // loaded against a SQLite back end and vice versa — the meta-fn
 // reports a typed warning when the dialect mismatches but does not
@@ -220,6 +224,7 @@ fn default_schema_for(adapter: &AdapterId) -> Text {
 // Renderer — emit a `.vr` file the meta-fn can read at compile time.
 // -----------------------------------------------------------------------------
 //
+
 // Format choice. The snapshot is data, not code — but emitting a
 // JSON-ish blob that the meta-fn parses at compile time means
 // implementing a full JSON parser inside the meta-fn machinery. The
@@ -228,6 +233,7 @@ fn default_schema_for(adapter: &AdapterId) -> Text {
 // future migration to a binary format can swap in the renderer
 // without touching the SchemaSnapshot shape itself.
 //
+
 // The renderer below produces a deterministic, line-stable text
 // representation suitable for committing to the repo and diffing
 // across re-introspections. The actual loading-at-compile-time

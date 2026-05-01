@@ -14,6 +14,7 @@
 )]
 // Unit tests for suggestion.rs
 //
+
 // Migrated from src/suggestion.rs to comply with CLAUDE.md test organization.
 
 use verum_diagnostics::suggestion::*;

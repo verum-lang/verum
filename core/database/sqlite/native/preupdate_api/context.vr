@@ -19,7 +19,7 @@ public type PreupdateContext is {
     /// Nested trigger / foreign-key cascade depth (0 for top-level).
     depth: Int,
     /// Column index currently targeted by sqlite3_blob_write during
-    /// the preupdate callback.  -1 if this isn't a blob-write.
+    /// the preupdate callback. -1 if this isn't a blob-write.
     blobwrite_column: Int,
 }
 

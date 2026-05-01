@@ -1,15 +1,18 @@
 //! CBGR (Capability-Based Generation References) tier analysis.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 9). Performs tier
 //! analysis on all functions in the module:
 //!
-//!   1. Builds control flow graphs (CFGs) for each function.
-//!   2. Runs escape analysis to determine reference tier selection.
-//!   3. Decides which references can be promoted from Tier 0
-//!      (~15ns managed) to Tier 1 (0ns compiler-proven safe,
-//!      `&checked T`).
-//!   4. Logs analysis statistics for optimisation feedback.
+
+//!  1. Builds control flow graphs (CFGs) for each function.
+//!  2. Runs escape analysis to determine reference tier selection.
+//!  3. Decides which references can be promoted from Tier 0
+//!  (~15ns managed) to Tier 1 (0ns compiler-proven safe,
+//!  `&checked T`).
+//!  4. Logs analysis statistics for optimisation feedback.
 //!
+
 //! The cluster is the second-largest single concern in pipeline.rs
 //! (~1794 LOC across 14 methods): one orchestrator
 //! (`phase_cbgr_analysis`) plus the AST-to-CFG construction
@@ -20,7 +23,7 @@
 //! (`extract_defs_and_uses_from_condition`,
 //! `extract_defs_and_uses_from_expr`,
 //! `extract_defs_and_uses_from_stmt`,
-//! `collect_exit_predecessors`).  Plus two leaf utilities
+//! `collect_exit_predecessors`). Plus two leaf utilities
 //! (`param_is_reference`, `hash_function_name`).
 
 use std::time::Instant;
@@ -36,12 +39,14 @@ use super::{CfgBuildContext, CompilationPipeline};
 impl<'s> CompilationPipeline<'s> {
     /// Phase 4a: Tier analysis
     ///
+
     /// Performs tier analysis on all functions in the module. This phase:
     /// 1. Builds control flow graphs (CFGs) for each function
     /// 2. Runs escape analysis to determine reference tier selection
     /// 3. Decides which references can be promoted from Tier 0 (~15ns) to Tier 1 (0ns)
     /// 4. Logs analysis statistics for optimization feedback
     ///
+
     /// CBGR analysis: builds CFGs, runs escape analysis to promote references from
     /// Tier 0 (~15ns managed) to Tier 1 (0ns compiler-proven safe, `&checked T`).
     pub(super) fn phase_cbgr_analysis(&self, module: &Module) -> Result<()> {
@@ -50,9 +55,9 @@ impl<'s> CompilationPipeline<'s> {
         use crate::session::FunctionId;
 
         // Gate on [runtime].cbgr_mode:
-        //   "unsafe" → skip analysis entirely (all refs are raw)
-        //   "managed" → skip promotion (all refs stay at Tier 0)
-        //   "checked" / "mixed" → full analysis (current behavior)
+        //  "unsafe" → skip analysis entirely (all refs are raw)
+        //  "managed" → skip promotion (all refs stay at Tier 0)
+        //  "checked" / "mixed" → full analysis (current behavior)
         let cbgr_mode = self
             .session
             .language_features()
@@ -91,15 +96,17 @@ impl<'s> CompilationPipeline<'s> {
 
         // Process each function in the module.
         //
+
         // #118 follow-up — per-function tier analysis is embarrassingly
         // parallel: each `TierAnalyzer` runs its 9-phase escape /
         // dominance / ownership / concurrency / lifetime / NLL /
         // tier-determination / cross-fn / final passes over an
-        // independent CFG, with no shared mutable state.  Statistics
+        // independent CFG, with no shared mutable state. Statistics
         // and cache writes both go through `&self` Session methods
         // (`cache_tier_analysis` uses an internal RwLock, statistics
         // merge is sequential under one Mutex).
         //
+
         // Opt-out via `VERUM_NO_PARALLEL_CBGR=1` for diagnostic
         // ordering and parallel-only regression triage.
         let parallel_cbgr = std::env::var("VERUM_NO_PARALLEL_CBGR").is_err();
@@ -183,6 +190,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Build a control flow graph from a function declaration
     ///
+
     /// Creates a complete CFG for escape analysis. This builds:
     /// - Entry block for function entry with parameter definitions
     /// - Blocks for if/else branches
@@ -191,6 +199,7 @@ impl<'s> CompilationPipeline<'s> {
     /// - Exit blocks
     /// - Control flow edges between blocks
     ///
+
     /// CFG construction for escape analysis: creates basic blocks for branches,
     /// match arms, loops, with control flow edges for dataflow analysis.
     pub(super) fn build_function_cfg(

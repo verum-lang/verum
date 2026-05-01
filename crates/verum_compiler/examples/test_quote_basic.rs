@@ -1,5 +1,6 @@
 //! Basic test of quote module functionality
 //!
+
 //! This example demonstrates that the quote module is fully functional.
 
 use verum_ast::{FileId, Span};

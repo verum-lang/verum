@@ -4,19 +4,23 @@
 // Layer: 5 (Network — TLS 1.3 core)
 // =============================================================================
 //
+
 // TLS 1.3 uses big-endian u16 + u24 length prefixes and fixed-
 // size byte arrays throughout RFC 8446 §3 structural notation.
 // This module concentrates the raw cursor ops so downstream
 // message encoders/decoders stay declarative.
 //
+
 // # Wire conventions (RFC 8446 §3)
 //
-//   * All integers big-endian.
-//   * Variable-length vectors prefixed with a fixed-width length
-//     field whose size is determined by the field's maximum: u8 for
-//     ≤ 255, u16 for ≤ 65535, u24 for ≤ 16 777 215.
-//   * Enumerated types are fixed-width integers.
+
+//  * All integers big-endian.
+//  * Variable-length vectors prefixed with a fixed-width length
+//  field whose size is determined by the field's maximum: u8 for
+//  ≤ 255, u16 for ≤ 65535, u24 for ≤ 16 777 215.
+//  * Enumerated types are fixed-width integers.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.codec;

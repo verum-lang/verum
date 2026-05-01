@@ -4,10 +4,12 @@
 // Layer: 6
 // Spec: sqlite-native.md §18
 //
+
 // Holds the live values of every connection-scope PRAGMA. The L6
 // `Connection<Mode>` carries one `PragmaConfig` per open handle; the
 // pager / vdbe / planner read these to alter their runtime behaviour.
 //
+
 // Database-scope PRAGMAs (page_size, journal_mode, ...) live in the
 // `DatabaseHeader` (cf. l1_pager/db_header.vr). They are surfaced
 // here only when read via `PRAGMA page_size`.

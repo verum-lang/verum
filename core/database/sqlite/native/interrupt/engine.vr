@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3_interrupt(db)       → void
-//   sqlite3_is_interrupted(db)  → int (0 / 1)
+
+//  sqlite3_interrupt(db) → void
+//  sqlite3_is_interrupted(db) → int (0 / 1)
 // =============================================================================
 
 module core.database.sqlite.native.interrupt.engine;

@@ -5,25 +5,31 @@
 // Dependencies: core, time/duration, time/instant, async/poll, async/stream
 // =============================================================================
 //
+
 // Provides periodic timer types:
 //
+
 // - Interval: Blocking periodic timer
 // - AsyncInterval: Non-blocking async interval implementing Stream
 // - interval(): Convenience constructor for AsyncInterval
 //
+
 // # Example
 //
+
 // ```verum
 // // Blocking interval
 // let timer = Interval.new(Duration.millis(100));
-// timer.tick();   // Blocks for ~100ms
-// timer.tick();   // Blocks for ~100ms
+// timer.tick(); // Blocks for ~100ms
+// timer.tick(); // Blocks for ~100ms
 //
+
 // // Async interval as a stream
 // let stream = interval(Duration.secs(1));
 // // Each .next() yields () after the period elapses
 // ```
 //
+
 // =============================================================================
 
 module interval;
@@ -41,17 +47,19 @@ mount core.async.waker.{Context};
 
 /// A blocking periodic timer.
 ///
+
 /// Each call to `tick()` sleeps until the next period boundary.
 /// The interval compensates for drift by tracking the expected next tick time.
 ///
+
 /// # Example
 /// ```verum
 /// let timer = Interval.new(Duration.millis(50));
 /// let mut count = 0;
 /// while count < 10 {
-///     timer.tick();
-///     count = count + 1;
-///     print(f"tick {count}");
+///  timer.tick();
+///  count = count + 1;
+///  print(f"tick {count}");
 /// }
 /// ```
 public type Interval is {
@@ -64,6 +72,7 @@ public type Interval is {
 implement Interval {
     /// Create a new blocking interval with the given period.
     ///
+
     /// The first tick will fire after one period has elapsed.
     public fn new(period: Duration) -> Interval {
         let now = Time.monotonic();
@@ -84,6 +93,7 @@ implement Interval {
 
     /// Wait until the next tick. Blocks the current thread.
     ///
+
     /// Returns the number of periods that have elapsed since the last tick.
     /// Normally returns 1, but can return more if the caller was slow and
     /// missed one or more ticks.
@@ -131,17 +141,19 @@ implement Interval {
 
 /// An asynchronous interval that implements the Stream protocol.
 ///
+
 /// Each call to `poll_next()` yields `()` after the period elapses.
 /// Suitable for use with stream combinators and async for-loops.
 ///
+
 /// # Example
 /// ```verum
 /// let ticks = interval(Duration.millis(100))
-///     .take(5)
-///     .for_each(|_| {
-///         print("tick");
-///     })
-///     .await;
+///  .take(5)
+///  .for_each(|_| {
+///  print("tick");
+///  })
+///  .await;
 /// ```
 public type AsyncInterval is {
     /// Period between ticks in nanoseconds
@@ -196,8 +208,10 @@ implement Stream for AsyncInterval {
 
 /// Create an async interval stream with the given period.
 ///
+
 /// The stream yields `()` each time the period elapses.
 ///
+
 /// # Example
 /// ```verum
 /// let ticker = interval(Duration.secs(1));

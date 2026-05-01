@@ -3,9 +3,11 @@
 // =============================================================================
 // Spec: postgresql.org/docs/16/protocol-message-formats.html
 //
+
 // Server → client message parsers. Each function takes a `PgFrame`
 // (already-decoded length-prefixed bytes) and returns a typed view.
 //
+
 // Errors propagate through `BackendDecodeError`; a malformed frame at
 // this layer is a server bug or a wire-tampering attack — callers
 // terminate the connection rather than retry.
@@ -177,12 +179,14 @@ public fn parse_parameter_status(payload: List<Byte>) -> Result<ParameterStatus,
 // NotificationResponse — async LISTEN/NOTIFY delivery (BE_NOTIFICATION 'A')
 // -----------------------------------------------------------------------------
 //
+
 // Wire layout:
-//     i32  process_id (sender's backend pid)
-//     cstr channel name (NUL-terminated)
-//     cstr payload (NUL-terminated; "" if NOTIFY had no payload arg)
+//  i32 process_id (sender's backend pid)
+//  cstr channel name (NUL-terminated)
+//  cstr payload (NUL-terminated; "" if NOTIFY had no payload arg)
 //
-// Spec: postgres §6.1.7.  These messages may arrive at any time the
+
+// Spec: postgres §6.1.7. These messages may arrive at any time the
 // connection is in a "the server is allowed to push" state — typically
 // after each ReadyForQuery and during long blocking operations.
 
@@ -424,12 +428,14 @@ public fn parse_error_response(payload: List<Byte>) -> Result<Diagnostic, Backen
 // COPY frames (database.md §6.1.6)
 // -----------------------------------------------------------------------------
 //
+
 // CopyInResponse / CopyOutResponse:
-//     i8   format   — 0 text, 1 binary
-//     i16  num_columns
-//     i16  per_column_format[num_columns]
+//  i8 format — 0 text, 1 binary
+//  i16 num_columns
+//  i16 per_column_format[num_columns]
 //
-// CopyData: opaque payload.  CopyDone: empty.
+
+// CopyData: opaque payload. CopyDone: empty.
 
 public type CopyFormat is CfText | CfBinary;
 

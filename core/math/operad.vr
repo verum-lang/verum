@@ -3,27 +3,31 @@
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
 // Spec: May "The Geometry of Iterated Loop Spaces", Leinster
-//       "Higher Operads, Higher Categories", Lurie HA §2
+//  "Higher Operads, Higher Categories", Lurie HA §2
 //
+
 // An **operad** is a combinatorial gadget encoding abstract algebraic
 // operations of multiple arities, together with composition rules
 // that say how to substitute operations into each other. The
 // classical examples include:
 //
-//   * the associative operad (one binary operation, satisfying
-//     associativity)
-//   * the commutative operad (also associative and commutative)
-//   * E_∞ operads (up-to-homotopy commutative)
-//   * the Little Cubes operads (governing iterated loop spaces)
+
+//  * the associative operad (one binary operation, satisfying
+//  associativity)
+//  * the commutative operad (also associative and commutative)
+//  * E_∞ operads (up-to-homotopy commutative)
+//  * the Little Cubes operads (governing iterated loop spaces)
 //
+
 // In the ∞-categorical world, operads generalise to **∞-operads**
 // (Lurie HA §2.1), which describe algebra structures up to coherent
 // homotopy. This module exposes both the 1-categorical and the
 // ∞-categorical flavours as protocols.
 //
+
 // See also:
-//   - core/math/category.vr           (Monoidal, Symmetric)
-//   - core/math/infinity_category.vr  (InfinityCategory)
+//  - core/math/category.vr (Monoidal, Symmetric)
+//  - core/math/infinity_category.vr (InfinityCategory)
 // =============================================================================
 
 module core.math.operad;
@@ -39,8 +43,10 @@ mount core.math.infinity_category.{InfinityCategory};
 /// `n` with `n` source objects and one target object. It is the
 /// algebraic structure captured by `Hom(c_1, ..., c_n; d)`:
 ///
-///     f : c_1, c_2, ..., c_n -> d
+
+///  f : c_1, c_2, ..., c_n -> d
 ///
+
 /// Composition substitutes a collection of multi-morphisms into the
 /// inputs of another multi-morphism, preserving the target. This
 /// generalises `Category` to multi-input operations.
@@ -75,6 +81,7 @@ public type Multicategory is protocol {
 /// `n` are called **n-ary operations**, and the composition encodes
 /// how operations can be nested.
 ///
+
 /// A symmetric operad has, in addition, an action of the symmetric
 /// group `S_n` on the set of n-ary operations, compatible with
 /// composition.
@@ -132,10 +139,11 @@ public type CommutativeOperad is protocol extends AssociativeOperad {
 /// `f : O(n)`, a morphism `α(f) : A^⊗n → A` — compatibly with
 /// composition, identity, and the symmetric group action.
 ///
+
 /// Examples:
-///   * An Ass-algebra in Set is an associative monoid.
-///   * A Comm-algebra in Set is a commutative monoid.
-///   * An E_∞-algebra in simplicial sets is a homotopy-commutative ∞-ring.
+///  * An Ass-algebra in Set is an associative monoid.
+///  * A Comm-algebra in Set is a commutative monoid.
+///  * An E_∞-algebra in simplicial sets is a homotopy-commutative ∞-ring.
 public type AlgebraOverOperad<O, M> is protocol {
     /// The underlying object in the monoidal category `M`.
     fn carrier(&self) -> Int;
@@ -162,6 +170,7 @@ public type AlgebraOverOperad<O, M> is protocol {
 /// ∞-categories. Concretely, it encodes algebraic operations whose
 /// composition is coherent up to higher homotopy.
 ///
+
 /// This protocol mirrors `Operad` but allows the operations to form
 /// ∞-groupoids rather than sets, and the composition laws hold up to
 /// coherent homotopy.

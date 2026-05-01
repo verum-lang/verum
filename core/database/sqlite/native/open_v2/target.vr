@@ -1,7 +1,7 @@
 // =============================================================================
 // open_v2/target.vr — resolved open target
 // =============================================================================
-// Spec: SQLite C API — sqlite3_open family.  The filename argument can
+// Spec: SQLite C API — sqlite3_open family. The filename argument can
 // be a regular path, `:memory:`, empty (temp DB), or a `file:` URI.
 // The target catalogue resolves each form without opening anything.
 // =============================================================================

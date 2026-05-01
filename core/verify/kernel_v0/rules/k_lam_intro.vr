@@ -2,42 +2,53 @@
 // kernel_v0 — T-Lam-Intro inference rule + soundness lemma (ADMITTED)
 // =============================================================================
 //
+
 // **Rule**
 //
-//   ┌─────────────────────────────────────────────────────────┐
-//   │ Γ      ⊢ A    : Universe(n)                              │
-//   │ Γ, A   ⊢ body : T                                          │
-//   │ ────────────────────────────────────────  T-Lam-Intro       │
-//   │ Γ      ⊢ Lam(A, body) : Pi(A, T)                            │
-//   └─────────────────────────────────────────────────────────┘
+
+//  ┌─────────────────────────────────────────────────────────┐
+//  │ Γ ⊢ A : Universe(n) │
+//  │ Γ, A ⊢ body : T │
+//  │ ──────────────────────────────────────── T-Lam-Intro │
+//  │ Γ ⊢ Lam(A, body) : Pi(A, T) │
+//  └─────────────────────────────────────────────────────────┘
 //
+
 // **Soundness lemma** (ADMITTED — categorical-product IOU)
 //
-//   For every Γ, A, body, T satisfying both premises, the term
-//   Lam(A, body) inhabits Pi(A, T) in the categorical model.
+
+//  For every Γ, A, body, T satisfying both premises, the term
+//  Lam(A, body) inhabits Pi(A, T) in the categorical model.
 //
+
 // **Why admitted (not yet proved)**
 //
+
 // The denotational interpretation `⟦Γ ⊢ Lam(A, body) : Pi(A, T)⟧` is
 // the exponential-transpose of `⟦Γ, A ⊢ body : T⟧` along the canonical
-// product projection.  The soundness step reduces to the
+// product projection. The soundness step reduces to the
 // CARTESIAN-CLOSED-CATEGORY property:
 //
-//     For every f: A × X → Y, there exists λf: X → Y^A.
+
+//  For every f: A × X → Y, there exists λf: X → Y^A.
 //
+
 // In the syntactic model, this is folklore but requires structural
-// induction on the body's derivation.  The proof is the textbook
+// induction on the body's derivation. The proof is the textbook
 // "λ-introduction admissibility" of dependent type theory.
 //
+
 // **Discharge plan** (#173 Phase 2)
 //
-//   1. Formalize `cartesian_closure_for_pi` lemma as a separate
-//      Verum theorem in `core/verify/kernel_v0/lemmas/`.
-//   2. Cross-discharge via Coq/Lean foreign-tool re-check.
+
+//  1. Formalize `cartesian_closure_for_pi` lemma as a separate
+//  Verum theorem in `core/verify/kernel_v0/lemmas/`.
+//  2. Cross-discharge via Coq/Lean foreign-tool re-check.
 //
+
 // **Dependency**: indirectly relies on the substitution lemma
 // because the categorical adjunction's unit/counit laws involve
-// substitution at the syntactic level.  Discharge T-Pi-Form first.
+// substitution at the syntactic level. Discharge T-Pi-Form first.
 // =============================================================================
 
 module core.verify.kernel_v0.rules.k_lam_intro;
@@ -50,8 +61,9 @@ mount super.super.judgment.{Derivation, type_of};
 /// Construct a T-Lam-Intro derivation from the domain-well-typedness
 /// and body-typing premises.
 ///
+
 /// The `result_type` parameter is the elaborator's record of `Pi(A, T)`
-/// where T is the body's inferred type.  By convention, the elaborator
+/// where T is the body's inferred type. By convention, the elaborator
 /// constructs this via `make_pi(A, T)`.
 public fn introduce_lam(
     ctx: Context,
@@ -69,15 +81,18 @@ public fn introduce_lam(
 
 /// **Soundness lemma — ADMITTED.**
 ///
+
 /// `∀ ctx A body T.
-///     Γ ⊢ A : Univ(n)
-///     → Γ, A ⊢ body : T
-///     → Γ ⊢ Lam(A, body) : Pi(A, T).`
+///  Γ ⊢ A : Univ(n)
+///  → Γ, A ⊢ body : T
+///  → Γ ⊢ Lam(A, body) : Pi(A, T).`
 ///
+
 /// **IOU** (recorded in audit bundle `soundness-iou.json`):
 /// cartesian-closure — the categorical model must satisfy the
 /// adjunction `(- × A) ⊣ (-)^A`, providing the λ-transpose.
 ///
+
 /// **Discharge target**: lemma `cartesian_closure_for_pi` in
 /// `core/verify/kernel_v0/lemmas/cartesian.vr` (Phase-1 work).
 @verify(formal)

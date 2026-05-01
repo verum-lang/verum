@@ -1,13 +1,14 @@
 // dbpage write-guard rules.
 //
+
 // dbpage(pgno, schema) lets a SELECT pull raw page bytes; an UPDATE writes
-// raw bytes back.  These bytes bypass the b-tree, so the engine enforces:
-//   * the connection holds an open write-txn
-//   * the schema is the writable database (not "temp" by default)
-//   * the page number is in the legal range
-//   * the buffer length matches the page size exactly
-//   * no page-1 overwrite when SQLITE_DBCONFIG_DEFENSIVE is on
-//   * no journal/WAL pages are modifiable directly
+// raw bytes back. These bytes bypass the b-tree, so the engine enforces:
+//  * the connection holds an open write-txn
+//  * the schema is the writable database (not "temp" by default)
+//  * the page number is in the legal range
+//  * the buffer length matches the page size exactly
+//  * no page-1 overwrite when SQLITE_DBCONFIG_DEFENSIVE is on
+//  * no journal/WAL pages are modifiable directly
 
 module core.database.sqlite.native.dbpage_writeguard_api.guard;
 

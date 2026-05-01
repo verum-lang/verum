@@ -1,11 +1,13 @@
 //! Per-rule fires/silent contract tests for `verum lint`.
 //!
+
 //! Every built-in rule has a matched pair: a fixture that *should*
 //! fire the rule, and a fixture that explicitly should not. Together
 //! they pin both sides of the rule's behaviour — silencing it
 //! without breaking detection requires editing the test, which makes
 //! the change visible at PR time.
 //!
+
 //! Tests run against `lint_source(...)` (no disk I/O) so this file
 //! costs ~milliseconds to run and adds zero filesystem flakes.
 

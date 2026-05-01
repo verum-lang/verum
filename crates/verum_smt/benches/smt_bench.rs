@@ -1,9 +1,11 @@
 //! Performance benchmarks for SMT solving
 //!
+
 //! Performance targets from CLAUDE.md:
 //! - SMT queries: < 10ms average
 //! - Refinement checking: < 50ms per function
 //!
+
 //! NOTE: Rewritten to use current verify_refinement API.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};

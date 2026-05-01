@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.1
 //
+
 // `StatementCache` is the container — capped at `max_entries`, with
 // pluggable `EvictionPolicy`. The L7 façade calls `lookup(sql)`
 // before parsing; on hit, the cached `program_id` is reused. On
 // miss, the caller compiles and `insert`s.
 //
+
 // Statistics surface (`hits`, `misses`, `evictions`, `pin_failures`)
 // are exposed via `pragma stmt_cache_stats`.
 // =============================================================================

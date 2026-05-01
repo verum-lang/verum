@@ -5,11 +5,13 @@
 // Dependencies: core, text.regex, base.iterator
 // =============================================================================
 //
+
 // In-process replacements for the most common stream-text utilities. All
 // functions are `Pure` — no IO, no allocation beyond the result. Faster
 // than spawning `grep`/`sed`/`awk` (no process startup), portable, and
 // composable with `core.shell.transducer` pipelines.
 //
+
 // =============================================================================
 
 module text_utils;

@@ -28,7 +28,7 @@ public fn category_name(c: &CompileOptionCategory) -> Text {
     }
 }
 
-// Classify a compile-option name.  Match by prefix.
+// Classify a compile-option name. Match by prefix.
 public fn classify(name: Text) -> CompileOptionCategory {
     if starts_with(&name, "ENABLE_".clone())   { return CtEnable; }
     if starts_with(&name, "OMIT_".clone())     { return CtOmit; }

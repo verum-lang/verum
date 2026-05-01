@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 (FTS5 segments)
 //
+
 // One `Segment` is a sorted (term, posting_list) collection that has
 // been frozen onto disk. Segments are written by the index tree's
 // flush path; the merger periodically combines older segments into

@@ -4,7 +4,7 @@ module core.database.sqlite.native.snapshot_get_open_api.snap;
 
 mount base.{Bool, Int64, Text};
 
-// Opaque snapshot handle.  In the C library this is `sqlite3_snapshot*`;
+// Opaque snapshot handle. In the C library this is `sqlite3_snapshot*`;
 // here we represent the on-disk identifier (mxFrame + saltBytes).
 public type WalSnapshot is {
     schema: Text,         // "main", "temp", or attached-db name
@@ -27,7 +27,7 @@ public fn equal(a: &WalSnapshot, b: &WalSnapshot) -> Bool {
 }
 
 // Result of sqlite3_snapshot_cmp(a, b):
-//   negative if a < b, zero if equal, positive if a > b.
+//  negative if a < b, zero if equal, positive if a > b.
 // Two snapshots are comparable only when their salts match (same commit-id);
 // otherwise the call returns SQLITE_ERROR.
 public type CmpResult is

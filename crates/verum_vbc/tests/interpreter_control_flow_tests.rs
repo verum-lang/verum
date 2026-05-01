@@ -14,6 +14,7 @@
 )]
 //! Interpreter tests for control flow, function calls, and CBGR generation tracking.
 //!
+
 //! Covers:
 //! - JmpIf / JmpNot branching
 //! - Loops via backward jumps
@@ -97,12 +98,13 @@ fn create_multi_fn_module(functions: &[(&[Instruction], u16)]) -> Arc<VbcModule>
 fn test_jmp_if_taken() {
     // if true { return 1 } else { return 2 }
     // LoadTrue r0
-    // JmpIf r0, +2  (skip the next 2 instructions if true)
-    // LoadSmallI r1, 2  <-- skipped
-    // Ret r1            <-- skipped
+    // JmpIf r0, +2 (skip the next 2 instructions if true)
+    // LoadSmallI r1, 2 <-- skipped
+    // Ret r1 <-- skipped
     // LoadSmallI r1, 1
     // Ret r1
     //
+
     // But the JmpIf offset is in BYTES from the current instruction,
     // so we need to compute exact byte offsets.
     // Instead, let's use a simpler approach: compute offsets from encoded bytes.
@@ -286,11 +288,11 @@ fn test_simple_countdown_loop() {
     // r2 = 1 (decrement constant)
     // r3 = 0 (zero for comparison)
     // Loop:
-    //   r1 = r1 + r0
-    //   r0 = r0 - r2
-    //   r4 = (r0 > r3) ?
-    //   if r4, jump back to loop start
-    //   ret r1
+    //  r1 = r1 + r0
+    //  r0 = r0 - r2
+    //  r4 = (r0 > r3) ?
+    //  if r4, jump back to loop start
+    //  ret r1
 
     // First compute the loop body size for the backward jump
     let loop_body = [
@@ -1569,9 +1571,9 @@ fn test_int_float_conversion_roundtrip() {
 fn test_recursive_fibonacci() {
     // fib(n): if n <= 1 return n; else return fib(n-1) + fib(n-2)
     // Function 1: fib(n)
-    //   r0 = n
-    //   if n <= 1 => return n
-    //   else => return fib(n-1) + fib(n-2)
+    //  r0 = n
+    //  if n <= 1 => return n
+    //  else => return fib(n-1) + fib(n-2)
 
     let ret_n = [
         Instruction::Ret { value: Reg(0) },

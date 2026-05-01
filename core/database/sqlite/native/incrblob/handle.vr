@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `BlobHandle` records the (db, table, column, rowid, mode) tuple
 // the caller opened, plus the cached `bytes` length so `sqlite3_blob_bytes`
 // can answer in O(1) without re-reading the column.

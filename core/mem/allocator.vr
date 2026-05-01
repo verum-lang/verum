@@ -5,45 +5,53 @@
 // Dependencies: sys/{platform}/mem, sys/common, mem/header, mem/capability
 // =============================================================================
 //
+
 // This module implements a high-performance, CBGR-integrated memory allocator
 // without libc dependencies. It uses direct syscalls via the sys/ layer.
 //
+
 // # Architecture
 //
+
 // ```
 // ┌────────────────────────────────────────────────────────────────────┐
-// │ LAYER 3: User API                                                  │
-// │   cbgr_alloc<T>() -> Result<ThinRef<T>, AllocError>                │
-// │   cbgr_dealloc(ref: ThinRef<T>)                                    │
+// │ LAYER 3: User API │
+// │ cbgr_alloc<T>() -> Result<ThinRef<T>, AllocError> │
+// │ cbgr_dealloc(ref: ThinRef<T>) │
 // └──────────────────────────────────────────────────────────────────┬─┘
-//                                                                    │
+//  │
 // ┌──────────────────────────────────────────────────────────────────▼─┐
-// │ LAYER 2: Thread-Local Heap (no locks on fast path)                 │
-// │   AllocatorLocalHeap { pages: [PagePtr; SIZE_CLASSES], cache, stats }       │
+// │ LAYER 2: Thread-Local Heap (no locks on fast path) │
+// │ AllocatorLocalHeap { pages: [PagePtr; SIZE_CLASSES], cache, stats } │
 // └──────────────────────────────────────────────────────────────────┬─┘
-//                                                                    │
+//  │
 // ┌──────────────────────────────────────────────────────────────────▼─┐
-// │ LAYER 1: Page Manager (64KB pages, slab allocation)                │
-// │   AllocPageHeader { generation, epoch, slots[], free_list }             │
+// │ LAYER 1: Page Manager (64KB pages, slab allocation) │
+// │ AllocPageHeader { generation, epoch, slots[], free_list } │
 // └──────────────────────────────────────────────────────────────────┬─┘
-//                                                                    │
+//  │
 // ┌──────────────────────────────────────────────────────────────────▼─┐
-// │ LAYER 0: OS Backend (mmap/VirtualAlloc)                            │
-// │   2MB chunks aligned to huge pages                                 │
+// │ LAYER 0: OS Backend (mmap/VirtualAlloc) │
+// │ 2MB chunks aligned to huge pages │
 // └────────────────────────────────────────────────────────────────────┘
 // ```
 //
+
 // # Dual-Mode CBGR
 //
+
 // - **Small Objects (≤2KB)**: Page-level generation with per-slot delta
 // - **Large Objects (>2KB)**: Inline 32-byte AllocationHeader
 //
+
 // # Performance Targets
 //
+
 // - Alloc fast path: ~20ns (thread-local, no locks)
 // - Dealloc fast path: ~15ns (same thread)
 // - CBGR validation: ~5ns (page-level mode)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 6
 // =============================================================================
 
@@ -118,16 +126,16 @@ public type AllocError is
     | InvalidPointer
     /// The requested allocation would overflow the addressable size
     /// space (e.g. `cap * elem_size > Int.MAX`, or `len + 1` would
-    /// wrap an `Int`).  Surfaced by container types as the typed
-    /// alternative to panicking on adversarial sizes.  `requested`
+    /// wrap an `Int`). Surfaced by container types as the typed
+    /// alternative to panicking on adversarial sizes. `requested`
     /// is the would-be element / capacity count that triggered the
     /// overflow (not bytes, since the byte count itself overflowed).
     | CapacityOverflow { requested: Int }
     /// The current target OS has no `os_mmap` / `os_munmap` lowering
-    /// in this build.  Surfaced as a typed error rather than the
+    /// in this build. Surfaced as a typed error rather than the
     /// previous `unreachable()` so a future cross-compile to an
     /// unsupported target is a propagable failure, not a runtime
-    /// panic from inside the kernel-page allocator.  `op` is the
+    /// panic from inside the kernel-page allocator. `op` is the
     /// failing entry point ("mmap" or "munmap") for diagnostic
     /// disambiguation.
     | UnsupportedOs { op: Text }
@@ -184,6 +192,7 @@ implement Eq for AllocError {
 
 /// Describes the memory layout requirements for a type.
 ///
+
 /// Layout captures the size and alignment needed to allocate memory for a type.
 /// It is used by allocators to properly align and size memory allocations.
 public type Layout is {
@@ -196,6 +205,7 @@ public type Layout is {
 implement Layout {
     /// Create a layout for a type T.
     ///
+
     /// Uses compile-time type properties to determine size and alignment.
     public fn new<T>() -> Layout {
         Layout {
@@ -206,6 +216,7 @@ implement Layout {
 
     /// Create a layout from explicit size and alignment.
     ///
+
     /// ## Panics
     /// Panics if alignment is not a power of 2 OR if size is
     /// negative. Prefer [`try_from_size_align`] when either value
@@ -244,6 +255,7 @@ implement Layout {
 
     /// Create a layout from size with natural alignment.
     ///
+
     /// Natural alignment is the largest power of 2 that divides size,
     /// clamped to a maximum of 16 (typical cache line consideration).
     public fn from_size(size: Int) -> Layout {
@@ -270,11 +282,13 @@ implement Layout {
 
     /// Calculate layout for an array of n elements.
     ///
+
     /// ## Panics
     /// Panics on `n < 0` and on `self.size_ * n` overflow. For
     /// untrusted `n` (deserialized config, peer-supplied count) use
     /// [`try_repeat`] which returns `Err(AllocError)` instead.
     ///
+
     /// Without these checks, a peer-controlled `n` of 2^60 against
     /// a 16-byte element would compute `16 * 2^60 = 2^64`, overflow
     /// Int (i64), wrap negative, and propagate a corrupt Layout to
@@ -312,8 +326,10 @@ implement Layout {
 
     /// Extend this layout with another, returning combined layout.
     ///
+
     /// The second layout is placed after the first with proper padding.
     ///
+
     /// ## Panics
     /// Panics if the padded size or final combined size would
     /// overflow Int. For untrusted layouts, use [`try_extend`].
@@ -373,6 +389,7 @@ public fn align_down(value: Int, align: Int) -> Int {
 
 /// Allocator protocol for memory allocation.
 ///
+
 /// This is an alias for the Allocator protocol for compatibility.
 public type Alloc is protocol {
     fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError>;
@@ -1138,6 +1155,7 @@ fn get_thread_id() -> UInt32 {
 /// Allocate memory with CBGR tracking.
 /// Returns pointer, generation, and epoch.
 ///
+
 /// Mapped to the `cbgr_alloc` intrinsic at codegen time. The Verum body
 /// below is the SEMANTIC specification — interpreters / AOT backends
 /// replace the call with `FfiExtended(CbgrAlloc, 0xA0)` which bypasses
@@ -1166,6 +1184,7 @@ public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UIn
 /// Allocate zeroed memory with CBGR tracking.
 /// Mapped to the `cbgr_alloc_zeroed` intrinsic (FfiSubOpcode 0xA1).
 ///
+
 /// Earlier revisions zeroed via a per-byte
 /// `for i in 0..size { ptr_write(ptr_offset(ptr, i), 0) }`
 /// loop — for any allocation larger than a single cache line
@@ -1190,6 +1209,7 @@ public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt
 
 /// Deallocate memory.
 ///
+
 /// Forwards the underlying heap-side error verbatim instead
 /// of collapsing every failure to `InvalidPointer`. The
 /// previous `Err(e) => Err(AllocError.InvalidPointer)` arm
@@ -1209,26 +1229,29 @@ public fn cbgr_dealloc(ptr: &unsafe Byte) -> Result<(), AllocError> {
 
 /// Reallocate memory to new size.
 ///
+
 /// Two improvements over the earlier per-byte implementation:
 ///
-///   * Copy via `memcpy(new_ptr, ptr, copy_size)` instead of
-///     a per-byte `ptr_write(ptr_offset(ptr, i), byte_val)`
-///     loop. Same 50-100× speedup story as
-///     `cbgr_alloc_zeroed`'s memset switch — `memcpy` lowers
-///     to LLVM's memcpy intrinsic and the OS gets to use
-///     `rep movsb` / NEON / SVE for optimal bandwidth. Every
-///     `List.push` past initial capacity, every `Text` grow,
-///     every `Map` rehash funnels through this path.
+
+///  * Copy via `memcpy(new_ptr, ptr, copy_size)` instead of
+///  a per-byte `ptr_write(ptr_offset(ptr, i), byte_val)`
+///  loop. Same 50-100× speedup story as
+///  `cbgr_alloc_zeroed`'s memset switch — `memcpy` lowers
+///  to LLVM's memcpy intrinsic and the OS gets to use
+///  `rep movsb` / NEON / SVE for optimal bandwidth. Every
+///  `List.push` past initial capacity, every `Text` grow,
+///  every `Map` rehash funnels through this path.
 ///
-///   * Strong-guarantee semantics on dealloc-failure: if the
-///     new allocation succeeds but freeing the old block
-///     fails, we now `cbgr_dealloc(new_result.0)` to release
-///     the freshly-allocated block and surface the original
-///     error.  Earlier revisions returned `Err` on
-///     dealloc-failure but **leaked the new block** —
-///     callers got back an error AND lost the new
-///     allocation, doubling the impact of any rare
-///     dealloc-side failure.
+
+///  * Strong-guarantee semantics on dealloc-failure: if the
+///  new allocation succeeds but freeing the old block
+///  fails, we now `cbgr_dealloc(new_result.0)` to release
+///  the freshly-allocated block and surface the original
+///  error. Earlier revisions returned `Err` on
+///  dealloc-failure but **leaked the new block** —
+///  callers got back an error AND lost the new
+///  allocation, doubling the impact of any rare
+///  dealloc-side failure.
 public fn cbgr_realloc(
     ptr: &unsafe Byte,
     old_size: Int,
@@ -1247,10 +1270,10 @@ public fn cbgr_realloc(
                 Err(e) => {
                     // Strong guarantee: the original allocation
                     // is still live (dealloc failed) AND we
-                    // just allocated a new block.  Release the
+                    // just allocated a new block. Release the
                     // new block so the caller doesn't end up
                     // owning two copies of the same logical
-                    // allocation.  The original `ptr` remains
+                    // allocation. The original `ptr` remains
                     // owned by the caller.
                     let _ = cbgr_dealloc(new_ptr);
                     Err(e)
@@ -1288,6 +1311,7 @@ public fn get_header_from_ptr(ptr: &unsafe Byte) -> &AllocationHeader {
 // - Debug allocators for tracking
 // - Custom allocators for specialized use cases
 //
+
 // Spec: docs/architecture/new-arch-spec.md Appendix F.3
 // =============================================================================
 
@@ -1297,21 +1321,25 @@ public const CONTEXT_SLOT_ALLOCATOR: UInt8 = 1;
 
 /// Allocator protocol for context-based allocation.
 ///
+
 /// Custom allocators implement this protocol and can be provided
 /// via the context system using `provide`.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// type ArenaAllocator implements Allocator {
-///     fn alloc(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
-///         // Arena allocation logic
-///     }
-///     // ...
+///  fn alloc(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+///  // Arena allocation logic
+///  }
+///  // ...
 /// }
 ///
+
 /// provide ArenaAllocator.new() as Allocator {
-///     // All allocations in this scope use the arena
+///  // All allocations in this scope use the arena
 /// }
 /// ```
 public type Allocator is protocol {
@@ -1370,6 +1398,7 @@ static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 
 /// Get the current allocator from context, or fall back to global.
 ///
+
 /// This is the main entry point for context-aware allocation.
 /// When a custom allocator is provided via `provide`, it will be used.
 /// Otherwise, the global CBGR allocator is used.
@@ -1384,8 +1413,10 @@ public fn get_allocator() -> &dyn Allocator {
 
 /// Set a custom allocator in the context.
 ///
+
 /// # Safety
 ///
+
 /// The allocator must remain valid for the duration of the context scope.
 @inline
 public fn set_context_allocator(allocator: &dyn Allocator) {
@@ -1404,6 +1435,7 @@ public fn clear_context_allocator() {
 
 /// Allocate using the context allocator (or global if none provided).
 ///
+
 /// This is the recommended way to allocate when you want to respect
 /// context-provided allocators.
 @inline
@@ -1499,20 +1531,25 @@ public fn get_global_alloc_stats() -> AllocStats {
 
 /// Tiered allocator with thread-local caching and size class optimization.
 ///
+
 /// This is the default high-performance allocator. It uses the CBGR-integrated
 /// allocation system which operates in three tiers:
 ///
+
 /// 1. **Thread-local fast path** (~20ns): Small allocations (≤2KB) are served
-///    from thread-local `AllocatorLocalHeap` with no locking. Size-class-based slabs
-///    minimize fragmentation.
+///  from thread-local `AllocatorLocalHeap` with no locking. Size-class-based slabs
+///  minimize fragmentation.
 ///
+
 /// 2. **Page manager** (~100ns): When thread-local caches are exhausted,
-///    new 64KB pages are carved from pre-allocated 2MB chunks with CBGR
-///    metadata (generation counters, epoch capabilities).
+///  new 64KB pages are carved from pre-allocated 2MB chunks with CBGR
+///  metadata (generation counters, epoch capabilities).
 ///
+
 /// 3. **OS backend** (~1μs): Large allocations (>2KB) use direct mmap/
-///    VirtualAlloc with inline allocation headers.
+///  VirtualAlloc with inline allocation headers.
 ///
+
 /// This allocator delegates to the global CBGR allocation infrastructure,
 /// which provides the tiered behavior automatically.
 public type TieredAllocator is ();
@@ -1520,6 +1557,7 @@ public type TieredAllocator is ();
 implement TieredAllocator {
     /// Initialize the tiered allocator.
     ///
+
     /// The underlying AllocatorLocalHeap and page infrastructure is initialized
     /// lazily on first allocation per thread.
     public fn init() -> Result<TieredAllocator, AllocError> {
@@ -1528,6 +1566,7 @@ implement TieredAllocator {
 
     /// Shutdown the allocator and release thread-local caches.
     ///
+
     /// After shutdown, any outstanding allocations remain valid but new
     /// allocations through this allocator will fail.
     public fn shutdown(&self) {
@@ -1565,12 +1604,14 @@ implement Allocator for TieredAllocator {
 
 /// Simple allocator without thread-local caching.
 ///
+
 /// Uses the global CBGR allocation without any additional caching or
 /// optimization layers. Suitable for:
 /// - Single-threaded applications where thread-local overhead is unnecessary
 /// - Debugging/profiling where direct allocation tracking is preferred
 /// - Embedded contexts with minimal memory overhead
 ///
+
 /// All allocations go directly through the global page manager with
 /// proper CBGR metadata (generation + epoch capabilities).
 public type SimpleAllocator is {
@@ -1591,6 +1632,7 @@ implement SimpleAllocator {
 
     /// Shutdown the allocator.
     ///
+
     /// In debug mode, reports if there are outstanding allocations.
     public fn shutdown(&self) {
         if self.active_allocs != 0 {
@@ -1679,25 +1721,32 @@ implement Allocator for SimpleAllocator {
 
 /// Bump allocator for arena-style allocation.
 ///
+
 /// Allocations are served by bumping a pointer forward in a contiguous
 /// memory region. Individual deallocations are no-ops — all memory is
 /// released together when the allocator is reset or dropped.
 ///
+
 /// # Performance
 ///
+
 /// - **Alloc**: O(1), ~5ns (pointer bump + alignment)
 /// - **Dealloc**: O(1), ~0ns (no-op)
 /// - **Reset**: O(1), ~0ns (pointer reset)
 ///
+
 /// # Use Cases
 ///
+
 /// - Temporary allocations within a function or scope
 /// - Parse tree construction (allocate many nodes, free all at once)
 /// - Per-frame game allocations
 /// - Any pattern where objects have uniform lifetime
 ///
+
 /// # Limitations
 ///
+
 /// - Cannot free individual allocations
 /// - Fixed capacity — panics on overflow (use `try_alloc` for fallible)
 /// - Not thread-safe — use one per thread
@@ -1717,12 +1766,15 @@ public type MemStackAllocator is {
 implement MemStackAllocator {
     /// Create a new bump allocator with the given capacity in bytes.
     ///
+
     /// The backing memory is obtained from the global allocator.
     /// Capacity should be chosen to cover the expected total allocation
     /// within the arena's lifetime.
     ///
+
     /// # Panics
     ///
+
     /// Panics if the backing memory cannot be allocated.
     public fn init(capacity: Int) -> Result<MemStackAllocator, AllocError> {
         if capacity <= 0 {
@@ -1750,6 +1802,7 @@ implement MemStackAllocator {
 
     /// Reset the allocator, logically freeing all allocations.
     ///
+
     /// After reset, the full capacity is available again.
     /// Previously returned pointers become invalid.
     public fn reset(&mut self) {

@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `StepOutcome` is the typed counterpart to sqlite3_step's return
 // integer. The five SQLite codes the catalogue exposes:
 //
-//   SQLITE_ROW    = 100
-//   SQLITE_DONE   = 101
-//   SQLITE_BUSY   = 5
-//   SQLITE_ERROR  = 1
-//   SQLITE_MISUSE = 21
+
+//  SQLITE_ROW = 100
+//  SQLITE_DONE = 101
+//  SQLITE_BUSY = 5
+//  SQLITE_ERROR = 1
+//  SQLITE_MISUSE = 21
 //
+
 // Anything else is wrapped in `SoOther(code)` so callers can route
 // extended error codes themselves.
 // =============================================================================

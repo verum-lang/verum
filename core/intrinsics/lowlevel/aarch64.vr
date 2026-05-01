@@ -4,11 +4,14 @@
 // Layer: Stdlib (1)
 // Dependencies: LLVM AOT compilation
 //
+
 // ARM64-specific intrinsics that require AOT compilation.
 // Many functions in this module are @llvm_only.
 //
+
 // # Categories
 //
+
 // - CPU Feature Detection: cpu_features, detect_sve, detect_sve2
 // - NEON: vfmaq_f32, vsqrtq_f32, vrecpeq_f32, vpaddq_f32, vdotq_s32
 // - Cryptographic: vaeseq_u8, vaesmcq_u8, vsha256hq_u32
@@ -18,12 +21,15 @@
 // - Cache Operations: dc_cvac, dc_civac, ic_ivau
 // - Hint Instructions: yield_cpu, wfi, wfe, sev
 //
+
 // # Safety
 //
+
 // Most intrinsics are safe because they operate on values. Intrinsics
 // that access system registers or execute privileged instructions
 // require unsafe blocks and are marked accordingly.
 //
+
 // Spec: docs/architecture/low-level-features.md Section 5.4
 // =============================================================================
 
@@ -350,6 +356,7 @@ public fn read_cntfrq_el0() -> UInt64;
 
 /// Read the user-mode thread pointer register (TPIDR_EL0).
 ///
+
 /// aarch64 Linux uses TPIDR_EL0 as the thread-pointer register that holds
 /// the TCB address for @thread_local resolution. Userspace can read it
 /// freely (it is software-owned from EL0).
@@ -360,6 +367,7 @@ public fn read_tpidr_el0() -> UInt64;
 
 /// Write the user-mode thread pointer register (TPIDR_EL0).
 ///
+
 /// Used by the Linux TLS bootstrap (sys/linux/tls.vr) as the aarch64
 /// equivalent of x86_64 `arch_prctl(ARCH_SET_FS, ptr)`. Unlike x86_64
 /// segment base manipulation, writing TPIDR_EL0 is permitted from EL0

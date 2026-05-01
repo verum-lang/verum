@@ -3,8 +3,10 @@
 // =============================================================================
 // Expression indexes (SQLite 3.9+):
 //
-//   CREATE INDEX idx_lower ON users(LOWER(name));
+
+//  CREATE INDEX idx_lower ON users(LOWER(name));
 //
+
 // Queries that reference the same expression syntactically can use the
 // index. All expressions must be deterministic.
 // Spec §13.3 — index variants.

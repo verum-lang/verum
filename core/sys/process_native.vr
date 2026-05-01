@@ -5,37 +5,45 @@
 // Dependencies: sys.{linux,darwin}, base.memory
 // =============================================================================
 //
+
 // Direct-syscall implementation of pipe + fork + dup2 + execve.
 //
+
 // ## Fork-safety contract
 //
+
 // After `fork()`, the child process:
-//   * MUST NOT call any allocator (Verum heap is in indeterminate state —
-//     mutex from the parent's allocator could be locked by another thread
-//     that no longer exists in the child, causing deadlock).
-//   * MUST NOT take any lock the parent might hold (futex, mutex, RwLock).
-//   * MUST NOT touch any TLS that the parent's runtime might have
-//     initialised (executor state, panic handlers, tracing buffers).
-//   * MUST only call async-signal-safe syscalls (POSIX list).
+//  * MUST NOT call any allocator (Verum heap is in indeterminate state —
+//  mutex from the parent's allocator could be locked by another thread
+//  that no longer exists in the child, causing deadlock).
+//  * MUST NOT take any lock the parent might hold (futex, mutex, RwLock).
+//  * MUST NOT touch any TLS that the parent's runtime might have
+//  initialised (executor state, panic handlers, tracing buffers).
+//  * MUST only call async-signal-safe syscalls (POSIX list).
 //
+
 // To honour this contract every byte the child needs (program path, argv
 // pointer table, NUL-terminated args) is materialised in the *parent*
 // **before** `fork()`. The child only:
-//   1. Calls `dup2()` to wire pipe ends.
-//   2. Calls `close()` on now-redundant pipe fds.
-//   3. Calls `execve()` with the pre-built pointer arrays.
-//   4. On execve failure, calls `_exit(127)` directly (no destructors,
-//      no buffer flushing, no lock release).
+//  1. Calls `dup2()` to wire pipe ends.
+//  2. Calls `close()` on now-redundant pipe fds.
+//  3. Calls `execve()` with the pre-built pointer arrays.
+//  4. On execve failure, calls `_exit(127)` directly (no destructors,
+//  no buffer flushing, no lock release).
 //
+
 // ## Layout of the pre-built argv buffer
 //
-//     buffer:  [path_bytes\0 arg0_bytes\0 arg1_bytes\0 ... argN_bytes\0]
-//     ptrs:    [ &buffer[0]  &buffer[off1]  &buffer[off2]  ...  NULL ]
+
+//  buffer: [path_bytes\0 arg0_bytes\0 arg1_bytes\0 ... argN_bytes\0]
+//  ptrs: [ &buffer[0] &buffer[off1] &buffer[off2] ... NULL ]
 //
+
 // Both are owned by the parent. After fork, the child references them
 // by absolute pointer; their contents are read-only and the kernel
 // preserves them across the exec call.
 //
+
 // =============================================================================
 
 module core.sys.process_native;
@@ -90,6 +98,7 @@ public type SpawnResult is {
 // ArgvBlob — pre-built, fork-safe argv layout
 // =============================================================================
 //
+
 // One contiguous byte buffer holding all NUL-terminated strings, plus a
 // pointer table. Both are computed in the parent so the child only reads.
 
@@ -176,7 +185,7 @@ public fn native_spawn(
         }
 
         // 2. Pre-build argv as a single contiguous, fork-stable blob.
-        //    Owned by the parent; read by the child via absolute pointers.
+        //  Owned by the parent; read by the child via absolute pointers.
         let blob = build_argv_blob(program, args);
 
         // Capture absolute pointers BEFORE fork. Post-fork access to

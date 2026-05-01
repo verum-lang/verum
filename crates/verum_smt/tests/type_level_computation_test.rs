@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for type-level computation interpreter
 //!
+
 //! Tests all features implemented in type_level_computation.rs:
 //! - Reduction strategies (call-by-value, call-by-name, normal form, WHNF)
 //! - Type-level arithmetic (add, sub, mul, div)
@@ -23,6 +24,7 @@
 //! - Expression simplification and beta reduction
 //! - User-defined type functions
 //!
+
 //! Type-level programming: types computed by functions at compile time.
 //! Type-level arithmetic (plus, mult on Nat), type-level conditionals,
 //! indexed types (Fin<n>, List<T, n>), and type functions that return Type.

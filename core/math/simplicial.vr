@@ -4,10 +4,12 @@
 // Layer: Foundations (Mathematical Structures)
 // Spec: HoTT book §6, Lurie "Higher Topos Theory" §1
 //
+
 // A thin stdlib module exposing simplicial sets, horns, Kan complexes,
 // and ∞-groupoids. This is the combinatorial substrate that ∞-categories
 // (in infinity_category.vr) and ∞-toposes (in infinity_topos.vr) build on.
 //
+
 // As with core/math/hott.vr, this module is intentionally minimal:
 // protocols and records capture the mathematical shape, while concrete
 // simplicial computations defer to implementation types supplied by the
@@ -17,10 +19,11 @@
 // by runtime checks in witness functions or, eventually, by cubical
 // path-based equalities once the cubical grammar lands.
 //
+
 // See also:
-//   - core/math/hott.vr          (Equiv, IsContr, IsProp, IsSet, Fiber)
-//   - core/math/category.vr      (Category, Functor, NatTrans, Topos)
-//   - core/math/logic.vr         (Prop, Proof<P>, Forall, Exists)
+//  - core/math/hott.vr (Equiv, IsContr, IsProp, IsSet, Fiber)
+//  - core/math/category.vr (Category, Functor, NatTrans, Topos)
+//  - core/math/logic.vr (Prop, Proof<P>, Forall, Exists)
 // =============================================================================
 
 module core.math.simplicial;
@@ -33,6 +36,7 @@ module core.math.simplicial;
 /// all non-empty subsets of those vertices as its faces. We represent
 /// it by its dimension and the sorted list of its vertices.
 ///
+
 /// Well-formedness: `vertices` is sorted and consists of n+1 distinct
 /// integers in `[0, n]`. The refinement on `dim` enforces non-negativity.
 public type Simplex is {
@@ -43,10 +47,12 @@ public type Simplex is {
 /// A **simplicial set** is a contravariant functor Δ^op → Set. We
 /// expose it as a protocol whose implementations provide:
 ///
-///   * `n_simplices(n)` — the set of n-simplices as a list
-///   * `face(s, i)`     — the i-th face of an n-simplex (returns an (n-1)-simplex)
-///   * `degeneracy(s, i)` — the i-th degeneracy (returns an (n+1)-simplex)
+
+///  * `n_simplices(n)` — the set of n-simplices as a list
+///  * `face(s, i)` — the i-th face of an n-simplex (returns an (n-1)-simplex)
+///  * `degeneracy(s, i)` — the i-th degeneracy (returns an (n+1)-simplex)
 ///
+
 /// The simplicial identities (d_i d_j = d_{j-1} d_i for i < j, etc.)
 /// are surfaced as `@verify(formal)` proof obligations: any concrete
 /// implementation must discharge them. Together these axioms make the
@@ -82,9 +88,11 @@ public type SimplicialSet is protocol {
 /// A **horn** Λ^n_k is the subcomplex of Δ[n] obtained by removing the
 /// interior and the k-th face. Horns are classified as:
 ///
-///   * **outer** when `k = 0` or `k = n`
-///   * **inner** when `0 < k < n`
+
+///  * **outer** when `k = 0` or `k = n`
+///  * **inner** when `0 < k < n`
 ///
+
 /// Horn filling conditions distinguish different classes of simplicial
 /// sets: Kan complexes fill all horns, quasi-categories fill only inner
 /// horns, etc.
@@ -112,6 +120,7 @@ public fn horn_is_outer(h: &Horn) -> Bool {
 /// outer — can be filled. Equivalently, for every n ≥ 2 and every
 /// k ∈ [0, n], every map Λ^n_k → X extends to a map Δ[n] → X.
 ///
+
 /// Kan complexes are the simplicial-set model of **∞-groupoids**: every
 /// 1-morphism has an inverse up to higher homotopy, and so on at every
 /// level. This is precisely the weakening that distinguishes them from
@@ -286,6 +295,7 @@ public fn inner_horn_count_for(n: Int{>= 2}) -> Int {
 // 9. Proven simplicial-identity regressions (SMT-discharged)
 // =============================================================================
 //
+
 // These theorems are discharged by `proof by auto` and lock in the
 // core facts about the simplicial constructors above: inner vs outer
 // horn classification, horn counting, face counting. If a future

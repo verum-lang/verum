@@ -1,54 +1,66 @@
 //! Dependent Contracts with `old()` — pre-state references.
 //!
+
 //! Postconditions in mutating functions often need to refer to the
 //! *prior* value of state, not the current value. Eiffel, JML,
 //! Dafny, and SPARK all use the `old()` syntax for this:
 //!
+
 //! ```text
-//!     fn increment(&mut self)
-//!         ensures self.count == old(self.count) + 1
-//!     { self.count += 1 }
+//!  fn increment(&mut self)
+//!  ensures self.count == old(self.count) + 1
+//!  { self.count += 1 }
 //! ```
 //!
+
 //! Without `old()`, postconditions can't say "the new value
 //! is one more than what it was before" — they can only describe
 //! the new state in isolation. With `old()`, contracts capture
 //! *change* directly.
 //!
+
 //! ## Operational model
 //!
+
 //! At verification time, every `old(e)` in the postcondition is
 //! evaluated against the *pre-state* snapshot. Concretely:
 //!
+
 //! 1. Before the function body executes, take a snapshot of every
-//!    location mentioned inside `old(...)` expressions.
+//!  location mentioned inside `old(...)` expressions.
 //! 2. After the body, evaluate the postcondition with `old(e)`
-//!    bound to the snapshot value.
+//!  bound to the snapshot value.
 //!
+
 //! ## Frame computation
 //!
+
 //! A function's *frame* is the set of locations it may modify. A
 //! sound contract system requires every modified location's prior
 //! value to be either:
 //!
+
 //! * Mentioned by `old(...)` in the postcondition (so the contract
-//!   says how it changed), or
+//!  says how it changed), or
 //! * Permitted to take any value (no constraint asserted).
 //!
+
 //! Locations *not* in the frame must equal their `old` value
 //! after execution — this is the **frame property** that makes
 //! local reasoning sound.
 //!
+
 //! ## API
 //!
+
 //! * [`Snapshot`] — pre-state snapshot keyed by location name.
 //! * [`OldExpr`] — abstract representation of `old(expr)`.
 //! * [`Postcondition`] — a contract clause that may reference
-//!   `old(...)` expressions.
+//!  `old(...)` expressions.
 //! * [`Frame`] — the set of locations a function may modify.
 //! * [`compute_frame_obligations`] — given a postcondition and a
-//!   declared frame, returns the locations whose `old` value
-//!   must be snapshot to verify the postcondition.
+//!  declared frame, returns the locations whose `old` value
+//!  must be snapshot to verify the postcondition.
 
 use std::collections::{HashMap, HashSet};
 

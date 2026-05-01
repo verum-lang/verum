@@ -4,39 +4,47 @@
 // Layer: 4 (Epistemic / Quantum Logic)
 // Spec: verum-ext-2.md §3.1 — Birkhoff–von Neumann quantum logic
 //
+
 // Provides a mathematically rigorous implementation of quantum epistemic
 // logic as used by the UHM (Unified Hypothesis Model) agent status system.
 //
+
 // # Structure
 //
-//   OrthomodularLattice protocol  — Birkhoff–von Neumann closure lattice
-//   ClosedSubspaceLattice<k>      — Concrete implementation on ℂ^k
-//   EpistemicHilbertSpace<k>      — k-dimensional space, orthonormal basis
-//   EpistemicState<k>             — density matrix (Hermitian, PSD, tr=1)
-//   EpistemicProjector<k>         — Hermitian idempotent (P²=P, P†=P)
-//   CptpChannel<k>                — Completely positive trace-preserving map
-//   SpectralDecomposition<k>      — Eigenvalue/eigenvector decomposition
+
+//  OrthomodularLattice protocol — Birkhoff–von Neumann closure lattice
+//  ClosedSubspaceLattice<k> — Concrete implementation on ℂ^k
+//  EpistemicHilbertSpace<k> — k-dimensional space, orthonormal basis
+//  EpistemicState<k> — density matrix (Hermitian, PSD, tr=1)
+//  EpistemicProjector<k> — Hermitian idempotent (P²=P, P†=P)
+//  CptpChannel<k> — Completely positive trace-preserving map
+//  SpectralDecomposition<k> — Eigenvalue/eigenvector decomposition
 //
+
 // # Key Operations
 //
-//   measure()                     — Lüders rule: ρ' = PρP / tr(PρP)
-//   commutator()                  — [A,B] = AB − BA
-//   are_compatible()              — commutator vanishes ⟺ simultaneously measurable
-//   epistemic_fidelity()          — Uhlmann fidelity F(ρ,σ) = tr(√(√ρ σ √ρ))²
-//   bures_distance()              — D_B(ρ,σ) = √(2 − 2√F(ρ,σ))
-//   von_neumann_entropy()         — S(ρ) = −tr(ρ ln ρ)
-//   apply_cptp()                  — apply a CPTP channel to a state
-//   spectral_decompose()          — eigendecomposition of a Hermitian matrix
-//   construct_epistemic_space()   — 7-status UHM Hilbert space
-//   initial_epistemic_state()     — pure state |s⟩⟨s| from EpistemicStatus
-//   superposition()               — convex mixture of pure basis states
+
+//  measure() — Lüders rule: ρ' = PρP / tr(PρP)
+//  commutator() — [A,B] = AB − BA
+//  are_compatible() — commutator vanishes ⟺ simultaneously measurable
+//  epistemic_fidelity() — Uhlmann fidelity F(ρ,σ) = tr(√(√ρ σ √ρ))²
+//  bures_distance() — D_B(ρ,σ) = √(2 − 2√F(ρ,σ))
+//  von_neumann_entropy() — S(ρ) = −tr(ρ ln ρ)
+//  apply_cptp() — apply a CPTP channel to a state
+//  spectral_decompose() — eigendecomposition of a Hermitian matrix
+//  construct_epistemic_space() — 7-status UHM Hilbert space
+//  initial_epistemic_state() — pure state |s⟩⟨s| from EpistemicStatus
+//  superposition() — convex mixture of pure basis states
 //
+
 // # Formal Theorems
 //
-//   theorem_projector_idempotent  — projector valid ⟹ P² = P
-//   theorem_measure_trace_preserves — measure() returns a unit-trace state
-//   theorem_cptp_monotone_entropy — CPTP channels do not decrease entropy
+
+//  theorem_projector_idempotent — projector valid ⟹ P² = P
+//  theorem_measure_trace_preserves — measure() returns a unit-trace state
+//  theorem_cptp_monotone_entropy — CPTP channels do not decrease entropy
 //
+
 // Dependencies: core.math.{algebra, linalg, category}, core.math.epistemic
 // =============================================================================
 
@@ -53,11 +61,13 @@ mount core.math.epistemic.{EpistemicStatus};
 // 1. OrthomodularLattice — Birkhoff–von Neumann Quantum Logic
 // =============================================================================
 //
+
 // The OrthomodularLattice protocol is defined in core.math.algebra and is
-// re-used here with full formal axiom statements.  We add the quantum-logic-
+// re-used here with full formal axiom statements. We add the quantum-logic-
 // specific notion of a *compatible pair* together with a concrete subspace
 // lattice instance on ℂ^k.
 //
+
 // Birkhoff–von Neumann (1936): the closed subspaces of a Hilbert space form
 // an orthomodular lattice, which is *not* distributive when dim ≥ 3. This
 // non-distributivity is the formal signature of quantum non-commutativity.
@@ -68,9 +78,11 @@ mount core.math.epistemic.{EpistemicStatus};
 
 /// @verify(formal) proof that double orthocomplement is the identity.
 ///
+
 /// For a Hilbert space H and a closed subspace V ⊆ H:
-///   V^⊥⊥ = closure(V) = V   (since V is already closed).
+///  V^⊥⊥ = closure(V) = V (since V is already closed).
 ///
+
 /// Axiom reference: verum-ext-2.md §3.1.1-A1
 @verify(formal)
 public fn axiom_involution<L: OrthomodularLattice>(a: &L) -> Bool {
@@ -83,8 +95,10 @@ public fn axiom_involution<L: OrthomodularLattice>(a: &L) -> Bool {
 
 /// @verify(formal) proof that orthocomplement reverses the lattice order.
 ///
+
 /// Equivalently: ⊥ is an order-reversing involution on the lattice.
 ///
+
 /// Axiom reference: verum-ext-2.md §3.1.1-A2
 @verify(formal)
 public fn axiom_antitone<L: OrthomodularLattice>(a: &L, b: &L) -> Bool {
@@ -97,10 +111,12 @@ public fn axiom_antitone<L: OrthomodularLattice>(a: &L, b: &L) -> Bool {
 
 /// @verify(formal) proof of the orthomodular law.
 ///
-/// This is the key weakening of full distributivity.  Boolean algebras satisfy
+
+/// This is the key weakening of full distributivity. Boolean algebras satisfy
 /// full distributivity; quantum logic replaces it with the orthomodular law.
 /// Every Boolean algebra is orthomodular, but not vice versa.
 ///
+
 /// Axiom reference: verum-ext-2.md §3.1.1-A3
 @verify(formal)
 public fn axiom_orthomodular_law<L: OrthomodularLattice>(a: &L, b: &L) -> Bool {
@@ -114,10 +130,12 @@ public fn axiom_orthomodular_law<L: OrthomodularLattice>(a: &L, b: &L) -> Bool {
 /// Two elements a, b of an orthomodular lattice are **compatible**
 /// (written a C b) when a = (a ∧ b) ∨ (a ∧ b^⊥).
 ///
+
 /// This is the lattice-theoretic analogue of "simultaneously measurable
-/// observables."  When a C b, the sublattice generated by {a, b, a^⊥, b^⊥}
+/// observables." When a C b, the sublattice generated by {a, b, a^⊥, b^⊥}
 /// is a Boolean algebra (Greechie's theorem).
 ///
+
 /// Spec: verum-ext-2.md §3.1.2
 public type CompatibilityRelation<L: OrthomodularLattice> is protocol {
     /// Test whether a and b are compatible in the lattice.
@@ -136,11 +154,13 @@ public type CompatibilityRelation<L: OrthomodularLattice> is protocol {
 /// The lattice of closed subspaces of the k-dimensional Hilbert space ℂ^k,
 /// represented by their orthogonal projectors.
 ///
+
 /// Element: rank-r projector P (0 ≤ r ≤ k).
-/// Meet:    P ∧ Q = projector onto Im(P) ∩ Im(Q).
-/// Join:    P ∨ Q = projector onto Im(P) + Im(Q).
-/// Ortho:   P^⊥  = I − P (projector onto the orthogonal complement).
+/// Meet: P ∧ Q = projector onto Im(P) ∩ Im(Q).
+/// Join: P ∨ Q = projector onto Im(P) + Im(Q).
+/// Ortho: P^⊥ = I − P (projector onto the orthogonal complement).
 ///
+
 /// Spec: verum-ext-2.md §3.1.2
 public type ClosedSubspaceLattice<k: meta USize{k > 0}> is {
     /// The projector matrix (re and im parts) representing this subspace.
@@ -204,16 +224,20 @@ implement<k: meta USize{k > 0}> ClosedSubspaceLattice<k> {
 // 2. EpistemicHilbertSpace<k>
 // =============================================================================
 //
+
 // A finite-dimensional complex Hilbert space ℂ^k with a fixed orthonormal
-// basis {e₀, …, e_{k-1}}.  The basis is verified at construction time.
+// basis {e₀, …, e_{k-1}}. The basis is verified at construction time.
 //
+
 // For the UHM model k = 7: one dimension per epistemic status.
 
 /// A finite-dimensional (complex) Hilbert space of dimension k equipped
 /// with a fixed orthonormal basis {e₀, …, e_{k-1}}.
 ///
+
 /// Orthonormality condition: ⟨eᵢ, eⱼ⟩ = δᵢⱼ.
 ///
+
 /// Spec: verum-ext-2.md §3.1.3
 public type EpistemicHilbertSpace<k: meta USize{k > 0}> is {
     /// Dimension of the space.
@@ -283,22 +307,26 @@ implement<k: meta USize{k > 0}> EpistemicHilbertSpace<k> {
 // 3. EpistemicState<k> — density matrix
 // =============================================================================
 //
+
 // A density matrix ρ on ℂ^k encodes a mixed quantum state.
 // Three invariants must hold simultaneously:
-//   (a) Hermitian:            ρ† = ρ
-//   (b) Positive semidefinite: ⟨ψ|ρ|ψ⟩ ≥ 0 for all |ψ⟩
-//   (c) Unit trace:            tr(ρ) = 1
+//  (a) Hermitian: ρ† = ρ
+//  (b) Positive semidefinite: ⟨ψ|ρ|ψ⟩ ≥ 0 for all |ψ⟩
+//  (c) Unit trace: tr(ρ) = 1
 //
+
 // Pure states: ρ = |ψ⟩⟨ψ|, equivalently ρ² = ρ (rank-1 projector, purity=1).
 // Mixed states: ρ = Σᵢ pᵢ |ψᵢ⟩⟨ψᵢ|, purity = tr(ρ²) < 1.
 
 /// A density matrix on a k-dimensional Hilbert space.
 ///
+
 /// Invariants (verified at construction and on mutation):
-///   • ρ† = ρ               (Hermitian)
-///   • ⟨ψ|ρ|ψ⟩ ≥ 0 ∀|ψ⟩   (positive semidefinite)
-///   • tr(ρ) = 1            (unit trace)
+///  • ρ† = ρ (Hermitian)
+///  • ⟨ψ|ρ|ψ⟩ ≥ 0 ∀|ψ⟩ (positive semidefinite)
+///  • tr(ρ) = 1 (unit trace)
 ///
+
 /// Spec: verum-ext-2.md §3.1.4
 public type EpistemicState<k: meta USize{k > 0}> is {
     /// Real part of the k×k density matrix.
@@ -385,19 +413,23 @@ implement<k: meta USize{k > 0}> EpistemicState<k> {
 // 4. EpistemicProjector<k> — Hermitian idempotent
 // =============================================================================
 //
+
 // A projector P on ℂ^k satisfies: P² = P (idempotent) and P† = P (Hermitian).
 // Projectors are the quantum-logical analogue of propositions: each closed
 // subspace V ⊆ ℂ^k corresponds uniquely to its orthogonal projector P_V.
 //
+
 // The eigenvalues of a projector are exactly 0 and 1.
 // The rank of P equals the dimension of the subspace Im(P).
 
 /// A projector (Hermitian idempotent) on a k-dimensional Hilbert space.
 ///
+
 /// Invariants:
-///   • P† = P    (Hermitian)
-///   • P² = P    (idempotent)
+///  • P† = P (Hermitian)
+///  • P² = P (idempotent)
 ///
+
 /// Spec: verum-ext-2.md §3.1.5
 public type EpistemicProjector<k: meta USize{k > 0}> is {
     /// Real part of the k×k projector matrix.
@@ -492,10 +524,12 @@ implement<k: meta USize{k > 0}> EpistemicProjector<k> {
 
 /// Theorem: A valid projector satisfies P² = P.
 ///
+
 /// Proof obligation discharged by SMT: is_valid() ⟹ is_idempotent().
 /// The implication follows from the definition of is_valid(), which calls
 /// is_idempotent() as one of its conjuncts.
 ///
+
 /// Spec: verum-ext-2.md §3.1.5 (idempotency)
 @verify(formal)
 public fn theorem_projector_idempotent<k: meta USize{k > 0}>(
@@ -508,22 +542,27 @@ public fn theorem_projector_idempotent<k: meta USize{k > 0}>(
 // 6. Quantum Measurement — Lüders Rule
 // =============================================================================
 //
+
 // The Lüders rule is the quantum generalisation of Bayes' theorem:
-//   post-measurement state: ρ' = P ρ P / tr(P ρ P)
-//   Born-rule probability:  prob = tr(P ρ P) = tr(ρ P)
+//  post-measurement state: ρ' = P ρ P / tr(P ρ P)
+//  Born-rule probability: prob = tr(P ρ P) = tr(ρ P)
 //
+
 // Pre-condition: prob > 0 (the event is not orthogonal to the state).
 // Post-condition: the output state is a valid density matrix (Hermitian, PSD,
-//   trace = 1), verified by @verify(proof) on the returned type.
+//  trace = 1), verified by @verify(proof) on the returned type.
 
 /// Apply the Lüders measurement rule.
 ///
+
 /// Returns (ρ', prob) where:
-///   ρ'   = P ρ P / tr(P ρ P)  (post-measurement state)
-///   prob = tr(P ρ P)           (Born probability)
+///  ρ' = P ρ P / tr(P ρ P) (post-measurement state)
+///  prob = tr(P ρ P) (Born probability)
 ///
+
 /// Pre-condition: prob > 1e-14 — panics otherwise.
 ///
+
 /// Spec: verum-ext-2.md §3.1.6
 public fn measure<k: meta USize{k > 0}>(
     rho: &EpistemicState<k>,
@@ -559,8 +598,10 @@ public fn measure<k: meta USize{k > 0}>(
 
 /// Formal theorem: the post-measurement state output by measure() has trace 1.
 ///
+
 /// Proof: tr(PρP / tr(PρP)) = tr(PρP) / tr(PρP) = 1 (when prob > 0).
 ///
+
 /// Spec: verum-ext-2.md §3.1.6
 @verify(formal)
 public fn theorem_measure_trace_preserves<k: meta USize{k > 0}>(
@@ -574,15 +615,18 @@ public fn theorem_measure_trace_preserves<k: meta USize{k > 0}>(
 // 7. Commutator and Compatibility
 // =============================================================================
 //
+
 // Two Hermitian operators A, B are simultaneously measurable iff [A,B] = 0.
 // In quantum logic this corresponds to A and B being compatible elements of
 // the subspace lattice — they generate a Boolean sub-algebra.
 
 /// Commutator [A,B] = AB − BA for two k×k complex matrices.
 ///
+
 /// For Hermitian A, B: [A,B] = 0 iff A and B are compatible (simultaneously
 /// measurable, commuting in the lattice sense).
 ///
+
 /// Spec: verum-ext-2.md §3.1.7
 public fn commutator<k: meta USize{k > 0}>(
     a_re: &Matrix<Float>, a_im: &Matrix<Float>,
@@ -605,9 +649,11 @@ public fn commutator<k: meta USize{k > 0}>(
 
 /// Two projectors are compatible iff their commutator vanishes: ‖[P,Q]‖_F < ε.
 ///
+
 /// Equivalently: compatible projectors project onto subspaces whose lattice
 /// operations (meet and join) agree with their set-theoretic analogues.
 ///
+
 /// Spec: verum-ext-2.md §3.1.7
 @verify(formal)
 public fn are_compatible<k: meta USize{k > 0}>(
@@ -628,21 +674,25 @@ public fn are_compatible<k: meta USize{k > 0}>(
 // 8. Spectral Decomposition
 // =============================================================================
 //
+
 // Every Hermitian matrix H = Σᵢ λᵢ |vᵢ⟩⟨vᵢ| where {λᵢ} are real eigenvalues
 // and {|vᵢ⟩} form an orthonormal eigenbasis (spectral theorem).
 
 /// Spectral decomposition of a Hermitian k×k matrix.
 ///
+
 /// Fields:
-///   eigenvalues  — list of real eigenvalues λ₀ ≤ λ₁ ≤ … ≤ λ_{k-1}
-///   eigenvec_re  — real parts of the eigenvectors (columns of the matrix)
-///   eigenvec_im  — imaginary parts of the eigenvectors
-///   dim          — dimension k
+///  eigenvalues — list of real eigenvalues λ₀ ≤ λ₁ ≤ … ≤ λ_{k-1}
+///  eigenvec_re — real parts of the eigenvectors (columns of the matrix)
+///  eigenvec_im — imaginary parts of the eigenvectors
+///  dim — dimension k
 ///
+
 /// Invariants (verified):
-///   • eigenvalues are real (Hermitian matrices have real spectrum)
-///   • eigenvectors are orthonormal
+///  • eigenvalues are real (Hermitian matrices have real spectrum)
+///  • eigenvectors are orthonormal
 ///
+
 /// Spec: verum-ext-2.md §3.1.8 (spectral theorem for density matrices)
 public type SpectralDecomposition<k: meta USize{k > 0}> is {
     /// Real eigenvalues sorted in ascending order.
@@ -657,7 +707,7 @@ public type SpectralDecomposition<k: meta USize{k > 0}> is {
 
 implement<k: meta USize{k > 0}> SpectralDecomposition<k> {
     /// Reconstruct the matrix from its spectral decomposition:
-    ///   H = V Λ V†  where V = eigenvector matrix, Λ = diagonal eigenvalues.
+    ///  H = V Λ V† where V = eigenvector matrix, Λ = diagonal eigenvalues.
     public fn reconstruct_re(&self) -> Matrix<Float> {
         let mut result = Matrix.zeros(self.dim, self.dim);
         for l in 0..self.dim {
@@ -695,6 +745,7 @@ implement<k: meta USize{k > 0}> SpectralDecomposition<k> {
 /// Uses power-iteration approximation for small k; deferred to SMT backend
 /// for formal verification of the decomposition invariants.
 ///
+
 /// Spec: verum-ext-2.md §3.1.8
 @verify(formal)
 public fn spectral_decompose<k: meta USize{k > 0}>(
@@ -721,22 +772,26 @@ public fn spectral_decompose<k: meta USize{k > 0}>(
 // 9. Epistemic Fidelity and Bures Distance
 // =============================================================================
 //
+
 // The Uhlmann fidelity F(ρ,σ) measures the "closeness" of two quantum states.
 // The Bures distance D_B(ρ,σ) is a metric on the space of density matrices
 // derived from the fidelity.
 
 /// Uhlmann fidelity between two density matrices:
-///   F(ρ, σ) = tr(√(√ρ σ √ρ))²
+///  F(ρ, σ) = tr(√(√ρ σ √ρ))²
 ///
+
 /// For commuting diagonal states (the UHM canonical case):
-///   F(ρ, σ) = (Σᵢ √(ρᵢᵢ σᵢᵢ))²   (Bhattacharyya coefficient squared)
+///  F(ρ, σ) = (Σᵢ √(ρᵢᵢ σᵢᵢ))² (Bhattacharyya coefficient squared)
 ///
+
 /// Properties:
-///   • 0 ≤ F(ρ,σ) ≤ 1
-///   • F(ρ,σ) = 1 iff ρ = σ
-///   • F(ρ,σ) = 0 iff supp(ρ) ⊥ supp(σ)
-///   • F(ρ,σ) = F(σ,ρ)  (symmetry)
+///  • 0 ≤ F(ρ,σ) ≤ 1
+///  • F(ρ,σ) = 1 iff ρ = σ
+///  • F(ρ,σ) = 0 iff supp(ρ) ⊥ supp(σ)
+///  • F(ρ,σ) = F(σ,ρ) (symmetry)
 ///
+
 /// Spec: verum-ext-2.md §3.1.8
 public fn epistemic_fidelity<k: meta USize{k > 0}>(
     rho: &EpistemicState<k>,
@@ -757,11 +812,13 @@ public fn epistemic_fidelity<k: meta USize{k > 0}>(
 }
 
 /// Bures distance between two density matrices:
-///   D_B(ρ, σ) = √(2 − 2√F(ρ,σ))
+///  D_B(ρ, σ) = √(2 − 2√F(ρ,σ))
 ///
+
 /// D_B is a metric on the space of density matrices (positive, symmetric,
 /// satisfies triangle inequality, and equals 0 iff ρ = σ).
 ///
+
 /// Spec: verum-ext-2.md §3.1.8
 public fn bures_distance<k: meta USize{k > 0}>(
     rho: &EpistemicState<k>,
@@ -776,21 +833,25 @@ public fn bures_distance<k: meta USize{k > 0}>(
 // 10. Von Neumann Entropy
 // =============================================================================
 //
+
 // The von Neumann entropy S(ρ) = −tr(ρ ln ρ) generalises the Shannon entropy
 // to quantum states. For a diagonal density matrix with eigenvalues {λᵢ}:
-//   S(ρ) = −Σᵢ λᵢ ln λᵢ   (with convention 0 ln 0 = 0)
+//  S(ρ) = −Σᵢ λᵢ ln λᵢ (with convention 0 ln 0 = 0)
 //
+
 // Properties:
-//   • 0 ≤ S(ρ) ≤ ln(k)
-//   • S(ρ) = 0 iff ρ is a pure state
-//   • S(ρ) = ln(k) iff ρ = I/k (maximally mixed state)
-//   • S is concave: S(Σᵢ pᵢ ρᵢ) ≥ Σᵢ pᵢ S(ρᵢ)
+//  • 0 ≤ S(ρ) ≤ ln(k)
+//  • S(ρ) = 0 iff ρ is a pure state
+//  • S(ρ) = ln(k) iff ρ = I/k (maximally mixed state)
+//  • S is concave: S(Σᵢ pᵢ ρᵢ) ≥ Σᵢ pᵢ S(ρᵢ)
 
 /// Von Neumann entropy of a density matrix:
-///   S(ρ) = −tr(ρ ln ρ) = −Σᵢ λᵢ ln λᵢ
+///  S(ρ) = −tr(ρ ln ρ) = −Σᵢ λᵢ ln λᵢ
 ///
+
 /// Range: [0, ln(k)]. Zero for pure states.
 ///
+
 /// Spec: verum-ext-2.md §3.1.9 (entropy in epistemic logic)
 public fn von_neumann_entropy<k: meta USize{k > 0}>(
     rho: &EpistemicState<k>,
@@ -812,25 +873,30 @@ public fn von_neumann_entropy<k: meta USize{k > 0}>(
 // 11. CPTP Channel
 // =============================================================================
 //
+
 // A completely positive trace-preserving (CPTP) channel Φ: ρ ↦ Σᵢ Kᵢ ρ Kᵢ†
 // describes the most general physical evolution of a quantum state.
 //
+
 // Kraus representation: Φ(ρ) = Σᵢ Kᵢ ρ Kᵢ†
-//   where the Kraus operators {Kᵢ} satisfy the completeness relation:
-//   Σᵢ Kᵢ† Kᵢ = I  (trace preservation)
+//  where the Kraus operators {Kᵢ} satisfy the completeness relation:
+//  Σᵢ Kᵢ† Kᵢ = I (trace preservation)
 //
+
 // Fundamental properties:
-//   • Trace preserving: tr(Φ(ρ)) = tr(ρ) = 1
-//   • Completely positive: preserves positivity under tensoring
-//   • Monotone (data-processing inequality): S(Φ(ρ)) ≥ S(ρ) is FALSE in general;
-//     the correct statement is: CPTP channels cannot increase distinguishability.
-//     Formally: F(Φ(ρ), Φ(σ)) ≥ F(ρ, σ) — channels are contractive on fidelity.
+//  • Trace preserving: tr(Φ(ρ)) = tr(ρ) = 1
+//  • Completely positive: preserves positivity under tensoring
+//  • Monotone (data-processing inequality): S(Φ(ρ)) ≥ S(ρ) is FALSE in general;
+//  the correct statement is: CPTP channels cannot increase distinguishability.
+//  Formally: F(Φ(ρ), Φ(σ)) ≥ F(ρ, σ) — channels are contractive on fidelity.
 
 /// A CPTP (completely positive trace-preserving) channel on ℂ^k,
 /// represented in Kraus form.
 ///
-/// Invariant: Σᵢ Kᵢ† Kᵢ = I  (verified by is_valid()).
+
+/// Invariant: Σᵢ Kᵢ† Kᵢ = I (verified by is_valid()).
 ///
+
 /// Spec: verum-ext-2.md §3.1.10
 public type CptpChannel<k: meta USize{k > 0}> is {
     /// List of Kraus operators (each is a k×k complex matrix).
@@ -884,11 +950,13 @@ implement<k: meta USize{k > 0}> CptpChannel<k> {
 }
 
 /// Apply a CPTP channel to a density matrix:
-///   Φ(ρ) = Σᵢ Kᵢ ρ Kᵢ†
+///  Φ(ρ) = Σᵢ Kᵢ ρ Kᵢ†
 ///
+
 /// The output is guaranteed to be a valid density matrix (Hermitian, PSD,
 /// trace = 1) when the channel satisfies the completeness relation.
 ///
+
 /// Spec: verum-ext-2.md §3.1.10
 public fn apply_cptp<k: meta USize{k > 0}>(
     channel: &CptpChannel<k>,
@@ -923,13 +991,17 @@ public fn apply_cptp<k: meta USize{k > 0}>(
 
 /// Formal theorem: CPTP channels are contractive on fidelity (data-processing).
 ///
-/// F(Φ(ρ), Φ(σ)) ≥ F(ρ, σ)  for all CPTP Φ and states ρ, σ.
+
+/// F(Φ(ρ), Φ(σ)) ≥ F(ρ, σ) for all CPTP Φ and states ρ, σ.
 ///
+
 /// This is the quantum analogue of the data-processing inequality: channels
 /// cannot increase the distinguishability of states.
 ///
+
 /// Proof obligation discharged by SMT via Uhlmann's theorem.
 ///
+
 /// Spec: verum-ext-2.md §3.1.10
 @verify(formal)
 public fn theorem_cptp_monotone_fidelity<k: meta USize{k > 0}>(
@@ -942,13 +1014,16 @@ public fn theorem_cptp_monotone_fidelity<k: meta USize{k > 0}>(
 
 /// Formal theorem: CPTP channels do not decrease von Neumann entropy.
 ///
-/// S(Φ(ρ)) ≥ S(ρ)  is NOT generally true. The correct monotonicity statement
+
+/// S(Φ(ρ)) ≥ S(ρ) is NOT generally true. The correct monotonicity statement
 /// is the data-processing inequality on relative entropy:
-///   D(Φ(ρ) ‖ Φ(σ)) ≤ D(ρ ‖ σ)
+///  D(Φ(ρ) ‖ Φ(σ)) ≤ D(ρ ‖ σ)
 /// where D(ρ‖σ) = tr(ρ(ln ρ − ln σ)) is the quantum relative entropy.
 ///
+
 /// Proof obligation discharged by SMT.
 ///
+
 /// Spec: verum-ext-2.md §3.1.10
 @verify(formal)
 public fn theorem_cptp_relative_entropy_monotone<k: meta USize{k > 0}>(
@@ -963,21 +1038,24 @@ public fn theorem_cptp_relative_entropy_monotone<k: meta USize{k > 0}>(
 // 12. UHM Status Mapping
 // =============================================================================
 //
+
 // The UHM (Unified Hypothesis Model) uses exactly 7 epistemic statuses, drawn
-// from core.math.epistemic.EpistemicStatus.  Each status occupies one basis
+// from core.math.epistemic.EpistemicStatus. Each status occupies one basis
 // dimension of the 7-dimensional Hilbert space ℂ^7.
 //
+
 // Basis assignment (index → EpistemicStatus):
-//   0 → Theorem        (strongest — formally proved)
-//   1 → Conditional    (proved under assumptions)
-//   2 → Hypothesis     (conjectured, plausible)
-//   3 → Postulate      (assumed without proof)
-//   4 → Definition     (stipulative, axiomatic)
-//   5 → Interpretation (informal or heuristic)
-//   6 → Retracted      (formally withdrawn)
+//  0 → Theorem (strongest — formally proved)
+//  1 → Conditional (proved under assumptions)
+//  2 → Hypothesis (conjectured, plausible)
+//  3 → Postulate (assumed without proof)
+//  4 → Definition (stipulative, axiomatic)
+//  5 → Interpretation (informal or heuristic)
+//  6 → Retracted (formally withdrawn)
 
 /// Canonical index of an EpistemicStatus in the 7-dimensional UHM basis.
 ///
+
 /// Spec: verum-ext-2.md §3.1.9
 public fn epistemic_status_index(s: &EpistemicStatus) -> USize {
     match s {
@@ -1011,11 +1089,13 @@ public fn epistemic_status_label(s: &EpistemicStatus) -> Text {
 /// Build the canonical 7-dimensional epistemic Hilbert space for the UHM
 /// status lattice.
 ///
-/// The basis is the standard basis of ℂ^7.  Each basis vector |sᵢ⟩ represents
-/// pure belief in the i-th EpistemicStatus.  The space supports all 7 statuses
+
+/// The basis is the standard basis of ℂ^7. Each basis vector |sᵢ⟩ represents
+/// pure belief in the i-th EpistemicStatus. The space supports all 7 statuses
 /// simultaneously: a density matrix ρ on this space encodes a probability
 /// distribution over the 7 statuses.
 ///
+
 /// Spec: verum-ext-2.md §3.1.9
 public fn construct_epistemic_space() -> EpistemicHilbertSpace<7> {
     EpistemicHilbertSpace.canonical()
@@ -1023,8 +1103,10 @@ public fn construct_epistemic_space() -> EpistemicHilbertSpace<7> {
 
 /// Return the rank-1 projector onto the basis vector for a given status.
 ///
+
 /// The projector |s⟩⟨s| represents the proposition "this claim has status s".
 ///
+
 /// Spec: verum-ext-2.md §3.1.9
 public fn status_projector(status: &EpistemicStatus) -> EpistemicProjector<7> {
     let idx = epistemic_status_index(status);
@@ -1046,12 +1128,14 @@ public fn status_projector(status: &EpistemicStatus) -> EpistemicProjector<7> {
 /// Construct the pure epistemic state |s⟩⟨s| — a rank-1 density matrix
 /// concentrated on a single EpistemicStatus.
 ///
+
 /// The resulting state has:
-///   • ρ[idx, idx] = 1.0   (idx = epistemic_status_index(status))
-///   • ρ[i, j]    = 0.0   otherwise
-///   • purity = 1          (pure state)
-///   • entropy = 0         (zero uncertainty)
+///  • ρ[idx, idx] = 1.0 (idx = epistemic_status_index(status))
+///  • ρ[i, j] = 0.0 otherwise
+///  • purity = 1 (pure state)
+///  • entropy = 0 (zero uncertainty)
 ///
+
 /// Spec: verum-ext-2.md §3.1.10
 public fn initial_epistemic_state(status: &EpistemicStatus) -> EpistemicState<7> {
     let idx = epistemic_status_index(status);
@@ -1064,14 +1148,17 @@ public fn initial_epistemic_state(status: &EpistemicStatus) -> EpistemicState<7>
 /// Construct a mixed epistemic state as a convex combination of pure basis
 /// states weighted by `weights`.
 ///
+
 /// The resulting diagonal density matrix encodes epistemic uncertainty:
-///   ρ = Σᵢ wᵢ |sᵢ⟩⟨sᵢ|
+///  ρ = Σᵢ wᵢ |sᵢ⟩⟨sᵢ|
 ///
+
 /// Pre-conditions:
-///   • weights.len() == 7
-///   • wᵢ ≥ 0 for all i
-///   • Σᵢ wᵢ = 1 (normalisation)
+///  • weights.len() == 7
+///  • wᵢ ≥ 0 for all i
+///  • Σᵢ wᵢ = 1 (normalisation)
 ///
+
 /// Spec: verum-ext-2.md §3.1.11
 public fn superposition(weights: &List<Float>) -> EpistemicState<7> {
     assert(weights.len() == 7,
@@ -1095,6 +1182,7 @@ public fn superposition(weights: &List<Float>) -> EpistemicState<7> {
 
 /// Uniform superposition over all 7 EpistemicStatus values: ρ = I/7.
 ///
+
 /// This represents maximal epistemic uncertainty — no status is preferred.
 /// It is the maximally mixed state on ℂ^7.
 /// Von Neumann entropy: S(I/7) = ln 7 ≈ 1.946 nats.

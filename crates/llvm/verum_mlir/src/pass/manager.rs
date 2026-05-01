@@ -88,6 +88,7 @@ impl<'c> PassManager<'c> {
 
     /// Creates a PassManager from the given raw pointer.
     ///
+
     /// # Safety
     /// Caller must ensure this is a valid PassManager pointer.
     pub unsafe fn from_raw(raw: MlirPassManager) -> Self {
@@ -164,8 +165,8 @@ mod tests {
     // Kept commented out as a manual debugging aid.
     // #[test]
     // fn enable_ir_printing() {
-    //     let context = Context::new();
-    //     PassManager::new(&context).enable_ir_printing();
+    //  let context = Context::new();
+    //  PassManager::new(&context).enable_ir_printing();
     // }
 
     #[test]

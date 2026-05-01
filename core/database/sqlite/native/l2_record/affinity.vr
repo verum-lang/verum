@@ -6,19 +6,23 @@ module core.database.sqlite.native.l2_record.affinity;
 // Layer: 2
 // Spec: sqlite-native.md §9.2, sqlite.org/datatype3.html §3
 //
+
 // SQLite column types are weakly typed. At CREATE TABLE time the
 // declared type text is mapped to one of five "affinities". Values
 // inserted into a column are coerced toward its affinity (but only
 // STRICT tables actually reject mismatches — see `strict.vr`).
 //
+
 // Affinity inference rules (§9.2 — applied top-down):
 //
-//   1. If the declared type contains "INT"   → Integer
-//   2. Else if it contains "CHAR", "CLOB", or "TEXT" → Text
-//   3. Else if it contains "BLOB" or is empty        → Blob
-//   4. Else if it contains "REAL", "FLOA", or "DOUB" → Real
-//   5. Else                                          → Numeric
+
+//  1. If the declared type contains "INT" → Integer
+//  2. Else if it contains "CHAR", "CLOB", or "TEXT" → Text
+//  3. Else if it contains "BLOB" or is empty → Blob
+//  4. Else if it contains "REAL", "FLOA", or "DOUB" → Real
+//  5. Else → Numeric
 //
+
 // Matching is case-insensitive ASCII per spec (SQLite compares upper-
 // cased declared text). We reuse `core.text.case_fold` for the ASCII
 // fold so the rule matches `Varchar`, `VARCHAR`, `varchar` identically.

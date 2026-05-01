@@ -1,5 +1,6 @@
 //! Contract Integration Helper
 //!
+
 //! This module provides helper functions for integrating verified contracts
 //! between Phase 3a (Contract Verification) and Phase 4 (Semantic Analysis).
 

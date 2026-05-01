@@ -1,63 +1,76 @@
-//! (∞,1)-topos infrastructure — V0 algorithmic kernel rule
+//! (∞,1)-topos infrastructure — algorithmic kernel rule
 //! (Lurie HTT 6.1).
 //!
+
 //! ## What this delivers
 //!
+
 //! An **(∞,1)-topos** `T` is, per Lurie HTT 6.1.0.4 (Giraud's
 //! theorem for ∞-categories), an ∞-category satisfying:
 //!
-//!   1. `T` is **presentable** (HTT 5.5.0.1).
-//!   2. `T` admits **all small colimits** and they are **universal**
-//!      (i.e. preserved by base change).
-//!   3. **Coproducts are disjoint**: for every pair `X, Y ∈ T`,
-//!      the canonical map `0 → X ×_{X+Y} Y` is an equivalence.
-//!   4. **Effective groupoids**: every groupoid object in `T` is
-//!      effective (HTT 6.1.0.4 (iv) — generalisation of Stone's
-//!      effective-equivalence-relation criterion).
+
+//!  1. `T` is **presentable** (HTT 5.5.0.1).
+//!  2. `T` admits **all small colimits** and they are **universal**
+//!  (i.e. preserved by base change).
+//!  3. **Coproducts are disjoint**: for every pair `X, Y ∈ T`,
+//!  the canonical map `0 → X ×_{X+Y} Y` is an equivalence.
+//!  4. **Effective groupoids**: every groupoid object in `T` is
+//!  effective (HTT 6.1.0.4 (iv) — generalisation of Stone's
+//!  effective-equivalence-relation criterion).
 //!
+
 //! Equivalently (HTT 6.1.0.6), `T` is an (∞,1)-topos iff it is
 //! a **left-exact-localisation of a presheaf ∞-category** —
 //! i.e. there exists a fully-faithful inclusion `T ↪ PSh(C)` whose
 //! left adjoint is *left exact* (preserves finite limits).
 //!
-//! This second characterisation is the algorithmic surface V0 ships:
+
+//! This second characterisation is the algorithmic surface ships:
 //! it composes [`crate::reflective_subcategory`] +
 //! [`crate::limits_colimits`] + a left-exactness witness flag.
 //!
+
 //! ## Why this matters for MSFS
 //!
+
 //! MSFS §3 takes place inside `S_S^global`, an (∞,1)-topos of
-//! S-definable foundations.  Pre-this-module the topos structure
+//! S-definable foundations. Pre-this-module the topos structure
 //! is admitted via the host-stdlib axiom `msfs_s_s_is_infty_topos`.
-//! V0 ships [`build_infinity_topos`] as the constructive
+//! ships [`build_infinity_topos`] as the constructive
 //! discharge.
 //!
+
 //! ## V0 algorithmic surface
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   1. [`GiraudAxioms`] — the four Giraud-axiom witness flags.
-//!   2. [`InfinityTopos`] — the topos data: base category,
-//!      reflective inclusion, Giraud witnesses, level.
-//!   3. [`is_infinity_topos`] — decidable predicate.
-//!   4. [`build_infinity_topos`] — algorithmic builder under
-//!      HTT 6.1.0.6 preconditions.
-//!   5. [`presheaf_category_is_topos`] — HTT 6.1.0.6 (i): every
-//!      `PSh(C)` is canonically an (∞,1)-topos.
-//!   6. [`left_exact_localisation_witness`] — HTT 6.1.0.6 (ii)
-//!      witness flag.
+
+//!  1. [`GiraudAxioms`] — the four Giraud-axiom witness flags.
+//!  2. [`InfinityTopos`] — the topos data: base category,
+//!  reflective inclusion, Giraud witnesses, level.
+//!  3. [`is_infinity_topos`] — decidable predicate.
+//!  4. [`build_infinity_topos`] — algorithmic builder under
+//!  HTT 6.1.0.6 preconditions.
+//!  5. [`presheaf_category_is_topos`] — HTT 6.1.0.6 (i): every
+//!  `PSh(C)` is canonically an (∞,1)-topos.
+//!  6. [`left_exact_localisation_witness`] — HTT 6.1.0.6 (ii)
+//!  witness flag.
 //!
-//! V1 promotion: explicit Giraud-axiom witnesses with structural
+
+//! Future work: explicit Giraud-axiom witnesses with structural
 //! checking of effective-groupoid + universal-colimit content.
 //!
+
 //! ## What this UNBLOCKS in MSFS
 //!
-//!   - **§3 Definition 3.3** — `S_S^global` is an (∞,1)-topos.
-//!     Promotion: invoke [`build_infinity_topos`] with the
-//!     reflective-subcategory inclusion `S_S^global ↪ PSh(...)`.
-//!   - **§9 Theorem 9.3** — the canonical classifier 2-stack lives
-//!     in an (∞,1)-topos; the topos structure provides the colimit
-//!     calculus needed for the construction.
+
+//!  - **§3 Definition 3.3** — `S_S^global` is an (∞,1)-topos.
+//!  Promotion: invoke [`build_infinity_topos`] with the
+//!  reflective-subcategory inclusion `S_S^global ↪ PSh(...)`.
+//!  - **§9 Theorem 9.3** — the canonical classifier 2-stack lives
+//!  in an (∞,1)-topos; the topos structure provides the colimit
+//!  calculus needed for the construction.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -70,7 +83,7 @@ use crate::reflective_subcategory::ReflectiveSubcategory;
 // Giraud axioms
 // =============================================================================
 
-/// The four Giraud axioms (HTT 6.1.0.4) on an ∞-category.  All four
+/// The four Giraud axioms (HTT 6.1.0.4) on an ∞-category. All four
 /// must hold for the category to be an (∞,1)-topos.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GiraudAxioms {
@@ -150,7 +163,7 @@ impl InfinityTopos {
 // =============================================================================
 
 /// Decide whether the given data constitutes an (∞,1)-topos
-/// (HTT 6.1.0.4).  V0 surface: returns the conjunction of structural
+/// (HTT 6.1.0.4). current surface: returns the conjunction of structural
 /// witnesses.
 pub fn is_infinity_topos(t: &InfinityTopos) -> bool {
     t.is_coherent()
@@ -164,6 +177,7 @@ pub fn is_infinity_topos(t: &InfinityTopos) -> bool {
 /// fully-faithful reflective inclusion into a presheaf ∞-category
 /// + left-exact reflector + Giraud axioms.
 ///
+
 /// Returns `None` if any precondition fails.
 pub fn build_infinity_topos(
     name: impl Into<Text>,
@@ -195,7 +209,7 @@ pub fn build_infinity_topos(
 }
 
 /// HTT 6.1.0.6 (i): every presheaf ∞-category `PSh(C)` is canonically
-/// an (∞,1)-topos.  The reflective-inclusion is the identity (no
+/// an (∞,1)-topos. The reflective-inclusion is the identity (no
 /// proper localisation), the reflector is the identity (trivially
 /// left-exact), and the Giraud axioms hold by HTT 5.5 + 5.5.3.
 pub fn presheaf_category_is_topos(
@@ -218,7 +232,7 @@ pub fn presheaf_category_is_topos(
 // =============================================================================
 
 /// Verify the left-exactness of the reflector (HTT 6.1.0.6 (ii)).
-/// V0 surface: returns the witness flag.
+/// current surface: returns the witness flag.
 pub fn left_exact_localisation_witness(t: &InfinityTopos) -> bool {
     t.left_exact_reflector
 }

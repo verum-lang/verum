@@ -5,35 +5,43 @@
 // Dependencies: mem/header, mem/capability, mem/hazard, mem/epoch
 // =============================================================================
 //
+
 // ThinRef<T> is the primary reference type for sized types in the CBGR system.
 // It provides memory safety through generation-based validation with ~15ns
 // overhead per dereference.
 //
+
 // # Memory Layout (16 bytes total)
 //
+
 // ```
-// Offset  Size  Field           Description
+// Offset Size Field Description
 // ──────────────────────────────────────────────────────────────────────
-// 0       8     ptr             Pointer to data (non-null)
-// 8       4     generation      Expected generation counter
-// 12      4     epoch_and_caps  Packed: epoch (16-bit) + capabilities (16-bit)
+// 0 8 ptr Pointer to data (non-null)
+// 8 4 generation Expected generation counter
+// 12 4 epoch_and_caps Packed: epoch (16-bit) + capabilities (16-bit)
 // ──────────────────────────────────────────────────────────────────────
 // Total: 16 bytes (fits in two registers)
 // ```
 //
+
 // # Packing Strategy
 //
+
 // epoch_and_caps layout:
-// - Bits 0-15:  epoch (16 bits, for wraparound protection)
+// - Bits 0-15: epoch (16 bits, for wraparound protection)
 // - Bits 16-31: capabilities (16 bits, access control)
 //
+
 // # Validation Tiers
 //
+
 // - Tier 0 (Interpreter): Full validation with hazard pointers (~15ns)
 // - Tier 1 (Baseline JIT): Standard validation (~10ns)
 // - Tier 2 (Optimizing JIT): Selective validation (~5ns)
 // - Tier 3 (AOT): Minimal validation (~3ns, compiler-proven paths)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 6.2
 // =============================================================================
 
@@ -55,19 +63,24 @@ mount core.intrinsics.memory.{ptr_offset};
 
 /// ThinRef - 16-byte generational reference for sized types.
 ///
+
 /// This is the core reference type in Verum's CBGR (Counter-Based Generation
 /// Reference) system. Every dereference is validated against the allocation's
 /// current generation, preventing use-after-free bugs at runtime.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let x = Heap.new(42);
 /// let thin: ThinRef<Int> = x.as_thin_ref();
 ///
+
 /// // Safe access with automatic validation
 /// let value = thin.try_deref()?;
 ///
+
 /// // After deallocation, validation fails
 /// drop(x);
 /// assert(thin.try_deref().is_err());
@@ -91,8 +104,10 @@ implement<T> ThinRef<T> {
 
     /// Create a new ThinRef from raw components.
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure:
     /// - `ptr` is non-null and properly aligned for T
     /// - `ptr` points to memory with a valid AllocationHeader at offset -32
@@ -113,8 +128,10 @@ implement<T> ThinRef<T> {
 
     /// Create a null ThinRef (for initialization/edge cases).
     ///
+
     /// # Safety
     ///
+
     /// This creates an invalid ThinRef that will fail validation.
     @inline
     public unsafe fn null() -> ThinRef<T> {
@@ -127,8 +144,10 @@ implement<T> ThinRef<T> {
 
     /// Create from allocation header.
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure `header` is valid and `ptr` is the user data
     /// pointer corresponding to that header.
     @inline
@@ -205,12 +224,15 @@ implement<T> ThinRef<T> {
 
     /// Validate generation and epoch (core CBGR check).
     ///
+
     /// This is the fundamental safety check that prevents use-after-free.
     /// Returns Ok(()) if the reference is valid, or an error describing
     /// the validation failure.
     ///
+
     /// # Performance
     ///
+
     /// ~15ns for full validation with header access.
     @inline
     public fn validate(&self) -> Result<(), UseAfterFreeError> {
@@ -239,8 +261,10 @@ implement<T> ThinRef<T> {
 
     /// Fast validation using combined 64-bit load.
     ///
+
     /// # Safety
     ///
+
     /// Requires header to be properly aligned for 64-bit access.
     @inline
     public unsafe fn validate_fast(&self) -> Result<(), UseAfterFreeError> {
@@ -321,14 +345,17 @@ implement<T> ThinRef<T> {
 
     /// Dereference with generation check.
     ///
+
     /// This is the primary safe access method. It:
     /// 1. Acquires a hazard pointer to prevent deallocation
     /// 2. Validates generation and epoch
     /// 3. Checks read capability
     /// 4. Returns reference to data
     ///
+
     /// # Performance
     ///
+
     /// ~15-20ns total (hazard + validation + capability check)
     @inline
     public fn try_deref(&self) -> Result<&T, UseAfterFreeError> {
@@ -352,6 +379,7 @@ implement<T> ThinRef<T> {
 
     /// Dereference mutably with generation check.
     ///
+
     /// Same as try_deref but also validates write and mutable capabilities.
     @inline
     public fn try_deref_mut(&mut self) -> Result<&mut T, UseAfterFreeError> {
@@ -383,8 +411,10 @@ implement<T> ThinRef<T> {
 
     /// Dereference without checking (unsafe).
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure:
     /// - Reference is valid (correct generation/epoch)
     /// - No concurrent deallocation
@@ -396,8 +426,10 @@ implement<T> ThinRef<T> {
 
     /// Dereference mutably without checking (unsafe).
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure:
     /// - Reference is valid (correct generation/epoch)
     /// - Exclusive access (no aliasing)
@@ -414,6 +446,7 @@ implement<T> ThinRef<T> {
 
     /// Clone this reference (shares generation).
     ///
+
     /// The cloned reference points to the same data and will be invalidated
     /// when the original allocation is deallocated.
     @inline
@@ -427,6 +460,7 @@ implement<T> ThinRef<T> {
 
     /// Create a read-only view of this reference.
     ///
+
     /// Removes write and mutable capabilities.
     @inline
     public fn as_readonly(&self) -> ThinRef<T> {
@@ -455,20 +489,25 @@ implement<T> ThinRef<T> {
 
     /// Explicitly revoke this reference.
     ///
+
     /// Atomically bumps the generation counter in the allocation
     /// header iff its current value still matches `self.generation`.
     /// On success, this reference and ALL copies that share the same
     /// generation value are invalidated.
     ///
+
     /// # Requirements
     ///
+
     /// - Reference must have CAP_REVOKE capability
     /// - Reference must be valid (not already revoked)
     ///
+
     /// # Concurrency
     ///
+
     /// Two threads racing on `revoke()` for the same allocation will
-    /// see exactly one `Ok(())` and one `Err(already_revoked)`.  The
+    /// see exactly one `Ok(())` and one `Err(already_revoked)`. The
     /// previous implementation used a verify-then-fetch_add pattern
     /// that allowed the late thread to spuriously double-bump the
     /// generation past a freshly-issued successor reference; the
@@ -494,7 +533,7 @@ implement<T> ThinRef<T> {
                 return Err(RevocationError.already_revoked(T.name));
             }
 
-            // Atomic verify-and-bump.  None means the generation
+            // Atomic verify-and-bump. None means the generation
             // moved under us → already revoked by another thread.
             let new_gen = match header.try_revoke(self.generation) {
                 Some(g) => g,
@@ -522,8 +561,10 @@ implement<T> ThinRef<T> {
 
     /// Get pointer to allocation header.
     ///
+
     /// # Safety
     ///
+
     /// Reference must be non-null and have valid header at offset -32.
     @inline
     public unsafe fn header(&self) -> &unsafe AllocationHeader {
@@ -533,8 +574,10 @@ implement<T> ThinRef<T> {
 
     /// Get mutable header reference.
     ///
+
     /// # Safety
     ///
+
     /// Reference must be non-null and caller must have exclusive access.
     @inline
     public unsafe fn header_mut(&self) -> &unsafe mut AllocationHeader {
@@ -569,8 +612,10 @@ unsafe implement<T: Sync> Sync for ThinRef<T> {}
 
 /// Create a ThinRef from a heap allocation.
 ///
+
 /// # Safety
 ///
+
 /// Caller must ensure `ptr` is a valid heap allocation with CBGR header.
 @inline
 public unsafe fn thin_ref_from_heap<T>(ptr: &unsafe T, capabilities: UInt16) -> ThinRef<T> {
@@ -580,6 +625,7 @@ public unsafe fn thin_ref_from_heap<T>(ptr: &unsafe T, capabilities: UInt16) -> 
 
 /// Validate a ThinRef and return the inner reference.
 ///
+
 /// Convenience function for common validate-then-deref pattern.
 @inline
 public fn deref_thin<T>(thin: &ThinRef<T>) -> Result<&T, UseAfterFreeError> {

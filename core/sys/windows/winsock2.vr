@@ -8,23 +8,27 @@ module sys.windows.winsock2;
 // Platform: Windows (x86_64)
 // =============================================================================
 //
+
 // This module provides:
 // 1. Raw Winsock2 FFI declarations via @extern("ws2_32.dll")
 // 2. POSIX-compatible wrapper functions with identical signatures to
-//    sys/linux/syscall, enabling core/net/ modules to share code paths
-//    across Linux and Windows via @cfg(any(target_os = "linux", target_os = "windows"))
+//  sys/linux/syscall, enabling core/net/ modules to share code paths
+//  across Linux and Windows via @cfg(any(target_os = "linux", target_os = "windows"))
 //
+
 // Architecture:
 // - WSA initialization is handled lazily via WindowsOnce guard on first socket call
 // - All wrappers return Result<T, OSError> matching the Linux syscall interface
 // - Socket handles are wrapped as FileDesc for cross-platform compatibility
 // - closesocket() is mapped to close(), ioctlsocket() to set_nonblocking(), etc.
 //
+
 // Performance:
 // - WSA init: ~50us one-time cost, amortized to 0
 // - Socket ops: same as raw Winsock2 (no overhead beyond error translation)
 // - IOCP integration available via sys/windows/io.vr for async I/O
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -123,12 +127,12 @@ public type WindowsSockaddrIn6 is {
 // =============================================================================
 
 // Winsock2 FFI signatures use the Win32 ABI:
-//   * `int` parameters / returns → `Int32` (POSIX-style 32-bit signed,
-//     identical width on Win64)
-//   * `SOCKET` → `UInt64` (Win64 pointer-width opaque handle, kept as-is)
-//   * `int *` socklen-shaped out-pointers (addrlen, namelen, fromlen,
-//     optlen) → `&mut Int32` — the kernel writes 4 bytes; `&mut Int`
-//     (i64*) would leave the high 4 bytes uninitialized.
+//  * `int` parameters / returns → `Int32` (POSIX-style 32-bit signed,
+//  identical width on Win64)
+//  * `SOCKET` → `UInt64` (Win64 pointer-width opaque handle, kept as-is)
+//  * `int *` socklen-shaped out-pointers (addrlen, namelen, fromlen,
+//  optlen) → `&mut Int32` — the kernel writes 4 bytes; `&mut Int`
+//  (i64*) would leave the high 4 bytes uninitialized.
 // T0.4.2 Phase 3 sweep — same FFI ABI hazard class as macOS libsystem.vr.
 
 @extern("ws2_32.dll")
@@ -243,6 +247,7 @@ fn wsa_error() -> OSError {
 // POSIX-Compatible Wrapper Functions
 // =============================================================================
 //
+
 // These wrappers provide the same interface as sys/linux/syscall, allowing
 // core/net/ modules to use @cfg(any(target_os = "linux", target_os = "windows"))
 // for shared code paths.

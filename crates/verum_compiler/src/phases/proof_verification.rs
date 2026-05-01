@@ -1,28 +1,33 @@
 //! Proof Verification Phase
 //!
+
 //! Bridges the AST proof system (in `verum_ast`) with the SMT proof search engine
 //! (in `verum_smt`). This module converts AST-level proof constructs — tactic
 //! expressions, structured proof steps, calculation chains, and proof methods —
 //! into SMT-level proof tactics that can be executed by `ProofSearchEngine`.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! verum_ast::TacticExpr ──┐
-//! verum_ast::ProofStep    ├──► proof_verification ──► verum_smt::ProofTactic
-//! verum_ast::ProofMethod  │                           verum_smt::ProofSearchEngine
-//! verum_ast::ProofBody  ──┘                           ──► VerificationResult
+//! verum_ast::ProofStep ├──► proof_verification ──► verum_smt::ProofTactic
+//! verum_ast::ProofMethod │ verum_smt::ProofSearchEngine
+//! verum_ast::ProofBody ──┘ ──► VerificationResult
 //! ```
 //!
+
 //! # Proof Body Variants
 //!
+
 //! - **Term**: Curry-Howard proof term — type-checked as an expression whose type
-//!   matches the proposition.
+//!  matches the proposition.
 //! - **Tactic**: Single tactic expression converted to `ProofTactic` and executed.
 //! - **Structured**: Sequence of `ProofStep`s building toward a conclusion, each
-//!   step producing or consuming subgoals.
+//!  step producing or consuming subgoals.
 //! - **ByMethod**: Dispatches induction, case analysis, or contradiction with
-//!   appropriate subgoal generation.
+//!  appropriate subgoal generation.
 
 use std::time::{Duration, Instant};
 
@@ -104,6 +109,7 @@ pub enum ProofVerificationResult {
 
 /// Convert an AST `TacticExpr` into an SMT `ProofTactic`.
 ///
+
 /// The mapping is largely one-to-one, with AST-level `Expr` / `Ident` nodes
 /// rendered to the `Text` representations expected by the SMT engine.
 pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
@@ -381,6 +387,7 @@ fn extract_fail_message(message: &Expr) -> Text {
 
 /// Build a sequential composition from a list of tactics.
 ///
+
 /// An empty list maps to `Done`; a singleton is returned directly; otherwise
 /// left-associated `Seq` nodes are constructed.
 fn build_seq(tactics: List<ProofTactic>) -> ProofTactic {
@@ -396,6 +403,7 @@ fn build_seq(tactics: List<ProofTactic>) -> ProofTactic {
 
 /// Build an alternative choice from a list of tactics.
 ///
+
 /// An empty list fails; a singleton is returned directly; otherwise
 /// left-associated `Alt` nodes are constructed.
 fn build_alt(tactics: List<ProofTactic>) -> ProofTactic {
@@ -434,12 +442,13 @@ fn calc_relation_name(rel: &CalcRelation) -> &'static str {
 
 /// Verify a calculation chain by checking each step's justification.
 ///
+
 /// A calc block like:
 /// ```text
 /// calc {
-///     a
-///       = b  by h1
-///       = c  by h2
+///  a
+///  = b by h1
+///  = c by h2
 /// }
 /// ```
 /// produces subgoals `a = b` (justified by `h1`) and `b = c` (justified by `h2`).
@@ -504,6 +513,7 @@ fn verify_calc_chain(
 
 /// Construct a binary relation expression from two sides and a relation.
 ///
+
 /// For equality this produces `lhs == rhs`; for ordering relations the
 /// corresponding binary operator is used. Relations without a direct AST
 /// binary operator (e.g. Divides, Congruent) are encoded as named function
@@ -633,10 +643,10 @@ fn verify_proof_method(
             // parser leaves an empty tuple placeholder) we fall back to
             // the goal's disjunction structure: split `A || B || …` into
             // one subgoal per disjunct. This matches the idiomatic usage
-            //     proof by cases {
-            //         case x >= 0 => { … }
-            //         case x < 0  => { … }
-            //     }
+            //  proof by cases {
+            //  case x >= 0 => { … }
+            //  case x < 0 => { … }
+            //  }
             // on a theorem like `ensures x >= 0 || x < 0`, where there
             // *is* no hypothesis to case-analyse — the user is partitioning
             // the disjunctive goal itself.
@@ -955,6 +965,7 @@ fn verify_proof_cases_ctx(
 
 /// Verify a sequence of `ProofStep`s, threading hypotheses through.
 ///
+
 /// Each step may introduce new hypotheses (via `Have`, `Obtain`, `Let`) or
 /// discharge intermediate goals (via `Show`, `Suffices`, `Tactic`). The
 /// function tracks a mutable hypothesis list that grows as the proof
@@ -1328,32 +1339,41 @@ fn discharge_subgoals(
 
 /// Verify the proof body of a theorem declaration.
 ///
+
 /// This is the primary entry point for proof verification. It dispatches on
 /// the `ProofBody` variant:
 ///
+
 /// - **Term**: The proof term is treated as an expression whose type must match
-///   the proposition. Since full dependent type checking is beyond this module's
-///   scope, we delegate to the SMT engine to verify the proposition directly,
-///   using the term as a hint.
+///  the proposition. Since full dependent type checking is beyond this module's
+///  scope, we delegate to the SMT engine to verify the proposition directly,
+///  using the term as a hint.
 ///
+
 /// - **Tactic**: A single tactic expression is converted to `ProofTactic` and
-///   executed against the proposition as a goal.
+///  executed against the proposition as a goal.
 ///
+
 /// - **Structured**: Each `ProofStep` is verified in sequence, threading
-///   hypotheses through. A final conclusion tactic (if present) closes the
-///   remaining goal.
+///  hypotheses through. A final conclusion tactic (if present) closes the
+///  remaining goal.
 ///
+
 /// - **ByMethod**: Dispatches to induction, case analysis, or contradiction
-///   handlers that generate and verify the appropriate subgoals.
+///  handlers that generate and verify the appropriate subgoals.
 ///
+
 /// # Arguments
 ///
+
 /// * `engine` - The proof search engine (may be reused across theorems).
 /// * `smt_ctx` - SMT context for formula translation.
 /// * `theorem` - The theorem declaration containing the proof body.
 ///
+
 /// # Returns
 ///
+
 /// `ProofVerificationResult::Verified` with a certificate on success, or
 /// `ProofVerificationResult::Failed` with the list of unproved subgoals.
 pub fn verify_proof_body(
@@ -1370,6 +1390,7 @@ pub fn verify_proof_body(
 /// alias's unqualified name and stores the already-composed chain of
 /// refinement predicates rooted in an implicit `self` binder.
 ///
+
 /// Callers that don't care about nominal resolution use [`verify_proof_body`]
 /// above; it passes an empty map and the behaviour degrades to "inline
 /// refinements only", which is the pre-existing contract.
@@ -1400,31 +1421,34 @@ pub fn verify_proof_body_with_aliases(
     // Pre-pass: kernel-bridge discharge validation (task #135 / MSFS-L4.2)
     // ----------------------------------------------------------------
     //
+
     // For every `apply kernel_<verb>_strict(literal_args)` invocation
     // in the proof body, replay the call through
-    // `verum_kernel::dispatch_intrinsic`.  When the dispatcher returns
+    // `verum_kernel::dispatch_intrinsic`. When the dispatcher returns
     // `Decision { holds: false }`, the discharge claim is false at
     // the kernel level — short-circuit with a verification failure
     // before the SMT engine wastes time on a doomed goal.
     //
-    // **Architectural significance.**  This is the load-bearing piece
+
+    // **Architectural significance.** This is the load-bearing piece
     // that converts the bridge-discharge audit's *observation* (task
-    // #134) into a *compile-time gate*.  Pre-fix the
+    // #134) into a *compile-time gate*. Pre-fix the
     // `kernel_*_strict` axioms were treated as opaque trusted
     // assertions — the user's claim "this discharges through the
-    // kernel" was honoured on faith.  Post-fix the dispatcher's
+    // kernel" was honoured on faith. Post-fix the dispatcher's
     // structural check runs at compile time and rejects pathological
     // arg shapes before they reach SMT.
     //
+
     // **Performance**: pure AST walk + hashmap dispatch — no SMT
-    // invocation, no kernel re-check round-trip.  Microsecond-scale
+    // invocation, no kernel re-check round-trip. Microsecond-scale
     // per proof body, so adding this pre-pass to every theorem is
     // negligible.
     let bridge_errors = crate::phases::bridge_discharge_check::validate_proof_body_bridges(
         proof_body,
         &theorem_name,
         // Theorem AST doesn't carry the source path directly; pass an
-        // empty path here.  The pipeline's surrounding diagnostic
+        // empty path here. The pipeline's surrounding diagnostic
         // surface attaches the actual file context when it surfaces
         // the verification result.
         std::path::Path::new(""),
@@ -1461,6 +1485,7 @@ pub fn verify_proof_body_with_aliases(
 
     // Build the primary goal from the theorem's proposition and requires clauses.
     //
+
     // Proof-body semantics for `theorem t(..) -> Bool ensures E proof by …`:
     // the proof body is evidence for `E`, not for the shape of the returned
     // `Bool`. Concretely the declaration means "there exists a proof of `E`,
@@ -1482,6 +1507,7 @@ pub fn verify_proof_body_with_aliases(
 
     // Inline refinement hypotheses.
     //
+
     // For every theorem parameter whose *inline* type is a refinement — i.e.
     // `n: Int { self == 7 }` (Rule 1) or `n: Int where |x| x > 0` (Rule 2) or
     // `x: Int where x > 0` (Rule 3, Sigma) — the predicate is a fact about
@@ -1491,6 +1517,7 @@ pub fn verify_proof_body_with_aliases(
     // hypothesis set so the SMT sees the same constraint the type system is
     // enforcing at call sites.
     //
+
     // Nominal refinements (`n: FanoDim` where `FanoDim is Dimension { self == 7 }`)
     // are *not* resolved here — that requires the type-alias chain from the
     // type registry and is tracked as a separate follow-up. The conservative
@@ -2152,11 +2179,13 @@ fn pv_error_tactic_name(err: &ProofVerificationError) -> Maybe<&str> {
 /// Build goal-aware tactic suggestions using the
 /// `verum_verification::tactic_heuristics` shape-level heuristic engine.
 ///
+
 /// This is the structured counterpart to `build_suggestions_from_*`:
 /// instead of hard-coded prose, it inspects the goal expression and
 /// already-tried tactic name and emits ranked suggestions
 /// ("try `refl`", "try `split`", …) with a short rationale.
 ///
+
 /// Empty result is fine — it signals "no shape-matching rule fires;
 /// fall back to the error-kind prose suggestions above".
 fn heuristic_suggestions(
@@ -2211,6 +2240,7 @@ fn heuristic_suggestions(
 /// parameter identifier. The resulting expressions are ready to be threaded
 /// as hypotheses into the proof goal.
 ///
+
 /// This is what lets the proof engine "see" the refinement: a theorem
 /// `theorem t(n: Int { self >= 0 }) ensures ...` must carry `n >= 0` as a
 /// hypothesis, not just as a refinement on the type. Type-checking still
@@ -2218,15 +2248,18 @@ fn heuristic_suggestions(
 /// through the verification layer where the goal solver lives.
 /// Collect propositional-witness hypotheses for `<Q: Prop>` generics.
 ///
+
 /// Rationale (Curry-Howard): a theorem quantified over a Prop-kinded
 /// type variable `Q` that also takes a parameter `p: Q` is saying
 /// "the caller supplies a proof of `Q`". Inside the body we can treat
 /// `Q` as `true`. Before this elaboration, goals of shape
 ///
+
 /// ```text
 /// theorem id_trivial<P: Prop>(p: P): P { proof by auto }
 /// ```
 ///
+
 /// died in the SMT with "Goal is not boolean" because `P` was a bare
 /// Path with no context telling the solver that its value is fixed
 /// to `true`. The fix threads `P` itself as a hypothesis (i.e. a
@@ -2288,6 +2321,7 @@ pub fn propositional_witness_hypotheses(theorem: &TheoremDecl) -> Vec<Expr> {
 /// `T is A | B | C`, produce the expression
 /// `p == T.A || p == T.B || p == T.C`.
 ///
+
 /// Uses the variant registry `variant_map` (populated from the
 /// module's `TypeDecl`s at `verify_module` time). Parameters typed
 /// with non-variant types are skipped. Combined with the pairwise-
@@ -2397,6 +2431,7 @@ pub fn refinement_hypotheses_from_params(
 /// predicate into `out`. Stops when a non-refinement, non-delegating
 /// TypeKind is reached.
 ///
+
 /// Nominal types are looked up in `alias_map`; each stored predicate is
 /// assumed to use `self` as its binder (matching the convention of
 /// `build_refinement_alias_map`), and is rewritten to the parameter
@@ -2466,6 +2501,7 @@ fn collect_refinements(
 /// automatically, and so a `match` ite-chain's branch-selection
 /// logic has the right discriminator semantics.
 ///
+
 /// The lowering matches the translator's Path-translation scheme:
 /// the qualified name `T.A` pretty-prints to `T.A` and emits
 /// `Int::new_const("path_T.A")`. Disjointness is therefore
@@ -2538,12 +2574,14 @@ pub fn variant_disjointness_axioms(module: &verum_ast::Module) -> Vec<Expr> {
 /// its unqualified name. This is what gives `apply <name>` in one theorem's
 /// proof body access to every sibling declaration in the same file.
 ///
+
 /// The lemma expression is the theorem's `proposition`, which the parser
 /// already synthesises from the requires/ensures clauses as
 /// `(req_conj) ⇒ (ens_conj)`. `try_apply` then peels the implication chain
 /// into premises + conclusion and unifies the conclusion with the current
 /// goal, exactly the usual natural-deduction `apply` semantics.
 ///
+
 /// Priority is fixed at a neutral mid-value so user declarations sit between
 /// core stdlib hints (highest) and speculative auto-hints (lowest). No
 /// heuristic ranking: the caller supplies the lemma name explicitly, so
@@ -2587,6 +2625,7 @@ pub fn register_module_lemmas(
 /// `type X is T1 { self op K1 }` / `type X is T2 where …` chain, resolving
 /// intermediate named types by re-entering the map recursively.
 ///
+
 /// This is the data source that turns `n: FanoDim` into the implicit
 /// hypothesis `n == 7` at verification time, eliminating the need for
 /// authors to restate the refinement as an explicit `requires` clause.
@@ -2680,14 +2719,16 @@ fn flatten_chain(
 /// Substitute every free `Path` consisting of a single ident in `from_to`
 /// with the corresponding target ident, returning a new `Expr`.
 ///
+
 /// Two path shapes are recognised at the single-segment head:
 ///
+
 /// * `PathSegment::Name(id)` — the normal identifier case, substituted when
-///   `id.name` matches one of the `from` entries.
+///  `id.name` matches one of the `from` entries.
 /// * `PathSegment::SelfValue` — the `self` keyword used in refinement
-///   predicates (Rule 1, `T { self > 0 }`). The AST stores `self` as a
-///   dedicated segment kind rather than an identifier, so we match it
-///   explicitly against a `from` entry of the literal text `"self"`.
+///  predicates (Rule 1, `T { self > 0 }`). The AST stores `self` as a
+///  dedicated segment kind rather than an identifier, so we match it
+///  explicitly against a `from` entry of the literal text `"self"`.
 pub fn substitute_ident(expr: &Expr, from_to: &[(Text, Ident)]) -> Expr {
     match &expr.kind {
         ExprKind::Path(p) => {
@@ -2796,15 +2837,18 @@ pub fn substitute_ident(expr: &Expr, from_to: &[(Text, Ident)]) -> Expr {
 /// Substitute every free reference to the reserved name `result` with the
 /// boolean literal `true` in `expr`.
 ///
+
 /// Rationale (see the call site in `verify_proof_body` for the wider
 /// discussion): a theorem of shape
 ///
+
 /// ```verum
 /// theorem t(..) -> Bool
-///     ensures <predicate involving result>
-///     proof by <tactic>
+///  ensures <predicate involving result>
+///  proof by <tactic>
 /// ```
 ///
+
 /// declares that the proof body is evidence for the predicate; the `-> Bool`
 /// return is a syntactic convenience whose witness is, by the convention
 /// of our proof system, fixed to `true`. The SMT translator is independent
@@ -2813,6 +2857,7 @@ pub fn substitute_ident(expr: &Expr, from_to: &[(Text, Ident)]) -> Expr {
 /// (`ensures result == (n == 7)` under `requires n == 7`) unprovable. This
 /// helper closes that gap before the goal is handed to the engine.
 ///
+
 /// The walker is intentionally limited to the expression shapes that appear
 /// in specification predicates (logical connectives, equalities and
 /// inequalities, arithmetic, field / method / index access, literal
@@ -2958,15 +3003,18 @@ pub struct ImplObligationFailure {
 /// Verify every axiom of the implemented protocol against the implementation's
 /// concrete items. Each axiom is either:
 ///
-///   1. Discharged by an explicit `proof axiom_name by tactic;` clause in
-///      the impl block — the tactic is converted via `convert_tactic` and
-///      executed against the self-substituted proposition.
-///   2. Discharged by `ProofSearchEngine::auto_prove` with a bounded budget.
+
+///  1. Discharged by an explicit `proof axiom_name by tactic;` clause in
+///  the impl block — the tactic is converted via `convert_tactic` and
+///  executed against the self-substituted proposition.
+///  2. Discharged by `ProofSearchEngine::auto_prove` with a bounded budget.
 ///
+
 /// Returns a report listing verified obligations and failures. No side effect
 /// on the compiler's diagnostic channel — callers (e.g. the pipeline) decide
 /// how to present failures.
 ///
+
 /// See `docs/architecture/model-theoretic-semantics.md` for the full
 /// specification.
 pub fn verify_impl_axioms(

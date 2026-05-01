@@ -4,15 +4,17 @@
 // Layer: Foundations (Mathematical Structures)
 // Spec: docs/detailed/13-formal-proofs.md
 //
+
 // Defines sequences, limits, continuity, differentiability, integration,
 // measure theory, and functional analysis structures (Banach, Hilbert spaces).
 // Each construction carries its axioms as formal verification obligations.
 //
+
 // Hierarchy:
-//   Sequence -> CauchySequence -> Convergent
-//   ContinuousFunction -> Differentiable -> SmoothFunction
-//   MeasurableSpace -> MeasureSpace -> ProbabilitySpace
-//   NormedSpace -> BanachSpace -> HilbertSpace
+//  Sequence -> CauchySequence -> Convergent
+//  ContinuousFunction -> Differentiable -> SmoothFunction
+//  MeasurableSpace -> MeasureSpace -> ProbabilitySpace
+//  NormedSpace -> BanachSpace -> HilbertSpace
 // =============================================================================
 
 module core.math.analysis;
@@ -286,6 +288,7 @@ axiom banach_fixed_point(f: Int, space: Int, contraction_factor: Float) -> Bool;
 // Analysis protocol-inheritance theorems (SMT-discharged)
 // =============================================================================
 //
+
 // These theorems lock in the `protocol extends` chain of the analysis
 // hierarchy: convergent sequences, complete spaces, smooth functions,
 // measure/probability spaces, and Hilbert/Banach spaces.

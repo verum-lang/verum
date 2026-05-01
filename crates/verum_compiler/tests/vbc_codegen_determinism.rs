@@ -1,29 +1,34 @@
 //! Determinism contract for the VBC bytecode emission pipeline.
 //!
+
 //! Compiles the same fixed Verum source twice in a row inside a single
-//! process and asserts the resulting bytecode is byte-identical.  Without
+//! process and asserts the resulting bytecode is byte-identical. Without
 //! this guardrail, any new HashMap iteration inserted into the codegen
 //! pipeline would silently leak Rust's per-process random hasher seed
 //! into FunctionId / TypeId assignment, producing the symptom matrix
 //! that motivated commits 0723ad43 + 82303f94 (task #143):
 //!
-//!     * `method 'X.Y' not found on value`
-//!     * `Null pointer dereference`
-//!     * `Division by zero`
-//!     * `field index N (offset M) exceeds object data size K`
+
+//!  * `method 'X.Y' not found on value`
+//!  * `Null pointer dereference`
+//!  * `Division by zero`
+//!  * `field index N (offset M) exceeds object data size K`
 //!
+
 //! Each of those happens when the runtime resolves a function-id /
 //! variant-tag / field-offset that was assigned to a *different* symbol
 //! in the run that produced the bytecode — which is exactly what
 //! non-deterministic iteration causes.
 //!
+
 //! Mechanism: spawn the same vtest invocation twice, compare the
-//! exit-code-and-stderr signature.  If the underlying bytecode differs
+//! exit-code-and-stderr signature. If the underlying bytecode differs
 //! between runs, the panic surface (or the absence of panic) differs
 //! too.
 //!
+
 //! Why two child-processes rather than two in-process compiles: each
-//! process gets a fresh random hasher seed.  In-process repeats reuse
+//! process gets a fresh random hasher seed. In-process repeats reuse
 //! the same seed and would fail to detect HashMap-iteration leaks.
 
 use std::path::PathBuf;
@@ -31,6 +36,7 @@ use std::process::Command;
 
 /// Fixture A — record type, while loop, assert_eq.
 ///
+
 /// Covers the original symptom matrix from commits 0723ad43 +
 /// 82303f94: protocol default methods, type-name imports, stdlib
 /// function lookups, generic monomorphisation around a small
@@ -72,6 +78,7 @@ fn main() {
 
 /// Fixture B — variant-constructor disambiguation (#76 family).
 ///
+
 /// Two user-declared sum types each have a `V4` variant with
 /// identical structure. Without deterministic codegen, the simple
 /// name `V4` can collapse onto whichever type registered first,
@@ -116,6 +123,7 @@ fn main() {
 
 /// Fixture C — stdlib method dispatch (#79 family).
 ///
+
 /// Multiple stdlib carrier types (Result, Maybe, …) all expose a
 /// method named `unwrap` with different panic-on-nothing semantics.
 /// The dispatcher must route by receiver type, not by first-
@@ -151,6 +159,7 @@ fn main() {
 
 /// Fixture D — generic monomorphisation across two carriers.
 ///
+
 /// `List<Pair>` inside a `Maybe<...>` exercises two layers of
 /// generic specialisation in the codegen. Historical
 /// non-determinism in mono-key ordering (HashMap iteration) would
@@ -203,7 +212,7 @@ fn main() {
 }
 "#;
 
-/// All fixtures the determinism contract pins.  Each is run in two
+/// All fixtures the determinism contract pins. Each is run in two
 /// separate vtest subprocesses with a wiped disk-cache; the
 /// (exit_code, stderr) tuple must match across runs.
 const FIXTURES: &[(&str, &str)] = &[
@@ -227,7 +236,7 @@ fn workspace_root() -> PathBuf {
     );
 }
 
-/// Run vtest on the fixture and capture (exit_code, stderr).  We use
+/// Run vtest on the fixture and capture (exit_code, stderr). We use
 /// stderr alone — stdout from successful runs is the same VCS report
 /// boilerplate, while stderr carries the panic message that varied
 /// run-to-run before the determinism fix.
@@ -256,6 +265,7 @@ fn wipe_disk_cache(root: &std::path::Path) {
 /// separate processes with the disk-cache wiped between runs,
 /// assert (exit_code, normalised_stderr) matches.
 ///
+
 /// `name` is used as the fixture file's basename and for failure
 /// reporting.
 fn run_determinism_contract(name: &str, source: &str) {
@@ -302,7 +312,7 @@ fn run_determinism_contract(name: &str, source: &str) {
 #[test]
 #[ignore = "requires built target/release/vtest; run with --ignored"]
 fn vbc_bytecode_emission_is_deterministic_across_runs() {
-    // Run every fixture in the contract.  Each probes a distinct
+    // Run every fixture in the contract. Each probes a distinct
     // historical non-determinism vector — see the const docs above.
     for (name, source) in FIXTURES {
         run_determinism_contract(name, source);

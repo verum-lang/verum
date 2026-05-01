@@ -1,26 +1,30 @@
 //! Red-team Round 2 §6.2 — refinement-witness purity invariant.
 //!
+
 //! Adversarial scenario: a function whose body emits side effects
 //! (IO, Mutates, Async) is used as a refinement witness. Without
 //! a purity guard, the SMT translation would either lose the
 //! effects (silently accepting an unsound proof) or panic on the
 //! impure body (no fail-closed behaviour).
 //!
+
 //! Defense: Verum's computational-properties system tracks
 //! Pure/IO/Async/Fallible/Mutates per `ComputationalProperty`.
 //! `PropertySet::is_pure()` is the canonical predicate for "may
 //! be used as a refinement witness". The purity invariant must
 //! hold structurally:
 //!
-//!   1. `pure()` is pure; `single(IO)` is not.
-//!   2. Adding any non-Pure property to a Pure set demotes it
-//!      out of pure.
-//!   3. Combining two Pure sets stays Pure.
-//!   4. Combining a Pure set with an effectful set demotes the
-//!      union out of Pure.
-//!   5. The default is Pure (matches the spec's
-//!      "absence-of-properties = Pure" convention).
+
+//!  1. `pure()` is pure; `single(IO)` is not.
+//!  2. Adding any non-Pure property to a Pure set demotes it
+//!  out of pure.
+//!  3. Combining two Pure sets stays Pure.
+//!  4. Combining a Pure set with an effectful set demotes the
+//!  union out of Pure.
+//!  5. The default is Pure (matches the spec's
+//!  "absence-of-properties = Pure" convention).
 //!
+
 //! These tests pin the algebra programmatically so any future
 //! refactor of `PropertySet` cannot silently break the
 //! refinement-witness purity contract.

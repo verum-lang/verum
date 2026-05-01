@@ -1,5 +1,6 @@
 //! Witness Generation
 //!
+
 //! This module generates concrete examples of values not covered by patterns.
 //! Witnesses help developers understand what cases are missing from their match.
 
@@ -192,17 +193,22 @@ impl Witness {
 
     /// Convert an SMT witness to a standard Witness
     ///
+
     /// This is used when the SMT guard verifier finds uncovered cases.
     /// The SMT witness contains variable bindings which we convert to
     /// appropriate witness values based on the scrutinee type.
     ///
+
     /// # Arguments
     ///
+
     /// * `smt_witness` - The SMT witness containing variable bindings
     /// * `scrutinee_ty` - The type being matched on
     ///
+
     /// # Returns
     ///
+
     /// A `Witness` representing the uncovered case
     pub fn from_smt_witness(smt_witness: &SmtWitness, scrutinee_ty: &Type) -> Witness {
         // If we have bindings, use the first one as the primary witness
@@ -500,6 +506,7 @@ fn covers_constructor(pattern: &PatternColumn, name: &Text) -> bool {
 
 /// Find an uncovered integer value
 ///
+
 /// Performance: Uses HashSet for O(1) value lookup instead of O(n) list search
 fn find_uncovered_integer(patterns: &[PatternColumn]) -> i64 {
     // Collect all covered integers using HashSet for O(1) lookup

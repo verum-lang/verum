@@ -1,5 +1,6 @@
 //! Variant information for compile-time reflection
 //!
+
 //! Provides detailed enum variant metadata matching core/meta/reflection.vr VariantInfo.
 
 use verum_ast::MetaValue;
@@ -10,6 +11,7 @@ use super::type_kind::VariantKind;
 
 /// Rich variant information for compile-time reflection
 ///
+
 /// Used by `variants_of` to provide detailed enum variant metadata.
 /// Matches: core/meta/reflection.vr VariantInfo
 #[derive(Debug, Clone, PartialEq)]

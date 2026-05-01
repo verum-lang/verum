@@ -5,32 +5,41 @@
 // Dependencies: core, core.collections
 // =============================================================================
 //
+
 // RFC 9218 — a small, cross-version HTTP priority scheme:
 //
-//   * Every request carries an optional `priority` header field whose
-//     value is a Structured Field dictionary:
+
+//  * Every request carries an optional `priority` header field whose
+//  value is a Structured Field dictionary:
 //
-//         priority: u=3, i
+
+//  priority: u=3, i
 //
-//     where
-//       u = urgency (0 .. 7; 0 = highest). Default 3.
-//       i = incremental flag (true/false). Default false.
+
+//  where
+//  u = urgency (0 .. 7; 0 = highest). Default 3.
+//  i = incremental flag (true/false). Default false.
 //
-//   * PRIORITY_UPDATE frame (type 0xF0700 for request streams,
-//     0xF0701 for push IDs) lets a client or server re-prioritise a
-//     stream after sending the initial headers.
+
+//  * PRIORITY_UPDATE frame (type 0xF0700 for request streams,
+//  0xF0701 for push IDs) lets a client or server re-prioritise a
+//  stream after sending the initial headers.
 //
-//   * Applies identically to HTTP/2 (RFC 9113 §5.3.2), HTTP/3
-//     (this module), and SETTINGS advertisement via
-//     SETTINGS_NO_RFC7540_PRIORITIES (0x09).
+
+//  * Applies identically to HTTP/2 (RFC 9113 §5.3.2), HTTP/3
+//  (this module), and SETTINGS advertisement via
+//  SETTINGS_NO_RFC7540_PRIORITIES (0x09).
 //
+
 // # Scope of this module
 //
+
 // Priority *semantics* — parsing the header / frame bodies and
 // exposing a typed `Priority` value the scheduler consumes. Actual
 // send ordering lives in `core.net.h3.server` / `client`; this
 // module is the wire parser + builder only.
 //
+
 // =============================================================================
 
 module core.net.h3.priority;
@@ -84,10 +93,12 @@ implement H3Priority {
 // Structured-field parser — RFC 8941 minimal subset needed by RFC 9218
 // =============================================================================
 //
+
 // We only parse the two fields `u=<digit>` and `i` (bare token,
 // optionally `i=?1` / `i=?0`). No full RFC 8941 machinery; a
 // conforming sender always produces the compact form.
 //
+
 // =============================================================================
 
 public type PriorityParseError is
@@ -196,9 +207,9 @@ fn is_ws(b: Byte) -> Bool {
 
 /// Emit the `priority:` header value bytes (no trailing CRLF).
 /// Shapes:
-///   Priority { urgency: 3, incremental: false } → "u=3"
-///   Priority { urgency: 0, incremental: true }  → "u=0, i"
-///   Default priority                              → "u=3"
+///  Priority { urgency: 3, incremental: false } → "u=3"
+///  Priority { urgency: 0, incremental: true } → "u=0, i"
+///  Default priority → "u=3"
 public fn encode_header(p: &H3Priority) -> List<Byte> {
     let mut out: List<Byte> = [];
     out.push('u' as Byte);
@@ -216,16 +227,18 @@ public fn encode_header(p: &H3Priority) -> List<Byte> {
 // PRIORITY_UPDATE frame (RFC 9218 §7.2)
 // =============================================================================
 //
-//   PRIORITY_UPDATE Frame {
-//     Type (i),
-//     Length (i),
-//     Prioritized Element ID (i),
-//     Priority Field Value (..),
-//   }
+
+//  PRIORITY_UPDATE Frame {
+//  Type (i),
+//  Length (i),
+//  Prioritized Element ID (i),
+//  Priority Field Value (..),
+//  }
 //
+
 // Frame types (RFC 9218 §7.2.1):
-//   0xF0700  PRIORITY_UPDATE referencing a request stream
-//   0xF0701  PRIORITY_UPDATE referencing a pushed response
+//  0xF0700 PRIORITY_UPDATE referencing a request stream
+//  0xF0701 PRIORITY_UPDATE referencing a pushed response
 // =============================================================================
 
 public const PRIORITY_UPDATE_REQUEST: UInt64 = 0xF0700_u64;

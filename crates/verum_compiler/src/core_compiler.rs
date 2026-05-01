@@ -3,6 +3,7 @@
 // The known_deps map should be derived from parsing `mount` statements in .vr files.
 //! Stdlib Compilation Support Types
 //!
+
 //! This module provides types and utilities for stdlib compilation:
 //! - `CoreConfig` - Configuration for stdlib compilation
 //! - `StdlibCompilationResult` - Result of stdlib compilation
@@ -11,23 +12,30 @@
 //! - `build_export_index` - Build export index for import validation
 //! - `validate_imports` - Validate imports against export index
 //!
+
 //! # Architecture
 //!
+
 //! Stdlib compilation is handled by `CompilationPipeline::compile_core()` in
 //! `BuildMode::StdlibBootstrap` mode. See `pipeline.rs` for the unified compilation
 //! implementation.
 //!
+
 //! # Usage
 //!
+
 //! ```ignore
 //! use verum_compiler::{CompilationPipeline, CompilerOptions, Session, CoreConfig};
 //!
+
 //! let config = CoreConfig::new("stdlib")
-//!     .with_output("target/stdlib.vbca");
+//!  .with_output("target/stdlib.vbca");
 //!
+
 //! let mut session = Session::new(CompilerOptions::default());
 //! let mut pipeline = CompilationPipeline::new_core(&mut session, config);
 //!
+
 //! let result = pipeline.compile_core()?;
 //! println!("Compiled {} modules", result.modules_compiled);
 //! ```
@@ -142,9 +150,11 @@ pub struct StdlibModule {
 
 /// Build an index of all publicly exported items (functions, types) per module path.
 ///
+
 /// This index is used for import validation to check that imported items actually exist.
 /// The key is the module path (e.g., "core.memory") and the value is a set of exported names.
 ///
+
 /// The submodule path is derived from the file name:
 /// - "core/memory.vr" -> "core.memory"
 /// - "core/mod.vr" -> "core" (mod.vr exports to parent module)
@@ -282,6 +292,7 @@ pub fn build_export_index(all_modules: &[(String, Vec<(PathBuf, verum_ast::Modul
 
 /// Recursively collect exported item names from an import tree.
 ///
+
 /// For `public import foo.{Bar, Baz as B}`:
 /// - Bar is exported as "Bar"
 /// - Baz is exported as "B" (using alias)
@@ -328,9 +339,11 @@ fn collect_import_exports(tree: &verum_ast::MountTree, exports: &mut HashSet<Str
 
 /// Resolve a relative import path to an absolute module path.
 ///
+
 /// When `is_prefix` is true, all segments are treated as module path (no item extraction).
 /// When `is_prefix` is false, the last segment is treated as the item name.
 ///
+
 /// Examples:
 /// - `.memory` in module `core` with is_prefix=true -> `core.memory`, None
 /// - `.memory.size_of` in module `core` with is_prefix=false -> `core.memory`, Some("size_of")
@@ -405,6 +418,7 @@ fn resolve_import_path(
 
 /// Validate imports and collect errors for missing items.
 ///
+
 /// Returns a list of (module_path, item_name, similar_names, span) tuples for items that don't exist.
 pub fn validate_imports(
     all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
@@ -556,7 +570,7 @@ fn validate_import_tree(
         }
         // #5 / P1.5 — file-relative mounts are validated by
         // the session loader (which reads the .vr file before
-        // the import-validation pass runs).  No module-export
+        // the import-validation pass runs). No module-export
         // table to consult here.
         MountTreeKind::File { .. } => {}
     }
@@ -700,8 +714,10 @@ impl StdlibModuleResolver {
         // IMPORTANT: Dependency order is based on actual imports analysis.
         // The order is designed to avoid circular dependencies.
         //
+
         // Compilation order: sys.* -> mem -> core -> sync -> text -> collections -> ...
         //
+
         // Key insight: `mem` does NOT import from `core` or `sync` - it only uses
         // builtins (Maybe, Result) and sys.* for platform-specific memory operations.
         // Meanwhile, `core/memory.vr` imports cbgr_alloc from `mem/allocator.vr`.
@@ -720,14 +736,14 @@ impl StdlibModuleResolver {
             ("core.mem", vec!["core.sys", "core.sys.linux", "core.sys.darwin", "core.sys.windows"]),
             // base depends on core AND core.mem because core/base/memory.vr
             // imports cbgr_alloc / cbgr_alloc_zeroed / cbgr_dealloc / cbgr_realloc
-            // from core.mem.allocator (line 21 of memory.vr).  Without this
+            // from core.mem.allocator (line 21 of memory.vr). Without this
             // dependency edge, core.base can compile BEFORE core.mem in topological
             // order, leaving cbgr_alloc unresolved when try_alloc's body compiles.
             // The stubbed try_alloc is then never exported, which cascades into
             // every module that depends on core.base — List.try_with_capacity,
             // List.try_resize_buffer, Map.try_resize, Text.try_with_capacity all
             // get stubbed at codegen, panic at runtime with FunctionNotFound (AOT)
-            // or null-deref at FatRef.is_null pc=0 (interpreter).  Documented in
+            // or null-deref at FatRef.is_null pc=0 (interpreter). Documented in
             // task #200; runtime regression anchor in
             // vcs/differential/cross-impl/diff_list_try_with_capacity_runtime.vr.
             ("core.base", vec!["core", "core.mem"]),
@@ -818,7 +834,7 @@ impl StdlibModuleResolver {
         self.compilation_order = order;
         // Diagnostic: surface the resolved order under `RUST_LOG=info` so
         // dependency-edge edits (#200 audit) are visible without grepping
-        // a huge trace.  Logged once per discover() call, at info level.
+        // a huge trace. Logged once per discover() call, at info level.
         tracing::info!(
             "[stdlib] compilation order ({} modules): {}",
             self.compilation_order.len(),

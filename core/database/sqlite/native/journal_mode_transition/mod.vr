@@ -5,6 +5,7 @@
 // TRUNCATE / PERSIST / MEMORY / WAL / OFF).
 // Spec §18.4 — journal_mode semantics.
 //
+
 // This catalogue complements the existing journal_mode taxonomy with a
 // state-transition planner that captures which transitions need an exclusive
 // lock + truncate, and which can happen lazily.

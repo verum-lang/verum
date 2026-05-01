@@ -1,10 +1,12 @@
 //! Generic Extended (`Opcode::Extended` = `0x1F`) opcode handler.
 //!
+
 //! Implements #167 Part A — the general-purpose extension-byte scheme.
 //! The dispatcher reads a single sub-op byte, then routes to the
-//! sub-op handler.  Sub-op `0x00` is reserved as a forward-compat
+//! sub-op handler. Sub-op `0x00` is reserved as a forward-compat
 //! anchor; encoders must never emit it, decoders accept-and-skip it.
 //!
+
 //! Future #167 Part B work (and any later first-class instruction
 //! that doesn't fit an existing extension namespace) wires its
 //! handler here.
@@ -18,12 +20,14 @@ use super::bytecode_io::*;
 
 /// Compute the expected payload-field count for a declared variant.
 ///
+
 /// `MakeVariantTyped` Phase 3b validation cross-checks the bytecode
 /// `field_count` operand against this:
-///   - `Unit`   → 0    (no payload),
-///   - `Tuple`  → `arity` (positional fields),
-///   - `Record` → `fields.len()` (named fields).
+///  - `Unit` → 0 (no payload),
+///  - `Tuple` → `arity` (positional fields),
+///  - `Record` → `fields.len()` (named fields).
 ///
+
 /// Inlined in the dispatcher's hot path; the match is exhaustive so
 /// the codegen folds it to a single load + cmov on most targets.
 #[inline]
@@ -40,11 +44,13 @@ fn expected_field_count(variant: &VariantDescriptor) -> u32 {
 /// the validator is unit-testable without bytecode-stream
 /// construction.
 ///
-/// Returns `Ok(())` on success.  On failure the
+
+/// Returns `Ok(())` on success. On failure the
 /// `InterpreterError::LayoutMismatch` payload distinguishes the
 /// three rejection classes via `reason`: "unknown type_id",
 /// "unknown tag for type", "field_count mismatch".
 ///
+
 /// Builtin-range type ids (`is_builtin()`, < 0x100) bypass this
 /// validation: they're scalar primitives and never carry a
 /// `variants` list — codegen never emits MakeVariantTyped for
@@ -101,9 +107,10 @@ pub(in super::super) fn validate_make_variant_typed(
 
 /// Dispatcher for `Opcode::Extended` (0x1F) — #167 Part A.
 ///
-/// Format: `[0x1F] [sub_op:u8] [operands...]`.  The sub-op byte
+
+/// Format: `[0x1F] [sub_op:u8] [operands...]`. The sub-op byte
 /// selects the extended-instruction kind from a 256-entry secondary
-/// space.  An unknown sub-op surfaces `InterpreterError::NotImplemented`
+/// space. An unknown sub-op surfaces `InterpreterError::NotImplemented`
 /// with `opcode = Some(Opcode::Extended)` so the caller can identify
 /// the extension family.
 pub(in super::super) fn handle_extended(
@@ -112,7 +119,7 @@ pub(in super::super) fn handle_extended(
     let sub_op_byte = read_u8(state)?;
     match ExtendedSubOpcode::from_byte(sub_op_byte) {
         Some(ExtendedSubOpcode::Reserved) => {
-            // Forward-compat anchor.  Encoders MUST NOT emit this
+            // Forward-compat anchor. Encoders MUST NOT emit this
             // sub-op; decoders accept it as a no-op so a future
             // extension that lands here can roll out without breaking
             // older interpreters.
@@ -122,14 +129,15 @@ pub(in super::super) fn handle_extended(
             // Wire format: `reg:dst + varint:type_id + varint:tag +
             // varint:field_count`.
             //
+
             // Phase 3b — cross-check the (type_id, tag, field_count)
             // tuple against the global type table BEFORE allocating.
             // Three rejection classes mapped to
             // `InterpreterError::LayoutMismatch`:
-            //   - type_id has no registered descriptor;
-            //   - tag is not a declared variant of that type;
-            //   - field_count disagrees with the declared variant's
-            //     arity (Unit=0, Tuple=arity, Record=fields.len()).
+            //  - type_id has no registered descriptor;
+            //  - tag is not a declared variant of that type;
+            //  - field_count disagrees with the declared variant's
+            //  arity (Unit=0, Tuple=arity, Record=fields.len()).
             // On success: identical heap footprint to legacy
             // `MakeVariant`, with the real sum-type id stored in the
             // heap header so `format_variant_for_print_depth` can
@@ -138,9 +146,10 @@ pub(in super::super) fn handle_extended(
             // the correct name when distinct sum types share variant
             // tags.
             //
+
             // Builtin-range type ids (`is_builtin()`, < 0x100) bypass
             // the descriptor lookup: they're scalar primitives and
-            // never carry a `variants` list.  Codegen never emits
+            // never carry a `variants` list. Codegen never emits
             // MakeVariantTyped for builtin types, so the only way to
             // hit a builtin id here is hand-rolled / fuzzed
             // bytecode — the synthetic `0x8000 + tag` sentinel id
@@ -149,6 +158,7 @@ pub(in super::super) fn handle_extended(
             // triggers the `unknown type_id` rejection rather than
             // a silent skip.
             //
+
             // Performance: O(1) operand read; single descriptor
             // lookup (Vec<TypeDescriptor> indexed by id); branchless
             // tag scan over the variant list (typically ≤ 8 entries
@@ -182,10 +192,12 @@ pub(in super::super) fn handle_extended(
             // steps and force every script to re-pay full compile cost
             // on its next invocation.
             //
+
             // Stdio flush happens at the driver boundary (just before
             // `process::exit`) so partial-line `print(...)` output is
             // not lost regardless of which path produced the exit.
             //
+
             // Permission gate: process termination is a script-level
             // resource boundary just like FFI _exit / kill / fork. A
             // script declaring `permissions = ["time"]` (no `run`)

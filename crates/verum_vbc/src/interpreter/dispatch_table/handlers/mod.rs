@@ -1,5 +1,6 @@
 //! Handler modules for VBC interpreter dispatch.
 //!
+
 //! These modules contain extracted handler functions from dispatch_table.rs,
 //! organized by category for maintainability.
 
@@ -9,7 +10,7 @@ pub(super) mod arith_helpers;
 pub(super) mod string_helpers;
 pub(super) mod cbgr_helpers;
 // Shared heap-marshaling primitives for the Tier-0 intercept
-// modules (shell/file/env/stdio/process/net).  Single canonical
+// modules (shell/file/env/stdio/process/net). Single canonical
 // source for `alloc_byte_list` / `alloc_record_n_fields` /
 // `wrap_in_variant` / `extract_byte_slice` / `extract_text_arg` /
 // `is_record_typed_as` / `lookup_type_id_by_name` etc.
@@ -40,24 +41,24 @@ pub(super) mod calls;
 pub(super) mod shell_runtime;
 
 // High-level Rust intercepts for file I/O (read_to_string, write,
-// read, write_bytes, exists).  Sibling to shell_runtime; same Tier-0
+// read, write_bytes, exists). Sibling to shell_runtime; same Tier-0
 // architecture (bypass libSystem FFI, use std::fs directly).
 pub(super) mod file_runtime;
 
 // High-level Rust intercepts for env-var ops (var, var_opt, set_var,
-// remove_var).  Sibling to file_runtime; bypasses libSystem
+// remove_var). Sibling to file_runtime; bypasses libSystem
 // `getenv`/`setenv`/`unsetenv` via `std::env`.
 pub(super) mod env_runtime;
 
 // High-level Rust intercepts for stdin (read_line, read_int,
-// read_float, read_to_end).  Sibling to env_runtime; bypasses
+// read_float, read_to_end). Sibling to env_runtime; bypasses
 // libSystem `read(2)` on stdin via `std::io::stdin()`.
 pub(super) mod stdio_runtime;
 
 // High-level Rust intercepts for process spawning
 // (spawn_child_with_output for `Command.output()` / `.status()`).
 // Sibling to shell_runtime; bypasses libSystem fork/execve/pipe via
-// `std::process::Command`.  See VBC-PROC-2 architecture notes.
+// `std::process::Command`. See VBC-PROC-2 architecture notes.
 pub(super) mod process_runtime;
 
 // Debug, assert, panic (0xD6-0xD9)

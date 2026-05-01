@@ -1,40 +1,49 @@
 //! Type Registry for AST → Type mapping
 //!
+
 //! This module provides a registry that maps AST nodes to their inferred types,
 //! enabling type information propagation from the type checker to code generation.
 //!
+
 //! # Architecture
 //!
+
 //! The TypeRegistry solves the critical problem of passing type information from
 //! verum_types to verum_codegen without modifying AST structures:
 //!
+
 //! ```text
 //! Parser → AST (verum_ast::Type) → TypeChecker → TypeRegistry → Codegen
-//!                                        ↓
-//!                                  verum_types::Type
+//!  ↓
+//!  verum_types::Type
 //! ```
 //!
+
 //! # Usage
 //!
+
 //! During type checking:
 //! ```ignore
 //! // Register expression types
 //! registry.register_expr(expr.span, inferred_type);
 //!
+
 //! // Register variable types
 //! registry.register_var(param.span, param.name.clone(), param_type);
 //! ```
 //!
+
 //! During code generation:
 //! ```ignore
 //! // Lookup expression type
 //! if let Some(ty) = registry.lookup_expr(expr.span) {
-//!     // Use inferred type
+//!  // Use inferred type
 //! }
 //!
+
 //! // Lookup variable type
 //! if let Some(ty) = registry.lookup_var(param.span, &param.name) {
-//!     // Use inferred type
+//!  // Use inferred type
 //! }
 //! ```
 
@@ -56,11 +65,14 @@ const MAX_FUNC_RETURN_TYPES: usize = 10_000;
 
 /// Registry mapping AST nodes to inferred types
 ///
+
 /// This structure enables type information to flow from the type checker
 /// to code generation without modifying the AST.
 ///
+
 /// # Performance
 ///
+
 /// - Lookups: O(1) average case
 /// - Memory: ~16 bytes per registered type (Span + pointer)
 /// - Build time: < 1ms for typical modules
@@ -68,6 +80,7 @@ const MAX_FUNC_RETURN_TYPES: usize = 10_000;
 pub struct TypeRegistry {
     /// Expression types indexed by span
     ///
+
     /// Maps expression spans to their inferred types. This handles all
     /// expression-level type information including literals, variables,
     /// function calls, and compound expressions.
@@ -75,6 +88,7 @@ pub struct TypeRegistry {
 
     /// Variable types indexed by (span, name)
     ///
+
     /// Maps variable declarations (parameters, locals) to their types.
     /// Uses both span and name for precise identification, handling cases
     /// where variables are shadowed or reused.
@@ -82,6 +96,7 @@ pub struct TypeRegistry {
 
     /// Function return types indexed by span
     ///
+
     /// Maps function declaration spans to their return types. This enables
     /// codegen to determine the correct LLVM return type without re-analyzing
     /// the AST type annotation.
@@ -100,13 +115,17 @@ impl TypeRegistry {
 
     /// Register the type of an expression
     ///
+
     /// # Arguments
     ///
+
     /// * `span` - The span of the expression in the source code
     /// * `ty` - The inferred type of the expression
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // During type checking of: x + 1
     /// registry.register_expr(plus_expr.span, Type::Int);
@@ -121,14 +140,18 @@ impl TypeRegistry {
 
     /// Register the type of a variable (parameter or local)
     ///
+
     /// # Arguments
     ///
+
     /// * `span` - The span of the variable declaration
     /// * `name` - The name of the variable
     /// * `ty` - The inferred type of the variable
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // During type checking of: fn foo(x: Int, y: Float) -> Bool
     /// registry.register_var(x_param.span, "x".into(), Type::Int);
@@ -144,13 +167,17 @@ impl TypeRegistry {
 
     /// Register the return type of a function
     ///
+
     /// # Arguments
     ///
+
     /// * `span` - The span of the function declaration
     /// * `ty` - The inferred return type
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // During type checking of: fn foo() -> Int { 42 }
     /// registry.register_func_return(func.span, Type::Int);
@@ -165,21 +192,27 @@ impl TypeRegistry {
 
     /// Lookup the type of an expression
     ///
+
     /// # Arguments
     ///
+
     /// * `span` - The span of the expression to lookup
     ///
+
     /// # Returns
     ///
+
     /// The inferred type if registered, or `Maybe::None` if not found
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // During codegen of: x + 1
     /// if let Some(ty) = registry.lookup_expr(plus_expr.span) {
-    ///     let llvm_ty = translate_type(ty);
-    ///     // Generate code with correct type
+    ///  let llvm_ty = translate_type(ty);
+    ///  // Generate code with correct type
     /// }
     /// ```
     pub fn lookup_expr(&self, span: Span) -> Maybe<&Type> {
@@ -188,22 +221,28 @@ impl TypeRegistry {
 
     /// Lookup the type of a variable
     ///
+
     /// # Arguments
     ///
+
     /// * `span` - The span of the variable declaration
     /// * `name` - The name of the variable
     ///
+
     /// # Returns
     ///
+
     /// The inferred type if registered, or `Maybe::None` if not found
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // During codegen of function parameter x
     /// if let Some(ty) = registry.lookup_var(x_param.span, "x") {
-    ///     let llvm_ty = translate_type(ty);
-    ///     // Generate parameter with correct type
+    ///  let llvm_ty = translate_type(ty);
+    ///  // Generate parameter with correct type
     /// }
     /// ```
     pub fn lookup_var(&self, span: Span, name: &Text) -> Maybe<&Type> {
@@ -212,21 +251,27 @@ impl TypeRegistry {
 
     /// Lookup the return type of a function
     ///
+
     /// # Arguments
     ///
+
     /// * `span` - The span of the function declaration
     ///
+
     /// # Returns
     ///
+
     /// The inferred return type if registered, or `Maybe::None` if not found
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // During codegen of function
     /// if let Some(ret_ty) = registry.lookup_func_return(func.span) {
-    ///     let llvm_ret_ty = translate_type(ret_ty);
-    ///     // Create function with correct return type
+    ///  let llvm_ret_ty = translate_type(ret_ty);
+    ///  // Create function with correct return type
     /// }
     /// ```
     pub fn lookup_func_return(&self, span: Span) -> Maybe<&Type> {
@@ -235,10 +280,13 @@ impl TypeRegistry {
 
     /// Get statistics about the registry
     ///
+
     /// Returns (expr_count, var_count, func_count)
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// let (exprs, vars, funcs) = registry.stats();
     /// println!("Registry: {} exprs, {} vars, {} funcs", exprs, vars, funcs);
@@ -253,6 +301,7 @@ impl TypeRegistry {
 
     /// Clear all registered types
     ///
+
     /// This is useful for testing or when processing multiple modules
     /// that should not share type information.
     pub fn clear(&mut self) {
@@ -263,11 +312,14 @@ impl TypeRegistry {
 
     /// Apply a unifier's substitution to all types in the registry
     ///
+
     /// This resolves type variables to their concrete types after type checking
     /// is complete. This is important for codegen which needs fully resolved types.
     ///
+
     /// # Arguments
     ///
+
     /// * `unifier` - The unifier containing the accumulated substitutions
     pub fn apply_substitution(&mut self, unifier: &crate::unify::Unifier) {
         // Apply substitution to all expression types

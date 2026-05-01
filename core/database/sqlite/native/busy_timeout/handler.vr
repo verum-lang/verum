@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// A BusyHandler is triple (name, attempt, decision).  The catalogue
+
+// A BusyHandler is triple (name, attempt, decision). The catalogue
 // keeps it callback-free; the runtime maps it onto a closure.
 // =============================================================================
 

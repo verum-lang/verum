@@ -4,6 +4,7 @@
 // Layer: 5 (parsing) / 6 (storage) / planner (inlining)
 // Spec: sqlite-native.md §17.2
 //
+
 // View catalogue. Views in SQLite are CREATE-time-frozen SELECTs;
 // the planner inlines them at every reference. INSTEAD-OF triggers
 // on a view turn it writable.

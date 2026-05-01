@@ -14,21 +14,23 @@
 )]
 // Comprehensive test suite for Cluster 2: Comprehension Completeness
 //
+
 // This test suite covers all comprehension syntax as per grammar/verum.ebnf:
 // - Map Comprehension: {k: v for (k, v) in items if condition}
 // - Set Comprehension: set{x for x in items if condition}
 // - Generator Expression: gen{x for x in items if condition}
 //
+
 // Grammar Reference:
 // map_comprehension = '{' , expression , ':' , expression , 'for' , pattern , 'in' , expression
-//                   , { comprehension_clause } , '}' ;
+//  , { comprehension_clause } , '}' ;
 // set_comprehension = 'set' , '{' , expression , 'for' , pattern , 'in' , expression
-//                   , { comprehension_clause } , '}' ;
+//  , { comprehension_clause } , '}' ;
 // generator_expr = 'gen' , '{' , expression , 'for' , pattern , 'in' , expression
-//                , { comprehension_clause } , '}' ;
+//  , { comprehension_clause } , '}' ;
 // comprehension_clause = 'for' , pattern , 'in' , expression
-//                      | 'let' , pattern , [ ':' , type_expr ] , '=' , expression
-//                      | 'if' , expression ;
+//  | 'let' , pattern , [ ':' , type_expr ] , '=' , expression
+//  | 'if' , expression ;
 
 use verum_ast::expr::{ComprehensionClause, ComprehensionClauseKind};
 use verum_ast::{Expr, ExprKind, FileId, PatternKind};

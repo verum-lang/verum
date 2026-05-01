@@ -1,5 +1,6 @@
 //! Per-file digest cache for `verum lint`.
 //!
+
 //! On a CI run that re-lints an unchanged repository, every file
 //! parse and AST walk is wasted work — the diagnostics are
 //! deterministic, so the result for *(content_hash, config_hash)*
@@ -7,15 +8,18 @@
 //! second run becomes O(files) cache lookups instead of O(files)
 //! parses.
 //!
+
 //! ## Layout
 //!
+
 //! ```text
 //! target/lint-cache/
-//!   <config-hash>/
-//!     <source-hash>.json     ← Vec<CachedIssue> for one file
-//!   index.json               ← top-level metadata (version, last-cleanup)
+//!  <config-hash>/
+//!  <source-hash>.json ← Vec<CachedIssue> for one file
+//!  index.json ← top-level metadata (version, last-cleanup)
 //! ```
 //!
+
 //! `<config-hash>` folds the serialised `LintConfig` and the
 //! verum_cli crate version. Any change to severity_map / presets /
 //! custom rules / verum_cli itself produces a new directory; old
@@ -23,8 +27,10 @@
 //! (see [`gc`]). `<source-hash>` is `blake3(content)` and is the only
 //! thing the per-file lookup keys on.
 //!
+
 //! ## Why JSON, not bincode
 //!
+
 //! The cache entries are tiny (a few KB tops) and reading them is
 //! not the hot path — it's the *avoidance* of running passes that
 //! makes this fast. JSON keeps the cache human-inspectable, which

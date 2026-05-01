@@ -3,10 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md Appendix E.2 (record encoding test vectors)
 //
+
 // SQLite record format (§9.1 serial types):
 //
-//   record := varint(header_size) || serial_types[] || values[]
+
+//  record := varint(header_size) || serial_types[] || values[]
 //
+
 // Each vector pairs a `RecordVector { header, values }` with the
 // canonical encoded byte sequence. The runner asserts encode +
 // decode round-trip exactly.

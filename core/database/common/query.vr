@@ -5,13 +5,15 @@
 // Spec: internal/specs/database.md §5.1, §5.3
 // =============================================================================
 //
+
 // `PreparedQuery<R, P>` is the central API type produced by `sql#"..."`
 // at compile time. The type parameters carry:
-//   * R — row shape (record type derived from SELECT-list, or `()` for
-//         INSERT/UPDATE/DELETE).
-//   * P — tuple of bound-parameter types matching `${expr}`
-//         interpolations in source order.
+//  * R — row shape (record type derived from SELECT-list, or `()` for
+//  INSERT/UPDATE/DELETE).
+//  * P — tuple of bound-parameter types matching `${expr}`
+//  interpolations in source order.
 //
+
 // At runtime PreparedQuery is a small POD (sql + fingerprint + meta).
 // Server-side caching is a per-adapter concern: the adapter looks at
 // `fingerprint` and `cached_on_server`, hashes against its named-
@@ -62,6 +64,7 @@ implement StmtKind {
 /// (see database.md §5.3 for the macro contract); user code never
 /// constructs this directly except in tests.
 ///
+
 /// `R` and `P` are phantom for runtime — they constrain the API at the
 /// type level so `Connection.query::<User, (UserId,)>` only accepts a
 /// `PreparedQuery<User, (UserId,)>` and the compiler refuses any other

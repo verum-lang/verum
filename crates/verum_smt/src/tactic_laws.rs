@@ -1,49 +1,62 @@
 //! Algebraic laws for tactic combinators.
 //!
+
 //! Closes task #86. A tactic combinator `TacticCombinator` is a
 //! tree over `{Single, AndThen, OrElse, Repeat, TryFor, WithParams,
 //! IfThenElse, ParOr}`. Treated as an algebra, the combinators
 //! satisfy the standard monoid + distribution laws from the
 //! Ltac / LCF / tactical-programming literature.
 //!
+
 //! This module exposes:
 //!
+
 //! * The laws themselves, as pure structural rewrite rules on
-//!   `TacticCombinator`.
+//!  `TacticCombinator`.
 //! * `normalize()` — a fixed-point rewrite that applies every
-//!   semantics-preserving simplification, shrinking user-written
-//!   combinators to canonical form.
+//!  semantics-preserving simplification, shrinking user-written
+//!  combinators to canonical form.
 //! * `check_law_*()` — boolean predicates that verify a given
-//!   combinator pair satisfies a named law on structural equality.
-//!   Used by property tests and by
-//!   `core.proof.tactics.laws`-style regression suites.
+//!  combinator pair satisfies a named law on structural equality.
+//!  Used by property tests and by
+//!  `core.proof.tactics.laws`-style regression suites.
 //!
+
 //! # Laws
 //!
+
 //! Monoid of AndThen with identity `skip` (0-iteration Repeat of
 //! the identity simplify):
 //!
-//!   skip ; t  ≡  t            (L1 left-identity)
-//!   t ; skip  ≡  t            (L2 right-identity)
-//!   (t ; u) ; v  ≡  t ; (u ; v)   (L3 associativity)
+
+//!  skip ; t ≡ t (L1 left-identity)
+//!  t ; skip ≡ t (L2 right-identity)
+//!  (t ; u) ; v ≡ t ; (u ; v) (L3 associativity)
 //!
+
 //! Monoid of OrElse with identity `fail`:
 //!
-//!   fail | t  ≡  t            (L4 left-identity)
-//!   t | fail  ≡  t            (L5 right-identity)
-//!   (t | u) | v  ≡  t | (u | v)   (L6 associativity)
+
+//!  fail | t ≡ t (L4 left-identity)
+//!  t | fail ≡ t (L5 right-identity)
+//!  (t | u) | v ≡ t | (u | v) (L6 associativity)
 //!
+
 //! Repeat:
 //!
-//!   Repeat(t, 0)  ≡  skip     (L7 zero-unfold)
-//!   Repeat(t, 1)  ≡  t        (L8 one-unfold)
+
+//!  Repeat(t, 0) ≡ skip (L7 zero-unfold)
+//!  Repeat(t, 1) ≡ t (L8 one-unfold)
 //!
+
 //! Idempotence (conservative — only on Single-leaf tactics because
 //! a compound combinator's effect sequence is not necessarily
 //! idempotent):
 //!
-//!   Single(k) | Single(k)  ≡  Single(k)   (L9 OrElse-idempotent)
+
+//!  Single(k) | Single(k) ≡ Single(k) (L9 OrElse-idempotent)
 //!
+
 //! Semantic note on idempotence: `simp ; simp` is *observationally*
 //! idempotent on every known Z3 state, but the solver may have
 //! trace side-effects (proof term size, statistics counters) — so
@@ -51,8 +64,10 @@
 //! is applied; it never changes the solver's proof trace because
 //! only the first alternative runs in practice.
 //!
+
 //! # Why this isn't "just a simplifier"
 //!
+
 //! The laws let `user_tactic::compile_tactic` produce smaller,
 //! deterministic combinators that the executor can dispatch
 //! faster. More fundamentally: they give the `core.proof.tactics`
@@ -108,12 +123,13 @@ pub fn is_fail(c: &TacticCombinator) -> bool {
 // LawId — single source of truth for the algebraic-law inventory
 // =============================================================================
 //
+
 // Both this simplifier (`normalize_once` rewrites) and the
 // `verum_verification::tactic_combinator` catalogue project off
-// the `CANONICAL_LAW_TABLE` below.  Adding / renaming a law is a
+// the `CANONICAL_LAW_TABLE` below. Adding / renaming a law is a
 // one-place edit.
 
-/// Stable identifier for one canonical algebraic law.  The kebab-
+/// Stable identifier for one canonical algebraic law. The kebab-
 /// case `name()` is what shows up in `verum tactic laws` output
 /// and in the catalogue's JSON schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -198,10 +214,10 @@ pub struct LawSpec {
 }
 
 /// **Single source of truth** for the canonical algebraic-law
-/// inventory.  Both the simplifier (this module's `normalize_once`)
+/// inventory. Both the simplifier (this module's `normalize_once`)
 /// and the catalogue
 /// (`verum_verification::tactic_combinator::canonical_laws`) read
-/// from this table.  A law name appears here exactly once.
+/// from this table. A law name appears here exactly once.
 pub const CANONICAL_LAW_TABLE: &[LawSpec] = &[
     LawSpec {
         id: LawId::SeqLeftIdentity,
@@ -303,12 +319,13 @@ pub fn law_by_name(name: &str) -> Option<&'static LawSpec> {
 }
 
 /// The subset of [`LawId`] this module's `normalize_once`
-/// rewriter currently applies.  V0 covers the identity / repeat-
+/// rewriter currently applies. covers the identity / repeat-
 /// elision / OrElse-singleton subset; the remaining laws are
 /// documented but not yet rewritten by the simplifier (e.g.
 /// `solve-of-skip-fails-when-open` has no `Solve` constructor in
 /// the Z3-side `TacticCombinator` enum yet).
 ///
+
 /// Used by the catalogue's CI gate to verify that every law the
 /// simplifier rewrites by is in the canonical inventory.
 pub const SIMPLIFIER_APPLIES: &[LawId] = &[
@@ -329,6 +346,7 @@ pub const SIMPLIFIER_APPLIES: &[LawId] = &[
 /// Normalise a combinator to its canonical form by applying every
 /// simplification law to fixpoint.
 ///
+
 /// Complexity: O(n) passes where n is the depth of the tree; each
 /// pass is O(tree size). Bounded by the tree size → overall
 /// O(tree^2) worst-case. Callers with very deep user-written
@@ -363,7 +381,7 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
                 return l;
             }
             // LawId::SeqAssociative — right-associate.
-            // `(a ; b) ; c` becomes `a ; (b ; c)`.  Gives every
+            // `(a ; b) ; c` becomes `a ; (b ; c)`. Gives every
             // AndThen chain a canonical right-associated shape, so
             // two chains that differ only in bracketing compare
             // equal after normalize.
@@ -388,7 +406,7 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
                 return l;
             }
             // LawId::OrelseAssociative — right-associate.
-            // `(a || b) || c` becomes `a || (b || c)`.  Mirrors the
+            // `(a || b) || c` becomes `a || (b || c)`. Mirrors the
             // AndThen canonicalisation: two OrElse chains differing
             // only in bracketing compare equal after normalize.
             if let TacticCombinator::OrElse(ll, lr) = l {
@@ -418,7 +436,7 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
 
         TacticCombinator::Repeat(inner, 0) => {
             // LawId::RepeatZeroIsSkip — `repeat_n(0, t) ≡ skip`,
-            // regardless of what t is.  This is how `Quote` /
+            // regardless of what t is. This is how `Quote` /
             // `GoalIntro` compile-targets fall out during
             // normalization.
             let _ = inner;
@@ -475,7 +493,7 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
             // LawId::FirstOfSingletonCollapses — `first_of([t]) ↪ t`.
             // Multi-element FirstOf reduces to a left-folded OrElse
             // chain (which the existing OrelseAssociative rule then
-            // right-associates).  Empty FirstOf ↪ fail.
+            // right-associates). Empty FirstOf ↪ fail.
             let mut norm_branches: Vec<TacticCombinator> = Vec::new();
             for b in branches {
                 norm_branches.push(normalize_once(b));
@@ -673,7 +691,7 @@ mod tests {
     #[test]
     fn l6_orelse_associativity_all_primitives() {
         // The catalogue's `LawId::OrelseAssociative` — wired into
-        // the simplifier in this commit (#103).  `(a || b) || c ≡
+        // the simplifier in this commit (#103). `(a || b) || c ≡
         // a || (b || c)` must hold by structural equality after
         // normalization.
         assert!(check_orelse_associativity(&simp(), &smt(), &lia()));
@@ -800,7 +818,7 @@ mod tests {
     fn task_107_canonical_law_count_now_twelve_of_twelve() {
         // Pin: all 12 catalogue laws are now wired (V0 was 7;
         // #103 added OrelseAssociative; #107 added Try +
-        // FirstOfSingleton; #108 added Solve + AllGoals).  Closes
+        // FirstOfSingleton; #108 added Solve + AllGoals). Closes
         // the catalogue ↔ simplifier single-source-of-truth gap.
         assert_eq!(SIMPLIFIER_APPLIES.len(), 12);
         assert_eq!(SIMPLIFIER_APPLIES.len(), LawId::all().len());
@@ -852,7 +870,7 @@ mod tests {
     #[test]
     fn task_108_every_canonical_law_is_simplifier_applied() {
         // Pin: every entry in LawId::all() appears in
-        // SIMPLIFIER_APPLIES.  No catalogue law is documentation-
+        // SIMPLIFIER_APPLIES. No catalogue law is documentation-
         // only any more.
         for id in LawId::all() {
             assert!(

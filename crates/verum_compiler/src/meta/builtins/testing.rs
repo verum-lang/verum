@@ -1,10 +1,13 @@
 //! Testing Builtins for Meta-System Error Validation
 //!
+
 //! This module provides builtin functions that trigger specific meta error
 //! codes for testing purposes. These are Tier 0 functions (always available).
 //!
+
 //! ## Functions
 //!
+
 //! - `trigger_type_reduction_failed(ty, msg)` - Trigger M501 TypeReductionFailed
 //! - `trigger_normalization_diverged(ty, iters)` - Trigger M502 NormalizationDiverged
 //! - `trigger_smt_verification_failed(constraint, reason)` - Trigger M503 SMTVerificationFailed
@@ -12,9 +15,11 @@
 //! - `trigger_refinement_violation(predicate, value)` - Trigger M505 RefinementViolation
 //! - `trigger_meta_where_unsatisfied(constraint)` - Trigger M506 MetaWhereUnsatisfied
 //!
+
 //! These functions are primarily for testing the error reporting infrastructure.
 //! They allow test cases to verify that error codes are properly propagated.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

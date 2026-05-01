@@ -1,5 +1,6 @@
 //! Method dispatch handlers for VBC interpreter.
 //!
+
 //! This module contains the CallM instruction handler and all supporting
 //! method dispatch functions, including:
 //! - handle_call_method: the main CallM opcode handler
@@ -56,6 +57,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
 
     // Resolve method name from string table.
     //
+
     // `mut` because the Shared-deref auto-forwarder below
     // (`_ => {}` arm of the Shared TypeId match) re-qualifies
     // a `"Shared.foo"` name to `"AtomicInt.foo"` (or whatever
@@ -76,7 +78,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
 
     // **High-level Rust intercept** — TcpStream method calls
     // (`read`, `write`, `flush`, `close`) bypass the libSystem
-    // `sys_send`/`sys_recv`/`sys_close` FFI chain.  See VBC-NET-2
+    // `sys_send`/`sys_recv`/`sys_close` FFI chain. See VBC-NET-2
     // architecture notes and `net_runtime::try_intercept_tcp_method`.
     {
         let caller_base = state.reg_base();
@@ -303,6 +305,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // Deref CBGR references to get the actual value for builtin dispatch.
     // RefMut creates register-based refs for &mut self method calls.
     //
+
     // `mut` because the Shared-deref auto-forwarder below may rebind
     // `dispatch_receiver` to the inner Value when an unrecognised
     // method is called on a `Shared<T>` carrier — see the `_ => {}`
@@ -333,6 +336,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
 
     // Try variant methods (unwrap, is_ok, is_err, etc.) on heap-allocated variants.
     //
+
     // The primitive variant dispatch CANNOT distinguish `Maybe.Some(v)` from
     // `Result.Err(v)` from raw runtime data — both share `(tag>=1, fc=1,
     // type_id == 0x8000+tag)` after `MakeVariant` (see comment block in
@@ -343,6 +347,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // downstream bugs (parse(...).unwrap() chains producing malformed
     // values that bubbled up as seemingly-unrelated panics — see #79).
     //
+
     // Fix: when the codegen emitted a *qualified* method name like
     // `Result.unwrap` AND the user-compiled function exists for that
     // qualified name, skip the primitive fallback so the compiled
@@ -372,6 +377,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             // Strip type prefix if present (e.g., "Shared.borrow" -> "borrow").
             // Support both "." (new convention) and "::" (legacy) for backwards compatibility.
             //
+
             // Owned `String` rather than borrowed `&str` so the
             // auto-deref arm below can re-qualify `method_name` to
             // the inner type without running into the borrow
@@ -414,6 +420,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                     // every `Shared<T>` permutation. Mirrors the
                     // earlier CBGR-ref deref above.
                     //
+
                     // Concrete callers that depend on this:
                     // `core/net/weft/dst.vr` wraps state in
                     // `Shared<AtomicInt>` / `Shared<AtomicBool>`
@@ -427,6 +434,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                     // identity. All builtin dispatchers below
                     // operate on `dispatch_receiver`.
                     //
+
                     // Re-qualify method_name with the inner type's
                     // name so the qualified-lookup walker at
                     // ~line 1014 finds e.g. `"AtomicInt.load"`
@@ -515,8 +523,8 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                     (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
                 };
                 unsafe {
-                    *data_ptr = Value::from_i64(1);      // refcount = 1
-                    *data_ptr.add(1) = value;            // inner value
+                    *data_ptr = Value::from_i64(1); // refcount = 1
+                    *data_ptr.add(1) = value; // inner value
                 }
                 state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 return Ok(DispatchResult::Continue);
@@ -572,13 +580,13 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                 let generation = state.heap.next_generation();
                 let epoch = state.cbgr_epoch as u16;
                 unsafe {
-                    *(raw_ptr as *mut u32) = data_size;                     // offset 0: size
-                    *(raw_ptr.add(4) as *mut u32) = 8;                      // offset 4: alignment
-                    *(raw_ptr.add(8) as *mut u32) = generation;            // offset 8: generation
-                    *(raw_ptr.add(12) as *mut u16) = epoch;                 // offset 12: epoch (u16)
-                    *(raw_ptr.add(14) as *mut u16) = 0x03;                  // offset 14: capabilities (read+write)
-                    *(raw_ptr.add(16) as *mut u32) = 0;                     // offset 16: type_id
-                    *(raw_ptr.add(20) as *mut u32) = 0;                     // offset 20: flags (0 = allocated)
+                    *(raw_ptr as *mut u32) = data_size; // offset 0: size
+                    *(raw_ptr.add(4) as *mut u32) = 8; // offset 4: alignment
+                    *(raw_ptr.add(8) as *mut u32) = generation; // offset 8: generation
+                    *(raw_ptr.add(12) as *mut u16) = epoch; // offset 12: epoch (u16)
+                    *(raw_ptr.add(14) as *mut u16) = 0x03; // offset 14: capabilities (read+write)
+                    *(raw_ptr.add(16) as *mut u32) = 0; // offset 16: type_id
+                    *(raw_ptr.add(20) as *mut u32) = 0; // offset 20: flags (0 = allocated)
                     // offsets 24-31: reserved (already zeroed)
                     // Write user data value after the header
                     *(raw_ptr.add(CBGR_HEADER_SIZE) as *mut Value) = value;
@@ -658,9 +666,9 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             let backing = state.heap.alloc_array(TypeId::LIST, DEFAULT_CAP)?;
             state.record_allocation();
             unsafe {
-                *data_ptr = Value::from_i64(0);                                    // len = 0
-                *data_ptr.add(1) = Value::from_i64(DEFAULT_CAP as i64);            // cap
-                *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);   // backing_ptr
+                *data_ptr = Value::from_i64(0); // len = 0
+                *data_ptr.add(1) = Value::from_i64(DEFAULT_CAP as i64); // cap
+                *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8); // backing_ptr
             }
             state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
             return Ok(DispatchResult::Continue);
@@ -708,10 +716,10 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                 unsafe { *buf_data.add(i) = Value::unit(); }
             }
             unsafe {
-                *header_ptr = Value::from_ptr(buffer_ptr);       // data (index 0)
-                *header_ptr.add(1) = Value::from_i64(0);         // head (index 1)
-                *header_ptr.add(2) = Value::from_i64(0);         // len  (index 2)
-                *header_ptr.add(3) = Value::from_i64(DEFAULT_CAP as i64); // cap  (index 3)
+                *header_ptr = Value::from_ptr(buffer_ptr); // data (index 0)
+                *header_ptr.add(1) = Value::from_i64(0); // head (index 1)
+                *header_ptr.add(2) = Value::from_i64(0); // len (index 2)
+                *header_ptr.add(3) = Value::from_i64(DEFAULT_CAP as i64); // cap (index 3)
             }
             state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
             return Ok(DispatchResult::Continue);
@@ -767,9 +775,9 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             let backing = state.heap.alloc_array(TypeId::LIST, actual_cap)?;
             state.record_allocation();
             unsafe {
-                *data_ptr = Value::from_i64(0);                                    // len = 0
-                *data_ptr.add(1) = Value::from_i64(actual_cap as i64);            // cap
-                *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);  // backing_ptr
+                *data_ptr = Value::from_i64(0); // len = 0
+                *data_ptr.add(1) = Value::from_i64(actual_cap as i64); // cap
+                *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8); // backing_ptr
             }
             state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
             return Ok(DispatchResult::Continue);
@@ -957,6 +965,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // Fallback: try to find a user-defined impl method by searching for "Type.method_name"
     // in the module's function table. This handles methods defined in `implement Type { ... }` blocks.
     //
+
     // If method_name already contains "." or "::" (e.g., "MapFlags.to_unix_flags"), it's already qualified.
     // Otherwise, we search for functions ending with ".method_name".
     // Skip this for builtin collections to ensure builtin methods are used.
@@ -1282,17 +1291,17 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
         return Ok(DispatchResult::Continue);
     }
 
-    // Reflexive `.into()` identity safety-net.  The stdlib defines
+    // Reflexive `.into()` identity safety-net. The stdlib defines
     // blanket `implement<T> From<T> for T` (core/base/protocols.vr:339)
     // plus `implement<T, U: From<T>> Into<U> for T` so any
     // `value.into()` call whose source and target type coincide
-    // SHOULD reduce to the identity function.  VBC monomorphisation
+    // SHOULD reduce to the identity function. VBC monomorphisation
     // does not always synthesise the concrete `T::into() -> T`
     // instance — same gap the `Result.map_err` safety-net handles
-    // for fallible combinators above.  We only fall back to identity
+    // for fallible combinators above. We only fall back to identity
     // when EVERY other dispatch path missed; cross-type `.into()`
     // calls (where a real `From::from` was monomorphised) hit one
-    // of the dispatchers above and never reach this branch.  Pre-
+    // of the dispatchers above and never reach this branch. Pre-
     // fix every `"…".into()` call on a literal Text panicked with
     // "method 'Text.into' not found on value" — broke shell-script
     // execution the moment scripts actually ran past type-check.
@@ -2425,8 +2434,8 @@ pub(super) fn dispatch_primitive_method(
 
                     // Initialize iterator
                     unsafe {
-                        *iter_ptr = *receiver;                         // source_ptr
-                        *iter_ptr.add(1) = Value::from_i64(0);         // front_idx = 0
+                        *iter_ptr = *receiver; // source_ptr
+                        *iter_ptr.add(1) = Value::from_i64(0); // front_idx = 0
                         *iter_ptr.add(2) = Value::from_i64(len as i64); // back_idx = len (exclusive)
                         *iter_ptr.add(3) = Value::from_i64(iter_type); // iter_type
                     }
@@ -2923,11 +2932,13 @@ pub(super) fn dispatch_primitive_method(
                     // work through the iterator-blob dispatch path at
                     // `TypeId::UNIT + 4 × Value` layout below.
                     //
+
                     // For-loops continue to work: `IterNew` detects a
                     // pre-built iterator blob (TypeId::UNIT + 4-value) and
                     // passes it through unchanged — see the updated
                     // `handle_iter_new` in `iterators.rs`.
                     //
+
                     // `back_idx` is set to `capacity` (not `len`) because
                     // Map/Set iteration scans the raw `entries` array and
                     // `next` on an iterator-blob skips empty slots.
@@ -2941,9 +2952,9 @@ pub(super) fn dispatch_primitive_method(
                         (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
                     };
                     unsafe {
-                        *iter_ptr = *receiver;                         // source_ptr (Map/Set)
-                        *iter_ptr.add(1) = Value::from_i64(0);         // front_idx = 0
-                        *iter_ptr.add(2) = Value::from_i64(capacity);  // back_idx = capacity
+                        *iter_ptr = *receiver; // source_ptr (Map/Set)
+                        *iter_ptr.add(1) = Value::from_i64(0); // front_idx = 0
+                        *iter_ptr.add(2) = Value::from_i64(capacity); // back_idx = capacity
                         *iter_ptr.add(3) = Value::from_i64(ITER_TYPE_MAP); // iter_type
                     }
                     return Ok(Some(Value::from_ptr(iter_obj.as_ptr() as *mut u8)));
@@ -3609,7 +3620,7 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_bool(count == 0)));
                 }
                 "union" if is_set => {
-                    // Set.union(other) -> Set  (new set with elements from both)
+                    // Set.union(other) -> Set (new set with elements from both)
                     let caller_base = state.reg_base();
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
@@ -3701,7 +3712,7 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_ptr(new_obj.as_ptr() as *mut u8)));
                 }
                 "intersection" if is_set => {
-                    // Set.intersection(other) -> Set  (elements in both sets)
+                    // Set.intersection(other) -> Set (elements in both sets)
                     let caller_base = state.reg_base();
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
@@ -3790,7 +3801,7 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_ptr(new_obj.as_ptr() as *mut u8)));
                 }
                 "difference" if is_set => {
-                    // Set.difference(other) -> Set  (elements in self but not in other)
+                    // Set.difference(other) -> Set (elements in self but not in other)
                     let caller_base = state.reg_base();
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
@@ -3879,7 +3890,7 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_ptr(new_obj.as_ptr() as *mut u8)));
                 }
                 "is_subset" if is_set => {
-                    // Set.is_subset(other) -> Bool  (all self elements are in other)
+                    // Set.is_subset(other) -> Bool (all self elements are in other)
                     let caller_base = state.reg_base();
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
@@ -3926,7 +3937,7 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_bool(is_subset)));
                 }
                 "is_superset" if is_set => {
-                    // Set.is_superset(other) -> Bool  (all other elements are in self)
+                    // Set.is_superset(other) -> Bool (all other elements are in self)
                     let caller_base = state.reg_base();
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
@@ -5532,15 +5543,18 @@ pub(crate) fn call_closure_sync(
 
 /// Execute a function by FunctionId synchronously, returning its result.
 ///
+
 /// This is the core primitive for async task execution: Spawn uses this to
 /// eagerly evaluate spawned functions. The function runs to completion in a
 /// nested dispatch loop and the return value is captured.
 ///
+
 /// # Arguments
 /// * `state` - Interpreter state
 /// * `func_id` - Function to call
 /// * `args` - Argument values
 ///
+
 /// # Returns
 /// The function's return value.
 pub(super) fn call_function_sync(
@@ -5599,7 +5613,7 @@ pub(crate) fn alloc_list_from_values(state: &mut InterpreterState, values: Vec<V
         (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
     };
     unsafe {
-        *data_ptr = Value::from_i64(len as i64);        // len
+        *data_ptr = Value::from_i64(len as i64); // len
         *data_ptr.add(1) = Value::from_i64(cap as i64); // cap
         *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8); // backing_ptr
     }
@@ -5733,13 +5747,16 @@ pub(super) fn list_push(state: &mut InterpreterState, list_val: Value, new_val: 
 
 /// Dispatch built-in methods on variant types (Result, Maybe).
 ///
+
 /// Variant layout in data section: [tag:u32][field_count:u32][payload:Value * field_count]
 /// TypeId range 0x8000+ indicates variant objects.
 ///
+
 /// Conventions:
-///   Result<T, E> = Ok(T) | Err(E)  → Ok = tag 0, Err = tag 1
-///   Maybe<T>     = None  | Some(T) → None = tag 0 (field_count=0), Some = tag 1
+///  Result<T, E> = Ok(T) | Err(E) → Ok = tag 0, Err = tag 1
+///  Maybe<T> = None | Some(T) → None = tag 0 (field_count=0), Some = tag 1
 ///
+
 /// `method_full` is the qualified call-site method name (e.g.
 /// `"Result.unwrap"` vs `"Maybe.unwrap"`). When it starts with
 /// `Result.` the dispatcher applies Result semantics — `unwrap`
@@ -5775,9 +5792,11 @@ pub(super) fn dispatch_variant_method(
         // Variant layout emitted by `MakeVariant` — tag encodes variant index
         // within the type declaration (`handle_make_variant` @ pattern_matching.rs).
         //
-        //   Maybe  is None | Some(T)  →  None: tag=0, fc=0   Some: tag=1, fc=1
-        //   Result is Ok(T) | Err(E)  →  Ok:   tag=0, fc=1   Err:  tag=1, fc=1
+
+        //  Maybe is None | Some(T) → None: tag=0, fc=0 Some: tag=1, fc=1
+        //  Result is Ok(T) | Err(E) → Ok: tag=0, fc=1 Err: tag=1, fc=1
         //
+
         // `is_ok`/`is_err` follow Result semantics; `is_some`/`is_none`
         // follow Maybe. The cases with fc>0 across both types are
         // indistinguishable purely from the data (type_id = 0x8000 + tag
@@ -5790,11 +5809,13 @@ pub(super) fn dispatch_variant_method(
 
         // Value extraction with type-aware semantics.
         //
-        //   Maybe.None  (tag=0, fc=0) → panic
-        //   Maybe.Some  (tag=1, fc=1) → extract payload
-        //   Result.Ok   (tag=0, fc=1) → extract payload
-        //   Result.Err  (tag=1, fc=1) → panic (when method_full says Result.*)
+
+        //  Maybe.None (tag=0, fc=0) → panic
+        //  Maybe.Some (tag=1, fc=1) → extract payload
+        //  Result.Ok (tag=0, fc=1) → extract payload
+        //  Result.Err (tag=1, fc=1) → panic (when method_full says Result.*)
         //
+
         // Without `method_full`, `Maybe.Some` and `Result.Err` are
         // indistinguishable from runtime data alone (same `(tag, fc)`
         // after `MakeVariant`; `TypeId = 0x8000 + tag` collapses both
@@ -5912,6 +5933,7 @@ pub(super) fn dispatch_variant_method(
 
         // Result / Maybe combinators that take a closure.
         //
+
         // These are defined generically in `core/base/result.vr` and
         // `core/base/maybe.vr` with `<T, E, F, U>`-quantified bodies.
         // VBC monomorphisation does not eagerly produce instances for
@@ -5923,22 +5945,25 @@ pub(super) fn dispatch_variant_method(
         // because the variant layout is type-erased at runtime; the
         // closure handles the type-specific work.
         //
+
         // Semantics (Result):
-        //   Ok(v).map(f)         = Ok(f(v))
-        //   Err(e).map(_)        = Err(e)               (identity)
-        //   Ok(v).map_err(_)     = Ok(v)                (identity)
-        //   Err(e).map_err(f)    = Err(f(e))
-        //   Ok(v).and_then(f)    = f(v)                 (f returns Result)
-        //   Err(e).and_then(_)   = Err(e)               (identity)
-        //   Ok(v).or_else(_)     = Ok(v)                (identity)
-        //   Err(e).or_else(f)    = f(e)                 (f returns Result)
+        //  Ok(v).map(f) = Ok(f(v))
+        //  Err(e).map(_) = Err(e) (identity)
+        //  Ok(v).map_err(_) = Ok(v) (identity)
+        //  Err(e).map_err(f) = Err(f(e))
+        //  Ok(v).and_then(f) = f(v) (f returns Result)
+        //  Err(e).and_then(_) = Err(e) (identity)
+        //  Ok(v).or_else(_) = Ok(v) (identity)
+        //  Err(e).or_else(f) = f(e) (f returns Result)
         //
+
         // Semantics (Maybe / Option) — same code path because the
         // variant tag layout is identical (None = tag 0, fc = 0;
         // Some(v) = tag 1, fc = 1; Ok / Err follow the same shape).
         // For `map_err` on Maybe the call is a no-op (Maybe has no
         // error track) — handled by the Ok-branch identity.
         //
+
         // Failure modes preserved: closure panics propagate; closure
         // captures live through `call_closure_sync` exactly as if the
         // user had written the match in source.
@@ -5954,14 +5979,14 @@ pub(super) fn dispatch_variant_method(
             // for the closure-applying branches; otherwise pass-through
             // on identity. `tag == 0` is Ok / Some; `tag != 0` is Err / None.
             // (method, tag) → "apply closure" vs "identity pass-through":
-            //   "map"      / 0  (Ok/Some): apply, wrap with same tag
-            //   "map"      / != 0       : identity
-            //   "map_err"  / 0          : identity
-            //   "map_err"  / != 0 (Err) : apply, wrap with same tag
-            //   "and_then" / 0          : closure already returns Result → return raw
-            //   "and_then" / != 0       : identity
-            //   "or_else"  / 0          : identity
-            //   "or_else"  / != 0       : closure already returns Result → return raw
+            //  "map" / 0 (Ok/Some): apply, wrap with same tag
+            //  "map" / != 0 : identity
+            //  "map_err" / 0 : identity
+            //  "map_err" / != 0 (Err) : apply, wrap with same tag
+            //  "and_then" / 0 : closure already returns Result → return raw
+            //  "and_then" / != 0 : identity
+            //  "or_else" / 0 : identity
+            //  "or_else" / != 0 : closure already returns Result → return raw
             let apply_branch = match (method, tag) {
                 ("map", 0) => true,
                 ("map", _) => false,
@@ -6038,7 +6063,7 @@ pub(super) fn dispatch_array_method(
 
     // `as_slice` / `as_mut_slice` are identity casts at runtime — a
     // Verum slice and a List share the same `{ObjectHeader, data...}`
-    // memory layout, the distinction is purely type-system.  The
+    // memory layout, the distinction is purely type-system. The
     // stdlib defines them in `core/collections/list.vr:725` as
     // `unsafe { slice_from_raw_parts(self.ptr, self.len) }`; the
     // VBC interpreter pre-fix had no entry for them and panicked
@@ -6093,6 +6118,7 @@ pub(super) fn dispatch_array_method(
     // or builder chain `min`/`max`) must be looked up via the user
     // function dispatch path, not treated as List ops.
     //
+
     // Historical note: the original guard was `(FIRST_USER..256)` — but
     // user type IDs can exceed 256 whenever the module defines >240
     // record types (stdlib easily does). Types with IDs in the gap
@@ -6102,11 +6128,12 @@ pub(super) fn dispatch_array_method(
     // with `field access out of bounds: field index 3 (offset 24+8 =
     // 32) exceeds object data size 16`.
     //
+
     // The correct bound is "anything below the first built-in
     // collection id" — LIST=512 today, so the range is `16..512`. If
     // a new built-in lands between FIRST_USER and LIST we must update
     // this alongside. Reproducer:
-    //   vcs/specs/L0-critical/vbc/struct_layout/flex_item_builder.vr
+    //  vcs/specs/L0-critical/vbc/struct_layout/flex_item_builder.vr
     if (TypeId::FIRST_USER..TypeId::LIST.0).contains(&type_id_val) {
         return Ok(None);
     }
@@ -6864,8 +6891,8 @@ pub(super) fn make_maybe_int(state: &mut InterpreterState, opt: Option<i64>) -> 
                 |data| {
                     let tag_ptr = data.as_mut_ptr() as *mut u32;
                     unsafe {
-                        *tag_ptr = 1;          // Some tag
-                        *tag_ptr.add(1) = 1;   // field_count = 1
+                        *tag_ptr = 1; // Some tag
+                        *tag_ptr.add(1) = 1; // field_count = 1
                     }
                 },
             )?;
@@ -6888,8 +6915,8 @@ pub(super) fn make_maybe_int(state: &mut InterpreterState, opt: Option<i64>) -> 
                 |data| {
                     let tag_ptr = data.as_mut_ptr() as *mut u32;
                     unsafe {
-                        *tag_ptr = 0;          // None tag
-                        *tag_ptr.add(1) = 0;   // field_count = 0
+                        *tag_ptr = 0; // None tag
+                        *tag_ptr.add(1) = 0; // field_count = 0
                     }
                 },
             )?;
@@ -6910,8 +6937,8 @@ pub(super) fn make_some_value(state: &mut InterpreterState, value: Value) -> Int
         |data| {
             let tag_ptr = data.as_mut_ptr() as *mut u32;
             unsafe {
-                *tag_ptr = 1;         // Some tag
-                *tag_ptr.add(1) = 1;  // field_count = 1
+                *tag_ptr = 1; // Some tag
+                *tag_ptr.add(1) = 1; // field_count = 1
             }
         },
     )?;
@@ -6936,7 +6963,7 @@ pub(super) fn make_none_value(state: &mut InterpreterState) -> InterpreterResult
         |data| {
             let tag_ptr = data.as_mut_ptr() as *mut u32;
             unsafe {
-                *tag_ptr = 0;       // None tag
+                *tag_ptr = 0; // None tag
                 *tag_ptr.add(1) = 0; // field_count = 0
             }
         },
@@ -6950,9 +6977,10 @@ pub(super) fn make_none_value(state: &mut InterpreterState) -> InterpreterResult
 /// (`map_err`, `map`, …) to wrap the closure result without going
 /// through user-compiled code paths.
 ///
+
 /// Layout matches `MakeVariant` (`pattern_matching::handle_make_variant`)
 /// and `make_some_value` / `make_none_value` above:
-///   `[ObjectHeader][tag: u32][field_count: u32][payload: Value]`.
+///  `[ObjectHeader][tag: u32][field_count: u32][payload: Value]`.
 fn make_result_variant(
     state: &mut InterpreterState,
     tag: u32,

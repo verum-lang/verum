@@ -7,9 +7,11 @@ module sys.net_ops;
 // Dependencies: sys/raw
 // =============================================================================
 //
+
 // Pure Verum TCP/UDP operations. Compiled through VBC → LLVM.
 // No C runtime dependency.
 //
+
 // =============================================================================
 
 mount core.*;

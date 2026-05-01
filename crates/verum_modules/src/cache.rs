@@ -1,5 +1,6 @@
 //! Module caching for performance.
 //!
+
 //! Caches parsed modules to avoid re-parsing unchanged files.
 
 use crate::ModuleInfo;
@@ -38,6 +39,7 @@ impl ModuleCacheEntry {
 
 /// Module cache - stores parsed modules for reuse.
 ///
+
 /// The cache is thread-safe and can be shared across multiple threads.
 /// It uses file modification times and content hashes to detect changes.
 #[derive(Debug)]

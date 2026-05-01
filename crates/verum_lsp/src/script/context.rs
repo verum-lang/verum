@@ -1,11 +1,13 @@
 //! Script context for tracking session state
 //!
+
 //! Moved from verum_parser::script
 
 use verum_common::{List, Map, Text};
 
 /// Context tracking for script parsing sessions
 ///
+
 /// Maintains state across multiple REPL lines including:
 /// - Defined bindings for tab completion
 /// - Multiline input buffer

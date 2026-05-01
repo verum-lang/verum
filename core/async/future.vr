@@ -5,9 +5,11 @@
 // Dependencies: core, async/poll, async/waker
 // =============================================================================
 //
+
 // Future represents an asynchronous computation that may not have completed.
 // This is the core abstraction for async/await.
 //
+
 // =============================================================================
 
 module core.async.future;
@@ -200,6 +202,7 @@ public type FutureExt is protocol extends Future {
 
     /// Run this future to completion synchronously.
     ///
+
     /// **LIMITATION:** uses `noop_waker()` — a future that depends
     /// on real wake events (timer expiry, IO completion, channel
     /// receive, condvar signal) will NEVER transition to Ready
@@ -209,6 +212,7 @@ public type FutureExt is protocol extends Future {
     /// constant-folding combinators, futures that drive their own
     /// progress through nested polling) work safely.
     ///
+
     /// For genuine async work — anything involving timers, IO, or
     /// inter-task coordination — use the runtime executor
     /// (`verum_runtime::block_on`) which builds a thread-park waker
@@ -216,6 +220,7 @@ public type FutureExt is protocol extends Future {
     /// stdlib does not yet ship a thread-aware waker primitive, so
     /// this method intentionally stays minimal.
     ///
+
     /// On Pending we call `thread::yield_now()` so the OS scheduler
     /// gets a chance to run other threads — keeps the CPU from
     /// pinning at 100% in the (already-incorrect) async-future

@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// Returns the collation name for the given constraint.  When the
+
+// Returns the collation name for the given constraint. When the
 // constraint has no explicit COLLATE clause, falls back to "BINARY".
 // When the index is out of range the real SQLite would return NULL
 // (we surface that via Maybe.None).

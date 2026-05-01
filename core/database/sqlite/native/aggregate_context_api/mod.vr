@@ -3,7 +3,7 @@
 // =============================================================================
 // sqlite3_aggregate_context(ctx, n) — lazy-allocate per-aggregate state.
 // First call returns a freshly zeroed allocation of `n` bytes; subsequent calls
-// from xStep / xFinal / xValue / xInverse return the same pointer.  n=0 is
+// from xStep / xFinal / xValue / xInverse return the same pointer. n=0 is
 // permitted to retrieve the existing pointer (or NULL if none).
 // Spec App E.A.
 // =============================================================================

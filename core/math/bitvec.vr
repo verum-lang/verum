@@ -2,31 +2,38 @@
 // bitvec.vr — Fixed-Width Bit-Vector Primitives
 // =============================================================================
 //
+
 // Layer: Standard Library / Mathematics
 //
+
 // User-facing surface for the bit-vector decision-procedure core
 // (`verum_types.bitvec_decision`). Fixed-width bit-vectors with
 // modular arithmetic, bitwise operations, and SMT-LIB-compatible
 // QF_BV semantics — foundation for cryptography, embedded
 // systems, packet filtering, and bounded-precision verification.
 //
+
 // ## Width
 //
+
 // Every `BitVec` is parameterised by its width (1–64 bits). The
 // width is part of the type via the `width` field; operations
 // require matching widths and raise `WidthMismatch` otherwise.
 // Construction masks any bits beyond the width to match SMT-LIB
 // QF_BV semantics exactly.
 //
+
 // ## Example
 //
+
 // ```verum
 // let a: BitVec = bv8(0xCA);
 // let b: BitVec = bv8(0x5A);
-// let xor = bitvec_xor(a, b);  // 0x90
+// let xor = bitvec_xor(a, b); // 0x90
 // assert(xor.bits == 0x90);
 // ```
 //
+
 // =============================================================================
 
 module core.math.bitvec;

@@ -14,6 +14,7 @@
 )]
 // Comprehensive test suite for stream comprehension parsing in Verum.
 //
+
 // This test suite covers all stream comprehension syntax as per grammar/verum.ebnf:
 // - Basic stream comprehension: stream[x * 2 for x in items]
 // - Stream with filter: stream[x for x in items if x > 0]
@@ -23,12 +24,13 @@
 // - Stream with type annotations in let
 // - Complex stream comprehension scenarios
 //
+
 // Grammar Reference:
 // stream_comprehension_expr = 'stream' , '[' , stream_body , ']' ;
 // stream_body = expression , 'for' , pattern , 'in' , expression , { stream_clause } ;
 // stream_clause = 'for' , pattern , 'in' , expression
-//               | 'let' , pattern , [ ':' , type_expr ] , '=' , expression
-//               | 'if' , expression ;
+//  | 'let' , pattern , [ ':' , type_expr ] , '=' , expression
+//  | 'if' , expression ;
 
 use verum_ast::expr::{ComprehensionClause, ComprehensionClauseKind};
 use verum_ast::{Expr, ExprKind, FileId, PatternKind};

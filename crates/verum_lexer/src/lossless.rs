@@ -1,8 +1,10 @@
 //! Lossless lexer that preserves trivia (whitespace, comments).
 //!
+
 //! This module provides a lexer that tracks all source text, including
 //! whitespace and comments, enabling lossless source reconstruction.
 //!
+
 //! Trivia preservation enables lossless source reconstruction: every whitespace
 //! character, newline, line comment (`// ...`), block comment (`/* ... */`),
 //! doc comment (`/// ...`), and inner doc comment (`//! ...`) is captured as
@@ -208,14 +210,17 @@ pub struct LosslessLexer<'source> {
 impl<'source> LosslessLexer<'source> {
     /// Create a new lossless lexer.
     ///
+
     /// Two file-prefix layers are recognised before scan_token starts:
     ///
+
     /// 1. **UTF-8 BOM** (`EF BB BF`) — emitted as `TriviaKind::ByteOrderMark`,
-    ///    span `[0..3)`.
+    ///  span `[0..3)`.
     /// 2. **POSIX shebang** (`#!...\n`) at the first non-BOM byte — emitted
-    ///    as `TriviaKind::Shebang`, span `[start..end)` where `start` is
-    ///    `0` or `3` (after BOM).
+    ///  as `TriviaKind::Shebang`, span `[start..end)` where `start` is
+    ///  `0` or `3` (after BOM).
     ///
+
     /// Both contribute to the leading-trivia slot of the first real token,
     /// preserving byte-perfect round-trip behaviour for lossless source
     /// reconstruction (formatters, IDE rename, incremental reparse).
@@ -469,6 +474,7 @@ impl<'source> LosslessLexer<'source> {
 
 /// Split trivia at the first newline.
 ///
+
 /// Trailing trivia: everything up to (not including) the first newline
 /// Leading trivia: everything from the first newline onward
 fn split_trivia_at_newline(trivia: Trivia) -> (Trivia, Trivia) {

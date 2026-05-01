@@ -1,10 +1,12 @@
 //! Performance benchmarks for type checking
 //!
+
 //! Performance targets:
 //! - Type inference: < 100ms for 10K LOC
 //! - Refinement checking: < 50ms per function
 //! - CBGR overhead: < 15ns per check
 //!
+
 //! These benchmarks verify we meet our performance requirements.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};

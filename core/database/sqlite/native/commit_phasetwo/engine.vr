@@ -3,14 +3,17 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The engine records the current phase + a counter of successful
-// commits.  Transitions:
+// commits. Transitions:
 //
-//   Idle → PhaseOne                      (start commit)
-//   PhaseOne → PhaseTwo                  (journal flushed)
-//   PhaseTwo → Done                      (main DB flushed; commit complete)
-//   any → Rollback(reason)               (abort)
+
+//  Idle → PhaseOne (start commit)
+//  PhaseOne → PhaseTwo (journal flushed)
+//  PhaseTwo → Done (main DB flushed; commit complete)
+//  any → Rollback(reason) (abort)
 //
+
 // Each PhaseTwo entry fires SQLITE_FCNTL_COMMIT_PHASETWO = 22 on the
 // owning VFS via file_control.
 // =============================================================================
@@ -51,7 +54,7 @@ implement CommitEngine {
     }
 
     /// Returns the FCNTL opcode the caller must send to the VFS
-    /// (SQLITE_FCNTL_COMMIT_PHASETWO).  Caller integrates with
+    /// (SQLITE_FCNTL_COMMIT_PHASETWO). Caller integrates with
     /// file_control to actually invoke it.
     pub fn enter_phase_two(&mut self) -> Int {
         match &self.phase {

@@ -2,20 +2,24 @@
 // MSFS — R-S non-examples + Proposition 3.2 independence
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §3.3 — non-examples and §3.4
 // — Proposition 3.2 (pairwise independence of (R1)–(R5)).
 //
+
 // MSFS §3.3 names theories that *fail* exactly one of the (R)
 // conditions. Each non-example doubles as a witness for the
 // independence claim of Proposition 3.2: the theory T_i satisfies
 // every (R_j) for j ≠ i but violates (R_i), thereby showing that
 // (R_i) is non-redundant in the conjunction.
 //
+
 // The non-examples ship as `@framework(msfs, "<theory> ∉ R-S
 // (violates R_i)")` axioms. Each is purely a record of the *fact*
 // that the named theory fails (R_i); the actual proof of failure
 // lives in the literature each theory cites.
 //
+
 // Proposition 3.2 is then assembled in `conditions.vr` as the
 // summary axiom `msfs_proposition_3_2_r_independence`; this file
 // provides its concrete witnesses.
@@ -27,6 +31,7 @@ module core.math.rich_s.non_examples;
 // V3 NOTE — witness-parameterised non-membership axioms
 // =============================================================================
 //
+
 // Each non-example is a NEGATIVE claim: "theory T violates R_i, hence
 // T ∉ R-S". V3 form encodes the negative claim by taking the failed-
 // condition index as an Int parameter and gating the membership

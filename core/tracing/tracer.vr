@@ -371,6 +371,7 @@ fn clone_links(src: &List<SpanLink>) -> List<SpanLink> {
 // Global provider — single OnceCell-style slot
 // =============================================================================
 //
+
 // Store behind Shared<Mutex<...>> for safe set/get race. Hot reads clone
 // the Shared which is a refcount bump — no lock acquired on get.
 

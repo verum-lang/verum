@@ -14,14 +14,17 @@
 )]
 //! Edge case tests for verum_types
 //!
+
 //! Tests boundary conditions and unusual inputs.
 //!
+
 //! NOTE: Edge case testing for verum_types is extensively covered in:
 //! - inference_edge_cases.rs: Type inference edge cases (empty tuples, nested generics, etc.)
 //! - error_quality_tests.rs: Edge cases in error reporting
 //! - overflow_modes_tests.rs: Integer overflow edge cases
 //! - refinement_tests.rs: Refinement predicate edge cases (empty ranges, etc.)
 //!
+
 //! This file exists as a placeholder for additional edge case tests that don't fit
 //! into the specialized test categories above.
 

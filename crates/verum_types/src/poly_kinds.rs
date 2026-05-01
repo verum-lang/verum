@@ -1,5 +1,6 @@
 //! Polymorphic Kinds — kind variables, kind unification.
 //!
+
 //! In Hindley-Milner-style type systems, the *kind* of a type is
 //! `Type` (concrete) or `Type → Type` (a type constructor). The
 //! existing `kind_inference` module covers this fragment for HKT
@@ -7,36 +8,44 @@
 //! into the polymorphic fragment: kind variables `κ`, kind
 //! quantification `∀κ. K`, and kind unification across them.
 //!
+
 //! Practical use cases:
 //!
+
 //! * **Heterogeneous data types** — `data HList :: forall κ. [κ] → Type`.
 //! * **Levitated functor combinators** — `Functor :: forall κ. (κ → κ) → Constraint`.
 //! * **Type-class hierarchies parameterised by kind** — Haskell's
-//!   `PolyKinds` extension.
+//!  `PolyKinds` extension.
 //!
+
 //! ## Algebra
 //!
+
 //! Kinds form a small algebra:
 //!
+
 //! ```text
-//!     K ::= Type            (kind of value-level types)
-//!         | K₁ → K₂         (kind of type constructors)
-//!         | κ               (kind variable — substitutable)
-//!         | Constraint      (kind of typeclass constraints)
+//!  K ::= Type (kind of value-level types)
+//!  | K₁ → K₂ (kind of type constructors)
+//!  | κ (kind variable — substitutable)
+//!  | Constraint (kind of typeclass constraints)
 //! ```
 //!
+
 //! Unification is structural: arrows match arrows, constants match
 //! constants, and a kind variable `κ` unifies with any kind `K`
 //! by substitution.
 //!
+
 //! ## API
 //!
+
 //! * [`Kind`] — the kind algebra.
 //! * [`KindSubst`] — a substitution `κ ↦ K`.
 //! * [`KindUnifier`] — accumulates substitutions, with `unify`
-//!   merging two kinds and updating its substitution map.
+//!  merging two kinds and updating its substitution map.
 //! * [`KindError`] — returned on unsolvable mismatches or occurs
-//!   check failures.
+//!  check failures.
 
 use std::collections::HashMap;
 
@@ -310,7 +319,7 @@ mod tests {
 
     #[test]
     fn arrow_unification_decomposes() {
-        // (a → b) ~ (Type → Constraint)  ↦  a := Type, b := Constraint
+        // (a → b) ~ (Type → Constraint) ↦ a := Type, b := Constraint
         let lhs = Kind::arrow(k("a"), k("b"));
         let rhs = Kind::arrow(t(), c());
         let s = unify(&lhs, &rhs).unwrap();
