@@ -89,10 +89,10 @@ fn checkpoint_is_accepted_in_all_modes() {
         Err(_) => { panic("open"); return; }
     };
     let mut actor = actor_new(p, 16);
-    let _ = pager_apply(&mut actor, Checkpoint(Passive, 1));
-    let _ = pager_apply(&mut actor, Checkpoint(Full, 2));
-    let _ = pager_apply(&mut actor, Checkpoint(Restart, 3));
-    let _ = pager_apply(&mut actor, Checkpoint(Truncate, 4));
+    let _ = pager_apply(&mut actor, Checkpoint(CheckpointMode.Passive, 1));
+    let _ = pager_apply(&mut actor, Checkpoint(CheckpointMode.Full, 2));
+    let _ = pager_apply(&mut actor, Checkpoint(CheckpointMode.Restart, 3));
+    let _ = pager_apply(&mut actor, Checkpoint(CheckpointMode.Truncate, 4));
 }
 
 fn main() {
