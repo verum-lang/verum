@@ -3050,60 +3050,9 @@ impl VbcCodegen {
             return Ok(result);
         }
 
-        // **Module-qualified-first lookup** for unqualified bare-name calls.
-        //
-        // When a bare-name call like `is_valid_page_size(4096)` originates
-        // from inside `core.database.sqlite.native.l1_pager.pager`, multiple
-        // modules across the stdlib may have registered the simple name
-        // `is_valid_page_size#1` — `journal_header_api/header.vr` (taking a
-        // `&JournalHeader`), `wal_frame_layout/constants.vr` (taking `Int`),
-        // `l1_pager/pager.vr` itself (taking `Int`), and
-        // `l1_pager/journal/writer.vr`.  The function-table is keyed by
-        // `(name, arity)` only — parameter type doesn't disambiguate — so
-        // whichever module loaded first wins the bare key under
-        // `prefer_existing` (stdlib loading), and a call from `pager.vr`
-        // silently dispatches to a different module's
-        // `is_valid_page_size`.  The mismatch surfaces only when the
-        // user adds `mount base.{Result, Ok, Err}` (transitively pulls in
-        // the conflicting module), which is why the L1-pager works in
-        // isolation but breaks under any stdlib-pulling user program.
-        //
-        // Fix: if we know the calling source module, prefer the
-        // module-qualified form FIRST.  Each function is registered
-        // under both its bare name AND its `<module>.<name>` form (see
-        // `register_function` at mod.rs:4855-4874), so the qualified
-        // lookup is guaranteed to find the local-module version when
-        // it exists.  Only fall back to the bare name when the
-        // module-qualified form misses (cross-module call to a function
-        // that lives in another module's table).
-        //
-        // This is also the architecturally honest semantics — a bare
-        // unqualified call from inside module `M` should mean "the `M`-
-        // local function of that name, if any; otherwise the imported one".
-        let module_qualified_lookup: Option<(String, FunctionInfo)> = {
-            let only_simple_segment = !func_name.contains("::") && !func_name.contains('.');
-            if !only_simple_segment {
-                None
-            } else if let Some(src_mod) = self.ctx.current_source_module.as_deref() {
-                if src_mod.is_empty() || src_mod == "main" {
-                    None
-                } else {
-                    let qualified = format!("{}.{}", src_mod, func_name);
-                    self.ctx
-                        .lookup_function_with_arity(&qualified, args.len())
-                        .map(|info| (qualified, info.clone()))
-                }
-            } else {
-                None
-            }
-        };
-
         // Look up function - use arity-based disambiguation when available
-        let (resolved_name, func_info) = match module_qualified_lookup
-            .or_else(|| self.ctx.lookup_function_with_arity(&func_name, args.len())
-                .map(|info| (func_name.clone(), info.clone())))
-        {
-            Some(result) => result,
+        let (resolved_name, func_info) = match self.ctx.lookup_function_with_arity(&func_name, args.len()) {
+            Some(info) => (func_name.clone(), info.clone()),
             None => {
                 // Try fallback: if qualified path like "darwin::tls::init_main_thread_tls" fails,
                 // try just the simple function name "init_main_thread_tls". Functions are often
