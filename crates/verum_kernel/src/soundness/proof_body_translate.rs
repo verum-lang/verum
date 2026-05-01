@@ -359,6 +359,28 @@ enum ChainStep<'a> {
 /// chains) used to emit unconditional admits — the foreign tool
 /// only verified the proposition's TYPE, not the proof structure.
 /// With chain support, the foreign tool re-runs every step.
+///
+/// ## Structural transparency (#153 V3)
+///
+/// `ProofStepKind::Let` and `ProofStepKind::Obtain` introduce
+/// Verum-internal bindings — they are **transparent** at the
+/// cross-format gate. The foreign tool's unifier resolves apply
+/// arguments from the lemma signatures it has on hand; it doesn't
+/// need the Verum binding scaffolding. Dropping the lets keeps the
+/// gate's verdict honest: "Coq accepts the apply skeleton" matches
+/// what the foreign tool can independently verify.
+///
+/// `ProofStepKind::Have`, `Show`, `Suffices` carry a tactic
+/// justification + a (possibly complex) proposition. The proposition
+/// is dropped (translation is V1+); the justification tactic is
+/// extracted as a regular chain step. Sound for the same reason as
+/// argument-dropping in single-apply: the foreign tool's unifier
+/// fills in what we drop.
+///
+/// `Calc`, `Cases`, `Focus` carry nested sub-structures whose
+/// translation needs more machinery (calc requires per-relation
+/// Coq tactics; cases requires per-case bodies). They still bail
+/// out — chain falls back, body emits `Admitted.`/`sorry`.
 fn classify_tactic_chain(body: &ProofBody) -> Option<Vec<ChainStep<'_>>> {
     let s = match body {
         ProofBody::Structured(s) => s,
@@ -366,27 +388,110 @@ fn classify_tactic_chain(body: &ProofBody) -> Option<Vec<ChainStep<'_>>> {
     };
     let step_count = s.steps.iter().count();
     let has_conclusion = matches!(s.conclusion, Maybe::Some(_));
-    let total = step_count + if has_conclusion { 1 } else { 0 };
-    // Reject single-step / empty shapes — those routes already
-    // exist (classify_single_apply + primitive_tactic).
-    if total < 2 {
+    if step_count == 0 && !has_conclusion {
         return None;
     }
-    let mut chain: Vec<ChainStep<'_>> = Vec::with_capacity(total);
+    let mut chain: Vec<ChainStep<'_>> = Vec::new();
     for step in s.steps.iter() {
-        let tactic = match &step.kind {
-            ProofStepKind::Tactic(t) => t,
-            // Have/Show/Suffices/Let/Obtain/Calc/Cases/Focus carry
-            // sub-bodies that V0 doesn't yet render — fall back so
-            // the renderer reverts to admitted/sorry.
-            _ => return None,
-        };
-        chain.push(classify_chain_step(tactic)?);
+        let nested = classify_proof_step_kind(&step.kind)?;
+        chain.extend(nested);
     }
     if let Maybe::Some(t) = &s.conclusion {
-        chain.push(classify_chain_step(t)?);
+        // Conclusion may itself be a Seq (rare but possible). Flatten
+        // through the same chain-aware classifier.
+        let nested = classify_tactic_for_chain(t)?;
+        chain.extend(nested);
+    }
+
+    // Empty chains (body is purely transparent — only Lets/Obtains
+    // with no actual tactic) fall back so the body emits admitted/sorry.
+    // Single-element chains are accepted: the parser may produce
+    // `Tactic(Apply foo)` standalone (where `classify_single_apply`
+    // would have already fired upstream and we'd never reach here),
+    // or `Let x = e; apply foo;` where `classify_single_apply`
+    // doesn't see through the transparent prefix. Accepting len=1
+    // closes the latter case without disrupting the former.
+    if chain.is_empty() {
+        return None;
     }
     Some(chain)
+}
+
+/// Classify a structural-step kind. Returns:
+///   * `Some(steps)` — emitted as a (possibly empty, possibly multi-)
+///     vec of chain steps. Empty for transparent steps (Let/Obtain);
+///     multi-element for `Tactic(Seq(...))` shapes the parser produces
+///     when consecutive applies share a single `;`-separated step.
+///   * `None` — un-renderable (Calc/Cases/Focus, alternatives,
+///     unrecognised tactics) — abort the chain.
+fn classify_proof_step_kind(
+    kind: &ProofStepKind,
+) -> Option<Vec<ChainStep<'_>>> {
+    match kind {
+        // Bare tactic — flatten through the chain-aware classifier.
+        ProofStepKind::Tactic(t) => classify_tactic_for_chain(t),
+        // Have/Show/Suffices: extract the justification tactic. Drop
+        // the proposition — the foreign tool's unifier doesn't need it,
+        // and translating arbitrary propositions is V1.
+        ProofStepKind::Have { justification, .. }
+        | ProofStepKind::Show { justification, .. }
+        | ProofStepKind::Suffices { justification, .. } => {
+            classify_tactic_for_chain(justification)
+        }
+        // Let/Obtain: transparent. Verum-internal binding scaffolding —
+        // the foreign tool unifies apply arguments from lemma signatures,
+        // it doesn't need the binding name. Empty vec signals "skip
+        // this step but don't reject the chain".
+        ProofStepKind::Let { .. } | ProofStepKind::Obtain { .. } => {
+            Some(Vec::new())
+        }
+        // Calc/Cases/Focus: nested sub-structures. V1+ work — for
+        // now the chain falls back so the body emits admitted/sorry.
+        ProofStepKind::Calc(_)
+        | ProofStepKind::Cases { .. }
+        | ProofStepKind::Focus { .. } => None,
+    }
+}
+
+/// Classify a `TacticExpr` for inclusion in a chain. Unlike
+/// [`classify_chain_step`] (which returns at most one step), this
+/// function flattens `TacticExpr::Seq(_)` into a multi-step vector.
+/// The parser produces `Seq([apply foo; apply bar; …])` for
+/// consecutive `apply` statements separated by `;` inside a `proof {…}`
+/// block, so flat-list handling is required for any non-trivial
+/// proof body.
+///
+/// Returns `None` for shapes that contain at least one un-renderable
+/// element (alternatives, `Try`/`Repeat`/`AllGoals`/`Focus` wrappers,
+/// custom `Intro`/`Split` etc.) — soundness over partial coverage.
+fn classify_tactic_for_chain(tactic: &TacticExpr) -> Option<Vec<ChainStep<'_>>> {
+    match tactic {
+        TacticExpr::Seq(tacs) => {
+            let mut out: Vec<ChainStep<'_>> = Vec::with_capacity(tacs.iter().count());
+            for t in tacs.iter() {
+                let nested = classify_tactic_for_chain(t)?;
+                out.extend(nested);
+            }
+            Some(out)
+        }
+        // Alt is a tactic-level disjunction — semantically distinct
+        // from sequential composition. Foreign tools have no clean
+        // analogue ("apply this OR that") in tactic mode without
+        // `first` / `;[ … | … ]` machinery. Bail and let the chain
+        // fall back rather than emit subtly-wrong code.
+        TacticExpr::Alt(_) => None,
+        // Try / Repeat / AllGoals / Focus modify the tactic-state
+        // semantics non-trivially. Unwrapping them changes meaning,
+        // so chains containing them fall back. (A future V2 could
+        // emit `try (...)` / `repeat (...)` per-backend.)
+        TacticExpr::Try(_)
+        | TacticExpr::Repeat(_)
+        | TacticExpr::AllGoals(_)
+        | TacticExpr::Focus(_)
+        | TacticExpr::TryElse { .. } => None,
+        // Atomic tactic — let the single-step classifier decide.
+        _ => classify_chain_step(tactic).map(|cs| vec![cs]),
+    }
 }
 
 /// Recognise one tactic as either an `apply` step or a primitive.
@@ -1808,17 +1913,27 @@ mod tests {
     }
 
     #[test]
-    fn classify_tactic_chain_rejects_single_step() {
-        // Single-step shapes route through classify_single_apply,
-        // not the chain classifier — keep responsibility split.
+    fn classify_tactic_chain_accepts_single_step_after_transparent() {
+        // V3 contract: a body whose only renderable step survives
+        // after stripping transparent prefixes (Let/Obtain) is
+        // accepted by the chain classifier. The bare-single-step
+        // case (no transparent prefix) is still preferentially
+        // routed through `classify_single_apply` upstream, so this
+        // gate's relaxation only affects shapes upstream couldn't
+        // see through.
         let body = structured_apply_chain(&["foo"]);
-        assert!(classify_tactic_chain(&body).is_none());
+        let chain = classify_tactic_chain(&body)
+            .expect("single-apply structured body classifies as a 1-step chain");
+        assert_eq!(chain.len(), 1);
     }
 
     #[test]
-    fn classify_tactic_chain_rejects_have_step() {
-        // `have h: P by t;` carries a sub-body that V0 doesn't render —
-        // chain classifier must bail so the whole body falls back.
+    fn classify_tactic_chain_extracts_have_justification() {
+        // `have h: P by t;` — the V3 contract makes this transparent
+        // at the proposition level (drop P) but extracts the
+        // justification tactic `t` as a regular chain step.
+        // Verum-internal Hypothesis binding is dropped; the foreign
+        // tool's unifier handles whatever the apply chain needs.
         use verum_ast::decl::{ProofStep, ProofStructure};
         let have_step = ProofStep {
             kind: ProofStepKind::Have {
@@ -1840,7 +1955,238 @@ mod tests {
             conclusion: Maybe::None,
             span: span(),
         });
-        assert!(classify_tactic_chain(&body).is_none());
+        let chain = classify_tactic_chain(&body)
+            .expect("V3 must accept have-step + apply-step chain");
+        // Two steps: Trivial (extracted from have justification) + apply foo.
+        assert_eq!(chain.len(), 2);
+        assert!(matches!(chain[0], ChainStep::Primitive(TacticExpr::Trivial)));
+        assert!(matches!(&chain[1], ChainStep::Apply { name } if name == "foo"));
+    }
+
+    #[test]
+    fn classify_tactic_chain_treats_let_step_as_transparent() {
+        // `let x = expr;` — V3 contract: structural-only step, dropped
+        // from the rendered chain. Verum's verifier needs the binding;
+        // foreign tools don't.
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        use verum_ast::pattern::{Pattern, PatternKind};
+        let let_step = ProofStep {
+            kind: ProofStepKind::Let {
+                pattern: Pattern::new(
+                    PatternKind::Ident {
+                        by_ref: false,
+                        mutable: false,
+                        name: ident("formal_witness"),
+                        subpattern: Maybe::None,
+                    },
+                    span(),
+                ),
+                value: Heap::new(name_path_expr("some_expression")),
+            },
+            span: span(),
+        };
+        let apply_a = ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr("foo")),
+                args: List::from(Vec::new()),
+            }),
+            span: span(),
+        };
+        let apply_b = ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr("bar")),
+                args: List::from(Vec::new()),
+            }),
+            span: span(),
+        };
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![let_step, apply_a, apply_b]),
+            conclusion: Maybe::None,
+            span: span(),
+        });
+        let chain = classify_tactic_chain(&body).expect("let + applies must classify");
+        // The let step is transparent — only the two applies emit.
+        assert_eq!(chain.len(), 2);
+        assert!(matches!(&chain[0], ChainStep::Apply { name } if name == "foo"));
+        assert!(matches!(&chain[1], ChainStep::Apply { name } if name == "bar"));
+    }
+
+    #[test]
+    fn classify_tactic_chain_rejects_only_let_steps() {
+        // A body with ONLY transparent steps (no actual tactic) must
+        // fall back — there's nothing to render.
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        use verum_ast::pattern::{Pattern, PatternKind};
+        let let_step = |name: &str| ProofStep {
+            kind: ProofStepKind::Let {
+                pattern: Pattern::new(
+                    PatternKind::Ident {
+                        by_ref: false,
+                        mutable: false,
+                        name: ident(name),
+                        subpattern: Maybe::None,
+                    },
+                    span(),
+                ),
+                value: Heap::new(name_path_expr("expr")),
+            },
+            span: span(),
+        };
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![let_step("a"), let_step("b")]),
+            conclusion: Maybe::None,
+            span: span(),
+        });
+        assert!(
+            classify_tactic_chain(&body).is_none(),
+            "body with only transparent steps must fall back",
+        );
+    }
+
+    #[test]
+    fn classify_tactic_chain_flattens_seq_of_applies() {
+        // The parser packs consecutive `apply foo; apply bar; apply baz;`
+        // into a single `Tactic(Seq([Apply foo, Apply bar, Apply baz]))`
+        // ProofStep — the dominant shape in the MSFS corpus's
+        // structured-proof bodies. The chain classifier must flatten
+        // Seq into N steps, not bail out.
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        let make_apply = |name: &str| TacticExpr::Apply {
+            lemma: Heap::new(name_path_expr(name)),
+            args: List::from(Vec::new()),
+        };
+        let seq = TacticExpr::Seq(List::from(vec![
+            make_apply("a"),
+            make_apply("b"),
+            make_apply("c"),
+        ]));
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![ProofStep {
+                kind: ProofStepKind::Tactic(seq),
+                span: span(),
+            }]),
+            conclusion: Maybe::None,
+            span: span(),
+        });
+        let chain = classify_tactic_chain(&body)
+            .expect("Seq([apply, apply, apply]) must classify");
+        assert_eq!(chain.len(), 3);
+        let names: Vec<String> = chain
+            .iter()
+            .filter_map(|c| match c {
+                ChainStep::Apply { name } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn coq_renders_seq_of_applies_as_chain() {
+        // End-to-end: the corpus-typical `proof { apply a; apply b; apply c; }`
+        // shape now renders as a 3-line Coq tactic chain.
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        let make_apply = |name: &str| TacticExpr::Apply {
+            lemma: Heap::new(name_path_expr(name)),
+            args: List::from(Vec::new()),
+        };
+        let seq = TacticExpr::Seq(List::from(vec![
+            make_apply("a"),
+            make_apply("b"),
+            make_apply("c"),
+        ]));
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![ProofStep {
+                kind: ProofStepKind::Tactic(seq),
+                span: span(),
+            }]),
+            conclusion: Maybe::None,
+            span: span(),
+        });
+        let r = CoqProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("apply a.\napply b.\napply c."));
+    }
+
+    #[test]
+    fn classify_tactic_chain_rejects_alt_inside_seq() {
+        // A Seq that contains an Alt (alternation) — chain bails
+        // because alternatives don't render cleanly into foreign-tool
+        // tactic mode.
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        let alt = TacticExpr::Alt(List::from(vec![
+            TacticExpr::Trivial,
+            TacticExpr::Reflexivity,
+        ]));
+        let seq = TacticExpr::Seq(List::from(vec![
+            TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr("foo")),
+                args: List::from(Vec::new()),
+            },
+            alt,
+        ]));
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![ProofStep {
+                kind: ProofStepKind::Tactic(seq),
+                span: span(),
+            }]),
+            conclusion: Maybe::None,
+            span: span(),
+        });
+        assert!(
+            classify_tactic_chain(&body).is_none(),
+            "Seq containing Alt must reject the entire chain",
+        );
+    }
+
+    #[test]
+    fn coq_renders_msfs_theorem_5_1_shape() {
+        // The MSFS theorem 5.1 shape — let bindings then a string of
+        // applies. End-to-end pin: the chain must render with all
+        // applies preserved and the lets transparent.
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        use verum_ast::pattern::{Pattern, PatternKind};
+        let let_step = |name: &str| ProofStep {
+            kind: ProofStepKind::Let {
+                pattern: Pattern::new(
+                    PatternKind::Ident {
+                        by_ref: false,
+                        mutable: false,
+                        name: ident(name),
+                        subpattern: Maybe::None,
+                    },
+                    span(),
+                ),
+                value: Heap::new(name_path_expr("expr")),
+            },
+            span: span(),
+        };
+        let apply_step = |name: &str| ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr(name)),
+                args: List::from(Vec::new()),
+            }),
+            span: span(),
+        };
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![
+                let_step("formal_witness"),
+                let_step("ss_membership"),
+                apply_step("msfs_lemma_3_4_outputs_in_s_s_global"),
+                apply_step("kernel_grothendieck_construction_strict"),
+                apply_step("kernel_compute_colimit_strict"),
+            ]),
+            conclusion: Maybe::None,
+            span: span(),
+        });
+        let r = CoqProofBodyRenderer::new().render(&body);
+        assert_eq!(
+            r.text(),
+            Some(
+                "apply msfs_lemma_3_4_outputs_in_s_s_global.\n\
+                 apply kernel_grothendieck_construction_strict.\n\
+                 apply kernel_compute_colimit_strict."
+            ),
+        );
     }
 
     // ----- TranslatedProofBody surface -----
