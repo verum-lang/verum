@@ -36,6 +36,7 @@ mount core.database.sqlite.native.l3_btree.{
     Btree, BtreeCursor, BtreeKind,
     btree_new, cursor_new, cursor_root,
 };
+mount core.database.sqlite.native.l3_btree.cursor.PathStep;
 mount core.database.sqlite.native.l4_vdbe.register.Register;
 
 // -----------------------------------------------------------------------------
@@ -650,5 +651,56 @@ implement CursorTable {
             i = i + 1;
         }
         out
+    }
+
+    // -------------------------------------------------------------------------
+    // B-tree cursor accessors — used by cursor_btree_dispatch.vr (#147)
+    // -------------------------------------------------------------------------
+
+    /// Read the slot's BtreeCursor by clone.  Returns None when the
+    /// slot is closed OR has no position (cursor opened but not yet
+    /// rewound/seeked).  Used by Column / RowIdOp dispatch which
+    /// only need an immutable view.
+    public fn btree_cursor_for(&self, cursor_id: Int) -> Maybe<BtreeCursor> {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return None; }
+        match &self.slots[cursor_id].position {
+            Some(c) => Some(clone_btree_cursor(c)),
+            None    => None,
+        }
+    }
+
+    /// Mutable variant — same as `btree_cursor_for` but for opcodes
+    /// that need to advance the cursor (Next/Prev/Rewind/Seek).
+    /// Caller must follow up with `store_btree_cursor` to write back
+    /// the mutated cursor.
+    public fn btree_cursor_mut_for(&self, cursor_id: Int) -> Maybe<BtreeCursor> {
+        self.btree_cursor_for(cursor_id)
+    }
+
+    /// Persist a (potentially mutated) BtreeCursor back into the
+    /// slot.  No-op if the slot is closed.
+    public fn store_btree_cursor(&mut self, cursor_id: Int, cursor: BtreeCursor) {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return; }
+        self.slots[cursor_id].position = Some(cursor);
+    }
+}
+
+/// Deep-clone a BtreeCursor — its `path` is a List<PathStep>.
+fn clone_btree_cursor(src: &BtreeCursor) -> BtreeCursor {
+    let mut path: List<PathStep> = List.new();
+    let mut i: Int = 0;
+    while i < src.path.len() {
+        path.push(PathStep {
+            page_no: src.path[i].page_no,
+            cell_index: src.path[i].cell_index,
+        });
+        i = i + 1;
+    }
+    BtreeCursor {
+        root_page: src.root_page,
+        page_size: src.page_size,
+        path: path,
+        valid: src.valid,
+        at_end: src.at_end,
     }
 }

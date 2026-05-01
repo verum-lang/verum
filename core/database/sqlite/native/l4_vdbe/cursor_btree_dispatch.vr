@@ -1,0 +1,229 @@
+module core.database.sqlite.native.l4_vdbe.cursor_btree_dispatch;
+
+// =============================================================================
+// l4_vdbe/cursor_btree_dispatch.vr — Backend-aware cursor opcode dispatch
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §11.2 (cursor opcodes) + §10.3 (B-tree cursor)
+//
+// Industrial-grade dispatch surface for the L4 interpreter.  Each
+// cursor opcode (Column / Next / Insert / Delete / Rewind / RowIdOp)
+// has TWO valid runtime backends:
+//
+//   1. **Row-store path** (CskEphemeral, CskSorter) — in-memory
+//      List<List<Register>> + position cursor.  Used for OpenEphemeral
+//      and sort buffers.  Lives in `cursor_table.vr` directly.
+//
+//   2. **B-tree path** (CskBtree) — real pager-backed cursor.
+//      Dispatches through `cursor_btree_bridge::op_*` against an
+//      injected PageStore.  Production data path.
+//
+// This module ships per-opcode functions that dispatch on the slot's
+// kind + take an optional `&PageStore` (None when the connection
+// hasn't initialised the pager yet, e.g. for tests).  Returns the
+// same typed result the row-store path returns so the interpreter's
+// existing handler shape stays unchanged.
+//
+// Architecture: pure dispatch.  No mutation of CursorTable beyond
+// what the underlying op_* / state.cursors call does.  Single
+// indirection per opcode — branch table lowers to an O(1)
+// dispatch in release.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l3_btree.cursor.{
+    BtreeCursor, cursor_is_valid, cursor_is_at_end,
+};
+mount core.database.sqlite.native.l3_btree.cursor_seek.{
+    PageStore, page_store_new,
+    SeekOutcome, SoExactMatch, SoFoundLarger, SoFoundSmaller, SoEmpty, SoPastEnd,
+};
+mount core.database.sqlite.native.l3_btree.comparator.{
+    SeekKey, SkRowId, SkRecord,
+};
+mount core.database.sqlite.native.btree_seek_op_codes.op.SeekOp;
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RReal, RText, RBlob, RRowId,
+};
+mount core.database.sqlite.native.l4_vdbe.cursor_table.{
+    CursorTable, CursorSlot, CursorSlotKind,
+    CskClosed, CskBtree, CskEphemeral, CskSorter,
+};
+mount core.database.sqlite.native.l4_vdbe.cursor_btree_bridge.{
+    CursorBridgeError,
+    op_open_read, op_column, op_next, op_prev, op_rewind, op_last,
+    op_seek, op_insert, op_delete, op_rowid,
+};
+
+// -----------------------------------------------------------------------------
+// DispatchResult — what an opcode handler observes after dispatch
+// -----------------------------------------------------------------------------
+
+/// Result of a column read.  Carries either the typed Register
+/// (success) or a sentinel RNull (slot closed / B-tree error).
+pub type ColumnResult is {
+    value: Register,
+    /// `true` when the value came from a real B-tree read; `false`
+    /// when it came from the row-store path or a fallback.
+    via_btree: Bool,
+}
+
+/// Result of an advance/rewind operation.  `still_has_row` matches
+/// the existing `CursorTable.advance` semantics.
+pub type AdvanceResult is {
+    still_has_row: Bool,
+    via_btree: Bool,
+}
+
+// -----------------------------------------------------------------------------
+// Per-opcode dispatchers
+// -----------------------------------------------------------------------------
+
+/// Dispatch a Column(cursor_id, col_idx) opcode.  When the slot is
+/// CskBtree AND `pages` is Some, routes through cursor_btree_bridge::
+/// op_column.  Otherwise falls back to CursorTable's row-store path
+/// (peek_cell).  RNull on any error path.
+pub fn dispatch_column(
+    table: &mut CursorTable,
+    pages: Maybe<&PageStore>,
+    cursor_id: Int,
+    col_idx: Int,
+) -> ColumnResult {
+    let kind = table.kind(cursor_id);
+    match kind {
+        CskBtree => {
+            match pages {
+                Some(p) => {
+                    match table.btree_cursor_for(cursor_id) {
+                        Some(cursor) => match op_column(&cursor, p, col_idx) {
+                            Ok(v)  => ColumnResult { value: v, via_btree: true },
+                            Err(_) => ColumnResult { value: RNull, via_btree: true },
+                        }
+                        None => ColumnResult { value: RNull, via_btree: false },
+                    }
+                }
+                None => ColumnResult {
+                    value: table.peek_cell(cursor_id, col_idx),
+                    via_btree: false,
+                },
+            }
+        }
+        _ => ColumnResult {
+            value: table.peek_cell(cursor_id, col_idx),
+            via_btree: false,
+        },
+    }
+}
+
+/// Dispatch a Next(cursor_id) opcode.  CskBtree path uses
+/// op_next + writes back the advanced cursor; row-store path uses
+/// CursorTable.advance.
+pub fn dispatch_next(
+    table: &mut CursorTable,
+    pages: Maybe<&PageStore>,
+    cursor_id: Int,
+) -> AdvanceResult {
+    let kind = table.kind(cursor_id);
+    match kind {
+        CskBtree => {
+            match pages {
+                Some(p) => {
+                    match table.btree_cursor_mut_for(cursor_id) {
+                        Some(mut cursor) => {
+                            let still = match op_next(&mut cursor, p) {
+                                Ok(b)  => b,
+                                Err(_) => false,
+                            };
+                            // Cursor advanced in-place; if `op_next`
+                            // mutated it, the table must persist the
+                            // new state — done via store_btree_cursor.
+                            table.store_btree_cursor(cursor_id, cursor);
+                            AdvanceResult { still_has_row: still, via_btree: true }
+                        }
+                        None => AdvanceResult { still_has_row: false, via_btree: false },
+                    }
+                }
+                None => AdvanceResult {
+                    still_has_row: table.advance(cursor_id),
+                    via_btree: false,
+                },
+            }
+        }
+        _ => AdvanceResult {
+            still_has_row: table.advance(cursor_id),
+            via_btree: false,
+        },
+    }
+}
+
+/// Dispatch a Rewind(cursor_id) opcode.  Returns `still_has_row`
+/// after positioning at first cell.
+pub fn dispatch_rewind(
+    table: &mut CursorTable,
+    pages: Maybe<&PageStore>,
+    cursor_id: Int,
+) -> AdvanceResult {
+    let kind = table.kind(cursor_id);
+    match kind {
+        CskBtree => {
+            match pages {
+                Some(p) => {
+                    match table.btree_cursor_mut_for(cursor_id) {
+                        Some(mut cursor) => {
+                            let still = match op_rewind(&mut cursor, p) {
+                                Ok(b)  => b,
+                                Err(_) => false,
+                            };
+                            table.store_btree_cursor(cursor_id, cursor);
+                            AdvanceResult { still_has_row: still, via_btree: true }
+                        }
+                        None => AdvanceResult { still_has_row: false, via_btree: false },
+                    }
+                }
+                None => {
+                    let _ = table.rewind(cursor_id);
+                    AdvanceResult {
+                        still_has_row: table.has_more(cursor_id),
+                        via_btree: false,
+                    }
+                }
+            }
+        }
+        _ => {
+            let _ = table.rewind(cursor_id);
+            AdvanceResult {
+                still_has_row: table.has_more(cursor_id),
+                via_btree: false,
+            }
+        }
+    }
+}
+
+/// Dispatch a RowIdOp(cursor_id) opcode.  Returns the rowid as
+/// Int64 (0 on error / non-table cursor).
+pub fn dispatch_rowid(
+    table: &mut CursorTable,
+    pages: Maybe<&PageStore>,
+    cursor_id: Int,
+) -> Int64 {
+    let kind = table.kind(cursor_id);
+    match kind {
+        CskBtree => {
+            match pages {
+                Some(p) => {
+                    match table.btree_cursor_for(cursor_id) {
+                        Some(cursor) => match op_rowid(&cursor, p) {
+                            Ok(r)  => r,
+                            Err(_) => 0_i64,
+                        }
+                        None => 0_i64,
+                    }
+                }
+                None => table.current_rowid(cursor_id),
+            }
+        }
+        _ => table.current_rowid(cursor_id),
+    }
+}
