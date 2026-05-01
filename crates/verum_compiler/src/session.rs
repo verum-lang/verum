@@ -535,13 +535,26 @@ impl Session {
         //     the "extern fn should be marked `unsafe` under
         //     `[safety].ffi_boundary = strict`" warning, threaded
         //     from manifest via SafetyPolicy::from_features.
-        //   - mls_level (Phase 1, #266 surface gate): when set to
-        //     `"secret"` or `"top_secret"`, every extern fn /
-        //     unsafe fn declaration must carry an
-        //     `@classification(<level>)` attribute matching the
-        //     manifest floor. Phases 2/3 (full taint analysis,
-        //     declassify gates) are tracked as #266-Phase2 and
-        //     #266-Phase3.
+        //   - mls_level — full surface gate stack landed:
+        //       * Phase 1 (#266): `extern fn` / `unsafe fn`
+        //         declarations require `@classification(<level>)`
+        //         matching the manifest floor.
+        //       * Phase 2a (#282): MlsLevel lattice primitive at
+        //         `verum_common::mls` — algebraic invariants
+        //         pinned (idempotence, commutativity, associativity,
+        //         absorption laws).
+        //       * Phase 2b (#288 partial): parameter-level
+        //         `@classification` triggers the gate; function-
+        //         level `@classification` must subsume the highest
+        //         classified parameter (closes implicit-leak hole).
+        //       * Phase 3a (#283): low-classification sink
+        //         detection. When a function has a classified
+        //         parameter AND uses a known-sink context (Logger,
+        //         FS, Network, Stdout, Stderr, Tracing, Telemetry,
+        //         FileSystem) WITHOUT `@declassify`, a leak
+        //         diagnostic fires.
+        //     Type-level taint propagation (Phase 2b-full at
+        //     `verum_types::infer`) is tracked as #289.
         //
         // No runtime warn! needed — every value the user can set
         // produces observable typecheck behaviour.

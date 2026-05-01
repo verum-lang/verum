@@ -277,6 +277,116 @@ fn pattern_to_name(p: &verum_ast::pattern::Pattern) -> verum_common::Text {
 /// appropriately — it must itself be classified).  Full type-
 /// level taint propagation through Pi-types remains Phase 2b-full
 /// at `verum_types::infer`.
+/// Default low-classification sink registry (#283 Phase 3a).
+///
+/// These context names are recognized as sinks where classified
+/// data leaks observably out of the program (logs, files, network
+/// packets). When a function with a Secret-or-higher classification
+/// `using` one of these contexts, the surface gate emits a leak
+/// warning unless the function is explicitly marked `@declassify`.
+///
+/// The list is conservative — only contexts whose semantic is
+/// "this is publicly observable output" are sinks. Pure-compute
+/// contexts (Database queries that return Secret data, validation
+/// services) are NOT sinks; they're classified-data CONSUMERS.
+///
+/// The registry is hardcoded at the prefix level — any context
+/// whose final path segment matches one of these is a sink.
+/// Phase 3 full-form will extend this with manifest-driven custom
+/// sink declarations under `[safety].mls_sinks = ["MyAuditLog"]`.
+const DEFAULT_LOW_CLASSIFICATION_SINKS: &[&str] = &[
+    "Logger",
+    "FS",
+    "FileSystem",
+    "Network",
+    "Stdout",
+    "Stderr",
+    "Tracing",
+    "Telemetry",
+];
+
+/// Determine whether a `ContextRequirement` references a known
+/// low-classification sink (#283 Phase 3a).  Matches against the
+/// final identifier segment so `core.io.Logger` and
+/// `my_lib.audit.Logger` both register as Logger sinks.
+fn is_low_classification_sink(ctx: &verum_ast::context::ContextRequirement) -> bool {
+    if ctx.is_negative {
+        return false;
+    }
+    let last = ctx.path.last_segment_name();
+    DEFAULT_LOW_CLASSIFICATION_SINKS
+        .iter()
+        .any(|sink| *sink == last)
+}
+
+/// Check if a function carries the `@declassify` attribute, which
+/// is the explicit escape hatch for classified data flowing into
+/// low-classification sinks (#283).  Without this attribute the
+/// surface gate rejects the leak; with it the user accepts
+/// responsibility (the value's classification is shed at the
+/// `@declassify` boundary).
+fn has_declassify_attr(attrs: &List<verum_ast::attr::Attribute>) -> bool {
+    attrs.iter().any(|a| a.is_named("declassify"))
+}
+
+/// MLS Phase 3a sink-detection (#283).  Emits a diagnostic when a
+/// function:
+///   1. carries a classified parameter (Phase 2b trigger), AND
+///   2. uses a low-classification sink context (Logger, FS,
+///      Network, …), AND
+///   3. is NOT marked `@declassify`.
+///
+/// This is the surface-level information-flow check: classified
+/// data + observable sink + no explicit declassification = leak.
+/// Full type-level taint propagation (where every classified value
+/// is tracked through let-bindings and rejected at sink boundaries)
+/// remains Phase 3-full follow-up.
+fn check_mls_sink_leak(
+    func: &verum_ast::decl::FunctionDecl,
+    policy: &SafetyPolicy,
+    out: &mut List<Diagnostic>,
+) {
+    let floor = MlsLevel::from_manifest_str(policy.mls_level.as_str());
+    if floor == MlsLevel::Public {
+        return;
+    }
+    let highest_param = highest_classified_param(func);
+    let param_max = match highest_param {
+        Some((_, lvl, _)) => lvl,
+        None => return,  // No classified params → no leak surface.
+    };
+    if has_declassify_attr(&func.attributes) {
+        return;  // Explicit escape hatch.
+    }
+    // Find any low-classification sink in the function's `using`
+    // contexts. The first match drives the diagnostic.
+    let sink = func
+        .contexts
+        .iter()
+        .find(|ctx| is_low_classification_sink(ctx));
+    let sink = match sink {
+        Some(s) => s,
+        None => return,
+    };
+    out.push(
+        DiagnosticBuilder::error()
+            .message(format!(
+                "function `{}` leaks {}-classified data into context \
+                 `{}` (a low-classification sink)",
+                func.name.name,
+                param_max.as_manifest_str(),
+                sink.path.last_segment_name(),
+            ))
+            .span(super::ast_span_to_diagnostic_span(func.span, None))
+            .help(
+                "either remove the classified parameter, drop the sink \
+                 context from `using [...]`, or mark the function with \
+                 `@declassify` to explicitly accept the leak",
+            )
+            .build(),
+    );
+}
+
 fn check_mls_classification(
     func: &verum_ast::decl::FunctionDecl,
     policy: &SafetyPolicy,
@@ -364,6 +474,7 @@ fn check_function_decl(
     out: &mut List<Diagnostic>,
 ) {
     check_mls_classification(func, policy, out);
+    check_mls_sink_leak(func, policy, out);
     if !policy.unsafe_allowed && func.is_unsafe {
         out.push(
             DiagnosticBuilder::error()
@@ -1245,5 +1356,247 @@ mod tests {
         assert!(msg.contains("ts_data"),
             "diagnostic must cite highest-classified param; got: {}", msg);
         assert!(msg.contains("top_secret"), "got: {}", msg);
+    }
+
+    // ============================================================
+    // [safety].mls_level Phase 3a sink-detection pin tests (#283).
+    //
+    // Phase 3a: classified data + low-classification sink (Logger,
+    // FS, Network, …) + no @declassify = leak diagnostic.
+    // ============================================================
+
+    /// Build a function with a classified param AND a `using
+    /// [<sink>]` context for sink-leak tests.
+    fn mk_module_with_classified_param_and_context(
+        param_classification: Maybe<&'static str>,
+        context_name: &str,
+        function_attrs: List<verum_ast::attr::Attribute>,
+    ) -> Module {
+        use verum_ast::pattern::{Pattern, PatternKind};
+        use verum_ast::context::ContextRequirement;
+
+        let mut param_attrs = List::new();
+        if let Maybe::Some(level) = param_classification {
+            param_attrs.push(mk_classification_attr(level));
+        }
+
+        let param = verum_ast::decl::FunctionParam {
+            kind: verum_ast::decl::FunctionParamKind::Regular {
+                pattern: Pattern {
+                    kind: PatternKind::Ident {
+                        by_ref: false,
+                        mutable: false,
+                        name: verum_ast::ty::Ident::new("data", Span::dummy()),
+                        subpattern: Maybe::None,
+                    },
+                    span: Span::dummy(),
+                },
+                ty: verum_ast::ty::Type {
+                    kind: verum_ast::ty::TypeKind::Path(
+                        verum_ast::ty::Path::single(
+                            verum_ast::ty::Ident::new("Int", Span::dummy()),
+                        ),
+                    ),
+                    span: Span::dummy(),
+                },
+                default_value: Maybe::None,
+            },
+            attributes: param_attrs,
+            span: Span::dummy(),
+        };
+        let mut params = List::new();
+        params.push(param);
+
+        let ctx_req = ContextRequirement::simple(
+            verum_ast::ty::Path::single(
+                verum_ast::ty::Ident::new(context_name, Span::dummy()),
+            ),
+            List::new(),
+            Span::dummy(),
+        );
+        let mut contexts = List::new();
+        contexts.push(ctx_req);
+
+        let func = FunctionDecl {
+            visibility: Default::default(),
+            name: verum_ast::ty::Ident::new("logger_handler", Span::dummy()),
+            generics: List::new(),
+            params,
+            return_type: Maybe::None,
+            throws_clause: Maybe::None,
+            body: None,
+            attributes: function_attrs,
+            is_async: false,
+            is_meta: false,
+            is_unsafe: false,
+            span: Span::dummy(),
+            generic_where_clause: Maybe::None,
+            meta_where_clause: Maybe::None,
+            requires: List::new(),
+            ensures: List::new(),
+            stage_level: 0,
+            is_pure: false,
+            is_generator: false,
+            is_cofix: false,
+            is_transparent: false,
+            extern_abi: Maybe::None,
+            is_variadic: false,
+            std_attr: Maybe::None,
+            contexts,
+        };
+        let mut items = List::new();
+        items.push(Item::new(ItemKind::Function(func), Span::dummy()));
+        Module {
+            items,
+            attributes: List::new(),
+            file_id: FileId::new(0),
+            span: Span::dummy(),
+        }
+    }
+
+    /// Helper: build a `@declassify` attribute (no args needed).
+    fn mk_declassify_attr() -> verum_ast::attr::Attribute {
+        verum_ast::attr::Attribute::simple(
+            verum_common::Text::from("declassify"),
+            Span::dummy(),
+        )
+    }
+
+    #[test]
+    fn mls_phase3a_secret_param_into_logger_rejected() {
+        // Pin: secret-classified param + Logger sink + no
+        // @declassify = leak diagnostic.
+        let mut func_attrs = List::new();
+        func_attrs.push(mk_classification_attr("secret"));
+        let module = mk_module_with_classified_param_and_context(
+            Maybe::Some("secret"),
+            "Logger",
+            func_attrs,
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let leak_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("low-classification sink"))
+            .collect();
+        assert_eq!(leak_diags.len(), 1,
+            "secret param + Logger sink must trigger leak diagnostic");
+        let msg = leak_diags[0].message().to_string();
+        assert!(msg.contains("Logger"), "got: {}", msg);
+        assert!(msg.contains("secret"), "got: {}", msg);
+    }
+
+    #[test]
+    fn mls_phase3a_declassify_escape_hatch_silences_leak() {
+        // Pin: @declassify on the function declaration acts as the
+        // explicit escape hatch — the leak is suppressed.  User
+        // accepted responsibility for the boundary.
+        let mut func_attrs = List::new();
+        func_attrs.push(mk_classification_attr("secret"));
+        func_attrs.push(mk_declassify_attr());
+        let module = mk_module_with_classified_param_and_context(
+            Maybe::Some("secret"),
+            "Logger",
+            func_attrs,
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let leak_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("low-classification sink"))
+            .collect();
+        assert_eq!(leak_diags.len(), 0,
+            "@declassify must suppress leak diagnostic");
+    }
+
+    #[test]
+    fn mls_phase3a_unclassified_param_does_not_trigger() {
+        // Pin: function using Logger sink WITHOUT classified
+        // params is fine — no leak surface to detect.
+        let module = mk_module_with_classified_param_and_context(
+            Maybe::None,
+            "Logger",
+            List::new(),
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let leak_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("low-classification sink"))
+            .collect();
+        assert_eq!(leak_diags.len(), 0,
+            "unclassified params must not trigger sink leak");
+    }
+
+    #[test]
+    fn mls_phase3a_non_sink_context_does_not_trigger() {
+        // Pin: classified param + non-sink context (e.g.
+        // "Database") = no leak. Database is a classified-data
+        // CONSUMER, not a sink.
+        let mut func_attrs = List::new();
+        func_attrs.push(mk_classification_attr("secret"));
+        let module = mk_module_with_classified_param_and_context(
+            Maybe::Some("secret"),
+            "Database",
+            func_attrs,
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let leak_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("low-classification sink"))
+            .collect();
+        assert_eq!(leak_diags.len(), 0,
+            "non-sink contexts must not trigger leak");
+    }
+
+    #[test]
+    fn mls_phase3a_recognizes_all_default_sinks() {
+        // Pin: every entry in DEFAULT_LOW_CLASSIFICATION_SINKS is
+        // recognized when used as the final path segment.
+        for sink in &["FS", "FileSystem", "Network", "Stdout",
+                      "Stderr", "Tracing", "Telemetry"] {
+            let mut func_attrs = List::new();
+            func_attrs.push(mk_classification_attr("secret"));
+            let module = mk_module_with_classified_param_and_context(
+                Maybe::Some("secret"),
+                sink,
+                func_attrs,
+            );
+            let mut policy = SafetyPolicy::permissive();
+            policy.mls_level = verum_common::Text::from("secret");
+            let diags = check_safety(&[module], policy);
+            let leak_count = diags.iter()
+                .filter(|d| d.message().to_string().contains("low-classification sink"))
+                .count();
+            assert_eq!(
+                leak_count, 1,
+                "sink {:?} must trigger leak diagnostic",
+                sink
+            );
+        }
+    }
+
+    #[test]
+    fn mls_phase3a_inactive_under_public_floor() {
+        // Pin: when manifest mls_level is "public" (the default),
+        // Phase 3a is dormant — Logger usage with classified
+        // params produces no diagnostic. Phase 3a only activates
+        // when the user opts into a non-public floor.
+        let mut func_attrs = List::new();
+        func_attrs.push(mk_classification_attr("secret"));
+        let module = mk_module_with_classified_param_and_context(
+            Maybe::Some("secret"),
+            "Logger",
+            func_attrs,
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("public");
+        let diags = check_safety(&[module], policy);
+        let leak_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("low-classification sink"))
+            .collect();
+        assert_eq!(leak_diags.len(), 0,
+            "Phase 3a must be dormant under public floor");
     }
 }
