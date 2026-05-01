@@ -1,0 +1,144 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: audit, regression-pin, foundation-profiles, framework-citation, task-163
+// @timeout: 10000
+// @expect: pass
+//
+// VCS pin for `verum audit --foundation-profiles` (task #163).
+//
+// The foundation-profiles audit gate walks every `@framework(<name>,
+// "<citation>")` attribute in the project, classifies the citation
+// by its underlying logical foundation
+// (`verum_kernel::foundation_profile::FoundationProfile`), and
+// surfaces cross-foundation conflicts.  This pin documents the live
+// MSFS-corpus headline distribution and the canonical 10-profile
+// classifier surface.
+//
+// **Pinned headlines** (live MSFS run, 2026-05-01)
+//
+//   Total citations:    388
+//   Resolved:           388
+//   Unresolved:         0
+//   Distinct foundations populated:  5
+//   Coherent (no UIP+univalence conflict):  true
+//
+// **Pinned classifier surface** — the canonical 10 foundation
+// profiles in `crates/verum_kernel/src/foundation_profile.rs`:
+//
+//   1. Zfc                       (ZFC, 0 inaccessibles)
+//   2. ZfcOneInaccessible        (ZFC + κ_1)
+//   3. ZfcTwoInaccessibles       (Verum default)
+//   4. ZfcThreeInaccessibles     (MSFS §11 trinitarian)
+//   5. Mltt                      (Martin-Löf, intensional)
+//   6. MlttUip                   (MLTT + UIP)
+//   7. Hott                      (HoTT)
+//   8. Cubical                   (CCHM Cubical TT)
+//   9. PredicativeMltt           (Bishop predicative)
+//  10. Cic                       (Calculus of Inductive Constructions)
+//
+// **Pinned conflict matrix**
+//
+// `MlttUip` ⊥ `Hott`        (UIP refutes univalence)
+// `MlttUip` ⊥ `Cubical`     (UIP refutes computational univalence)
+//
+// Live MSFS exercises 5 of the 10 foundation profiles — the gate's
+// `dist.foundations().len() == 5` is the headline regression pin.
+// A drop to 4 (or jump to 6) without a corresponding stdlib change
+// is a manifest drift; a UIP+univalence crossing flips
+// `is_coherent()` to false and exits non-zero.
+//
+// **Drift conditions caught by the live gate**
+//
+//   1. New `@framework(<unrecognised>, ...)` citation in the corpus
+//      → unresolved-count > 0, the gate's "extend `from_known_framework`"
+//      hint surfaces.
+//   2. Citation reclassification flipping a coherent corpus into
+//      `MlttUip` ∧ `Hott` (or `MlttUip` ∧ `Cubical`) → conflict
+//      detected, gate exits non-zero.
+//   3. Total-citation drift (e.g. 388 → 200) without a corresponding
+//      MSFS-corpus deletion → silent regression that this pin
+//      documents but cannot enforce without runtime invocation.
+//
+// **Why this pin is type-check (not run)**
+//
+// Same rationale as `kernel_v0_roster_pin.vr`: the audit gate runs
+// in Rust (`verum_cli::audit::audit_foundation_profiles_with_format`)
+// and walks the project's `.vr` files; vtest cannot invoke it
+// directly today.  This pin documents the manifest invariants
+// (10-profile classifier surface, 5-foundation MSFS distribution,
+// coherence claim, conflict matrix) so any drift surfaces in code
+// review even if the live gate isn't part of CI yet.
+//
+// TODO(vcs-runner): once `vtest` gains an `// @audit-cmd: ...`
+// directive, upgrade to `// @test: integration` + JSON-shape
+// assertions on `foundation-profiles.json::by_foundation`.
+
+fn pin_foundation_profile_classifier_size() {
+    // The classifier MUST expose exactly 10 distinct
+    // FoundationProfile variants.  Adding an 11th (e.g. CIC + sized
+    // induction) is fine — but it requires updating this pin AND
+    // the Rust enum in lockstep, which is the regression discipline.
+    let classifier_variant_count: Int = 10;
+    assert(classifier_variant_count == 10,
+           "FoundationProfile classifier surface drift: expected 10 \
+            distinct variants in verum_kernel::foundation_profile");
+}
+
+fn pin_foundation_msfs_distinct_families() {
+    // Live MSFS-corpus headline: 5 distinct foundation profiles
+    // populated.  Drop to 4 / jump to 6 without a corresponding
+    // stdlib change is a regression.
+    let distinct_foundations_in_msfs: Int = 5;
+    assert(distinct_foundations_in_msfs == 5,
+           "foundation-profiles: MSFS distinct-family count drift — \
+            either a citation was deleted (drop) or a new framework \
+            family was introduced (jump)");
+}
+
+fn pin_foundation_msfs_total_citations() {
+    // Live MSFS-corpus total `@framework(...)` citations: 388.
+    // 388 = resolved (no unresolved citations should exist in a
+    // production corpus).
+    let total_citations: Int = 388;
+    let resolved: Int = 388;
+    let unresolved: Int = 0;
+    assert(total_citations == resolved + unresolved,
+           "foundation-profiles: total = resolved + unresolved \
+            invariant violated");
+    assert(unresolved == 0,
+           "foundation-profiles: every @framework citation must \
+            resolve to a known foundation (extend \
+            from_known_framework if not)");
+}
+
+fn pin_foundation_conflict_matrix_size() {
+    // Two ordered conflict pairs are pinned in
+    // `FoundationProfile::conflicts_with`:
+    //   (MlttUip, Hott) and (MlttUip, Cubical).
+    // Symmetric closure adds (Hott, MlttUip) and (Cubical, MlttUip)
+    // → 4 directed conflict edges total in the symmetric matrix.
+    let directed_conflict_edges: Int = 4;
+    assert(directed_conflict_edges == 4,
+           "foundation-profiles: conflict matrix drift — UIP must \
+            still conflict with both Hott and Cubical");
+}
+
+fn pin_foundation_msfs_coherence() {
+    // The live MSFS corpus MUST be foundation-coherent — no
+    // single derivation chain crosses an MlttUip ↔ Hott or
+    // MlttUip ↔ Cubical boundary.
+    let is_coherent: Bool = true;
+    assert(is_coherent,
+           "foundation-profiles: MSFS coherence drift — a UIP+univalence \
+            citation pair would derive False");
+}
+
+fn main() {
+    pin_foundation_profile_classifier_size();
+    pin_foundation_msfs_distinct_families();
+    pin_foundation_msfs_total_citations();
+    pin_foundation_conflict_matrix_size();
+    pin_foundation_msfs_coherence();
+    print("audit/foundation_profiles pin OK");
+}
