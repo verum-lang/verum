@@ -8635,42 +8635,56 @@ impl<'ctx> RuntimeLowering<'ctx> {
     ///
 
     /// See `docs/architecture/no-libc-architecture.md`.
-    fn get_or_declare_close(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+    pub(crate) fn get_or_declare_close(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_close";
-        if let Some(f) = module.get_function(wrapper_name) {
-            return f;
-        }
+        // Adopt-and-emit pattern (parallels `get_or_declare_strlen`).
+        // Other emit paths may forward-declare the wrapper bodyless;
+        // we adopt the existing FunctionValue and fill the body so the
+        // declared-without-body case never reaches the linker.
         let i32_type = self.context.i32_type();
         let i64_type = self.context.i64_type();
-
-        let fn_type = i32_type.fn_type(&[i32_type.into()], false);
-        let wrapper = module.add_function(wrapper_name, fn_type, None);
-        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+        // **Verum-side i64 ABI** (per CLAUDE.md no-libc invariant).
+        // The wrapper takes i64 fd to match how Verum-side code
+        // passes file descriptors (NaN-boxed Value → i64).  Internally
+        // narrow to POSIX i32 at the syscall / libSystem boundary,
+        // then sign-extend the i32 return back to i64 (preserves the
+        // -1 error semantics).  Pre-fix the wrapper used i32 ABI
+        // throughout, forcing every Verum-side caller to emit explicit
+        // narrowing — many didn't, producing systematic IR mismatches
+        // across the runtime surface (#96).
+        let wrapper = match module.get_function(wrapper_name) {
+            Some(f) if f.count_basic_blocks() > 0 => return f,
+            Some(f) => f,
+            None => {
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+                let f = module.add_function(wrapper_name, fn_type, None);
+                f.set_linkage(verum_llvm::module::Linkage::Internal);
+                f
+            }
+        };
 
         let entry = self.context.append_basic_block(wrapper, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
 
-        let fd_i32 = wrapper
+        let fd_i64 = wrapper
             .get_first_param()
             .expect("close wrapper missing param 0")
             .into_int_value();
 
         if target_is_linux(module) {
-            // SYS_close is 3 on x86_64 *and* aarch64.
-            let fd_i64 = builder
-                .build_int_s_extend(fd_i32, i64_type, "fd_i64")
-                .expect("close fd extend");
+            // SYS_close is 3 on x86_64 *and* aarch64.  Linux syscall
+            // ABI takes i64 args directly — no narrowing needed.
             let ret = self
                 .emit_linux_syscall(&builder, module, 3, &[fd_i64])
                 .expect("close syscall");
-            let ret_i32 = builder
-                .build_int_truncate(ret, i32_type, "ret_i32")
-                .expect("close ret trunc");
-            builder.build_return(Some(&ret_i32)).expect("close return");
+            builder.build_return(Some(&ret)).expect("close return");
         } else {
-            // macOS / other Unix: libSystem close. Symbol name kept
-            // distinct so the wrapper doesn't collide.
+            // macOS / other Unix: libSystem close(int fd) -> int.
+            // Narrow Verum i64 fd → POSIX i32; sign-extend i32 ret → i64.
+            let fd_i32 = builder
+                .build_int_truncate(fd_i64, i32_type, "fd_i32")
+                .expect("close fd trunc");
             let libsys_close = module
                 .get_function("__verum_libsys_close")
                 .unwrap_or_else(|| {
@@ -8679,9 +8693,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         i32_type.fn_type(&[i32_type.into()], false),
                         None,
                     );
-                    // Map to libSystem's `close` via an LLVM-IR alias on
-                    // the symbol name level — emit as `extern "C" close`
-                    // so the linker resolves through libSystem (-lSystem).
                     f.add_attribute(
                         verum_llvm::attributes::AttributeLoc::Function,
                         self.context
@@ -8689,14 +8700,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     );
                     f
                 });
-            let ret = builder
+            let ret_i32 = builder
                 .build_call(libsys_close, &[fd_i32.into()], "ret")
                 .expect("close libsys call")
                 .try_as_basic_value()
                 .basic()
                 .expect("close return value")
                 .into_int_value();
-            builder.build_return(Some(&ret)).expect("close return");
+            let ret_i64 = builder
+                .build_int_s_extend(ret_i32, i64_type, "ret_i64")
+                .expect("close ret sext");
+            builder.build_return(Some(&ret_i64)).expect("close return");
         }
 
         wrapper
@@ -8707,24 +8721,32 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// **Libc-free**: Linux uses `SYS_read` (0) direct syscall, macOS
     /// routes through libSystem.
-    fn get_or_declare_read(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+    pub(crate) fn get_or_declare_read(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_read";
-        if let Some(f) = module.get_function(wrapper_name) {
-            return f;
-        }
         let i32_type = self.context.i32_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
-
-        let fn_type = i64_type.fn_type(&[i32_type.into(), ptr_type.into(), i64_type.into()], false);
-        let wrapper = module.add_function(wrapper_name, fn_type, None);
-        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+        // **Verum-side i64 ABI**: takes (i64 fd, ptr buf, i64 count),
+        // returns i64 ssize_t.  Internally narrows fd to i32 at the
+        // libSystem boundary on macOS; Linux syscall ABI takes i64
+        // directly.  See `get_or_declare_close` for full rationale.
+        let wrapper = match module.get_function(wrapper_name) {
+            Some(f) if f.count_basic_blocks() > 0 => return f,
+            Some(f) => f,
+            None => {
+                let fn_type = i64_type
+                    .fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
+                let f = module.add_function(wrapper_name, fn_type, None);
+                f.set_linkage(verum_llvm::module::Linkage::Internal);
+                f
+            }
+        };
 
         let entry = self.context.append_basic_block(wrapper, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
 
-        let fd_i32 = wrapper.get_nth_param(0).expect("read p0").into_int_value();
+        let fd_i64 = wrapper.get_nth_param(0).expect("read p0").into_int_value();
         let buf = wrapper
             .get_nth_param(1)
             .expect("read p1")
@@ -8732,9 +8754,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let count = wrapper.get_nth_param(2).expect("read p2").into_int_value();
 
         if target_is_linux(module) {
-            let fd_i64 = builder
-                .build_int_s_extend(fd_i32, i64_type, "fd_i64")
-                .expect("read fd extend");
             let buf_addr = builder
                 .build_ptr_to_int(buf, i64_type, "buf_addr")
                 .expect("read buf p2i");
@@ -8743,6 +8762,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("read syscall");
             builder.build_return(Some(&ret)).expect("read return");
         } else {
+            let fd_i32 = builder
+                .build_int_truncate(fd_i64, i32_type, "fd_i32")
+                .expect("read fd trunc");
             let libsys_read = module
                 .get_function("__verum_libsys_read")
                 .unwrap_or_else(|| {
