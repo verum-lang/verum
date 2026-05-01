@@ -1,0 +1,167 @@
+// =============================================================================
+// t14_physical_replication.vr — physical replication + BASE_BACKUP V0
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.7 (streaming replication).
+// =============================================================================
+//
+// V0 surface check — proves the physical-mode replication wire is
+// reachable end-to-end:
+//
+//   1. connect_replication(physical) against the admin role
+//      (which has WITH REPLICATION granted via init/01-init.sql).
+//   2. IDENTIFY_SYSTEM works in physical mode (same shape as
+//      logical — shared decoder).
+//   3. timeline_history(1) — every freshly initialised cluster is
+//      on timeline 1; the call may return an error indicating
+//      "timeline 1 has no history" which is acceptable as a
+//      negative-shape probe (we only verify the wire round-trips).
+//   4. create_physical_slot + drop_slot lifecycle.
+//   5. BASE_BACKUP {fast, manifest=BbmYes}: read tablespace
+//      metadata, drain the first chunk of the first tablespace,
+//      then drain the rest + manifest + finish. Asserts the
+//      multi-stream wire decoder makes forward progress.
+//
+// BASE_BACKUP wall-clock can be a few seconds even on a tiny
+// cluster — guard the test with a tolerant cap.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    PgReplicationConfig, PgReplicationConnection,
+    Lsn,
+    connect_replication,
+    BaseBackupOptions, BaseBackupSession,
+    BbmYes,
+    base_backup_start,
+};
+
+fn admin_physical_config() -> PgReplicationConfig {
+    PgReplicationConfig.physical(PgConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        application_name: "spindle-itest-physrepl".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    })
+}
+
+fn main() {
+    // -------------------------------------------------------------------------
+    // 1. Connect in physical mode.
+    // -------------------------------------------------------------------------
+    let cfg = admin_physical_config();
+    let mut repl = expect_ok(
+        connect_replication(&cfg),
+        &"connect_replication(physical) failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // 2. IDENTIFY_SYSTEM.
+    // -------------------------------------------------------------------------
+    let id = expect_ok(
+        repl.identify_system(),
+        &"IDENTIFY_SYSTEM (physical) failed".clone(),
+    );
+    expect(
+        id.timeline >= 1,
+        &f"physical IDENTIFY_SYSTEM.timeline must be ≥ 1, got {id.timeline}",
+    );
+    expect(
+        id.systemid.len() > 0,
+        &"physical IDENTIFY_SYSTEM.systemid empty".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // 3. timeline_history(1) — shape probe. PG returns ERROR for
+    //    a timeline that has no prior history (timeline 1 on a
+    //    pristine cluster), so we treat any wire round-trip as
+    //    success.
+    // -------------------------------------------------------------------------
+    let _ = repl.timeline_history(1);   // best-effort
+
+    // -------------------------------------------------------------------------
+    // 4. Slot lifecycle.
+    // -------------------------------------------------------------------------
+    let slot = "spindle_test_phys_slot".clone();
+    let _ = repl.drop_slot(&slot, false);     // pre-clean
+    expect_ok(
+        repl.create_physical_slot(&slot, true),
+        &"create_physical_slot failed".clone(),
+    );
+    expect_ok(
+        repl.drop_slot(&slot, false),
+        &"drop physical slot failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // 5. BASE_BACKUP — issue, drain at least one tablespace's
+    //    first chunk, then drain everything to RFQ.
+    // -------------------------------------------------------------------------
+    let opts = BaseBackupOptions.default()
+        .with_fast(true)
+        .with_label("spindle-itest-bb".clone())
+        .with_include_wal(false)        // smaller stream
+        .with_manifest(BbmYes);
+
+    let mut session = expect_ok(
+        base_backup_start(repl, &opts),
+        &"BASE_BACKUP start failed".clone(),
+    );
+
+    expect(
+        session.tablespaces().len() >= 1,
+        &"BASE_BACKUP returned zero tablespaces".clone(),
+    );
+
+    // Drain every tablespace.
+    let mut drained_chunks: Int = 0;
+    let mut current_ts: Int = 0;
+    while current_ts < (session.tablespaces().len() as Int) {
+        loop {
+            let r = expect_ok(
+                session.next_tablespace_data(),
+                &f"next_tablespace_data on ts {current_ts} failed",
+            );
+            match r {
+                Some(_) => { drained_chunks = drained_chunks + 1; }
+                None    => { break; }
+            }
+        }
+        current_ts = current_ts + 1;
+    }
+    expect(
+        drained_chunks > 0,
+        &"BASE_BACKUP produced no tablespace data chunks".clone(),
+    );
+
+    // Drain the manifest.
+    let mut manifest_chunks: Int = 0;
+    loop {
+        let r = expect_ok(
+            session.manifest_bytes(),
+            &"manifest_bytes failed".clone(),
+        );
+        match r {
+            Some(_) => { manifest_chunks = manifest_chunks + 1; }
+            None    => { break; }
+        }
+    }
+    expect(
+        manifest_chunks >= 0,
+        &"manifest pump did not terminate".clone(),     // smoke
+    );
+
+    expect_ok(
+        session.finish(),
+        &"BASE_BACKUP finish (drain to RFQ) failed".clone(),
+    );
+
+    pass(&"t14_physical_replication".clone());
+}

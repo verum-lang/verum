@@ -104,3 +104,8 @@ Test list per `internal/specs/database.md` follow-up:
 - `t13_async_transaction.vr` — async typed Database<AsyncPgPool, _>:
   capability narrowing, AsyncPgTxScope round-trips (rollback +
   commit) via the actor (spec §5.4 / §5.5 / §6.1.8)
+- `t14_physical_replication.vr` — physical-mode replication wire
+  + BASE_BACKUP V0: connect_replication(physical) / IDENTIFY_SYSTEM
+  / timeline_history / create_physical_slot / drop_slot;
+  BASE_BACKUP {fast, manifest} drains every tablespace's CopyData
+  chain + the manifest stream + RFQ (spec §6.1.7)

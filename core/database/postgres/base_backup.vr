@@ -1,0 +1,503 @@
+// =============================================================================
+// core/database/postgres/base_backup.vr — BASE_BACKUP wire (V0)
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.7 (streaming replication),
+//       PG src/backend/replication/basebackup_copy.c.
+// =============================================================================
+//
+// `BASE_BACKUP` is the documented replication-mode command for
+// taking a binary cluster snapshot. It is the foundation
+// `pg_basebackup` builds on. Spindle ships the wire protocol;
+// downstream tooling decides what to do with the bytes (write to
+// disk, ship to S3, parse the tar, …).
+//
+// Wire flow (PG 15+):
+//
+//   Client  → BASE_BACKUP [LABEL 'L'] [PROGRESS] [FAST] [WAL]
+//             [NOWAIT] [MAX_RATE n] [TABLESPACE_MAP]
+//             [MANIFEST 'yes'|'no'|'force-encode']
+//             [MANIFEST_CHECKSUMS algo]
+//             [TARGET 'client'|...]
+//
+//   Server  → RowDescription + 1+ DataRow describing each
+//             tablespace (oid bigint, location text, size bigint).
+//
+//             Then for each tablespace, in declaration order:
+//                 CopyOutResponse  (data is binary tar bytes)
+//                 CopyData × N     (chunks of the tar)
+//                 CopyDone
+//
+//             If MANIFEST != 'no':
+//                 RowDescription + 1 DataRow {
+//                   start_wal_location text, end_wal_location text }
+//                 CopyOutResponse  (manifest JSON bytes)
+//                 CopyData × N
+//                 CopyDone
+//
+//             Then CommandComplete + ReadyForQuery.
+//
+// V0 surfaces this as a session-style `BaseBackupSession` whose
+// methods are explicit step transitions:
+//
+//   * `start(repl_conn, opts) -> BaseBackupSession`  — issues
+//     BASE_BACKUP, parses the tablespace metadata rows.
+//   * `tablespaces() -> &List<BackupTablespace>` — read after start.
+//   * `next_tablespace_data() -> Result<Maybe<List<Byte>>, DbError>`
+//     reads the next CopyData chunk of the current tablespace; on
+//     `Ok(None)` the tablespace's CopyDone arrived, advance state.
+//   * `manifest_bytes() -> Result<Maybe<List<Byte>>, DbError>` —
+//     once tablespaces are drained, this drains the manifest
+//     stream chunk-by-chunk; `Ok(None)` after CopyDone.
+//   * `finish() -> Result<(), DbError>` — drain to ReadyForQuery.
+//
+// Out of V0:
+//   * tar parsing (separate module).
+//   * INCREMENTAL backup (V17+).
+//   * TARGET 'server:path' / 'blackhole' (server-side delivery).
+//   * Live PROGRESS reporting (server emits progress in
+//     command_tag of CommandComplete; V1 surfaces it).
+// =============================================================================
+
+module core.database.postgres.base_backup;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.common.types.{WireValue, WvNull, WvPresent};
+mount core.database.postgres.replication.{
+    PgReplicationConnection, RmPhysical, Lsn,
+};
+mount core.database.postgres.connection.PgConnection;
+mount core.database.postgres.error.dberr_from_pg;
+mount core.database.postgres.wire.frontend.simple_query as fe_simple_query;
+mount core.database.postgres.wire.backend.{
+    BackendMessage,
+    BmReadyForQuery, BmCommandComplete, BmRowDescription, BmDataRow,
+    BmCopyOutResponse, BmCopyData, BmCopyDone,
+    BmError, BmNotice, BmParameterStatus,
+    BmEmptyQueryResponse,
+    Diagnostic, RowDescription,
+};
+
+// =============================================================================
+// Options
+// =============================================================================
+
+public type BaseBackupTarget is BbtClient | BbtBlackhole;
+
+public type BaseBackupManifest is BbmYes | BbmNo | BbmForceEncode;
+
+public type BaseBackupOptions is {
+    label: Text,
+    progress: Bool,
+    fast: Bool,
+    /// Include the necessary WAL files alongside the tablespaces
+    /// so the resulting backup can be restored without an archive.
+    /// Adds WAL bytes to the stream — not free.
+    include_wal: Bool,
+    /// Skip the post-backup WAL flush wait. Speeds up shutdown
+    /// at the cost of needing the archive for restore.
+    no_wait: Bool,
+    /// MAX_RATE in bytes/sec — server-side throttle. 0 = unlimited.
+    max_rate_bytes_per_sec: Int,
+    /// Include the JSON tablespace_map file alongside the data.
+    tablespace_map: Bool,
+    manifest: BaseBackupManifest,
+    /// `"NONE"` / `"CRC32C"` / `"SHA224"` / `"SHA256"` / `"SHA384"`
+    /// / `"SHA512"`. Only meaningful when `manifest != BbmNo`.
+    manifest_checksums: Text,
+    target: BaseBackupTarget,
+};
+
+implement BaseBackupOptions {
+    public fn default() -> BaseBackupOptions {
+        BaseBackupOptions {
+            label: "spindle_basebackup".clone(),
+            progress: false,
+            fast: false,
+            include_wal: true,
+            no_wait: false,
+            max_rate_bytes_per_sec: 0,
+            tablespace_map: false,
+            manifest: BbmYes,
+            manifest_checksums: "CRC32C".clone(),
+            target: BbtClient,
+        }
+    }
+
+    public fn with_label(mut self, l: Text) -> BaseBackupOptions { self.label = l; self }
+    public fn with_fast(mut self, b: Bool) -> BaseBackupOptions { self.fast = b; self }
+    public fn with_include_wal(mut self, b: Bool) -> BaseBackupOptions { self.include_wal = b; self }
+    public fn with_manifest(mut self, m: BaseBackupManifest) -> BaseBackupOptions { self.manifest = m; self }
+    public fn with_max_rate(mut self, bytes_per_sec: Int) -> BaseBackupOptions {
+        self.max_rate_bytes_per_sec = bytes_per_sec; self
+    }
+}
+
+fn render_options(o: &BaseBackupOptions) -> Text {
+    let mut out: Text = " (".clone();
+    let mut first: Bool = true;
+
+    let mut push = |k: Text, v: Maybe<Text>| {
+        if !first { out.push_str(", "); }
+        first = false;
+        out.push_str(&k);
+        match v {
+            Some(s) => { out.push_str(" "); out.push_str(&s); }
+            None    => {}
+        }
+    };
+
+    push("LABEL".clone(), Some(f"'{o.label}'"));
+    if o.progress     { push("PROGRESS".clone(), None); }
+    if o.fast         { push("FAST".clone(), None); }
+    if o.include_wal  { push("WAL".clone(), None); }
+    if o.no_wait      { push("NOWAIT".clone(), None); }
+    if o.max_rate_bytes_per_sec > 0 {
+        push("MAX_RATE".clone(), Some(f"{o.max_rate_bytes_per_sec}"));
+    }
+    if o.tablespace_map { push("TABLESPACE_MAP".clone(), None); }
+    match o.manifest {
+        BbmYes         => { push("MANIFEST".clone(), Some("'yes'".clone())); }
+        BbmNo          => { push("MANIFEST".clone(), Some("'no'".clone())); }
+        BbmForceEncode => { push("MANIFEST".clone(), Some("'force-encode'".clone())); }
+    }
+    if o.manifest_checksums.len() > 0 && !is_no_manifest(&o.manifest) {
+        push("MANIFEST_CHECKSUMS".clone(), Some(f"'{o.manifest_checksums}'"));
+    }
+    match o.target {
+        BbtClient    => {}                     // server default
+        BbtBlackhole => { push("TARGET".clone(), Some("'blackhole'".clone())); }
+    }
+
+    out.push_str(")");
+    out
+}
+
+fn is_no_manifest(m: &BaseBackupManifest) -> Bool {
+    match m {
+        BbmNo => true,
+        _     => false,
+    }
+}
+
+// =============================================================================
+// Tablespace metadata
+// =============================================================================
+
+public type BackupTablespace is {
+    /// Tablespace OID; 0 for the default tablespace.
+    oid: Int,
+    /// File-system path on the source server (NULL → default
+    /// tablespace, surfaced as empty Text).
+    location: Text,
+    /// Estimated size in 1024-byte blocks. Server's pre-flight
+    /// estimate; the actual tar stream may differ.
+    size_kb: Int,
+};
+
+// =============================================================================
+// Session — finite-state machine wrapping the replication conn
+// =============================================================================
+
+public type BaseBackupState is
+      BbsPreTablespaces        // tablespace metadata read; pumping CopyOutResponses
+    | BbsInTablespaceData      // mid-tablespace CopyData stream
+    | BbsBetweenTablespaces    // CopyDone seen, awaiting next CopyOutResponse / manifest
+    | BbsInManifestData        // manifest CopyData stream
+    | BbsDone;                 // RFQ observed — session is closed
+
+public type BaseBackupSession is {
+    /// Reuses the replication connection's read/write hooks.
+    /// The conn must NOT be in CopyBoth (i.e. NOT post
+    /// `start_physical` / `start_logical`); BASE_BACKUP is its own
+    /// command, not a START_REPLICATION variant.
+    conn: PgReplicationConnection,
+    tablespaces: List<BackupTablespace>,
+    /// Index into `tablespaces` — which one we're currently
+    /// streaming. Advances on each CopyDone.
+    current_idx: Int,
+    state: BaseBackupState,
+    /// Set when the manifest is requested in the start opts so
+    /// `finish` knows whether to expect the manifest stream
+    /// before the final RFQ.
+    has_manifest: Bool,
+};
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Issue BASE_BACKUP and parse the tablespace metadata. Returns a
+/// session ready for chunk iteration.
+public fn start(
+    mut repl_conn: PgReplicationConnection,
+    opts: &BaseBackupOptions,
+) -> Result<BaseBackupSession, DbError> {
+    match repl_conn.mode() {
+        RmPhysical => {}
+        _ => {
+            return Err(must_be_physical("base_backup"));
+        }
+    }
+    if repl_conn.is_streaming() {
+        return Err(bad_state("base_backup after START_REPLICATION"));
+    }
+
+    let conn_inner = repl_conn.conn_mut();
+    let mut sql: Text = "BASE_BACKUP".clone();
+    sql.push_str(&render_options(opts));
+
+    let payload = fe_simple_query(&sql);
+    conn_inner.write_replication_frame(payload.as_slice())?;
+
+    // Phase A: read RowDescription + DataRow(s) describing the
+    // tablespaces. May see ParameterStatus / Notice in between.
+    let mut tablespaces: List<BackupTablespace> = List.new();
+    let mut saw_row_desc: Bool = false;
+    loop {
+        let msg = conn_inner.read_replication_message()?;
+        match msg {
+            BmRowDescription(_) => {
+                if saw_row_desc {
+                    // We already have the tablespaces and now see
+                    // the manifest header — stash it back and
+                    // stop here.
+                    conn_inner.push_back_replication(msg)?;
+                    break;
+                }
+                saw_row_desc = true;
+            }
+            BmDataRow(dr) => {
+                let row = &dr.values;
+                if row.len() >= 3 {
+                    let oid = parse_int_or_zero(&row[0]);
+                    let loc = wire_text_or_empty(&row[1]);
+                    let size = parse_int_or_zero(&row[2]);
+                    tablespaces.push(BackupTablespace {
+                        oid: oid,
+                        location: loc,
+                        size_kb: size,
+                    });
+                }
+            }
+            BmCopyOutResponse(_) => {
+                // First tablespace's CopyOut — re-stash and start.
+                conn_inner.push_back_replication(msg)?;
+                break;
+            }
+            BmError(d) => { return Err(dberr_from_pg(d)); }
+            BmNotice(_) | BmParameterStatus(_) => {}
+            BmReadyForQuery(_) => {
+                // No tablespaces / immediate completion (e.g.
+                // empty cluster).
+                let s = BaseBackupSession {
+                    conn: repl_conn,
+                    tablespaces: tablespaces,
+                    current_idx: 0,
+                    state: BbsDone,
+                    has_manifest: !is_no_manifest(&opts.manifest),
+                };
+                return Ok(s);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(BaseBackupSession {
+        conn: repl_conn,
+        tablespaces: tablespaces,
+        current_idx: 0,
+        state: BbsPreTablespaces,
+        has_manifest: !is_no_manifest(&opts.manifest),
+    })
+}
+
+implement BaseBackupSession {
+    /// Pre-flight metadata for every tablespace the server will
+    /// stream, in order.
+    public fn tablespaces(&self) -> &List<BackupTablespace> {
+        &self.tablespaces
+    }
+
+    /// Read the next CopyData chunk for the *current* tablespace.
+    /// `Ok(Some(bytes))` until CopyDone; `Ok(None)` exactly once
+    /// per tablespace then the session advances `current_idx`.
+    /// Subsequent calls move to the next tablespace's CopyOut +
+    /// CopyData chain. Returns `Ok(None)` again once every
+    /// tablespace has been drained — at that point either call
+    /// `manifest_bytes()` (if MANIFEST was requested) or
+    /// `finish()`.
+    public fn next_tablespace_data(&mut self) -> Result<Maybe<List<Byte>>, DbError> {
+        let conn_inner = self.conn.conn_mut();
+        loop {
+            let msg = conn_inner.read_replication_message()?;
+            match msg {
+                BmCopyOutResponse(_) => {
+                    // Either the first tablespace OR the manifest
+                    // header. Distinguish via state machine.
+                    match self.state {
+                        BbsPreTablespaces | BbsBetweenTablespaces => {
+                            self.state = BbsInTablespaceData;
+                            // Loop to read the first CopyData.
+                        }
+                        _ => {
+                            // Mid-tablespace and we got a fresh
+                            // CopyOut — protocol violation.
+                            return Err(bad_state("unexpected CopyOutResponse mid-tablespace"));
+                        }
+                    }
+                }
+                BmCopyData { bytes } => {
+                    return Ok(Some(bytes));
+                }
+                BmCopyDone => {
+                    // Tablespace stream end.
+                    self.current_idx = self.current_idx + 1;
+                    self.state = BbsBetweenTablespaces;
+                    return Ok(None);
+                }
+                BmRowDescription(_) => {
+                    // Manifest result-set header — re-stash; the
+                    // caller should now switch to manifest_bytes().
+                    conn_inner.push_back_replication(msg)?;
+                    return Ok(None);
+                }
+                BmError(d) => { return Err(dberr_from_pg(d)); }
+                BmNotice(_) | BmParameterStatus(_) => {}
+                BmReadyForQuery(_) => {
+                    self.state = BbsDone;
+                    return Ok(None);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Drain the manifest stream chunk-by-chunk. Caller must have
+    /// already drained every tablespace via `next_tablespace_data`
+    /// (i.e. seen `Ok(None)` after the last tablespace's
+    /// CopyDone). Returns `Ok(Some(bytes))` for each manifest
+    /// CopyData; `Ok(None)` once after CopyDone.
+    public fn manifest_bytes(&mut self) -> Result<Maybe<List<Byte>>, DbError> {
+        if !self.has_manifest {
+            return Ok(None);
+        }
+        let conn_inner = self.conn.conn_mut();
+        loop {
+            let msg = conn_inner.read_replication_message()?;
+            match msg {
+                BmRowDescription(_) => {
+                    // Manifest header — discard.
+                }
+                BmDataRow(_) => {
+                    // start_wal_location / end_wal_location row —
+                    // V0 surface drops this; V1 expose via
+                    // session getter.
+                }
+                BmCopyOutResponse(_) => {
+                    self.state = BbsInManifestData;
+                }
+                BmCopyData { bytes } => {
+                    return Ok(Some(bytes));
+                }
+                BmCopyDone => {
+                    return Ok(None);
+                }
+                BmError(d) => { return Err(dberr_from_pg(d)); }
+                BmNotice(_) | BmParameterStatus(_) => {}
+                BmReadyForQuery(_) => {
+                    self.state = BbsDone;
+                    return Ok(None);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Drain the wire to ReadyForQuery and consume the session.
+    /// Required to release the connection back to a usable state
+    /// (otherwise the next replication command sees CommandComplete
+    /// in the buffer).
+    public fn finish(mut self) -> Result<(), DbError> {
+        let conn_inner = self.conn.conn_mut();
+        loop {
+            match self.state {
+                BbsDone => { return Ok(()); }
+                _ => {}
+            }
+            let msg = conn_inner.read_replication_message()?;
+            match msg {
+                BmReadyForQuery(_) => {
+                    self.state = BbsDone;
+                    return Ok(());
+                }
+                BmCommandComplete(_) => {}
+                BmError(d) => { return Err(dberr_from_pg(d)); }
+                BmCopyData { .. } | BmCopyDone | BmCopyOutResponse(_) => {
+                    // Caller short-circuited mid-stream — drain
+                    // and discard.
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Wire-value helpers — V0 inline (small enough)
+// =============================================================================
+
+fn parse_int_or_zero(v: &WireValue) -> Int {
+    match v {
+        WvNull => 0,
+        WvPresent { bytes, .. } => {
+            let mut acc: Int = 0;
+            let mut neg: Bool = false;
+            let mut i: Int = 0;
+            let n = bytes.len() as Int;
+            if n > 0 && (bytes[0] as Int) == ('-' as Int) { neg = true; i = 1; }
+            while i < n {
+                let b = bytes[i] as Int;
+                if b < ('0' as Int) || b > ('9' as Int) { return 0; }
+                acc = acc * 10 + (b - ('0' as Int));
+                i = i + 1;
+            }
+            if neg { -acc } else { acc }
+        }
+    }
+}
+
+fn wire_text_or_empty(v: &WireValue) -> Text {
+    match v {
+        WvNull => "".clone(),
+        WvPresent { bytes, .. } => {
+            match Text.from_utf8(bytes.as_slice()) {
+                Ok(s)  => s,
+                Err(_) => "".clone(),
+            }
+        }
+    }
+}
+
+fn must_be_physical(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "BB_BAD_MODE".clone(),
+        message: f"{what} requires RmPhysical replication conn".to_owned(),
+        retryable: false,
+    })
+}
+
+fn bad_state(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "BB_BAD_STATE".clone(),
+        message: f"BASE_BACKUP state error: {what}",
+        retryable: false,
+    })
+}
