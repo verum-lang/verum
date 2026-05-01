@@ -45,6 +45,7 @@ pub mod coq;
 pub mod corpus_export;
 pub mod expr_translate;
 pub mod lean;
+pub mod proof_body_translate;
 
 #[cfg(test)]
 mod tests;
