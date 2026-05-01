@@ -2402,6 +2402,181 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
 }
 
 // =============================================================================
+// audit --codegen-attestation — task #162 / verified-compilation entry point
+// =============================================================================
+
+/// Entry-point for `verum audit --codegen-attestation [--format FORMAT]`.
+///
+/// Walks the canonical 6-pass codegen attestation manifest from
+/// [`verum_kernel::codegen_attestation`] and reports per-pass status
+/// (Discharged / AdmittedWithIou / NotYetAttested).  Each pass entry
+/// carries its semantic invariant + concrete proof obligation
+/// describing what would discharge it.
+///
+/// **Architecture**: this is the *foundation layer* for task #162's
+/// CompCert-style verified-compilation chain.  The V0 manifest leaves
+/// every entry `NotYetAttested`; subsequent commits flip individual
+/// entries to `Discharged` or `AdmittedWithIou` as discharge work
+/// completes.  This audit gate is the observability layer that
+/// reports progress along that chain and surfaces the IOU surface as
+/// a first-class L4 line-item.
+///
+/// **Failure semantics**: this gate exits non-zero only if the
+/// manifest claims "all attested" but the data layer disagrees — i.e.
+/// it is a literal-claim guard.  Pending entries are observability,
+/// not failure.
+///
+/// Output: `target/audit-reports/codegen-attestation.json`.
+pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::codegen_attestation::{
+        AttestationStatus, admitted_count, attested_count, manifest,
+        pass_count, pending_count, CODEGEN_PASS_COUNT,
+    };
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Auditing codegen-pass kernel-discharge attestations (#162)");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let passes = manifest();
+    let total = pass_count();
+    let attested = attested_count();
+    let admitted = admitted_count();
+    let pending = pending_count();
+
+    // Always write the JSON report — same convention as the rest of
+    // the audit gate suite (#172).
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("codegen-attestation.json");
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "task": "#162",
+        "discipline": "compcert_per_pass_simulation",
+        "pass_count": total,
+        "attested_count": attested,
+        "admitted_count": admitted,
+        "pending_count": pending,
+        "all_attested_claim_supported": attested == total,
+        "passes": passes
+            .iter()
+            .map(|p| {
+                let (status_tag, iou) = match &p.status {
+                    AttestationStatus::Discharged => ("discharged", String::new()),
+                    AttestationStatus::AdmittedWithIou { iou } => {
+                        ("admitted_with_iou", iou.clone())
+                    }
+                    AttestationStatus::NotYetAttested => {
+                        ("not_yet_attested", String::new())
+                    }
+                };
+                serde_json::json!({
+                    "pass": p.pass.tag(),
+                    "display_name": p.pass.display_name(),
+                    "kernel_intrinsic": p.pass.kernel_intrinsic_name(),
+                    "semantic_invariant": p.semantic_invariant,
+                    "proof_obligation": p.proof_obligation,
+                    "status": status_tag,
+                    "iou": iou,
+                })
+            })
+            .collect::<Vec<_>>(),
+    });
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("codegen-pass kernel-discharge attestations (CompCert-style #162)");
+            println!("─────────────────────────────────────────────────────────────────");
+            println!("Total passes:        {}", total);
+            println!(
+                "Attested:            {} ({:.0}%)",
+                attested,
+                (attested as f64 / total as f64) * 100.0,
+            );
+            println!(
+                "Admitted with IOU:   {} ({:.0}%)",
+                admitted,
+                (admitted as f64 / total as f64) * 100.0,
+            );
+            println!(
+                "Not yet attested:    {} ({:.0}%)",
+                pending,
+                (pending as f64 / total as f64) * 100.0,
+            );
+            println!();
+            for p in &passes {
+                let (glyph, suffix) = match &p.status {
+                    AttestationStatus::Discharged => ("✓".to_string(), String::new()),
+                    AttestationStatus::AdmittedWithIou { iou } => (
+                        "○".to_string(),
+                        format!("  IOU: {}", iou),
+                    ),
+                    AttestationStatus::NotYetAttested => {
+                        ("·".to_string(), String::new())
+                    }
+                };
+                println!(
+                    "  {} {:<24}  {}",
+                    glyph,
+                    p.pass.display_name(),
+                    p.status.display_name(),
+                );
+                if !suffix.is_empty() {
+                    println!("       {}", suffix);
+                }
+                println!("       invariant: {}", p.semantic_invariant);
+                if matches!(p.status, AttestationStatus::NotYetAttested) {
+                    println!("       obligation: {}", p.proof_obligation);
+                }
+            }
+            println!();
+            println!(
+                "{} of {} passes attested — the verified-compilation chain is the L4 IOU surface",
+                attested,
+                CODEGEN_PASS_COUNT,
+            );
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string(&payload).unwrap_or_default(),
+            );
+        }
+    }
+
+    // Failure semantics: the manifest's literal "all attested" claim
+    // is the only failure surface.  Pending entries are observability;
+    // a partial-attestation manifest is an honest report, not a gate
+    // failure.  If the manifest data layer ever diverges from the
+    // helper-count partition, that is a build-time bug surfaced here.
+    if attested + admitted + pending != total {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "codegen-attestation manifest is internally inconsistent: \
+                 attested({}) + admitted({}) + pending({}) != total({}) — \
+                 see {}",
+                attested,
+                admitted,
+                pending,
+                total,
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+// =============================================================================
 // audit --bridge-discharge — task #134 / MSFS-L4.1 entry point
 // =============================================================================
 
