@@ -933,11 +933,19 @@ impl VbcCodegen {
         // verum.toml doesn't silently produce a module without
         // any DWARF metadata.
         if config.debug_info {
-            tracing::warn!(
-                "CodegenConfig surface: debug_info=true (this field lands on \
-                 the config but VBC codegen does not currently emit DWARF-\
-                 style debug info — only the narrower `source_map` flag, \
-                 which controls line/col tracking via debug_vars, is wired)",
+            // `debug_info=true` is the default in `CompilerOptions`,
+            // so a `tracing::warn!` here would fire on every script
+            // compilation and drown real diagnostics.  Drop to
+            // `tracing::debug!` — visible under `RUST_LOG=debug` for
+            // anyone investigating "why isn't DWARF metadata being
+            // emitted?", silent in normal use.  The comment block
+            // above documents the conceptual debug_info vs source_map
+            // split for readers of the source.
+            tracing::debug!(
+                target: "verum_vbc::codegen",
+                "CodegenConfig surface: debug_info=true (advisory only — the \
+                 narrower `source_map` flag controls actual line/col tracking \
+                 via debug_vars; broad DWARF emission is not yet wired)",
             );
         }
 
@@ -8177,12 +8185,42 @@ impl VbcCodegen {
         };
 
         // Get the pre-registered function info (for ID and properties).
-        // Use arity-based lookup to resolve collisions between user functions
-        // and stdlib methods with the same name but different arities.
+        //
+        // **Module-qualified-first lookup** to match `compile_call`'s
+        // dispatch path.  Without this, a top-level fn with a name that
+        // collides across modules (e.g. `is_valid_page_size` in
+        // `pager.vr`, `journal_header_api/header.vr`,
+        // `wal_frame_layout/constants.vr`, `journal/writer.vr`) would
+        // bind its compiled body to whichever func_info won the bare-
+        // name registry slot — typically a different module's
+        // function.  Pager.vr's body would then be pushed to
+        // `self.functions` with journal's codegen-id, while pager.vr's
+        // own codegen-id (resolved via qualified-first at every call
+        // site inside pager.vr) would have no `self.functions` entry
+        // — `func_id_remap` lacks an entry for it, so the post-remap
+        // Call lands on whatever function happens to occupy that
+        // position.
+        //
+        // Mirror compile_call's resolution: try
+        // `<source_module>.<base_name>` first when we have a source
+        // module and the lookup is for a bare top-level fn.
         let param_count = func.params.len();
-        let func_info = self.ctx.lookup_function_with_arity(&lookup_name, param_count)
-            .ok_or_else(|| CodegenError::internal(format!("function not registered: {}", lookup_name)))?
-            .clone();
+        let qualified_lookup = if impl_type_name.is_none() {
+            self.ctx.current_source_module.as_deref()
+                .filter(|m| !m.is_empty() && *m != "main")
+                .and_then(|src_mod| {
+                    let qn = format!("{}.{}", src_mod, base_name);
+                    self.ctx.lookup_function_with_arity(&qn, param_count).cloned()
+                })
+        } else {
+            None
+        };
+        let func_info = match qualified_lookup {
+            Some(info) => info,
+            None => self.ctx.lookup_function_with_arity(&lookup_name, param_count)
+                .ok_or_else(|| CodegenError::internal(format!("function not registered: {}", lookup_name)))?
+                .clone(),
+        };
 
         // IMPORTANT: Extract parameter names and mutability from the CURRENT function being compiled,
         // NOT from func_info. When there are multiple impl blocks for the same method
@@ -9020,7 +9058,14 @@ impl VbcCodegen {
         {
             use std::collections::HashMap;
             let before_len = self.functions.len();
-            // Diagnostic: report duplicate ids before collapsing.
+            // Diagnostic counting is unconditional so we can ALWAYS
+            // record the dup-group count under tracing::debug; the
+            // verbose per-function listing is gated on the
+            // `VERUM_TRACE_DEDUP` env so it doesn't pollute stderr
+            // on every `verum run` invocation.  The pre-fix path
+            // unconditionally `eprintln!`'d both lines, which made
+            // every script invocation emit ~30 lines of dispatch
+            // diagnostics that drown real script output.
             let mut id_count: HashMap<u32, usize> = HashMap::new();
             for f in &self.functions {
                 *id_count.entry(f.descriptor.id.0).or_insert(0) += 1;
@@ -9031,12 +9076,25 @@ impl VbcCodegen {
                 .map(|(&k, &v)| (k, v))
                 .collect();
             if !dups.is_empty() {
-                eprintln!("[codegen-dedup] {} duplicate codegen-id groups detected (e.g. id={} appears {}x)",
-                    dups.len(), dups[0].0, dups[0].1);
-                for f in &self.functions {
-                    if f.descriptor.id.0 == dups[0].0 {
-                        let n = self.ctx.strings.get(f.descriptor.name.0 as usize).cloned().unwrap_or_default();
-                        eprintln!("  duplicate id={} name='{}' bytecode_len={}", f.descriptor.id.0, n, f.instructions.len());
+                tracing::debug!(
+                    target: "verum_vbc::codegen::dedup",
+                    "{} duplicate codegen-id groups detected (e.g. id={} appears {}x)",
+                    dups.len(), dups[0].0, dups[0].1,
+                );
+                if std::env::var("VERUM_TRACE_DEDUP").is_ok() {
+                    for f in &self.functions {
+                        if f.descriptor.id.0 == dups[0].0 {
+                            let n = self
+                                .ctx
+                                .strings
+                                .get(f.descriptor.name.0 as usize)
+                                .cloned()
+                                .unwrap_or_default();
+                            eprintln!(
+                                "[codegen-dedup]   duplicate id={} name='{}' bytecode_len={}",
+                                f.descriptor.id.0, n, f.instructions.len(),
+                            );
+                        }
                     }
                 }
             }
@@ -9048,8 +9106,13 @@ impl VbcCodegen {
             self.functions.retain(|f| seen.insert(f.descriptor.id.0));
             self.functions.reverse();
             if self.functions.len() != before_len {
-                eprintln!("[codegen-dedup] collapsed {} functions ({} → {})",
-                    before_len - self.functions.len(), before_len, self.functions.len());
+                tracing::debug!(
+                    target: "verum_vbc::codegen::dedup",
+                    "collapsed {} functions ({} → {})",
+                    before_len - self.functions.len(),
+                    before_len,
+                    self.functions.len(),
+                );
             }
         }
 
