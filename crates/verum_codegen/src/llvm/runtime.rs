@@ -3976,14 +3976,42 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // Reuse existing declaration or create new function.
         // NEVER delete — that invalidates existing call sites.
         let func = if let Some(f) = module.get_function("verum_text_get_ptr") {
-            if f.count_basic_blocks() > 0 {
-                return Ok(());
-            } // Already has body
             f
         } else {
             let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
             module.add_function("verum_text_get_ptr", fn_type, None)
         };
+
+        // **Hot inline gate** (#91 perf roadmap).
+        //
+        // Body is 4 basic blocks of trivial integer + load ops; for
+        // static `__rodata` Text constants the optimiser can fold
+        // through every branch (non-null + non-null → return field0,
+        // and field0 is `ptrtoint @verum_text_data_<id>` which is a
+        // link-time constant).  Without `alwaysinline`, LLVM's call-
+        // site cost model often keeps the call alive — e.g.
+        // `verum_main` post-#92 still emitted `bl _verum_text_get_ptr`
+        // even though the entire chain was constant-foldable.  With
+        // `alwaysinline` the optimiser inlines unconditionally, then
+        // SROA / GVN / instcombine collapse the result to a single
+        // `adrp + add` pair (matching what C/Rust would do for a
+        // static string).
+        //
+        // **Idempotent** — must be applied even when the body is
+        // already emitted (multiple emit-chains may have created
+        // the function; the attribute attaches once per call but
+        // LLVM dedupes attribute additions internally).
+        func.add_attribute(
+            verum_llvm::attributes::AttributeLoc::Function,
+            ctx.create_enum_attribute(
+                verum_llvm::attributes::Attribute::get_named_enum_kind_id("alwaysinline"),
+                0,
+            ),
+        );
+
+        if func.count_basic_blocks() > 0 {
+            return Ok(()); // Body already emitted; only the attribute matters
+        }
 
         let entry = ctx.append_basic_block(func, "entry");
         let load_ptr = ctx.append_basic_block(func, "load_ptr");

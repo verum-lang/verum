@@ -486,24 +486,63 @@ impl<'s> CompilationPipeline<'s> {
             // operands.
             let has_ir_issues = lowering.has_arity_collisions() || lowering.skip_body_count() > 0;
 
-            let passes = if has_ir_issues {
-                // Arity collisions / skip-body stubs contain redirect IR
-                // with null Type* references — full instcombine/SROA/GVN
-                // crashes LLVM TypeFinder, so restrict to module-level DCE.
-                "globaldce".to_string()
-            } else {
-                // Use LLVM's canonical O-level pipelines. These include
-                // DCE, GVN, LICM, SROA, instcombine, inliner, loop opts,
-                // vectorization — the full set of standard optimizations.
-                // Fall back to the conservative pipeline for opt_level=0
-                // to keep debug builds fast.
+            // **Tiered pipeline** (#94 / #91 perf roadmap).
+            //
+            // Pre-fix: any skip-body or arity-collided function dropped
+            // the entire module to `globaldce`-only — defeating EVERY
+            // perf pass including `always-inline`.  Hello-world hits
+            // this because the stdlib has 9 `swap` overloads (one of
+            // which hits `InvalidRegister(2)` during VBC→LLVM lowering),
+            // silently degrading every binary's perf to "linked but
+            // unoptimised".
+            //
+            // Post-fix tiering:
+            //
+            //   * **Clean modules** (no skip-body, no arity collisions):
+            //     run the full canonical `default<O2>` / `default<O3>`
+            //     pipeline.  Inliner, SROA, GVN, instcombine, loop opts,
+            //     vectorization — everything LLVM offers.
+            //
+            //   * **Modules with IR issues**: run a curated SAFE subset
+            //     anchored on `always-inline` + `globaldce`.  The
+            //     `always-inline` pass respects `alwaysinline` function
+            //     attributes (#92's `verum_text_get_ptr` etc.) and
+            //     critically does NOT traverse into the bodies of
+            //     non-alwaysinline functions — so the broken IR in
+            //     skip-body stubs can't trip it.  `globaldce` then
+            //     deletes any function that became unreachable after
+            //     inlining, including the stubs themselves.
+            //
+            // Result: even on dirty modules the user's hot Text helpers
+            // get inlined into call sites, cutting hello-world's
+            // `verum_main` from `bl _verum_text_get_ptr; bl _verum_internal_puts`
+            // to inline `_verum_internal_puts(adrp+add)`.
+            let passes = if !has_ir_issues {
                 match opt_level {
                     0 => "globaldce".to_string(),
                     1 => "default<O1>".to_string(),
                     2 => "default<O2>".to_string(),
                     _ => "default<O3>".to_string(),
                 }
+            } else {
+                // Anchor on always-inline so our `verum_text_get_ptr` /
+                // `verum_is_text_object` (and any future `@inline` Verum
+                // attribute) get honoured even when full O2 isn't safe.
+                // Order matters: always-inline first → globaldce last
+                // so the stubs that become unreachable post-inlining
+                // get removed.
+                "always-inline,globaldce".to_string()
             };
+
+            if has_ir_issues {
+                tracing::info!(
+                    "  IR issues detected (arity_collisions={}, skip_body={}) — \
+                     using tiered pipeline '{}' (#94)",
+                    lowering.has_arity_collisions(),
+                    lowering.skip_body_count(),
+                    passes,
+                );
+            }
 
             info!("  Running LLVM passes: {}", passes);
             if let Err(e) = lowering
