@@ -1,0 +1,73 @@
+module core.database.sqlite.native.l4_vdbe.ssa.optimizer;
+
+// =============================================================================
+// l4_vdbe/ssa/optimizer.vr — SSA optimizer pipeline driver
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4
+//
+// Composes the SSA passes (DCE + jump-threading) into a deterministic
+// pipeline.  Runs to fixed point — each pass may expose opportunities
+// for the others (DCE removes dead branches → jump-threading collapses
+// chains; jump-threading folds constant branches → DCE drops the
+// unreachable arms).
+// =============================================================================
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l4_vdbe.ssa.program.SsaProgram;
+mount core.database.sqlite.native.l4_vdbe.ssa.dce.{run_dce, DceReport};
+mount core.database.sqlite.native.l4_vdbe.ssa.jump_threading.{
+    run_jump_threading, JumpThreadReport,
+};
+
+// -----------------------------------------------------------------------------
+// SsaOptimizerReport — composed report from one pipeline run
+// -----------------------------------------------------------------------------
+
+pub type SsaOptimizerReport is {
+    iterations: Int,
+    total_dce_removed: Int,
+    total_jumps_threaded: Int,
+    total_branches_folded: Int,
+}
+
+fn empty_report() -> SsaOptimizerReport {
+    SsaOptimizerReport {
+        iterations: 0,
+        total_dce_removed: 0,
+        total_jumps_threaded: 0,
+        total_branches_folded: 0,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Public entry point
+// -----------------------------------------------------------------------------
+
+/// Run the full SSA optimizer pipeline.  Iterates DCE → jump-threading
+/// until both report zero edits in a pass (max 4 iterations).  Returns
+/// a report aggregating per-pass metrics.
+pub fn optimize_ssa(prog: &mut SsaProgram) -> SsaOptimizerReport {
+    let mut report = empty_report();
+    let max_iter: Int = 4;
+    let mut iter: Int = 0;
+
+    while iter < max_iter {
+        iter = iter + 1;
+
+        let dce = run_dce(prog);
+        report.total_dce_removed = report.total_dce_removed + dce.removed;
+
+        let jt = run_jump_threading(prog);
+        report.total_jumps_threaded = report.total_jumps_threaded + jt.threaded_jumps;
+        report.total_branches_folded = report.total_branches_folded + jt.folded_branches;
+
+        // Stop when neither pass made progress.
+        if dce.removed == 0 && jt.threaded_jumps == 0 && jt.folded_branches == 0 {
+            break;
+        }
+    }
+    report.iterations = iter;
+    report
+}

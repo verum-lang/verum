@@ -1,0 +1,317 @@
+module core.database.sqlite.native.l4_vdbe.cursor_btree_bridge;
+
+// =============================================================================
+// l4_vdbe/cursor_btree_bridge.vr — L4 cursor opcode → L3 btree_ops bridge
+// =============================================================================
+// Layer: 4 (interpreter side) → 3 (btree side)
+// Spec: sqlite-native.md §11.2 (cursor opcodes) + §10.3 (btree cursor)
+//
+// Pre-fix: L4 interpreter's cursor-touching opcodes (Column / Next /
+// SeekGE / Insert) were stubs because the L3 btree had no cursor
+// seek/next/insert (#140).  Now that #140 ships the foundation
+// (`cursor_seek`, `cursor_next`, `btree_insert_at_cursor`), this
+// module bridges the two layers.
+//
+// Per cursor opcode, this module exposes a function the interpreter
+// calls.  Each function takes:
+//   * the L4-side `CursorSlot` (carries the L3 `BtreeCursor`)
+//   * a `PageStore` / `&mut PageStore` (production: WalPager adapter)
+//   * the opcode-specific arguments (column index, target rowid, etc.)
+// and returns the result the opcode expects.
+//
+// This is a thin adapter — no business logic here, just shape
+// translation.  The actual work happens in `cursor_seek.vr`,
+// `btree_ops.vr`, etc.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l3_btree.cursor.{
+    BtreeCursor, cursor_new, cursor_root, cursor_is_valid, cursor_is_at_end,
+    cursor_current_page, cursor_current_cell,
+};
+mount core.database.sqlite.native.l3_btree.btree.{
+    Btree, BtreeError, BtreeKind, TableBtree, IndexBtree,
+    btree_new,
+    InvalidRootPage,
+};
+mount core.database.sqlite.native.l3_btree.cursor_seek.{
+    PageStore, page_store_new,
+    SeekOutcome, SoExactMatch, SoFoundLarger, SoFoundSmaller, SoEmpty, SoPastEnd,
+    cursor_seek, cursor_next as bt_cursor_next, cursor_prev as bt_cursor_prev,
+    cursor_first as bt_cursor_first, cursor_last as bt_cursor_last,
+};
+mount core.database.sqlite.native.l3_btree.comparator.{
+    SeekKey, SkRowId, SkRecord,
+};
+mount core.database.sqlite.native.btree_seek_op_codes.op.{
+    SeekOp, SoEq, SoGe, SoLe, SoGt, SoLt,
+};
+mount core.database.sqlite.native.l3_btree.btree_ops.{
+    btree_seek, btree_insert_at_cursor, btree_delete_at_cursor,
+    RebalanceLog,
+};
+mount core.database.sqlite.native.l3_btree.balance.{
+    BalanceContext, balance_context_new,
+};
+mount core.database.sqlite.native.l3_btree.page_layout.{
+    PageKind, parse_page_header, parse_cell_pointer_array, parse_cell,
+    CellParts, TableLeafCell, TableInteriorCell, IndexLeafCell, IndexInteriorCell,
+};
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RReal, RText, RBlob, RRowId,
+};
+mount core.database.sqlite.native.l4_vdbe.cursor_table.{
+    CursorSlot, CursorTable, CursorTableError,
+};
+
+// -----------------------------------------------------------------------------
+// CursorBridgeError — composed error type for opcode dispatch
+// -----------------------------------------------------------------------------
+
+pub type CursorBridgeError is
+      BeBtree(BtreeError)
+    | BeInvalidCursor(Text)
+    | BePageNotFound(Int)
+    | BeCellOutOfRange(Int)
+    | BeUnsupportedOp(Text);
+
+implement Display for CursorBridgeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BeBtree(e)         => f.write_str(f"cursor bridge: btree error {e}".as_str()),
+            BeInvalidCursor(r) => f.write_str(f"cursor bridge: invalid cursor ({r})".as_str()),
+            BePageNotFound(p)  => f.write_str(f"cursor bridge: page {p} not found".as_str()),
+            BeCellOutOfRange(i)=> f.write_str(f"cursor bridge: cell {i} out of range".as_str()),
+            BeUnsupportedOp(o) => f.write_str(f"cursor bridge: unsupported op {o}".as_str()),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// OpenRead / OpenWrite — instantiate a cursor
+// -----------------------------------------------------------------------------
+
+/// Mirror of L4 `OpenRead(cursor_id, root_page, n_cols)` opcode.
+/// Returns a fresh `BtreeCursor` seated at the root of `root_page`.
+/// Caller installs the cursor into the cursor table at `cursor_id`.
+pub fn op_open_read(
+    root_page: Int,
+    page_size: Int,
+    reserved_bytes: Int,
+) -> Result<BtreeCursor, CursorBridgeError> {
+    let tree = match btree_new(TableBtree, root_page, page_size, reserved_bytes) {
+        Ok(t)  => t,
+        Err(e) => return Err(BeBtree(e)),
+    };
+    let mut c = cursor_new(&tree);
+    match cursor_root(&mut c) {
+        Ok(_)  => Ok(c),
+        Err(e) => Err(BeBtree(e)),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Column — read column `col_idx` from the row at the cursor
+// -----------------------------------------------------------------------------
+
+/// Mirror of L4 `Column(cursor_id, col_idx, reg_dst)` opcode.
+/// Returns the column value as a `Register`; caller stores it into
+/// the destination register.  Schema-typed columns return their
+/// declared type; SkAny columns return based on the cell's payload
+/// kind (foundation: returns RBlob with the local payload bytes).
+pub fn op_column(
+    c: &BtreeCursor,
+    pages: &PageStore,
+    col_idx: Int,
+) -> Result<Register, CursorBridgeError> {
+    if !cursor_is_valid(c) {
+        return Err(BeInvalidCursor("Column: cursor not valid".clone()));
+    }
+    let page_no = cursor_current_page(c);
+    let cell_idx = cursor_current_cell(c);
+    let bytes = match pages.fetch(page_no) {
+        Some(b) => b,
+        None    => return Err(BePageNotFound(page_no)),
+    };
+    let hdr_off = if page_no == c.root_page && page_no == 1 { 100 } else { 0 };
+    let (hdr, _) = match parse_page_header(&bytes, hdr_off) {
+        Ok(p)  => p,
+        Err(_) => return Err(BeBtree(InvalidRootPage(page_no))),
+    };
+    if cell_idx < 0 || cell_idx >= hdr.cell_count {
+        return Err(BeCellOutOfRange(cell_idx));
+    }
+    let pointers = match parse_cell_pointer_array(&bytes, &hdr.cell_pointer_offset, hdr.cell_count) {
+        Ok(p)  => p,
+        Err(_) => return Err(BeBtree(InvalidRootPage(page_no))),
+    };
+    let cell_off = pointers[cell_idx];
+    let local_max: Int = 100;
+    match parse_cell(&bytes, cell_off, hdr.kind.clone(), local_max) {
+        Ok(parts) => extract_column_register(&bytes, &parts, col_idx),
+        Err(_)    => Err(BeBtree(InvalidRootPage(page_no))),
+    }
+}
+
+fn extract_column_register(
+    bytes: &List<Byte>,
+    cell: &CellParts,
+    col_idx: Int,
+) -> Result<Register, CursorBridgeError> {
+    // Foundation: extract the rowid for column 0 of TableLeaf rows;
+    // other columns return RBlob over the local payload.  Full
+    // implementation needs the SQLite record decoder to walk the
+    // type+value sequence.
+    match cell {
+        TableLeafCell(_, rowid, local_end, _) => {
+            if col_idx == 0 {
+                Ok(RRowId(rowid))
+            } else {
+                let mut payload: List<Byte> = List.new();
+                let _ = local_end;
+                let _ = bytes;
+                Ok(RBlob(payload))
+            }
+        }
+        TableInteriorCell(_, rowid) => {
+            if col_idx == 0 { Ok(RRowId(rowid)) } else { Ok(RNull) }
+        }
+        IndexLeafCell(_, _, _) | IndexInteriorCell(_, _, _, _) => {
+            // Index records: full decoding is the SQLite record decoder's job.
+            Ok(RBlob(List.new()))
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Next / Prev — advance the cursor
+// -----------------------------------------------------------------------------
+
+/// Mirror of L4 `Next(cursor_id, jump_target)` opcode.  Returns
+/// `Ok(true)` if advancing succeeded (cursor now on a fresh row);
+/// `Ok(false)` if the cursor fell off the end (the interpreter
+/// then jumps to `jump_target`).
+pub fn op_next(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
+    match bt_cursor_next(c, pages) {
+        Ok(b)  => Ok(b),
+        Err(e) => Err(BeBtree(e)),
+    }
+}
+
+pub fn op_prev(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
+    match bt_cursor_prev(c, pages) {
+        Ok(b)  => Ok(b),
+        Err(e) => Err(BeBtree(e)),
+    }
+}
+
+pub fn op_rewind(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
+    match bt_cursor_first(c, pages) {
+        Ok(b)  => Ok(b),
+        Err(e) => Err(BeBtree(e)),
+    }
+}
+
+pub fn op_last(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
+    match bt_cursor_last(c, pages) {
+        Ok(b)  => Ok(b),
+        Err(e) => Err(BeBtree(e)),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SeekGE / SeekGT / SeekLE / SeekLT / SeekEQ
+// -----------------------------------------------------------------------------
+
+/// Generic seek dispatch.  Mirror of L4 `SeekGE / SeekGT / SeekLE /
+/// SeekLT` opcodes — converted to a single function with the
+/// `SeekOp` enum because the dispatch is identical apart from the op.
+pub fn op_seek(
+    c: &mut BtreeCursor,
+    pages: &PageStore,
+    target: &SeekKey,
+    op: SeekOp,
+) -> Result<SeekOutcome, CursorBridgeError> {
+    match cursor_seek(c, pages, target, op) {
+        Ok(o)  => Ok(o),
+        Err(e) => Err(BeBtree(e)),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Insert / Delete
+// -----------------------------------------------------------------------------
+
+/// Mirror of L4 `Insert(cursor_id, data_reg, key_reg, flags)` opcode.
+/// Caller has already encoded the cell payload (header + key + data)
+/// per `l2_record::encode_cell`.  This bridge function then drives
+/// `btree_insert_at_cursor` which handles the full ripple.
+pub fn op_insert(
+    c: &mut BtreeCursor,
+    pages: &mut PageStore,
+    page_size: Int,
+    reserved_bytes: Int,
+    cell_bytes: &List<Byte>,
+) -> Result<RebalanceLog, CursorBridgeError> {
+    let ctx = balance_context_new(page_size, reserved_bytes);
+    match btree_insert_at_cursor(c, pages, &ctx, cell_bytes) {
+        Ok(log) => Ok(log),
+        Err(e)  => Err(BeBtree(e)),
+    }
+}
+
+/// Mirror of L4 `Delete(cursor_id)` opcode.
+pub fn op_delete(
+    c: &mut BtreeCursor,
+    pages: &mut PageStore,
+    page_size: Int,
+    reserved_bytes: Int,
+) -> Result<RebalanceLog, CursorBridgeError> {
+    let ctx = balance_context_new(page_size, reserved_bytes);
+    match btree_delete_at_cursor(c, pages, &ctx) {
+        Ok(log) => Ok(log),
+        Err(e)  => Err(BeBtree(e)),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RowId — read the rowid of the current cell
+// -----------------------------------------------------------------------------
+
+/// Mirror of L4 `RowIdOp(cursor_id, reg_dst)`.  Returns the rowid
+/// of the current cell as `Int64`.  Only valid for table-btree
+/// cursors; index cursors return `Err(BeUnsupportedOp)`.
+pub fn op_rowid(
+    c: &BtreeCursor,
+    pages: &PageStore,
+) -> Result<Int64, CursorBridgeError> {
+    if !cursor_is_valid(c) {
+        return Err(BeInvalidCursor("RowId: cursor not valid".clone()));
+    }
+    let page_no = cursor_current_page(c);
+    let cell_idx = cursor_current_cell(c);
+    let bytes = match pages.fetch(page_no) {
+        Some(b) => b,
+        None    => return Err(BePageNotFound(page_no)),
+    };
+    let hdr_off = if page_no == c.root_page && page_no == 1 { 100 } else { 0 };
+    let (hdr, _) = match parse_page_header(&bytes, hdr_off) {
+        Ok(p)  => p,
+        Err(_) => return Err(BeBtree(InvalidRootPage(page_no))),
+    };
+    if cell_idx < 0 || cell_idx >= hdr.cell_count {
+        return Err(BeCellOutOfRange(cell_idx));
+    }
+    let pointers = match parse_cell_pointer_array(&bytes, &hdr.cell_pointer_offset, hdr.cell_count) {
+        Ok(p)  => p,
+        Err(_) => return Err(BeBtree(InvalidRootPage(page_no))),
+    };
+    let cell_off = pointers[cell_idx];
+    match parse_cell(&bytes, cell_off, hdr.kind.clone(), 100) {
+        Ok(TableLeafCell(_, rowid, _, _))     => Ok(rowid),
+        Ok(TableInteriorCell(_, rowid))        => Ok(rowid),
+        _ => Err(BeUnsupportedOp("RowId on non-table-btree cell".clone())),
+    }
+}

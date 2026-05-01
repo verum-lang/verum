@@ -37,6 +37,8 @@ public module interpreter;
 public module optimizer;
 public module cursor_table;
 public module affinity_coerce;
+public module ssa;
+public module cursor_btree_bridge;
 
 public mount .opcode.{
     Opcode,
@@ -77,4 +79,10 @@ public mount .cursor_table.{
 public mount .affinity_coerce.{
     register_to_value, value_to_register,
     coerce_register, coerce_row,
+};
+
+public mount .cursor_btree_bridge.{
+    CursorBridgeError,
+    op_open_read, op_column, op_next, op_prev, op_rewind, op_last,
+    op_seek, op_insert, op_delete, op_rowid,
 };

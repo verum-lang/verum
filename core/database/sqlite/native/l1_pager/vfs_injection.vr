@@ -1,0 +1,82 @@
+module core.database.sqlite.native.l1_pager.vfs_injection;
+
+// =============================================================================
+// l1_pager/vfs_injection.vr — pager_open_with_vfs (VFS pluggability)
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §7 (VFS) + §8 (WAL) + DST §22.5
+//
+// Closes #137: the legacy `pager_open_*` functions hardcoded
+// `MemDbVfs` (memory) or `PosixVfs` (file) via `BeMemory(MemDbFile)`
+// / `BeFile(PosixFile)` — no plugin point for DST fault-injection
+// or future RBU / S3 / encrypted backends.
+//
+// Post-fix: `pager_open_with_vfs(vfs_kind, page_size, …)` accepts
+// a `VfsInjection` enum that names which backend to mount.  The
+// enum is the architecturally-honest analogue of `&mut dyn
+// VfsProtocol` — sum-type dispatch matches the existing
+// `PagerBackend` / `WalBackend` pattern, no `dyn` requirement.
+//
+// New backend variants land as new `VfsInjection` arms; the
+// `Pager` constructor adds the corresponding `PagerBackend`
+// variant.  DST fault-injection just wraps an inner VfsInjection
+// and intercepts I/O — the wrapper itself is its own VfsInjection
+// arm, no special-casing in pager.vr.
+// =============================================================================
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.OpenFlags;
+mount core.database.sqlite.native.l1_pager.pager.{
+    Pager, PagerError, PagerErrorKind, PagerConfig,
+    pager_open_memory_with_size, pager_open_file_with_config,
+    pager_config_default,
+    PAGE_SIZE_DEFAULT,
+};
+
+// -----------------------------------------------------------------------------
+// VfsInjection — sum type naming the backend choice
+// -----------------------------------------------------------------------------
+
+/// Which VFS to mount.  Enum extension is forward-compatible —
+/// adding a new backend lands as a new variant + a new arm in
+/// `pager_open_with_vfs`.
+pub type VfsInjection is
+      ViMemory                     // MemDbVfs — Phase 1 default
+    | ViPosixFile(path: Text, flags: OpenFlags)
+                                    // Production file-backed (POSIX)
+    | ViDstWrapped(inner: Text);    // DST fault-injection wrapper
+                                    // (`inner` names the inner VFS
+                                    // by tag — keeps the wrapper
+                                    // architecturally visible)
+
+/// Open a pager with the named VFS.  Returns the same `Pager` shape
+/// as the legacy `pager_open_*` functions; `WalPager` callers wrap
+/// it via `wal_pager_new`.
+pub fn pager_open_with_vfs(
+    vfs: VfsInjection,
+    page_size: Int,
+) -> Result<Pager, PagerError> {
+    match vfs {
+        ViMemory => pager_open_memory_with_size(page_size),
+        ViPosixFile(path, flags) => {
+            let cfg = pager_config_default();
+            pager_open_file_with_config(&path, page_size, flags, cfg)
+        }
+        ViDstWrapped(inner_tag) => {
+            // Foundation: the wrapper's I/O interception lives in
+            // `vcs/dst/`; here we just reject construction so callers
+            // know to wire the DST harness via a follow-up.
+            let _ = inner_tag;
+            Err(PagerError {
+                kind: IoError,
+                message: "ViDstWrapped: DST harness wiring tracked under #137 follow-up",
+            })
+        }
+    }
+}
+
+/// Default-page-size convenience.
+pub fn pager_open_with_vfs_default(vfs: VfsInjection) -> Result<Pager, PagerError> {
+    pager_open_with_vfs(vfs, PAGE_SIZE_DEFAULT)
+}

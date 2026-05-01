@@ -71,6 +71,8 @@ public module wal_state;
 public module wal_writer;
 public module wal_reader;
 public module wal_pager;
+public module wal_actor_bridge;
+public module vfs_injection;
 
 public mount .pager.{
     PageNo, PageFrame, Pager, PagerError, PagerErrorKind,
@@ -165,4 +167,14 @@ public mount .wal_pager.{
     wal_pager_read, wal_pager_read_snapshot,
     wal_pager_write, wal_pager_commit,
     wal_pager_checkpoint, wal_pager_recover,
+};
+
+public mount .wal_actor_bridge.{
+    WalPagerActor,
+    wal_actor_new, wal_pager_apply, wal_pager_apply_batch,
+};
+
+public mount .vfs_injection.{
+    VfsInjection, ViMemory, ViPosixFile, ViDstWrapped,
+    pager_open_with_vfs, pager_open_with_vfs_default,
 };
