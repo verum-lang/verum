@@ -47,7 +47,13 @@ fn parse_verify_mode(mode: &str) -> Result<VerifyMode, CliError> {
     }
 }
 
-/// Build single file to executable
+/// Build single file to executable.
+///
+/// `target_triple` selects the cross-compile target (e.g.
+/// `aarch64-unknown-linux-gnu`).  When `None`, builds for the host.
+/// Pre-fix this function silently dropped the target — single-file
+/// `verum build --target T file.vr` produced a host binary regardless
+/// of `T` (#82).
 pub fn build(
     file: &str,
     output: Option<&str>,
@@ -56,6 +62,7 @@ pub fn build(
     timeout: u64,
     show_costs: bool,
     emit_vbc: bool,
+    target_triple: Option<&str>,
 ) -> Result<(), CliError> {
     let start = std::time::Instant::now();
 
@@ -64,7 +71,10 @@ pub fn build(
         return Err(CliError::FileNotFound(file.to_string()));
     }
 
-    ui::status("Compiling", &format!("{} (AOT)", file));
+    let target_label = target_triple
+        .map(|t| format!(" → {}", t))
+        .unwrap_or_default();
+    ui::status("Compiling", &format!("{} (AOT){}", file, target_label));
 
     let verify_mode = parse_verify_mode(verify_mode)?;
 
@@ -85,6 +95,7 @@ pub fn build(
         output_format: OutputFormat::Human,
         emit_vbc,
         language_features,
+        target_triple: target_triple.map(|t| t.into()),
         ..Default::default()
     };
 

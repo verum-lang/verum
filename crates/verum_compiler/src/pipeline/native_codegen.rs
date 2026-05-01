@@ -362,16 +362,27 @@ impl<'s> CompilationPipeline<'s> {
             CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
         };
 
-        // Initialize native target ONCE per process.
-        // LLVM's target initialization is not idempotent — calling it multiple
-        // times can corrupt internal state.
+        // **Initialize ALL LLVM targets** ONCE per process (#82
+        // cross-compile correctness).  Pre-fix only the native target
+        // was initialized, so `--target T` from x86_64 host failed
+        // with "No available targets are compatible with triple T"
+        // for any non-native T (every cross-compile broke).
+        //
+        // Per LLVM docs, `LLVM_InitializeAllTargets` registers all
+        // architectures (x86, ARM, AArch64, RISC-V, WebAssembly,
+        // PowerPC, etc.); per-OS support is automatic via the same
+        // backends.  This adds ~5MB to the verum binary but unlocks
+        // every supported target without per-target init switches.
+        // LLVM's target initialization is not idempotent — calling it
+        // multiple times can corrupt internal state, so we gate via
+        // `Once`.
         {
             static INIT: std::sync::Once = std::sync::Once::new();
             INIT.call_once(|| {
-                let _ = Target::initialize_native(&InitializationConfig::default());
-                // Also initialize WebAssembly target for cross-compilation
-                #[cfg(feature = "target-wasm")]
-                Target::initialize_webassembly(&InitializationConfig::default());
+                // Always initialize all targets — verum supports
+                // cross-compilation by default (#82).  The cost is
+                // upfront one-time and bounded; runtime impact is zero.
+                Target::initialize_all(&InitializationConfig::default());
             });
         }
 
@@ -395,13 +406,37 @@ impl<'s> CompilationPipeline<'s> {
             _ => verum_codegen::llvm::verum_llvm::OptimizationLevel::Default,
         };
 
-        // Use host CPU name and features for native targets.
-        // For WASM targets, use "generic" CPU with no features.
+        // **CPU/features dispatch** (#82 cross-compile correctness).
+        //
+        // For native (host == target) builds: use host CPU + features
+        // for maximum performance.
+        //
+        // For cross builds: use "generic" CPU + empty features.
+        // Pre-fix the host CPU name (e.g. `apple-m3`) was forwarded
+        // into every TargetMachine regardless of arch, which LLVM
+        // rejects with `'apple-m3' is not a recognized processor for
+        // this target` followed by `LLVM ERROR: 64-bit code requested
+        // on a subtarget that doesn't support it!` — every cross-arch
+        // build crashed.
+        //
+        // Detection: compare target architecture to host architecture
+        // via the TargetMachine's default-host triple.
         let is_wasm = triple.as_str().to_string_lossy().contains("wasm");
-        let (cpu_str, features_str) = if is_wasm {
+        let triple_str = triple.as_str().to_string_lossy().to_string();
+        let host_triple_for_cpu = TargetMachine::get_default_triple()
+            .as_str()
+            .to_string_lossy()
+            .into_owned();
+        // Heuristic: if target arch differs from host, host CPU is
+        // not applicable.  Use simple substring match on arch prefix.
+        let host_arch = host_triple_for_cpu.split('-').next().unwrap_or("");
+        let target_arch = triple_str.split('-').next().unwrap_or("");
+        let cross_arch = !target_arch.is_empty() && target_arch != host_arch;
+
+        let (cpu_str, features_str) = if is_wasm || cross_arch {
             ("generic", "")
         } else {
-            // Get host CPU info for native compilation
+            // Native build — use host CPU info for max perf.
             let cpu = TargetMachine::get_host_cpu_name();
             let features = TargetMachine::get_host_cpu_features();
             // Leak to static — called once per compilation, acceptable
@@ -415,7 +450,10 @@ impl<'s> CompilationPipeline<'s> {
                 Box::leak(features.to_str().unwrap_or("").to_string().into_boxed_str());
             (cpu_s, feat_s)
         };
-        debug!("LLVM target: cpu={}, features={}", cpu_str, features_str);
+        debug!(
+            "LLVM target: triple={}, cpu={}, features={} (cross_arch={})",
+            triple_str, cpu_str, features_str, cross_arch
+        );
 
         let target_machine = target
             .create_target_machine(
@@ -885,7 +923,23 @@ impl<'s> CompilationPipeline<'s> {
         ))
     }
 
-    /// Link object files into executable
+    /// Link object files into executable.
+    ///
+    /// **Cross-compile gate**: when the configured target triple
+    /// differs from the host, `clang` / `gcc` on the host cannot
+    /// produce binaries for the target.  Pre-fix the linker step
+    /// blindly invoked the host's `clang` regardless of target,
+    /// producing `ld: unknown options: --gc-sections -z` errors when
+    /// macOS-host's ld saw Linux-target's flags.
+    ///
+    /// Post-fix: detect the cross-compile case and skip linking with
+    /// a clear status message.  The user gets the target-correct
+    /// `.o` files in `target/build/` and can finish linking with the
+    /// target's native toolchain (e.g. `aarch64-linux-gnu-gcc` on
+    /// the target machine, or via Docker).
+    ///
+    /// True cross-linking (lld with `-target` flag, or vendored
+    /// per-target ld) is a follow-up under #82 cross-compile matrix.
     pub(super) fn link_executable(
         &self,
         object_files: &[PathBuf],
@@ -894,6 +948,50 @@ impl<'s> CompilationPipeline<'s> {
         let linker = self.detect_c_compiler()?;
 
         debug!("Linking with {}: {}", linker, output_path.display());
+
+        // Detect cross-compile case via target-triple comparison.
+        let target_triple = self
+            .session
+            .options()
+            .target_triple
+            .clone()
+            .map(|t| t.as_str().to_string());
+        if let Some(tt) = &target_triple {
+            use verum_codegen::llvm::target_triple::triple_str_os_family;
+            use verum_codegen::llvm::verum_llvm::targets::TargetMachine;
+            let host_triple_owned = TargetMachine::get_default_triple()
+                .as_str()
+                .to_string_lossy()
+                .into_owned();
+            let host_os = triple_str_os_family(&host_triple_owned);
+            let target_os = triple_str_os_family(tt);
+            // Architecture comparison via leading triple component.
+            // `x86_64-apple-darwin` arch = "x86_64".
+            let host_arch = host_triple_owned.split('-').next().unwrap_or("");
+            let target_arch = tt.split('-').next().unwrap_or("");
+            // Cross-compile is detected on EITHER OS or arch mismatch.
+            // arm64-darwin host → x86_64-darwin target needs cross-link
+            // even though OS matches (host's `-arch arm64` ld can't
+            // consume x86_64 .o without an `-arch x86_64` invocation).
+            let cross_os = host_os != target_os;
+            let cross_arch = !target_arch.is_empty() && target_arch != host_arch;
+            if cross_os || cross_arch {
+                info!(
+                    "  Cross-compile: target {} != host {} (cross_os={}, cross_arch={}) — skipping link step",
+                    tt, host_triple_owned, cross_os, cross_arch
+                );
+                info!(
+                    "  Object file(s) produced for target.  Link with target-native toolchain:"
+                );
+                for obj in object_files {
+                    info!("    {}", obj.display());
+                }
+                // Don't error — the build successfully produced
+                // target-correct object files, which is the meaningful
+                // unit of work for cross-compile.  Skip linking.
+                return Ok(());
+            }
+        }
 
         let mut cmd = std::process::Command::new(&linker);
 
