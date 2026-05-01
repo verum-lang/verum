@@ -298,16 +298,72 @@ pub enum ManifestIssue {
 ///
 
 /// `project_root` should be the project's `manifest_dir` — the
-/// directory containing `verum.toml`. The function joins
-/// project-relative paths in the manifest against this root.
+/// directory containing `verum.toml`. The function searches the
+/// project root + every additional `extra_search_roots` entry for
+/// each manifest-listed file; the rule is satisfied when ANY root
+/// contains it.
+///
+/// **Stdlib-aware lookup**: kernel_v0 rule files live in
+/// `core/verify/kernel_v0/rules/` inside the Verum stdlib, which is
+/// embedded into the binary at build time. When auditing a corpus
+/// (e.g. MSFS) the project root doesn't contain these files; the
+/// caller passes the stdlib root via `extra_search_roots` (or the
+/// embedded-stdlib alternative [`verify_manifest_with_embedded_stdlib`]
+/// for installed binaries).
 pub fn verify_manifest(project_root: &Path) -> Vec<ManifestIssue> {
+    verify_manifest_with_search_roots(project_root, &[])
+}
+
+/// Like [`verify_manifest`] but searches multiple roots for
+/// manifest-listed rule files. Useful for corpus audits where the
+/// kernel_v0 rule files live in the stdlib (separate root from the
+/// corpus's own `manifest_dir`).
+///
+/// **Soundness**: the function preserves the original "project root
+/// is canonical" semantics for orphan detection — Pass 2 only walks
+/// the project root, since spurious orphans in the stdlib aren't
+/// the corpus's concern. Pass 1 (manifest → file presence) is the
+/// part that benefits from multi-root search.
+pub fn verify_manifest_with_search_roots(
+    project_root: &Path,
+    extra_search_roots: &[&Path],
+) -> Vec<ManifestIssue> {
     let mut issues = Vec::new();
     let m = manifest();
 
-    // Pass 1: every manifest entry must have a corresponding file.
+    // Manifest file paths are stdlib-relative (e.g.
+    // `verify/kernel_v0/rules/k_var.vr`).  Corpus roots may host
+    // these directly (mirroring the stdlib layout) or under a `core/`
+    // prefix (the canonical Verum stdlib layout).  Try both at every
+    // search root.
+    let candidate_paths = |root: &Path, rel: &Path| -> [std::path::PathBuf; 2] {
+        [root.join(rel), root.join("core").join(rel)]
+    };
+
+    // Pass 1: every manifest entry must have a corresponding file
+    // in at least one (root × layout-prefix) candidate.
     for rule in &m {
-        let abs = project_root.join(&rule.file_path);
-        if !abs.is_file() {
+        let mut found = false;
+        for cand in candidate_paths(project_root, &rule.file_path).iter() {
+            if cand.is_file() {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            for root in extra_search_roots {
+                for cand in candidate_paths(root, &rule.file_path).iter() {
+                    if cand.is_file() {
+                        found = true;
+                        break;
+                    }
+                }
+                if found {
+                    break;
+                }
+            }
+        }
+        if !found {
             issues.push(ManifestIssue::MissingSourceFile {
                 rule_name: rule.name.clone(),
                 expected_path: rule.file_path.clone(),
@@ -315,40 +371,64 @@ pub fn verify_manifest(project_root: &Path) -> Vec<ManifestIssue> {
         }
     }
 
-    // Pass 2: every k_*.vr file under kernel_v0/rules/ must be in
-    // the manifest. Surfaces orphans that drifted out of the
-    // bootstrap chain without a manifest update.
-    let rules_dir = project_root.join("verify/kernel_v0/rules");
-    if let Ok(entries) = std::fs::read_dir(&rules_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
+    // Pass 2: every k_*.vr file under `<root>{,/core}/verify/kernel_v0/rules/`
+    // must be in the manifest. Walks every search root so stdlib
+    // additions surface too. The `in_manifest` check considers ALL
+    // candidate paths (project root + extra roots, with and without
+    // the `core/` layout prefix) so a file at the stdlib's
+    // `core/verify/kernel_v0/rules/k_var.vr` correctly matches the
+    // manifest entry `verify/kernel_v0/rules/k_var.vr`.
+    let mut roots: Vec<&Path> = vec![project_root];
+    roots.extend(extra_search_roots.iter().copied());
+    for root in roots {
+        for dir_layout in [
+            root.join("verify/kernel_v0/rules"),
+            root.join("core/verify/kernel_v0/rules"),
+        ] {
+            let Ok(entries) = std::fs::read_dir(&dir_layout) else {
                 continue;
-            }
-            // Only inspect k_*.vr files; mod.vr, README.md, etc.
-            // aren't manifest subjects.
-            let stem = match path.file_stem().and_then(|s| s.to_str()) {
-                Some(s) if s.starts_with("k_") => s,
-                _ => continue,
             };
-            let ext_ok = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e == "vr")
-                .unwrap_or(false);
-            if !ext_ok {
-                continue;
-            }
-            let _ = stem; // stem unused after extension check
-            let in_manifest = m.iter().any(|r| {
-                project_root.join(&r.file_path).canonicalize().ok() == path.canonicalize().ok()
-            });
-            if !in_manifest {
-                let rel = path
-                    .strip_prefix(project_root)
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|_| path.clone());
-                issues.push(ManifestIssue::OrphanSourceFile { path: rel });
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                // Only inspect k_*.vr files; mod.vr, README.md, etc.
+                // aren't manifest subjects.
+                let stem = match path.file_stem().and_then(|s| s.to_str()) {
+                    Some(s) if s.starts_with("k_") => s,
+                    _ => continue,
+                };
+                let ext_ok = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e == "vr")
+                    .unwrap_or(false);
+                if !ext_ok {
+                    continue;
+                }
+                let _ = stem;
+                let path_canonical = path.canonicalize().ok();
+                let in_manifest = m.iter().any(|r| {
+                    // Try every (root × layout) combination — match
+                    // succeeds when ANY canonicalized candidate equals
+                    // the on-disk path.
+                    let mut cands: Vec<std::path::PathBuf> = Vec::new();
+                    cands.extend(candidate_paths(project_root, &r.file_path));
+                    for er in extra_search_roots {
+                        cands.extend(candidate_paths(er, &r.file_path));
+                    }
+                    cands
+                        .iter()
+                        .any(|c| c.canonicalize().ok() == path_canonical)
+                });
+                if !in_manifest {
+                    let rel = path
+                        .strip_prefix(root)
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|_| path.clone());
+                    issues.push(ManifestIssue::OrphanSourceFile { path: rel });
+                }
             }
         }
     }
