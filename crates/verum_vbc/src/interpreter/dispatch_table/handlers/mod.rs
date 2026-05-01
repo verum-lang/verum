@@ -38,6 +38,11 @@ pub(super) mod shell_runtime;
 // architecture (bypass libSystem FFI, use std::fs directly).
 pub(super) mod file_runtime;
 
+// High-level Rust intercepts for env-var ops (var, var_opt, set_var,
+// remove_var).  Sibling to file_runtime; bypasses libSystem
+// `getenv`/`setenv`/`unsetenv` via `std::env`.
+pub(super) mod env_runtime;
+
 // Debug, assert, panic (0xD6-0xD9)
 pub(super) mod debug;
 
