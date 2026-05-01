@@ -1,0 +1,245 @@
+// =============================================================================
+// core/database/postgres/async_copy.vr — async COPY FROM / COPY TO V0
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.8 (async surface), §6.1.6 (COPY).
+// =============================================================================
+//
+// Adds true streaming COPY to the async surface. The actor pattern
+// from `async_connection.vr` is fundamentally request/response
+// (one PgRequest → one oneshot reply). COPY is different — it
+// streams arbitrarily many CopyData frames between the
+// `Q "COPY ... FROM/TO ..."` and the trailing ReadyForQuery.
+//
+// Architecture — sub-actor takeover:
+//
+//   When the actor processes ReqCopyInOpen, it calls
+//   `conn.start_copy_in_session(sql)` and acks the caller. Then it
+//   ENTERS A SUB-LOOP reading from a per-COPY chunk-channel
+//   (separate from the main mailbox) until the writer signals
+//   Done or Cancel. While in the sub-loop the main mailbox is
+//   paused — fine, the actor owns one wire and one writer must
+//   finish before the next request can use it.
+//
+//   CopyOut is symmetric but the actor pushes chunks to the
+//   caller's Receiver instead of pulling from a Sender. After
+//   CopyDone the actor sends the row count via a completion
+//   oneshot.
+//
+// Sync `copy_in_bytes` / `copy_out_bytes` (one-shot bulk) stay
+// canonical and unchanged; this is opt-in true streaming.
+//
+// V0 surface:
+//   * `copy_in_async(conn, copy_sql)` -> `AsyncCopyInWriter`
+//        .write(bytes).await -> Result<(), DbError>
+//        .finish().await       -> Result<row_count, DbError>
+//        .cancel(reason).await -> Result<(), DbError>
+//   * `copy_out_async(conn, copy_sql)` -> `AsyncCopyOutReader`
+//        .read_chunk().await   -> Result<Maybe<List<Byte>>, …>
+//        .finish().await       -> Result<row_count, DbError>
+//
+// Out of V0:
+//   * Per-chunk MAX_RATE shaping.
+//   * COPY BINARY format helpers (V0 surfaces raw bytes; caller
+//     prepends the 11-byte signature + builds tuple framing).
+// =============================================================================
+
+module core.database.postgres.async_copy;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.postgres.async_connection.{
+    AsyncPgConnection, PgRequest, ReqCopyInOpen, ReqCopyOutOpen,
+    CopyInChunk, CicBytes, CicDone, CicCancel,
+};
+mount core.async.channel.{
+    Sender, Receiver, OneshotSender,
+    bounded_channel, oneshot,
+};
+
+// =============================================================================
+// Caller-side handles
+// =============================================================================
+
+/// Affine writer for COPY FROM. Send bytes via `write`; finish
+/// with `finish` to commit (returns server's COPY row count) or
+/// abort with `cancel` (server-side rollback). Drop without
+/// either sends a best-effort cancel from the actor side once
+/// the chunk channel closes.
+public type affine AsyncCopyInWriter is {
+    chunk_tx: Sender<CopyInChunk>,
+};
+
+implement AsyncCopyInWriter {
+    public async fn write(&self, bytes: List<Byte>) -> Result<(), DbError> {
+        match self.chunk_tx.send_async(CicBytes(bytes)).await {
+            Ok(())  => Ok(()),
+            Err(_)  => Err(actor_dropped("copy_in.write")),
+        }
+    }
+
+    public async fn finish(self) -> Result<Int, DbError> {
+        let (rs, rr) = oneshot();
+        match self.chunk_tx.send_async(CicDone(rs)).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("copy_in.finish send")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("copy_in.finish reply")),
+        }
+    }
+
+    public async fn cancel(self, reason: &Text) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.chunk_tx.send_async(CicCancel { reason: reason.clone(), reply: rs }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("copy_in.cancel send")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("copy_in.cancel reply")),
+        }
+    }
+}
+
+/// Affine reader for COPY TO. Pull chunks via `read_chunk`; once
+/// `Ok(None)` is observed, call `finish` to consume the stream
+/// completion and surface the COPY row count.
+public type affine AsyncCopyOutReader is {
+    chunk_rx: Receiver<CopyOutEvent>,
+    /// Set once the actor signals end-of-stream. Holds the
+    /// row count or the wire-level failure.
+    completion: Maybe<Result<Int, DbError>>,
+};
+
+/// Internal — the chunk channel carries either a data frame or
+/// the terminal completion event so the reader's API is
+/// monotonic without a side oneshot.
+public type CopyOutEvent is
+      CoeBytes(List<Byte>)
+    | CoeDone(Result<Int, DbError>);
+
+implement AsyncCopyOutReader {
+    /// `Ok(Some(bytes))` for each CopyData frame; `Ok(None)`
+    /// exactly once when the stream ends. Subsequent calls also
+    /// return `Ok(None)`.
+    public async fn read_chunk(&mut self) -> Result<Maybe<List<Byte>>, DbError> {
+        match self.completion {
+            Some(_) => { return Ok(None); }
+            None    => {}
+        }
+        match self.chunk_rx.recv_fut().await {
+            Some(CoeBytes(b)) => Ok(Some(b)),
+            Some(CoeDone(r)) => {
+                self.completion = Some(r);
+                Ok(None)
+            }
+            None => {
+                // Channel closed without a CoeDone — actor died.
+                let e = actor_dropped("copy_out.read_chunk");
+                self.completion = Some(Err(e.clone()));
+                Err(e)
+            }
+        }
+    }
+
+    /// After `Ok(None)` from `read_chunk`, drain the completion
+    /// signal and return the row count or the terminal error.
+    public async fn finish(mut self) -> Result<Int, DbError> {
+        match self.completion {
+            Some(r) => r,
+            None    => {
+                // Caller forgot to drain; do it now.
+                loop {
+                    match self.read_chunk().await {
+                        Ok(Some(_)) => {}
+                        Ok(None) => {
+                            match self.completion {
+                                Some(r) => { return r; }
+                                None    => { return Err(actor_dropped("copy_out.finish")); }
+                            }
+                        }
+                        Err(e) => { return Err(e); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Constructors
+// =============================================================================
+
+/// Open a streaming COPY FROM. The actor issues `copy_sql` and
+/// drives the wire to `CopyInResponse` before this returns Ok;
+/// the writer is then ready to `write` chunks.
+///
+/// `chunk_capacity` bounds in-flight chunks (back-pressures the
+/// caller via `write`'s send_async future).
+public async fn copy_in_async(
+    conn: &AsyncPgConnection,
+    copy_sql: &Text,
+    chunk_capacity: Int,
+) -> Result<AsyncCopyInWriter, DbError> {
+    let cap = if chunk_capacity < 1 { 1 } else { chunk_capacity };
+    let (chunk_tx, chunk_rx) = bounded_channel::<CopyInChunk>(cap);
+    let (open_tx, open_rx) = oneshot::<Result<(), DbError>>();
+
+    match conn.tx_ref().send_async(ReqCopyInOpen {
+        sql: copy_sql.clone(),
+        chunk_rx: chunk_rx,
+        ack: open_tx,
+    }).await {
+        Ok(())  => {}
+        Err(_)  => { return Err(actor_dropped("copy_in_async send")); }
+    }
+    match open_rx.await {
+        Ok(Ok(()))  => {}
+        Ok(Err(e))  => { return Err(e); }
+        Err(_)      => { return Err(actor_dropped("copy_in_async ack")); }
+    }
+    Ok(AsyncCopyInWriter { chunk_tx: chunk_tx })
+}
+
+/// Open a streaming COPY TO. The actor issues `copy_sql` and
+/// drives the wire to `CopyOutResponse` before this returns Ok;
+/// the reader is then ready to `read_chunk`.
+public async fn copy_out_async(
+    conn: &AsyncPgConnection,
+    copy_sql: &Text,
+    chunk_capacity: Int,
+) -> Result<AsyncCopyOutReader, DbError> {
+    let cap = if chunk_capacity < 1 { 1 } else { chunk_capacity };
+    let (chunk_tx, chunk_rx) = bounded_channel::<CopyOutEvent>(cap);
+    let (open_tx, open_rx) = oneshot::<Result<(), DbError>>();
+
+    match conn.tx_ref().send_async(ReqCopyOutOpen {
+        sql: copy_sql.clone(),
+        chunk_tx: chunk_tx,
+        ack: open_tx,
+    }).await {
+        Ok(())  => {}
+        Err(_)  => { return Err(actor_dropped("copy_out_async send")); }
+    }
+    match open_rx.await {
+        Ok(Ok(()))  => {}
+        Ok(Err(e))  => { return Err(e); }
+        Err(_)      => { return Err(actor_dropped("copy_out_async ack")); }
+    }
+    Ok(AsyncCopyOutReader { chunk_rx: chunk_rx, completion: None })
+}
+
+fn actor_dropped(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "ACTOR_CLOSED".clone(),
+        message: f"async PG actor unavailable during {what}",
+        retryable: false,
+    })
+}

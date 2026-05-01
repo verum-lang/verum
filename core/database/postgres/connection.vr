@@ -676,6 +676,213 @@ implement PgConnection {
         Ok(())
     }
 
+    // -------------------------------------------------------------------------
+    // Session-style COPY — for the async actor's chunk-at-a-time path
+    // -------------------------------------------------------------------------
+    //
+    // The bulk `copy_in_bytes` / `copy_out_bytes` methods take ALL
+    // rows up-front. `core.database.postgres.async_copy` owns true
+    // streaming COPY and needs to drive the wire chunk-by-chunk
+    // between mailbox events. These hooks expose the wire's
+    // mid-COPY surface without re-wiring the existing bulk path.
+
+    /// Issue `sql` (must be `COPY … FROM STDIN`) and drive the
+    /// wire until `CopyInResponse` arrives. After this returns
+    /// `Ok(())` the connection is mid-COPY: subsequent
+    /// `write_copy_in_chunk` writes feed the server, and either
+    /// `finish_copy_in_session` or `cancel_copy_in_session`
+    /// terminates.
+    public fn start_copy_in_session(&mut self, sql: &Text) -> Result<(), DbError> {
+        match self.state {
+            PcsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "BAD_STATE".clone(),
+                message: "start_copy_in_session requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.state = PcsBusy;
+        let payload = simple_query(sql);
+        write_all(&mut self.stream, payload.as_slice())?;
+
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmCopyInResponse(_)  => { return Ok(()); }
+                BmCopyOutResponse(_) => {
+                    return Err(DbError.Adapter(AdapterSpecific {
+                        adapter: AdPostgres,
+                        code: "COPY_DIRECTION".clone(),
+                        message: "expected CopyInResponse, got CopyOutResponse".clone(),
+                        retryable: false,
+                    }));
+                }
+                BmError(d) => {
+                    let _ = drain_to_ready(self);
+                    return Err(dberr_from_pg(d));
+                }
+                BmNotice(_) | BmParameterStatus(_) => {}
+                BmReadyForQuery(_) => {
+                    self.state = PcsReady;
+                    return Err(DbError.Adapter(AdapterSpecific {
+                        adapter: AdPostgres,
+                        code: "COPY_NO_RESPONSE".clone(),
+                        message: "COPY command returned RFQ without CopyInResponse".clone(),
+                        retryable: false,
+                    }));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Send one CopyData frame containing `bytes` mid-COPY.
+    /// `start_copy_in_session` must have returned `Ok` first.
+    public fn write_copy_in_chunk(&mut self, bytes: &[Byte]) -> Result<(), DbError> {
+        let frame = copy_data(bytes);
+        write_all(&mut self.stream, frame.as_slice())
+    }
+
+    /// Send CopyDone, drain to ReadyForQuery, return the COPY
+    /// row count parsed from the trailing CommandComplete tag.
+    public fn finish_copy_in_session(&mut self) -> Result<Int, DbError> {
+        let done = copy_done();
+        write_all(&mut self.stream, done.as_slice())?;
+
+        let mut row_count: Int = 0;
+        let mut diagnostic: Maybe<Diagnostic> = None;
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmCommandComplete(cc) => {
+                    row_count = parse_copy_command_count(&cc.tag);
+                }
+                BmError(d) => { diagnostic = Some(d); }
+                BmNotice(_) => {}
+                BmParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmReadyForQuery(s) => {
+                    self.tx_status = s;
+                    self.state = PcsReady;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match diagnostic {
+            Some(d) => Err(dberr_from_pg(d)),
+            None    => Ok(row_count),
+        }
+    }
+
+    /// Send CopyFail mid-COPY and drain to ReadyForQuery. Used by
+    /// the async writer when its caller drops without an explicit
+    /// finish.
+    public fn cancel_copy_in_session(&mut self, reason: &Text) -> Result<(), DbError> {
+        self.copy_fail_in(reason)
+    }
+
+    /// Issue `sql` (must be `COPY … TO STDOUT`) and drive the
+    /// wire until `CopyOutResponse` arrives. Subsequent
+    /// `read_copy_out_chunk` calls return CopyData payloads.
+    public fn start_copy_out_session(&mut self, sql: &Text) -> Result<(), DbError> {
+        match self.state {
+            PcsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "BAD_STATE".clone(),
+                message: "start_copy_out_session requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.state = PcsBusy;
+        let payload = simple_query(sql);
+        write_all(&mut self.stream, payload.as_slice())?;
+
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmCopyOutResponse(_) => { return Ok(()); }
+                BmCopyInResponse(_) => {
+                    return Err(DbError.Adapter(AdapterSpecific {
+                        adapter: AdPostgres,
+                        code: "COPY_DIRECTION".clone(),
+                        message: "expected CopyOutResponse, got CopyInResponse".clone(),
+                        retryable: false,
+                    }));
+                }
+                BmError(d) => {
+                    let _ = drain_to_ready(self);
+                    return Err(dberr_from_pg(d));
+                }
+                BmNotice(_) | BmParameterStatus(_) => {}
+                BmReadyForQuery(_) => {
+                    self.state = PcsReady;
+                    return Err(DbError.Adapter(AdapterSpecific {
+                        adapter: AdPostgres,
+                        code: "COPY_NO_RESPONSE".clone(),
+                        message: "COPY command returned RFQ without CopyOutResponse".clone(),
+                        retryable: false,
+                    }));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Read the next CopyData frame mid-COPY. Returns
+    /// `Ok(Some(bytes))` for each CopyData; `Ok(None)` once
+    /// CopyDone arrives — caller must then call
+    /// `finish_copy_out_session` to drain to ReadyForQuery.
+    public fn read_copy_out_chunk(&mut self) -> Result<Maybe<List<Byte>>, DbError> {
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmCopyData { bytes } => { return Ok(Some(bytes)); }
+                BmCopyDone => { return Ok(None); }
+                BmError(d) => {
+                    let _ = drain_to_ready(self);
+                    return Err(dberr_from_pg(d));
+                }
+                BmNotice(_) | BmParameterStatus(_) => {}
+                _ => {}
+            }
+        }
+    }
+
+    /// After `read_copy_out_chunk` returns `Ok(None)`, drain to
+    /// ReadyForQuery (consumes the trailing CommandComplete) and
+    /// surface the row count.
+    public fn finish_copy_out_session(&mut self) -> Result<Int, DbError> {
+        let mut row_count: Int = 0;
+        let mut diagnostic: Maybe<Diagnostic> = None;
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmCommandComplete(cc) => {
+                    row_count = parse_copy_command_count(&cc.tag);
+                }
+                BmError(d) => { diagnostic = Some(d); }
+                BmNotice(_) => {}
+                BmParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmReadyForQuery(s) => {
+                    self.tx_status = s;
+                    self.state = PcsReady;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match diagnostic {
+            Some(d) => Err(dberr_from_pg(d)),
+            None    => Ok(row_count),
+        }
+    }
+
     /// COPY TO STDOUT — issue `sql` (must be `COPY ... TO STDOUT`),
     /// collect every CopyData chunk, return them. For TEXT mode
     /// each chunk is typically one row; the caller concatenates and

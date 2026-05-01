@@ -1,0 +1,154 @@
+// =============================================================================
+// t15_async_copy.vr — async streaming COPY FROM / COPY TO
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.6 (COPY), §6.1.8 (async surface).
+// =============================================================================
+//
+// Two scenarios — proves the chunk-streaming pattern works
+// end-to-end without buffering N rows in memory upfront:
+//
+//   1. copy_in_async: stream 1000 text rows in 10 chunks of 100;
+//      assert finish() returns row count == 1000.
+//   2. copy_out_async: stream the same table back; collect chunks
+//      until None; reassemble into rows; assert ≥ 1000 rows
+//      observed.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    AsyncPgConnection,
+    async_connect,
+    AsyncCopyInWriter, AsyncCopyOutReader,
+    copy_in_async, copy_out_async,
+};
+mount core.async.executor.block_on;
+
+const N_ROWS: Int = 1000;
+const ROWS_PER_CHUNK: Int = 100;
+
+fn main() {
+    block_on(async move {
+        let cfg = PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-acopy".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let conn = expect_ok(
+            async_connect(&cfg, 8).await,
+            &"async_connect failed".clone(),
+        );
+
+        // Setup table.
+        let _ = conn.execute(&"DROP TABLE IF EXISTS async_copy_smoke".clone()).await;
+        expect_ok(
+            conn.execute(&
+                "CREATE TABLE async_copy_smoke (id integer PRIMARY KEY, payload text NOT NULL)"
+                    .clone()
+            ).await,
+            &"CREATE TABLE failed".clone(),
+        );
+
+        // ---------------------------------------------------------------------
+        // 1. COPY FROM — stream 1000 rows in 10 chunks of 100.
+        // ---------------------------------------------------------------------
+        let writer = expect_ok(
+            copy_in_async(
+                &conn,
+                &"COPY async_copy_smoke (id, payload) FROM STDIN".clone(),
+                4,
+            ).await,
+            &"copy_in_async failed".clone(),
+        );
+
+        let mut row_id: Int = 0;
+        let mut chunk_idx: Int = 0;
+        while chunk_idx < (N_ROWS / ROWS_PER_CHUNK) {
+            let mut buf: List<Byte> = List.with_capacity(ROWS_PER_CHUNK * 32);
+            let mut k: Int = 0;
+            while k < ROWS_PER_CHUNK {
+                let row_text = f"{row_id}\tpayload-{row_id}\n";
+                let bytes = row_text.as_bytes();
+                let mut i: Int = 0;
+                while i < (bytes.len() as Int) {
+                    buf.push(bytes[i]);
+                    i = i + 1;
+                }
+                row_id = row_id + 1;
+                k = k + 1;
+            }
+            expect_ok(
+                writer.write(buf).await,
+                &f"writer.write chunk {chunk_idx} failed",
+            );
+            chunk_idx = chunk_idx + 1;
+        }
+
+        let written = expect_ok(
+            writer.finish().await,
+            &"writer.finish failed".clone(),
+        );
+        expect_eq_int(written, N_ROWS, &"COPY FROM row count".clone());
+
+        // ---------------------------------------------------------------------
+        // 2. COPY TO — stream back, count chunks + rows.
+        // ---------------------------------------------------------------------
+        let mut reader = expect_ok(
+            copy_out_async(
+                &conn,
+                &"COPY async_copy_smoke (id, payload) TO STDOUT".clone(),
+                4,
+            ).await,
+            &"copy_out_async failed".clone(),
+        );
+
+        let mut chunk_count: Int = 0;
+        let mut total_bytes: Int = 0;
+        let mut newlines: Int = 0;
+        loop {
+            let r = expect_ok(
+                reader.read_chunk().await,
+                &f"reader.read_chunk #{chunk_count} failed",
+            );
+            match r {
+                Some(bytes) => {
+                    chunk_count = chunk_count + 1;
+                    total_bytes = total_bytes + (bytes.len() as Int);
+                    let mut i: Int = 0;
+                    while i < (bytes.len() as Int) {
+                        if (bytes[i] as Int) == ('\n' as Int) {
+                            newlines = newlines + 1;
+                        }
+                        i = i + 1;
+                    }
+                }
+                None => { break; }
+            }
+        }
+        let read_count = expect_ok(
+            reader.finish().await,
+            &"reader.finish failed".clone(),
+        );
+
+        expect_eq_int(read_count, N_ROWS, &"COPY TO server-reported row count".clone());
+        expect_eq_int(newlines, N_ROWS, &"COPY TO row count by newline scan".clone());
+        expect(
+            chunk_count > 0,
+            &"COPY TO produced no chunks".clone(),
+        );
+
+        // Cleanup.
+        let _ = conn.execute(&"DROP TABLE async_copy_smoke".clone()).await;
+        let _ = conn.close().await;
+
+        pass(&"t15_async_copy".clone());
+    });
+}

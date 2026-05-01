@@ -109,3 +109,8 @@ Test list per `internal/specs/database.md` follow-up:
   / timeline_history / create_physical_slot / drop_slot;
   BASE_BACKUP {fast, manifest} drains every tablespace's CopyData
   chain + the manifest stream + RFQ (spec §6.1.7)
+- `t15_async_copy.vr` — async streaming COPY FROM (1000 rows in
+  10 chunks of 100 via AsyncCopyInWriter) + COPY TO
+  (AsyncCopyOutReader; chunk-by-chunk drain); proves the actor
+  sub-loop pattern works without buffering rows in memory
+  (spec §6.1.6 / §6.1.8)
