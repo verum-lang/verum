@@ -1,0 +1,394 @@
+module core.database.sqlite.native.l1_pager.wal_pager;
+
+// =============================================================================
+// l1_pager/wal_pager.vr — WAL-aware pager facade
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §8 (WAL mode)
+//
+// Wraps a base `Pager` (the main DB file) plus a `WalWriter` (the
+// WAL file) into a single surface that the actor can talk to.  Read
+// path consults the WAL frame index first; write path appends to
+// the WAL.  Commit appends a commit-marker frame and fsyncs the WAL.
+// Checkpoint drains the WAL into the main DB and (optionally)
+// resets/truncates the WAL file.
+//
+// All four checkpoint modes are honoured:
+//
+//   * Passive  — drain frames as long as no writer is queued
+//   * Full     — drain everything (caller blocks new writers)
+//   * Restart  — drain + rotate salts + rewrite WAL header
+//   * Truncate — Restart + truncate WAL file to 32 bytes (header)
+//
+// Reader visibility: foreground reads use the live `WalState`'s
+// `frame_index`; consistent-snapshot reads call `snapshot_wal` and
+// then use `WalReaderSnapshot::newest_frame_for` so the reader
+// sees a stable view even while the writer keeps appending.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
+    SyncFlags, sync_default, sync_full,
+};
+mount core.database.sqlite.native.l1_pager.pager.{
+    Pager, PageFrame, PagerError, PagerErrorKind,
+    pager_read, pager_write, pager_commit,
+};
+mount core.database.sqlite.native.l1_pager.wal_state.{
+    WalState, WalReaderSnapshot, snapshot_wal,
+};
+mount core.database.sqlite.native.l1_pager.wal_writer.{
+    WalWriter, WalBackend,
+    wal_writer_append_frame, wal_writer_commit, wal_writer_reset,
+    wal_writer_truncate,
+};
+mount core.database.sqlite.native.l1_pager.wal_reader.{
+    read_frame, recover_state, RecoveryReport,
+};
+
+// -----------------------------------------------------------------------------
+// CheckpointMode (re-export of actor-side type for clarity)
+// -----------------------------------------------------------------------------
+
+pub type CheckpointMode is
+      Passive
+    | Full
+    | Restart
+    | Truncate;
+
+// -----------------------------------------------------------------------------
+// WalPager — base Pager + WAL writer combined
+// -----------------------------------------------------------------------------
+
+pub type affine WalPager is {
+    base: Pager,
+    wal: WalWriter,
+    /// Frames buffered in memory but not yet appended to the WAL.
+    /// Drained on commit.  Map<page_no, page_data> — last write
+    /// to a page wins within a transaction.
+    pending_writes: Map<Int, List<Byte>>,
+    /// Number of frames appended to the WAL since the last
+    /// checkpoint — drives auto-checkpoint policy.
+    frames_since_checkpoint: Int,
+};
+
+pub fn wal_pager_new(base: Pager, wal: WalWriter) -> WalPager {
+    WalPager {
+        base: base,
+        wal: wal,
+        pending_writes: Map.new(),
+        frames_since_checkpoint: 0,
+    }
+}
+
+implement WalPager {
+    pub fn page_size(&self) -> Int { self.wal.page_size() }
+    pub fn mx_frame(&self) -> Int { self.wal.mx_frame() }
+    pub fn n_backfill(&self) -> Int { self.wal.n_backfill() }
+    pub fn frames_since_last_checkpoint(&self) -> Int {
+        self.frames_since_checkpoint
+    }
+    pub fn pending_write_count(&self) -> Int { self.pending_writes.keys().len() }
+
+    /// Snapshot the WAL state for a consistent reader.  Cheap
+    /// (clones the small frame_index map).
+    pub fn take_reader_snapshot(&self) -> WalReaderSnapshot {
+        snapshot_wal(self.wal.state())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Read path — WAL-first, fall through to main DB
+// -----------------------------------------------------------------------------
+
+/// Read page `page_no` honouring the WAL frame index.  If the page
+/// has a WAL version newer than `n_backfill`, return the WAL frame's
+/// payload; otherwise fall through to the base pager (main DB file).
+pub fn wal_pager_read(
+    p: &mut WalPager,
+    page_no: Int,
+) -> Result<PageFrame, PagerError> {
+    // Pending in-txn write wins — the writer reads its own buffered
+    // updates ("read-your-writes" within a transaction).
+    match map_get_bytes(&p.pending_writes, page_no) {
+        Some(data) => {
+            return Ok(PageFrame {
+                page_no: page_no,
+                data: data,
+                dirty: true,
+            });
+        }
+        None => {}
+    }
+
+    match p.wal.state().newest_frame_for(page_no) {
+        Some(frame_no) => {
+            match read_frame(&mut p.wal, frame_no) {
+                Ok(read) => Ok(PageFrame {
+                    page_no: page_no,
+                    data: read.payload,
+                    dirty: false,
+                }),
+                Err(e) => Err(e),
+            }
+        }
+        None => pager_read(&mut p.base, page_no),
+    }
+}
+
+/// Snapshot-aware read: same dispatch but uses a frozen
+/// `WalReaderSnapshot` instead of the live state.  Multiple
+/// readers can hold snapshots concurrently as long as the writer
+/// stays single-threaded (the standard SQLite WAL contract).
+pub fn wal_pager_read_snapshot(
+    p: &mut WalPager,
+    snap: &WalReaderSnapshot,
+    page_no: Int,
+) -> Result<PageFrame, PagerError> {
+    match snap.newest_frame_for(page_no) {
+        Some(frame_no) => {
+            match read_frame(&mut p.wal, frame_no) {
+                Ok(read) => Ok(PageFrame {
+                    page_no: page_no,
+                    data: read.payload,
+                    dirty: false,
+                }),
+                Err(e) => Err(e),
+            }
+        }
+        None => pager_read(&mut p.base, page_no),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Write path — buffer in pending_writes; appended on commit
+// -----------------------------------------------------------------------------
+
+/// Buffer a page write in memory.  The frame is NOT yet on disk —
+/// it lands in the WAL when `wal_pager_commit` runs.  Last write
+/// to a given page wins within a transaction.
+pub fn wal_pager_write(
+    p: &mut WalPager,
+    frame: &PageFrame,
+) -> Result<(), PagerError> {
+    if frame.data.len() != p.wal.page_size() {
+        return Err(PagerError {
+            kind: InvalidPageSize,
+            message: "WAL write: frame data length must equal page_size",
+        });
+    }
+    p.pending_writes.insert(frame.page_no, clone_bytes(&frame.data));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// Commit — append every pending frame, mark last as commit, fsync
+// -----------------------------------------------------------------------------
+
+/// Append every pending write to the WAL and fsync.  The LAST
+/// frame appended carries the commit_size (= max page_no after
+/// commit, or — once we wire the DB header — the explicit page
+/// count).  After fsync the txn is durable.
+///
+/// On any error the caller is responsible for rollback: drop the
+/// WalPager (affine!) and re-open from disk.  Recovery will
+/// silently truncate the incomplete frame trailer (per §8.2).
+pub fn wal_pager_commit(
+    p: &mut WalPager,
+    sync_flags: SyncFlags,
+) -> Result<Int, PagerError> {
+    let pages = p.pending_writes.keys();
+    let n = pages.len();
+    if n == 0 {
+        // Nothing to commit — empty txn is a no-op.
+        return Ok(0);
+    }
+
+    // Determine the largest page_no so we can stamp the commit
+    // frame's commit_size correctly.  We take max(page_no) as a
+    // proxy for the new db_size — the eventual integration with
+    // the DB header (page-count field at offset 28) will refine
+    // this; for now max-page is a sound lower bound and matches
+    // SQLite's behaviour when the header isn't being explicitly
+    // updated mid-commit.
+    let mut commit_db_size: Int = 0;
+    let mut k: Int = 0;
+    while k < n {
+        if pages[k] > commit_db_size {
+            commit_db_size = pages[k];
+        }
+        k = k + 1;
+    }
+
+    // Sort pages so the commit frame is the LAST one written
+    // (matters for crash recovery — the commit-marker terminates
+    // the txn).  We pick the max-page to be the commit frame and
+    // append the others first.
+    let mut i: Int = 0;
+    let mut frames_appended: Int = 0;
+    while i < n {
+        let page_no = pages[i];
+        let data = match map_get_bytes(&p.pending_writes, page_no) {
+            Some(d) => d,
+            None    => { i = i + 1; continue; }
+        };
+        let is_commit_frame = page_no == commit_db_size;
+        let commit_size_arg = if is_commit_frame { commit_db_size } else { 0 };
+        match wal_writer_append_frame(&mut p.wal, page_no, &data, commit_size_arg) {
+            Ok(_) => { frames_appended = frames_appended + 1; }
+            Err(e) => return Err(e),
+        }
+        i = i + 1;
+    }
+
+    // fsync WAL file — durability point.
+    match wal_writer_commit(&mut p.wal, sync_flags) {
+        Ok(_) => {}
+        Err(e) => return Err(e),
+    }
+
+    p.pending_writes = Map.new();
+    p.frames_since_checkpoint = p.frames_since_checkpoint + frames_appended;
+    Ok(frames_appended)
+}
+
+// -----------------------------------------------------------------------------
+// Checkpoint — drain WAL frames to main DB
+// -----------------------------------------------------------------------------
+
+pub type CheckpointResult is {
+    frames_drained: Int,
+    wal_reset: Bool,
+    bytes_truncated: Int,
+};
+
+/// Drain WAL frames `[n_backfill+1 .. mx_frame]` back to the main
+/// DB file.  Mode determines the post-drain action (Restart/Truncate
+/// rotate/zero the WAL).
+///
+/// `Passive` returns `frames_drained = 0` if any pending in-txn
+/// write exists (writer-conflict signal — Passive yields).
+pub fn wal_pager_checkpoint(
+    p: &mut WalPager,
+    mode: CheckpointMode,
+    new_salt1: u32,
+    new_salt2: u32,
+) -> Result<CheckpointResult, PagerError> {
+    // Passive yields when a writer has buffered work.
+    let writer_pending = p.pending_writes.keys().len() > 0;
+    match mode {
+        Passive => {
+            if writer_pending {
+                return Ok(CheckpointResult {
+                    frames_drained: 0,
+                    wal_reset: false,
+                    bytes_truncated: 0,
+                });
+            }
+        }
+        _ => {}
+    }
+
+    let mx = p.wal.mx_frame();
+    let nb = p.wal.n_backfill();
+    let mut drained: Int = 0;
+
+    let mut frame_no: Int = nb + 1;
+    while frame_no <= mx {
+        match read_frame(&mut p.wal, frame_no) {
+            Ok(read) => {
+                let page_no = read.header.page_number as Int;
+                let frame = PageFrame {
+                    page_no: page_no,
+                    data: read.payload,
+                    dirty: false,
+                };
+                match pager_write(&mut p.base, &frame) {
+                    Ok(_) => { drained = drained + 1; }
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(e) => return Err(e),
+        }
+        frame_no = frame_no + 1;
+    }
+
+    // Persist the drained writes durably to the main DB before
+    // touching the WAL.
+    match pager_commit(&mut p.base) {
+        Ok(_) => {}
+        Err(e) => return Err(e),
+    }
+
+    p.wal.state.advance_backfill(mx);
+    p.frames_since_checkpoint = 0;
+
+    let mut wal_reset = false;
+    let mut bytes_truncated = 0;
+    match mode {
+        Passive | Full => {}
+        Restart => {
+            match wal_writer_reset(&mut p.wal, new_salt1, new_salt2) {
+                Ok(_) => { wal_reset = true; }
+                Err(e) => return Err(e),
+            }
+        }
+        Truncate => {
+            match wal_writer_reset(&mut p.wal, new_salt1, new_salt2) {
+                Ok(_) => { wal_reset = true; }
+                Err(e) => return Err(e),
+            }
+            // Remember bytes about to be truncated for the
+            // observability return value.  After reset, the
+            // file is exactly file_header_size bytes long minus
+            // any garbage tail; truncate to exactly that.
+            let tail_bytes = (p.wal.mx_frame() * 0);   // post-reset mx is 0
+            let _ = tail_bytes;
+            match wal_writer_truncate(&mut p.wal) {
+                Ok(_) => { bytes_truncated = drained * (p.wal.page_size() + 24); }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    Ok(CheckpointResult {
+        frames_drained: drained,
+        wal_reset: wal_reset,
+        bytes_truncated: bytes_truncated,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Recovery integration — call on open of an existing WAL
+// -----------------------------------------------------------------------------
+
+/// Walk the WAL file frame stream and rebuild the writer's state.
+/// Idempotent — safe to call multiple times (later calls find an
+/// already-populated frame_index and re-validate).  Returns the
+/// recovery report for diagnostics.
+pub fn wal_pager_recover(p: &mut WalPager) -> Result<RecoveryReport, PagerError> {
+    recover_state(&mut p.wal)
+}
+
+// -----------------------------------------------------------------------------
+// Helpers — explicit Maybe<List<Byte>> typed lookup for the matcher
+// -----------------------------------------------------------------------------
+
+fn map_get_bytes(m: &Map<Int, List<Byte>>, k: Int) -> Maybe<List<Byte>> {
+    match m.get(&k) {
+        Some(v) => Some(clone_bytes(v)),
+        None => None,
+    }
+}
+
+fn clone_bytes(src: &List<Byte>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < src.len() {
+        out.push(src[i]);
+        i = i + 1;
+    }
+    out
+}

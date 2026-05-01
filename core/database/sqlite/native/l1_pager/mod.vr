@@ -67,6 +67,10 @@ public module db_header;
 public module savepoint;
 public module snapshot;
 public module checkpointer;
+public module wal_state;
+public module wal_writer;
+public module wal_reader;
+public module wal_pager;
 
 public mount .pager.{
     PageNo, PageFrame, Pager, PagerError, PagerErrorKind,
@@ -135,4 +139,30 @@ public mount .checkpointer.{
     checkpoint_config_default, checkpoint_stats_empty,
     should_trigger, mode_resets_wal, mode_truncates_file, mode_blocks_writers,
     run_checkpoint,
+};
+
+public mount .wal_state.{
+    WalState, WalReaderSnapshot,
+    wal_state_new, wal_state_from_header, snapshot_wal,
+};
+
+public mount .wal_writer.{
+    WalWriter, WalBackend, WbFile, WbMem,
+    wal_writer_create, wal_writer_open,
+    wal_writer_append_frame, wal_writer_commit,
+    wal_writer_reset, wal_writer_truncate,
+    decode_frame_header,
+};
+
+public mount .wal_reader.{
+    RecoveryReport, WalFrameRead,
+    recover_state, read_frame, frame_offset,
+};
+
+public mount .wal_pager.{
+    WalPager, CheckpointMode as WalCheckpointMode, CheckpointResult,
+    wal_pager_new,
+    wal_pager_read, wal_pager_read_snapshot,
+    wal_pager_write, wal_pager_commit,
+    wal_pager_checkpoint, wal_pager_recover,
 };

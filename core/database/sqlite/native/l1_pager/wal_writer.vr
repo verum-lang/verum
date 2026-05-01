@@ -1,0 +1,429 @@
+module core.database.sqlite.native.l1_pager.wal_writer;
+
+// =============================================================================
+// l1_pager/wal_writer.vr — Append-only WAL file writer
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §8.1 .. §8.3
+//
+// Owns the WAL file (one per pager) and the in-memory `WalState`.
+// Single-writer by construction (the type is `affine`, mirroring
+// `PagerActor`).  All disk I/O goes through the `SqliteFile`
+// protocol so the same writer works on Posix, MemDb, and any
+// future backend that implements the protocol.
+//
+// Operations:
+//
+//   * `wal_writer_create(backend, page_size, salts)` — create a
+//     fresh WAL file, write the file header, return the writer.
+//   * `wal_writer_open(backend)` — open an existing WAL file,
+//     decode the header, and return a writer.  The caller must
+//     run `wal_reader::recover_state` afterward to rebuild the
+//     `frame_index` from the on-disk frame stream.
+//   * `wal_writer_append_frame(self, page_no, page_data,
+//                              commit_db_size)` — encode a frame
+//     header + payload, append to the file, update `WalState`.
+//   * `wal_writer_commit(self, sync_flags)` — fsync the WAL file
+//     after the last commit frame of a transaction.
+//   * `wal_writer_reset(self, new_salts)` — overwrite the file
+//     header with rotated salts; mx_frame and n_backfill go to 0.
+//   * `wal_writer_truncate(self)` — reset + truncate the file to
+//     `file_header_size()`.
+//
+// Encoding follows the SQLite WAL on-disk format (sqlite-native.md
+// §6.4 / SQLite §wal-file-format):
+//
+//   * File header  — 32 bytes (8 × u32 big-endian)
+//   * Frame header — 24 bytes (6 × u32 big-endian)
+//   * Frame payload — `page_size` bytes verbatim
+//
+// Endianness: SQLite uses big-endian for both headers regardless of
+// host endianness.  We encode/decode via explicit byte shifts so
+// the same code runs on any target.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l0_vfs.posix_vfs.PosixFile;
+mount core.database.sqlite.native.l0_vfs.memdb_vfs.MemDbFile;
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
+    VfsError, SyncFlags, sync_default, sync_full,
+};
+mount core.database.sqlite.native.wal_frame_layout.constants.{
+    file_header_size, frame_header_size, magic_little, current_format_version,
+};
+mount core.database.sqlite.native.wal_frame_layout.file_header.{
+    WalFileHeader, new as new_file_header,
+};
+mount core.database.sqlite.native.wal_frame_layout.frame_header.{
+    WalFrameHeader, new as new_frame_header,
+};
+mount core.database.sqlite.native.l1_pager.wal_state.{
+    WalState, wal_state_new,
+};
+mount core.database.sqlite.native.l1_pager.pager.{PagerError, PagerErrorKind};
+
+// -----------------------------------------------------------------------------
+// WalBackend — sum type mirroring `PagerBackend` for consistency
+// -----------------------------------------------------------------------------
+
+/// One WAL file.  Posix-backed for real WAL files; MemDb for tests.
+/// A future addition (Sqlite-3 RBU custom VFS) will land as a third
+/// variant rather than a `dyn` parameter — same dispatch pattern as
+/// `PagerBackend`.
+public type WalBackend is
+      WbFile(PosixFile)
+    | WbMem(MemDbFile);
+
+// -----------------------------------------------------------------------------
+// WalWriter — append-only writer
+// -----------------------------------------------------------------------------
+
+public type affine WalWriter is {
+    backend: WalBackend,
+    state: WalState,
+    /// Last byte offset written.  Equals `file_header_size() +
+    /// mx_frame * (frame_header_size() + page_size)`.  Cached so
+    /// each append doesn't re-multiply.
+    write_cursor: Int,
+};
+
+// -----------------------------------------------------------------------------
+// Construction
+// -----------------------------------------------------------------------------
+
+/// Create a fresh WAL file.  Writes the file header at offset 0
+/// with the supplied salts + page_size.  Caller is responsible for
+/// providing salts from the Vfs PRNG; for tests, deterministic
+/// salts are fine.
+///
+/// `page_size` must be a power of two in [512, 65536] OR the
+/// sentinel 1 (which encodes 65536 in u16).  Returns
+/// `PagerError::InvalidPageSize` otherwise.
+public fn wal_writer_create(
+    backend: WalBackend,
+    page_size: Int,
+    salt1: u32,
+    salt2: u32,
+) -> Result<WalWriter, PagerError> {
+    if !is_power_of_two_or_sentinel(page_size) {
+        return Err(PagerError {
+            kind: InvalidPageSize,
+            message: "WAL page size must be 512..65536 power-of-two or sentinel 1",
+        });
+    }
+
+    let hdr = new_file_header(
+        magic_little(),
+        current_format_version(),
+        page_size,
+        0 as u32,           // checkpoint_seq starts at 0
+        salt1,
+        salt2,
+        0 as u32,           // checksum1 (computed by encoder)
+        0 as u32,           // checksum2
+    );
+
+    let mut backend = backend;
+    let header_bytes = encode_file_header(&hdr);
+    match backend_write(&mut backend, &header_bytes, 0) {
+        Ok(_) => {}
+        Err(e) => return Err(io_error("wal create header write failed", e)),
+    }
+
+    let mut state = wal_state_new(page_size);
+    state.salt1 = salt1;
+    state.salt2 = salt2;
+
+    Ok(WalWriter {
+        backend: backend,
+        state: state,
+        write_cursor: file_header_size(),
+    })
+}
+
+/// Open an existing WAL file.  Reads + decodes the header but does
+/// NOT walk the frame stream — the caller (typically
+/// `wal_reader::recover_state`) follows up to rebuild the
+/// `frame_index` from disk and update `mx_frame` / `n_backfill` to
+/// the actual on-disk reality.
+public fn wal_writer_open(
+    backend: WalBackend,
+) -> Result<WalWriter, PagerError> {
+    let mut backend = backend;
+    let mut buf: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < file_header_size() {
+        buf.push(0 as Byte);
+        i = i + 1;
+    }
+    match backend_read(&mut backend, &mut buf, 0) {
+        Ok(_) => {}
+        Err(e) => return Err(io_error("wal open header read failed", e)),
+    }
+    let hdr = decode_file_header(&buf);
+    if hdr.magic != magic_little() {
+        return Err(PagerError {
+            kind: CorruptHeader,
+            message: "WAL file magic mismatch",
+        });
+    }
+    let mut state = wal_state_new(hdr.page_size);
+    state.salt1 = hdr.salt1;
+    state.salt2 = hdr.salt2;
+    state.checkpoint_seq = hdr.checkpoint_seq;
+    Ok(WalWriter {
+        backend: backend,
+        state: state,
+        write_cursor: file_header_size(),
+    })
+}
+
+implement WalWriter {
+    pub fn page_size(&self) -> Int { self.state.page_size }
+    pub fn mx_frame(&self) -> Int { self.state.mx_frame }
+    pub fn n_backfill(&self) -> Int { self.state.n_backfill }
+    pub fn pending_frames(&self) -> Int { self.state.pending_frame_count() }
+    pub fn salts(&self) -> (u32, u32) { (self.state.salt1, self.state.salt2) }
+    pub fn checkpoint_seq(&self) -> u32 { self.state.checkpoint_seq }
+
+    /// Borrow the state for read access (no mutation).  Used by
+    /// the snapshot machinery and the pager's read fast path.
+    pub fn state(&self) -> &WalState { &self.state }
+}
+
+// -----------------------------------------------------------------------------
+// Frame append
+// -----------------------------------------------------------------------------
+
+/// Append one frame to the WAL.  `commit_db_size` is non-zero for
+/// the LAST frame of a transaction (the commit marker) — it
+/// records the new database page count after the txn.  All other
+/// frames pass `0`.
+///
+/// Caller MUST `wal_writer_commit` after the commit-marker frame
+/// to durably persist the txn.  Without the fsync the appended
+/// frames are visible to in-process readers but a crash will lose
+/// them.
+pub fn wal_writer_append_frame(
+    w: &mut WalWriter,
+    page_no: Int,
+    page_data: &[Byte],
+    commit_db_size: Int,
+) -> Result<(), PagerError> {
+    if page_data.len() != w.state.page_size {
+        return Err(PagerError {
+            kind: InvalidPageSize,
+            message: "WAL append: page_data length must equal page_size",
+        });
+    }
+    let is_commit = commit_db_size > 0;
+    let frame_hdr = new_frame_header(
+        page_no as u32,
+        commit_db_size as u32,
+        w.state.salt1,
+        w.state.salt2,
+        0 as u32,                   // checksum1 (rolling Fossil — TODO follow-up)
+        0 as u32,                   // checksum2
+    );
+    let hdr_bytes = encode_frame_header(&frame_hdr);
+
+    // Write header at the current cursor.
+    match backend_write(&mut w.backend, &hdr_bytes, w.write_cursor) {
+        Ok(_) => {}
+        Err(e) => return Err(io_error("wal append: frame header write failed", e)),
+    }
+    // Write payload immediately after the header.
+    let payload_offset = w.write_cursor + frame_header_size();
+    match backend_write(&mut w.backend, page_data, payload_offset) {
+        Ok(_) => {}
+        Err(e) => return Err(io_error("wal append: frame payload write failed", e)),
+    }
+    w.write_cursor = w.write_cursor + frame_header_size() + w.state.page_size;
+    w.state.record_appended_frame(page_no, is_commit, commit_db_size);
+    Ok(())
+}
+
+/// fsync the WAL file.  Call after the last frame of a transaction.
+/// `full=true` uses F_FULLFSYNC on Darwin (slower, true-durable);
+/// the default `sync_default()` uses fdatasync on Linux which is
+/// ~5-20× faster on rotational + datacenter SSDs.
+pub fn wal_writer_commit(
+    w: &mut WalWriter,
+    flags: SyncFlags,
+) -> Result<(), PagerError> {
+    match backend_sync(&w.backend, flags) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(io_error("wal commit: fsync failed", e)),
+    }
+}
+
+/// Reset the WAL: rotate salts, rewrite the file header, drop the
+/// frame index.  Used by Restart and Truncate checkpoints AFTER
+/// the frames have been drained to the main DB.
+pub fn wal_writer_reset(
+    w: &mut WalWriter,
+    new_salt1: u32,
+    new_salt2: u32,
+) -> Result<(), PagerError> {
+    w.state.reset_for_restart(new_salt1, new_salt2);
+    let hdr = new_file_header(
+        magic_little(),
+        current_format_version(),
+        w.state.page_size,
+        w.state.checkpoint_seq,
+        new_salt1,
+        new_salt2,
+        0 as u32,
+        0 as u32,
+    );
+    let header_bytes = encode_file_header(&hdr);
+    match backend_write(&mut w.backend, &header_bytes, 0) {
+        Ok(_) => {}
+        Err(e) => return Err(io_error("wal reset: header write failed", e)),
+    }
+    w.write_cursor = file_header_size();
+    Ok(())
+}
+
+/// Truncate the WAL file to just the file header.  Used by
+/// Truncate checkpoint mode after `wal_writer_reset`.
+pub fn wal_writer_truncate(w: &mut WalWriter) -> Result<(), PagerError> {
+    match backend_truncate(&mut w.backend, file_header_size()) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(io_error("wal truncate: ftruncate failed", e)),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Backend dispatch — sum-type pattern matching the PagerBackend shape
+// -----------------------------------------------------------------------------
+
+fn backend_write(b: &mut WalBackend, buf: &[Byte], offset: Int) -> Result<(), VfsError> {
+    match b {
+        WbFile(f) => f.write(buf, offset),
+        WbMem(f)  => f.write(buf, offset),
+    }
+}
+
+fn backend_read(b: &mut WalBackend, buf: &mut List<Byte>, offset: Int) -> Result<(), VfsError> {
+    match b {
+        WbFile(f) => f.read(buf, offset),
+        WbMem(f)  => f.read(buf, offset),
+    }
+}
+
+fn backend_sync(b: &WalBackend, flags: SyncFlags) -> Result<(), VfsError> {
+    match b {
+        WbFile(f) => f.sync(flags),
+        WbMem(f)  => f.sync(flags),
+    }
+}
+
+fn backend_truncate(b: &mut WalBackend, size: Int) -> Result<(), VfsError> {
+    match b {
+        WbFile(f) => f.truncate(size),
+        WbMem(f)  => f.truncate(size),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Binary encoding — big-endian u32 (SQLite WAL convention)
+// -----------------------------------------------------------------------------
+
+fn encode_u32_be(value: u32, dst: &mut List<Byte>) {
+    let v: Int = value as Int;
+    dst.push(((v >> 24) & 0xFF) as Byte);
+    dst.push(((v >> 16) & 0xFF) as Byte);
+    dst.push(((v >> 8)  & 0xFF) as Byte);
+    dst.push((v         & 0xFF) as Byte);
+}
+
+fn decode_u32_be(buf: &[Byte], offset: Int) -> u32 {
+    let b0: Int = buf[offset]     as Int;
+    let b1: Int = buf[offset + 1] as Int;
+    let b2: Int = buf[offset + 2] as Int;
+    let b3: Int = buf[offset + 3] as Int;
+    (((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) as u32)
+}
+
+fn encode_file_header(h: &WalFileHeader) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    encode_u32_be(h.magic,           &mut out);
+    encode_u32_be(h.format_version,  &mut out);
+    // page_size is i32 in our type; cast to u32 for encoding.
+    // Per spec, value 1 in the file header sentinels for 65536.
+    encode_u32_be(h.page_size as u32, &mut out);
+    encode_u32_be(h.checkpoint_seq,  &mut out);
+    encode_u32_be(h.salt1,           &mut out);
+    encode_u32_be(h.salt2,           &mut out);
+    encode_u32_be(h.checksum1,       &mut out);
+    encode_u32_be(h.checksum2,       &mut out);
+    out
+}
+
+fn decode_file_header(buf: &List<Byte>) -> WalFileHeader {
+    new_file_header(
+        decode_u32_be(buf, 0),
+        decode_u32_be(buf, 4),
+        decode_u32_be(buf, 8) as Int,
+        decode_u32_be(buf, 12),
+        decode_u32_be(buf, 16),
+        decode_u32_be(buf, 20),
+        decode_u32_be(buf, 24),
+        decode_u32_be(buf, 28),
+    )
+}
+
+fn encode_frame_header(h: &WalFrameHeader) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    encode_u32_be(h.page_number, &mut out);
+    encode_u32_be(h.commit_size, &mut out);
+    encode_u32_be(h.salt1,       &mut out);
+    encode_u32_be(h.salt2,       &mut out);
+    encode_u32_be(h.checksum1,   &mut out);
+    encode_u32_be(h.checksum2,   &mut out);
+    out
+}
+
+pub fn decode_frame_header(buf: &List<Byte>, offset: Int) -> WalFrameHeader {
+    let mut tmp: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < frame_header_size() {
+        tmp.push(buf[offset + i]);
+        i = i + 1;
+    }
+    new_frame_header(
+        decode_u32_be(&tmp, 0),
+        decode_u32_be(&tmp, 4),
+        decode_u32_be(&tmp, 8),
+        decode_u32_be(&tmp, 12),
+        decode_u32_be(&tmp, 16),
+        decode_u32_be(&tmp, 20),
+    )
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn is_power_of_two_or_sentinel(n: Int) -> Bool {
+    if n == 1 { return true; }   // sentinel for 65536
+    if n < 512 { return false; }
+    if n > 65536 { return false; }
+    let mut x = n;
+    while x > 1 {
+        if (x % 2) != 0 { return false; }
+        x = x / 2;
+    }
+    true
+}
+
+fn io_error(context: &str, e: VfsError) -> PagerError {
+    let _ = e;
+    PagerError {
+        kind: IoError,
+        message: context.to_owned(),
+    }
+}

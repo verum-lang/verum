@@ -1,0 +1,300 @@
+module core.database.sqlite.native.l1_pager.wal_state;
+
+// =============================================================================
+// l1_pager/wal_state.vr — WAL runtime state machine
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §8.1 .. §8.4
+//
+// The WAL ("Write-Ahead Log") backs the pager's commit + recovery
+// protocol.  Pre-fix: the L1 pager shipped only `BeMemory` and
+// `BeFile` backends; commits went straight to the main DB file with
+// no recovery story and no concurrent-reader support.  Post-fix:
+// the pager can run in WAL mode with the state machine here, the
+// frame I/O in `wal_writer.vr` + `wal_reader.vr`, and the WAL-aware
+// pager facade in `wal_pager.vr`.
+//
+// State per WAL session (private to one writer):
+//
+//   * `salt1` / `salt2`         — current WAL header salts; every
+//                                  frame's salts must match (§6.4)
+//   * `page_size`               — fixed for the life of the WAL file
+//   * `mx_frame`                — highest-numbered valid frame in WAL
+//                                  (first invalid is mx_frame + 1)
+//   * `n_backfill`              — frames already checkpointed back
+//                                  to the main DB; safely overwritten
+//                                  by future commits
+//   * `frame_index`             — Map<page_no, frame_no> — newest
+//                                  frame per page (read fast path)
+//   * `last_commit_db_size`     — db page count from the last
+//                                  commit-frame (the commit marker)
+//   * `checkpoint_seq`          — bumped on every Restart/Truncate
+//
+// All state is pure data — no I/O, no actor spawning.  The actor
+// owns one WalState; readers see snapshots through the snapshot
+// view (sqlite-native.md §4.3).
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.wal_frame_layout.file_header.WalFileHeader;
+mount core.database.sqlite.native.wal_frame_layout.frame_header.WalFrameHeader;
+
+// -----------------------------------------------------------------------------
+// WalState — runtime state of a WAL session
+// -----------------------------------------------------------------------------
+
+public type affine WalState is {
+    /// Salt1 of the active WAL header.  Every frame's `salt1` must
+    /// match.  Rotates on Restart/Truncate (Fossil random).
+    salt1: u32,
+    salt2: u32,
+    page_size: Int,
+    /// Highest-numbered valid frame in the WAL file.  0 means the
+    /// WAL is logically empty (header-only or freshly reset).
+    mx_frame: Int,
+    /// Frames already checkpointed back to main DB.  In [0, mx_frame].
+    n_backfill: Int,
+    /// Newest frame per page — Map<page_no, frame_no>.  Updated on
+    /// every appended frame; readers use this to find the most
+    /// recent value of a page (skipping checkpointed frames).
+    frame_index: Map<Int, Int>,
+    /// db_size from the most recent commit-frame, or 0 if no commit
+    /// has landed since the last reset.
+    last_commit_db_size: Int,
+    /// Bumped on every Restart / Truncate.  Persisted in the file
+    /// header so concurrent readers can detect a salt rotation.
+    checkpoint_seq: u32,
+};
+
+/// Initial WAL state for a freshly-created WAL file.  Salts are
+/// random in production (Fossil PRNG); for the foundation pass we
+/// seed with a deterministic well-known pair so tests are
+/// reproducible — `wal_writer::open_for_create` overrides with
+/// real randomness when wired through a Vfs::random_bytes call.
+public fn wal_state_new(page_size: Int) -> WalState {
+    WalState {
+        salt1: 0xDEADBEEF as u32,
+        salt2: 0xCAFEBABE as u32,
+        page_size: page_size,
+        mx_frame: 0,
+        n_backfill: 0,
+        frame_index: Map.new(),
+        last_commit_db_size: 0,
+        checkpoint_seq: 0 as u32,
+    }
+}
+
+/// Construct a WalState from an existing WAL file header (used by
+/// recovery — `wal_reader::recover_state_from_header` returns this
+/// after walking the frame stream and rebuilding `frame_index`).
+public fn wal_state_from_header(
+    hdr: &WalFileHeader,
+    mx_frame: Int,
+    n_backfill: Int,
+    frame_index: Map<Int, Int>,
+    last_commit_db_size: Int,
+) -> WalState {
+    WalState {
+        salt1: hdr.salt1,
+        salt2: hdr.salt2,
+        page_size: hdr.page_size,
+        mx_frame: mx_frame,
+        n_backfill: n_backfill,
+        frame_index: frame_index,
+        last_commit_db_size: last_commit_db_size,
+        checkpoint_seq: hdr.checkpoint_seq,
+    }
+}
+
+implement WalState {
+    /// `true` iff the WAL contains any committed frames not yet
+    /// checkpointed.  Used by the auto-checkpoint policy.
+    public fn has_pending_frames(&self) -> Bool {
+        self.mx_frame > self.n_backfill
+    }
+
+    /// Frames waiting for checkpoint = `mx_frame - n_backfill`.
+    public fn pending_frame_count(&self) -> Int {
+        self.mx_frame - self.n_backfill
+    }
+
+    /// `true` iff `page_no` has an in-WAL version newer than the
+    /// last checkpoint.  Used by the read fast path.
+    public fn has_wal_version(&self, page_no: Int) -> Bool {
+        match map_get_int(&self.frame_index, page_no) {
+            Some(frame_no) => frame_no > self.n_backfill,
+            None => false,
+        }
+    }
+
+    /// Frame number holding the newest version of `page_no`, or
+    /// `None` if the page has never been written to WAL OR its
+    /// only WAL frame has already been checkpointed (and is thus
+    /// freely overwritable).
+    public fn newest_frame_for(&self, page_no: Int) -> Maybe<Int> {
+        match map_get_int(&self.frame_index, page_no) {
+            Some(frame_no) => {
+                if frame_no > self.n_backfill { Some(frame_no) }
+                else { None }
+            }
+            None => None,
+        }
+    }
+
+    /// Record that a fresh frame has been appended.  Caller must
+    /// have already written the frame to disk; this updates the
+    /// in-memory bookkeeping.  `page_no` is the page the frame
+    /// targets; `is_commit` toggles whether `db_size_after_commit`
+    /// is recorded in `last_commit_db_size`.
+    public fn record_appended_frame(
+        &mut self,
+        page_no: Int,
+        is_commit: Bool,
+        db_size_after_commit: Int,
+    ) {
+        self.mx_frame = self.mx_frame + 1;
+        self.frame_index.insert(page_no, self.mx_frame);
+        if is_commit {
+            self.last_commit_db_size = db_size_after_commit;
+        }
+    }
+
+    /// Rewind a partially-staged transaction.  Drops every frame
+    /// after `keep_through_frame` from the index.  Used by
+    /// rollback (when a Commit fails) and by recovery (truncating
+    /// an incomplete txn at the salt-mismatch boundary).
+    public fn rollback_to_frame(&mut self, keep_through_frame: Int) {
+        if keep_through_frame >= self.mx_frame { return; }
+        // Walk frame_index and drop entries whose frame_no exceeds
+        // the keep boundary.  The frame_index is small (one entry per
+        // page touched in the txn) so the linear sweep is cheap.
+        let keys = self.frame_index.keys();
+        let mut i: Int = 0;
+        while i < keys.len() {
+            let page_no = keys[i];
+            match map_get_int(&self.frame_index, page_no) {
+                Some(frame_no) => {
+                    if frame_no > keep_through_frame {
+                        self.frame_index.remove(&page_no);
+                    }
+                }
+                None => {}
+            }
+            i = i + 1;
+        }
+        self.mx_frame = keep_through_frame;
+    }
+
+    /// Mark frames `[1 .. through_frame]` as checkpointed.  Called
+    /// by `wal_writer::checkpoint_drain` after the frames have been
+    /// flushed to the main DB file.
+    pub fn advance_backfill(&mut self, through_frame: Int) {
+        if through_frame > self.mx_frame { return; }
+        if through_frame > self.n_backfill {
+            self.n_backfill = through_frame;
+        }
+    }
+
+    /// Reset to a fresh WAL with rotated salts.  Used on Restart
+    /// and Truncate checkpoints.  `new_salt1` / `new_salt2` come
+    /// from the Vfs PRNG; the caller is responsible for writing a
+    /// new file header with these values BEFORE calling this.
+    public fn reset_for_restart(&mut self, new_salt1: u32, new_salt2: u32) {
+        self.salt1 = new_salt1;
+        self.salt2 = new_salt2;
+        self.mx_frame = 0;
+        self.n_backfill = 0;
+        self.frame_index = Map.new();
+        self.last_commit_db_size = 0;
+        // Wrap-around increment at u32::MAX is correct — checkpoint_seq
+        // is an opaque change counter, not an absolute monotonic.
+        let cur: Int = self.checkpoint_seq as Int;
+        self.checkpoint_seq = ((cur + 1) % 4294967296) as u32;
+    }
+
+    /// Validate that a freshly-decoded frame header carries our
+    /// salts — the standard §6.4 check that callers run on every
+    /// frame before applying it.
+    public fn frame_salts_valid(&self, fh: &WalFrameHeader) -> Bool {
+        fh.salt1 == self.salt1 && fh.salt2 == self.salt2
+    }
+
+    /// Snapshot the visible mx_frame for a fresh reader.  Once a
+    /// reader takes a snapshot it sees frames `[1 .. mx]` even if
+    /// the writer keeps appending (§4.3 reader-snapshot semantics).
+    public fn snapshot_mx_frame(&self) -> Int { self.mx_frame }
+}
+
+// -----------------------------------------------------------------------------
+// Local helpers — Verum's pattern matcher prefers method calls return
+// non-Int sums; explicitly thread the lookup through a typed helper so
+// the `Some/None` patterns dispatch on a `Maybe<Int>` rather than the
+// inferred-Int they get when called inline.
+// -----------------------------------------------------------------------------
+
+fn map_get_int(m: &Map<Int, Int>, k: Int) -> Maybe<Int> {
+    m.get(&k)
+}
+
+// -----------------------------------------------------------------------------
+// WalReaderSnapshot — frozen view used by readers
+// -----------------------------------------------------------------------------
+
+/// A reader-side snapshot taken from `WalState`.  Clones the
+/// frame_index and freezes mx_frame so the reader sees a stable
+/// view even while the writer keeps appending.  Cheap (the
+/// frame_index typically holds tens of entries between checkpoints).
+public type WalReaderSnapshot is {
+    salt1: u32,
+    salt2: u32,
+    page_size: Int,
+    mx_frame: Int,
+    n_backfill_at_open: Int,
+    frame_index: Map<Int, Int>,
+};
+
+public fn snapshot_wal(state: &WalState) -> WalReaderSnapshot {
+    // Map.clone deep-copies the entries — readers see a stable view
+    // immune to writer mutations.
+    let mut idx_clone: Map<Int, Int> = Map.new();
+    let keys = state.frame_index.keys();
+    let mut i: Int = 0;
+    while i < keys.len() {
+        let k = keys[i];
+        match map_get_int(&state.frame_index, k) {
+            Some(v) => { idx_clone.insert(k, v); }
+            None => {}
+        }
+        i = i + 1;
+    }
+    WalReaderSnapshot {
+        salt1: state.salt1,
+        salt2: state.salt2,
+        page_size: state.page_size,
+        mx_frame: state.mx_frame,
+        n_backfill_at_open: state.n_backfill,
+        frame_index: idx_clone,
+    }
+}
+
+implement WalReaderSnapshot {
+    /// Snapshot-aware lookup: returns the frame holding `page_no`'s
+    /// latest version IF it's between `n_backfill_at_open + 1` and
+    /// `mx_frame` (inclusive).  Frames checkpointed AFTER snapshot
+    /// open are still visible — the snapshot uses the frame_index
+    /// it cloned at open time.
+    public fn newest_frame_for(&self, page_no: Int) -> Maybe<Int> {
+        match map_get_int(&self.frame_index, page_no) {
+            Some(frame_no) => {
+                if frame_no > self.n_backfill_at_open && frame_no <= self.mx_frame {
+                    Some(frame_no)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        }
+    }
+}
