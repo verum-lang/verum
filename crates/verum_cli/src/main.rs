@@ -1284,6 +1284,17 @@ enum Commands {
         #[clap(long = "kernel-soundness")]
         kernel_soundness: bool,
 
+        /// kernel_v0 roster audit (task #154 / Phase 3).
+        /// Walks the canonical 10-rule kernel_v0 manifest and the
+        /// `core/verify/kernel_v0/rules/` directory on disk.
+        /// Reports per-rule (Proved / Admitted with IOU) and the
+        /// proved-vs-admitted split. Exits non-zero on
+        /// manifest↔filesystem drift (missing or orphan source
+        /// files). Output:
+        /// `target/audit-reports/kernel-v0-roster.json`.
+        #[clap(long = "kernel-v0-roster")]
+        kernel_v0_roster: bool,
+
         /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
         /// Walks every `apply kernel_*_strict(args)` invocation in the
         /// corpus's proof bodies and replays each literal-arg call
@@ -2728,7 +2739,12 @@ fn run_command(cli: Cli) -> Result<()> {
             match resolve_path(file.as_ref())? {
                 PathTarget::SingleFile(file_path) => {
                     verum_error::crash::set_input_file(file_path.as_str());
-                    ui::status("Running", &format!("{} ({})", file_path, tier_label));
+                    // The inner `run_script_interpreted` /
+                    // `run_native_compilation` paths print their own
+                    // `Running <file> (interpreter|cached VBC|aot)`
+                    // status with the cache-state-aware label.
+                    // Printing here too would emit a duplicate
+                    // `Running` line on every invocation.
                     commands::file::run_with_tier_and_flags(
                         file_path.as_str(),
                         args_list,
@@ -3743,6 +3759,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_rules,
             kernel_recheck,
             kernel_soundness,
+            kernel_v0_roster,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -3797,6 +3814,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_recheck_with_format(output_format)
             } else if kernel_soundness {
                 commands::audit::audit_kernel_soundness_with_format(output_format)
+            } else if kernel_v0_roster {
+                commands::audit::audit_kernel_v0_roster_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {
