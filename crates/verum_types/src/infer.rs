@@ -483,9 +483,22 @@ pub struct TypeChecker {
     /// than a TypeVar id because classification is a property of
     /// BINDINGS (not types) — two different variables can carry
     /// the same `Type::Int` but distinct classifications.
-    /// Phase 2b-Foundation lays the storage; Phase 2b-Integration
-    /// (still pending in this task) wires the propagation rules
-    /// in the synth/check arms.
+    ///
+    /// Architecture phases (all CLOSED):
+    ///   * Phase 2b-Foundation (#289): this map (storage).
+    ///   * Phase 2b-Integration (#291): seeded from
+    ///     `@classification` attributes at
+    ///     `register_function_signature` time.
+    ///   * Phase 2b-Followup (#292): expression classification
+    ///     propagated through let-bindings via
+    ///     `expr_classification` + StmtKind::Let arm.
+    ///   * Phase 2b-Helper (#293): `check_classification_downflow`
+    ///     enforces lattice contract `param.subsumes(arg)`.
+    ///   * Phase 2b-Integration (#294):
+    ///     `check_module_call_classifications` walker invokes
+    ///     the helper at every call site.
+    ///   * Phase 2b-@declassify (#295): functions carrying
+    ///     `@declassify` are skipped by the walker.
     pub(crate) classification_map:
         std::collections::HashMap<verum_common::Text, verum_common::mls::MlsLevel>,
     /// Name resolver for cross-module resolution
