@@ -6892,21 +6892,62 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(raw_ptr)
     }
 
+    /// Get or declare a libc-free exit wrapper.
+    ///
+    /// Returns a (i64) -> noreturn wrapper that internally calls
+    /// `verum_os_exit` (libc-free; defined in
+    /// `platform_ir.rs::emit_verum_os_exit` — uses ExitProcess on
+    /// Windows, `_exit` syscall on Linux, libSystem `_exit` on
+    /// macOS).
+    ///
+    /// Wrapper preserves the historical (i64) caller signature so
+    /// existing call sites don't need updating; the (i64 → i32)
+    /// truncation happens in the wrapper body.
     fn get_or_declare_exit(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("_exit") {
+        let wrapper_name = "verum_internal_exit_i64";
+        if let Some(f) = module.get_function(wrapper_name) {
             return f;
         }
         let i64_type = self.context.i64_type();
-        let fn_type = self
-            .context
-            .void_type()
-            .fn_type(&[i64_type.into()], false);
-        let f = module.add_function("_exit", fn_type, None);
-        f.add_attribute(
+        let i32_type = self.context.i32_type();
+        let void_type = self.context.void_type();
+
+        let wrapper_fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let wrapper = module.add_function(wrapper_name, wrapper_fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+        wrapper.add_attribute(
             verum_llvm::attributes::AttributeLoc::Function,
             self.context.create_string_attribute("noreturn", ""),
         );
-        f
+
+        // Underlying libc-free exit.
+        let os_exit = module.get_function("verum_os_exit").unwrap_or_else(|| {
+            let ft = void_type.fn_type(&[i32_type.into()], false);
+            let f = module.add_function("verum_os_exit", ft, None);
+            f.add_attribute(
+                verum_llvm::attributes::AttributeLoc::Function,
+                self.context.create_string_attribute("noreturn", ""),
+            );
+            f
+        });
+
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let code_i64 = wrapper
+            .get_first_param()
+            .expect("exit wrapper missing param 0")
+            .into_int_value();
+        let code_i32 = builder
+            .build_int_truncate(code_i64, i32_type, "code_i32")
+            .expect("exit i64 trunc");
+        let _ = builder
+            .build_call(os_exit, &[code_i32.into()], "")
+            .expect("exit call os_exit");
+        builder.build_unreachable().expect("exit unreachable");
+
+        wrapper
     }
 
     /// Get or declare a 3-arg memset wrapper that internally calls

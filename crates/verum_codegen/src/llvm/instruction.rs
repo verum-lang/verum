@@ -97,6 +97,94 @@ fn checked_malloc_instr<'ctx>(
     Ok(raw_ptr)
 }
 
+/// Get or declare a libc-free `puts(s) -> i32` wrapper.
+///
+/// **Libc-free**: emits an internal-linkage wrapper that calls
+/// `verum_internal_strlen` + `verum_internal_write` (both already
+/// libc-free — see runtime.rs).  The wrapper writes the string to
+/// stdout (fd=1) plus a trailing newline, matching libc puts's
+/// observable behaviour.  Returns 0 on success (non-negative;
+/// matches libc puts's return-value contract).
+///
+/// See `docs/architecture/no-libc-architecture.md`.
+fn get_or_declare_internal_puts<'ctx>(
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    module: &Module<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    let wrapper_name = "verum_internal_puts";
+    if let Some(f) = module.get_function(wrapper_name) {
+        return f;
+    }
+    let i8_type = llvm_ctx.i8_type();
+    let i32_type = llvm_ctx.i32_type();
+    let i64_type = llvm_ctx.i64_type();
+    let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+
+    let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
+    let func = module.add_function(wrapper_name, fn_type, None);
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+    // Declare verum_internal_strlen (i64 strlen(ptr)).
+    let strlen_fn = module.get_function("verum_internal_strlen").unwrap_or_else(|| {
+        let ft = i64_type.fn_type(&[ptr_type.into()], false);
+        module.add_function("verum_internal_strlen", ft, None)
+    });
+
+    // Declare verum_internal_write (i64 write(i64 fd, ptr buf, i64 count)).
+    let write_fn = module.get_function("verum_internal_write").unwrap_or_else(|| {
+        let ft = i64_type.fn_type(
+            &[i64_type.into(), ptr_type.into(), i64_type.into()],
+            false,
+        );
+        module.add_function("verum_internal_write", ft, None)
+    });
+
+    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let builder = llvm_ctx.create_builder();
+    builder.position_at_end(entry);
+
+    let s_param = func.get_first_param().expect("puts p0").into_pointer_value();
+
+    // len = strlen(s)
+    let len = builder
+        .build_call(strlen_fn, &[s_param.into()], "len")
+        .expect("puts strlen call")
+        .try_as_basic_value()
+        .basic()
+        .expect("puts strlen ret")
+        .into_int_value();
+
+    // write(1, s, len)
+    let stdout_fd = i64_type.const_int(1, false);
+    let _ = builder
+        .build_call(
+            write_fn,
+            &[stdout_fd.into(), s_param.into(), len.into()],
+            "",
+        )
+        .expect("puts write body");
+
+    // Append newline: write(1, "\n", 1)
+    let nl = builder
+        .build_global_string_ptr("\n", "puts_nl")
+        .expect("puts nl global");
+    let one = i64_type.const_int(1, false);
+    let _ = builder
+        .build_call(
+            write_fn,
+            &[stdout_fd.into(), nl.as_pointer_value().into(), one.into()],
+            "",
+        )
+        .expect("puts write nl");
+
+    builder
+        .build_return(Some(&i32_type.const_zero()))
+        .expect("puts return 0");
+
+    let _ = i8_type; // unused after refactor; kept for type-witness symmetry
+    func
+}
+
 /// Get or declare a libc-free `strcmp(a, b) -> i32` wrapper.
 ///
 /// **Libc-free**: emits an internal-linkage byte-by-byte
@@ -2811,13 +2899,10 @@ pub fn lower_instruction<'ctx>(
             ctx.builder().position_at_end(then_bb);
             let i32_ty = ctx.types().i32_type();
             let i64_type = ctx.types().i64_type();
-            let puts_fn = module.get_function("puts").unwrap_or_else(|| {
-                let fn_type = i32_ty.fn_type(&[ptr_type.into()], false);
-                module.add_function("puts", fn_type, None)
-            });
-            let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+            let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+            let exit_fn = module.get_function("verum_internal_exit_i64").unwrap_or_else(|| {
                 let fn_type = ctx.llvm_context().void_type().fn_type(&[i64_type.into()], false);
-                let f = module.add_function("_exit", fn_type, None);
+                let f = module.add_function("verum_internal_exit_i64", fn_type, None);
                 f.add_attribute(
                     verum_llvm::attributes::AttributeLoc::Function,
                     ctx.llvm_context().create_string_attribute("noreturn", ""),
@@ -2858,13 +2943,10 @@ pub fn lower_instruction<'ctx>(
             // with interpreter (was: abort() → exit 134).
             let i32_ty = ctx.types().i32_type();
             let i64_type = ctx.types().i64_type();
-            let puts_fn = module.get_function("puts").unwrap_or_else(|| {
-                let fn_type = i32_ty.fn_type(&[ptr_type.into()], false);
-                module.add_function("puts", fn_type, None)
-            });
-            let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+            let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+            let exit_fn = module.get_function("verum_internal_exit_i64").unwrap_or_else(|| {
                 let fn_type = ctx.llvm_context().void_type().fn_type(&[i64_type.into()], false);
-                let f = module.add_function("_exit", fn_type, None);
+                let f = module.add_function("verum_internal_exit_i64", fn_type, None);
                 f.add_attribute(
                     verum_llvm::attributes::AttributeLoc::Function,
                     ctx.llvm_context().create_string_attribute("noreturn", ""),
@@ -6126,13 +6208,10 @@ fn emit_permission_panic<'ctx>(
         .build_global_string_ptr(&msg, "perm_denied_msg")
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
-    let puts_fn = module.get_function("puts").unwrap_or_else(|| {
-        let fn_type = i32_ty.fn_type(&[ptr_ty.into()], false);
-        module.add_function("puts", fn_type, None)
-    });
-    let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+    let exit_fn = module.get_function("verum_internal_exit_i64").unwrap_or_else(|| {
         let fn_type = llvm_ctx.void_type().fn_type(&[i64_ty.into()], false);
-        let f = module.add_function("_exit", fn_type, None);
+        let f = module.add_function("verum_internal_exit_i64", fn_type, None);
         f.add_attribute(
             verum_llvm::attributes::AttributeLoc::Function,
             llvm_ctx.create_string_attribute("noreturn", ""),
@@ -15921,11 +16000,11 @@ fn lower_extended<'ctx>(
             let module = ctx.get_module();
             let llvm_ctx = ctx.llvm_context();
             let i64_ty = llvm_ctx.i64_type();
-            let exit_fn = if let Some(f) = module.get_function("_exit") {
+            let exit_fn = if let Some(f) = module.get_function("verum_internal_exit_i64") {
                 f
             } else {
                 let fn_type = llvm_ctx.void_type().fn_type(&[i64_ty.into()], false);
-                let f = module.add_function("_exit", fn_type, None);
+                let f = module.add_function("verum_internal_exit_i64", fn_type, None);
                 f.add_attribute(
                     verum_llvm::attributes::AttributeLoc::Function,
                     llvm_ctx.create_string_attribute("noreturn", ""),
@@ -18364,13 +18443,10 @@ fn safe_int_div<'ctx>(
     ctx.builder().position_at_end(panic_bb);
     let i32_ty = ctx.types().i32_type();
     let i64_type = ctx.types().i64_type();
-    let puts_fn = module.get_function("puts").unwrap_or_else(|| {
-        let fn_type = i32_ty.fn_type(&[ptr_type.into()], false);
-        module.add_function("puts", fn_type, None)
-    });
-    let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+    let exit_fn = module.get_function("verum_internal_exit_i64").unwrap_or_else(|| {
         let fn_type = ctx.llvm_context().void_type().fn_type(&[i64_type.into()], false);
-        let f = module.add_function("_exit", fn_type, None);
+        let f = module.add_function("verum_internal_exit_i64", fn_type, None);
         f.add_attribute(
             verum_llvm::attributes::AttributeLoc::Function,
             ctx.llvm_context().create_string_attribute("noreturn", ""),
@@ -18427,14 +18503,11 @@ fn safe_int_rem<'ctx>(
     // Panic block
     ctx.builder().position_at_end(panic_bb);
     let i32_ty = ctx.types().i32_type();
-    let puts_fn = module.get_function("puts").unwrap_or_else(|| {
-        let fn_type = i32_ty.fn_type(&[ptr_type.into()], false);
-        module.add_function("puts", fn_type, None)
-    });
+    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
     let i64_type = ctx.types().i64_type();
-    let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+    let exit_fn = module.get_function("verum_internal_exit_i64").unwrap_or_else(|| {
         let fn_type = ctx.llvm_context().void_type().fn_type(&[i64_type.into()], false);
-        let f = module.add_function("_exit", fn_type, None);
+        let f = module.add_function("verum_internal_exit_i64", fn_type, None);
         f.add_attribute(
             verum_llvm::attributes::AttributeLoc::Function,
             ctx.llvm_context().create_string_attribute("noreturn", ""),
@@ -18956,19 +19029,16 @@ fn lower_ctx_check_negative<'ctx>(
         ctx_name, ctx_name, func_name,
     );
 
-    // Use puts + _exit(1) for the error — unified exit code with interpreter
-    let puts_fn = module.get_function("puts").unwrap_or_else(|| {
-        let puts_ty = llvm_ctx.i32_type().fn_type(
-            &[ctx.types().ptr_type().into()],
-            false,
-        );
-        module.add_function("puts", puts_ty, None)
-    });
+    // Use puts + verum_os_exit(1) for the error — unified with interpreter.
+    // Both libc-free.
+    let puts_fn = get_or_declare_internal_puts(llvm_ctx, &module);
 
     let i64_type = ctx.types().i64_type();
-    let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
-        let fn_type = llvm_ctx.void_type().fn_type(&[i64_type.into()], false);
-        let f = module.add_function("_exit", fn_type, None);
+    let _ = i64_type; // unused after libc-free migration
+    let i32_type = llvm_ctx.i32_type();
+    let exit_fn = module.get_function("verum_os_exit").unwrap_or_else(|| {
+        let fn_type = llvm_ctx.void_type().fn_type(&[i32_type.into()], false);
+        let f = module.add_function("verum_os_exit", fn_type, None);
         f.add_attribute(
             verum_llvm::attributes::AttributeLoc::Function,
             llvm_ctx.create_string_attribute("noreturn", ""),
@@ -18985,7 +19055,7 @@ fn lower_ctx_check_negative<'ctx>(
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
     ctx.builder()
-        .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
+        .build_call(exit_fn, &[i32_type.const_int(1, false).into()], "")
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
     ctx.builder()
@@ -24107,10 +24177,7 @@ fn lower_debug_print<'ctx>(
     if is_string {
         // Register holds a Text* pointer (stored as i64 in alloca mode).
         // Extract char* via verum_text_get_ptr, then use libc puts.
-        let puts_fn = module.get_function("puts").unwrap_or_else(|| {
-            let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], false);
-            module.add_function("puts", fn_type, None)
-        });
+        let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
         // Extract char* from Text object
         let text_get_ptr_fn = module.get_function("verum_text_get_ptr").unwrap_or_else(|| {
             let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
@@ -24128,10 +24195,7 @@ fn lower_debug_print<'ctx>(
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
     } else if ctx.is_bool_register(value.0) {
         // Bool register: print "true" or "false"
-        let puts_fn = module.get_function("puts").unwrap_or_else(|| {
-            let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], false);
-            module.add_function("puts", fn_type, None)
-        });
+        let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
         let true_str = ctx.builder()
             .build_global_string_ptr("true", "debug_bool_true")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
@@ -24170,10 +24234,7 @@ fn lower_debug_print<'ctx>(
         match val {
             BasicValueEnum::PointerValue(v) => {
                 // Non-string pointer — print as string (best guess)
-                let puts_fn = module.get_function("puts").unwrap_or_else(|| {
-                    let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], false);
-                    module.add_function("puts", fn_type, None)
-                });
+                let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
                 ctx.builder()
                     .build_call(puts_fn, &[v.into()], "")
                     .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
