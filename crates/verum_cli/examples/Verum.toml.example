@@ -1,7 +1,11 @@
 # Verum.toml - Complete LLVM Optimization Configuration Example
-# This file demonstrates all available LLVM backend and optimization settings
+# This file demonstrates all available LLVM backend and optimization settings.
+#
+# Section name is `[cog]` (Verum's term for a package/crate).  Pre-fix
+# this example used `[package]` which the parser would silently ignore —
+# users got an error like "missing field `name`" with no clue why.
 
-[package]
+[cog]
 name = "my-verum-project"
 version = "0.1.0"
 authors = ["Your Name <you@example.com>"]
