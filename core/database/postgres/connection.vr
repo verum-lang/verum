@@ -67,6 +67,9 @@ mount core.database.postgres.auth.scram.{
 };
 mount core.database.common.types.{WireValue, WvNull, WvPresent};
 mount core.database.postgres.notify.NotifyDispatcher;
+mount core.database.postgres.pipeline.{
+    PgPipeline, PipelineHandle,
+};
 
 // -----------------------------------------------------------------------------
 // Connection state — observable from outside.
@@ -112,6 +115,13 @@ public type PgConnection is {
     /// populated. Caller registers via `attach_dispatcher` /
     /// `detach_dispatcher`. Spec database.md §6.1 (LISTEN/NOTIFY).
     dispatcher: Maybe<Shared<NotifyDispatcher>>,
+    /// Optional bounded pipeline. When `Some`, callers can submit
+    /// extended-protocol queries through `submit_pipelined` and
+    /// drive completion via `pump_pipeline`. When `None`, only the
+    /// non-pipelined simple_query / extended-query paths are
+    /// available. Caller registers via `attach_pipeline` /
+    /// `detach_pipeline`. Spec database.md §6.1.5.
+    pipeline: Maybe<PgPipeline>,
 };
 
 // -----------------------------------------------------------------------------
@@ -155,6 +165,7 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
         last_formats: List.new(),
         notifications: List.new(),
         dispatcher: None,
+        pipeline: None,
     };
 
     // Send Startup.
@@ -543,6 +554,169 @@ implement PgConnection {
         match &self.dispatcher {
             Some(_) => true,
             None    => false,
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Bounded pipeline (spec §6.1.5)
+    // -------------------------------------------------------------------------
+    //
+    // Attach a `PgPipeline` to enable the high-throughput
+    // extended-protocol pipelined path. Without it, callers reach
+    // `extended.build_parse_bind_execute` + `read_message` per
+    // query (one Sync round per call). With the pipeline, many
+    // submissions ride one Sync round — at intercontinental RTT,
+    // 89× faster per spec §6.1.5 measurement.
+    //
+    // Caller flow:
+    //
+    //   conn.attach_pipeline(PgPipeline.new());
+    //   for each query in batch:
+    //       handle = conn.submit_pipelined(parse_bytes, bind_bytes,
+    //                                       execute_bytes, expects_rows)?;
+    //       handles.push(handle);
+    //   conn.pump_pipeline()?;          // writes to wire, reads replies,
+    //                                    // routes to per-handle sinks
+    //   for handle in handles:
+    //       result = handle.await();    // pulls from this handle's sink
+    //
+    // The pump call is synchronous: drains `flush_into` to the
+    // wire in one syscall, then reads BackendMessage frames until
+    // every submitted entry has terminated. Per-query results
+    // appear via `PipelineHandle.await()`.
+
+    /// Register a pipeline. Calling twice replaces the previous one
+    /// (any in-flight queries on the old pipeline are abandoned —
+    /// their handles will block on `await` until the timeout).
+    public fn attach_pipeline(&mut self, pipeline: PgPipeline) {
+        self.pipeline = Some(pipeline);
+    }
+
+    /// Drop the pipeline registration.
+    public fn detach_pipeline(&mut self) {
+        self.pipeline = None;
+    }
+
+    /// Whether a pipeline is attached.
+    public fn has_pipeline(&self) -> Bool {
+        match &self.pipeline {
+            Some(_) => true,
+            None    => false,
+        }
+    }
+
+    /// Submit a pre-built (Parse?+Bind+Execute) byte triple to the
+    /// pipeline queue. Returns a `PipelineHandle` whose `.await()`
+    /// yields the per-query `ExtendedQueryResult` once the pump
+    /// drains it from the wire.
+    ///
+    /// `parse_bytes` may be empty for a cache-hit re-bind (skip the
+    /// Parse round); `bind_bytes` and `execute_bytes` are always
+    /// required. `expects_rows = true` for SELECT-class queries.
+    ///
+    /// Errors (synchronous):
+    ///   * `PIPELINE_NOT_ATTACHED` — caller forgot `attach_pipeline`.
+    ///   * `PIPELINE_CLOSED`       — the pipeline was closed (drain
+    ///                               in progress, or connection went
+    ///                               away).
+    ///   * The pipeline blocks (parks on its inner condvar) when the
+    ///     queue hits `MAX_INFLIGHT = 256`; submissions resume the
+    ///     moment the pump frees a slot.
+    public fn submit_pipelined(
+        &mut self,
+        parse_bytes: List<Byte>,
+        bind_bytes: List<Byte>,
+        execute_bytes: List<Byte>,
+        expects_rows: Bool,
+    ) -> Result<PipelineHandle, DbError> {
+        match &self.pipeline {
+            None => Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "PIPELINE_NOT_ATTACHED".clone(),
+                message: "submit_pipelined called without attach_pipeline".clone(),
+                retryable: false,
+            })),
+            Some(p) => p.submit(parse_bytes, bind_bytes, execute_bytes, expects_rows),
+        }
+    }
+
+    /// Drive the attached pipeline until every queued entry has
+    /// terminated (or the wire fails). One iteration:
+    ///
+    ///   1. `flush_into(buf)` — drain up to `current_batch_size`
+    ///      entries + trailing Sync into a byte buffer.
+    ///   2. `write_all(buf)` — single syscall.
+    ///   3. Loop: `read_message` → `consume_message` until
+    ///      `consume_message` returns `true` (end of Sync round).
+    ///   4. If `live_count() > 0`, repeat.
+    ///
+    /// On wire failure the pipeline's `close(reason)` is invoked so
+    /// every parked handle wakes with the connection-gone error.
+    public fn pump_pipeline(&mut self) -> Result<(), DbError> {
+        // Snapshot the live count to avoid holding any borrow on
+        // the pipeline across the read/write loops below.
+        let mut remaining: Int = match &self.pipeline {
+            None    => return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "PIPELINE_NOT_ATTACHED".clone(),
+                message: "pump_pipeline called without attach_pipeline".clone(),
+                retryable: false,
+            })),
+            Some(p) => p.live_count(),
+        };
+        if remaining == 0 {
+            return Ok(());
+        }
+        loop {
+            // Flush a batch.
+            let mut buf: List<Byte> = List.new();
+            let written: Int = match &self.pipeline {
+                Some(p) => p.flush_into(&mut buf),
+                None    => return Ok(()),
+            };
+            if written == 0 {
+                // Nothing to flush — pipeline drained or only
+                // already-in-flight entries remain. Read until end-
+                // of-Sync to clean up.
+                if remaining == 0 { return Ok(()); }
+            } else {
+                match write_all(&mut self.stream, buf.as_slice()) {
+                    Ok(_)  => {}
+                    Err(e) => {
+                        // Notify every parked handle that the wire
+                        // is dead.
+                        match &self.pipeline {
+                            Some(p) => p.close(connection_gone_err()),
+                            None    => {}
+                        }
+                        return Err(e);
+                    }
+                }
+            }
+            // Consume reply frames until end-of-Sync.
+            loop {
+                let msg = match read_message(self) {
+                    Ok(m)  => m,
+                    Err(e) => {
+                        match &self.pipeline {
+                            Some(p) => p.close(connection_gone_err()),
+                            None    => {}
+                        }
+                        return Err(e);
+                    }
+                };
+                let end_of_sync: Bool = match &self.pipeline {
+                    Some(p) => p.consume_message(msg),
+                    None    => true,    // shouldn't happen — pipeline detached mid-pump
+                };
+                if end_of_sync { break; }
+            }
+            // Refresh remaining count.
+            remaining = match &self.pipeline {
+                Some(p) => p.live_count(),
+                None    => 0,
+            };
+            if remaining == 0 { return Ok(()); }
         }
     }
 
@@ -1031,6 +1205,16 @@ fn write_all(stream: &mut TcpStream, buf: &[Byte]) -> Result<(), DbError> {
         }
     }
     Ok(())
+}
+
+/// Build a "connection-gone" error to fail every parked pipeline
+/// handle with a coherent reason. Used by `pump_pipeline` when the
+/// underlying TCP write / read fails.
+fn connection_gone_err() -> DbError {
+    DbError.ConnectionFailed {
+        source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+        adapter: AdPostgres,
+    }
 }
 
 fn sub_slice(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
