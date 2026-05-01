@@ -432,6 +432,12 @@ impl<T> Maybe<T> {
     /// Converts from `Maybe<T>` to `Maybe<Pin<&T>>`.
     #[inline]
     pub fn as_pin_ref(self: std::pin::Pin<&Self>) -> Maybe<std::pin::Pin<&T>> {
+        // SAFETY: Pin projection — when self: Pin<&Maybe<T>> is
+        // structurally pinned, every reachable T inside it is
+        // also pinned (textbook structural pinning for `enum`
+        // variants).  `Pin::new_unchecked` is therefore sound:
+        // we promise not to move `x` and the caller's outer
+        // pin contract guarantees we won't.
         unsafe {
             match *std::pin::Pin::get_ref(self) {
                 Maybe::Some(ref x) => Maybe::Some(std::pin::Pin::new_unchecked(x)),
@@ -443,6 +449,12 @@ impl<T> Maybe<T> {
     /// Converts from `Maybe<T>` to `Maybe<Pin<&mut T>>`.
     #[inline]
     pub fn as_pin_mut(self: std::pin::Pin<&mut Self>) -> Maybe<std::pin::Pin<&mut T>> {
+        // SAFETY: Pin projection — symmetric to `as_pin_ref`.
+        // `get_unchecked_mut` returns the underlying &mut Maybe<T>;
+        // we re-wrap each variant's payload in `Pin::new_unchecked`
+        // to project the structural pin onto the inner T.  Sound
+        // because Maybe's variants don't have moveable interior
+        // mutability that would invalidate the pin contract.
         unsafe {
             match *std::pin::Pin::get_unchecked_mut(self) {
                 Maybe::Some(ref mut x) => Maybe::Some(std::pin::Pin::new_unchecked(x)),
@@ -472,6 +484,11 @@ impl<T> Maybe<T> {
         *self = Maybe::Some(value);
         match self {
             Maybe::Some(ref mut v) => v,
+            // SAFETY: the immediately preceding statement assigned
+            // `Maybe::Some(value)` (or the if-block did), so the
+            // None arm is provably unreachable.  Using
+            // `unreachable_unchecked` avoids a redundant runtime
+            // panic check in the optimised build.
             Maybe::None => unsafe { std::hint::unreachable_unchecked() },
         }
     }
@@ -484,6 +501,11 @@ impl<T> Maybe<T> {
         }
         match self {
             Maybe::Some(ref mut v) => v,
+            // SAFETY: the immediately preceding statement assigned
+            // `Maybe::Some(value)` (or the if-block did), so the
+            // None arm is provably unreachable.  Using
+            // `unreachable_unchecked` avoids a redundant runtime
+            // panic check in the optimised build.
             Maybe::None => unsafe { std::hint::unreachable_unchecked() },
         }
     }
@@ -508,6 +530,11 @@ impl<T> Maybe<T> {
         }
         match self {
             Maybe::Some(ref mut v) => v,
+            // SAFETY: the immediately preceding statement assigned
+            // `Maybe::Some(value)` (or the if-block did), so the
+            // None arm is provably unreachable.  Using
+            // `unreachable_unchecked` avoids a redundant runtime
+            // panic check in the optimised build.
             Maybe::None => unsafe { std::hint::unreachable_unchecked() },
         }
     }

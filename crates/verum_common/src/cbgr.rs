@@ -737,6 +737,14 @@ impl TrackedAllocation {
     /// Get the CBGR header
     #[inline]
     pub fn header(&self) -> &CbgrHeader {
+        // SAFETY: TrackedAllocation maintains the invariant that
+        // `self.ptr` always points to user-data immediately after
+        // a valid CbgrHeader (see `tracked_alloc_zeroed` which
+        // initialises the header before constructing
+        // TrackedAllocation::from_user_ptr).  `ptr.sub(SIZE)` is
+        // therefore in-bounds and points to a properly-initialised
+        // CbgrHeader; the cast + dereference is sound for the
+        // lifetime of self's borrow.
         unsafe {
             let header_ptr = self.ptr.sub(CbgrHeader::SIZE) as *const CbgrHeader;
             &*header_ptr
@@ -746,6 +754,11 @@ impl TrackedAllocation {
     /// Get a mutable reference to the CBGR header
     #[inline]
     pub fn header_mut(&mut self) -> &mut CbgrHeader {
+        // SAFETY: same invariant as `header` — TrackedAllocation
+        // owns the header bytes preceding `self.ptr`, and the
+        // `&mut self` borrow proves no other reference exists, so
+        // the resulting `&mut CbgrHeader` is unique for its
+        // lifetime.
         unsafe {
             let header_ptr = self.ptr.sub(CbgrHeader::SIZE) as *mut CbgrHeader;
             &mut *header_ptr
@@ -785,12 +798,22 @@ pub fn tracked_alloc_zeroed(size: usize, align: usize) -> Result<TrackedAllocati
     let layout = Layout::from_size_align(total_size, actual_align)
         .map_err(|_| CbgrErrorCode::AllocationFailed)?;
 
+    // SAFETY: `Layout::from_size_align` succeeded above, so the
+    // layout is valid (size aligned, non-zero size — total_size is
+    // SIZE + size where SIZE > 0).  `alloc_zeroed` is sound for any
+    // valid Layout; null-check below handles allocation failure
+    // before the pointer is used.
     let base_ptr = unsafe { alloc_zeroed(layout) };
     if base_ptr.is_null() {
         return Err(CbgrErrorCode::AllocationFailed);
     }
 
-    // Initialize the CBGR header
+    // Initialize the CBGR header.
+    // SAFETY: `base_ptr` is non-null (checked above), aligned to
+    // `actual_align >= align_of::<CbgrHeader>()` (computed in the
+    // layout), and points to `total_size = SIZE + size` writable
+    // bytes.  `ptr::write` of a fresh CbgrHeader is sound; `add`
+    // by SIZE stays in-bounds because total_size accounts for it.
     unsafe {
         let header_ptr = base_ptr as *mut CbgrHeader;
         std::ptr::write(header_ptr, CbgrHeader::new(0));
