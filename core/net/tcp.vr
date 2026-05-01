@@ -688,9 +688,11 @@ implement Write for TcpStream {
 // poll_read: if data ready → recv() → Ready(n); if WouldBlock → Pending +
 // waker registered with I/O engine so receiver is woken on next read event.
 //
-// Buffer parameter is `&mut List<Int>` per the protocol contract; each Int
-// holds one byte. For higher performance, callers should use the explicit
-// byte-slice methods `read_async` / `write_async` below.
+// Buffer parameter is `&mut List<Int>` per the AsyncRead / AsyncWrite
+// protocol contract; each Int holds one byte.  The user-facing
+// `read_async` / `write_async` wrappers below speak `List<Byte>`
+// (semantic-honesty migration #316) and bridge to this protocol via
+// a single conversion per await.
 
 implement AsyncRead for TcpStream {
     fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Int>) -> Poll<IoResult<Int>> {
@@ -782,23 +784,34 @@ implement AsyncWrite for TcpStream {
 // =============================================================================
 
 implement TcpStream {
-    /// Async read — returns the number of bytes read.
-    pub async fn read_async(&mut self, buf: &mut List<Int>) -> Result<Int, IoError> {
+    /// Async read — returns the number of bytes read into `buf`.
+    ///
+    /// `buf` is `&mut List<Byte>` (semantic-honesty migration #316
+    /// follow-up): network reads produce bytes, not 8-byte Ints.
+    /// Internally bridges to `poll_read` (still `List<Int>` per the
+    /// AsyncRead protocol) using a scratch list, then copies down to
+    /// `Byte` once per await.
+    pub async fn read_async(&mut self, buf: &mut List<Byte>) -> Result<Int, IoError> {
         // Simple poll-driven loop. Real implementation builds a Future.
         let mut fut = AsyncReadFut { stream: self, buf: buf };
         fut.await
     }
 
-    /// Async write — returns the number of bytes written.
-    pub async fn write_async(&mut self, buf: &List<Int>) -> Result<Int, IoError> {
+    /// Async write — returns the number of bytes written from `buf`.
+    ///
+    /// `buf` is `&List<Byte>` post-#316.  Internally marshals to a
+    /// scratch `List<Int>` for the AsyncWrite protocol's `poll_write`.
+    pub async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError> {
         let mut fut = AsyncWriteFut { stream: self, buf: buf };
         fut.await
     }
 
     /// Cancellable async read — returns Err on token fire.
+    ///
+    /// `buf` is `&mut List<Byte>` post-#316.  See `read_async`.
     pub async fn read_cancellable(
         &mut self,
-        buf: &mut List<Int>,
+        buf: &mut List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
@@ -808,9 +821,11 @@ implement TcpStream {
     }
 
     /// Cancellable async write.
+    ///
+    /// `buf` is `&List<Byte>` post-#316.  See `write_async`.
     pub async fn write_cancellable(
         &mut self,
-        buf: &List<Int>,
+        buf: &List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
@@ -820,31 +835,57 @@ implement TcpStream {
     }
 }
 
-// Helper Future types for read_async/write_async.
+// Helper Future types for read_async / write_async.
+//
+// Bridge between the byte-typed user-facing API
+// (`read_async(&mut List<Byte>)` / `write_async(&List<Byte>)`) and
+// the AsyncRead / AsyncWrite protocols, which still describe their
+// buffers in `List<Int>` form.  Conversion happens here once per
+// await — consumers never see the Int form.
 
 public type AsyncReadFut<'a> is {
     stream: &'a mut TcpStream,
-    buf: &'a mut List<Int>,
+    buf: &'a mut List<Byte>,
 };
 
 implement<'a> Future for AsyncReadFut<'a> {
     type Output = Result<Int, IoError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
-        self.stream.poll_read(cx, self.buf)
+        let mut int_buf: List<Int> = List.with_capacity(self.buf.capacity());
+        match self.stream.poll_read(cx, &mut int_buf) {
+            Poll.Pending => Poll.Pending,
+            Poll.Ready(r) => match r {
+                Err(e) => Poll.Ready(Err(e)),
+                Ok(n) => {
+                    // Copy the freshly-read Ints into the caller's
+                    // Byte buffer, masking down to the low 8 bits.
+                    for i in 0..n {
+                        self.buf.push((int_buf[i] & 0xFF) as Byte);
+                    }
+                    Poll.Ready(Ok(n))
+                }
+            },
+        }
     }
 }
 
 public type AsyncWriteFut<'a> is {
     stream: &'a mut TcpStream,
-    buf: &'a List<Int>,
+    buf: &'a List<Byte>,
 };
 
 implement<'a> Future for AsyncWriteFut<'a> {
     type Output = Result<Int, IoError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
-        self.stream.poll_write(cx, self.buf)
+        // Marshal the caller's Byte slice into a scratch List<Int>
+        // for the AsyncWrite protocol's poll_write.
+        let mut int_buf: List<Int> = List.with_capacity(self.buf.len());
+        for i in 0..self.buf.len() {
+            int_buf.push(self.buf[i] as Int);
+        }
+        self.stream.poll_write(cx, &int_buf)
     }
 }
 

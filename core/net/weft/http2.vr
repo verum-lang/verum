@@ -416,8 +416,9 @@ pub async fn run_h2_session<H: Handler>(
     // 2. Send server SETTINGS (bounded defaults per §6.16).
     // -------------------------------------------------------------------------
     let settings_frame = build_server_settings(limits);
-    let mut out: List<Int> = List.new();
-    encode_frame_to_ints(&settings_frame, &mut out);
+    // Post-#316: emit bytes straight into the transport-typed buffer.
+    let mut out: List<Byte> = List.new();
+    core.net.http2.encode_frame(&settings_frame, &mut out);
     match stream.write_async(&out).await {
         Err(_) => return Err(Http2Error.IoError),
         Ok(_) => {}
@@ -466,8 +467,8 @@ pub async fn run_h2_session<H: Handler>(
                 if !ack {
                     // Auto-PONG.
                     let pong = Frame.PingFrame { ack: true, opaque_data: opaque_data };
-                    let mut buf: List<Int> = List.new();
-                    encode_frame_to_ints(&pong, &mut buf);
+                    let mut buf: List<Byte> = List.new();
+                    core.net.http2.encode_frame(&pong, &mut buf);
                     let _ = stream.write_async(&buf).await;
                 }
             }
@@ -476,8 +477,8 @@ pub async fn run_h2_session<H: Handler>(
                     // ACK client's settings; we don't change behaviour
                     // based on them in phase-3 (fixed defaults).
                     let ack_frame = Frame.SettingsFrame { ack: true, params: List.new() };
-                    let mut buf: List<Int> = List.new();
-                    encode_frame_to_ints(&ack_frame, &mut buf);
+                    let mut buf: List<Byte> = List.new();
+                    core.net.http2.encode_frame(&ack_frame, &mut buf);
                     let _ = stream.write_async(&buf).await;
                 }
             }
@@ -549,9 +550,12 @@ type StreamSlot is {
 // =============================================================================
 
 async fn read_preface(stream: &mut TcpStream, token: &CancellationToken) -> Bool {
-    let mut buf: List<Int> = List.with_capacity(24);
+    // Post-#316: transport hands out `List<Byte>` directly, so we
+    // accumulate bytes and compare against the spec constant without
+    // any mask + cast.
+    let mut buf: List<Byte> = List.with_capacity(24);
     while buf.len() < 24 {
-        let mut chunk: List<Int> = List.with_capacity(32);
+        let mut chunk: List<Byte> = List.with_capacity(32);
         match stream.read_cancellable(&mut chunk, token).await {
             Err(_) => return false,
             Ok(Err(_)) => return false,
@@ -564,7 +568,7 @@ async fn read_preface(stream: &mut TcpStream, token: &CancellationToken) -> Bool
     // Compare first 24 bytes with the spec constant.
     let mut ok = true;
     for i in 0..24 {
-        if (buf[i] & 0xFF) as Byte != PREFACE[i] {
+        if buf[i] != PREFACE[i] {
             ok = false;
             break;
         }
@@ -581,14 +585,10 @@ fn build_server_settings(limits: &Http2Limits) -> Frame {
     Frame.SettingsFrame { ack: false, params: params }
 }
 
-/// Encode a frame to the wire and append as Ints (TcpStream ABI).
-fn encode_frame_to_ints(frame: &Frame, out: &mut List<Int>) {
-    let mut bytes: List<Byte> = List.new();
-    core.net.http2.encode_frame(frame, &mut bytes);
-    for i in 0..bytes.len() {
-        out.push(bytes[i] as Int);
-    }
-}
+// Post-#316 follow-up: the byte-typed transport API lets callers
+// emit frames straight via `core.net.http2.encode_frame` (which
+// already targets `List<Byte>`).  The previous `encode_frame_to_ints`
+// adaptor (Byte→Int re-pack) is now redundant and has been removed.
 
 /// CVE-2023-45288 (MadeYouReset) classifier. Returns true for
 /// frame-level protocol violations the server must answer with a
@@ -632,16 +632,18 @@ async fn read_exact_bytes(
     n: Int,
     token: &CancellationToken,
 ) -> Maybe<List<Byte>> {
+    // Post-#316: transport hands out `List<Byte>` directly, so we
+    // append without any mask + cast at the consumer.
     let mut out: List<Byte> = List.with_capacity(n);
     while out.len() < n {
-        let mut chunk: List<Int> = List.with_capacity(n - out.len());
+        let mut chunk: List<Byte> = List.with_capacity(n - out.len());
         match stream.read_cancellable(&mut chunk, token).await {
             Err(_) => return None,
             Ok(Err(_)) => return None,
             Ok(Ok(read_n)) => {
                 if read_n == 0 { return None; }
                 for i in 0..read_n {
-                    out.push((chunk[i] & 0xFF) as Byte);
+                    out.push(chunk[i]);
                 }
             }
         }
@@ -672,8 +674,8 @@ async fn send_goaway(
         error_code: error,
         debug_data: List.new(),
     };
-    let mut out: List<Int> = List.new();
-    encode_frame_to_ints(&frame, &mut out);
+    let mut out: List<Byte> = List.new();
+    core.net.http2.encode_frame(&frame, &mut out);
     match stream.write_async(&out).await {
         Err(_) => Err(Http2Error.IoError),
         Ok(_)  => Ok(()),
@@ -703,8 +705,8 @@ async fn send_minimal_response(
         end_stream: true,
         end_headers: true,
     };
-    let mut out: List<Int> = List.new();
-    encode_frame_to_ints(&headers_frame, &mut out);
+    let mut out: List<Byte> = List.new();
+    core.net.http2.encode_frame(&headers_frame, &mut out);
     match stream.write_async(&out).await {
         Err(_) => Err(Http2Error.IoError),
         Ok(_)  => Ok(()),

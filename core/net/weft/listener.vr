@@ -204,9 +204,10 @@ implement<H: Handler + Send + Sync + 'static> ConnectionRunner for PlainHttp1Run
         // accept-loop returns immediately; the deadline ensures the
         // spawned write doesn't dangle if the peer never reads.
         let msg = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-length: 11\r\n\r\noverloaded\n";
-        let mut buf: List<Int> = List.with_capacity(msg.len());
+        // Post-#316: emit bytes straight into the byte buffer.
+        let mut buf: List<Byte> = List.with_capacity(msg.len());
         for b in msg.as_bytes().iter() {
-            buf.push(*b as Int);
+            buf.push(*b);
         }
         // Fire-and-forget — accept loop continues immediately.
         // 1-second write deadline bounds the slow-consumer attack

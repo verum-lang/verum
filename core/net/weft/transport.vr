@@ -14,10 +14,14 @@
 // without touching tcp.vr, and gives us a single binding point for
 // TLS / UDS / vsock adaptors.
 //
-// Why `List<Int>` buffers? The existing stdlib socket layer marshals
-// bytes through `List<Int>` (see tcp.vr). We preserve that shape here
-// to avoid a disruptive stdlib-wide rewrite; a future `List<Byte>`
-// migration (Phase 5) changes this single file.
+// Buffer type — `List<Byte>` (post-#316 migration follow-up).
+// Pre-migration the stdlib socket layer marshalled bytes through
+// `List<Int>`, forcing every parse-layer consumer to mask + cast
+// back to Byte at 8× the memory footprint.  The transport API now
+// hands bytes out as bytes, eliminating the conversion permanently.
+// `core/net/tcp.vr` bridges this byte-typed surface to the AsyncRead
+// / AsyncWrite protocols (still `List<Int>` for now) at a single
+// per-await conversion point.
 //
 // =============================================================================
 
@@ -43,17 +47,18 @@ public type WeftTransport is protocol {
     fn peer_addr(&self) -> Result<SocketAddr, IoError>;
 
     /// Cancellable read. Outer Result is the cancellation channel;
-    /// inner Result the normal read outcome.
+    /// inner Result the normal read outcome.  `buf` is `&mut
+    /// List<Byte>` (semantic-honesty migration #316 follow-up).
     async fn read_cancellable(
         &mut self,
-        buf: &mut List<Int>,
+        buf: &mut List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError>;
 
     /// Write — may be partial; the connection pipeline is responsible
     /// for retrying until `buf` is fully drained (see `write_response`
-    /// in connection.vr).
-    async fn write_async(&mut self, buf: &List<Int>) -> Result<Int, IoError>;
+    /// in connection.vr).  `buf` is `&List<Byte>` post-#316.
+    async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError>;
 
     /// Half-close write direction (HTTP/1.1 `Connection: close` path
     /// closes here). No-op permitted for transports without a
@@ -74,13 +79,13 @@ implement WeftTransport for TcpStream {
 
     async fn read_cancellable(
         &mut self,
-        buf: &mut List<Int>,
+        buf: &mut List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         TcpStream.read_cancellable(self, buf, token).await
     }
 
-    async fn write_async(&mut self, buf: &List<Int>) -> Result<Int, IoError> {
+    async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError> {
         TcpStream.write_async(self, buf).await
     }
 
