@@ -37,6 +37,10 @@ public module cursor;
 public module balance;
 public module overflow;
 public module integrity;
+public module comparator;
+public module cursor_seek;
+public module balance_apply;
+public module btree_ops;
 
 public mount .page_layout.{
     PageKind, PageHeader, PageLayoutError, CellParts, LocalPayloadBudget,
@@ -75,4 +79,34 @@ public mount .integrity.{
     Violation, IntegrityReport,
     integrity_report_new, integrity_is_ok,
     check_page, check_tree, check_freelist,
+};
+
+public mount .comparator.{
+    KeyKind, KkRowId, KkRecord,
+    SeekKey, SkRowId, SkRecord,
+    KeyOrdering, KoLess, KoEqual, KoGreater,
+    CellKey, CkRowId, CkRecord,
+    seek_key_kind, ordering_name, reverse_ordering,
+    cmp_int64, cmp_bytes, cmp_keys,
+    BinarySearchResult, binary_search_cells,
+};
+
+public mount .cursor_seek.{
+    PageStore, page_store_new,
+    SeekOutcome, SoExactMatch, SoFoundLarger, SoFoundSmaller,
+    SoEmpty, SoPastEnd,
+    cursor_seek, cursor_next, cursor_prev, cursor_first, cursor_last,
+    outcome_name,
+};
+
+public mount .balance_apply.{
+    PageBuf, page_buf,
+    ApplyOutcome, RippleHint,
+    apply_balance_decision,
+};
+
+public mount .btree_ops.{
+    BtreePagerOps,
+    RebalanceLog, RebalanceStep,
+    btree_seek, btree_insert_at_cursor, btree_delete_at_cursor,
 };

@@ -1,0 +1,219 @@
+module core.database.sqlite.native.l3_btree.comparator;
+
+// =============================================================================
+// l3_btree/comparator.vr — Key comparator for B-tree seek
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §10.4 (key ordering)
+//
+// B-tree cursors descend by comparing a `target_key` against the cell
+// keys at each level.  Three flavours of keys live in SQLite trees:
+//
+//   1. Table B-tree    — key = `rowid` (Int64)
+//   2. Index B-tree    — key = SQLite Record (List<Byte>) compared
+//                        column-by-column with collation
+//   3. Sorter ephemeral — key = synthetic Record built by SortRowStore
+//
+// Pre-fix: `cursor.vr` shipped only the cursor TYPE; no comparison
+// machinery existed, so the cursor couldn't actually seek.  This
+// module delivers the missing ordering layer.
+//
+// Architecture: a `KeyKind` sum type discriminates the key shape;
+// `SeekKey` carries the actual key payload; `cmp_keys` is the
+// branch-table comparator dispatching on the (key shape, cell shape)
+// pair.  All comparators are PURE — they consume `&` references
+// and return a `KeyOrdering` (Less/Equal/Greater) without touching
+// the pager.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+
+// -----------------------------------------------------------------------------
+// KeyKind / SeekKey
+// -----------------------------------------------------------------------------
+
+/// Discriminator for the three key flavours.  Tables key by Int64
+/// rowid; indices key by a SQLite-encoded Record (`MakeRecord`
+/// output) that the comparator decodes column-by-column with
+/// collation.  `KkRecordKey` carries the schema tuple required for
+/// per-column collation lookup; for the foundation pass we ship
+/// the BINARY collation only.
+public type KeyKind is
+      KkRowId
+    | KkRecord;
+
+/// The seek key handed to `cursor_seek`.
+public type SeekKey is
+      SkRowId(Int64)
+    | SkRecord(List<Byte>);
+
+public fn seek_key_kind(k: &SeekKey) -> KeyKind {
+    match k {
+        SkRowId(_)  => KkRowId,
+        SkRecord(_) => KkRecord,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// KeyOrdering — the comparator return type
+// -----------------------------------------------------------------------------
+
+/// Three-valued ordering — same shape as the standard library's
+/// `Ordering` but specialised so the B-tree code doesn't take a
+/// transitive dependency on the protocol surface.
+public type KeyOrdering is
+      KoLess
+    | KoEqual
+    | KoGreater;
+
+public fn ordering_name(o: &KeyOrdering) -> Text {
+    match o {
+        KoLess    => "<".clone(),
+        KoEqual   => "==".clone(),
+        KoGreater => ">".clone(),
+    }
+}
+
+/// Reverse the ordering — `KoLess <-> KoGreater`.  Used by
+/// descending-walk (Prev) seek paths.
+public fn reverse_ordering(o: &KeyOrdering) -> KeyOrdering {
+    match o {
+        KoLess    => KoGreater,
+        KoEqual   => KoEqual,
+        KoGreater => KoLess,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Primitive comparators
+// -----------------------------------------------------------------------------
+
+/// Compare two `Int64` values.  Used for rowid keys + integer
+/// columns inside records.
+pub fn cmp_int64(a: Int64, b: Int64) -> KeyOrdering {
+    if a < b { KoLess }
+    else if a > b { KoGreater }
+    else { KoEqual }
+}
+
+/// Lex-compare two byte sequences.  Used as the BINARY collation
+/// for index records and for blob columns.  Shorter sequence is
+/// less when prefixes are equal — standard memcmp semantics.
+pub fn cmp_bytes(a: &List<Byte>, b: &List<Byte>) -> KeyOrdering {
+    let an = a.len();
+    let bn = b.len();
+    let n = if an < bn { an } else { bn };
+    let mut i: Int = 0;
+    while i < n {
+        let av: Int = a[i] as Int;
+        let bv: Int = b[i] as Int;
+        if av < bv { return KoLess; }
+        if av > bv { return KoGreater; }
+        i = i + 1;
+    }
+    if an < bn { KoLess }
+    else if an > bn { KoGreater }
+    else { KoEqual }
+}
+
+// -----------------------------------------------------------------------------
+// Cell-key extraction (mirrors the page_layout CellParts shapes)
+// -----------------------------------------------------------------------------
+
+/// What the comparator needs to know about a single cell to compare
+/// it against a SeekKey.  Decouples the comparator from the full
+/// cell parser (the seek loop calls the parser once per cell and
+/// hands the comparator the extracted key).
+public type CellKey is
+      CkRowId(Int64)
+    | CkRecord(List<Byte>);
+
+/// Compare a `target` key against a `cell` key.  Both sides MUST
+/// have the same kind — comparing a rowid target against a record
+/// cell is a programming error and returns `Err`.
+pub fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<KeyOrdering, Text> {
+    match target {
+        SkRowId(t) => match cell {
+            CkRowId(c)  => Ok(cmp_int64(t, c)),
+            CkRecord(_) => Err("cmp_keys: rowid target vs record cell".clone()),
+        }
+        SkRecord(t) => match cell {
+            CkRecord(c) => Ok(cmp_bytes(&t, c)),
+            CkRowId(_)  => Err("cmp_keys: record target vs rowid cell".clone()),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Binary search — given a cell-key extractor + cell count, find the
+// largest cell index whose key is <= target.  Standard textbook
+// B-tree descent uses this on every interior page.
+// -----------------------------------------------------------------------------
+
+/// Result of a binary search at one level of a B-tree page.
+///
+/// `index` is the cell position; `ordering` describes the key
+/// relationship at that index:
+///
+///   * `KoEqual`   — exact hit at `index`
+///   * `KoLess`    — every cell key is < target; cursor sits past
+///                   the last cell (index = cell_count)
+///   * `KoGreater` — cell at `index` is the first key > target;
+///                   for interior pages descend via the LEFT child;
+///                   for leaves position the cursor BEFORE this cell
+pub type BinarySearchResult is {
+    index: Int,
+    ordering: KeyOrdering,
+};
+
+/// `cell_at` is a pure callback returning the cell key at index `i`
+/// (0-based).  Caller holds the page bytes; the comparator never
+/// touches the pager.
+///
+/// Algorithm: standard half-open binary search [lo, hi).  Returns
+/// `KoEqual` if a hit was found; otherwise the index of the first
+/// cell strictly greater than target (or `cell_count` if all are
+/// less).  Caller interprets this against `SeekOp` to decide the
+/// final cursor position.
+pub fn binary_search_cells<F>(
+    cell_count: Int,
+    target: &SeekKey,
+    cell_at: F,
+) -> Result<BinarySearchResult, Text>
+where F: Fn(Int) -> CellKey
+{
+    let mut lo: Int = 0;
+    let mut hi: Int = cell_count;
+    let mut last_ordering: KeyOrdering = KoLess;
+
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let ck = cell_at(mid);
+        let ord = match cmp_keys(target, &ck) {
+            Ok(o)  => o,
+            Err(e) => { return Err(e); }
+        };
+        match ord {
+            KoEqual   => {
+                return Ok(BinarySearchResult { index: mid, ordering: KoEqual });
+            }
+            KoLess    => {
+                // target < cell[mid] — search left half.
+                hi = mid;
+                last_ordering = KoGreater;   // relative to cells we passed
+            }
+            KoGreater => {
+                // target > cell[mid] — search right half.
+                lo = mid + 1;
+                last_ordering = KoLess;
+            }
+        }
+    }
+
+    Ok(BinarySearchResult {
+        index: lo,
+        ordering: last_ordering,
+    })
+}

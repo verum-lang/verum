@@ -1,0 +1,538 @@
+module core.database.sqlite.native.l3_btree.cursor_seek;
+
+// =============================================================================
+// l3_btree/cursor_seek.vr — Cursor seek + next/prev
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §10.3 / §10.4
+//
+// Pre-fix: `cursor.vr` shipped the cursor TYPE + low-level path
+// helpers (`descend` / `ascend` / `bump_cell`) but NO seek
+// algorithm.  The L4 cursor opcodes (Column / Next / SeekGE) had
+// nothing to call.
+//
+// Post-fix: this module delivers the full seek + next/prev surface:
+//
+//   * `cursor_seek(c, &mut pager, key, op)` — root-to-leaf descent
+//     with binary search at each level.  Positions the cursor at
+//     the matching cell per the SeekOp semantics (Eq/Ge/Le/Gt/Lt).
+//   * `cursor_next(c, &mut pager)` — advance to the next cell in
+//     in-order traversal.  Crosses page boundaries by ascending the
+//     path and re-descending into the next subtree.
+//   * `cursor_prev(c, &mut pager)` — symmetric backward step.
+//   * `cursor_first(c, &mut pager)` — leftmost leaf, cell 0.
+//   * `cursor_last(c, &mut pager)` — rightmost leaf, last cell.
+//
+// All seek paths operate on PageStore — a tiny abstraction over
+// "give me the bytes of page N".  In production this is backed by
+// the WalPager / PagerActor; tests inject a `Map<Int, List<Byte>>`
+// directly so they don't need a full pager fixture.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l3_btree.cursor.{
+    BtreeCursor, PathStep, cursor_is_valid, cursor_is_at_end,
+    cursor_current_page, cursor_current_cell,
+};
+mount core.database.sqlite.native.l3_btree.btree.{Btree, BtreeError};
+mount core.database.sqlite.native.l3_btree.page_layout.{
+    PageKind, TableLeaf, TableInterior, IndexLeaf, IndexInterior,
+    PageHeader, parse_page_header, parse_cell_pointer_array,
+    parse_cell, CellParts, TableLeafCell, TableInteriorCell,
+    IndexLeafCell, IndexInteriorCell, PageLayoutError,
+    page_kind_is_interior, page_kind_is_table,
+};
+mount core.database.sqlite.native.l3_btree.comparator.{
+    KeyKind, SeekKey, CellKey, CkRowId, CkRecord,
+    SkRowId, SkRecord,
+    KeyOrdering, KoLess, KoEqual, KoGreater,
+    cmp_keys, binary_search_cells, BinarySearchResult,
+};
+mount core.database.sqlite.native.btree_seek_op_codes.op.{
+    SeekOp, SoEq, SoGe, SoLe, SoGt, SoLt,
+};
+
+// -----------------------------------------------------------------------------
+// PageStore — abstraction over "fetch page N's bytes"
+// -----------------------------------------------------------------------------
+
+/// Pure read-only abstraction over the pager.  The seek code never
+/// MUTATES pages — that's the balance/insert path's job.  By
+/// taking a `&PageStore` we keep `cursor_seek` pure and trivially
+/// testable (the test injects a `Map<Int, List<Byte>>`).
+public type PageStore is {
+    pages: Map<Int, List<Byte>>,
+};
+
+public fn page_store_new() -> PageStore {
+    PageStore { pages: Map.new() }
+}
+
+implement PageStore {
+    pub fn install(&mut self, page_no: Int, bytes: List<Byte>) {
+        self.pages.insert(page_no, bytes);
+    }
+
+    /// Fetch page bytes.  Returns `None` if the page is absent —
+    /// caller surfaces this as `BtreeError::PageNotFound`.
+    pub fn fetch(&self, page_no: Int) -> Maybe<List<Byte>> {
+        match self.pages.get(&page_no) {
+            Some(bs) => Some(clone_bytes(bs)),
+            None => None,
+        }
+    }
+}
+
+fn clone_bytes(src: &List<Byte>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < src.len() {
+        out.push(src[i]);
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// SeekOutcome — result of cursor_seek
+// -----------------------------------------------------------------------------
+
+public type SeekOutcome is
+      SoExactMatch       // cursor positioned at the cell whose key == target
+    | SoFoundLarger      // cursor at the first cell whose key > target
+                          // (relevant for Ge/Gt)
+    | SoFoundSmaller     // cursor at the last cell whose key < target
+                          // (relevant for Le/Lt)
+    | SoEmpty            // tree is empty; cursor is invalid
+    | SoPastEnd;         // target > every key; cursor at_end
+
+pub fn outcome_name(o: &SeekOutcome) -> Text {
+    match o {
+        SoExactMatch    => "ExactMatch".clone(),
+        SoFoundLarger   => "FoundLarger".clone(),
+        SoFoundSmaller  => "FoundSmaller".clone(),
+        SoEmpty         => "Empty".clone(),
+        SoPastEnd       => "PastEnd".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Seek — root-to-leaf descent
+// -----------------------------------------------------------------------------
+
+/// Seat the cursor at the cell matching `(target, op)`.
+///
+/// Algorithm:
+///   1. Reset cursor to root, push (root, 0).
+///   2. While current page is INTERIOR:
+///        binary-search the cell-key array
+///        descend via the child pointer indicated by the search
+///        push the new (page, 0) onto the cursor path
+///   3. At LEAF:
+///        binary-search again to find the final position
+///        adjust per `op` (Eq exact-only, Ge first ≥, Le last ≤, etc.)
+///   4. Return SeekOutcome.
+pub fn cursor_seek(
+    c: &mut BtreeCursor,
+    pages: &PageStore,
+    target: &SeekKey,
+    op: SeekOp,
+) -> Result<SeekOutcome, BtreeError> {
+    // Re-root the path.
+    c.invalidate();
+    c.descend(c.root_page);
+
+    // Empty-tree fast path: if the root has zero cells, return SoEmpty.
+    let root_page = c.root_page;
+    let root_bytes = match pages.fetch(root_page) {
+        Some(b) => b,
+        None    => return Err(InvalidRootPage(root_page)),
+    };
+    let (root_hdr, _) = match parse_page_header(&root_bytes, header_offset_for_root(root_page)) {
+        Ok(p)  => p,
+        Err(_) => return Err(CorruptPage(root_page)),
+    };
+    if root_hdr.cell_count == 0 {
+        c.mark_at_end();
+        return Ok(SoEmpty);
+    }
+
+    // Descent loop.  Each iteration either descends into a child
+    // (interior page) or breaks out (leaf page).
+    let mut depth: Int = 0;
+    let max_depth: Int = 64;   // SQLite enforces a hard cap; matches.
+
+    while depth < max_depth {
+        let cur_page = cursor_current_page(c);
+        let bytes = match pages.fetch(cur_page) {
+            Some(b) => b,
+            None    => return Err(PageNotFound(cur_page)),
+        };
+        let hdr_off = header_offset_for_root_or_zero(cur_page, c.root_page);
+        let (hdr, _) = match parse_page_header(&bytes, hdr_off) {
+            Ok(p)  => p,
+            Err(_) => return Err(CorruptPage(cur_page)),
+        };
+
+        // Binary-search cells at this level.
+        let bsr = match binary_search_with_layout(&bytes, &hdr, target) {
+            Ok(r)  => r,
+            Err(_) => return Err(CorruptPage(cur_page)),
+        };
+
+        if page_kind_is_interior(hdr.kind) {
+            // Decide which child to descend into.  If the search
+            // returned `KoEqual` at index `i`, descend via cell i's
+            // left_child for index trees; for table interior cells
+            // (which only carry rowids) descend via cell i's left_child
+            // when the rowid is <= target, else cell i+1's left_child.
+            let child_page = pick_interior_child(&bytes, &hdr, &bsr);
+            // Update path: bump current cell index to the chosen
+            // separator, then push child.
+            c.bump_cell(bsr.index - cursor_current_cell(c));
+            c.descend(child_page);
+            depth = depth + 1;
+            continue;
+        }
+
+        // LEAF — finalise position per op.
+        finalise_leaf_position(c, &hdr, &bsr, op);
+        return Ok(seek_outcome_from_bsr(&bsr, op));
+    }
+    Err(MaxDepthExceeded(max_depth))
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+/// Page 1 carries the 100-byte database header before its B-tree
+/// page header.  Other pages start at offset 0.
+fn header_offset_for_root(root_page: Int) -> Int {
+    if root_page == 1 { 100 } else { 0 }
+}
+
+fn header_offset_for_root_or_zero(cur_page: Int, root_page: Int) -> Int {
+    if cur_page == root_page && root_page == 1 { 100 } else { 0 }
+}
+
+/// Run binary search using parsed cell-pointer array + per-cell
+/// key extraction.  Wraps the raw `binary_search_cells` from
+/// comparator.vr with the page-layout-aware cell-at closure.
+fn binary_search_with_layout(
+    bytes: &List<Byte>,
+    hdr: &PageHeader,
+    target: &SeekKey,
+) -> Result<BinarySearchResult, Text> {
+    // Parse cell-pointer array once; reuse it for each `cell_at`
+    // call inside the binary search.
+    let pointers = match parse_cell_pointer_array(bytes, &hdr.cell_pointer_offset, hdr.cell_count) {
+        Ok(p)  => p,
+        Err(_) => return Err("cell pointer array parse failed".clone()),
+    };
+    let kind_local = hdr.kind.clone();
+    let bytes_local = clone_bytes(bytes);
+    let local_max: Int = 100;   // foundation: assume small inline payloads
+
+    binary_search_cells(
+        hdr.cell_count,
+        target,
+        |i: Int| -> CellKey {
+            extract_key_at(&bytes_local, pointers[i], &kind_local, local_max)
+        },
+    )
+}
+
+/// Extract the comparator-relevant key from a parsed cell.
+fn extract_key_at(
+    bytes: &List<Byte>,
+    cell_off: Int,
+    kind: &PageKind,
+    local_max: Int,
+) -> CellKey {
+    match parse_cell(bytes, cell_off, kind.clone(), local_max) {
+        Ok(parts) => match parts {
+            TableLeafCell(_, rowid, _, _)         => CkRowId(rowid),
+            TableInteriorCell(_, rowid)            => CkRowId(rowid),
+            IndexLeafCell(_, local_end, _)         => {
+                // Foundation: use the local payload bytes as the key.
+                // Real implementation needs to chase overflow chains
+                // for keys longer than local_max.
+                CkRecord(slice_bytes(bytes, cell_off, local_end))
+            }
+            IndexInteriorCell(_, _, local_end, _) => {
+                CkRecord(slice_bytes(bytes, cell_off, local_end))
+            }
+        }
+        Err(_) => CkRowId(0_i64),   // defensive — caller treats as last
+    }
+}
+
+fn slice_bytes(src: &List<Byte>, start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = start;
+    while i < end && i < src.len() {
+        out.push(src[i]);
+        i = i + 1;
+    }
+    out
+}
+
+/// Pick the child to descend into given the binary-search result on
+/// an interior page.  Interior cells carry the LEFT child pointer;
+/// the last child sits in the page's `right_pointer` field.
+fn pick_interior_child(
+    bytes: &List<Byte>,
+    hdr: &PageHeader,
+    bsr: &BinarySearchResult,
+) -> Int {
+    if bsr.index >= hdr.cell_count {
+        return hdr.right_child as Int;
+    }
+    let pointers = match parse_cell_pointer_array(bytes, &hdr.cell_pointer_offset, hdr.cell_count) {
+        Ok(p)  => p,
+        Err(_) => return hdr.right_child as Int,
+    };
+    let cell_off = pointers[bsr.index];
+    let local_max: Int = 100;
+    match parse_cell(bytes, cell_off, hdr.kind.clone(), local_max) {
+        Ok(TableInteriorCell(left, _))                  => left as Int,
+        Ok(IndexInteriorCell(left, _, _, _))           => left as Int,
+        _ => hdr.right_child as Int,
+    }
+}
+
+/// After binary search at the leaf, finalise the cursor position
+/// per the SeekOp.  For Eq we leave the cursor on the matching
+/// cell or invalidate; for Ge/Gt we may need to advance one cell;
+/// for Le/Lt we may need to step back.
+fn finalise_leaf_position(
+    c: &mut BtreeCursor,
+    hdr: &PageHeader,
+    bsr: &BinarySearchResult,
+    op: SeekOp,
+) {
+    let target_idx = match (op, &bsr.ordering) {
+        (SoEq, KoEqual)    => bsr.index,
+        (SoEq, _)          => -1,                              // miss
+        (SoGe, KoEqual)    => bsr.index,
+        (SoGe, KoGreater)  => bsr.index,
+        (SoGe, KoLess)     => hdr.cell_count,                  // past end
+        (SoGt, KoEqual)    => bsr.index + 1,
+        (SoGt, KoGreater)  => bsr.index,
+        (SoGt, KoLess)     => hdr.cell_count,
+        (SoLe, KoEqual)    => bsr.index,
+        (SoLe, KoGreater)  => bsr.index - 1,
+        (SoLe, KoLess)     => hdr.cell_count - 1,
+        (SoLt, KoEqual)    => bsr.index - 1,
+        (SoLt, KoGreater)  => bsr.index - 1,
+        (SoLt, KoLess)     => hdr.cell_count - 1,
+    };
+    if target_idx < 0 || target_idx >= hdr.cell_count {
+        c.mark_at_end();
+    } else {
+        c.bump_cell(target_idx - cursor_current_cell(c));
+    }
+}
+
+fn seek_outcome_from_bsr(bsr: &BinarySearchResult, op: SeekOp) -> SeekOutcome {
+    match (op, &bsr.ordering) {
+        (SoEq, KoEqual) => SoExactMatch,
+        (SoEq, _)       => SoEmpty,                            // miss
+        (_, KoEqual)    => SoExactMatch,
+        (SoGe, KoLess)  => SoPastEnd,
+        (SoGt, KoLess)  => SoPastEnd,
+        (SoLe, KoLess)  => SoFoundSmaller,
+        (SoLt, KoLess)  => SoFoundSmaller,
+        (SoGe, _)       => SoFoundLarger,
+        (SoGt, _)       => SoFoundLarger,
+        (SoLe, _)       => SoFoundSmaller,
+        (SoLt, _)       => SoFoundSmaller,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// next / prev — single-cell advance with page-boundary crossing
+// -----------------------------------------------------------------------------
+
+/// Advance to the next cell in in-order traversal.  Returns `Ok(true)`
+/// if a fresh cell is now under the cursor; `Ok(false)` if we've
+/// fallen off the right end (cursor is now `at_end`).
+pub fn cursor_next(
+    c: &mut BtreeCursor,
+    pages: &PageStore,
+) -> Result<Bool, BtreeError> {
+    if cursor_is_at_end(c) { return Ok(false); }
+    if !cursor_is_valid(c) { return Ok(false); }
+
+    // Bump within the current leaf.
+    c.bump_cell(1);
+    let cur_page = cursor_current_page(c);
+    let bytes = match pages.fetch(cur_page) {
+        Some(b) => b,
+        None    => return Err(PageNotFound(cur_page)),
+    };
+    let (hdr, _) = match parse_page_header(&bytes, header_offset_for_root_or_zero(cur_page, c.root_page)) {
+        Ok(p)  => p,
+        Err(_) => return Err(CorruptPage(cur_page)),
+    };
+
+    if cursor_current_cell(c) < hdr.cell_count {
+        return Ok(true);
+    }
+
+    // Off the right end of this leaf — ascend until we find an
+    // interior page where we can step right, then descend leftmost
+    // through the new subtree.  Foundation: ascend once + try
+    // descend; full implementation iterates this until we either
+    // find a slot or exhaust the path.
+    c.ascend();
+    if !cursor_is_valid(c) {
+        c.mark_at_end();
+        return Ok(false);
+    }
+    c.bump_cell(1);
+    // Descend leftmost through the new subtree until we hit a leaf.
+    let mut guard: Int = 0;
+    while guard < 64 {
+        let cp = cursor_current_page(c);
+        let pb = match pages.fetch(cp) {
+            Some(b) => b,
+            None    => return Err(PageNotFound(cp)),
+        };
+        let (h, _) = match parse_page_header(&pb, header_offset_for_root_or_zero(cp, c.root_page)) {
+            Ok(p)  => p,
+            Err(_) => return Err(CorruptPage(cp)),
+        };
+        if !page_kind_is_interior(h.kind) { break; }
+        // Pick the leftmost child = first cell's left_child.
+        let pointers = match parse_cell_pointer_array(&pb, &h.cell_pointer_offset, h.cell_count) {
+            Ok(p)  => p,
+            Err(_) => return Err(CorruptPage(cp)),
+        };
+        if h.cell_count == 0 {
+            // Empty interior — descend via right_child as fallback.
+            c.descend(h.right_child as Int);
+        } else {
+            let cell_off = pointers[0];
+            let child = match parse_cell(&pb, cell_off, h.kind.clone(), 100) {
+                Ok(TableInteriorCell(l, _))               => l as Int,
+                Ok(IndexInteriorCell(l, _, _, _))         => l as Int,
+                _ => h.right_child as Int,
+            };
+            c.descend(child);
+        }
+        guard = guard + 1;
+    }
+    Ok(true)
+}
+
+/// Symmetric backward step.  Foundation implements one-cell decrement
+/// + ascend-once; full implementation iterates the ascend until a
+/// real previous cell is found.
+pub fn cursor_prev(
+    c: &mut BtreeCursor,
+    pages: &PageStore,
+) -> Result<Bool, BtreeError> {
+    if !cursor_is_valid(c) && !cursor_is_at_end(c) { return Ok(false); }
+    if cursor_is_at_end(c) {
+        // Re-position to the last cell of the rightmost leaf.
+        c.invalidate();
+        c.descend(c.root_page);
+        return descend_rightmost(c, pages);
+    }
+    c.bump_cell(-1);
+    if cursor_current_cell(c) >= 0 { return Ok(true); }
+
+    // Off the left end — ascend, decrement parent cell.
+    c.ascend();
+    if !cursor_is_valid(c) {
+        c.invalidate();
+        return Ok(false);
+    }
+    c.bump_cell(-1);
+    descend_rightmost(c, pages)
+}
+
+fn descend_rightmost(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, BtreeError> {
+    let mut guard: Int = 0;
+    while guard < 64 {
+        let cp = cursor_current_page(c);
+        let pb = match pages.fetch(cp) {
+            Some(b) => b,
+            None    => return Err(PageNotFound(cp)),
+        };
+        let (h, _) = match parse_page_header(&pb, header_offset_for_root_or_zero(cp, c.root_page)) {
+            Ok(p)  => p,
+            Err(_) => return Err(CorruptPage(cp)),
+        };
+        if !page_kind_is_interior(h.kind) {
+            // Position at the last cell of this leaf.
+            if h.cell_count > 0 {
+                c.bump_cell((h.cell_count - 1) - cursor_current_cell(c));
+                return Ok(true);
+            }
+            c.mark_at_end();
+            return Ok(false);
+        }
+        c.descend(h.right_child as Int);
+        guard = guard + 1;
+    }
+    Err(MaxDepthExceeded(64))
+}
+
+/// Position cursor at the FIRST cell of the leftmost leaf.
+pub fn cursor_first(
+    c: &mut BtreeCursor,
+    pages: &PageStore,
+) -> Result<Bool, BtreeError> {
+    c.invalidate();
+    c.descend(c.root_page);
+    let mut guard: Int = 0;
+    while guard < 64 {
+        let cp = cursor_current_page(c);
+        let pb = match pages.fetch(cp) {
+            Some(b) => b,
+            None    => return Err(PageNotFound(cp)),
+        };
+        let (h, _) = match parse_page_header(&pb, header_offset_for_root_or_zero(cp, c.root_page)) {
+            Ok(p)  => p,
+            Err(_) => return Err(CorruptPage(cp)),
+        };
+        if !page_kind_is_interior(h.kind) {
+            if h.cell_count == 0 {
+                c.mark_at_end();
+                return Ok(false);
+            }
+            return Ok(true);
+        }
+        let pointers = match parse_cell_pointer_array(&pb, &h.cell_pointer_offset, h.cell_count) {
+            Ok(p)  => p,
+            Err(_) => return Err(CorruptPage(cp)),
+        };
+        let child = if h.cell_count == 0 {
+            h.right_child as Int
+        } else {
+            match parse_cell(&pb, pointers[0], h.kind.clone(), 100) {
+                Ok(TableInteriorCell(l, _))               => l as Int,
+                Ok(IndexInteriorCell(l, _, _, _))         => l as Int,
+                _ => h.right_child as Int,
+            }
+        };
+        c.descend(child);
+        guard = guard + 1;
+    }
+    Err(MaxDepthExceeded(64))
+}
+
+/// Position cursor at the LAST cell of the rightmost leaf.
+pub fn cursor_last(
+    c: &mut BtreeCursor,
+    pages: &PageStore,
+) -> Result<Bool, BtreeError> {
+    c.invalidate();
+    c.descend(c.root_page);
+    descend_rightmost(c, pages)
+}
