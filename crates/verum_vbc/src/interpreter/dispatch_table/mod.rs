@@ -617,12 +617,33 @@ pub(crate) fn load_constant(
         Constant::Int(i) => Ok(Value::from_i64(i)),
         Constant::Float(f) => Ok(Value::from_f64(f)),
         Constant::String(string_id) => {
-            if let Some(s) = state.module.get_string(string_id) {
+            // **String-constant singleton cache** (#93, mirrors AOT
+            // `__rodata` Text globals from #92).
+            //
+            // First load for `const_id` realises the Value (small-
+            // string-optimized via NaN box, or heap-allocated
+            // `[len:u64][bytes...]` blob).  Subsequent loads return
+            // the cached Value directly — zero allocation, zero
+            // memcpy.  The realised allocation is module-lifetime
+            // (never freed); for SSO values there's nothing to pin.
+            //
+            // The cache lives on `InterpreterState` because the
+            // module is shared (`Arc<VbcModule>`) and may be
+            // executed by multiple states with independent heaps;
+            // each state owns its own cache.
+            let idx = const_id.0 as usize;
+            if let Some(Some(cached)) = state.string_const_cache.get(idx) {
+                return Ok(*cached);
+            }
+
+            let value = if let Some(s) = state.module.get_string(string_id) {
                 let s = s.to_string();
                 if let Some(small) = Value::from_small_string(&s) {
-                    Ok(small)
+                    small
                 } else {
-                    // Allocate on heap: [len: u64][bytes...]
+                    // Heap-allocate the `[len: u64][bytes...]` blob —
+                    // happens at most once per ConstId per
+                    // InterpreterState lifetime.
                     let bytes = s.as_bytes();
                     let len = bytes.len();
                     let alloc_size = 8 + len;
@@ -638,11 +659,20 @@ pub(crate) fn load_constant(
                         let bytes_ptr = base_ptr.add(data_offset + 8);
                         std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
                     }
-                    Ok(Value::from_ptr(base_ptr))
+                    Value::from_ptr(base_ptr)
                 }
             } else {
-                Ok(Value::from_small_string("").unwrap_or(Value::nil()))
+                Value::from_small_string("").unwrap_or(Value::nil())
+            };
+
+            // Grow the cache to fit `idx` and store the realised
+            // Value.  Linear capacity growth here is fine — the
+            // VBC constant pool is fixed-size per module.
+            if state.string_const_cache.len() <= idx {
+                state.string_const_cache.resize(idx + 1, None);
             }
+            state.string_const_cache[idx] = Some(value);
+            Ok(value)
         }
         Constant::Type(type_ref) => match type_ref {
             crate::types::TypeRef::Concrete(type_id) => Ok(Value::from_type(type_id)),
