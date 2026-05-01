@@ -1527,14 +1527,36 @@ impl<'ctx> PlatformIR<'ctx> {
                 .or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         } else {
+            // **Bare `write` declaration** — match libSystem / glibc's
+            // canonical signature `ssize_t write(int fd, const void *buf,
+            // size_t count)`.  Pre-fix this site declared `write` with
+            // i64 fd (Verum-side ABI), which conflicted with the
+            // POSIX-correct declaration in `runtime.rs::get_or_declare_write`
+            // (commit ed12665d's libsys_extern path).  When the i32-fd
+            // declaration won the order race, the i64-fd call here
+            // produced "Call parameter type does not match function
+            // signature!" verifier errors and UB at runtime (depending
+            // on register-passing conventions).
+            //
+            // Fix: declare `write` with the canonical POSIX signature
+            // `(i32 fd, ptr buf, i64 count) -> i64`, matching libSystem
+            // / glibc / musl exactly.  Truncate the i64 fd to i32 at
+            // the call boundary.
             let write_fn = module.get_function("write").unwrap_or_else(|| {
                 let write_type =
-                    i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
+                    i64_type.fn_type(&[i32_type.into(), ptr_type.into(), i64_type.into()], false);
                 module.add_function("write", write_type, None)
             });
 
+            let fd_i32 = builder
+                .build_int_truncate(fd.into_int_value(), i32_type, "fd_i32")
+                .or_llvm_err()?;
             let result = builder
-                .build_call(write_fn, &[fd.into(), buf.into(), count.into()], "written")
+                .build_call(
+                    write_fn,
+                    &[fd_i32.into(), buf.into(), count.into()],
+                    "written",
+                )
                 .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
