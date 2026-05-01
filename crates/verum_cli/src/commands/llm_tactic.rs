@@ -6,9 +6,8 @@ use crate::error::{CliError, Result};
 use std::path::PathBuf;
 use verum_common::Text;
 use verum_verification::llm_tactic::{
-    AuditTrail, EchoLlmAdapter, FilesystemAuditTrail, KernelGate, KernelVerdict,
-    LlmGoalSummary, LlmTacticAdapter, MemoryAuditTrail, MockLlmAdapter,
-    PatternKernelChecker,
+    AuditTrail, EchoLlmAdapter, FilesystemAuditTrail, KernelGate, KernelVerdict, LlmGoalSummary,
+    LlmTacticAdapter, MemoryAuditTrail, MockLlmAdapter, PatternKernelChecker,
 };
 
 /// Default audit-trail path (relative to the current project's
@@ -100,9 +99,7 @@ pub fn run_propose(
         ));
     }
     if goal.is_empty() {
-        return Err(CliError::InvalidArgument(
-            "--goal must be non-empty".into(),
-        ));
+        return Err(CliError::InvalidArgument("--goal must be non-empty".into()));
     }
     validate_format(format)?;
 
@@ -144,9 +141,8 @@ fn run_with<A: LlmTacticAdapter>(
 
     let verdict = if persist {
         let resolved = resolve_audit_path(audit_path)?;
-        let trail = FilesystemAuditTrail::new(&resolved).map_err(|e| {
-            CliError::VerificationFailed(format!("audit trail open: {}", e))
-        })?;
+        let trail = FilesystemAuditTrail::new(&resolved)
+            .map_err(|e| CliError::VerificationFailed(format!("audit trail open: {}", e)))?;
         gate.run(adapter, &checker, goal, &trail)
             .map_err(|e| CliError::VerificationFailed(format!("llm-tactic: {}", e)))?
     } else {
@@ -177,7 +173,10 @@ fn emit_verdict_plain(v: &KernelVerdict, model_id: &str, goal: &LlmGoalSummary) 
     match v {
         KernelVerdict::Accepted { steps_checked } => {
             println!();
-            println!("Verdict      : ACCEPTED ({} step(s) kernel-checked)", steps_checked);
+            println!(
+                "Verdict      : ACCEPTED ({} step(s) kernel-checked)",
+                steps_checked
+            );
         }
         KernelVerdict::Rejected {
             failed_step_index,
@@ -202,10 +201,7 @@ fn emit_verdict_json(v: &KernelVerdict, model_id: &str, goal: &LlmGoalSummary) {
         "  \"goal\": \"{}\",\n",
         json_escape(goal.focused_proposition.as_str())
     ));
-    out.push_str(&format!(
-        "  \"model_id\": \"{}\",\n",
-        json_escape(model_id)
-    ));
+    out.push_str(&format!("  \"model_id\": \"{}\",\n", json_escape(model_id)));
     out.push_str(&format!(
         "  \"prompt_hash\": \"{}\",\n",
         goal.prompt_hash().as_str()
@@ -240,12 +236,11 @@ fn emit_verdict_json(v: &KernelVerdict, model_id: &str, goal: &LlmGoalSummary) {
 pub fn run_audit_trail(audit_path: Option<&PathBuf>, format: &str) -> Result<()> {
     validate_format(format)?;
     let resolved = resolve_audit_path(audit_path)?;
-    let trail = FilesystemAuditTrail::new(&resolved).map_err(|e| {
-        CliError::VerificationFailed(format!("audit trail open: {}", e))
-    })?;
-    let events = trail.read_all().map_err(|e| {
-        CliError::VerificationFailed(format!("audit trail read: {}", e))
-    })?;
+    let trail = FilesystemAuditTrail::new(&resolved)
+        .map_err(|e| CliError::VerificationFailed(format!("audit trail open: {}", e)))?;
+    let events = trail
+        .read_all()
+        .map_err(|e| CliError::VerificationFailed(format!("audit trail read: {}", e)))?;
 
     match format {
         "plain" => {
@@ -255,7 +250,11 @@ pub fn run_audit_trail(audit_path: Option<&PathBuf>, format: &str) -> Result<()>
                     resolved.display()
                 );
             } else {
-                println!("Audit trail: {} ({} event(s))", resolved.display(), events.len());
+                println!(
+                    "Audit trail: {} ({} event(s))",
+                    resolved.display(),
+                    events.len()
+                );
                 for (i, e) in events.iter().enumerate() {
                     println!("  [{:>3}] {}", i + 1, e.name());
                 }
@@ -313,7 +312,9 @@ pub fn run_models(format: &str) -> Result<()> {
                 println!("    {}", desc);
             }
             println!();
-            println!("Production cloud / on-device adapters plug in via the same trait without CLI changes.");
+            println!(
+                "Production cloud / on-device adapters plug in via the same trait without CLI changes."
+            );
         }
         "json" => {
             let mut out = String::from("{\n");

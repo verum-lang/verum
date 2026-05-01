@@ -800,8 +800,7 @@ impl E0317 {
                     suggestions.push(Suggestion {
                         title: "add `?` to propagate the error".into(),
                         description: Some(
-                            "Use the `?` operator to propagate errors up the call stack"
-                                .into(),
+                            "Use the `?` operator to propagate errors up the call stack".into(),
                         ),
                         snippet: Some(CodeSnippet::with_span(
                             format!("let {} = {}?", var_name, self.creation_expr),

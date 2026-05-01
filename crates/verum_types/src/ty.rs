@@ -14,9 +14,9 @@ use indexmap::IndexMap;
 use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use verum_ast::{span::Span, ty::Path};
-use verum_common::{List, Map, Set, Text};
 use verum_common::ToText;
 use verum_common::well_known_types::WellKnownType as WKT;
+use verum_common::{List, Map, Set, Text};
 
 use crate::refinement::RefinementPredicate;
 
@@ -1743,7 +1743,8 @@ impl Type {
         }
         // Structural fallback: variant type with exactly Some and None constructors
         if let Type::Variant(variants) = self {
-            if variants.len() == 2 && variants.contains_key("Some") && variants.contains_key("None") {
+            if variants.len() == 2 && variants.contains_key("Some") && variants.contains_key("None")
+            {
                 if let Some(some_ty) = variants.get("Some") {
                     return Some(some_ty.clone());
                 }
@@ -2243,7 +2244,11 @@ impl Type {
     /// Check if this type is a dependent type (Pi, Sigma, Eq, etc.)
     pub fn is_dependent(&self) -> bool {
         match self {
-            Type::Pi { .. } | Type::Sigma { .. } | Type::Eq { .. } | Type::PathType { .. } | Type::Partial { .. } => true,
+            Type::Pi { .. }
+            | Type::Sigma { .. }
+            | Type::Eq { .. }
+            | Type::PathType { .. }
+            | Type::Partial { .. } => true,
             Type::Inductive { indices, .. } => !indices.is_empty(),
             _ => false,
         }
@@ -2418,7 +2423,10 @@ impl Type {
     // they converge here before any type-level reasoning runs.
     fn primitive_named(canonical: &str) -> Self {
         let ident = verum_ast::ty::Ident::new(canonical, Span::dummy());
-        Type::Named { path: Path::single(ident), args: List::new() }
+        Type::Named {
+            path: Path::single(ident),
+            args: List::new(),
+        }
     }
 
     /// Collapse Rust-style lowercase numeric aliases (`u64`, `i32`,
@@ -2438,43 +2446,71 @@ impl Type {
     /// future extension of the numeric set.
     pub fn canonical_primitive(name: &str) -> &str {
         match name {
-            "i8"    => "Int8",
-            "i16"   => "Int16",
-            "i32"   => "Int32",
-            "i64"   => "Int64",
-            "i128"  => "Int128",
+            "i8" => "Int8",
+            "i16" => "Int16",
+            "i32" => "Int32",
+            "i64" => "Int64",
+            "i128" => "Int128",
             "isize" => "IntSize",
             "u8" | "UInt8" => "Byte",
-            "u16"   => "UInt16",
-            "u32"   => "UInt32",
-            "u64"   => "UInt64",
-            "u128"  => "UInt128",
+            "u16" => "UInt16",
+            "u32" => "UInt32",
+            "u64" => "UInt64",
+            "u128" => "UInt128",
             "usize" => "UIntSize",
-            "f32"   => "Float32",
-            "f64"   => "Float64",
-            other   => other,
+            "f32" => "Float32",
+            "f64" => "Float64",
+            other => other,
         }
     }
 
-    pub fn i8_refined(_value: i8) -> Self      { Self::primitive_named("Int8") }
-    pub fn i16_refined(_value: i16) -> Self    { Self::primitive_named("Int16") }
-    pub fn i32_refined(_value: i32) -> Self    { Self::primitive_named("Int32") }
-    pub fn i64_refined(_value: i64) -> Self    { Self::primitive_named("Int64") }
-    pub fn i128_refined(_value: i128) -> Self  { Self::primitive_named("Int128") }
-    pub fn isize_refined(_value: isize) -> Self { Self::primitive_named("IntSize") }
+    pub fn i8_refined(_value: i8) -> Self {
+        Self::primitive_named("Int8")
+    }
+    pub fn i16_refined(_value: i16) -> Self {
+        Self::primitive_named("Int16")
+    }
+    pub fn i32_refined(_value: i32) -> Self {
+        Self::primitive_named("Int32")
+    }
+    pub fn i64_refined(_value: i64) -> Self {
+        Self::primitive_named("Int64")
+    }
+    pub fn i128_refined(_value: i128) -> Self {
+        Self::primitive_named("Int128")
+    }
+    pub fn isize_refined(_value: isize) -> Self {
+        Self::primitive_named("IntSize")
+    }
 
     /// `Byte` is the canonical 8-bit unsigned type in Verum; `UInt8`
     /// is a synonym but `Byte` is preferred in semantic-typing
     /// contexts, so the literal synthesizer keeps emitting it.
-    pub fn u8_refined(_value: u8) -> Self      { Self::primitive_named("Byte") }
-    pub fn u16_refined(_value: u16) -> Self    { Self::primitive_named("UInt16") }
-    pub fn u32_refined(_value: u32) -> Self    { Self::primitive_named("UInt32") }
-    pub fn u64_refined(_value: u64) -> Self    { Self::primitive_named("UInt64") }
-    pub fn u128_refined(_value: u128) -> Self  { Self::primitive_named("UInt128") }
-    pub fn usize_refined(_value: usize) -> Self { Self::primitive_named("UIntSize") }
+    pub fn u8_refined(_value: u8) -> Self {
+        Self::primitive_named("Byte")
+    }
+    pub fn u16_refined(_value: u16) -> Self {
+        Self::primitive_named("UInt16")
+    }
+    pub fn u32_refined(_value: u32) -> Self {
+        Self::primitive_named("UInt32")
+    }
+    pub fn u64_refined(_value: u64) -> Self {
+        Self::primitive_named("UInt64")
+    }
+    pub fn u128_refined(_value: u128) -> Self {
+        Self::primitive_named("UInt128")
+    }
+    pub fn usize_refined(_value: usize) -> Self {
+        Self::primitive_named("UIntSize")
+    }
 
-    pub fn f32_refined(_value: f32) -> Self    { Self::primitive_named("Float32") }
-    pub fn f64_refined(_value: f64) -> Self    { Self::primitive_named("Float64") }
+    pub fn f32_refined(_value: f32) -> Self {
+        Self::primitive_named("Float32")
+    }
+    pub fn f64_refined(_value: f64) -> Self {
+        Self::primitive_named("Float64")
+    }
 
     /// Get the free type variables in this type
     pub fn free_vars(&self) -> Set<TypeVar> {
@@ -2780,7 +2816,8 @@ impl Type {
                 kind: kind.clone(),
             },
             Type::TypeApp { constructor, args } => {
-                let resolved_ctor = constructor.apply_subst_with_depth(subst, next_depth, max_depth);
+                let resolved_ctor =
+                    constructor.apply_subst_with_depth(subst, next_depth, max_depth);
                 let resolved_args: List<Type> = args
                     .iter()
                     .map(|a| a.apply_subst_with_depth(subst, next_depth, max_depth))
@@ -2789,7 +2826,10 @@ impl Type {
                 // Try to reduce TypeApp when constructor is a concrete type with free vars.
                 // This handles GAT resolution: TypeApp { ctor: List<$tv>, args: [Int] } → List<Int>
                 match &resolved_ctor {
-                    Type::Generic { name, args: ctor_args } if !name.as_str().starts_with("::") => {
+                    Type::Generic {
+                        name,
+                        args: ctor_args,
+                    } if !name.as_str().starts_with("::") => {
                         // Build TypeVar substitution: positionally map free vars in ctor to resolved_args
                         let mut var_subst = Substitution::new();
                         for (i, arg) in ctor_args.iter().enumerate() {
@@ -2800,18 +2840,30 @@ impl Type {
                             }
                         }
                         if !var_subst.is_empty() {
-                            return resolved_ctor.apply_subst_with_depth(&var_subst, next_depth, max_depth);
+                            return resolved_ctor
+                                .apply_subst_with_depth(&var_subst, next_depth, max_depth);
                         }
                         // No free vars to substitute — replace args entirely if same arity
-                        if ctor_args.len() == resolved_args.len() && ctor_args.iter().all(|a| matches!(a, Type::Var(_))) {
-                            Type::Generic { name: name.clone(), args: resolved_args }
+                        if ctor_args.len() == resolved_args.len()
+                            && ctor_args.iter().all(|a| matches!(a, Type::Var(_)))
+                        {
+                            Type::Generic {
+                                name: name.clone(),
+                                args: resolved_args,
+                            }
                         } else if resolved_args.is_empty() {
                             resolved_ctor
                         } else {
-                            Type::TypeApp { constructor: Box::new(resolved_ctor), args: resolved_args }
+                            Type::TypeApp {
+                                constructor: Box::new(resolved_ctor),
+                                args: resolved_args,
+                            }
                         }
                     }
-                    Type::Named { path, args: ctor_args } => {
+                    Type::Named {
+                        path,
+                        args: ctor_args,
+                    } => {
                         let mut var_subst = Substitution::new();
                         for (i, arg) in ctor_args.iter().enumerate() {
                             if let Type::Var(tv) = arg {
@@ -2821,17 +2873,29 @@ impl Type {
                             }
                         }
                         if !var_subst.is_empty() {
-                            return resolved_ctor.apply_subst_with_depth(&var_subst, next_depth, max_depth);
+                            return resolved_ctor
+                                .apply_subst_with_depth(&var_subst, next_depth, max_depth);
                         }
-                        if ctor_args.len() == resolved_args.len() && ctor_args.iter().all(|a| matches!(a, Type::Var(_))) {
-                            Type::Named { path: path.clone(), args: resolved_args }
+                        if ctor_args.len() == resolved_args.len()
+                            && ctor_args.iter().all(|a| matches!(a, Type::Var(_)))
+                        {
+                            Type::Named {
+                                path: path.clone(),
+                                args: resolved_args,
+                            }
                         } else if resolved_args.is_empty() {
                             resolved_ctor
                         } else {
-                            Type::TypeApp { constructor: Box::new(resolved_ctor), args: resolved_args }
+                            Type::TypeApp {
+                                constructor: Box::new(resolved_ctor),
+                                args: resolved_args,
+                            }
                         }
                     }
-                    _ => Type::TypeApp { constructor: Box::new(resolved_ctor), args: resolved_args },
+                    _ => Type::TypeApp {
+                        constructor: Box::new(resolved_ctor),
+                        args: resolved_args,
+                    },
                 }
             }
 
@@ -2865,11 +2929,13 @@ impl Type {
             },
             Type::PathType { space, left, right } => Type::PathType {
                 space: Box::new(space.apply_subst_with_depth(subst, next_depth, max_depth)),
-                left: left.clone(),   // CubicalTerms are value-level, not type-level
+                left: left.clone(), // CubicalTerms are value-level, not type-level
                 right: right.clone(),
             },
             Type::Partial { element_type, face } => Type::Partial {
-                element_type: Box::new(element_type.apply_subst_with_depth(subst, next_depth, max_depth)),
+                element_type: Box::new(
+                    element_type.apply_subst_with_depth(subst, next_depth, max_depth),
+                ),
                 face: face.clone(), // CubicalTerms are value-level
             },
             Type::Interval => Type::Interval,

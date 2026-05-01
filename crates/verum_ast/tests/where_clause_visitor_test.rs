@@ -18,10 +18,10 @@
 use verum_ast::ty::{
     Ident, Path, TypeBound, TypeBoundKind, WhereClause, WherePredicate, WherePredicateKind,
 };
-use verum_common::List;
 use verum_ast::visitor::{Visitor, walk_where_predicate};
 use verum_ast::{Expr, ExprKind, Span};
 use verum_common::Heap;
+use verum_common::List;
 
 /// Test visitor that counts where clause components
 struct WhereClauseCounter {
@@ -78,7 +78,10 @@ fn test_visitor_type_constraint() {
     }];
 
     let predicate = WherePredicate {
-        kind: WherePredicateKind::Type { ty, bounds: bounds.into() },
+        kind: WherePredicateKind::Type {
+            ty,
+            bounds: bounds.into(),
+        },
         span: dummy_span,
     };
 

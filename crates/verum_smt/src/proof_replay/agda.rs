@@ -18,9 +18,7 @@
 use verum_common::Text;
 use verum_kernel::SmtCertificate;
 
-use super::{
-    DeclarationHeader, ProofReplayBackend, ReplayError, TargetTactic,
-};
+use super::{DeclarationHeader, ProofReplayBackend, ReplayError, TargetTactic};
 
 #[derive(Debug, Default)]
 pub struct AgdaProofReplay;
@@ -137,8 +135,8 @@ fn bytes_to_string(bytes: &verum_common::List<u8>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::DeclKind;
+    use super::*;
     use verum_common::List;
 
     fn cert(backend: &str, trace: &str) -> SmtCertificate {
@@ -222,7 +220,10 @@ mod tests {
         let mut c = cert("z3", "(refl x)");
         c.schema_version = 99;
         let result = AgdaProofReplay::new().lower(&c, &theorem("v")).err();
-        assert!(matches!(result, Some(ReplayError::UnsupportedSchema { .. })));
+        assert!(matches!(
+            result,
+            Some(ReplayError::UnsupportedSchema { .. })
+        ));
     }
 
     #[test]

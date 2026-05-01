@@ -2,11 +2,11 @@ use crate::{
     context::{Context, ContextRef},
     string_ref::StringRef,
 };
+use std::marker::PhantomData;
 use verum_mlir_sys::{
     MlirIdentifier, mlirIdentifierEqual, mlirIdentifierGet, mlirIdentifierGetContext,
     mlirIdentifierStr,
 };
-use std::marker::PhantomData;
 
 /// An identifier.
 #[derive(Clone, Copy, Debug)]

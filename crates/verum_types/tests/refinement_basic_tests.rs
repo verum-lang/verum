@@ -599,9 +599,7 @@ fn smt_backend_set_timeout_ms_default_is_no_op() {
     // it. The trait extension is therefore source-compatible with
     // every existing backend.
     use verum_common::{Map, Maybe};
-    use verum_types::refinement::{
-        RefinementError, SmtBackend, SmtResult, VerificationResult,
-    };
+    use verum_types::refinement::{RefinementError, SmtBackend, SmtResult, VerificationResult};
 
     /// Legacy-style backend that doesn't override `set_timeout_ms`.
     /// Compiling this is the test — if the default impl were
@@ -645,9 +643,7 @@ fn smt_backend_set_timeout_ms_can_be_overridden() {
     // production Z3 backend forwards the limit to the solver.
     use std::sync::{Arc, Mutex};
     use verum_common::{Map, Maybe};
-    use verum_types::refinement::{
-        RefinementError, SmtBackend, SmtResult, VerificationResult,
-    };
+    use verum_types::refinement::{RefinementError, SmtBackend, SmtResult, VerificationResult};
 
     struct SpyBackend {
         seen: Arc<Mutex<Vec<u64>>>,

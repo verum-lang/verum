@@ -1,13 +1,15 @@
 #![allow(deprecated)]
 
 use verum_llvm_sys::object::{
-    LLVMDisposeObjectFile, LLVMDisposeRelocationIterator, LLVMDisposeSectionIterator, LLVMDisposeSymbolIterator,
-    LLVMGetRelocationOffset, LLVMGetRelocationSymbol, LLVMGetRelocationType, LLVMGetRelocationTypeName,
-    LLVMGetRelocationValueString, LLVMGetRelocations, LLVMGetSectionAddress, LLVMGetSectionContents,
-    LLVMGetSectionName, LLVMGetSectionSize, LLVMGetSections, LLVMGetSymbolAddress, LLVMGetSymbolName,
+    LLVMDisposeObjectFile, LLVMDisposeRelocationIterator, LLVMDisposeSectionIterator,
+    LLVMDisposeSymbolIterator, LLVMGetRelocationOffset, LLVMGetRelocationSymbol,
+    LLVMGetRelocationType, LLVMGetRelocationTypeName, LLVMGetRelocationValueString,
+    LLVMGetRelocations, LLVMGetSectionAddress, LLVMGetSectionContents, LLVMGetSectionName,
+    LLVMGetSectionSize, LLVMGetSections, LLVMGetSymbolAddress, LLVMGetSymbolName,
     LLVMGetSymbolSize, LLVMGetSymbols, LLVMIsRelocationIteratorAtEnd, LLVMIsSectionIteratorAtEnd,
-    LLVMIsSymbolIteratorAtEnd, LLVMMoveToNextRelocation, LLVMMoveToNextSection, LLVMMoveToNextSymbol,
-    LLVMObjectFileRef, LLVMRelocationIteratorRef, LLVMSectionIteratorRef, LLVMSymbolIteratorRef,
+    LLVMIsSymbolIteratorAtEnd, LLVMMoveToNextRelocation, LLVMMoveToNextSection,
+    LLVMMoveToNextSymbol, LLVMObjectFileRef, LLVMRelocationIteratorRef, LLVMSectionIteratorRef,
+    LLVMSymbolIteratorRef,
 };
 
 use std::ffi::CStr;
@@ -57,7 +59,10 @@ pub struct SectionIterator {
 }
 
 impl SectionIterator {
-    pub unsafe fn new(section_iterator: LLVMSectionIteratorRef, object_file: LLVMObjectFileRef) -> Self {
+    pub unsafe fn new(
+        section_iterator: LLVMSectionIteratorRef,
+        object_file: LLVMObjectFileRef,
+    ) -> Self {
         assert!(!section_iterator.is_null());
         assert!(!object_file.is_null());
 
@@ -85,7 +90,8 @@ impl Iterator for SectionIterator {
             }
         }
 
-        let at_end = unsafe { LLVMIsSectionIteratorAtEnd(self.object_file, self.section_iterator) == 1 };
+        let at_end =
+            unsafe { LLVMIsSectionIteratorAtEnd(self.object_file, self.section_iterator) == 1 };
 
         if at_end {
             return None;
@@ -112,7 +118,10 @@ impl Section {
         assert!(!section.is_null());
         assert!(!object_file.is_null());
 
-        Section { section, object_file }
+        Section {
+            section,
+            object_file,
+        }
     }
 
     pub unsafe fn as_mut_ptr(&self) -> (LLVMSectionIteratorRef, LLVMObjectFileRef) {
@@ -133,7 +142,12 @@ impl Section {
     }
 
     pub fn get_contents(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(LLVMGetSectionContents(self.section) as *const u8, self.size() as usize) }
+        unsafe {
+            std::slice::from_raw_parts(
+                LLVMGetSectionContents(self.section) as *const u8,
+                self.size() as usize,
+            )
+        }
     }
 
     pub fn get_address(&self) -> u64 {
@@ -173,8 +187,18 @@ impl RelocationIterator {
         }
     }
 
-    pub fn as_mut_ptr(&self) -> (LLVMRelocationIteratorRef, LLVMSectionIteratorRef, LLVMObjectFileRef) {
-        (self.relocation_iterator, self.section_iterator, self.object_file)
+    pub fn as_mut_ptr(
+        &self,
+    ) -> (
+        LLVMRelocationIteratorRef,
+        LLVMSectionIteratorRef,
+        LLVMObjectFileRef,
+    ) {
+        (
+            self.relocation_iterator,
+            self.section_iterator,
+            self.object_file,
+        )
     }
 }
 
@@ -188,7 +212,9 @@ impl Iterator for RelocationIterator {
             unsafe { LLVMMoveToNextRelocation(self.relocation_iterator) }
         }
 
-        let at_end = unsafe { LLVMIsRelocationIteratorAtEnd(self.section_iterator, self.relocation_iterator) == 1 };
+        let at_end = unsafe {
+            LLVMIsRelocationIteratorAtEnd(self.section_iterator, self.relocation_iterator) == 1
+        };
 
         if at_end {
             return None;
@@ -211,7 +237,10 @@ pub struct Relocation {
 }
 
 impl Relocation {
-    pub unsafe fn new(relocation: LLVMRelocationIteratorRef, object_file: LLVMObjectFileRef) -> Self {
+    pub unsafe fn new(
+        relocation: LLVMRelocationIteratorRef,
+        object_file: LLVMObjectFileRef,
+    ) -> Self {
         assert!(!relocation.is_null());
         assert!(!object_file.is_null());
 
@@ -258,7 +287,10 @@ pub struct SymbolIterator {
 }
 
 impl SymbolIterator {
-    pub unsafe fn new(symbol_iterator: LLVMSymbolIteratorRef, object_file: LLVMObjectFileRef) -> Self {
+    pub unsafe fn new(
+        symbol_iterator: LLVMSymbolIteratorRef,
+        object_file: LLVMObjectFileRef,
+    ) -> Self {
         assert!(!symbol_iterator.is_null());
         assert!(!object_file.is_null());
 
@@ -284,7 +316,8 @@ impl Iterator for SymbolIterator {
             unsafe { LLVMMoveToNextSymbol(self.symbol_iterator) }
         }
 
-        let at_end = unsafe { LLVMIsSymbolIteratorAtEnd(self.object_file, self.symbol_iterator) == 1 };
+        let at_end =
+            unsafe { LLVMIsSymbolIteratorAtEnd(self.object_file, self.symbol_iterator) == 1 };
 
         if at_end {
             return None;

@@ -1,8 +1,8 @@
 //! Sidebar widget with tabbed panels: Variables, Outline, Stats.
 
+use crate::playbook::session::CellKind;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph, Tabs, Widget};
-use crate::playbook::session::CellKind;
 
 /// Sidebar tab selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -101,12 +101,29 @@ impl<'a> SidebarWidget<'a> {
         }
     }
 
-    pub fn tab(mut self, tab: SidebarTab) -> Self { self.tab = tab; self }
-    pub fn variables(mut self, vars: &'a [VarInfo]) -> Self { self.variables = vars; self }
-    pub fn functions(mut self, funcs: &'a [FuncInfo]) -> Self { self.functions = funcs; self }
-    pub fn outline(mut self, entries: &'a [OutlineEntry]) -> Self { self.outline = entries; self }
-    pub fn stats(mut self, stats: ExecStats) -> Self { self.stats = stats; self }
-    pub fn cell_info(self, _count: usize, _selected: usize) -> Self { self }
+    pub fn tab(mut self, tab: SidebarTab) -> Self {
+        self.tab = tab;
+        self
+    }
+    pub fn variables(mut self, vars: &'a [VarInfo]) -> Self {
+        self.variables = vars;
+        self
+    }
+    pub fn functions(mut self, funcs: &'a [FuncInfo]) -> Self {
+        self.functions = funcs;
+        self
+    }
+    pub fn outline(mut self, entries: &'a [OutlineEntry]) -> Self {
+        self.outline = entries;
+        self
+    }
+    pub fn stats(mut self, stats: ExecStats) -> Self {
+        self.stats = stats;
+        self
+    }
+    pub fn cell_info(self, _count: usize, _selected: usize) -> Self {
+        self
+    }
 
     fn render_variables(&self, area: Rect, buf: &mut Buffer) {
         let mut lines: Vec<Line> = Vec::new();
@@ -114,7 +131,9 @@ impl<'a> SidebarWidget<'a> {
         if self.variables.is_empty() && self.functions.is_empty() {
             lines.push(Line::from(Span::styled(
                 "  (no bindings yet)",
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
             )));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
@@ -134,9 +153,17 @@ impl<'a> SidebarWidget<'a> {
                     if var.is_mutable {
                         name_spans.push(Span::styled("mut ", Style::default().fg(Color::Yellow)));
                     }
-                    name_spans.push(Span::styled(&var.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)));
+                    name_spans.push(Span::styled(
+                        &var.name,
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ));
                     name_spans.push(Span::styled(" : ", Style::default().fg(Color::DarkGray)));
-                    name_spans.push(Span::styled(&var.type_info, Style::default().fg(Color::Cyan)));
+                    name_spans.push(Span::styled(
+                        &var.type_info,
+                        Style::default().fg(Color::Cyan),
+                    ));
                     lines.push(Line::from(name_spans));
 
                     // Value preview — allow up to sidebar width
@@ -164,8 +191,18 @@ impl<'a> SidebarWidget<'a> {
                 )));
                 for func in self.functions {
                     lines.push(Line::from(vec![
-                        Span::styled("fn ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-                        Span::styled(&func.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            "fn ",
+                            Style::default()
+                                .fg(Color::Magenta)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            &func.name,
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
                         Span::styled(&func.signature, Style::default().fg(Color::DarkGray)),
                     ]));
                 }
@@ -181,7 +218,9 @@ impl<'a> SidebarWidget<'a> {
         if self.outline.is_empty() {
             lines.push(Line::from(Span::styled(
                 "  (no cells)",
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
             )));
         } else {
             for entry in self.outline {
@@ -209,7 +248,9 @@ impl<'a> SidebarWidget<'a> {
                 };
 
                 let row_style = if entry.is_selected {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -235,7 +276,12 @@ impl<'a> SidebarWidget<'a> {
             )),
             Line::from(vec![
                 Span::styled("  Cells     ", Style::default().fg(Color::DarkGray)),
-                Span::styled(format!("{}", s.total_cells), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{}", s.total_cells),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(
                     format!("  ({}↓ {}≡)", s.code_cells, s.markdown_cells),
                     Style::default().fg(Color::DarkGray),
@@ -299,10 +345,7 @@ impl<'a> SidebarWidget<'a> {
             };
             lines.push(Line::from(vec![
                 Span::styled("  Time  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("  {}", time_str),
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled(format!("  {}", time_str), Style::default().fg(Color::White)),
             ]));
 
             if s.last_instructions > 0 {
@@ -369,7 +412,9 @@ impl<'a> SidebarWidget<'a> {
 }
 
 impl<'a> Default for SidebarWidget<'a> {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<'a> Widget for SidebarWidget<'a> {
@@ -387,7 +432,12 @@ impl<'a> Widget for SidebarWidget<'a> {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::DarkGray))
-            .title(Span::styled(tab_label, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+            .title(Span::styled(
+                tab_label,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ));
 
         let inner = block.inner(area);
         block.render(area, buf);
@@ -399,7 +449,11 @@ impl<'a> Widget for SidebarWidget<'a> {
         let tabs = Tabs::new(vec!["Vars", "Cells", "Session"])
             .select(self.tab.index())
             .style(Style::default().fg(Color::DarkGray))
-            .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
             .divider(Span::styled("│", Style::default().fg(Color::DarkGray)));
         let tab_area = Rect { height: 1, ..inner };
         tabs.render(tab_area, buf);

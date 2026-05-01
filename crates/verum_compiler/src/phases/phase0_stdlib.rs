@@ -232,19 +232,35 @@ struct PrimitiveFfi {
 
 /// Primitives that can be monomorphized into stdlib generics at the FFI layer.
 const FFI_PRIMITIVES: &[PrimitiveFfi] = &[
-    PrimitiveFfi { verum: "i32",  c_type: "int32_t", mangled: "i32"  },
-    PrimitiveFfi { verum: "i64",  c_type: "int64_t", mangled: "i64"  },
-    PrimitiveFfi { verum: "f64",  c_type: "double",  mangled: "f64"  },
-    PrimitiveFfi { verum: "bool", c_type: "uint8_t", mangled: "bool" },
-    PrimitiveFfi { verum: "Text", c_type: "void*",   mangled: "text" },
+    PrimitiveFfi {
+        verum: "i32",
+        c_type: "int32_t",
+        mangled: "i32",
+    },
+    PrimitiveFfi {
+        verum: "i64",
+        c_type: "int64_t",
+        mangled: "i64",
+    },
+    PrimitiveFfi {
+        verum: "f64",
+        c_type: "double",
+        mangled: "f64",
+    },
+    PrimitiveFfi {
+        verum: "bool",
+        c_type: "uint8_t",
+        mangled: "bool",
+    },
+    PrimitiveFfi {
+        verum: "Text",
+        c_type: "void*",
+        mangled: "text",
+    },
 ];
 
 /// Pre-monomorphized Map<K,V> key-value pairs exposed at the FFI layer.
-const FFI_MAP_PAIRS: &[(&str, &str)] = &[
-    ("Text", "i64"),
-    ("Text", "Text"),
-    ("i64", "Text"),
-];
+const FFI_MAP_PAIRS: &[(&str, &str)] = &[("Text", "i64"), ("Text", "Text"), ("i64", "Text")];
 
 /// Primitives exposed for Maybe<T> monomorphizations at the FFI layer.
 /// (Subset of FFI_PRIMITIVES — Maybe<bool> is not currently materialized.)
@@ -254,32 +270,32 @@ const FFI_MAYBE_PRIMITIVES: &[&str] = &["i32", "i64", "f64", "Text"];
 /// Used to synthesize FunctionSignature type_params for FFI descriptors.
 /// Driven lookup replaces per-type match arms.
 const GENERIC_TYPE_PARAMS: &[(&str, &[&str])] = &[
-    ("List",    &["T"]),
-    ("Set",     &["T"]),
-    ("Deque",   &["T"]),
-    ("Maybe",   &["T"]),
-    ("Option",  &["T"]),
-    ("Map",     &["K", "V"]),
+    ("List", &["T"]),
+    ("Set", &["T"]),
+    ("Deque", &["T"]),
+    ("Maybe", &["T"]),
+    ("Option", &["T"]),
+    ("Map", &["K", "V"]),
     ("HashMap", &["K", "V"]),
-    ("Result",  &["T", "E"]),
+    ("Result", &["T", "E"]),
 ];
 
 /// Path fragments that identify a stdlib function as a compiler intrinsic.
 /// Format: `(type_segment, method_segment, intrinsic_id)` — matched via
 /// `path.contains(...)` on the full Verum path (e.g. `"List.<i64>.push"`).
 const INTRINSIC_PATTERNS: &[(&str, &str, IntrinsicId)] = &[
-    ("List", ".new",  IntrinsicId::ListNew),
+    ("List", ".new", IntrinsicId::ListNew),
     ("List", ".push", IntrinsicId::ListPush),
-    ("List", ".pop",  IntrinsicId::ListPop),
-    ("List", ".get",  IntrinsicId::ListGet),
-    ("List", ".len",  IntrinsicId::ListLen),
-    ("Map",  ".new",    IntrinsicId::MapNew),
-    ("Map",  ".insert", IntrinsicId::MapInsert),
-    ("Map",  ".get",    IntrinsicId::MapGet),
-    ("Set",  ".new",    IntrinsicId::SetNew),
-    ("Set",  ".insert", IntrinsicId::SetInsert),
-    ("Text", ".new",    IntrinsicId::TextNew),
-    ("Text", ".len",    IntrinsicId::TextLen),
+    ("List", ".pop", IntrinsicId::ListPop),
+    ("List", ".get", IntrinsicId::ListGet),
+    ("List", ".len", IntrinsicId::ListLen),
+    ("Map", ".new", IntrinsicId::MapNew),
+    ("Map", ".insert", IntrinsicId::MapInsert),
+    ("Map", ".get", IntrinsicId::MapGet),
+    ("Set", ".new", IntrinsicId::SetNew),
+    ("Set", ".insert", IntrinsicId::SetInsert),
+    ("Text", ".new", IntrinsicId::TextNew),
+    ("Text", ".len", IntrinsicId::TextLen),
     ("Text", ".concat", IntrinsicId::TextConcat),
 ];
 
@@ -590,9 +606,7 @@ impl Phase0CoreCompiler {
             let verum_path: Text = format!("List.<{}>.push", prim.verum).into();
             let c_symbol: Text = format!("verum_std_list_{}_push", prim.mangled).into();
             mappings.insert(verum_path.clone(), c_symbol.clone());
-            header.push(
-                format!("void {}(void* list, {} value);", c_symbol, prim.c_type).into(),
-            );
+            header.push(format!("void {}(void* list, {} value);", c_symbol, prim.c_type).into());
 
             // List.len
             let verum_path: Text = format!("List.<{}>.len", prim.verum).into();
@@ -628,9 +642,8 @@ impl Phase0CoreCompiler {
             let verum_path: Text = format!("Map.<{}, {}>.insert", k, v).into();
             let c_symbol: Text = format!("verum_std_map_{}_{}_insert", k_mangled, v_mangled).into();
             mappings.insert(verum_path.clone(), c_symbol.clone());
-            header.push(
-                format!("void {}(void* map, {} key, {} value);", c_symbol, k_c, v_c).into(),
-            );
+            header
+                .push(format!("void {}(void* map, {} key, {} value);", c_symbol, k_c, v_c).into());
         }
 
         Ok(())
@@ -1267,7 +1280,9 @@ impl Phase0CoreCompiler {
         GENERIC_TYPE_PARAMS
             .iter()
             .find(|(name, _)| *name == type_name)
-            .map(|(_, params)| List::from(params.iter().map(|p| Text::from(*p)).collect::<Vec<_>>()))
+            .map(|(_, params)| {
+                List::from(params.iter().map(|p| Text::from(*p)).collect::<Vec<_>>())
+            })
             .unwrap_or_default()
     }
 
@@ -1377,11 +1392,7 @@ impl Phase0CoreCompiler {
     }
 
     /// Recursively hash modification times of .rs files in subdirectories using Blake3.
-    fn hash_subdir_files(
-        &self,
-        dir: &std::path::Path,
-        hasher: &mut crate::hash::ContentHash,
-    ) {
+    fn hash_subdir_files(&self, dir: &std::path::Path, hasher: &mut crate::hash::ContentHash) {
         if let Ok(entries) = fs::read_dir(dir) {
             let mut paths: Vec<_> = entries.filter_map(|e| e.ok()).collect();
             paths.sort_by_key(|e| e.path());

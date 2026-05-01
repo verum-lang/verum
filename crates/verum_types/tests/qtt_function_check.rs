@@ -94,11 +94,7 @@ fn omega_used_anywhere_passes() {
     decl.insert(Text::from("y"), Quantity::Omega);
     // x + y, x + y, x + y — all uses of Omega bindings are fine
     let body = Expr {
-        kind: ExprKind::Tuple(List::from_iter([
-            add_xy(),
-            add_xy(),
-            add_xy(),
-        ])),
+        kind: ExprKind::Tuple(List::from_iter([add_xy(), add_xy(), add_xy()])),
         span: sp(),
         ref_kind: None,
         check_eliminated: false,

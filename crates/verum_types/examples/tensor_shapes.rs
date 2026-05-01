@@ -33,10 +33,7 @@ use verum_ast::{
     ty::Path,
 };
 use verum_common::{ConstValue, List};
-use verum_types::{
-    Type, TypeChecker,
-    const_eval::ConstEvaluator,
-};
+use verum_types::{Type, TypeChecker, const_eval::ConstEvaluator};
 
 fn main() {
     println!("=== Verum Tensor Shape Computation Example ===\n");
@@ -189,7 +186,7 @@ fn example_tensor_arithmetic() {
     println!("Meta parameters: N = 10, M = 20");
 
     // Compute: N + M
-    
+
     let n_path = Path::single(Ident::new("N".to_string(), Span::dummy()));
     let m_path = Path::single(Ident::new("M".to_string(), Span::dummy()));
 

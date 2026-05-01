@@ -8,8 +8,8 @@
 //! AST for pipeline-shared facts.
 
 use serde::{Deserialize, Serialize};
-use verum_common::{List, Maybe, Text};
 use verum_common::span::Span;
+use verum_common::{List, Maybe, Text};
 
 use crate::expr::IrExpr;
 use crate::ty::IrType;
@@ -157,9 +157,7 @@ impl IrModule {
         for td in &self.types {
             if td.name == *name {
                 if let IrVariantKind::Variant { constructors } = &td.variant_kind {
-                    return Some(
-                        constructors.iter().map(|(n, _)| n.clone()).collect(),
-                    );
+                    return Some(constructors.iter().map(|(n, _)| n.clone()).collect());
                 }
                 return None;
             }
@@ -213,9 +211,7 @@ mod tests {
     #[test]
     fn variant_lookup_misses_return_none() {
         let m = IrModule::empty("core.test", Span::dummy());
-        assert!(m
-            .variant_constructors(&Text::from("Absent"))
-            .is_none());
+        assert!(m.variant_constructors(&Text::from("Absent")).is_none());
     }
 
     #[test]

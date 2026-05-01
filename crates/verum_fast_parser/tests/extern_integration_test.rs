@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 use verum_ast::{FileId, ItemKind, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 #[test]
 fn test_extern_functions_integration() {
@@ -56,8 +56,8 @@ public extern "system" fn win32_api(handle: Int) -> Int;
 #[test]
 fn test_extern_example_file() {
     use verum_ast::{FileId, ItemKind};
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
 
     // Inline extern function example (rather than requiring /tmp/extern_example.vr)
     let source = r#"
@@ -98,12 +98,13 @@ public extern fn libc_exit(code: Int);
     // Verify no function has a body
     for item in &module.items {
         if let ItemKind::Function(func) = &item.kind
-            && func.extern_abi.is_some() {
-                assert!(
-                    func.body.is_none(),
-                    "Extern function {} should not have a body",
-                    func.name.name
-                );
-            }
+            && func.extern_abi.is_some()
+        {
+            assert!(
+                func.body.is_none(),
+                "Extern function {} should not have a body",
+                func.name.name
+            );
+        }
     }
 }

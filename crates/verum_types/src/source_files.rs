@@ -31,8 +31,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use verum_common::span::{FileId, LineColSpan, SourceFile, Span};
 use verum_common::Text;
+use verum_common::span::{FileId, LineColSpan, SourceFile, Span};
 
 /// A thread-safe registry of source files for span conversion.
 ///

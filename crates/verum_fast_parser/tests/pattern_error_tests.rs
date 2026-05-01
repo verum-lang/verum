@@ -38,7 +38,10 @@ fn parse_pattern_err(source: &str) -> String {
     let tokens: Vec<Token> = lexer.filter_map(|r| r.ok()).collect();
     let mut parser = RecursiveParser::new(&tokens, file_id);
     match parser.parse_pattern() {
-        Ok(_) => panic!("Expected parse error for '{}', but parsing succeeded", source),
+        Ok(_) => panic!(
+            "Expected parse error for '{}', but parsing succeeded",
+            source
+        ),
         Err(e) => format!("{}", e),
     }
 }
@@ -49,8 +52,15 @@ fn parse_module_err(source: &str) -> String {
     let lexer = Lexer::new(source, file_id);
     let parser = VerumParser::new();
     match parser.parse_module(lexer, file_id) {
-        Ok(_) => panic!("Expected parse error, but parsing succeeded for:\n{}", source),
-        Err(errors) => errors.iter().map(|e| format!("{}", e)).collect::<Vec<_>>().join("\n"),
+        Ok(_) => panic!(
+            "Expected parse error, but parsing succeeded for:\n{}",
+            source
+        ),
+        Err(errors) => errors
+            .iter()
+            .map(|e| format!("{}", e))
+            .collect::<Vec<_>>()
+            .join("\n"),
     }
 }
 

@@ -48,9 +48,9 @@ use verum_ast::{FileId, Span};
 use verum_common::{List, Maybe, Text};
 use verum_lexer::{Lexer, Token};
 
-use verum_parser::VerumParser;
 use verum_parser::ParseError;
 use verum_parser::RecursiveParser;
+use verum_parser::VerumParser;
 
 use super::context::ScriptContext;
 use super::result::{ParseMode, ScriptParseResult};
@@ -145,9 +145,10 @@ impl ScriptParser {
 
         // If input looks like multiple statements (contains `;` not inside a string),
         // try module mode first to capture ALL statements.
-        let has_multiple_semis = trimmed.matches(';').count() > 1
-            || (trimmed.contains(';') && !trimmed.ends_with(';'));
-        let has_semi_separated = trimmed.contains(';') && trimmed.len() > trimmed.find(';').unwrap_or(0) + 1;
+        let has_multiple_semis =
+            trimmed.matches(';').count() > 1 || (trimmed.contains(';') && !trimmed.ends_with(';'));
+        let has_semi_separated =
+            trimmed.contains(';') && trimmed.len() > trimmed.find(';').unwrap_or(0) + 1;
 
         if has_semi_separated || has_multiple_semis {
             // Wrap in fn main() {} for module parsing if it's bare statements

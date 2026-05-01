@@ -39,11 +39,11 @@ use crate::ui;
 use std::path::{Path, PathBuf};
 use verum_ast::decl::ItemKind;
 use verum_kernel::tactic_elaborator::{
-    elaborate_theorem, register_kernel_bridge_dispatchers, register_kernel_v0_lemmas,
-    register_propositional_connectives, ElabContext, ElabError,
+    ElabContext, ElabError, elaborate_theorem, register_kernel_bridge_dispatchers,
+    register_kernel_v0_lemmas, register_propositional_connectives,
 };
 use verum_kernel::verification_goal::{
-    from_theorem_decl, module_verification_surface, TheoremKind,
+    TheoremKind, from_theorem_decl, module_verification_surface,
 };
 
 /// One row in the elaboration report — what happened for one
@@ -182,34 +182,25 @@ pub fn execute(path: &str, output_dir: Option<&str>) -> Result<()> {
 /// Walk one `.vr` source file and elaborate every theorem-shaped
 /// declaration. Writes `.vproof` files for verified theorems;
 /// returns one [`ElaborationRow`] per theorem.
-fn walk_and_elaborate(
-    source_path: &Path,
-    out_dir: &Path,
-) -> Result<Vec<ElaborationRow>> {
+fn walk_and_elaborate(source_path: &Path, out_dir: &Path) -> Result<Vec<ElaborationRow>> {
     use verum_common::span::FileId;
     // verum_parser re-exports FastParser at the crate root; verum_cli
     // depends on verum_parser via [dependencies] but only on
     // verum_fast_parser via [dev-dependencies], so use the re-export.
     use verum_fast_parser::FastParser;
 
-    let source = std::fs::read_to_string(source_path).map_err(|e| {
-        CliError::custom(format!("read {}: {}", source_path.display(), e))
-    })?;
+    let source = std::fs::read_to_string(source_path)
+        .map_err(|e| CliError::custom(format!("read {}: {}", source_path.display(), e)))?;
 
     let parser = FastParser::new();
     let file_id = FileId::new(0);
     let module = parser.parse_module_str(&source, file_id).map_err(|e| {
-        CliError::InvalidArgument(format!(
-            "parse {} failed: {:?}",
-            source_path.display(),
-            e,
-        ))
+        CliError::InvalidArgument(format!("parse {} failed: {:?}", source_path.display(), e,))
     })?;
 
     // Ensure output directory exists.
-    std::fs::create_dir_all(out_dir).map_err(|e| {
-        CliError::custom(format!("mkdir {}: {}", out_dir.display(), e))
-    })?;
+    std::fs::create_dir_all(out_dir)
+        .map_err(|e| CliError::custom(format!("mkdir {}: {}", out_dir.display(), e)))?;
 
     // Emit the module-level verification surface — one JSON file
     // listing every theorem / lemma / corollary / fn-with-contract's
@@ -227,16 +218,10 @@ fn walk_and_elaborate(
     let module_items: Vec<verum_ast::decl::Item> = module.items.iter().cloned().collect();
     let surface = module_verification_surface(&module_items, &surface_ctx);
     let surface_path = out_dir.join("verification-surface.json");
-    let surface_json = serde_json::to_string_pretty(&surface).map_err(|e| {
-        CliError::custom(format!("serialise verification surface: {}", e))
-    })?;
-    std::fs::write(&surface_path, surface_json).map_err(|e| {
-        CliError::custom(format!(
-            "write {}: {}",
-            surface_path.display(),
-            e,
-        ))
-    })?;
+    let surface_json = serde_json::to_string_pretty(&surface)
+        .map_err(|e| CliError::custom(format!("serialise verification surface: {}", e)))?;
+    std::fs::write(&surface_path, surface_json)
+        .map_err(|e| CliError::custom(format!("write {}: {}", surface_path.display(), e,)))?;
 
     let mut rows = Vec::new();
     for item in module.items.iter() {
@@ -271,15 +256,10 @@ fn walk_and_elaborate(
         let row = match elaborate_theorem(&theorem, &mut ctx) {
             Ok(cert) => {
                 let vproof_path = out_dir.join(format!("{}.vproof", name));
-                let json = serde_json::to_string_pretty(&cert).map_err(|e| {
-                    CliError::custom(format!("serialise certificate: {}", e))
-                })?;
+                let json = serde_json::to_string_pretty(&cert)
+                    .map_err(|e| CliError::custom(format!("serialise certificate: {}", e)))?;
                 std::fs::write(&vproof_path, json).map_err(|e| {
-                    CliError::custom(format!(
-                        "write {}: {}",
-                        vproof_path.display(),
-                        e,
-                    ))
+                    CliError::custom(format!("write {}: {}", vproof_path.display(), e,))
                 })?;
                 // Also emit the unified VerificationGoal alongside
                 // the certificate so audit-gate dashboards and
@@ -289,28 +269,18 @@ fn walk_and_elaborate(
                 // theorem's proposition shape isn't yet supported by
                 // proposition_to_term (the matching certificate
                 // metadata records `claimed_type_source: placeholder`).
-                let vgoal_path =
-                    match from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx) {
-                        Ok(goal) => {
-                            let path = out_dir.join(format!("{}.vgoal", name));
-                            let goal_json = serde_json::to_string_pretty(&goal)
-                                .map_err(|e| {
-                                    CliError::custom(format!(
-                                        "serialise goal: {}",
-                                        e,
-                                    ))
-                                })?;
-                            std::fs::write(&path, goal_json).map_err(|e| {
-                                CliError::custom(format!(
-                                    "write {}: {}",
-                                    path.display(),
-                                    e,
-                                ))
-                            })?;
-                            Some(path)
-                        }
-                        Err(_) => None,
-                    };
+                let vgoal_path = match from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx) {
+                    Ok(goal) => {
+                        let path = out_dir.join(format!("{}.vgoal", name));
+                        let goal_json = serde_json::to_string_pretty(&goal)
+                            .map_err(|e| CliError::custom(format!("serialise goal: {}", e,)))?;
+                        std::fs::write(&path, goal_json).map_err(|e| {
+                            CliError::custom(format!("write {}: {}", path.display(), e,))
+                        })?;
+                        Some(path)
+                    }
+                    Err(_) => None,
+                };
                 ElaborationRow {
                     name,
                     status: ElaborationStatus::Verified {
@@ -343,15 +313,21 @@ mod tests {
     /// Pin: a `.vr` file with a single theorem `apply` body whose
     /// target axiom is undeclared cleanly skips with the
     /// UndeclaredApplyTarget message.
+    ///
+    /// Theorem syntax: the proof block IS the theorem's body — it
+    /// goes at the declaration level after `ensures`, NOT inside
+    /// outer `{ ... }` braces (those would make the theorem look
+    /// like a function decl, which the parser rejects with
+    /// `expected RBrace, found Semicolon`).  See
+    /// `core/verify/kernel_v0/soundness.vr::kernel_soundness` for
+    /// the canonical form.
     #[test]
     fn elaborate_proof_skips_undeclared_apply_targets() {
         let source = "module test_elab;\n\
                       \n\
                       public theorem foo()\n\
                           ensures true\n\
-                      {\n\
-                          proof { apply some_undeclared_axiom; };\n\
-                      }\n";
+                          proof { apply some_undeclared_axiom; };\n";
         let mut src = tempfile::NamedTempFile::new().expect("tempfile");
         src.write_all(source.as_bytes()).expect("write");
         // Rename to .vr extension by copying.
@@ -364,7 +340,11 @@ mod tests {
             Some(out_dir.path().to_string_lossy().as_ref()),
         );
         // Skipped (not failed) → exit 0.
-        assert!(result.is_ok(), "expected ok with skipped row, got {:?}", result);
+        assert!(
+            result.is_ok(),
+            "expected ok with skipped row, got {:?}",
+            result
+        );
         // No .vproof files emitted.
         let entries: Vec<_> = std::fs::read_dir(out_dir.path())
             .unwrap()
@@ -398,9 +378,7 @@ mod tests {
                       \n\
                       public theorem witness()\n\
                           ensures true\n\
-                      {\n\
-                          proof { apply core.verify.kernel_v0.lemmas.beta.church_rosser_confluence; };\n\
-                      }\n";
+                          proof { apply core.verify.kernel_v0.lemmas.beta.church_rosser_confluence; };\n";
         let mut src = tempfile::NamedTempFile::new().expect("tempfile");
         src.write_all(source.as_bytes()).expect("write");
         let vr_path = src.path().with_extension("vr");

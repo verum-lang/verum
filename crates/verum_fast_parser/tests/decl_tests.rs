@@ -25,8 +25,8 @@
 
 use verum_ast::{FileId, ItemKind, Module};
 use verum_common::List;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper to parse a module from source.
 fn parse_module(source: &str) -> Result<Module, String> {
@@ -183,11 +183,17 @@ fn test_fn_with_where_meta_clause() {
 #[test]
 fn test_type_with_where_meta_clause() {
     // Type definition with where meta constraint before 'is'
-    assert_parses("type FixedBuffer<const SIZE: Int> where meta SIZE > 0 is { data: [Byte; SIZE] };");
+    assert_parses(
+        "type FixedBuffer<const SIZE: Int> where meta SIZE > 0 is { data: [Byte; SIZE] };",
+    );
     // Multiple meta constraints
-    assert_parses("type Matrix<const R: Int, const C: Int> where meta R > 0, meta C > 0 is { data: [[Float; C]; R] };");
+    assert_parses(
+        "type Matrix<const R: Int, const C: Int> where meta R > 0, meta C > 0 is { data: [[Float; C]; R] };",
+    );
     // Combined type and meta constraints
-    assert_parses("type Container<T, const N: Int> where T: Clone, meta N > 0 is { items: [T; N] };");
+    assert_parses(
+        "type Container<T, const N: Int> where T: Clone, meta N > 0 is { items: [T; N] };",
+    );
 }
 
 #[test]
@@ -1681,10 +1687,16 @@ fn test_context_group_alias_vs_traditional() {
             assert_eq!(cg1.name.name.as_str(), cg2.name.name.as_str());
             assert_eq!(cg1.contexts.len(), cg2.contexts.len());
             // Compare context paths
-            if let (Some(seg1), Some(seg2)) = (cg1.contexts[0].path.as_ident(), cg2.contexts[0].path.as_ident()) {
+            if let (Some(seg1), Some(seg2)) = (
+                cg1.contexts[0].path.as_ident(),
+                cg2.contexts[0].path.as_ident(),
+            ) {
                 assert_eq!(seg1.name.as_str(), seg2.name.as_str());
             }
-            if let (Some(seg1), Some(seg2)) = (cg1.contexts[1].path.as_ident(), cg2.contexts[1].path.as_ident()) {
+            if let (Some(seg1), Some(seg2)) = (
+                cg1.contexts[1].path.as_ident(),
+                cg2.contexts[1].path.as_ident(),
+            ) {
                 assert_eq!(seg1.name.as_str(), seg2.name.as_str());
             }
         }
@@ -1898,7 +1910,11 @@ fn test_extern_fn_can_have_body() {
     // Extern functions with bodies are "exported" functions
     let source = r#"extern fn foo() { }"#;
     let result = parse_module(source);
-    assert!(result.is_ok(), "Extern functions with bodies are exported functions: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Extern functions with bodies are exported functions: {:?}",
+        result.err()
+    );
 }
 
 #[test]

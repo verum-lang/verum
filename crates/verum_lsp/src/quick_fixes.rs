@@ -1628,8 +1628,8 @@ pub fn extract_constraint_from_message(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_smt::{CounterExample, CounterExampleValue};
     use verum_common::{Map, Text};
+    use verum_smt::{CounterExample, CounterExampleValue};
 
     #[test]
     fn test_categorize_division_by_zero() {

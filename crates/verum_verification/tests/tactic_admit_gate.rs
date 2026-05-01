@@ -11,9 +11,7 @@
 //! under: an admitted goal is a hole, not a proof.
 
 use verum_ast::decl::TacticExpr;
-use verum_verification::tactic_evaluation::{
-    TacticConfig, TacticError, TacticEvaluator,
-};
+use verum_verification::tactic_evaluation::{TacticConfig, TacticError, TacticEvaluator};
 
 #[test]
 fn default_config_allows_admits() {

@@ -7,11 +7,11 @@
 //! ordinary type checking; HIT-aware tactics (cubical, descent) then
 //! consult the side channel for path-constructor topology.
 
-use verum_common::{Heap, List, Maybe};
 use verum_ast::decl::{Variant, VariantData};
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Type as AstType, TypeKind};
+use verum_common::{Heap, List, Maybe};
 
 fn span() -> Span {
     Span::default()

@@ -93,16 +93,13 @@ fn plain_output_reports_canonical_corpus() {
 #[test]
 fn json_output_has_schema_v1_envelope() {
     let (_temp, dir) = create_project("ks_json");
-    let out = run_verum(
-        &["audit", "--kernel-soundness", "--format", "json"],
-        &dir,
-    );
+    let out = run_verum(&["audit", "--kernel-soundness", "--format", "json"], &dir);
 
     assert!(out.status.success(), "JSON-format audit must exit 0");
 
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let payload: serde_json::Value = serde_json::from_str(&stdout)
-        .expect("audit JSON must be parseable");
+    let payload: serde_json::Value =
+        serde_json::from_str(&stdout).expect("audit JSON must be parseable");
 
     assert_eq!(payload["schema_version"], 1);
     assert_eq!(payload["command"], "audit-kernel-soundness");
@@ -145,8 +142,16 @@ fn cross_export_writes_coq_and_lean_files() {
     let coq_path = report_dir.join("kernel_soundness.v");
     let lean_path = report_dir.join("KernelSoundness.lean");
 
-    assert!(coq_path.exists(), "Coq export must be written to {:?}", coq_path);
-    assert!(lean_path.exists(), "Lean export must be written to {:?}", lean_path);
+    assert!(
+        coq_path.exists(),
+        "Coq export must be written to {:?}",
+        coq_path
+    );
+    assert!(
+        lean_path.exists(),
+        "Lean export must be written to {:?}",
+        lean_path
+    );
 
     let coq_text = fs::read_to_string(&coq_path).expect("read Coq output");
     let lean_text = fs::read_to_string(&lean_path).expect("read Lean output");
@@ -244,37 +249,59 @@ fn every_rule_appears_as_kernel_rule_constructor_in_both_exports() {
     let out = run_verum(&["audit", "--kernel-soundness"], &dir);
     assert!(out.status.success());
 
-    let coq_text = fs::read_to_string(
-        dir.join("target/audit-reports/kernel-soundness/kernel_soundness.v"),
-    ).expect("read Coq output");
-    let lean_text = fs::read_to_string(
-        dir.join("target/audit-reports/kernel-soundness/KernelSoundness.lean"),
-    ).expect("read Lean output");
+    let coq_text =
+        fs::read_to_string(dir.join("target/audit-reports/kernel-soundness/kernel_soundness.v"))
+            .expect("read Coq output");
+    let lean_text =
+        fs::read_to_string(dir.join("target/audit-reports/kernel-soundness/KernelSoundness.lean"))
+            .expect("read Lean output");
 
     // Every one of the 38 canonical rules must appear as a constructor
     // in the KernelRule inductive AND as a Lemma/theorem name.
     let canonical_rules = [
-        "K_Var", "K_Univ", "K_Pi_Form", "K_Lam_Intro", "K_App_Elim",
-        "K_Sigma_Form", "K_Pair_Intro", "K_Fst_Elim", "K_Snd_Elim",
-        "K_Path_Ty_Form", "K_Path_Over_Form", "K_Refl_Intro", "K_HComp",
-        "K_Transp", "K_Glue",
-        "K_Refine", "K_Refine_Omega", "K_Refine_Intro", "K_Refine_Erase",
-        "K_Quot_Form", "K_Quot_Intro", "K_Quot_Elim",
-        "K_Inductive", "K_Pos", "K_Elim",
-        "K_Smt", "K_FwAx",
-        "K_Eps_Mu", "K_Universe_Ascent", "K_Round_Trip",
-        "K_Epsilon_Of", "K_Alpha_Of",
-        "K_Modal_Box", "K_Modal_Diamond", "K_Modal_Big_And",
-        "K_Shape", "K_Flat", "K_Sharp",
+        "K_Var",
+        "K_Univ",
+        "K_Pi_Form",
+        "K_Lam_Intro",
+        "K_App_Elim",
+        "K_Sigma_Form",
+        "K_Pair_Intro",
+        "K_Fst_Elim",
+        "K_Snd_Elim",
+        "K_Path_Ty_Form",
+        "K_Path_Over_Form",
+        "K_Refl_Intro",
+        "K_HComp",
+        "K_Transp",
+        "K_Glue",
+        "K_Refine",
+        "K_Refine_Omega",
+        "K_Refine_Intro",
+        "K_Refine_Erase",
+        "K_Quot_Form",
+        "K_Quot_Intro",
+        "K_Quot_Elim",
+        "K_Inductive",
+        "K_Pos",
+        "K_Elim",
+        "K_Smt",
+        "K_FwAx",
+        "K_Eps_Mu",
+        "K_Universe_Ascent",
+        "K_Round_Trip",
+        "K_Epsilon_Of",
+        "K_Alpha_Of",
+        "K_Modal_Box",
+        "K_Modal_Diamond",
+        "K_Modal_Big_And",
+        "K_Shape",
+        "K_Flat",
+        "K_Sharp",
     ];
     assert_eq!(canonical_rules.len(), 38);
 
     for rule in &canonical_rules {
-        assert!(
-            coq_text.contains(rule),
-            "Coq output missing rule {}",
-            rule,
-        );
+        assert!(coq_text.contains(rule), "Coq output missing rule {}", rule,);
         assert!(
             lean_text.contains(rule),
             "Lean output missing rule {}",
@@ -297,10 +324,7 @@ fn every_rule_appears_as_kernel_rule_constructor_in_both_exports() {
 #[test]
 fn json_rules_array_carries_per_rule_metadata() {
     let (_temp, dir) = create_project("ks_metadata");
-    let out = run_verum(
-        &["audit", "--kernel-soundness", "--format", "json"],
-        &dir,
-    );
+    let out = run_verum(&["audit", "--kernel-soundness", "--format", "json"], &dir);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
@@ -315,7 +339,12 @@ fn json_rules_array_carries_per_rule_metadata() {
     assert_eq!(pi_form["premise_arity"], 2);
     assert_eq!(pi_form["has_side_condition"], false);
     assert_eq!(pi_form["status"], "Admitted");
-    assert!(pi_form["admit_reason"].as_str().unwrap().contains("substitution-lemma"));
+    assert!(
+        pi_form["admit_reason"]
+            .as_str()
+            .unwrap()
+            .contains("substitution-lemma")
+    );
 
     // K_Var is proved → admit_reason is Null
     let k_var = rules.iter().find(|r| r["rule_name"] == "K_Var").unwrap();

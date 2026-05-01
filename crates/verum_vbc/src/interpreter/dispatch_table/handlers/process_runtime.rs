@@ -38,14 +38,14 @@
 
 use std::io::Read;
 
+use super::super::super::error::InterpreterResult;
+use super::heap_helpers::{alloc_byte_list, alloc_record_n_fields, wrap_in_variant};
+use super::string_helpers::{alloc_string_value, extract_string};
 use crate::interpreter::heap;
 use crate::interpreter::permission::{PermissionDecision, PermissionScope};
 use crate::interpreter::state::InterpreterState;
 use crate::types::TypeId;
 use crate::value::Value;
-use super::super::super::error::InterpreterResult;
-use super::heap_helpers::{alloc_byte_list, alloc_record_n_fields, wrap_in_variant};
-use super::string_helpers::{alloc_string_value, extract_string};
 
 pub(in super::super) fn try_intercept_process_runtime(
     state: &mut InterpreterState,
@@ -139,9 +139,7 @@ fn read_command_record(state: &InterpreterState, v: Value) -> Option<CommandData
         return None;
     }
     let ptr = v.as_ptr::<u8>();
-    if ptr.is_null()
-        || !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-    {
+    if ptr.is_null() || !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return None;
     }
     let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
@@ -196,8 +194,7 @@ fn read_pair_list(state: &InterpreterState, v: Value) -> Option<Vec<(String, Str
         if pair_ptr.is_null() {
             continue;
         }
-        let pair_base =
-            unsafe { pair_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+        let pair_base = unsafe { pair_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         let k_v = unsafe { *pair_base };
         let v_v = unsafe { *pair_base.add(1) };
         out.push((extract_string(&k_v, state), extract_string(&v_v, state)));
@@ -210,9 +207,7 @@ fn read_list_header(v: Value) -> Option<(usize, *const Value)> {
         return None;
     }
     let ptr = v.as_ptr::<u8>();
-    if ptr.is_null()
-        || !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-    {
+    if ptr.is_null() || !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return None;
     }
     let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
@@ -229,8 +224,7 @@ fn read_list_header(v: Value) -> Option<(usize, *const Value)> {
     if backing_ptr.is_null() {
         return None;
     }
-    let backing_data =
-        unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
     Some((len, backing_data))
 }
 
@@ -259,13 +253,14 @@ fn read_variant_payload(v: Value) -> Option<(u32, *const Value)> {
     }
     let tag_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const u32 };
     let tag = unsafe { *tag_ptr };
-    let payload_base =
-        unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
+    let payload_base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
     Some((tag, payload_base))
 }
 
 fn unwrap_ref(state: &InterpreterState, reg: u16, caller_base: u32) -> Value {
-    let v = state.registers.get(caller_base, crate::instruction::Reg(reg));
+    let v = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(reg));
     if super::cbgr_helpers::is_cbgr_ref(&v) {
         let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
         state.registers.get_absolute(abs_index)
@@ -292,8 +287,7 @@ fn check_process_permission(state: &mut InterpreterState) -> Option<Value> {
         // Surface as an Err(Text) — the stdlib's spawn return type is
         // `Result<Output, Text>`, so we match its discriminant.
         let msg =
-            alloc_string_value(state, "permission denied: process spawn requires `run`")
-                .ok()?;
+            alloc_string_value(state, "permission denied: process spawn requires `run`").ok()?;
         return wrap_in_variant(state, "Result", 1, &[msg]).ok();
     }
     None
@@ -326,7 +320,6 @@ fn encode_exit_status(s: &std::process::ExitStatus) -> i64 {
 fn encode_exit_status(s: &std::process::ExitStatus) -> i64 {
     s.code().unwrap_or(0) as i64
 }
-
 
 // `Read` import is currently unused — kept for symmetry with sibling
 // modules that may grow streaming-spawn intercepts.

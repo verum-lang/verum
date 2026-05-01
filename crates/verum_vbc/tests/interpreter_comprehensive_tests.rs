@@ -13,9 +13,7 @@
 
 use std::sync::Arc;
 use verum_vbc::bytecode;
-use verum_vbc::instruction::{
-    BinaryFloatOp, BinaryIntOp, CompareOp, Instruction, Reg,
-};
+use verum_vbc::instruction::{BinaryFloatOp, BinaryIntOp, CompareOp, Instruction, Reg};
 use verum_vbc::interpreter::Interpreter;
 use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
 use verum_vbc::types::StringId;
@@ -49,7 +47,9 @@ fn run(instructions: &[Instruction]) -> Value {
     let bc = encode(instructions);
     let module = create_module(bc);
     let mut interp = Interpreter::new(module);
-    interp.execute_function(FunctionId(0)).expect("Execution failed")
+    interp
+        .execute_function(FunctionId(0))
+        .expect("Execution failed")
 }
 
 // =============================================================================
@@ -59,7 +59,10 @@ fn run(instructions: &[Instruction]) -> Value {
 #[test]
 fn test_load_small_int_positive() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert!(result.is_int());
@@ -69,7 +72,10 @@ fn test_load_small_int_positive() {
 #[test]
 fn test_load_small_int_negative() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: -10 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: -10,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert!(result.is_int());
@@ -79,7 +85,10 @@ fn test_load_small_int_negative() {
 #[test]
 fn test_load_small_int_zero() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert!(result.is_int());
@@ -118,8 +127,14 @@ fn test_load_unit() {
 #[test]
 fn test_mov_register() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 99 },
-        Instruction::Mov { dst: Reg(1), src: Reg(0) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 99,
+        },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(0),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
     assert_eq!(result.as_i64(), 99);
@@ -128,7 +143,10 @@ fn test_mov_register() {
 #[test]
 fn test_load_large_int() {
     let result = run(&[
-        Instruction::LoadI { dst: Reg(0), value: 1_000_000 },
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: 1_000_000,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert!(result.is_int());
@@ -138,7 +156,10 @@ fn test_load_large_int() {
 #[test]
 fn test_load_float() {
     let result = run(&[
-        Instruction::LoadF { dst: Reg(0), value: 3.14 },
+        Instruction::LoadF {
+            dst: Reg(0),
+            value: 3.14,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert_eq!(result.as_f64(), 3.14);
@@ -151,9 +172,20 @@ fn test_load_float() {
 #[test]
 fn test_add_int() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 10 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 20 },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 10,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 20,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 30);
@@ -162,9 +194,20 @@ fn test_add_int() {
 #[test]
 fn test_sub_int() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 50 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 20 },
-        Instruction::BinaryI { op: BinaryIntOp::Sub, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 50,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 20,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Sub,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 30);
@@ -173,9 +216,20 @@ fn test_sub_int() {
 #[test]
 fn test_mul_int() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 6 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 7 },
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 6,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 7,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 42);
@@ -184,9 +238,20 @@ fn test_mul_int() {
 #[test]
 fn test_div_int() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 6 },
-        Instruction::BinaryI { op: BinaryIntOp::Div, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 6,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Div,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 7);
@@ -195,9 +260,20 @@ fn test_div_int() {
 #[test]
 fn test_mod_int() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 17 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 5 },
-        Instruction::BinaryI { op: BinaryIntOp::Mod, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 17,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 5,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mod,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 2);
@@ -206,9 +282,20 @@ fn test_mod_int() {
 #[test]
 fn test_add_negative_int() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 10 },
-        Instruction::LoadSmallI { dst: Reg(1), value: -3 },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 10,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: -3,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 7);
@@ -221,9 +308,20 @@ fn test_add_negative_int() {
 #[test]
 fn test_add_float() {
     let result = run(&[
-        Instruction::LoadF { dst: Reg(0), value: 1.5 },
-        Instruction::LoadF { dst: Reg(1), value: 2.5 },
-        Instruction::BinaryF { op: BinaryFloatOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadF {
+            dst: Reg(0),
+            value: 1.5,
+        },
+        Instruction::LoadF {
+            dst: Reg(1),
+            value: 2.5,
+        },
+        Instruction::BinaryF {
+            op: BinaryFloatOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_f64(), 4.0);
@@ -232,9 +330,20 @@ fn test_add_float() {
 #[test]
 fn test_sub_float() {
     let result = run(&[
-        Instruction::LoadF { dst: Reg(0), value: 10.0 },
-        Instruction::LoadF { dst: Reg(1), value: 3.5 },
-        Instruction::BinaryF { op: BinaryFloatOp::Sub, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadF {
+            dst: Reg(0),
+            value: 10.0,
+        },
+        Instruction::LoadF {
+            dst: Reg(1),
+            value: 3.5,
+        },
+        Instruction::BinaryF {
+            op: BinaryFloatOp::Sub,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_f64(), 6.5);
@@ -243,9 +352,20 @@ fn test_sub_float() {
 #[test]
 fn test_mul_float() {
     let result = run(&[
-        Instruction::LoadF { dst: Reg(0), value: 3.0 },
-        Instruction::LoadF { dst: Reg(1), value: 4.0 },
-        Instruction::BinaryF { op: BinaryFloatOp::Mul, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadF {
+            dst: Reg(0),
+            value: 3.0,
+        },
+        Instruction::LoadF {
+            dst: Reg(1),
+            value: 4.0,
+        },
+        Instruction::BinaryF {
+            op: BinaryFloatOp::Mul,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_f64(), 12.0);
@@ -254,9 +374,20 @@ fn test_mul_float() {
 #[test]
 fn test_div_float() {
     let result = run(&[
-        Instruction::LoadF { dst: Reg(0), value: 10.0 },
-        Instruction::LoadF { dst: Reg(1), value: 4.0 },
-        Instruction::BinaryF { op: BinaryFloatOp::Div, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadF {
+            dst: Reg(0),
+            value: 10.0,
+        },
+        Instruction::LoadF {
+            dst: Reg(1),
+            value: 4.0,
+        },
+        Instruction::BinaryF {
+            op: BinaryFloatOp::Div,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_f64(), 2.5);
@@ -269,9 +400,20 @@ fn test_div_float() {
 #[test]
 fn test_compare_int_eq_true() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 42 },
-        Instruction::CmpI { op: CompareOp::Eq, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 42,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Eq,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert!(result.as_bool());
@@ -280,9 +422,20 @@ fn test_compare_int_eq_true() {
 #[test]
 fn test_compare_int_eq_false() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 43 },
-        Instruction::CmpI { op: CompareOp::Eq, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 43,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Eq,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert!(!result.as_bool());
@@ -291,9 +444,20 @@ fn test_compare_int_eq_false() {
 #[test]
 fn test_compare_int_lt_true() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 5 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 10 },
-        Instruction::CmpI { op: CompareOp::Lt, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 5,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 10,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Lt,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert!(result.as_bool());
@@ -302,9 +466,20 @@ fn test_compare_int_lt_true() {
 #[test]
 fn test_compare_int_gt_true() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 10 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 5 },
-        Instruction::CmpI { op: CompareOp::Gt, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 10,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 5,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Gt,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert!(result.as_bool());
@@ -313,9 +488,20 @@ fn test_compare_int_gt_true() {
 #[test]
 fn test_compare_int_le_equal() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 5 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 5 },
-        Instruction::CmpI { op: CompareOp::Le, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 5,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 5,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Le,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert!(result.as_bool());
@@ -324,9 +510,20 @@ fn test_compare_int_le_equal() {
 #[test]
 fn test_compare_int_ge_less() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 3 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 5 },
-        Instruction::CmpI { op: CompareOp::Ge, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 3,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 5,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Ge,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert!(!result.as_bool());
@@ -335,9 +532,20 @@ fn test_compare_int_ge_less() {
 #[test]
 fn test_compare_int_ne_true() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 2 },
-        Instruction::CmpI { op: CompareOp::Ne, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 2,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Ne,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert!(result.as_bool());
@@ -351,7 +559,10 @@ fn test_compare_int_ne_true() {
 fn test_not_true() {
     let result = run(&[
         Instruction::LoadTrue { dst: Reg(0) },
-        Instruction::Not { dst: Reg(1), src: Reg(0) },
+        Instruction::Not {
+            dst: Reg(1),
+            src: Reg(0),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
     assert!(!result.as_bool());
@@ -361,7 +572,10 @@ fn test_not_true() {
 fn test_not_false() {
     let result = run(&[
         Instruction::LoadFalse { dst: Reg(0) },
-        Instruction::Not { dst: Reg(1), src: Reg(0) },
+        Instruction::Not {
+            dst: Reg(1),
+            src: Reg(0),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
     assert!(result.as_bool());
@@ -374,8 +588,14 @@ fn test_not_false() {
 #[test]
 fn test_convert_int_to_float() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::CvtIF { dst: Reg(1), src: Reg(0) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::CvtIF {
+            dst: Reg(1),
+            src: Reg(0),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
     assert_eq!(result.as_f64(), 42.0);
@@ -385,7 +605,10 @@ fn test_convert_int_to_float() {
 fn test_convert_bool_to_int_true() {
     let result = run(&[
         Instruction::LoadTrue { dst: Reg(0) },
-        Instruction::CvtBI { dst: Reg(1), src: Reg(0) },
+        Instruction::CvtBI {
+            dst: Reg(1),
+            src: Reg(0),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
     assert_eq!(result.as_i64(), 1);
@@ -395,7 +618,10 @@ fn test_convert_bool_to_int_true() {
 fn test_convert_bool_to_int_false() {
     let result = run(&[
         Instruction::LoadFalse { dst: Reg(0) },
-        Instruction::CvtBI { dst: Reg(1), src: Reg(0) },
+        Instruction::CvtBI {
+            dst: Reg(1),
+            src: Reg(0),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
     assert_eq!(result.as_i64(), 0);
@@ -409,10 +635,26 @@ fn test_convert_bool_to_int_false() {
 fn test_chain_of_operations() {
     // r0=3, r1=4, r2=r0+r1(=7), r3=r2*r0(=21)
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 3 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 4 },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(3), a: Reg(2), b: Reg(0) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 3,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 4,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(3),
+            a: Reg(2),
+            b: Reg(0),
+        },
         Instruction::Ret { value: Reg(3) },
     ]);
     assert_eq!(result.as_i64(), 21);
@@ -422,9 +664,20 @@ fn test_chain_of_operations() {
 fn test_overwrite_register() {
     // r0=10, r0=r0+5=15
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 10 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 5 },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(0), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 10,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 5,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(0),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert_eq!(result.as_i64(), 15);
@@ -434,24 +687,74 @@ fn test_overwrite_register() {
 fn test_fibonacci_sequence() {
     // Compute fib(5)=5 using unrolled loop
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 1,
+        },
         // Step 1: 0+1=1
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::Mov { dst: Reg(0), src: Reg(1) },
-        Instruction::Mov { dst: Reg(1), src: Reg(2) },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        },
         // Step 2: 1+1=2
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::Mov { dst: Reg(0), src: Reg(1) },
-        Instruction::Mov { dst: Reg(1), src: Reg(2) },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        },
         // Step 3: 1+2=3
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::Mov { dst: Reg(0), src: Reg(1) },
-        Instruction::Mov { dst: Reg(1), src: Reg(2) },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        },
         // Step 4: 2+3=5
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::Mov { dst: Reg(0), src: Reg(1) },
-        Instruction::Mov { dst: Reg(1), src: Reg(2) },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
     assert_eq!(result.as_i64(), 5);
@@ -464,7 +767,10 @@ fn test_fibonacci_sequence() {
 #[test]
 fn test_load_max_small_int() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 63 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 63,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert_eq!(result.as_i64(), 63);
@@ -473,7 +779,10 @@ fn test_load_max_small_int() {
 #[test]
 fn test_load_min_small_int() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: -64 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: -64,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert_eq!(result.as_i64(), -64);
@@ -482,9 +791,20 @@ fn test_load_min_small_int() {
 #[test]
 fn test_add_zero() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 0 },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 0,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 42);
@@ -493,9 +813,20 @@ fn test_add_zero() {
 #[test]
 fn test_multiply_by_one() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 1 },
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 1,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 42);
@@ -504,9 +835,20 @@ fn test_multiply_by_one() {
 #[test]
 fn test_multiply_by_zero() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 0 },
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 0,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 0);
@@ -515,9 +857,20 @@ fn test_multiply_by_zero() {
 #[test]
 fn test_float_precision() {
     let result = run(&[
-        Instruction::LoadF { dst: Reg(0), value: 0.1 },
-        Instruction::LoadF { dst: Reg(1), value: 0.2 },
-        Instruction::BinaryF { op: BinaryFloatOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadF {
+            dst: Reg(0),
+            value: 0.1,
+        },
+        Instruction::LoadF {
+            dst: Reg(1),
+            value: 0.2,
+        },
+        Instruction::BinaryF {
+            op: BinaryFloatOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     let val = result.as_f64();
@@ -527,9 +880,20 @@ fn test_float_precision() {
 #[test]
 fn test_negative_result() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 5 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 10 },
-        Instruction::BinaryI { op: BinaryIntOp::Sub, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 5,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 10,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Sub,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), -5);
@@ -538,7 +902,10 @@ fn test_negative_result() {
 #[test]
 fn test_large_negative_int() {
     let result = run(&[
-        Instruction::LoadI { dst: Reg(0), value: -1_000_000 },
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: -1_000_000,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert_eq!(result.as_i64(), -1_000_000);
@@ -547,7 +914,10 @@ fn test_large_negative_int() {
 #[test]
 fn test_float_negative_zero() {
     let result = run(&[
-        Instruction::LoadF { dst: Reg(0), value: -0.0 },
+        Instruction::LoadF {
+            dst: Reg(0),
+            value: -0.0,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert_eq!(result.as_f64(), 0.0);
@@ -561,10 +931,19 @@ fn test_float_negative_zero() {
 fn test_cbgr_ref_basic() {
     // r0 = 42; r1 = &r0; ChkRef r1; r2 = *r1; return r2
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::Ref { dst: Reg(1), src: Reg(0) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::Ref {
+            dst: Reg(1),
+            src: Reg(0),
+        },
         Instruction::ChkRef { ref_reg: Reg(1) },
-        Instruction::Deref { dst: Reg(2), ref_reg: Reg(1) },
+        Instruction::Deref {
+            dst: Reg(2),
+            ref_reg: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 42);
@@ -574,10 +953,22 @@ fn test_cbgr_ref_basic() {
 fn test_cbgr_ref_mut_basic() {
     // r0 = 0; r1 = &mut r0; *r1 = 42; return r0
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
-        Instruction::RefMut { dst: Reg(1), src: Reg(0) },
-        Instruction::LoadSmallI { dst: Reg(2), value: 42 },
-        Instruction::DerefMut { ref_reg: Reg(1), value: Reg(2) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
+        Instruction::RefMut {
+            dst: Reg(1),
+            src: Reg(0),
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 42,
+        },
+        Instruction::DerefMut {
+            ref_reg: Reg(1),
+            value: Reg(2),
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     assert_eq!(result.as_i64(), 42);
@@ -587,10 +978,22 @@ fn test_cbgr_ref_mut_basic() {
 fn test_cbgr_deref_preserves_value() {
     // r0 = 77; r1 = &r0; r2 = *r1; r3 = *r1; both should be 77
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 77 },
-        Instruction::Ref { dst: Reg(1), src: Reg(0) },
-        Instruction::Deref { dst: Reg(2), ref_reg: Reg(1) },
-        Instruction::Deref { dst: Reg(3), ref_reg: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 77,
+        },
+        Instruction::Ref {
+            dst: Reg(1),
+            src: Reg(0),
+        },
+        Instruction::Deref {
+            dst: Reg(2),
+            ref_reg: Reg(1),
+        },
+        Instruction::Deref {
+            dst: Reg(3),
+            ref_reg: Reg(1),
+        },
         Instruction::Ret { value: Reg(3) },
     ]);
     assert_eq!(result.as_i64(), 77);
@@ -599,9 +1002,18 @@ fn test_cbgr_deref_preserves_value() {
 #[test]
 fn test_cbgr_ref_negative_value() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: -100 },
-        Instruction::Ref { dst: Reg(1), src: Reg(0) },
-        Instruction::Deref { dst: Reg(2), ref_reg: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: -100,
+        },
+        Instruction::Ref {
+            dst: Reg(1),
+            src: Reg(0),
+        },
+        Instruction::Deref {
+            dst: Reg(2),
+            ref_reg: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), -100);
@@ -610,9 +1022,18 @@ fn test_cbgr_ref_negative_value() {
 #[test]
 fn test_cbgr_ref_zero_value() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
-        Instruction::Ref { dst: Reg(1), src: Reg(0) },
-        Instruction::Deref { dst: Reg(2), ref_reg: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
+        Instruction::Ref {
+            dst: Reg(1),
+            src: Reg(0),
+        },
+        Instruction::Deref {
+            dst: Reg(2),
+            ref_reg: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 0);
@@ -622,9 +1043,18 @@ fn test_cbgr_ref_zero_value() {
 fn test_cbgr_ref_checked_tier1() {
     // Use Tier 1 RefChecked instead of Tier 0 Ref
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::RefChecked { dst: Reg(1), src: Reg(0) },
-        Instruction::Deref { dst: Reg(2), ref_reg: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::RefChecked {
+            dst: Reg(1),
+            src: Reg(0),
+        },
+        Instruction::Deref {
+            dst: Reg(2),
+            ref_reg: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 42);

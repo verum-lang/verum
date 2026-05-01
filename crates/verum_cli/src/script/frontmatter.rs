@@ -158,19 +158,39 @@ pub struct Extracted {
 /// Errors that can arise while parsing frontmatter.
 #[derive(Debug, Clone)]
 pub enum FrontmatterError {
-    UnterminatedBlock { line: usize },
-    InvalidToml { line: usize, source: String },
-    NonCommentLineInBlock { line: usize, content: String },
+    UnterminatedBlock {
+        line: usize,
+    },
+    InvalidToml {
+        line: usize,
+        source: String,
+    },
+    NonCommentLineInBlock {
+        line: usize,
+        content: String,
+    },
     /// `verum = "<spec>"` is not a valid semver requirement.
-    InvalidVerumRequirement { value: String, reason: String },
+    InvalidVerumRequirement {
+        value: String,
+        reason: String,
+    },
     /// A `dependencies` short-form entry doesn't match `name(@version)?`
     /// or the name is not a valid cog identifier.
-    InvalidDepShortForm { value: String, reason: String },
+    InvalidDepShortForm {
+        value: String,
+        reason: String,
+    },
     /// A `dependencies` long-form table entry has an empty / invalid `name`.
-    InvalidDepLongForm { name: String, reason: String },
+    InvalidDepLongForm {
+        name: String,
+        reason: String,
+    },
     /// A `permissions` scope string doesn't match the documented grammar.
     /// `value` is the full scope string; `reason` explains the violation.
-    InvalidPermissionScope { value: String, reason: String },
+    InvalidPermissionScope {
+        value: String,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for FrontmatterError {
@@ -195,10 +215,9 @@ impl std::fmt::Display for FrontmatterError {
                 f,
                 "frontmatter: dependency entry {value:?} is not a valid `name(@version)?` form: {reason}",
             ),
-            Self::InvalidDepLongForm { name, reason } => write!(
-                f,
-                "frontmatter: long-form dependency `{name}`: {reason}",
-            ),
+            Self::InvalidDepLongForm { name, reason } => {
+                write!(f, "frontmatter: long-form dependency `{name}`: {reason}",)
+            }
             Self::InvalidPermissionScope { value, reason } => write!(
                 f,
                 "frontmatter: permission scope {value:?} is invalid: {reason}",
@@ -545,8 +564,8 @@ pub fn extract(source: &str) -> Result<Option<Extracted>, FrontmatterError> {
     let mut toml_body = String::new();
     for (line_no, (_, raw)) in lines[(open_idx + 1)..close_idx].iter().enumerate() {
         let logical_line = open_idx + 2 + line_no; // 1-indexed user-visible
-        let trimmed = strip_comment_prefix(raw)
-            .ok_or_else(|| FrontmatterError::NonCommentLineInBlock {
+        let trimmed =
+            strip_comment_prefix(raw).ok_or_else(|| FrontmatterError::NonCommentLineInBlock {
                 line: logical_line,
                 content: raw.trim().to_string(),
             })?;
@@ -841,25 +860,29 @@ print("hello");
     #[test]
     fn validate_semver_accepts_canonical_forms() {
         for spec in &[
-            "0.6.0", "1.2.3", "0.1.0-rc.1",
-            ">=0.6.0", "^1.2", "~2.3.4", "<3", ">1.0", "=1.2.3", "<=4.5",
-            "1.*", "1.2.*", "*",
+            "0.6.0",
+            "1.2.3",
+            "0.1.0-rc.1",
+            ">=0.6.0",
+            "^1.2",
+            "~2.3.4",
+            "<3",
+            ">1.0",
+            "=1.2.3",
+            "<=4.5",
+            "1.*",
+            "1.2.*",
+            "*",
             ">=1.2, <2",
         ] {
-            assert!(
-                validate_semver_req(spec).is_ok(),
-                "should accept {spec:?}"
-            );
+            assert!(validate_semver_req(spec).is_ok(), "should accept {spec:?}");
         }
     }
 
     #[test]
     fn validate_semver_rejects_garbage() {
         for spec in &["", "abc", ">=v1", "1.x.0", "..1", "1..", ">"] {
-            assert!(
-                validate_semver_req(spec).is_err(),
-                "should reject {spec:?}"
-            );
+            assert!(validate_semver_req(spec).is_err(), "should reject {spec:?}");
         }
     }
 
@@ -879,7 +902,13 @@ print("hello");
 
     #[test]
     fn validate_dep_short_form_accepts_canonical() {
-        for s in &["json", "json@1", "http@^0.2", "kebab-name@1.2.3", "snake_name"] {
+        for s in &[
+            "json",
+            "json@1",
+            "http@^0.2",
+            "kebab-name@1.2.3",
+            "snake_name",
+        ] {
             assert!(validate_dep_short_form(s).is_ok(), "should accept {s:?}");
         }
     }
@@ -1072,7 +1101,9 @@ print("hello");
         // Stress-test: BOM + shebang + valid block — extract must succeed
         // through both prefix layers AND validation must pass.
         let src = "\u{FEFF}#!/usr/bin/env verum\n// /// script\n// verum = \">=0.6\"\n// ///\n";
-        let e = extract_and_validate(src).expect("no error").expect("frontmatter");
+        let e = extract_and_validate(src)
+            .expect("no error")
+            .expect("frontmatter");
         assert_eq!(e.frontmatter.verum.as_deref(), Some(">=0.6"));
     }
 

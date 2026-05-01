@@ -190,9 +190,7 @@ impl RegistryMirror {
         println!();
         println!("Available endpoints:");
         println!("  GET /index.json - Package index");
-        println!(
-            "  GET /cogs/{{name}}/{{version}}/{{name}}-{{version}}.tar.gz - Download package"
-        );
+        println!("  GET /cogs/{{name}}/{{version}}/{{name}}-{{version}}.tar.gz - Download package");
 
         for stream in listener.incoming() {
             let stream = match stream {

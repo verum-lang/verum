@@ -16,7 +16,9 @@ use super::bytecode_io::*;
 /// Format: `Throw error_reg`
 /// Throws an exception with the value from error_reg.
 /// Unwinds the stack to the nearest exception handler or errors if none.
-pub(in super::super) fn handle_throw(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_throw(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let error_reg = read_reg(state)?;
     let error_value = state.get_reg(error_reg);
 
@@ -25,16 +27,23 @@ pub(in super::super) fn handle_throw(state: &mut InterpreterState) -> Interprete
 
     let debug = std::env::var("VBC_EXC_TRACE").is_ok();
     if debug {
-        eprintln!("[THROW] pc={} error_reg={:?} value=0x{:x} stack_depth={} handlers={}",
-            state.pc(), error_reg, error_value.to_bits(),
-            state.call_stack.depth(), state.exception_handlers.len());
+        eprintln!(
+            "[THROW] pc={} error_reg={:?} value=0x{:x} stack_depth={} handlers={}",
+            state.pc(),
+            error_reg,
+            error_value.to_bits(),
+            state.call_stack.depth(),
+            state.exception_handlers.len()
+        );
     }
 
     // Find the nearest exception handler
     if let Some(handler) = state.exception_handlers.pop() {
         if debug {
-            eprintln!("[THROW] jumping to handler_pc={} (stack_depth={}, func={:?})",
-                handler.handler_pc, handler.stack_depth, handler.func_id);
+            eprintln!(
+                "[THROW] jumping to handler_pc={} (stack_depth={}, func={:?})",
+                handler.handler_pc, handler.stack_depth, handler.func_id
+            );
         }
         // Unwind stack to handler's depth
         while state.call_stack.depth() > handler.stack_depth {
@@ -58,7 +67,9 @@ pub(in super::super) fn handle_throw(state: &mut InterpreterState) -> Interprete
 
 /// Format: `TryBegin handler_offset:i32`
 /// Sets up an exception handler at the given offset from current PC.
-pub(in super::super) fn handle_try_begin(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_try_begin(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     // Read the handler offset (signed 32-bit varint)
     let offset = read_signed_varint(state)?;
 
@@ -68,7 +79,9 @@ pub(in super::super) fn handle_try_begin(state: &mut InterpreterState) -> Interp
     // Get current context
     let stack_depth = state.call_stack.depth();
     let reg_base = state.reg_base() as usize;
-    let func_id = state.call_stack.current()
+    let func_id = state
+        .call_stack
+        .current()
         .map(|f| f.function)
         .unwrap_or(crate::module::FunctionId(0));
 
@@ -80,8 +93,14 @@ pub(in super::super) fn handle_try_begin(state: &mut InterpreterState) -> Interp
         func_id,
     };
     if std::env::var("VBC_EXC_TRACE").is_ok() {
-        eprintln!("[TRY_BEGIN] pc={} handler_pc={} stack_depth={} reg_base={} func={:?}",
-            state.pc(), handler_pc, stack_depth, reg_base, func_id);
+        eprintln!(
+            "[TRY_BEGIN] pc={} handler_pc={} stack_depth={} reg_base={} func={:?}",
+            state.pc(),
+            handler_pc,
+            stack_depth,
+            reg_base,
+            func_id
+        );
     }
     state.exception_handlers.push(handler);
 
@@ -93,7 +112,9 @@ pub(in super::super) fn handle_try_begin(state: &mut InterpreterState) -> Interp
 
 /// Format: `TryEnd`
 /// Pops the current exception handler (normal exit from try block).
-pub(in super::super) fn handle_try_end(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_try_end(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     // Pop the exception handler - we're leaving the try block normally
     let _ = state.exception_handlers.pop();
     Ok(DispatchResult::Continue)
@@ -104,17 +125,22 @@ pub(in super::super) fn handle_try_end(state: &mut InterpreterState) -> Interpre
 
 /// Format: `GetException dst`
 /// Gets the current exception value (set by Throw) into dst register.
-pub(in super::super) fn handle_get_exception(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_get_exception(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
 
     // Get the current exception value (or unit if none)
     let exception = state.current_exception.take().unwrap_or_default();
     if std::env::var("VBC_EXC_TRACE").is_ok() {
-        eprintln!("[GET_EXC] pc={} dst={:?} value=0x{:x}",
-            state.pc(), dst, exception.to_bits());
+        eprintln!(
+            "[GET_EXC] pc={} dst={:?} value=0x{:x}",
+            state.pc(),
+            dst,
+            exception.to_bits()
+        );
     }
     state.set_reg(dst, exception);
 
     Ok(DispatchResult::Continue)
 }
-

@@ -31,13 +31,13 @@ use crate::config::Manifest;
 use crate::error::{CliError, Result};
 use crate::ui;
 use colored::Colorize;
+use verum_ast::Item;
 use verum_ast::attr::FrameworkAttr;
 use verum_ast::decl::ItemKind;
-use verum_ast::Item;
 use verum_common::{List, Maybe, Text};
+use verum_compiler::CompilerOptions;
 use verum_compiler::pipeline::CompilationPipeline;
 use verum_compiler::session::Session;
-use verum_compiler::CompilerOptions;
 
 /// The target format a user can request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -278,18 +278,14 @@ pub fn run(options: ExportOptions) -> Result<()> {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 CliError::Custom(
-                    format!("creating output directory {}: {}", parent.display(), e)
-                        .into(),
+                    format!("creating output directory {}: {}", parent.display(), e).into(),
                 )
             })?;
         }
     }
 
     std::fs::write(&output_path, &body).map_err(|e| {
-        CliError::Custom(
-            format!("writing certificate to {}: {}", output_path.display(), e)
-                .into(),
-        )
+        CliError::Custom(format!("writing certificate to {}: {}", output_path.display(), e).into())
     })?;
 
     // provenance sidecar.
@@ -311,12 +307,7 @@ pub fn run(options: ExportOptions) -> Result<()> {
         })?;
     }
 
-    print_summary(
-        options.format,
-        &declarations,
-        &output_path,
-        skipped_files,
-    );
+    print_summary(options.format, &declarations, &output_path, skipped_files);
 
     Ok(())
 }
@@ -357,10 +348,7 @@ fn emit_provenance_sidecar(decls: &[Declaration], format: ExportFormat) -> Strin
     let mut out = String::new();
     out.push_str("{\n");
     out.push_str("  \"schema_version\": 1,\n");
-    out.push_str(&format!(
-        "  \"target_format\": \"{}\",\n",
-        format.as_str()
-    ));
+    out.push_str(&format!("  \"target_format\": \"{}\",\n", format.as_str()));
     out.push_str(&format!("  \"declaration_count\": {},\n", decls.len()));
     out.push_str("  \"declarations\": [\n");
     let total = decls.len();
@@ -391,7 +379,11 @@ fn emit_provenance_sidecar(decls: &[Declaration], format: ExportFormat) -> Strin
         out.push_str("      \"discharge_strategy\": \"statement_only\",\n");
         out.push_str("      \"obligation_hash\": null,\n");
         out.push_str("      \"proof_term\": null\n");
-        out.push_str(if i + 1 == total { "    }\n" } else { "    },\n" });
+        out.push_str(if i + 1 == total {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ]\n");
     out.push_str("}\n");
@@ -434,9 +426,7 @@ fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
             Ok(e) => e,
             Err(_) => continue,
         };
-        if entry.file_type().is_file()
-            && entry.path().extension().map_or(false, |e| e == "vr")
-        {
+        if entry.file_type().is_file() && entry.path().extension().map_or(false, |e| e == "vr") {
             out.push(entry.into_path());
         }
     }
@@ -464,9 +454,7 @@ fn collect_declaration(
     let (kind, name, decl_attrs) = match &item.kind {
         ItemKind::Theorem(decl) => ("theorem", decl.name.name.clone(), &decl.attributes),
         ItemKind::Lemma(decl) => ("lemma", decl.name.name.clone(), &decl.attributes),
-        ItemKind::Corollary(decl) => {
-            ("corollary", decl.name.name.clone(), &decl.attributes)
-        }
+        ItemKind::Corollary(decl) => ("corollary", decl.name.name.clone(), &decl.attributes),
         ItemKind::Axiom(decl) => ("axiom", decl.name.name.clone(), &decl.attributes),
         _ => return None,
     };
@@ -533,18 +521,16 @@ fn collect_declaration(
 /// surface as `CoreTerm::Var("<unsupported-expr>")`, which the
 /// proof_export lowerers in turn render as `sorry` / `Admitted` /
 /// `?` — i.e. a graceful degradation, not a panic.
-fn extract_core_proof_term(
-    body: &Maybe<verum_ast::ProofBody>,
-) -> Option<verum_kernel::CoreTerm> {
+fn extract_core_proof_term(body: &Maybe<verum_ast::ProofBody>) -> Option<verum_kernel::CoreTerm> {
     use verum_ast::ProofBody;
     let body = match body {
         Maybe::Some(b) => b,
         Maybe::None => return None,
     };
     match body {
-        ProofBody::Term(expr) => {
-            Some(verum_verification::kernel_recheck::lift_expr_to_core(expr.as_ref()))
-        }
+        ProofBody::Term(expr) => Some(verum_verification::kernel_recheck::lift_expr_to_core(
+            expr.as_ref(),
+        )),
         ProofBody::Structured(s) => {
             // Try the conclusion's tactic-target if it's a Have / Show /
             // Suffices step — those carry an Expr proposition that
@@ -554,13 +540,10 @@ fn extract_core_proof_term(
             let last_step_expr = s.steps.iter().rev().find_map(|step| match &step.kind {
                 ProofStepKind::Have { proposition, .. }
                 | ProofStepKind::Show { proposition, .. }
-                | ProofStepKind::Suffices { proposition, .. } => {
-                    Some(proposition.as_ref())
-                }
+                | ProofStepKind::Suffices { proposition, .. } => Some(proposition.as_ref()),
                 _ => None,
             });
-            last_step_expr
-                .map(verum_verification::kernel_recheck::lift_expr_to_core)
+            last_step_expr.map(verum_verification::kernel_recheck::lift_expr_to_core)
         }
         // Tactic-only and ByMethod proofs don't carry a structural
         // CoreTerm — they're imperative scripts. The SimpleApply
@@ -577,9 +560,7 @@ fn extract_core_proof_term(
 /// per-target emitter can decide whether to render it as a comment
 /// or fall back to the admitted scaffold; absent proof bodies (axioms,
 /// missing `proof { ... }` block) return `None`.
-fn extract_simple_proof_body(
-    body: &Maybe<verum_ast::ProofBody>,
-) -> Option<SimpleProofBody> {
+fn extract_simple_proof_body(body: &Maybe<verum_ast::ProofBody>) -> Option<SimpleProofBody> {
     use verum_ast::pretty::format_expr;
     use verum_ast::{ProofBody, ProofStepKind, TacticExpr};
     let body = match body {
@@ -616,14 +597,10 @@ fn extract_simple_proof_body(
             // assistants don't understand `super.` qualifiers; the
             // basename suffices because the corpus uses globally
             // unique theorem names.
-            let lemma_text = Text::from(strip_module_qualifier(
-                format_expr(lemma).as_str(),
-            ));
+            let lemma_text = Text::from(strip_module_qualifier(format_expr(lemma).as_str()));
             let arg_texts: Vec<Text> = args
                 .iter()
-                .map(|a| Text::from(strip_module_qualifier(
-                    format_expr(a).as_str(),
-                )))
+                .map(|a| Text::from(strip_module_qualifier(format_expr(a).as_str())))
                 .collect();
             Some(SimpleProofBody::SimpleApply {
                 lemma: lemma_text,
@@ -1067,7 +1044,10 @@ fn distinct_lineages(decls: &[Declaration]) -> Vec<Text> {
 // Dedukti emitter
 // -----------------------------------------------------------------------------
 
-fn emit_dedukti(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::ProofReplayRegistry) -> String {
+fn emit_dedukti(
+    decls: &[Declaration],
+    replay_registry: &verum_smt::proof_replay::ProofReplayRegistry,
+) -> String {
     let mut out = String::new();
     out.push_str("(; Exported by `verum export --to dedukti`. ;)\n");
     out.push_str(
@@ -1079,10 +1059,7 @@ fn emit_dedukti(decls: &[Declaration], replay_registry: &verum_smt::proof_replay
     let by_framework = group_by_framework(decls);
     for (framework_key, group) in &by_framework {
         if let Some(fw) = framework_key {
-            out.push_str(&format!(
-                "(; ---- framework: {} ---- ;)\n",
-                fw.as_str()
-            ));
+            out.push_str(&format!("(; ---- framework: {} ---- ;)\n", fw.as_str()));
         } else {
             out.push_str("(; ---- no framework attribution ---- ;)\n");
         }
@@ -1096,11 +1073,7 @@ fn emit_dedukti(decls: &[Declaration], replay_registry: &verum_smt::proof_replay
                     d.source.display(),
                 ));
             } else {
-                out.push_str(&format!(
-                    "(; {} :: {} ;)\n",
-                    d.kind,
-                    d.source.display(),
-                ));
+                out.push_str(&format!("(; {} :: {} ;)\n", d.kind, d.source.display(),));
             }
             // Dedukti uses term-style proof
             // assignment: `def name : Prop := <term>.` for theorems
@@ -1115,21 +1088,12 @@ fn emit_dedukti(decls: &[Declaration], replay_registry: &verum_smt::proof_replay
                     //  1. SMT-replay via DeduktiProofReplay (cert-loaded)
                     //  2. SimpleApply (M0.D) → CoreTerm lower (M-EXPORT V2)
                     //  3. Admitted comment marker.
-                    let proof = replay_or_admitted(
-                        replay_registry,
-                        "dedukti",
-                        d,
-                        "(; admitted ;)",
-                    );
+                    let proof = replay_or_admitted(replay_registry, "dedukti", d, "(; admitted ;)");
                     if proof.starts_with("(;") {
                         // No replay hit; try V2 decl-aware path.
                         let v2_body = dedukti_body_for_decl(d);
                         if v2_body.is_empty() {
-                            out.push_str(&format!(
-                                "{} : Prop. {}\n\n",
-                                mangle(&d.name),
-                                proof
-                            ));
+                            out.push_str(&format!("{} : Prop. {}\n\n", mangle(&d.name), proof));
                         } else {
                             out.push_str(&format!(
                                 "def {} : Prop {}.\n\n",
@@ -1139,11 +1103,7 @@ fn emit_dedukti(decls: &[Declaration], replay_registry: &verum_smt::proof_replay
                         }
                     } else {
                         // Lowered λΠ-term — emit as a `def`.
-                        out.push_str(&format!(
-                            "def {} : Prop := {}.\n\n",
-                            mangle(&d.name),
-                            proof
-                        ));
+                        out.push_str(&format!("def {} : Prop := {}.\n\n", mangle(&d.name), proof));
                     }
                 }
             }
@@ -1165,9 +1125,7 @@ fn emit_coq_imports(decls: &[Declaration], out: &mut String) {
     let mut unmapped: Vec<&str> = Vec::new();
     for l in &lineages {
         match lineage_import(l.as_str()).and_then(|li| li.coq) {
-            Some(stanza) if !import_lines.contains(&stanza) => {
-                import_lines.push(stanza)
-            }
+            Some(stanza) if !import_lines.contains(&stanza) => import_lines.push(stanza),
             Some(_) => {}
             None => unmapped.push(l.as_str()),
         }
@@ -1190,7 +1148,10 @@ fn emit_coq_imports(decls: &[Declaration], out: &mut String) {
     }
 }
 
-fn emit_coq(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::ProofReplayRegistry) -> String {
+fn emit_coq(
+    decls: &[Declaration],
+    replay_registry: &verum_smt::proof_replay::ProofReplayRegistry,
+) -> String {
     let mut out = String::new();
     out.push_str("(* Exported by `verum export --to coq`. *)\n");
     out.push_str(
@@ -1204,10 +1165,7 @@ fn emit_coq(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::Pr
     let by_framework = group_by_framework(decls);
     for (framework_key, group) in &by_framework {
         if let Some(fw) = framework_key {
-            out.push_str(&format!(
-                "(* ==== framework: {} ==== *)\n",
-                fw.as_str()
-            ));
+            out.push_str(&format!("(* ==== framework: {} ==== *)\n", fw.as_str()));
         } else {
             out.push_str("(* ==== no framework attribution ==== *)\n");
         }
@@ -1223,22 +1181,15 @@ fn emit_coq(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::Pr
             }
             match d.kind {
                 "axiom" => {
-                    out.push_str(&format!(
-                        "Axiom {} : Prop.\n\n",
-                        mangle(&d.name)
-                    ));
+                    out.push_str(&format!("Axiom {} : Prop.\n\n", mangle(&d.name)));
                 }
                 _ => {
                     // Three-step decision (M0.D Phase 1.5, mirror of
                     // emit_lean): cert replay first, then verum-side
                     // M0.A simple-apply translation, then admitted
                     // scaffold.
-                    let replayed = replay_or_admitted(
-                        replay_registry,
-                        "coq",
-                        d,
-                        "Proof. Admitted.",
-                    );
+                    let replayed =
+                        replay_or_admitted(replay_registry, "coq", d, "Proof. Admitted.");
                     let proof_body = if replayed != "Proof. Admitted." {
                         replayed
                     } else {
@@ -1283,7 +1234,10 @@ fn emit_coq(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::Pr
 /// mirrors the admitted-proof semantics of the Coq / Lean / Dedukti
 /// emitters: the statement is authoritative, the proof step is a
 /// follow-up that per-backend SMT replay will fill in.
-fn emit_metamath(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::ProofReplayRegistry) -> String {
+fn emit_metamath(
+    decls: &[Declaration],
+    replay_registry: &verum_smt::proof_replay::ProofReplayRegistry,
+) -> String {
     let mut out = String::new();
     out.push_str("$( Exported by `verum export --to metamath`. $)\n");
     out.push_str(
@@ -1329,12 +1283,7 @@ fn emit_metamath(decls: &[Declaration], replay_registry: &verum_smt::proof_repla
                     //  1. SMT-replay via MetamathProofReplay (cert-loaded)
                     //  2. SimpleApply (M0.D) / CoreTerm (M-EXPORT V2)
                     //  3. `$= ? $.` placeholder accepted by mmverify.py.
-                    let proof = replay_or_admitted(
-                        replay_registry,
-                        "metamath",
-                        d,
-                        "$= ? $.",
-                    );
+                    let proof = replay_or_admitted(replay_registry, "metamath", d, "$= ? $.");
                     let body = if proof != "$= ? $." {
                         proof
                     } else {
@@ -1361,7 +1310,10 @@ fn emit_metamath(decls: &[Declaration], replay_registry: &verum_smt::proof_repla
     out
 }
 
-fn emit_lean(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::ProofReplayRegistry) -> String {
+fn emit_lean(
+    decls: &[Declaration],
+    replay_registry: &verum_smt::proof_replay::ProofReplayRegistry,
+) -> String {
     let mut out = String::new();
     out.push_str("-- Exported by `verum export --to lean`.\n");
     out.push_str(
@@ -1378,9 +1330,7 @@ fn emit_lean(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
         let mut unmapped: Vec<&str> = Vec::new();
         for l in &lineages {
             match lineage_import(l.as_str()).and_then(|li| li.lean) {
-                Some(stanza) if !import_lines.contains(&stanza) => {
-                    import_lines.push(stanza)
-                }
+                Some(stanza) if !import_lines.contains(&stanza) => import_lines.push(stanza),
                 Some(_) => {}
                 None => unmapped.push(l.as_str()),
             }
@@ -1406,10 +1356,7 @@ fn emit_lean(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
     let by_framework = group_by_framework(decls);
     for (framework_key, group) in &by_framework {
         if let Some(fw) = framework_key {
-            out.push_str(&format!(
-                "-- ==== framework: {} ====\n",
-                fw.as_str()
-            ));
+            out.push_str(&format!("-- ==== framework: {} ====\n", fw.as_str()));
         } else {
             out.push_str("-- ==== no framework attribution ====\n");
         }
@@ -1435,12 +1382,7 @@ fn emit_lean(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
                     //  when the AST captured a M0.A simple-apply
                     //  shape — emit `:= X c` term-style.
                     //  3. Fall through to `:= sorry` scaffold.
-                    let proof = replay_or_admitted(
-                        replay_registry,
-                        "lean",
-                        d,
-                        ":= sorry",
-                    );
+                    let proof = replay_or_admitted(replay_registry, "lean", d, ":= sorry");
                     let body = if proof.starts_with("by") {
                         // SMT-replay produced a `by ...` tactic block.
                         format!(":= {}", proof)
@@ -1453,11 +1395,7 @@ fn emit_lean(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
                         // lower (M-EXPORT V2) → `:= sorry`.
                         lean_body_for_decl(d)
                     };
-                    out.push_str(&format!(
-                        "theorem {} : Prop {}\n\n",
-                        mangle(&d.name),
-                        body
-                    ));
+                    out.push_str(&format!("theorem {} : Prop {}\n\n", mangle(&d.name), body));
                 }
             }
         }
@@ -1498,7 +1436,10 @@ fn agda_mangle(name: &Text) -> String {
 /// As with the other backends, statements are opaque (`: Set`) at the
 /// MVP level. Type-preserving export through verum_kernel lands when
 /// per-backend SMT proof-replay is wired in.
-fn emit_agda(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::ProofReplayRegistry) -> String {
+fn emit_agda(
+    decls: &[Declaration],
+    replay_registry: &verum_smt::proof_replay::ProofReplayRegistry,
+) -> String {
     let mut out = String::new();
     out.push_str("-- Exported by `verum export --to agda`.\n");
     out.push_str(
@@ -1516,9 +1457,7 @@ fn emit_agda(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
         let mut unmapped: Vec<&str> = Vec::new();
         for l in &lineages {
             match lineage_import(l.as_str()).and_then(|li| li.agda) {
-                Some(stanza) if !import_lines.contains(&stanza) => {
-                    import_lines.push(stanza)
-                }
+                Some(stanza) if !import_lines.contains(&stanza) => import_lines.push(stanza),
                 Some(_) => {}
                 None => unmapped.push(l.as_str()),
             }
@@ -1544,10 +1483,7 @@ fn emit_agda(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
     let by_framework = group_by_framework(decls);
     for (framework_key, group) in &by_framework {
         if let Some(fw) = framework_key {
-            out.push_str(&format!(
-                "-- ==== framework: {} ====\n",
-                fw.as_str()
-            ));
+            out.push_str(&format!("-- ==== framework: {} ====\n", fw.as_str()));
         } else {
             out.push_str("-- ==== no framework attribution ====\n");
         }
@@ -1573,12 +1509,7 @@ fn emit_agda(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
                     out.push_str(&format!("  {} : Set\n\n", agda_mangle(&d.name)));
                 }
                 _ => {
-                    let proof = replay_or_admitted(
-                        replay_registry,
-                        "agda",
-                        d,
-                        "{!!}",
-                    );
+                    let proof = replay_or_admitted(replay_registry, "agda", d, "{!!}");
                     let body = if proof != "{!!}" {
                         // Replay produced a real term; use as-is.
                         format!("= {}", proof)
@@ -1609,9 +1540,7 @@ fn emit_agda(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
 // Summary + helpers
 // -----------------------------------------------------------------------------
 
-fn group_by_framework(
-    decls: &[Declaration],
-) -> BTreeMap<Option<Text>, Vec<&Declaration>> {
+fn group_by_framework(decls: &[Declaration]) -> BTreeMap<Option<Text>, Vec<&Declaration>> {
     let mut map: BTreeMap<Option<Text>, Vec<&Declaration>> = BTreeMap::new();
     for d in decls {
         let key = match &d.framework {
@@ -1705,9 +1634,7 @@ fn print_summary(
             "{} No SmtCertificates loaded from `.verum/cache/certificates/`. Run",
             "note:".dimmed()
         );
-        println!(
-            "      `verum verify` first to populate the cert store, then re-export"
-        );
+        println!("      `verum verify` first to populate the cert store, then re-export");
         println!("      to splice real proof-term tactic chains.");
     } else if with_cert_count < theorem_count {
         println!(
@@ -1777,7 +1704,9 @@ fn read_manifest_name(manifest_dir: &Path) -> String {
 /// default `:` prefix. Names containing characters outside the OWL 2
 /// FS local-name production are wrapped in `<…>` (full IRI form).
 fn owl2_local(name: &str) -> String {
-    let safe = name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    let safe = name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
     if safe {
         format!(":{}", name)
     } else {
@@ -1790,12 +1719,12 @@ fn owl2_local(name: &str) -> String {
 fn characteristic_axiom_name(c: verum_ast::attr::Owl2Characteristic) -> &'static str {
     use verum_ast::attr::Owl2Characteristic::*;
     match c {
-        Transitive        => "TransitiveObjectProperty",
-        Symmetric         => "SymmetricObjectProperty",
-        Asymmetric        => "AsymmetricObjectProperty",
-        Reflexive         => "ReflexiveObjectProperty",
-        Irreflexive       => "IrreflexiveObjectProperty",
-        Functional        => "FunctionalObjectProperty",
+        Transitive => "TransitiveObjectProperty",
+        Symmetric => "SymmetricObjectProperty",
+        Asymmetric => "AsymmetricObjectProperty",
+        Reflexive => "ReflexiveObjectProperty",
+        Irreflexive => "IrreflexiveObjectProperty",
+        Functional => "FunctionalObjectProperty",
         InverseFunctional => "InverseFunctionalObjectProperty",
     }
 }
@@ -1834,7 +1763,9 @@ fn emit_owl2_fs(graph: &crate::commands::owl2::Owl2Graph, manifest_name: &str) -
             }
         }
     }
-    if !graph.entities.is_empty() { out.push('\n'); }
+    if !graph.entities.is_empty() {
+        out.push('\n');
+    }
 
     // Section 2 — Class hierarchy: SubClassOf edges, alphabetical
     // by (child, parent).
@@ -1845,27 +1776,33 @@ fn emit_owl2_fs(graph: &crate::commands::owl2::Owl2Graph, manifest_name: &str) -
             owl2_local(parent.as_str()),
         ));
     }
-    if !graph.subclass_edges.is_empty() { out.push('\n'); }
+    if !graph.subclass_edges.is_empty() {
+        out.push('\n');
+    }
 
     // Section 3 — EquivalentClasses, one axiom per partition (≥ 2
     // classes). Equivalence pairs in graph are symmetrised; we use the
     // partition projection for clean OWL 2 FS output.
     for partition in graph.equivalence_partition() {
-        if partition.len() < 2 { continue; }
+        if partition.len() < 2 {
+            continue;
+        }
         let mut group: Vec<String> = partition.iter().map(|n| owl2_local(n.as_str())).collect();
         group.sort();
-        out.push_str(&format!(
-            "  EquivalentClasses({})\n",
-            group.join(" "),
-        ));
+        out.push_str(&format!("  EquivalentClasses({})\n", group.join(" "),));
     }
 
     // Section 4 — DisjointClasses, one axiom per disjoint pair. We
     // de-symmetrise: only emit (a, b) with a < b lexicographically.
-    let mut disjoint_seen: std::collections::BTreeSet<(Text, Text)> = std::collections::BTreeSet::new();
+    let mut disjoint_seen: std::collections::BTreeSet<(Text, Text)> =
+        std::collections::BTreeSet::new();
     for (a, b) in &graph.disjoint_pairs {
-        if a >= b { continue; }
-        if !disjoint_seen.insert((a.clone(), b.clone())) { continue; }
+        if a >= b {
+            continue;
+        }
+        if !disjoint_seen.insert((a.clone(), b.clone())) {
+            continue;
+        }
         out.push_str(&format!(
             "  DisjointClasses({} {})\n",
             owl2_local(a.as_str()),
@@ -1878,7 +1815,9 @@ fn emit_owl2_fs(graph: &crate::commands::owl2::Owl2Graph, manifest_name: &str) -
     // groups; V1 emits all key properties as ObjectProperty (the most
     // common case); Future work will route DataProperty-typed keys correctly.
     for (name, e) in &graph.entities {
-        if !matches!(e.kind, Owl2EntityKind::Class) { continue; }
+        if !matches!(e.kind, Owl2EntityKind::Class) {
+            continue;
+        }
         for key in &e.keys {
             let props: Vec<String> = key.iter().map(|p| owl2_local(p.as_str())).collect();
             out.push_str(&format!(
@@ -1891,7 +1830,9 @@ fn emit_owl2_fs(graph: &crate::commands::owl2::Owl2Graph, manifest_name: &str) -
 
     // Section 6 — Property domain / range / characteristics / inverse.
     for (name, e) in &graph.entities {
-        if !matches!(e.kind, Owl2EntityKind::Property) { continue; }
+        if !matches!(e.kind, Owl2EntityKind::Property) {
+            continue;
+        }
         let prop_iri = owl2_local(name.as_str());
         if let Some(d) = &e.property_domain {
             out.push_str(&format!(
@@ -1948,7 +1889,10 @@ mod format_tests {
 
     #[test]
     fn all_six_formats_parse_from_canonical_names() {
-        assert_eq!(ExportFormat::parse("dedukti").unwrap(), ExportFormat::Dedukti);
+        assert_eq!(
+            ExportFormat::parse("dedukti").unwrap(),
+            ExportFormat::Dedukti
+        );
         assert_eq!(ExportFormat::parse("coq").unwrap(), ExportFormat::Coq);
         assert_eq!(ExportFormat::parse("lean").unwrap(), ExportFormat::Lean);
         assert_eq!(ExportFormat::parse("agda").unwrap(), ExportFormat::Agda);
@@ -1956,9 +1900,15 @@ mod format_tests {
             ExportFormat::parse("metamath").unwrap(),
             ExportFormat::Metamath
         );
-        assert_eq!(ExportFormat::parse("owl2-fs").unwrap(), ExportFormat::Owl2Fs);
-        assert_eq!(ExportFormat::parse("owl2_fs").unwrap(), ExportFormat::Owl2Fs);
-        assert_eq!(ExportFormat::parse("ofn").unwrap(),     ExportFormat::Owl2Fs);
+        assert_eq!(
+            ExportFormat::parse("owl2-fs").unwrap(),
+            ExportFormat::Owl2Fs
+        );
+        assert_eq!(
+            ExportFormat::parse("owl2_fs").unwrap(),
+            ExportFormat::Owl2Fs
+        );
+        assert_eq!(ExportFormat::parse("ofn").unwrap(), ExportFormat::Owl2Fs);
     }
 
     #[test]
@@ -1976,7 +1926,7 @@ mod format_tests {
     #[test]
     fn owl2_fs_extension_and_canonical_name() {
         assert_eq!(ExportFormat::Owl2Fs.extension(), "ofn");
-        assert_eq!(ExportFormat::Owl2Fs.as_str(),    "owl2-fs");
+        assert_eq!(ExportFormat::Owl2Fs.as_str(), "owl2-fs");
     }
 
     #[test]
@@ -1984,12 +1934,18 @@ mod format_tests {
         use crate::commands::owl2::{Owl2Entity, Owl2Graph};
         let mut graph = Owl2Graph::default();
         graph.add_entity(Owl2Entity::new_class(
-            Text::from("Animal"), None, PathBuf::from("src/lib.vr"),
+            Text::from("Animal"),
+            None,
+            PathBuf::from("src/lib.vr"),
         ));
         graph.add_entity(Owl2Entity::new_class(
-            Text::from("Mammal"), None, PathBuf::from("src/lib.vr"),
+            Text::from("Mammal"),
+            None,
+            PathBuf::from("src/lib.vr"),
         ));
-        graph.subclass_edges.insert((Text::from("Mammal"), Text::from("Animal")));
+        graph
+            .subclass_edges
+            .insert((Text::from("Mammal"), Text::from("Animal")));
 
         let out = emit_owl2_fs(&graph, "test-pkg");
         // Mandatory header per W3C OWL 2 FS Recommendation.
@@ -2033,12 +1989,24 @@ mod format_tests {
     fn owl2_fs_emitter_deterministic_disjoint_pair_dedup() {
         use crate::commands::owl2::{Owl2Entity, Owl2Graph};
         let mut graph = Owl2Graph::default();
-        graph.add_entity(Owl2Entity::new_class(Text::from("Pizza"),    None, PathBuf::new()));
-        graph.add_entity(Owl2Entity::new_class(Text::from("IceCream"), None, PathBuf::new()));
+        graph.add_entity(Owl2Entity::new_class(
+            Text::from("Pizza"),
+            None,
+            PathBuf::new(),
+        ));
+        graph.add_entity(Owl2Entity::new_class(
+            Text::from("IceCream"),
+            None,
+            PathBuf::new(),
+        ));
         // Symmetrised pair — both orientations stored, but emitter
         // emits exactly one DisjointClasses axiom.
-        graph.disjoint_pairs.insert((Text::from("Pizza"),    Text::from("IceCream")));
-        graph.disjoint_pairs.insert((Text::from("IceCream"), Text::from("Pizza")));
+        graph
+            .disjoint_pairs
+            .insert((Text::from("Pizza"), Text::from("IceCream")));
+        graph
+            .disjoint_pairs
+            .insert((Text::from("IceCream"), Text::from("Pizza")));
 
         let out = emit_owl2_fs(&graph, "test-pkg");
         let count = out.matches("DisjointClasses(").count();
@@ -2150,7 +2118,8 @@ mod format_tests {
         let li = lineage_import("schreiber_dcct").expect("schreiber_dcct must be in table");
         assert!(li.lean.is_some(), "schreiber_dcct.lean was already mapped");
         assert!(
-            li.coq.is_some_and(|s| s.contains("HoTT.Modalities.Modality")),
+            li.coq
+                .is_some_and(|s| s.contains("HoTT.Modalities.Modality")),
             "schreiber_dcct.coq must now reference HoTT.Modalities.Modality"
         );
         assert!(

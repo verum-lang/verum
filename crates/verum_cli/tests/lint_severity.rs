@@ -17,9 +17,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use verum_cli::commands::lint::{
-    lint_source, FileOverride, LintConfig, LintIssue, LintLevel,
-};
+use verum_cli::commands::lint::{FileOverride, LintConfig, LintIssue, LintLevel, lint_source};
 
 fn empty_config() -> LintConfig {
     LintConfig {
@@ -70,7 +68,10 @@ fn severity_map_off_disables_rule() {
     let mut cfg = empty_config();
     cfg.severity_map
         .insert("todo-in-code".to_string(), LintLevel::Off);
-    assert_eq!(cfg.effective_level("todo-in-code", LintLevel::Warning), None);
+    assert_eq!(
+        cfg.effective_level("todo-in-code", LintLevel::Warning),
+        None
+    );
 }
 
 // ============================================================
@@ -81,7 +82,10 @@ fn severity_map_off_disables_rule() {
 fn disabled_list_suppresses_rule() {
     let mut cfg = empty_config();
     cfg.disabled.insert("todo-in-code".to_string());
-    assert_eq!(cfg.effective_level("todo-in-code", LintLevel::Warning), None);
+    assert_eq!(
+        cfg.effective_level("todo-in-code", LintLevel::Warning),
+        None
+    );
 }
 
 #[test]
@@ -203,14 +207,12 @@ fn per_file_most_specific_match_wins() {
 #[test]
 fn at_allow_suppresses_rule_on_item() {
     let cfg = empty_config();
-    let src = "@allow(\"todo-in-code\", reason = \"legacy\")\nfn legacy() {\n    // TODO: ship me\n}\n";
+    let src =
+        "@allow(\"todo-in-code\", reason = \"legacy\")\nfn legacy() {\n    // TODO: ship me\n}\n";
     let issues = lint(src, &cfg);
     // The suppression layer should remove the issue on the
     // suppressed item.
-    let todo_issues: Vec<_> = issues
-        .iter()
-        .filter(|i| i.rule == "todo-in-code")
-        .collect();
+    let todo_issues: Vec<_> = issues.iter().filter(|i| i.rule == "todo-in-code").collect();
     assert!(
         todo_issues.is_empty(),
         "@allow should suppress todo-in-code, got: {:?}",
@@ -226,7 +228,9 @@ fn at_allow_does_not_suppress_unrelated_items() {
     // todo-in-code on the *other* fn must still fire — @allow is
     // scoped to its own item.
     assert!(
-        issues.iter().any(|i| i.rule == "todo-in-code" && i.line >= 5),
+        issues
+            .iter()
+            .any(|i| i.rule == "todo-in-code" && i.line >= 5),
         "the unsuppressed TODO on `other` should still fire, got: {:?}",
         issues
             .iter()

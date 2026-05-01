@@ -26,9 +26,9 @@
 
 use tower_lsp::lsp_types::*;
 use verum_ast::FileId;
+use verum_common::List;
 use verum_lsp::completion::*;
 use verum_lsp::document::DocumentState;
-use verum_common::List;
 
 // ==================== Helper Functions ====================
 

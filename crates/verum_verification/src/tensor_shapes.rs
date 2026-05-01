@@ -1614,18 +1614,11 @@ impl ShapeVerifier {
     /// inert: an analyser configured with `max_rank = 4` would
     /// happily verify a rank-100 reshape, defeating the
     /// documented "Maximum tensor rank to verify" contract.
-    fn check_rank_bound(
-        &self,
-        operation: &'static str,
-        shape: &TensorShape,
-    ) -> ShapeResult<()> {
+    fn check_rank_bound(&self, operation: &'static str, shape: &TensorShape) -> ShapeResult<()> {
         if shape.rank() > self.config.max_rank {
             return Err(ShapeError::InvalidOperation {
                 operation: operation.into(),
-                requirement: Text::from(format!(
-                    "rank ≤ max_rank ({})",
-                    self.config.max_rank
-                )),
+                requirement: Text::from(format!("rank ≤ max_rank ({})", self.config.max_rank)),
                 actual: Text::from(format!("rank {}", shape.rank())),
             });
         }

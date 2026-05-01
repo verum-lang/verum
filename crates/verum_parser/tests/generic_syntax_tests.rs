@@ -41,7 +41,9 @@ fn parse_expr_fully(input: &str) -> Result<verum_ast::Expr, String> {
     let tokens = lexer.tokenize().map_err(|e| format!("Lex error: {}", e))?;
 
     let mut parser = RecursiveParser::new(&tokens, file_id);
-    let expr = parser.parse_expr().map_err(|e| format!("Parse error: {}", e))?;
+    let expr = parser
+        .parse_expr()
+        .map_err(|e| format!("Parse error: {}", e))?;
 
     // Check that all tokens were consumed (only EOF remaining)
     if !parser.stream.at_end() {

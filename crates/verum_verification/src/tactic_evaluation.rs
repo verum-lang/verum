@@ -403,12 +403,10 @@ fn expr_structural_equal(e1: &Expr, e2: &Expr, bindings: &mut HashMap<Text, Text
         // Function calls - check function and arguments
         (
             ExprKind::Call {
-                func: f1,
-                args: a1, ..
+                func: f1, args: a1, ..
             },
             ExprKind::Call {
-                func: f2,
-                args: a2, ..
+                func: f2, args: a2, ..
             },
         ) => {
             expr_structural_equal(f1, f2, bindings)
@@ -1438,12 +1436,10 @@ impl TacticEvaluator {
             TacticExpr::Seq(tactics) => self.apply_sequence(tactics),
             TacticExpr::Alt(tactics) => self.apply_alternative(tactics),
             TacticExpr::Try(inner) => self.apply_try(inner),
-            TacticExpr::TryElse { body, fallback } => {
-                match self.apply_try(body) {
-                    ok @ Ok(_) => ok,
-                    Err(_) => self.apply_tactic(fallback),
-                }
-            }
+            TacticExpr::TryElse { body, fallback } => match self.apply_try(body) {
+                ok @ Ok(_) => ok,
+                Err(_) => self.apply_tactic(fallback),
+            },
             TacticExpr::Repeat(inner) => self.apply_repeat(inner),
             TacticExpr::AllGoals(inner) => self.apply_all_goals(inner),
             TacticExpr::Focus(inner) => self.apply_focus(inner),
@@ -1462,9 +1458,11 @@ impl TacticEvaluator {
             // structural apply_* helpers for actual proof work.
             TacticExpr::Let { name, ty: _, value } => self.apply_let(name, value),
             TacticExpr::Match { scrutinee, arms } => self.apply_match(scrutinee, arms),
-            TacticExpr::If { cond, then_branch, else_branch } => {
-                self.apply_if(cond, then_branch, else_branch.as_ref())
-            }
+            TacticExpr::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => self.apply_if(cond, then_branch, else_branch.as_ref()),
             TacticExpr::Fail { message } => self.apply_fail(message),
         };
 
@@ -1571,9 +1569,7 @@ impl TacticEvaluator {
             ExprKind::Forall { bindings, body } => {
                 // Process the first binding (multi-binding intro requires multiple intro calls)
                 if bindings.is_empty() {
-                    return Err(TacticError::InvalidGoal(
-                        "forall has no bindings".into(),
-                    ));
+                    return Err(TacticError::InvalidGoal("forall has no bindings".into()));
                 }
                 let binding = &bindings[0];
 
@@ -1681,8 +1677,7 @@ impl TacticEvaluator {
                 }
             }
             TypeKind::Tuple(types) => {
-                let converted: List<_> =
-                    types.iter().map(|t| self.ast_type_to_type(t)).collect();
+                let converted: List<_> = types.iter().map(|t| self.ast_type_to_type(t)).collect();
                 Type::Tuple(converted)
             }
             TypeKind::Array { element, size } => {
@@ -2645,7 +2640,9 @@ impl TacticEvaluator {
         match ty {
             Type::Named { path, .. } => path
                 .as_ident()
-                .map(|id| verum_common::well_known_types::WellKnownType::Result.matches(id.as_str()))
+                .map(|id| {
+                    verum_common::well_known_types::WellKnownType::Result.matches(id.as_str())
+                })
                 .unwrap_or(false),
             _ => false,
         }
@@ -2791,11 +2788,7 @@ impl TacticEvaluator {
             }) {
                 for hyp in hypotheses.iter() {
                     if hyp.name == name
-                        && expr_structural_equal(
-                            &hyp.proposition,
-                            &goal_prop,
-                            &mut HashMap::new(),
-                        )
+                        && expr_structural_equal(&hyp.proposition, &goal_prop, &mut HashMap::new())
                     {
                         self.state.prove_current_goal()?;
                         return Ok(());
@@ -3121,19 +3114,23 @@ impl TacticEvaluator {
                         .as_ref()
                         .map_or(false, |r| self.pattern_binds_name(r, name))
                     || after.iter().any(|p| self.pattern_binds_name(p, name))
-            }            PatternKind::View { pattern, .. } => self.pattern_binds_name(pattern, name),
-            PatternKind::Active { .. } => false,
-            PatternKind::And(patterns) => {
-                patterns.iter().any(|p| self.pattern_binds_name(p, name))
             }
+            PatternKind::View { pattern, .. } => self.pattern_binds_name(pattern, name),
+            PatternKind::Active { .. } => false,
+            PatternKind::And(patterns) => patterns.iter().any(|p| self.pattern_binds_name(p, name)),
             PatternKind::TypeTest { binding, .. } => {
                 // TypeTest pattern binds the identifier to the narrowed type
                 Text::from(binding.name.as_str()) == *name
             }
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream pattern: stream[first, second, ...rest]
                 // Check head patterns and rest binding for the name
-                head_patterns.iter().any(|p| self.pattern_binds_name(p, name))
+                head_patterns
+                    .iter()
+                    .any(|p| self.pattern_binds_name(p, name))
                     || rest
                         .as_ref()
                         .map_or(false, |r| Text::from(r.name.as_str()) == *name)
@@ -3267,9 +3264,9 @@ impl TacticEvaluator {
             }
             ExprKind::Forall { bindings, body } => {
                 // Unfold in body (but not if the name is bound by any binding pattern)
-                let is_shadowed = bindings.iter().any(|b| {
-                    extract_pattern_name(&b.pattern).as_ref() == Some(name)
-                });
+                let is_shadowed = bindings
+                    .iter()
+                    .any(|b| extract_pattern_name(&b.pattern).as_ref() == Some(name));
                 if is_shadowed {
                     expr.clone() // Name is shadowed, don't unfold
                 } else {
@@ -3284,9 +3281,9 @@ impl TacticEvaluator {
                 }
             }
             ExprKind::Exists { bindings, body } => {
-                let is_shadowed = bindings.iter().any(|b| {
-                    extract_pattern_name(&b.pattern).as_ref() == Some(name)
-                });
+                let is_shadowed = bindings
+                    .iter()
+                    .any(|b| extract_pattern_name(&b.pattern).as_ref() == Some(name));
                 if is_shadowed {
                     expr.clone()
                 } else {
@@ -5342,9 +5339,9 @@ impl TacticEvaluator {
                     .iter()
                     .map(|arm| {
                         let new_guard = match &arm.guard {
-                            Maybe::Some(g) => Maybe::Some(Heap::new(
-                                self.substitute_params_in_expr(g, bindings),
-                            )),
+                            Maybe::Some(g) => {
+                                Maybe::Some(Heap::new(self.substitute_params_in_expr(g, bindings)))
+                            }
                             Maybe::None => Maybe::None,
                         };
                         let new_body = self.instantiate_tactic_expr(&arm.body, bindings)?;
@@ -5364,7 +5361,11 @@ impl TacticEvaluator {
             TacticExpr::Fail { message } => Ok(TacticExpr::Fail {
                 message: Heap::new(self.substitute_params_in_expr(message, bindings)),
             }),
-            TacticExpr::If { cond, then_branch, else_branch } => {
+            TacticExpr::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 let new_cond = self.substitute_params_in_expr(cond, bindings);
                 let new_then = self.instantiate_tactic_expr(then_branch, bindings)?;
                 let new_else = match else_branch {
@@ -5555,11 +5556,7 @@ impl TacticEvaluator {
     /// a hypothesis of the current goal; type annotation (if present)
     /// is accepted but not enforced beyond what the expression's
     /// own type-inference already does.
-    fn apply_let(
-        &mut self,
-        name: &verum_ast::Ident,
-        value: &Heap<Expr>,
-    ) -> TacticResult<()> {
+    fn apply_let(&mut self, name: &verum_ast::Ident, value: &Heap<Expr>) -> TacticResult<()> {
         let goal = self.state.current_goal_mut()?;
         goal.hypotheses.push(Hypothesis {
             name: Text::from(name.as_str()),
@@ -5593,16 +5590,10 @@ impl TacticEvaluator {
         // wildcard-ish arm.
         let scrutinee_head: Option<Text> = match &scrutinee.kind {
             ExprKind::Call { func, .. } => callee_head_name(func),
-            ExprKind::Path(path) => path
-                .segments
-                .iter()
-                .last()
-                .and_then(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(ident) => {
-                        Some(Text::from(ident.name.as_str()))
-                    }
-                    _ => None,
-                }),
+            ExprKind::Path(path) => path.segments.iter().last().and_then(|seg| match seg {
+                verum_ast::ty::PathSegment::Name(ident) => Some(Text::from(ident.name.as_str())),
+                _ => None,
+            }),
             _ => None,
         };
 
@@ -5681,14 +5672,10 @@ impl TacticEvaluator {
 /// Used by `apply_match` to compute the scrutinee's head constructor.
 fn callee_head_name(callee: &Expr) -> Option<Text> {
     match &callee.kind {
-        ExprKind::Path(path) => path
-            .segments
-            .iter()
-            .last()
-            .and_then(|seg| match seg {
-                verum_ast::ty::PathSegment::Name(ident) => Some(Text::from(ident.name.as_str())),
-                _ => None,
-            }),
+        ExprKind::Path(path) => path.segments.iter().last().and_then(|seg| match seg {
+            verum_ast::ty::PathSegment::Name(ident) => Some(Text::from(ident.name.as_str())),
+            _ => None,
+        }),
         _ => None,
     }
 }

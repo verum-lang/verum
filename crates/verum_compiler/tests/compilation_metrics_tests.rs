@@ -19,11 +19,11 @@
 //! and related types for tracking compilation performance.
 
 use std::time::Duration;
+use verum_common::Text;
 use verum_compiler::compilation_metrics::{
     Bottleneck, BottleneckKind, CompilationProfileReport, CompilationStats, ModuleMetrics,
     PhasePerformanceMetrics,
 };
-use verum_common::Text;
 
 #[test]
 fn test_compilation_profile_report_creation() {

@@ -24,8 +24,8 @@
 
 use verum_ast::span::FileId;
 use verum_ast::{BinOp, ExprKind, ItemKind, UnOp};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 // ============================================================================
 // Basic Parsing Tests

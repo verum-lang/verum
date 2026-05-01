@@ -115,11 +115,7 @@ struct WalkContext {
     source_path: PathBuf,
 }
 
-fn walk_proof_body(
-    body: &ProofBody,
-    ctx: &WalkContext,
-    errors: &mut Vec<BridgeDischargeError>,
-) {
+fn walk_proof_body(body: &ProofBody, ctx: &WalkContext, errors: &mut Vec<BridgeDischargeError>) {
     match body {
         ProofBody::Structured(s) => {
             for step in s.steps.iter() {
@@ -131,11 +127,7 @@ fn walk_proof_body(
     }
 }
 
-fn walk_proof_step(
-    step: &ProofStep,
-    ctx: &WalkContext,
-    errors: &mut Vec<BridgeDischargeError>,
-) {
+fn walk_proof_step(step: &ProofStep, ctx: &WalkContext, errors: &mut Vec<BridgeDischargeError>) {
     match &step.kind {
         ProofStepKind::Tactic(t) => walk_tactic(t, ctx, errors),
         ProofStepKind::Have { justification, .. }
@@ -164,11 +156,7 @@ fn walk_proof_step(
     }
 }
 
-fn walk_tactic(
-    tactic: &TacticExpr,
-    ctx: &WalkContext,
-    errors: &mut Vec<BridgeDischargeError>,
-) {
+fn walk_tactic(tactic: &TacticExpr, ctx: &WalkContext, errors: &mut Vec<BridgeDischargeError>) {
     match tactic {
         TacticExpr::Apply { lemma, args } => {
             // Two parser shapes — match both. The fast parser emits
@@ -176,7 +164,11 @@ fn walk_tactic(
             // the structured form has Apply{lemma:Path, args:[...]}.
             let owned_args: Vec<Expr>;
             let (effective_lemma, arg_refs): (&Expr, Vec<&Expr>) = match &lemma.kind {
-                ExprKind::Call { func, args: call_args, .. } if args.is_empty() => {
+                ExprKind::Call {
+                    func,
+                    args: call_args,
+                    ..
+                } if args.is_empty() => {
                     owned_args = call_args.iter().cloned().collect();
                     let refs: Vec<&Expr> = owned_args.iter().collect();
                     (&**func, refs)
@@ -254,7 +246,10 @@ fn check_apply_callsite(
     let decision = dispatch_intrinsic(&bare_name, &intrinsic_args);
 
     match decision {
-        Some(IntrinsicValue::Decision { holds: false, reason }) => {
+        Some(IntrinsicValue::Decision {
+            holds: false,
+            reason,
+        }) => {
             errors.push(BridgeDischargeError {
                 item_name: ctx.item_name.clone(),
                 bridge_name: bare_name,
@@ -336,10 +331,10 @@ fn expr_to_text(e: &Expr) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_ast::decl::{ProofStructure, ProofStep};
-    
+    use verum_ast::decl::{ProofStep, ProofStructure};
+
+    use verum_ast::Span;
     use verum_ast::ty::{Ident, Path};
-    use verum_ast::{Span};
     use verum_common::Heap;
 
     fn ident_path_expr(name: &str) -> Expr {
@@ -387,29 +382,39 @@ mod tests {
     #[test]
     fn passing_kernel_grothendieck_with_strictpos_arg_emits_no_error() {
         // `kernel_grothendieck_construction(1)` — 1 > 0 satisfies StrictPos.
-        let body = structured_proof_body(vec![
-            make_apply_step("kernel_grothendieck_construction_strict", vec![int_literal_expr(1)]),
-        ]);
+        let body = structured_proof_body(vec![make_apply_step(
+            "kernel_grothendieck_construction_strict",
+            vec![int_literal_expr(1)],
+        )]);
         let errors = validate_proof_body_bridges(
             &body,
             &Text::from("test_thm"),
             std::path::Path::new("test.vr"),
         );
-        assert!(errors.is_empty(), "passing dispatcher arg must not produce errors: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "passing dispatcher arg must not produce errors: {:?}",
+            errors
+        );
     }
 
     #[test]
     fn failing_kernel_grothendieck_with_zero_arg_emits_error() {
         // `kernel_grothendieck_construction(0)` — 0 violates StrictPos.
-        let body = structured_proof_body(vec![
-            make_apply_step("kernel_grothendieck_construction_strict", vec![int_literal_expr(0)]),
-        ]);
+        let body = structured_proof_body(vec![make_apply_step(
+            "kernel_grothendieck_construction_strict",
+            vec![int_literal_expr(0)],
+        )]);
         let errors = validate_proof_body_bridges(
             &body,
             &Text::from("test_thm"),
             std::path::Path::new("test.vr"),
         );
-        assert_eq!(errors.len(), 1, "dispatcher rejection must produce exactly one error");
+        assert_eq!(
+            errors.len(),
+            1,
+            "dispatcher rejection must produce exactly one error"
+        );
         let e = &errors[0];
         assert_eq!(e.item_name.as_str(), "test_thm");
         assert_eq!(e.bridge_name, "kernel_grothendieck_construction");
@@ -425,9 +430,10 @@ mod tests {
     fn non_kernel_apply_is_ignored() {
         // `apply some_lemma(0)` is not a kernel bridge — the validator
         // must not check it.
-        let body = structured_proof_body(vec![
-            make_apply_step("some_user_lemma", vec![int_literal_expr(0)]),
-        ]);
+        let body = structured_proof_body(vec![make_apply_step(
+            "some_user_lemma",
+            vec![int_literal_expr(0)],
+        )]);
         let errors = validate_proof_body_bridges(
             &body,
             &Text::from("test_thm"),
@@ -440,12 +446,10 @@ mod tests {
     fn non_literal_args_are_deferred() {
         // Args that aren't literals (here, a Path expression) are
         // deferred to downstream layers; the validator must not error.
-        let body = structured_proof_body(vec![
-            make_apply_step(
-                "kernel_grothendieck_construction_strict",
-                vec![ident_path_expr("n")],
-            ),
-        ]);
+        let body = structured_proof_body(vec![make_apply_step(
+            "kernel_grothendieck_construction_strict",
+            vec![ident_path_expr("n")],
+        )]);
         let errors = validate_proof_body_bridges(
             &body,
             &Text::from("test_thm"),
@@ -462,7 +466,10 @@ mod tests {
         // Two failing kernel bridges in one proof body — both should
         // appear in the error list.
         let body = structured_proof_body(vec![
-            make_apply_step("kernel_grothendieck_construction_strict", vec![int_literal_expr(0)]),
+            make_apply_step(
+                "kernel_grothendieck_construction_strict",
+                vec![int_literal_expr(0)],
+            ),
             make_apply_step("kernel_compute_colimit_strict", vec![int_literal_expr(0)]),
         ]);
         let errors = validate_proof_body_bridges(
@@ -481,8 +488,14 @@ mod tests {
         // Mixed pass/fail — the failing one is reported, the passing
         // one isn't.
         let body = structured_proof_body(vec![
-            make_apply_step("kernel_grothendieck_construction_strict", vec![int_literal_expr(1)]),
-            make_apply_step("kernel_grothendieck_construction_strict", vec![int_literal_expr(0)]),
+            make_apply_step(
+                "kernel_grothendieck_construction_strict",
+                vec![int_literal_expr(1)],
+            ),
+            make_apply_step(
+                "kernel_grothendieck_construction_strict",
+                vec![int_literal_expr(0)],
+            ),
         ]);
         let errors = validate_proof_body_bridges(
             &body,

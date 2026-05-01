@@ -127,7 +127,9 @@ pub mod syntax_kind;
 pub mod trivia;
 
 // Re-exports for convenience
-pub use event::{CompletedMarker, Event, EventBuilder, EventSink, Marker, TokenSource, TriviaSource};
+pub use event::{
+    CompletedMarker, Event, EventBuilder, EventSink, Marker, TokenSource, TriviaSource,
+};
 pub use green::{GreenBuilder, GreenChild, GreenNode, GreenToken, TextRange, TextSize};
 pub use incremental::{
     AffectedSubtree, ChangeTracker, IncrementalEngine, IncrementalStats, LspChange, LspRange,
@@ -137,7 +139,7 @@ pub use incremental::{
 pub use red::{SyntaxElement, SyntaxNode, SyntaxToken};
 pub use sink::{GreenTreeSink, TextTreeSink};
 pub use syntax_kind::SyntaxKind;
-pub use trivia::{classify_trivia, DocCommentKind, Trivia, TriviaList, TriviaListExt, TriviaText};
+pub use trivia::{DocCommentKind, Trivia, TriviaList, TriviaListExt, TriviaText, classify_trivia};
 
 /// Parse result containing the syntax tree and any errors.
 #[derive(Debug)]

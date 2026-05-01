@@ -652,7 +652,10 @@ fn test_match_int_literal() {
         attributes: verum_common::List::new(),
         pattern: Pattern::literal(Literal::int(1, span)),
         guard: None,
-        body: Box::new(Expr::literal(Literal::string("one".to_string().into(), span))),
+        body: Box::new(Expr::literal(Literal::string(
+            "one".to_string().into(),
+            span,
+        ))),
         with_clause: verum_common::Maybe::None,
         span,
     };
@@ -661,7 +664,10 @@ fn test_match_int_literal() {
         attributes: verum_common::List::new(),
         pattern: Pattern::new(verum_ast::pattern::PatternKind::Wildcard, span),
         guard: None,
-        body: Box::new(Expr::literal(Literal::string("other".to_string().into(), span))),
+        body: Box::new(Expr::literal(Literal::string(
+            "other".to_string().into(),
+            span,
+        ))),
         with_clause: verum_common::Maybe::None,
         span,
     };

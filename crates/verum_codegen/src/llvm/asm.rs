@@ -39,10 +39,10 @@
 
 use verum_ast::expr::{AsmOperand, AsmOperandKind, AsmOptions};
 use verum_common::{List, Text};
+use verum_llvm::InlineAsmDialect;
 use verum_llvm::context::Context;
 use verum_llvm::types::{BasicType, BasicTypeEnum, FunctionType};
 use verum_llvm::values::{BasicValue, BasicValueEnum, PointerValue};
-use verum_llvm::InlineAsmDialect;
 
 use super::error::{LlvmLoweringError, Result};
 
@@ -84,7 +84,11 @@ impl<'ctx> InlineAsmGenerator<'ctx> {
                     let value = get_value(expr)?;
                     inputs.push((constraint.constraint.clone(), value));
                 }
-                AsmOperandKind::Out { constraint, place, late: _ } => {
+                AsmOperandKind::Out {
+                    constraint,
+                    place,
+                    late: _,
+                } => {
                     let ptr = get_output_ptr(place)?;
                     outputs.push((format_output_constraint(&constraint.constraint), ptr));
                 }
@@ -92,11 +96,16 @@ impl<'ctx> InlineAsmGenerator<'ctx> {
                     // InOut uses '+' constraint modifier
                     let value = get_value(place)?;
                     let ptr = get_output_ptr(place)?;
-                    let inout_constraint = format!("+{}", constraint.constraint.trim_start_matches('+'));
+                    let inout_constraint =
+                        format!("+{}", constraint.constraint.trim_start_matches('+'));
                     inputs.push((inout_constraint.into(), value));
                     outputs.push((format_output_constraint(&constraint.constraint), ptr));
                 }
-                AsmOperandKind::InLateOut { constraint, in_expr, out_place } => {
+                AsmOperandKind::InLateOut {
+                    constraint,
+                    in_expr,
+                    out_place,
+                } => {
                     let value = get_value(in_expr)?;
                     let ptr = get_output_ptr(out_place)?;
                     inputs.push((constraint.constraint.clone(), value));
@@ -148,10 +157,8 @@ impl<'ctx> InlineAsmGenerator<'ctx> {
 
         // Build function type
         // We always return void and write outputs to pointers
-        let input_types: Vec<BasicTypeEnum<'ctx>> = inputs
-            .iter()
-            .map(|(_, v)| v.get_type())
-            .collect();
+        let input_types: Vec<BasicTypeEnum<'ctx>> =
+            inputs.iter().map(|(_, v)| v.get_type()).collect();
 
         let fn_type = self.context.void_type().fn_type(
             &input_types.iter().map(|t| (*t).into()).collect::<Vec<_>>(),

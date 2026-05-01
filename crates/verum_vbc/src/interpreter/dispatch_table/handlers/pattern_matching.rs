@@ -1,14 +1,14 @@
 //! Pattern matching and variant instruction handlers for VBC interpreter.
 
+use super::super::super::error::InterpreterResult;
+use super::super::super::heap;
+use super::super::super::state::InterpreterState;
+use super::super::DispatchResult;
+use super::bytecode_io::*;
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
 use crate::instruction::Reg;
 use crate::types::TypeId;
 use crate::value::Value;
-use super::super::super::error::InterpreterResult;
-use super::super::super::state::InterpreterState;
-use super::super::super::heap;
-use super::super::DispatchResult;
-use super::bytecode_io::*;
-use super::cbgr_helpers::{is_cbgr_ref, decode_cbgr_ref};
 
 // ============================================================================
 // Pattern Matching + Variant Operations
@@ -18,7 +18,9 @@ use super::cbgr_helpers::{is_cbgr_ref, decode_cbgr_ref};
 ///
 
 /// Similar to GetVariantData but uses u8 for field index instead of varint.
-pub(in super::super) fn handle_as_var(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_as_var(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let variant_reg = read_reg(state)?;
     let field_idx = read_varint(state)? as usize;
@@ -57,11 +59,12 @@ pub(in super::super) fn handle_as_var(state: &mut InterpreterState) -> Interpret
 }
 
 /// Switch (0x94) - Jump table dispatch.
-pub(in super::super) fn handle_switch(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_switch(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let selector = read_reg(state)?;
     let case_count = read_u8(state)? as usize;
     let default_offset = read_signed_varint(state)? as i32;
-
 
     let selector_val = state.get_reg(selector).as_i64() as usize;
 
@@ -84,7 +87,9 @@ pub(in super::super) fn handle_switch(state: &mut InterpreterState) -> Interpret
 }
 
 /// MatchGuard (0x95) - Evaluate match guard, jump if false.
-pub(in super::super) fn handle_match_guard(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_match_guard(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let cond = read_reg(state)?;
     let fail_offset = read_signed_varint(state)? as i32;
 
@@ -96,7 +101,9 @@ pub(in super::super) fn handle_match_guard(state: &mut InterpreterState) -> Inte
 }
 
 // Generic/Type operation stubs
-pub(in super::super) fn handle_specialize(_state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_specialize(
+    _state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     // Instantiate (0x85) is a reserved opcode for runtime generic instantiation.
     // Verum uses compile-time monomorphization, so this opcode is never emitted.
     // Gracefully skip as a no-op if encountered in legacy/malformed bytecode.
@@ -108,7 +115,9 @@ pub(in super::super) fn handle_specialize(_state: &mut InterpreterState) -> Inte
 
 /// Encoding: opcode + dst:reg + src:reg
 /// Effect: Inspects the NaN-boxed tag bits and stores a TypeId integer in `dst`.
-pub(in super::super) fn handle_type_of(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_type_of(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let val = state.get_reg(src);
@@ -151,7 +160,9 @@ pub(in super::super) fn handle_type_of(state: &mut InterpreterState) -> Interpre
 ///
 
 /// For user-defined types, looks up size from TypeDescriptor.
-pub(in super::super) fn handle_size_of(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_size_of(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let type_id = crate::types::TypeId(read_varint(state)? as u32);
 
@@ -161,7 +172,7 @@ pub(in super::super) fn handle_size_of(state: &mut InterpreterState) -> Interpre
         match type_id {
             crate::types::TypeId::UNIT => 0,
             crate::types::TypeId::BOOL => 1,
-            crate::types::TypeId::INT => 8,   // Also covers I64 (same TypeId)
+            crate::types::TypeId::INT => 8, // Also covers I64 (same TypeId)
             crate::types::TypeId::FLOAT => 8, // Also covers F64 (same TypeId)
             crate::types::TypeId::TEXT => std::mem::size_of::<Value>() as i64, // Text is a fat pointer
             crate::types::TypeId::U8 | crate::types::TypeId::I8 => 1,
@@ -195,7 +206,9 @@ pub(in super::super) fn handle_size_of(state: &mut InterpreterState) -> Interpre
 ///
 
 /// For user-defined types, looks up alignment from TypeDescriptor.
-pub(in super::super) fn handle_align_of(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_align_of(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let type_id = crate::types::TypeId(read_varint(state)? as u32);
 
@@ -207,7 +220,7 @@ pub(in super::super) fn handle_align_of(state: &mut InterpreterState) -> Interpr
             crate::types::TypeId::BOOL | crate::types::TypeId::U8 | crate::types::TypeId::I8 => 1,
             crate::types::TypeId::U16 | crate::types::TypeId::I16 => 2,
             crate::types::TypeId::U32 | crate::types::TypeId::I32 | crate::types::TypeId::F32 => 4,
-            crate::types::TypeId::INT => 8,   // Also covers I64 (same TypeId)
+            crate::types::TypeId::INT => 8, // Also covers I64 (same TypeId)
             crate::types::TypeId::FLOAT => 8, // Also covers F64 (same TypeId)
             crate::types::TypeId::U64 | crate::types::TypeId::PTR => 8,
             _ => std::mem::align_of::<Value>() as i64, // Default to Value alignment
@@ -232,7 +245,9 @@ pub(in super::super) fn handle_align_of(state: &mut InterpreterState) -> Interpr
 ///
 
 /// Variant layout: ObjectHeader + [tag:u32][padding:u32][payload space...]
-pub(in super::super) fn handle_make_variant(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_make_variant(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let tag = read_varint(state)? as u32;
     let field_count = read_varint(state)? as u32;
@@ -286,17 +301,13 @@ pub(in super::super) fn alloc_variant_into_with_type_id(
     type_id: TypeId,
 ) -> InterpreterResult<()> {
     let data_size = 8 + (field_count as usize) * std::mem::size_of::<Value>();
-    let obj = state.heap.alloc_with_init(
-        type_id,
-        data_size,
-        |data| {
-            let tag_ptr = data.as_mut_ptr() as *mut u32;
-            unsafe {
-                *tag_ptr = tag;
-                *tag_ptr.add(1) = field_count;
-            }
-        },
-    )?;
+    let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+        let tag_ptr = data.as_mut_ptr() as *mut u32;
+        unsafe {
+            *tag_ptr = tag;
+            *tag_ptr.add(1) = field_count;
+        }
+    })?;
     state.record_allocation();
 
     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
@@ -308,7 +319,9 @@ pub(in super::super) fn alloc_variant_into_with_type_id(
 
 /// Encoding: opcode + variant:reg + field:varint + value:reg
 /// Effect: Stores `value` at the specified `field` offset in the variant's payload.
-pub(in super::super) fn handle_set_variant_data(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_set_variant_data(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let variant_reg = read_reg(state)?;
     let field = read_varint(state)? as usize;
     let value_reg = read_reg(state)?;
@@ -338,13 +351,14 @@ pub(in super::super) fn handle_set_variant_data(state: &mut InterpreterState) ->
 
 /// Encoding: opcode + dst:reg + variant:reg + field:varint
 /// Effect: Reads the value at the specified `field` offset from the variant's payload into `dst`.
-pub(in super::super) fn handle_get_variant_data(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_get_variant_data(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let variant_reg = read_reg(state)?;
     let field = read_varint(state)? as usize;
 
     let mut variant = state.get_reg(variant_reg);
-
 
     // Auto-deref through register-based references (CBGR encoding)
     let mut deref_depth = 0;
@@ -388,7 +402,9 @@ pub(in super::super) fn handle_get_variant_data(state: &mut InterpreterState) ->
 
 /// Encoding: opcode + dst:reg + variant:reg + field:varint
 /// Effect: Sets `dst` to a pointer to the field at `field` offset in the variant's payload.
-pub(in super::super) fn handle_get_variant_data_ref(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_get_variant_data_ref(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let variant_reg = read_reg(state)?;
     let field = read_varint(state)? as usize;
@@ -440,7 +456,9 @@ pub(in super::super) fn handle_get_variant_data_ref(state: &mut InterpreterState
 
 /// Variant layout: ObjectHeader + [tag:u32][padding:u32][payload...]
 /// - Tag is stored as u32 at offset OBJECT_HEADER_SIZE
-pub(in super::super) fn handle_match_tag(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_match_tag(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let value_reg = read_reg(state)?;
     let expected_tag = read_varint(state)? as u32;
@@ -489,7 +507,9 @@ pub(in super::super) fn handle_match_tag(state: &mut InterpreterState) -> Interp
 
 /// Variant layout: ObjectHeader + [tag:u32][padding:u32][payload:Value]
 /// - Payload is stored at offset OBJECT_HEADER_SIZE + 8
-pub(in super::super) fn handle_get_tag(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_get_tag(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let value_reg = read_reg(state)?;
 
@@ -527,7 +547,9 @@ pub(in super::super) fn handle_get_tag(state: &mut InterpreterState) -> Interpre
 /// Tuple layout: ObjectHeader + [Value; count]
 /// - Object header size is OBJECT_HEADER_SIZE bytes
 /// - Each element is sizeof(Value) bytes
-pub(in super::super) fn handle_unpack(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_unpack(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst_start = read_reg(state)?;
     let tuple_reg = read_reg(state)?;
     let count = read_u8(state)?;
@@ -576,7 +598,9 @@ pub(in super::super) fn handle_unpack(state: &mut InterpreterState) -> Interpret
 ///
 
 /// Tuple layout: ObjectHeader + [Value; count]
-pub(in super::super) fn handle_pack(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_pack(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src_start = read_reg(state)?;
     let count = read_u8(state)?;
@@ -585,15 +609,13 @@ pub(in super::super) fn handle_pack(state: &mut InterpreterState) -> Interpreter
     let data_size = count as usize * std::mem::size_of::<Value>();
 
     // Allocate on the heap with tuple type id
-    let obj = state.heap.alloc_with_init(
-        TypeId::TUPLE,
-        data_size,
-        |data| {
+    let obj = state
+        .heap
+        .alloc_with_init(TypeId::TUPLE, data_size, |data| {
             // This closure doesn't have access to state, so we zero-init here
             // We'll write the actual values after allocation
             let _ = data;
-        },
-    )?;
+        })?;
 
     // Write values into the tuple data area
     let data_ptr = obj.data_ptr();
@@ -609,7 +631,6 @@ pub(in super::super) fn handle_pack(state: &mut InterpreterState) -> Interpreter
     state.set_reg(dst, Value::from_ptr(obj.as_ptr()));
     Ok(DispatchResult::Continue)
 }
-
 
 // ============================================================================
 // Dependent-type runtime packaging (T1-H)
@@ -656,18 +677,14 @@ pub(in super::super) fn handle_make_pi(
     // slot is a Value (the captured param); the second stores the return type
     // id widened to u64 so it is bit-compatible with the Value slot width.
     let data_size = 8 + 2 * std::mem::size_of::<Value>();
-    let obj = state.heap.alloc_with_init(
-        TypeId::PI,
-        data_size,
-        |data| {
-            // Write 0 at the tag word so it is never confused with a variant.
-            let tag_ptr = data.as_mut_ptr() as *mut u32;
-            unsafe {
-                *tag_ptr = 0;
-                *tag_ptr.add(1) = 2; // field_count, for observer helpers
-            }
-        },
-    )?;
+    let obj = state.heap.alloc_with_init(TypeId::PI, data_size, |data| {
+        // Write 0 at the tag word so it is never confused with a variant.
+        let tag_ptr = data.as_mut_ptr() as *mut u32;
+        unsafe {
+            *tag_ptr = 0;
+            *tag_ptr.add(1) = 2; // field_count, for observer helpers
+        }
+    })?;
     state.record_allocation();
 
     let base_ptr = obj.as_ptr() as *mut u8;
@@ -702,24 +719,25 @@ pub(in super::super) fn handle_make_sigma(
     let payload = state.get_reg(payload_reg);
 
     let data_size = 8 + 2 * std::mem::size_of::<Value>();
-    let obj = state.heap.alloc_with_init(
-        TypeId::SIGMA,
-        data_size,
-        |data| {
+    let obj = state
+        .heap
+        .alloc_with_init(TypeId::SIGMA, data_size, |data| {
             let tag_ptr = data.as_mut_ptr() as *mut u32;
             unsafe {
                 *tag_ptr = 0;
                 *tag_ptr.add(1) = 2;
             }
-        },
-    )?;
+        })?;
     state.record_allocation();
 
     let base_ptr = obj.as_ptr() as *mut u8;
     unsafe {
         let slot0 = base_ptr.add(heap::OBJECT_HEADER_SIZE + 8);
         std::ptr::write(slot0 as *mut Value, witness);
-        std::ptr::write(slot0.add(std::mem::size_of::<Value>()) as *mut Value, payload);
+        std::ptr::write(
+            slot0.add(std::mem::size_of::<Value>()) as *mut Value,
+            payload,
+        );
     }
 
     state.set_reg(dst, Value::from_ptr(base_ptr));
@@ -740,17 +758,15 @@ pub(in super::super) fn handle_make_witness(
     let value = state.get_reg(value_reg);
 
     let data_size = 8 + 2 * std::mem::size_of::<Value>();
-    let obj = state.heap.alloc_with_init(
-        TypeId::WITNESS,
-        data_size,
-        |data| {
+    let obj = state
+        .heap
+        .alloc_with_init(TypeId::WITNESS, data_size, |data| {
             let tag_ptr = data.as_mut_ptr() as *mut u32;
             unsafe {
                 *tag_ptr = 0;
                 *tag_ptr.add(1) = 2;
             }
-        },
-    )?;
+        })?;
     state.record_allocation();
 
     let base_ptr = obj.as_ptr() as *mut u8;

@@ -35,8 +35,8 @@ use verum_common::{List, Map, Text};
 
 use crate::proof_term_unified::ProofTerm;
 
-use z3::ast::Int;
 use z3::Solver;
+use z3::ast::Int;
 
 // ==================== Core Number Theory Operations ====================
 
@@ -762,10 +762,9 @@ impl NumberTheoryVerifier {
         // Create expression: a^(p-1) ≡ 1 (mod p)
         Expr::new(
             ExprKind::Literal(Literal::new(
-                LiteralKind::Text(verum_ast::literal::StringLit::Regular(format!(
-                    "{}^({}-1) ≡ 1 (mod {})",
-                    a, p, p
-                ).into())),
+                LiteralKind::Text(verum_ast::literal::StringLit::Regular(
+                    format!("{}^({}-1) ≡ 1 (mod {})", a, p, p).into(),
+                )),
                 Span::dummy(),
             )),
             Span::dummy(),
@@ -776,10 +775,9 @@ impl NumberTheoryVerifier {
         // Create expression: a^φ(n) ≡ 1 (mod n)
         Expr::new(
             ExprKind::Literal(Literal::new(
-                LiteralKind::Text(verum_ast::literal::StringLit::Regular(format!(
-                    "{}^φ({}) = {}^{} ≡ 1 (mod {})",
-                    a, n, a, phi_n, n
-                ).into())),
+                LiteralKind::Text(verum_ast::literal::StringLit::Regular(
+                    format!("{}^φ({}) = {}^{} ≡ 1 (mod {})", a, n, a, phi_n, n).into(),
+                )),
                 Span::dummy(),
             )),
             Span::dummy(),
@@ -790,10 +788,9 @@ impl NumberTheoryVerifier {
         // Create expression: (p-1)! ≡ -1 (mod p)
         Expr::new(
             ExprKind::Literal(Literal::new(
-                LiteralKind::Text(verum_ast::literal::StringLit::Regular(format!(
-                    "({}−1)! ≡ −1 (mod {})",
-                    p, p
-                ).into())),
+                LiteralKind::Text(verum_ast::literal::StringLit::Regular(
+                    format!("({}−1)! ≡ −1 (mod {})", p, p).into(),
+                )),
                 Span::dummy(),
             )),
             Span::dummy(),
@@ -815,10 +812,9 @@ impl NumberTheoryVerifier {
 
         Expr::new(
             ExprKind::Literal(Literal::new(
-                LiteralKind::Text(verum_ast::literal::StringLit::Regular(format!(
-                    "{} = {}",
-                    n, factorization
-                ).into())),
+                LiteralKind::Text(verum_ast::literal::StringLit::Regular(
+                    format!("{} = {}", n, factorization).into(),
+                )),
                 Span::dummy(),
             )),
             Span::dummy(),
@@ -828,10 +824,9 @@ impl NumberTheoryVerifier {
     fn create_bezout_expr(&self, a: i64, b: i64, g: i64, x: i64, y: i64) -> Expr {
         Expr::new(
             ExprKind::Literal(Literal::new(
-                LiteralKind::Text(verum_ast::literal::StringLit::Regular(format!(
-                    "{}×{} + {}×{} = {} = gcd({}, {})",
-                    a, x, b, y, g, a, b
-                ).into())),
+                LiteralKind::Text(verum_ast::literal::StringLit::Regular(
+                    format!("{}×{} + {}×{} = {} = gcd({}, {})", a, x, b, y, g, a, b).into(),
+                )),
                 Span::dummy(),
             )),
             Span::dummy(),

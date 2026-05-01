@@ -124,7 +124,10 @@ fn meta_source_map_enter_generated(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -145,7 +148,10 @@ fn meta_source_map_exit_generated(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
 
     if ctx.source_map_scope_stack.is_empty() {
@@ -164,7 +170,10 @@ fn meta_source_map_current_scope(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
 
     let scope = ctx
@@ -182,7 +191,10 @@ fn meta_source_map_scope_path(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
 
     let path: Vec<String> = ctx
@@ -205,24 +217,30 @@ fn extract_span_key(value: &ConstValue) -> Result<String, MetaError> {
         ConstValue::Tuple(fields) if fields.len() >= 3 => {
             let file = match &fields[0] {
                 ConstValue::Text(t) => t.to_string(),
-                _ => return Err(MetaError::TypeMismatch {
-                    expected: Text::from("Text"),
-                    found: fields[0].type_name(),
-                }),
+                _ => {
+                    return Err(MetaError::TypeMismatch {
+                        expected: Text::from("Text"),
+                        found: fields[0].type_name(),
+                    });
+                }
             };
             let line = match &fields[1] {
                 ConstValue::Int(n) => *n as i64,
-                _ => return Err(MetaError::TypeMismatch {
-                    expected: Text::from("Int"),
-                    found: fields[1].type_name(),
-                }),
+                _ => {
+                    return Err(MetaError::TypeMismatch {
+                        expected: Text::from("Int"),
+                        found: fields[1].type_name(),
+                    });
+                }
             };
             let col = match &fields[2] {
                 ConstValue::Int(n) => *n as i64,
-                _ => return Err(MetaError::TypeMismatch {
-                    expected: Text::from("Int"),
-                    found: fields[2].type_name(),
-                }),
+                _ => {
+                    return Err(MetaError::TypeMismatch {
+                        expected: Text::from("Int"),
+                        found: fields[2].type_name(),
+                    });
+                }
             };
             Ok(format!("{}:{}:{}", file, line, col))
         }
@@ -239,7 +257,10 @@ fn meta_source_map_map_span(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 2 {
-        return Err(MetaError::ArityMismatch { expected: 2, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 2,
+            got: args.len(),
+        });
     }
 
     let gen_key = extract_span_key(&args[0])?;
@@ -249,24 +270,30 @@ fn meta_source_map_map_span(
         ConstValue::Tuple(fields) if fields.len() >= 3 => {
             let file = match &fields[0] {
                 ConstValue::Text(t) => t.clone(),
-                _ => return Err(MetaError::TypeMismatch {
-                    expected: Text::from("Text"),
-                    found: fields[0].type_name(),
-                }),
+                _ => {
+                    return Err(MetaError::TypeMismatch {
+                        expected: Text::from("Text"),
+                        found: fields[0].type_name(),
+                    });
+                }
             };
             let line = match &fields[1] {
                 ConstValue::Int(n) => *n as usize,
-                _ => return Err(MetaError::TypeMismatch {
-                    expected: Text::from("Int"),
-                    found: fields[1].type_name(),
-                }),
+                _ => {
+                    return Err(MetaError::TypeMismatch {
+                        expected: Text::from("Int"),
+                        found: fields[1].type_name(),
+                    });
+                }
             };
             let col = match &fields[2] {
                 ConstValue::Int(n) => *n as usize,
-                _ => return Err(MetaError::TypeMismatch {
-                    expected: Text::from("Int"),
-                    found: fields[2].type_name(),
-                }),
+                _ => {
+                    return Err(MetaError::TypeMismatch {
+                        expected: Text::from("Int"),
+                        found: fields[2].type_name(),
+                    });
+                }
             };
             verum_common::span::LineColSpan::new(file.to_string(), line, col, col.saturating_add(1))
         }
@@ -290,7 +317,10 @@ fn meta_source_map_get_source_span(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     let gen_key = extract_span_key(&args[0])?;
@@ -314,7 +344,10 @@ fn meta_source_map_synthetic_span(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -343,7 +376,10 @@ fn meta_source_map_get_mappings(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
 
     let mappings: List<ConstValue> = ctx
@@ -467,8 +503,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Look it up
-        let result =
-            meta_source_map_get_source_span(&mut ctx, List::from(vec![gen_span])).unwrap();
+        let result = meta_source_map_get_source_span(&mut ctx, List::from(vec![gen_span])).unwrap();
         if let ConstValue::Maybe(Maybe::Some(_)) = &result {
             // Found the mapping
         } else {
@@ -481,8 +516,7 @@ mod tests {
             ConstValue::Int(1i128),
             ConstValue::Int(1i128),
         ]));
-        let result =
-            meta_source_map_get_source_span(&mut ctx, List::from(vec![missing])).unwrap();
+        let result = meta_source_map_get_source_span(&mut ctx, List::from(vec![missing])).unwrap();
         if let ConstValue::Maybe(Maybe::None) = &result {
             // Not found, as expected
         } else {

@@ -146,58 +146,78 @@ pub use metadata::{
 
 // Typed attributes - all from the typed module
 pub use typed::{
-    // Bitfield attributes (low-level bit manipulation)
-    BitfieldAttr,
-    BitOffsetAttr,
-    BitsAttr,
-    EndianAttr,
     // MMIO/Register attributes (memory-mapped hardware access)
     AccessMode,
-    RegisterBlockAttr,
-    RegisterOffsetAttr,
     // Optimization attributes
     AccessPattern,
     AccessPatternAttr,
+    // item 4 — Diakrisis Axi-4 accessibility marker.
+    AccessibilityAttr,
+    // Linker control attributes (Phase 6)
+    AliasAttr,
     AlignAttr,
     AssumeAttr,
     // Core attributes
     Attribute,
+    BitOffsetAttr,
+    // Bitfield attributes (low-level bit manipulation)
+    BitfieldAttr,
+    BitsAttr,
     BlackBoxAttr,
     ColdAttr,
     ConstEvalAttr,
     ConstEvalMode,
     CpuDispatchAttr,
-    // Multi-version dispatch for SIMD
-    MultiversionAttr,
-    MultiversionVariant,
-    // Interrupt handling attributes
-    InterruptAttr,
     // Concurrency attributes
     DeadlockDetectionAttr,
+    DecreasesAttr,
     DifferentiableAttr,
     EnactAttr,
+    EndianAttr,
+    EnsuresAttr,
+    ExportAttr,
     // governance — opt-in / opt-out for kernel extensions.
     ExtensionRequirementAttr,
     ExtensionToggleKind,
-    // item 4 — Diakrisis Axi-4 accessibility marker.
-    AccessibilityAttr,
-    FeatureAttr,
     ExtractAttr,
     ExtractContractAttr,
     ExtractTarget,
     ExtractWitnessAttr,
+    FeatureAttr,
     FrameworkAttr,
     FrameworkTranslateAttr,
+    // Formal verification attributes
+    GhostAttr,
     HotAttr,
+    InitPriorityAttr,
+    InjectAttr,
+    // Dependency injection attributes: @injectable(Scope) for static DI, @inject for field injection
+    InjectableAttr,
+    InjectionScope,
     InlineAttr,
     InlineMode,
+    // Interrupt handling attributes
+    InterruptAttr,
+    InvariantAttr,
     IvdepAttr,
     Likelihood,
     LikelihoodAttr,
+    LinkNameAttr,
+    LinkageAttr,
+    LinkageKind,
+    // LLVM-only execution attribute
+    LlvmOnlyAttr,
     LockLevelAttr,
     LtoAttr,
     LtoMode,
+    // Multi-version dispatch for SIMD
+    MultiversionAttr,
+    MultiversionVariant,
+    // Additional linker attributes
+    NakedAttr,
     NoAliasAttr,
+    NoMangleAttr,
+    NoReturnAttr,
     OptimizationAttr,
     OptimizationHints,
     OptimizationLevel,
@@ -213,18 +233,22 @@ pub use typed::{
     Owl2Semantics,
     Owl2SubClassOfAttr,
     ParallelAttr,
-    Quantity,
-    QuantityAttr,
     PerformanceContract,
     PgoAttr,
     PrefetchAccess,
     PrefetchAttr,
     Profile,
     ProfileAttr,
+    Quantity,
+    QuantityAttr,
     ReduceAttr,
     ReductionOp,
+    RegisterBlockAttr,
+    RegisterOffsetAttr,
     Repr,
     ReprAttr,
+    RequiresAttr,
+    SectionAttr,
     SpecializeAttr,
     StdAttr,
     SymbolVisibility,
@@ -233,10 +257,6 @@ pub use typed::{
     TargetFeatureAttr,
     // Context system attributes: context transforms (e.g., .transactional(), .scoped())
     TransformAttr,
-    // Dependency injection attributes: @injectable(Scope) for static DI, @inject for field injection
-    InjectableAttr,
-    InjectAttr,
-    InjectionScope,
     UnrollAttr,
     UnrollMode,
     UsedAttr,
@@ -245,27 +265,7 @@ pub use typed::{
     VerificationMode,
     VerifyAttr,
     VisibilityAttr,
-    // Linker control attributes (Phase 6)
-    AliasAttr,
     WeakAttr,
-    LinkageAttr,
-    LinkageKind,
-    InitPriorityAttr,
-    SectionAttr,
-    ExportAttr,
-    // Additional linker attributes
-    NakedAttr,
-    LinkNameAttr,
-    NoReturnAttr,
-    NoMangleAttr,
-    // LLVM-only execution attribute
-    LlvmOnlyAttr,
-    // Formal verification attributes
-    GhostAttr,
-    RequiresAttr,
-    EnsuresAttr,
-    InvariantAttr,
-    DecreasesAttr,
 };
 
 // Conversion helpers and additional attribute types
@@ -480,9 +480,11 @@ mod tests {
 
     #[test]
     fn test_attribute_list_ext() {
-        let attrs = [Attribute::simple(Text::from("inline"), Span::default()),
+        let attrs = [
+            Attribute::simple(Text::from("inline"), Span::default()),
             Attribute::simple(Text::from("cold"), Span::default()),
-            Attribute::simple(Text::from("doc"), Span::default())];
+            Attribute::simple(Text::from("doc"), Span::default()),
+        ];
 
         assert!(attrs.has_attribute("inline"));
         assert!(attrs.has_attribute("cold"));

@@ -1,10 +1,10 @@
-use verum_mlir_sys::{MlirStringRef, mlirStringRefEqual};
 use std::{
     ffi::CStr,
     marker::PhantomData,
     slice,
     str::{self, Utf8Error},
 };
+use verum_mlir_sys::{MlirStringRef, mlirStringRefEqual};
 
 /// A string reference.
 #[derive(Clone, Copy, Debug)]

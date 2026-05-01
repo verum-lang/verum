@@ -43,12 +43,18 @@ fn proof_draft_plain_output_ranks_lemma_first() {
     let out = Command::new(verum_bin())
         .args([
             "proof-draft",
-            "--theorem", "thm_test",
-            "--goal", "forall x. x > 0 -> succ(x) > 0",
-            "--lemma", "succ_pos:::forall x. x > 0 -> succ(x) > 0:::core",
-            "--lemma", "unrelated:::List<Int> append associative:::core",
-            "--max", "5",
-            "--format", "plain",
+            "--theorem",
+            "thm_test",
+            "--goal",
+            "forall x. x > 0 -> succ(x) > 0",
+            "--lemma",
+            "succ_pos:::forall x. x > 0 -> succ(x) > 0:::core",
+            "--lemma",
+            "unrelated:::List<Int> append associative:::core",
+            "--max",
+            "5",
+            "--format",
+            "plain",
         ])
         .output()
         .expect("CLI invocation must succeed");
@@ -61,8 +67,14 @@ fn proof_draft_plain_output_ranks_lemma_first() {
     let stdout = String::from_utf8_lossy(&out.stdout);
 
     // Header lines.
-    assert!(stdout.contains("Goal: forall x. x > 0"), "stdout missing goal");
-    assert!(stdout.contains("Theorem: thm_test"), "stdout missing theorem");
+    assert!(
+        stdout.contains("Goal: forall x. x > 0"),
+        "stdout missing goal"
+    );
+    assert!(
+        stdout.contains("Theorem: thm_test"),
+        "stdout missing theorem"
+    );
 
     // The relevant lemma MUST appear; the unrelated one is correctly
     // filtered (score=0 — engine drops zero-score suggestions). This
@@ -84,11 +96,16 @@ fn proof_draft_json_output_is_well_formed() {
     let out = Command::new(verum_bin())
         .args([
             "proof-draft",
-            "--theorem", "thm_test",
-            "--goal", "P(x)",
-            "--lemma", "p_holds:::P(x):::core",
-            "--max", "3",
-            "--format", "json",
+            "--theorem",
+            "thm_test",
+            "--goal",
+            "P(x)",
+            "--lemma",
+            "p_holds:::P(x):::core",
+            "--max",
+            "3",
+            "--format",
+            "json",
         ])
         .output()
         .expect("CLI invocation must succeed");
@@ -97,16 +114,20 @@ fn proof_draft_json_output_is_well_formed() {
     let stdout = String::from_utf8_lossy(&out.stdout);
 
     // Round-trip through serde_json — proves the output is valid JSON.
-    let parsed: serde_json::Value = serde_json::from_str(&stdout)
-        .expect("output must be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("output must be valid JSON");
 
     // Schema validations.
     assert_eq!(parsed["schema_version"], 1);
     assert_eq!(parsed["theorem"], "thm_test");
     assert_eq!(parsed["goal"], "P(x)");
-    let suggestions = parsed["suggestions"].as_array()
+    let suggestions = parsed["suggestions"]
+        .as_array()
         .expect("suggestions must be an array");
-    assert!(!suggestions.is_empty(), "should produce at least one suggestion");
+    assert!(
+        !suggestions.is_empty(),
+        "should produce at least one suggestion"
+    );
 
     // Each suggestion must have all required fields.
     for s in suggestions {
@@ -122,27 +143,20 @@ fn proof_draft_json_output_is_well_formed() {
 #[test]
 fn proof_draft_rejects_empty_theorem() {
     let out = Command::new(verum_bin())
-        .args([
-            "proof-draft",
-            "--theorem", "",
-            "--goal", "P",
-            "--max", "1",
-        ])
+        .args(["proof-draft", "--theorem", "", "--goal", "P", "--max", "1"])
         .output()
         .expect("CLI invocation must succeed");
 
-    assert!(!out.status.success(), "empty --theorem must produce non-zero exit");
+    assert!(
+        !out.status.success(),
+        "empty --theorem must produce non-zero exit"
+    );
 }
 
 #[test]
 fn proof_draft_rejects_zero_max() {
     let out = Command::new(verum_bin())
-        .args([
-            "proof-draft",
-            "--theorem", "t",
-            "--goal", "P",
-            "--max", "0",
-        ])
+        .args(["proof-draft", "--theorem", "t", "--goal", "P", "--max", "0"])
         .output()
         .expect("CLI invocation must succeed");
 
@@ -154,15 +168,22 @@ fn proof_draft_rejects_unknown_format() {
     let out = Command::new(verum_bin())
         .args([
             "proof-draft",
-            "--theorem", "t",
-            "--goal", "P",
-            "--max", "1",
-            "--format", "xml",
+            "--theorem",
+            "t",
+            "--goal",
+            "P",
+            "--max",
+            "1",
+            "--format",
+            "xml",
         ])
         .output()
         .expect("CLI invocation must succeed");
 
-    assert!(!out.status.success(), "unknown --format must produce non-zero exit");
+    assert!(
+        !out.status.success(),
+        "unknown --format must produce non-zero exit"
+    );
 }
 
 #[test]
@@ -170,15 +191,22 @@ fn proof_draft_rejects_malformed_lemma_flag() {
     let out = Command::new(verum_bin())
         .args([
             "proof-draft",
-            "--theorem", "t",
-            "--goal", "P",
-            "--max", "1",
-            "--lemma", "missing-separator",
+            "--theorem",
+            "t",
+            "--goal",
+            "P",
+            "--max",
+            "1",
+            "--lemma",
+            "missing-separator",
         ])
         .output()
         .expect("CLI invocation must succeed");
 
-    assert!(!out.status.success(), "malformed --lemma must produce non-zero exit");
+    assert!(
+        !out.status.success(),
+        "malformed --lemma must produce non-zero exit"
+    );
 }
 
 #[test]
@@ -186,20 +214,24 @@ fn proof_draft_pi_shaped_goal_offers_intro() {
     let out = Command::new(verum_bin())
         .args([
             "proof-draft",
-            "--theorem", "t",
-            "--goal", "forall x. x = x",
-            "--max", "10",
-            "--format", "json",
+            "--theorem",
+            "t",
+            "--goal",
+            "forall x. x = x",
+            "--max",
+            "10",
+            "--format",
+            "json",
         ])
         .output()
         .expect("CLI invocation must succeed");
 
     assert!(out.status.success());
-    let parsed: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
-        .expect("must be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("must be valid JSON");
     let suggestions = parsed["suggestions"].as_array().unwrap();
-    let has_intro = suggestions.iter().any(|s| {
-        s["snippet"].as_str().unwrap_or("").starts_with("intro")
-    });
+    let has_intro = suggestions
+        .iter()
+        .any(|s| s["snippet"].as_str().unwrap_or("").starts_with("intro"));
     assert!(has_intro, "Π-shaped goal should suggest `intro`");
 }

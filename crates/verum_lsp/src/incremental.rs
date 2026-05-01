@@ -37,11 +37,11 @@ use std::collections::HashMap;
 use std::time::Instant;
 use tower_lsp::lsp_types::{Position, Range};
 use verum_ast::{Expr, ExprKind, Module, Span};
-use verum_syntax::{
-    GreenNode, SyntaxNode, TextEdit, TextRange, TextSize,
-    LspChange as SyntaxLspChange, LspRange as SyntaxLspRange,
-};
 use verum_parser::IncrementalDocument;
+use verum_syntax::{
+    GreenNode, LspChange as SyntaxLspChange, LspRange as SyntaxLspRange, SyntaxNode, TextEdit,
+    TextRange, TextSize,
+};
 
 /// A hashable range key for HashMap lookups
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -715,7 +715,11 @@ impl LspIncrementalDocument {
     }
 
     /// Apply content changes from an LSP didChange notification.
-    pub fn apply_changes(&mut self, changes: Vec<tower_lsp::lsp_types::TextDocumentContentChangeEvent>, version: i32) {
+    pub fn apply_changes(
+        &mut self,
+        changes: Vec<tower_lsp::lsp_types::TextDocumentContentChangeEvent>,
+        version: i32,
+    ) {
         let start_time = Instant::now();
 
         // Convert LSP changes to our format

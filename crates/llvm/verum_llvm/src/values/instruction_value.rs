@@ -1,25 +1,26 @@
-
+use verum_llvm_sys::LLVMOpcode;
 use verum_llvm_sys::core::LLVMGetGEPSourceElementType;
 use verum_llvm_sys::core::{
-    LLVMGetAlignment, LLVMGetAllocatedType, LLVMGetAtomicRMWBinOp, LLVMGetFCmpPredicate, LLVMGetICmpPredicate,
-    LLVMGetIndices, LLVMGetInstructionOpcode, LLVMGetInstructionParent, LLVMGetMetadata, LLVMGetNextInstruction,
-    LLVMGetNumIndices, LLVMGetNumOperands, LLVMGetOperand, LLVMGetOperandUse, LLVMGetOrdering,
-    LLVMGetPreviousInstruction, LLVMGetVolatile, LLVMHasMetadata, LLVMInstructionClone, LLVMInstructionEraseFromParent,
-    LLVMInstructionRemoveFromParent, LLVMIsATerminatorInst, LLVMIsConditional, LLVMIsTailCall, LLVMSetAlignment,
-    LLVMSetMetadata, LLVMSetOperand, LLVMSetOrdering, LLVMSetVolatile, LLVMValueAsBasicBlock, LLVMValueIsBasicBlock,
+    LLVMGetAlignment, LLVMGetAllocatedType, LLVMGetAtomicRMWBinOp, LLVMGetFCmpPredicate,
+    LLVMGetICmpPredicate, LLVMGetIndices, LLVMGetInstructionOpcode, LLVMGetInstructionParent,
+    LLVMGetMetadata, LLVMGetNextInstruction, LLVMGetNumIndices, LLVMGetNumOperands, LLVMGetOperand,
+    LLVMGetOperandUse, LLVMGetOrdering, LLVMGetPreviousInstruction, LLVMGetVolatile,
+    LLVMHasMetadata, LLVMInstructionClone, LLVMInstructionEraseFromParent,
+    LLVMInstructionRemoveFromParent, LLVMIsATerminatorInst, LLVMIsConditional, LLVMIsTailCall,
+    LLVMSetAlignment, LLVMSetMetadata, LLVMSetOperand, LLVMSetOrdering, LLVMSetVolatile,
+    LLVMValueAsBasicBlock, LLVMValueIsBasicBlock,
 };
 use verum_llvm_sys::prelude::LLVMValueRef;
-use verum_llvm_sys::LLVMOpcode;
 
 use std::{ffi::CStr, fmt, fmt::Display};
 
+use crate::AtomicRMWBinOp;
 use crate::debug_info::DILocation;
 use crate::values::{BasicValue, BasicValueEnum, BasicValueUse, MetadataValue, Value};
-use crate::AtomicRMWBinOp;
+use crate::{AtomicOrdering, FloatPredicate, IntPredicate};
 use crate::{basic_block::BasicBlock, types::AnyTypeEnum};
 use crate::{error::AlignmentError, values::basic_value_use::Operand};
 use crate::{types::BasicTypeEnum, values::traits::AsValueRef};
-use crate::{AtomicOrdering, FloatPredicate, IntPredicate};
 
 use super::AnyValue;
 
@@ -32,7 +33,9 @@ pub enum AtomicError {
     AcquireRelease,
     #[error("The acquire ordering is not valid on store instructions.")]
     AcquireOnStore,
-    #[error("Only acquire, release, acq_rel and sequentially consistent orderings are valid on fence instructions.")]
+    #[error(
+        "Only acquire, release, acq_rel and sequentially consistent orderings are valid on fence instructions."
+    )]
     InvalidOrderingOnFence,
     #[error("The not_atomic and unordered orderings are not valid on atomicrmw instructions.")]
     InvalidOrderingOnAtomicRMW,
@@ -188,7 +191,10 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Get a instruction with it's name
     /// Compares against all instructions after self, and self.
     pub fn get_instruction_with_name(&self, name: &str) -> Option<InstructionValue<'ctx>> {
-        if self.get_name().is_some_and(|ins_name| ins_name.to_str() == Ok(name)) {
+        if self
+            .get_name()
+            .is_some_and(|ins_name| ins_name.to_str() == Ok(name))
+        {
             return Some(*self);
         }
         self.get_next_instruction()?.get_instruction_with_name(name)
@@ -313,7 +319,9 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Set [`FastMathFlags`] on supported instructions.
     pub fn set_fast_math_flags(self, flags: FastMathFlags) -> Result<(), InstructionValueError> {
         if self.can_use_fast_math_flags() {
-            unsafe { verum_llvm_sys::core::LLVMSetFastMathFlags(self.as_value_ref(), flags.bits()) };
+            unsafe {
+                verum_llvm_sys::core::LLVMSetFastMathFlags(self.as_value_ref(), flags.bits())
+            };
             Ok(())
         } else {
             Err(InstructionValueError::NotFastMathInst)
@@ -366,7 +374,9 @@ impl<'ctx> InstructionValue<'ctx> {
             | InstructionOpcode::Sub
             | InstructionOpcode::Mul
             | InstructionOpcode::Shl
-            | InstructionOpcode::Trunc => Ok(unsafe { verum_llvm_sys::core::LLVMGetNSW(self.as_value_ref()) == 1 }),
+            | InstructionOpcode::Trunc => {
+                Ok(unsafe { verum_llvm_sys::core::LLVMGetNSW(self.as_value_ref()) == 1 })
+            }
             _ => Err(InstructionValueError::NotArithInst),
         }
     }
@@ -382,7 +392,7 @@ impl<'ctx> InstructionValue<'ctx> {
             | InstructionOpcode::Trunc => {
                 unsafe { verum_llvm_sys::core::LLVMSetNSW(self.as_value_ref(), flag as i32) };
                 Ok(())
-            },
+            }
             _ => Err(InstructionValueError::NotArithInst),
         }
     }
@@ -395,7 +405,9 @@ impl<'ctx> InstructionValue<'ctx> {
             | InstructionOpcode::Sub
             | InstructionOpcode::Mul
             | InstructionOpcode::Shl
-            | InstructionOpcode::Trunc => Ok(unsafe { verum_llvm_sys::core::LLVMGetNUW(self.as_value_ref()) == 1 }),
+            | InstructionOpcode::Trunc => {
+                Ok(unsafe { verum_llvm_sys::core::LLVMGetNUW(self.as_value_ref()) == 1 })
+            }
             _ => Err(InstructionValueError::NotArithInst),
         }
     }
@@ -411,7 +423,7 @@ impl<'ctx> InstructionValue<'ctx> {
             | InstructionOpcode::Trunc => {
                 unsafe { verum_llvm_sys::core::LLVMSetNUW(self.as_value_ref(), flag as i32) };
                 Ok(())
-            },
+            }
             _ => Err(InstructionValueError::NotArithInst),
         }
     }
@@ -420,9 +432,12 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Returns whether or not an instruction has the exact flag set.
     pub fn get_exact_flag(self) -> Result<bool, InstructionValueError> {
         match self.get_opcode() {
-            InstructionOpcode::SDiv | InstructionOpcode::UDiv | InstructionOpcode::AShr | InstructionOpcode::LShr => {
+            InstructionOpcode::SDiv
+            | InstructionOpcode::UDiv
+            | InstructionOpcode::AShr
+            | InstructionOpcode::LShr => {
                 Ok(unsafe { verum_llvm_sys::core::LLVMGetExact(self.as_value_ref()) == 1 })
-            },
+            }
             _ => Err(InstructionValueError::NotDivOrShrInst),
         }
     }
@@ -431,10 +446,13 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Sets whether or not an instruction is exact.
     pub fn set_exact_flag(self, flag: bool) -> Result<(), InstructionValueError> {
         match self.get_opcode() {
-            InstructionOpcode::SDiv | InstructionOpcode::UDiv | InstructionOpcode::AShr | InstructionOpcode::LShr => {
+            InstructionOpcode::SDiv
+            | InstructionOpcode::UDiv
+            | InstructionOpcode::AShr
+            | InstructionOpcode::LShr => {
                 unsafe { verum_llvm_sys::core::LLVMSetExact(self.as_value_ref(), flag as i32) };
                 Ok(())
-            },
+            }
             _ => Err(InstructionValueError::NotDivOrShrInst),
         }
     }
@@ -443,7 +461,9 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Returns whether or not an instruction has the same sign flag set.
     pub fn get_same_sign_flag(self) -> Result<bool, InstructionValueError> {
         match self.get_opcode() {
-            InstructionOpcode::ICmp => Ok(unsafe { verum_llvm_sys::core::LLVMGetICmpSameSign(self.as_value_ref()) == 1 }),
+            InstructionOpcode::ICmp => {
+                Ok(unsafe { verum_llvm_sys::core::LLVMGetICmpSameSign(self.as_value_ref()) == 1 })
+            }
             _ => Err(InstructionValueError::NotIcmpInst),
         }
     }
@@ -453,15 +473,18 @@ impl<'ctx> InstructionValue<'ctx> {
     pub fn set_same_sign_flag(self, flag: bool) -> Result<(), InstructionValueError> {
         match self.get_opcode() {
             InstructionOpcode::ICmp => {
-                unsafe { verum_llvm_sys::core::LLVMSetICmpSameSign(self.as_value_ref(), flag as i32) };
+                unsafe {
+                    verum_llvm_sys::core::LLVMSetICmpSameSign(self.as_value_ref(), flag as i32)
+                };
                 Ok(())
-            },
+            }
             _ => Err(InstructionValueError::NotIcmpInst),
         }
     }
 
     pub fn replace_all_uses_with(self, other: &InstructionValue<'ctx>) {
-        self.instruction_value.replace_all_uses_with(other.as_value_ref())
+        self.instruction_value
+            .replace_all_uses_with(other.as_value_ref())
     }
 
     // SubTypes: Only apply to memory access instructions
@@ -471,7 +494,9 @@ impl<'ctx> InstructionValue<'ctx> {
             InstructionOpcode::Load
             | InstructionOpcode::Store
             | InstructionOpcode::AtomicRMW
-            | InstructionOpcode::AtomicCmpXchg => Ok(unsafe { LLVMGetVolatile(self.as_value_ref()) } == 1),
+            | InstructionOpcode::AtomicCmpXchg => {
+                Ok(unsafe { LLVMGetVolatile(self.as_value_ref()) } == 1)
+            }
             _ => Err(InstructionValueError::NotMemoryAccessInst),
         }
     }
@@ -486,7 +511,7 @@ impl<'ctx> InstructionValue<'ctx> {
             | InstructionOpcode::AtomicCmpXchg => {
                 unsafe { LLVMSetVolatile(self.as_value_ref(), volatile as i32) };
                 Ok(())
-            },
+            }
             _ => Err(InstructionValueError::NotMemoryAccessInst),
         }
     }
@@ -495,7 +520,9 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Returns the type that is allocated by the alloca instruction.
     pub fn get_allocated_type(self) -> Result<BasicTypeEnum<'ctx>, InstructionValueError> {
         match self.get_opcode() {
-            InstructionOpcode::Alloca => Ok(unsafe { BasicTypeEnum::new(LLVMGetAllocatedType(self.as_value_ref())) }),
+            InstructionOpcode::Alloca => {
+                Ok(unsafe { BasicTypeEnum::new(LLVMGetAllocatedType(self.as_value_ref())) })
+            }
             _ => Err(InstructionValueError::NotAllocaInst),
         }
     }
@@ -506,7 +533,7 @@ impl<'ctx> InstructionValue<'ctx> {
         match self.get_opcode() {
             InstructionOpcode::GetElementPtr => {
                 Ok(unsafe { BasicTypeEnum::new(LLVMGetGEPSourceElementType(self.as_value_ref())) })
-            },
+            }
             _ => Err(InstructionValueError::NotGEPInst),
         }
     }
@@ -515,7 +542,9 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Returns whether or not the GEP is in bounds.
     pub fn get_in_bounds_flag(self) -> Result<bool, InstructionValueError> {
         match self.get_opcode() {
-            InstructionOpcode::GetElementPtr => Ok(unsafe { verum_llvm_sys::core::LLVMIsInBounds(self.as_value_ref()) == 1 }),
+            InstructionOpcode::GetElementPtr => {
+                Ok(unsafe { verum_llvm_sys::core::LLVMIsInBounds(self.as_value_ref()) == 1 })
+            }
             _ => Err(InstructionValueError::NotGEPInst),
         }
     }
@@ -529,7 +558,7 @@ impl<'ctx> InstructionValue<'ctx> {
                     verum_llvm_sys::core::LLVMSetIsInBounds(self.as_value_ref(), flag as i32);
                 }
                 Ok(())
-            },
+            }
             _ => Err(InstructionValueError::NotGEPInst),
         }
     }
@@ -540,7 +569,7 @@ impl<'ctx> InstructionValue<'ctx> {
         match self.get_opcode() {
             InstructionOpcode::Alloca | InstructionOpcode::Load | InstructionOpcode::Store => {
                 Ok(unsafe { LLVMGetAlignment(self.as_value_ref()) })
-            },
+            }
             _ => Err(InstructionValueError::AlignmentError(
                 AlignmentError::UnalignedInstruction,
             )),
@@ -552,16 +581,16 @@ impl<'ctx> InstructionValue<'ctx> {
     pub fn set_alignment(self, alignment: u32) -> Result<(), InstructionValueError> {
         // Zero check is unnecessary as 0 is not a power of two.
         if !alignment.is_power_of_two() {
-            return Err(InstructionValueError::AlignmentError(AlignmentError::NonPowerOfTwo(
-                alignment,
-            )));
+            return Err(InstructionValueError::AlignmentError(
+                AlignmentError::NonPowerOfTwo(alignment),
+            ));
         }
 
         match self.get_opcode() {
             InstructionOpcode::Alloca | InstructionOpcode::Load | InstructionOpcode::Store => {
                 unsafe { LLVMSetAlignment(self.as_value_ref(), alignment) };
                 Ok(())
-            },
+            }
             _ => Err(InstructionValueError::AlignmentError(
                 AlignmentError::UnalignedInstruction,
             )),
@@ -574,7 +603,7 @@ impl<'ctx> InstructionValue<'ctx> {
         match self.get_opcode() {
             InstructionOpcode::Load | InstructionOpcode::Store | InstructionOpcode::AtomicRMW => {
                 Ok(unsafe { LLVMGetOrdering(self.as_value_ref()) }.into())
-            },
+            }
             InstructionOpcode::Fence => Ok(unsafe { LLVMGetOrdering(self.as_value_ref()) }.into()),
             _ => Err(InstructionValueError::NotAtomicOrderingInst),
         }
@@ -582,24 +611,30 @@ impl<'ctx> InstructionValue<'ctx> {
 
     // SubTypes: Only apply to memory access instructions
     /// Sets atomic ordering on a memory access instruction.
-    pub fn set_atomic_ordering(self, ordering: AtomicOrdering) -> Result<(), InstructionValueError> {
+    pub fn set_atomic_ordering(
+        self,
+        ordering: AtomicOrdering,
+    ) -> Result<(), InstructionValueError> {
         // Although fence and atomicrmw both have an ordering, the LLVM C API
         // does not support them (for LLVM < 18). The cmpxchg instruction has two orderings and
         // does not work with this API
         match (self.get_opcode(), ordering) {
-            (InstructionOpcode::Load, AtomicOrdering::Release) => {
-                Err(InstructionValueError::AtomicError(AtomicError::ReleaseOnLoad))
-            },
-            (InstructionOpcode::Store, AtomicOrdering::Acquire) => {
-                Err(InstructionValueError::AtomicError(AtomicError::AcquireOnStore))
-            },
-            (InstructionOpcode::Load | InstructionOpcode::Store, AtomicOrdering::AcquireRelease) => {
-                Err(InstructionValueError::AtomicError(AtomicError::AcquireRelease))
-            },
+            (InstructionOpcode::Load, AtomicOrdering::Release) => Err(
+                InstructionValueError::AtomicError(AtomicError::ReleaseOnLoad),
+            ),
+            (InstructionOpcode::Store, AtomicOrdering::Acquire) => Err(
+                InstructionValueError::AtomicError(AtomicError::AcquireOnStore),
+            ),
+            (
+                InstructionOpcode::Load | InstructionOpcode::Store,
+                AtomicOrdering::AcquireRelease,
+            ) => Err(InstructionValueError::AtomicError(
+                AtomicError::AcquireRelease,
+            )),
             (InstructionOpcode::Load | InstructionOpcode::Store, _) => {
                 unsafe { LLVMSetOrdering(self.as_value_ref(), ordering.into()) };
                 Ok(())
-            },
+            }
             (
                 InstructionOpcode::Fence,
                 AtomicOrdering::Acquire
@@ -609,17 +644,20 @@ impl<'ctx> InstructionValue<'ctx> {
             ) => {
                 unsafe { LLVMSetOrdering(self.as_value_ref(), ordering.into()) };
                 Ok(())
-            },
-            (InstructionOpcode::Fence, _) => {
-                Err(InstructionValueError::AtomicError(AtomicError::InvalidOrderingOnFence))
-            },
-            (InstructionOpcode::AtomicRMW, AtomicOrdering::NotAtomic | AtomicOrdering::Unordered) => Err(
-                InstructionValueError::AtomicError(AtomicError::InvalidOrderingOnAtomicRMW),
-            ),
+            }
+            (InstructionOpcode::Fence, _) => Err(InstructionValueError::AtomicError(
+                AtomicError::InvalidOrderingOnFence,
+            )),
+            (
+                InstructionOpcode::AtomicRMW,
+                AtomicOrdering::NotAtomic | AtomicOrdering::Unordered,
+            ) => Err(InstructionValueError::AtomicError(
+                AtomicError::InvalidOrderingOnAtomicRMW,
+            )),
             (InstructionOpcode::AtomicRMW, _) => {
                 unsafe { LLVMSetOrdering(self.as_value_ref(), ordering.into()) };
                 Ok(())
-            },
+            }
             (_, _) => Err(InstructionValueError::NotAtomicOrderingInst),
         }
     }
@@ -800,7 +838,9 @@ impl<'ctx> InstructionValue<'ctx> {
         if is_basic_block {
             let bb = unsafe { BasicBlock::new(LLVMValueAsBasicBlock(operand)) };
 
-            Some(Operand::Block(bb.expect("BasicBlock should always be valid")))
+            Some(Operand::Block(
+                bb.expect("BasicBlock should always be valid"),
+            ))
         } else {
             Some(Operand::Value(unsafe { BasicValueEnum::new(operand) }))
         }
@@ -1150,13 +1190,21 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Determines whether or not this `Instruction` has any associated metadata
     /// `kind_id`.
-    pub fn set_metadata(self, metadata: MetadataValue<'ctx>, kind_id: u32) -> Result<(), InstructionValueError> {
+    pub fn set_metadata(
+        self,
+        metadata: MetadataValue<'ctx>,
+        kind_id: u32,
+    ) -> Result<(), InstructionValueError> {
         if !metadata.is_node() {
             return Err(InstructionValueError::ExpectedNode);
         }
 
         unsafe {
-            LLVMSetMetadata(self.instruction_value.value, kind_id, metadata.as_value_ref());
+            LLVMSetMetadata(
+                self.instruction_value.value,
+                kind_id,
+                metadata.as_value_ref(),
+            );
         }
 
         Ok(())
@@ -1165,7 +1213,8 @@ impl<'ctx> InstructionValue<'ctx> {
     /// Get the debug location for this instruction.
     pub fn get_debug_location(self) -> Option<DILocation<'ctx>> {
         // https://github.com/llvm/llvm-project/blob/e83cc896e7c2378914a391f942c188d454b517d2/llvm/include/llvm/IR/Instruction.h#L513
-        let metadata_ref = unsafe { verum_llvm_sys::debuginfo::LLVMInstructionGetDebugLoc(self.as_value_ref()) };
+        let metadata_ref =
+            unsafe { verum_llvm_sys::debuginfo::LLVMInstructionGetDebugLoc(self.as_value_ref()) };
         if metadata_ref.is_null() {
             None
         } else {
@@ -1181,7 +1230,10 @@ impl<'ctx> InstructionValue<'ctx> {
         // https://github.com/llvm/llvm-project/blob/e83cc896e7c2378914a391f942c188d454b517d2/llvm/include/llvm/IR/Instruction.h#L510
         let metadata_ref = location.map_or(std::ptr::null_mut(), |loc| loc.metadata_ref);
         unsafe {
-            verum_llvm_sys::debuginfo::LLVMInstructionSetDebugLoc(self.as_value_ref(), metadata_ref);
+            verum_llvm_sys::debuginfo::LLVMInstructionSetDebugLoc(
+                self.as_value_ref(),
+                metadata_ref,
+            );
         }
     }
 }
@@ -1241,7 +1293,6 @@ impl<'ctx> Iterator for OperandUseIter<'ctx> {
         }
     }
 }
-
 
 bitflags::bitflags! {
     /// Fast math flags to enable otherwise unsafe floating-point transformations.

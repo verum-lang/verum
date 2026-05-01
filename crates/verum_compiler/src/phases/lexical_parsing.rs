@@ -32,10 +32,10 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::time::Instant;
 use verum_ast::{FileId, Module};
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
-use verum_lexer::Lexer;
-use verum_fast_parser::VerumParser;
 use verum_common::{List, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
+use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
 
@@ -140,12 +140,14 @@ impl LexicalParsingPhase {
     }
 
     /// Convert parser errors to diagnostics
-    fn convert_parse_errors(&self, errors: List<verum_fast_parser::ParseError>) -> List<Diagnostic> {
+    fn convert_parse_errors(
+        &self,
+        errors: List<verum_fast_parser::ParseError>,
+    ) -> List<Diagnostic> {
         errors
             .into_iter()
             .map(|e| {
-                let mut builder = DiagnosticBuilder::new(Severity::Error)
-                    .message(e.to_string());
+                let mut builder = DiagnosticBuilder::new(Severity::Error).message(e.to_string());
                 // Include error code if present (e.g., M401 for splice outside quote)
                 if let Some(ref code) = e.code {
                     builder = builder.code(code.clone());

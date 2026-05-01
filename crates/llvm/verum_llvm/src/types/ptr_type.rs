@@ -7,10 +7,10 @@ use crate::context::ContextRef;
 use crate::support::LLVMString;
 use crate::types::traits::AsTypeRef;
 
+use crate::AddressSpace;
 use crate::types::ScalableVectorType;
 use crate::types::{ArrayType, FunctionType, Type, VectorType};
 use crate::values::{ArrayValue, IntValue, PointerValue};
-use crate::AddressSpace;
 
 use crate::types::enums::BasicMetadataTypeEnum;
 use std::fmt::{self, Display};
@@ -124,7 +124,11 @@ impl<'ctx> PointerType<'ctx> {
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let fn_type = f32_ptr_type.fn_type(&[], false);
     /// ```
-    pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type(
+        self,
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+        is_var_args: bool,
+    ) -> FunctionType<'ctx> {
         self.ptr_type.fn_type(param_types, is_var_args)
     }
 

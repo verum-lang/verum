@@ -4,15 +4,15 @@ use crate::{
     string_ref::StringRef,
     utility::print_callback,
 };
-use verum_mlir_sys::{
-    MlirLocation, mlirLocationCallSiteGet, mlirLocationEqual, mlirLocationFileLineColGet,
-    mlirLocationFusedGet, mlirLocationGetContext, mlirLocationNameGet, mlirLocationPrint,
-    mlirLocationUnknownGet,
-};
 use std::{
     ffi::c_void,
     fmt::{self, Display, Formatter},
     marker::PhantomData,
+};
+use verum_mlir_sys::{
+    MlirLocation, mlirLocationCallSiteGet, mlirLocationEqual, mlirLocationFileLineColGet,
+    mlirLocationFusedGet, mlirLocationGetContext, mlirLocationNameGet, mlirLocationPrint,
+    mlirLocationUnknownGet,
 };
 
 /// A location

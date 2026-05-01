@@ -7,8 +7,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use verum_common::{List, Text};
 use verum_ast::FileId;
+use verum_common::{List, Text};
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::interpreter::Interpreter;
 use verum_vbc::module::{FunctionId, VbcModule};
@@ -17,7 +17,7 @@ use verum_vbc::value::Value;
 use crate::{IncrementalScriptParser, ScriptParseResult};
 
 use super::context::{ExecutionContext, FunctionInfo};
-use super::value_format::{format_value_with_type, ValueDisplayOptions};
+use super::value_format::{ValueDisplayOptions, format_value_with_type};
 use crate::CellId;
 
 /// Result type for execution operations.
@@ -115,11 +115,17 @@ pub struct CellExecutionOutput {
 fn format_ast_type(kind: &verum_ast::TypeKind) -> String {
     match kind {
         verum_ast::TypeKind::Path(path) => {
-            let segs: Vec<String> = path.segments.iter().filter_map(|s| {
-                if let verum_ast::ty::PathSegment::Name(ident) = s {
-                    Some(ident.as_str().to_string())
-                } else { None }
-            }).collect();
+            let segs: Vec<String> = path
+                .segments
+                .iter()
+                .filter_map(|s| {
+                    if let verum_ast::ty::PathSegment::Name(ident) = s {
+                        Some(ident.as_str().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             segs.join(".")
         }
         verum_ast::TypeKind::Bool => "Bool".into(),
@@ -199,9 +205,9 @@ impl ExecutionPipeline {
         let (ast_module, result_type, new_bindings, new_functions) =
             self.parse_result_to_module(parse_result, &module_name)?;
 
-
         // ── Type Check via verum_types::TypeChecker ────────────────────
-        let mut inferred_types: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut inferred_types: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         {
             let mut checker = verum_types::TypeChecker::with_minimal_context();
             checker.register_builtins();
@@ -211,28 +217,36 @@ impl ExecutionPipeline {
                     // Extract let-binding types from function body
                     if let Some(verum_ast::decl::FunctionBody::Block(block)) = func.body.as_ref() {
                         for stmt in block.stmts.iter() {
-                            if let verum_ast::StmtKind::Let { pattern, ty, value, .. } = &stmt.kind
-                                && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                                    let name_str = name.as_str().to_string();
-                                    // Try type annotation first
-                                    inferred_types.entry(name_str.clone()).or_insert_with(|| {
-                                        ty.as_ref().map(|t| format_ast_type(&t.kind)).unwrap_or_else(|| "<inferred>".to_string())
-                                    });
-                                    // Try TypeChecker synth_expr on initializer
-                                    if let Some(init) = value
-                                        && let Ok(result) = checker.synth_expr(init) {
-                                            let ty_str = format!("{}", result.ty);
-                                            if ty_str != "()" && ty_str != "_" {
-                                                inferred_types.insert(name_str, ty_str);
-                                            }
-                                        }
+                            if let verum_ast::StmtKind::Let {
+                                pattern, ty, value, ..
+                            } = &stmt.kind
+                                && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+                            {
+                                let name_str = name.as_str().to_string();
+                                // Try type annotation first
+                                inferred_types.entry(name_str.clone()).or_insert_with(|| {
+                                    ty.as_ref()
+                                        .map(|t| format_ast_type(&t.kind))
+                                        .unwrap_or_else(|| "<inferred>".to_string())
+                                });
+                                // Try TypeChecker synth_expr on initializer
+                                if let Some(init) = value
+                                    && let Ok(result) = checker.synth_expr(init)
+                                {
+                                    let ty_str = format!("{}", result.ty);
+                                    if ty_str != "()" && ty_str != "_" {
+                                        inferred_types.insert(name_str, ty_str);
+                                    }
                                 }
+                            }
                         }
                         // Infer tail expression type
                         if let verum_common::Maybe::Some(tail) = &block.expr
-                            && let Ok(result) = checker.synth_expr(tail) {
-                                inferred_types.insert("__return__".to_string(), format!("{}", result.ty));
-                            }
+                            && let Ok(result) = checker.synth_expr(tail)
+                        {
+                            inferred_types
+                                .insert("__return__".to_string(), format!("{}", result.ty));
+                        }
                     }
                 }
             }
@@ -315,7 +329,8 @@ impl ExecutionPipeline {
                 if msg.contains("InstructionLimitExceeded") || msg.contains("instruction limit") {
                     ExecutionError::Runtime(
                         "Execution timed out: instruction limit exceeded (100M instructions). \
-                         Possible infinite loop? Use :set timeout <ms> to adjust.".to_string()
+                         Possible infinite loop? Use :set timeout <ms> to adjust."
+                            .to_string(),
                     )
                 } else {
                     ExecutionError::Runtime(msg)
@@ -325,23 +340,24 @@ impl ExecutionPipeline {
         // If the module defines a `main` function that ISN'T the entry point
         // (i.e., entry was a different function like a stdlib stub, and main is
         // a user-defined Item/Module), invoke it explicitly.
-        if result.is_unit() && compiled.has_main
+        if result.is_unit()
+            && compiled.has_main
             && let Some(main_id) = self.find_function_by_name(&compiled.module, "main")
-                && main_id != compiled.entry_func {
-                    result = interpreter
-                        .execute_function(main_id)
-                        .map_err(|e| {
-                            let msg = format!("{:?}", e);
-                            if msg.contains("InstructionLimitExceeded") || msg.contains("instruction limit") {
-                                ExecutionError::Runtime(
-                                    "Execution timed out: instruction limit exceeded (100M instructions). \
-                                     Possible infinite loop? Use :set timeout <ms> to adjust.".to_string()
-                                )
-                            } else {
-                                ExecutionError::Runtime(msg)
-                            }
-                        })?;
+            && main_id != compiled.entry_func
+        {
+            result = interpreter.execute_function(main_id).map_err(|e| {
+                let msg = format!("{:?}", e);
+                if msg.contains("InstructionLimitExceeded") || msg.contains("instruction limit") {
+                    ExecutionError::Runtime(
+                        "Execution timed out: instruction limit exceeded (100M instructions). \
+                                     Possible infinite loop? Use :set timeout <ms> to adjust."
+                            .to_string(),
+                    )
+                } else {
+                    ExecutionError::Runtime(msg)
                 }
+            })?;
+        }
 
         let execution_time = start.elapsed();
 
@@ -356,12 +372,15 @@ impl ExecutionPipeline {
                 // 1. Codegen's variable_type_names (captures generics: List<Int>)
                 // 2. VBC module's FunctionDescriptor return_type
                 // 3. Runtime value type tag (Int, Float, Bool, Text)
-                let type_info = compiled.codegen_type_names
+                let type_info = compiled
+                    .codegen_type_names
                     .get(name.as_str())
                     .filter(|t| !t.is_empty() && *t != "()")
                     .map(|t| Text::from(t.as_str()))
                     .or_else(|| {
-                        compiled.module.get_function(compiled.entry_func)
+                        compiled
+                            .module
+                            .get_function(compiled.entry_func)
                             .map(|f| compiled.module.display_type_ref(&f.return_type))
                             .filter(|t| t != "()")
                             .map(|t| Text::from(t.as_str()))
@@ -383,25 +402,34 @@ impl ExecutionPipeline {
 
             // Register functions with full signatures from VBC metadata
             for func_name in &compiled.new_functions {
-                if let Some(main_id) = self.find_function_by_name(&compiled.module, func_name.as_str())
-                    && let Some(desc) = compiled.module.get_function(main_id) {
-                        let params: Vec<(Text, Text)> = desc.params.iter().map(|p| {
-                            let pname = compiled.module.get_string(p.name)
-                                .unwrap_or("_").to_string();
+                if let Some(main_id) =
+                    self.find_function_by_name(&compiled.module, func_name.as_str())
+                    && let Some(desc) = compiled.module.get_function(main_id)
+                {
+                    let params: Vec<(Text, Text)> = desc
+                        .params
+                        .iter()
+                        .map(|p| {
+                            let pname = compiled
+                                .module
+                                .get_string(p.name)
+                                .unwrap_or("_")
+                                .to_string();
                             let ptype = compiled.module.display_type_ref(&p.type_ref);
                             (Text::from(pname.as_str()), Text::from(ptype.as_str()))
-                        }).collect();
-                        let ret = compiled.module.display_type_ref(&desc.return_type);
+                        })
+                        .collect();
+                    let ret = compiled.module.display_type_ref(&desc.return_type);
 
-                        context.set_function(FunctionInfo {
-                            name: func_name.clone(),
-                            func_id: main_id,
-                            defined_in: cid,
-                            params,
-                            return_type: Text::from(ret.as_str()),
-                        });
-                        continue;
-                    }
+                    context.set_function(FunctionInfo {
+                        name: func_name.clone(),
+                        func_id: main_id,
+                        defined_in: cid,
+                        params,
+                        return_type: Text::from(ret.as_str()),
+                    });
+                    continue;
+                }
                 // Fallback if function not found by name
                 context.set_function(FunctionInfo {
                     name: func_name.clone(),
@@ -423,17 +451,24 @@ impl ExecutionPipeline {
         // 3. Runtime value type tag (Int, Float, Bool, Text)
         let real_type_hint = if !compiled.codegen_type_names.is_empty() {
             // If codegen captured variable types, the first binding's type is best
-            compiled.codegen_type_names.values().next()
+            compiled
+                .codegen_type_names
+                .values()
+                .next()
                 .filter(|t| !t.is_empty() && *t != "()")
                 .map(|t| Text::from(t.as_str()))
         } else {
             None
-        }.or_else(|| {
-            compiled.module.get_function(compiled.entry_func)
+        }
+        .or_else(|| {
+            compiled
+                .module
+                .get_function(compiled.entry_func)
                 .map(|f| compiled.module.display_type_ref(&f.return_type))
                 .filter(|t| t != "()")
                 .map(|t| Text::from(t.as_str()))
-        }).unwrap_or_else(|| Self::infer_type_from_value(&result));
+        })
+        .unwrap_or_else(|| Self::infer_type_from_value(&result));
 
         let (display, type_info) =
             format_value_with_type(&result, &real_type_hint, &self.display_options);
@@ -524,7 +559,10 @@ impl ExecutionPipeline {
             Some(if value.as_bool() { "true" } else { "false" }.to_string())
         } else if value.is_small_string() {
             let s = value.as_small_string();
-            Some(format!("\"{}\"", s.as_str().replace('\\', "\\\\").replace('"', "\\\"")))
+            Some(format!(
+                "\"{}\"",
+                s.as_str().replace('\\', "\\\\").replace('"', "\\\"")
+            ))
         } else {
             None // Unit values and complex types (pointers, objects) not yet supported
         }
@@ -585,8 +623,8 @@ impl ExecutionPipeline {
         module_name: &str,
     ) -> ExecutionResult<ParseToModuleResult> {
         use verum_ast::{
-            Block, Expr, FunctionBody, FunctionDecl, Item, ItemKind, Module, Stmt,
-            StmtKind, decl::Visibility,
+            Block, Expr, FunctionBody, FunctionDecl, Item, ItemKind, Module, Stmt, StmtKind,
+            decl::Visibility,
         };
 
         let mut new_bindings = Vec::new();
@@ -615,26 +653,22 @@ impl ExecutionPipeline {
                         .as_ref()
                         .map(|t| format!("{:?}", t))
                         .unwrap_or_else(|| "<inferred>".to_string());
-                    new_bindings.push((
-                        Text::from(name.as_str()),
-                        Text::from(type_str.as_str()),
-                    ));
+                    new_bindings.push((Text::from(name.as_str()), Text::from(type_str.as_str())));
                     result_type = Text::from("<expr>");
 
                     // Tail expression: return the variable so its value is captured
                     verum_common::Maybe::Some(verum_common::Heap::new(Expr::ident(
-                        verum_ast::Ident::new(name.as_str().to_string(), verum_ast::Span::default()),
+                        verum_ast::Ident::new(
+                            name.as_str().to_string(),
+                            verum_ast::Span::default(),
+                        ),
                     )))
                 } else {
                     result_type = Text::from("()");
                     verum_common::Maybe::None
                 };
 
-                Block::new(
-                    List::from(vec![stmt.clone()]),
-                    tail_expr,
-                    stmt.span,
-                )
+                Block::new(List::from(vec![stmt.clone()]), tail_expr, stmt.span)
             }
             ScriptParseResult::Item(item) => {
                 result_type = Text::from("()");
@@ -721,23 +755,33 @@ impl ExecutionPipeline {
 
     /// Infer type name from a runtime Value using VBC type tags.
     fn infer_type_from_value(value: &Value) -> Text {
-        if value.is_int() { Text::from("Int") }
-        else if value.is_float() { Text::from("Float") }
-        else if value.is_bool() { Text::from("Bool") }
-        else if value.is_small_string() || value.is_ptr() { Text::from("Text") }
-        else if value.is_unit() { Text::from("()") }
-        else if value.is_nil() { Text::from("Nil") }
-        else if value.is_func_ref() { Text::from("Function") }
-        else { Text::from("<value>") }
+        if value.is_int() {
+            Text::from("Int")
+        } else if value.is_float() {
+            Text::from("Float")
+        } else if value.is_bool() {
+            Text::from("Bool")
+        } else if value.is_small_string() || value.is_ptr() {
+            Text::from("Text")
+        } else if value.is_unit() {
+            Text::from("()")
+        } else if value.is_nil() {
+            Text::from("Nil")
+        } else if value.is_func_ref() {
+            Text::from("Function")
+        } else {
+            Text::from("<value>")
+        }
     }
 
     /// Look up a function by name in a VBC module.
     fn find_function_by_name(&self, module: &VbcModule, name: &str) -> Option<FunctionId> {
         for func in &module.functions {
             if let Some(func_name) = module.get_string(func.name)
-                && func_name == name {
-                    return Some(func.id);
-                }
+                && func_name == name
+            {
+                return Some(func.id);
+            }
         }
         None
     }

@@ -110,7 +110,8 @@ pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic
     // Phase 1 gate (#266) inspects every extern fn / unsafe fn /
     // unsafe block for an @classification annotation matching the
     // manifest floor. Non-public mls_level is the marker.
-    if policy.unsafe_allowed && policy.ffi
+    if policy.unsafe_allowed
+        && policy.ffi
         && !policy.capability_required
         && !policy.forbid_stdlib_extern
         && policy.ffi_boundary.as_str() != "strict"
@@ -128,10 +129,7 @@ pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic
 
 /// Back-compat: the previous one-flag signature that only checked
 /// `unsafe`. New callers should prefer [`check_safety`].
-pub fn check_unsafe_usage(
-    modules: &[Module],
-    unsafe_allowed: bool,
-) -> List<Diagnostic> {
+pub fn check_unsafe_usage(modules: &[Module], unsafe_allowed: bool) -> List<Diagnostic> {
     let mut p = SafetyPolicy::permissive();
     p.unsafe_allowed = unsafe_allowed;
     check_safety(modules, p)
@@ -221,9 +219,7 @@ fn highest_classified_param(
             continue;
         }
         let name = match &param.kind {
-            verum_ast::decl::FunctionParamKind::Regular { pattern, .. } => {
-                pattern_to_name(pattern)
-            }
+            verum_ast::decl::FunctionParamKind::Regular { pattern, .. } => pattern_to_name(pattern),
             _ => verum_common::Text::from("self"),
         };
         match &best {
@@ -341,10 +337,10 @@ fn check_mls_sink_leak(
     let highest_param = highest_classified_param(func);
     let param_max = match highest_param {
         Some((_, lvl, _)) => lvl,
-        None => return,  // No classified params → no leak surface.
+        None => return, // No classified params → no leak surface.
     };
     if has_declassify_attr(&func.attributes) {
-        return;  // Explicit escape hatch.
+        return; // Explicit escape hatch.
     }
     // Find any low-classification sink in the function's `using`
     // contexts. The first match drives the diagnostic.
@@ -382,7 +378,7 @@ fn check_mls_classification(
 ) {
     let floor = MlsLevel::from_manifest_str(policy.mls_level.as_str());
     if floor == MlsLevel::Public {
-        return;  // Hot path: no manifest floor, no gate.
+        return; // Hot path: no manifest floor, no gate.
     }
     let is_ffi = matches!(&func.extern_abi, verum_common::Maybe::Some(_));
     let is_unsafe_decl = func.is_unsafe;
@@ -587,7 +583,11 @@ fn walk_expr(expr: &Expr, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
         }
         ExprKind::Block(block) => walk_block(block, policy, out),
         ExprKind::Async(block) | ExprKind::Meta(block) => walk_block(block, policy, out),
-        ExprKind::If { condition, then_branch, else_branch } => {
+        ExprKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             for cond in &condition.conditions {
                 match cond {
                     ConditionKind::Expr(e) => walk_expr(e, policy, out),
@@ -599,7 +599,10 @@ fn walk_expr(expr: &Expr, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
                 walk_expr(else_b, policy, out);
             }
         }
-        ExprKind::Match { expr: scrutinee, arms } => {
+        ExprKind::Match {
+            expr: scrutinee,
+            arms,
+        } => {
             walk_expr(scrutinee, policy, out);
             for arm in arms {
                 if let verum_common::Maybe::Some(guard) = &arm.guard {
@@ -609,7 +612,9 @@ fn walk_expr(expr: &Expr, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
             }
         }
         ExprKind::Loop { body, .. } => walk_block(body, policy, out),
-        ExprKind::While { condition, body, .. } => {
+        ExprKind::While {
+            condition, body, ..
+        } => {
             walk_expr(condition, policy, out);
             walk_block(body, policy, out);
         }
@@ -736,10 +741,7 @@ mod tests {
         assert_eq!(diags.len(), 0);
     }
 
-    fn mk_module_with_function(
-        is_unsafe: bool,
-        extern_abi: Maybe<verum_common::Text>,
-    ) -> Module {
+    fn mk_module_with_function(is_unsafe: bool, extern_abi: Maybe<verum_common::Text>) -> Module {
         let func = FunctionDecl {
             visibility: Default::default(),
             name: verum_ast::ty::Ident::new("native_fn", Span::dummy()),
@@ -780,7 +782,8 @@ mod tests {
     #[test]
     fn unsafe_fn_rejected_when_unsafe_disabled() {
         let module = mk_module_with_function(true, Maybe::None);
-        let mut policy = SafetyPolicy::permissive(); policy.unsafe_allowed = false;
+        let mut policy = SafetyPolicy::permissive();
+        policy.unsafe_allowed = false;
         let diags = check_safety(&[module], policy);
         assert_eq!(diags.len(), 1);
         let msg = diags.iter().next().unwrap().message();
@@ -790,11 +793,9 @@ mod tests {
 
     #[test]
     fn ffi_fn_rejected_when_ffi_disabled() {
-        let module = mk_module_with_function(
-            false,
-            Maybe::Some(verum_common::Text::from("C")),
-        );
-        let mut policy = SafetyPolicy::permissive(); policy.ffi = false;
+        let module = mk_module_with_function(false, Maybe::Some(verum_common::Text::from("C")));
+        let mut policy = SafetyPolicy::permissive();
+        policy.ffi = false;
         let diags = check_safety(&[module], policy);
         assert_eq!(diags.len(), 1);
         let msg = diags.iter().next().unwrap().message();
@@ -805,10 +806,7 @@ mod tests {
 
     #[test]
     fn ffi_permissive_policy_allows_extern_fn() {
-        let module = mk_module_with_function(
-            false,
-            Maybe::Some(verum_common::Text::from("C")),
-        );
+        let module = mk_module_with_function(false, Maybe::Some(verum_common::Text::from("C")));
         let policy = SafetyPolicy::permissive();
         let diags = check_safety(&[module], policy);
         assert_eq!(diags.len(), 0);
@@ -817,11 +815,10 @@ mod tests {
     #[test]
     fn combined_unsafe_and_ffi_violations_both_reported() {
         // unsafe fn + extern abi — both disabled → 2 diagnostics.
-        let module = mk_module_with_function(
-            true,
-            Maybe::Some(verum_common::Text::from("C")),
-        );
-        let mut policy = SafetyPolicy::permissive(); policy.unsafe_allowed = false; policy.ffi = false;
+        let module = mk_module_with_function(true, Maybe::Some(verum_common::Text::from("C")));
+        let mut policy = SafetyPolicy::permissive();
+        policy.unsafe_allowed = false;
+        policy.ffi = false;
         let diags = check_safety(&[module], policy);
         assert_eq!(diags.len(), 2, "both gates should fire independently");
     }
@@ -837,24 +834,22 @@ mod tests {
         // With the wire-up, an extern function declared without `unsafe`
         // surfaces a warning suggesting the modifier — pinning the
         // strict-mode contract end-to-end.
-        let module = mk_module_with_function(
-            false,
-            Maybe::Some(verum_common::Text::from("C")),
-        );
+        let module = mk_module_with_function(false, Maybe::Some(verum_common::Text::from("C")));
         let mut policy = SafetyPolicy::permissive();
         policy.ffi_boundary = verum_common::Text::from("strict");
         let diags = check_safety(&[module], policy);
-        assert_eq!(diags.len(), 1, "strict mode must warn on extern without unsafe");
+        assert_eq!(
+            diags.len(),
+            1,
+            "strict mode must warn on extern without unsafe"
+        );
     }
 
     #[test]
     fn ffi_strict_mode_quiet_on_extern_with_unsafe() {
         // Pin the inverse: extern function WITH `unsafe` modifier
         // satisfies strict mode, no warning fires.
-        let module = mk_module_with_function(
-            true,
-            Maybe::Some(verum_common::Text::from("C")),
-        );
+        let module = mk_module_with_function(true, Maybe::Some(verum_common::Text::from("C")));
         let mut policy = SafetyPolicy::permissive();
         policy.ffi_boundary = verum_common::Text::from("strict");
         let diags = check_safety(&[module], policy);
@@ -869,10 +864,7 @@ mod tests {
     fn ffi_lenient_mode_quiet_on_extern_without_unsafe() {
         // Pin the lenient mode: extern function without `unsafe`
         // is allowed silently when ffi_boundary = "lenient".
-        let module = mk_module_with_function(
-            false,
-            Maybe::Some(verum_common::Text::from("C")),
-        );
+        let module = mk_module_with_function(false, Maybe::Some(verum_common::Text::from("C")));
         let mut policy = SafetyPolicy::permissive();
         policy.ffi_boundary = verum_common::Text::from("lenient");
         let diags = check_safety(&[module], policy);
@@ -932,13 +924,8 @@ mod tests {
 
     /// Build `@classification(<level>)` as an Attribute.
     fn mk_classification_attr(level: &str) -> verum_ast::attr::Attribute {
-        let path = verum_ast::ty::Path::single(
-            verum_ast::ty::Ident::new(level, Span::dummy()),
-        );
-        let arg = Expr::new(
-            ExprKind::Path(path),
-            Span::dummy(),
-        );
+        let path = verum_ast::ty::Path::single(verum_ast::ty::Ident::new(level, Span::dummy()));
+        let arg = Expr::new(ExprKind::Path(path), Span::dummy());
         let mut args = List::new();
         args.push(arg);
         verum_ast::attr::Attribute::new(
@@ -953,42 +940,47 @@ mod tests {
         // Pin: when mls_level == "public" (the default), the gate is
         // a no-op — extern fn without @classification is allowed.
         let module = mk_module_with_function(
-            true,  // unsafe
+            true, // unsafe
             Maybe::Some(verum_common::Text::from("C")),
         );
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("public");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| {
                 let msg = d.message().to_string();
                 msg.contains("@classification")
             })
             .collect();
-        assert_eq!(mls_diags.len(), 0,
-            "public mls_level must not emit @classification diagnostics");
+        assert_eq!(
+            mls_diags.len(),
+            0,
+            "public mls_level must not emit @classification diagnostics"
+        );
     }
 
     #[test]
     fn mls_secret_rejects_unannotated_extern() {
         // Pin: under mls_level = "secret", an extern fn without
         // @classification triggers an error citing the manifest.
-        let module = mk_module_with_function(
-            false,
-            Maybe::Some(verum_common::Text::from("C")),
-        );
+        let module = mk_module_with_function(false, Maybe::Some(verum_common::Text::from("C")));
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| {
                 let msg = d.message().to_string();
                 msg.contains("@classification")
             })
             .collect();
-        assert_eq!(mls_diags.len(), 1,
+        assert_eq!(
+            mls_diags.len(),
+            1,
             "secret mls_level must reject unannotated extern; got {} diags",
-            mls_diags.len());
+            mls_diags.len()
+        );
     }
 
     #[test]
@@ -999,14 +991,18 @@ mod tests {
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| {
                 let msg = d.message().to_string();
                 msg.contains("@classification") && msg.contains("unsafe")
             })
             .collect();
-        assert_eq!(mls_diags.len(), 1,
-            "unsafe fn under mls=secret must require @classification");
+        assert_eq!(
+            mls_diags.len(),
+            1,
+            "unsafe fn under mls=secret must require @classification"
+        );
     }
 
     #[test]
@@ -1014,19 +1010,20 @@ mod tests {
         // Pin: properly classified extern fn passes the gate cleanly.
         let mut attrs = List::new();
         attrs.push(mk_classification_attr("secret"));
-        let module = mk_module_with_function_attrs(
-            false,
-            Maybe::Some(verum_common::Text::from("C")),
-            attrs,
-        );
+        let module =
+            mk_module_with_function_attrs(false, Maybe::Some(verum_common::Text::from("C")), attrs);
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("@classification"))
             .collect();
-        assert_eq!(mls_diags.len(), 0,
-            "@classification(secret) must satisfy mls_level=secret");
+        assert_eq!(
+            mls_diags.len(),
+            0,
+            "@classification(secret) must satisfy mls_level=secret"
+        );
     }
 
     #[test]
@@ -1036,19 +1033,20 @@ mod tests {
         // This is the lattice-monotonicity property.
         let mut attrs = List::new();
         attrs.push(mk_classification_attr("top_secret"));
-        let module = mk_module_with_function_attrs(
-            false,
-            Maybe::Some(verum_common::Text::from("C")),
-            attrs,
-        );
+        let module =
+            mk_module_with_function_attrs(false, Maybe::Some(verum_common::Text::from("C")), attrs);
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("@classification"))
             .collect();
-        assert_eq!(mls_diags.len(), 0,
-            "@classification(top_secret) must satisfy lower floor secret");
+        assert_eq!(
+            mls_diags.len(),
+            0,
+            "@classification(top_secret) must satisfy lower floor secret"
+        );
     }
 
     #[test]
@@ -1058,19 +1056,20 @@ mod tests {
         // top_secret gate.
         let mut attrs = List::new();
         attrs.push(mk_classification_attr("secret"));
-        let module = mk_module_with_function_attrs(
-            false,
-            Maybe::Some(verum_common::Text::from("C")),
-            attrs,
-        );
+        let module =
+            mk_module_with_function_attrs(false, Maybe::Some(verum_common::Text::from("C")), attrs);
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("top_secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("@classification"))
             .collect();
-        assert_eq!(mls_diags.len(), 1,
-            "@classification(secret) must fail higher floor top_secret");
+        assert_eq!(
+            mls_diags.len(),
+            1,
+            "@classification(secret) must fail higher floor top_secret"
+        );
     }
 
     #[test]
@@ -1082,11 +1081,15 @@ mod tests {
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("@classification"))
             .collect();
-        assert_eq!(mls_diags.len(), 0,
-            "safe non-FFI function must not trigger MLS gate");
+        assert_eq!(
+            mls_diags.len(),
+            0,
+            "safe non-FFI function must not trigger MLS gate"
+        );
     }
 
     // ============================================================
@@ -1126,11 +1129,9 @@ mod tests {
                     span: Span::dummy(),
                 },
                 ty: verum_ast::ty::Type {
-                    kind: verum_ast::ty::TypeKind::Path(
-                        verum_ast::ty::Path::single(
-                            verum_ast::ty::Ident::new("Int", Span::dummy()),
-                        ),
-                    ),
+                    kind: verum_ast::ty::TypeKind::Path(verum_ast::ty::Path::single(
+                        verum_ast::ty::Ident::new("Int", Span::dummy()),
+                    )),
                     span: Span::dummy(),
                 },
                 default_value: Maybe::None,
@@ -1185,15 +1186,12 @@ mod tests {
         // through an unclassified function body. The Phase 2b
         // surface gate catches this even when the function is
         // neither extern nor unsafe.
-        let module = mk_module_with_classified_param(
-            false,
-            Maybe::None,
-            Maybe::Some("secret"),
-        );
+        let module = mk_module_with_classified_param(false, Maybe::None, Maybe::Some("secret"));
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("@classification"))
             .collect();
         assert_eq!(
@@ -1203,8 +1201,11 @@ mod tests {
         );
         let msg = mls_diags[0].message().to_string();
         assert!(msg.contains("classified-param"), "got: {}", msg);
-        assert!(msg.contains("data"),
-            "diagnostic must name the offending parameter; got: {}", msg);
+        assert!(
+            msg.contains("data"),
+            "diagnostic must name the offending parameter; got: {}",
+            msg
+        );
         assert!(msg.contains("secret"), "got: {}", msg);
     }
 
@@ -1219,11 +1220,7 @@ mod tests {
         func_attrs.push(mk_classification_attr("secret"));
 
         // Build directly so we can attach the function-level attr.
-        let mut module = mk_module_with_classified_param(
-            false,
-            Maybe::None,
-            Maybe::Some("secret"),
-        );
+        let mut module = mk_module_with_classified_param(false, Maybe::None, Maybe::Some("secret"));
         if let ItemKind::Function(ref mut f) = module.items[0].kind {
             f.attributes = func_attrs;
         }
@@ -1231,12 +1228,16 @@ mod tests {
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("@classification"))
             .collect();
-        assert_eq!(mls_diags.len(), 0,
+        assert_eq!(
+            mls_diags.len(),
+            0,
             "secret param + secret function must pass; got {} diags",
-            mls_diags.len());
+            mls_diags.len()
+        );
     }
 
     #[test]
@@ -1252,11 +1253,8 @@ mod tests {
         let mut func_attrs = List::new();
         func_attrs.push(mk_classification_attr("top_secret"));
 
-        let mut module = mk_module_with_classified_param(
-            false,
-            Maybe::None,
-            Maybe::Some("top_secret"),
-        );
+        let mut module =
+            mk_module_with_classified_param(false, Maybe::None, Maybe::Some("top_secret"));
         if let ItemKind::Function(ref mut f) = module.items[0].kind {
             f.attributes = func_attrs;
         }
@@ -1264,11 +1262,15 @@ mod tests {
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("@classification"))
             .collect();
-        assert_eq!(mls_diags.len(), 0,
-            "top_secret function + top_secret param must satisfy secret floor");
+        assert_eq!(
+            mls_diags.len(),
+            0,
+            "top_secret function + top_secret param must satisfy secret floor"
+        );
     }
 
     #[test]
@@ -1284,11 +1286,15 @@ mod tests {
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("@classification"))
             .collect();
-        assert_eq!(mls_diags.len(), 0,
-            "unclassified params must not trigger Phase 2b gate");
+        assert_eq!(
+            mls_diags.len(),
+            0,
+            "unclassified params must not trigger Phase 2b gate"
+        );
     }
 
     #[test]
@@ -1297,11 +1303,7 @@ mod tests {
         // the lattice JOIN takes the highest. The diagnostic
         // identifies the highest-classified param.
         // Build two-param function: one Secret, one TopSecret.
-        let mut module = mk_module_with_classified_param(
-            false,
-            Maybe::None,
-            Maybe::Some("secret"),
-        );
+        let mut module = mk_module_with_classified_param(false, Maybe::None, Maybe::Some("secret"));
         // Add a second param at TopSecret.
         if let ItemKind::Function(ref mut f) = module.items[0].kind {
             use verum_ast::pattern::{Pattern, PatternKind};
@@ -1319,11 +1321,9 @@ mod tests {
                         span: Span::dummy(),
                     },
                     ty: verum_ast::ty::Type {
-                        kind: verum_ast::ty::TypeKind::Path(
-                            verum_ast::ty::Path::single(
-                                verum_ast::ty::Ident::new("Int", Span::dummy()),
-                            ),
-                        ),
+                        kind: verum_ast::ty::TypeKind::Path(verum_ast::ty::Path::single(
+                            verum_ast::ty::Ident::new("Int", Span::dummy()),
+                        )),
                         span: Span::dummy(),
                     },
                     default_value: Maybe::None,
@@ -1337,15 +1337,23 @@ mod tests {
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let mls_diags: Vec<_> = diags.iter()
+        let mls_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("@classification"))
             .collect();
-        assert_eq!(mls_diags.len(), 1, "two-param case must fire one diagnostic");
+        assert_eq!(
+            mls_diags.len(),
+            1,
+            "two-param case must fire one diagnostic"
+        );
         let msg = mls_diags[0].message().to_string();
         // The highest-classified param (ts_data, TopSecret) should
         // be cited in the diagnostic.
-        assert!(msg.contains("ts_data"),
-            "diagnostic must cite highest-classified param; got: {}", msg);
+        assert!(
+            msg.contains("ts_data"),
+            "diagnostic must cite highest-classified param; got: {}",
+            msg
+        );
         assert!(msg.contains("top_secret"), "got: {}", msg);
     }
 
@@ -1364,8 +1372,8 @@ mod tests {
         context_name: &str,
         function_attrs: List<verum_ast::attr::Attribute>,
     ) -> Module {
-        use verum_ast::pattern::{Pattern, PatternKind};
         use verum_ast::context::ContextRequirement;
+        use verum_ast::pattern::{Pattern, PatternKind};
 
         let mut param_attrs = List::new();
         if let Maybe::Some(level) = param_classification {
@@ -1384,11 +1392,9 @@ mod tests {
                     span: Span::dummy(),
                 },
                 ty: verum_ast::ty::Type {
-                    kind: verum_ast::ty::TypeKind::Path(
-                        verum_ast::ty::Path::single(
-                            verum_ast::ty::Ident::new("Int", Span::dummy()),
-                        ),
-                    ),
+                    kind: verum_ast::ty::TypeKind::Path(verum_ast::ty::Path::single(
+                        verum_ast::ty::Ident::new("Int", Span::dummy()),
+                    )),
                     span: Span::dummy(),
                 },
                 default_value: Maybe::None,
@@ -1400,9 +1406,7 @@ mod tests {
         params.push(param);
 
         let ctx_req = ContextRequirement::simple(
-            verum_ast::ty::Path::single(
-                verum_ast::ty::Ident::new(context_name, Span::dummy()),
-            ),
+            verum_ast::ty::Path::single(verum_ast::ty::Ident::new(context_name, Span::dummy())),
             List::new(),
             Span::dummy(),
         );
@@ -1448,10 +1452,7 @@ mod tests {
 
     /// Helper: build a `@declassify` attribute (no args needed).
     fn mk_declassify_attr() -> verum_ast::attr::Attribute {
-        verum_ast::attr::Attribute::simple(
-            verum_common::Text::from("declassify"),
-            Span::dummy(),
-        )
+        verum_ast::attr::Attribute::simple(verum_common::Text::from("declassify"), Span::dummy())
     }
 
     #[test]
@@ -1468,11 +1469,15 @@ mod tests {
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let leak_diags: Vec<_> = diags.iter()
+        let leak_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("low-classification sink"))
             .collect();
-        assert_eq!(leak_diags.len(), 1,
-            "secret param + Logger sink must trigger leak diagnostic");
+        assert_eq!(
+            leak_diags.len(),
+            1,
+            "secret param + Logger sink must trigger leak diagnostic"
+        );
         let msg = leak_diags[0].message().to_string();
         assert!(msg.contains("Logger"), "got: {}", msg);
         assert!(msg.contains("secret"), "got: {}", msg);
@@ -1494,30 +1499,35 @@ mod tests {
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let leak_diags: Vec<_> = diags.iter()
+        let leak_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("low-classification sink"))
             .collect();
-        assert_eq!(leak_diags.len(), 0,
-            "@declassify must suppress leak diagnostic");
+        assert_eq!(
+            leak_diags.len(),
+            0,
+            "@declassify must suppress leak diagnostic"
+        );
     }
 
     #[test]
     fn mls_phase3a_unclassified_param_does_not_trigger() {
         // Pin: function using Logger sink WITHOUT classified
         // params is fine — no leak surface to detect.
-        let module = mk_module_with_classified_param_and_context(
-            Maybe::None,
-            "Logger",
-            List::new(),
-        );
+        let module =
+            mk_module_with_classified_param_and_context(Maybe::None, "Logger", List::new());
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let leak_diags: Vec<_> = diags.iter()
+        let leak_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("low-classification sink"))
             .collect();
-        assert_eq!(leak_diags.len(), 0,
-            "unclassified params must not trigger sink leak");
+        assert_eq!(
+            leak_diags.len(),
+            0,
+            "unclassified params must not trigger sink leak"
+        );
     }
 
     #[test]
@@ -1535,19 +1545,30 @@ mod tests {
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("secret");
         let diags = check_safety(&[module], policy);
-        let leak_diags: Vec<_> = diags.iter()
+        let leak_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("low-classification sink"))
             .collect();
-        assert_eq!(leak_diags.len(), 0,
-            "non-sink contexts must not trigger leak");
+        assert_eq!(
+            leak_diags.len(),
+            0,
+            "non-sink contexts must not trigger leak"
+        );
     }
 
     #[test]
     fn mls_phase3a_recognizes_all_default_sinks() {
         // Pin: every entry in DEFAULT_LOW_CLASSIFICATION_SINKS is
         // recognized when used as the final path segment.
-        for sink in &["FS", "FileSystem", "Network", "Stdout",
-                      "Stderr", "Tracing", "Telemetry"] {
+        for sink in &[
+            "FS",
+            "FileSystem",
+            "Network",
+            "Stdout",
+            "Stderr",
+            "Tracing",
+            "Telemetry",
+        ] {
             let mut func_attrs = List::new();
             func_attrs.push(mk_classification_attr("secret"));
             let module = mk_module_with_classified_param_and_context(
@@ -1558,7 +1579,8 @@ mod tests {
             let mut policy = SafetyPolicy::permissive();
             policy.mls_level = verum_common::Text::from("secret");
             let diags = check_safety(&[module], policy);
-            let leak_count = diags.iter()
+            let leak_count = diags
+                .iter()
                 .filter(|d| d.message().to_string().contains("low-classification sink"))
                 .count();
             assert_eq!(
@@ -1585,10 +1607,14 @@ mod tests {
         let mut policy = SafetyPolicy::permissive();
         policy.mls_level = verum_common::Text::from("public");
         let diags = check_safety(&[module], policy);
-        let leak_diags: Vec<_> = diags.iter()
+        let leak_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message().to_string().contains("low-classification sink"))
             .collect();
-        assert_eq!(leak_diags.len(), 0,
-            "Phase 3a must be dormant under public floor");
+        assert_eq!(
+            leak_diags.len(),
+            0,
+            "Phase 3a must be dormant under public floor"
+        );
     }
 }

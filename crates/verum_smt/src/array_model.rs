@@ -61,8 +61,8 @@ use std::time::Instant;
 use z3::ast::{Array, Ast, Bool, Dynamic, Int};
 use z3::{SatResult, Solver, Sort};
 
-use verum_common::{List, Map, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Text};
 
 use crate::option_to_maybe;
 use crate::solver::SmtError;

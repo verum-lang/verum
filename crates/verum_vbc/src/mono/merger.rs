@@ -41,35 +41,68 @@ use super::specializer::SpecializedFunction;
 #[allow(missing_docs)]
 pub enum MergeError {
     /// Function not found in source module.
-    FunctionNotFound { module: String, function_id: FunctionId },
+    FunctionNotFound {
+        module: String,
+        function_id: FunctionId,
+    },
     /// Type not found in source module.
     TypeNotFound { module: String, type_id: TypeId },
     /// Bytecode range invalid.
-    InvalidBytecodeRange { offset: u32, length: u32, module_size: usize },
+    InvalidBytecodeRange {
+        offset: u32,
+        length: u32,
+        module_size: usize,
+    },
     /// String table conflict.
     StringTableConflict(String),
     /// Specialization missing.
-    SpecializationMissing { function_id: FunctionId, type_args: Vec<TypeRef> },
+    SpecializationMissing {
+        function_id: FunctionId,
+        type_args: Vec<TypeRef>,
+    },
 }
 
 impl std::fmt::Display for MergeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MergeError::FunctionNotFound { module, function_id } => {
-                write!(f, "Function {:?} not found in module {}", function_id, module)
+            MergeError::FunctionNotFound {
+                module,
+                function_id,
+            } => {
+                write!(
+                    f,
+                    "Function {:?} not found in module {}",
+                    function_id, module
+                )
             }
             MergeError::TypeNotFound { module, type_id } => {
                 write!(f, "Type {:?} not found in module {}", type_id, module)
             }
-            MergeError::InvalidBytecodeRange { offset, length, module_size } => {
-                write!(f, "Invalid bytecode range {}..{} in module of size {}",
-                       offset, offset + length, module_size)
+            MergeError::InvalidBytecodeRange {
+                offset,
+                length,
+                module_size,
+            } => {
+                write!(
+                    f,
+                    "Invalid bytecode range {}..{} in module of size {}",
+                    offset,
+                    offset + length,
+                    module_size
+                )
             }
             MergeError::StringTableConflict(msg) => {
                 write!(f, "String table conflict: {}", msg)
             }
-            MergeError::SpecializationMissing { function_id, type_args } => {
-                write!(f, "Specialization missing for {:?} with {:?}", function_id, type_args)
+            MergeError::SpecializationMissing {
+                function_id,
+                type_args,
+            } => {
+                write!(
+                    f,
+                    "Specialization missing for {:?} with {:?}",
+                    function_id, type_args
+                )
             }
         }
     }
@@ -138,7 +171,8 @@ impl FunctionMapping {
 
     /// Looks up a function in the output module.
     pub fn get(&self, old_id: FunctionId) -> Option<FunctionId> {
-        self.user_to_output.get(&old_id)
+        self.user_to_output
+            .get(&old_id)
             .or_else(|| self.stdlib_to_output.get(&old_id))
             .copied()
     }
@@ -261,7 +295,9 @@ impl ModuleMerger {
                 });
             }
 
-            output.bytecode.extend_from_slice(&self.user_module.bytecode[start..end]);
+            output
+                .bytecode
+                .extend_from_slice(&self.user_module.bytecode[start..end]);
 
             // Create new function descriptor with updated offset
             let mut new_func = func.clone();
@@ -270,7 +306,8 @@ impl ModuleMerger {
             output.functions.push(new_func);
 
             // Record mapping
-            self.mapping.add_user(old_id, FunctionId(output.functions.len() as u32 - 1));
+            self.mapping
+                .add_user(old_id, FunctionId(output.functions.len() as u32 - 1));
             self.stats.user_functions += 1;
         }
 
@@ -289,7 +326,8 @@ impl ModuleMerger {
                 bytecode_offset,
                 bytecode_length,
                 register_count,
-            }) = self.resolver.get_resolution(request.hash) {
+            }) = self.resolver.get_resolution(request.hash)
+            {
                 // Copy bytecode from stdlib
                 let new_offset = output.bytecode.len() as u32;
                 let start = *bytecode_offset as usize;
@@ -303,7 +341,9 @@ impl ModuleMerger {
                     });
                 }
 
-                output.bytecode.extend_from_slice(&stdlib.bytecode[start..end]);
+                output
+                    .bytecode
+                    .extend_from_slice(&stdlib.bytecode[start..end]);
 
                 // Create function descriptor for specialization
                 let new_func = FunctionDescriptor {
@@ -319,7 +359,8 @@ impl ModuleMerger {
                 output.functions.push(new_func);
 
                 // Record mapping
-                self.mapping.add_spec(request.hash, FunctionId(output.functions.len() as u32 - 1));
+                self.mapping
+                    .add_spec(request.hash, FunctionId(output.functions.len() as u32 - 1));
                 self.stats.stdlib_specializations += 1;
             }
         }
@@ -356,7 +397,8 @@ impl ModuleMerger {
             output.functions.push(new_func);
 
             // Record mapping
-            self.mapping.add_spec(request.hash, FunctionId(output.functions.len() as u32 - 1));
+            self.mapping
+                .add_spec(request.hash, FunctionId(output.functions.len() as u32 - 1));
             self.stats.new_specializations += 1;
 
             // Add to specialization table
@@ -575,11 +617,7 @@ impl ModuleMerger {
         if pc >= bytecode.len() {
             return pc;
         }
-        if bytecode[pc] < 128 {
-            pc + 1
-        } else {
-            pc + 2
-        }
+        if bytecode[pc] < 128 { pc + 1 } else { pc + 2 }
     }
 
     /// Reads a varint and returns (value, length).
@@ -625,7 +663,11 @@ impl ModuleMerger {
                 bytecode[pos] = byte;
             } else {
                 // Pad with continuation zeros if value is smaller than old encoding
-                bytecode[pos] = if v > 0 || pos + 1 < end - 1 { byte | 0x80 } else { byte };
+                bytecode[pos] = if v > 0 || pos + 1 < end - 1 {
+                    byte | 0x80
+                } else {
+                    byte
+                };
             }
             pos += 1;
         }
@@ -712,32 +754,80 @@ impl ModuleMerger {
     }
 
     /// Skips instruction operands for non-call opcodes.
-    fn skip_instruction_operands(&self, opcode: Opcode, bytecode: &[u8], pc: usize, end: usize) -> usize {
+    fn skip_instruction_operands(
+        &self,
+        opcode: Opcode,
+        bytecode: &[u8],
+        pc: usize,
+        end: usize,
+    ) -> usize {
         match opcode {
             // No operands
             Opcode::Nop | Opcode::RetV => pc,
 
             // Single register
-            Opcode::LoadTrue | Opcode::LoadFalse | Opcode::LoadUnit | Opcode::LoadNil
+            Opcode::LoadTrue
+            | Opcode::LoadFalse
+            | Opcode::LoadUnit
+            | Opcode::LoadNil
             | Opcode::Ret => self.skip_register(bytecode, pc),
 
             // Two registers
-            Opcode::Mov | Opcode::Not | Opcode::NegI | Opcode::NegF | Opcode::Bnot
-            | Opcode::Clone | Opcode::Ref | Opcode::RefMut | Opcode::Deref | Opcode::DerefMut
-            | Opcode::Inc | Opcode::Dec => {
+            Opcode::Mov
+            | Opcode::Not
+            | Opcode::NegI
+            | Opcode::NegF
+            | Opcode::Bnot
+            | Opcode::Clone
+            | Opcode::Ref
+            | Opcode::RefMut
+            | Opcode::Deref
+            | Opcode::DerefMut
+            | Opcode::Inc
+            | Opcode::Dec => {
                 let pc = self.skip_register(bytecode, pc);
                 self.skip_register(bytecode, pc)
             }
 
             // Three registers
-            Opcode::AddI | Opcode::SubI | Opcode::MulI | Opcode::DivI | Opcode::ModI
-            | Opcode::AddF | Opcode::SubF | Opcode::MulF | Opcode::DivF | Opcode::ModF
-            | Opcode::AddG | Opcode::SubG | Opcode::MulG | Opcode::DivG
-            | Opcode::Band | Opcode::Bor | Opcode::Bxor | Opcode::Shl | Opcode::Shr | Opcode::Ushr
-            | Opcode::And | Opcode::Or | Opcode::Xor
-            | Opcode::EqI | Opcode::NeI | Opcode::LtI | Opcode::LeI | Opcode::GtI | Opcode::GeI
-            | Opcode::EqF | Opcode::NeF | Opcode::LtF | Opcode::LeF | Opcode::GtF | Opcode::GeF
-            | Opcode::EqG | Opcode::CmpG | Opcode::EqRef => {
+            Opcode::AddI
+            | Opcode::SubI
+            | Opcode::MulI
+            | Opcode::DivI
+            | Opcode::ModI
+            | Opcode::AddF
+            | Opcode::SubF
+            | Opcode::MulF
+            | Opcode::DivF
+            | Opcode::ModF
+            | Opcode::AddG
+            | Opcode::SubG
+            | Opcode::MulG
+            | Opcode::DivG
+            | Opcode::Band
+            | Opcode::Bor
+            | Opcode::Bxor
+            | Opcode::Shl
+            | Opcode::Shr
+            | Opcode::Ushr
+            | Opcode::And
+            | Opcode::Or
+            | Opcode::Xor
+            | Opcode::EqI
+            | Opcode::NeI
+            | Opcode::LtI
+            | Opcode::LeI
+            | Opcode::GtI
+            | Opcode::GeI
+            | Opcode::EqF
+            | Opcode::NeF
+            | Opcode::LtF
+            | Opcode::LeF
+            | Opcode::GtF
+            | Opcode::GeF
+            | Opcode::EqG
+            | Opcode::CmpG
+            | Opcode::EqRef => {
                 let pc = self.skip_register(bytecode, pc);
                 let pc = self.skip_register(bytecode, pc);
                 self.skip_register(bytecode, pc)
@@ -771,8 +861,12 @@ impl ModuleMerger {
             }
 
             // Compare-and-jump: two registers + offset
-            Opcode::JmpEq | Opcode::JmpNe | Opcode::JmpLt | Opcode::JmpLe
-            | Opcode::JmpGt | Opcode::JmpGe => {
+            Opcode::JmpEq
+            | Opcode::JmpNe
+            | Opcode::JmpLt
+            | Opcode::JmpLe
+            | Opcode::JmpGt
+            | Opcode::JmpGe => {
                 let pc = self.skip_register(bytecode, pc);
                 let pc = self.skip_register(bytecode, pc);
                 pc + 4
@@ -861,7 +955,11 @@ impl IncrementalMerger {
             mapping.add_user(func.id, FunctionId(i as u32));
         }
 
-        Self { base, mapping, stats }
+        Self {
+            base,
+            mapping,
+            stats,
+        }
     }
 
     /// Adds a new specialization to the module.

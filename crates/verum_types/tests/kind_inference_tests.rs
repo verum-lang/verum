@@ -774,7 +774,8 @@ fn test_check_type_application_kind_binary() {
     };
 
     // Check Map<Text, Int> - should produce kind *
-    let result = inferer.check_type_application_kind(&map_ctor, &[Type::Text, Type::Int], Span::default());
+    let result =
+        inferer.check_type_application_kind(&map_ctor, &[Type::Text, Type::Int], Span::default());
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), Kind::Type);
 }
@@ -791,7 +792,8 @@ fn test_check_type_application_kind_arity_mismatch() {
     };
 
     // Check List<Int, Bool> - arity mismatch, should fail
-    let result = inferer.check_type_application_kind(&list_ctor, &[Type::Int, Type::Bool], Span::default());
+    let result =
+        inferer.check_type_application_kind(&list_ctor, &[Type::Int, Type::Bool], Span::default());
     assert!(result.is_err());
 }
 
@@ -1096,7 +1098,9 @@ fn test_type_apply_type_args() {
 
     assert!(list_int.is_type_app());
     if let Type::TypeApp { constructor, args } = list_int {
-        assert!(matches!(constructor.as_ref(), Type::TypeConstructor { name, .. } if name == "List"));
+        assert!(
+            matches!(constructor.as_ref(), Type::TypeConstructor { name, .. } if name == "List")
+        );
         assert_eq!(args.len(), 1);
     } else {
         panic!("Expected TypeApp");

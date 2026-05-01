@@ -46,13 +46,14 @@
 use thiserror::Error;
 use verum_ast::FunctionDecl;
 use verum_ast::expr::{Expr, ExprKind};
-use verum_ast::ty::{PathSegment, RefinementPredicate as AstRefinementPredicate, Type as AstType, TypeKind};
+use verum_ast::ty::{
+    PathSegment, RefinementPredicate as AstRefinementPredicate, Type as AstType, TypeKind,
+};
 use verum_common::{Heap, List, Maybe, Text};
 use verum_kernel::{
     BridgeAudit, CoreTerm, KappaTier, KernelError, UniverseTier, canonical_form,
-    check_eps_mu_coherence, check_eps_mu_coherence_v3_final, check_refine_omega,
-    check_round_trip, check_round_trip_v2, check_universe_ascent,
-    check_universe_ascent_v2,
+    check_eps_mu_coherence, check_eps_mu_coherence_v3_final, check_refine_omega, check_round_trip,
+    check_round_trip_v2, check_universe_ascent, check_universe_ascent_v2,
 };
 use verum_types::refinement::{RefinementBinding, RefinementPredicate as TypesRefinementPredicate};
 use verum_types::ty::Type as TypesType;
@@ -117,11 +118,9 @@ impl KernelRecheck {
         base: &CoreTerm,
         predicate: &CoreTerm,
     ) -> Result<(), KernelRecheckError> {
-        check_refine_omega(binder, base, predicate).map_err(|err| {
-            KernelRecheckError::RefineOmega {
-                binder: binder.clone(),
-                source: err,
-            }
+        check_refine_omega(binder, base, predicate).map_err(|err| KernelRecheckError::RefineOmega {
+            binder: binder.clone(),
+            source: err,
         })
     }
 
@@ -192,11 +191,9 @@ impl KernelRecheck {
         rhs: &CoreTerm,
         context: &str,
     ) -> Result<(), KernelRecheckError> {
-        check_eps_mu_coherence(lhs, rhs, context).map_err(|err| {
-            KernelRecheckError::EpsMu {
-                context: Text::from(context),
-                source: err,
-            }
+        check_eps_mu_coherence(lhs, rhs, context).map_err(|err| KernelRecheckError::EpsMu {
+            context: Text::from(context),
+            source: err,
         })
     }
 
@@ -221,11 +218,9 @@ impl KernelRecheck {
         rhs: &CoreTerm,
         context: &str,
     ) -> Result<(), KernelRecheckError> {
-        check_round_trip(lhs, rhs, context).map_err(|err| {
-            KernelRecheckError::RoundTrip {
-                context: Text::from(context),
-                source: err,
-            }
+        check_round_trip(lhs, rhs, context).map_err(|err| KernelRecheckError::RoundTrip {
+            context: Text::from(context),
+            source: err,
         })
     }
 
@@ -249,11 +244,9 @@ impl KernelRecheck {
         rhs: &CoreTerm,
         context: &str,
     ) -> Result<BridgeAudit, KernelRecheckError> {
-        check_round_trip_v2(lhs, rhs, context).map_err(|err| {
-            KernelRecheckError::RoundTrip {
-                context: Text::from(context),
-                source: err,
-            }
+        check_round_trip_v2(lhs, rhs, context).map_err(|err| KernelRecheckError::RoundTrip {
+            context: Text::from(context),
+            source: err,
         })
     }
 
@@ -369,9 +362,7 @@ impl KernelRecheck {
     /// (`crates/verum_verification/src/passes.rs::SmtVerificationPass::
     /// verify_function`); /V2 entry points remain available
     /// for unit-test isolation and direct kernel-rule invocation.
-    pub fn recheck_function(
-        func: &FunctionDecl,
-    ) -> List<(Text, Result<(), KernelRecheckError>)> {
+    pub fn recheck_function(func: &FunctionDecl) -> List<(Text, Result<(), KernelRecheckError>)> {
         let mut out: List<(Text, Result<(), KernelRecheckError>)> = List::new();
         recheck_signature_into(
             &func.name.name,
@@ -501,8 +492,7 @@ impl KernelRecheck {
     pub fn recheck_module(
         module: &verum_ast::Module,
     ) -> List<(Text, &'static str, Result<(), KernelRecheckError>)> {
-        let mut out: List<(Text, &'static str, Result<(), KernelRecheckError>)> =
-            List::new();
+        let mut out: List<(Text, &'static str, Result<(), KernelRecheckError>)> = List::new();
         for item in module.items.iter() {
             collect_module_recheck(&item.kind, &mut out);
         }
@@ -523,8 +513,7 @@ impl KernelRecheck {
     ) -> Result<(), KernelRecheckError> {
         let binder: Text = match &predicate.binding {
             RefinementBinding::Inline | RefinementBinding::Bare => Text::from("it"),
-            RefinementBinding::Lambda(name)
-            | RefinementBinding::Sigma(name) => name.clone(),
+            RefinementBinding::Lambda(name) | RefinementBinding::Sigma(name) => name.clone(),
             RefinementBinding::Named(_) => Text::from("it"),
         };
         let base_core = lift_types_type_to_core(base);
@@ -658,8 +647,7 @@ pub(crate) fn walk_ast_block_for_recheck(
             verum_ast::stmt::StmtKind::Expr { expr, .. } => {
                 walk_ast_expr_for_recheck(expr, function_name, out);
             }
-            verum_ast::stmt::StmtKind::Defer(e)
-            | verum_ast::stmt::StmtKind::Errdefer(e) => {
+            verum_ast::stmt::StmtKind::Defer(e) | verum_ast::stmt::StmtKind::Errdefer(e) => {
                 walk_ast_expr_for_recheck(e, function_name, out);
             }
             // Item declarations inside fn bodies
@@ -793,11 +781,7 @@ fn walk_ast_nested_item_for_recheck(
             // Recurse into the nested module's items.
             if let verum_common::Maybe::Some(items) = &m.items {
                 for nested in items.iter() {
-                    walk_ast_nested_item_for_recheck(
-                        &nested.kind,
-                        parent_function_name,
-                        out,
-                    );
+                    walk_ast_nested_item_for_recheck(&nested.kind, parent_function_name, out);
                 }
             }
         }
@@ -857,9 +841,7 @@ pub(crate) fn walk_ast_expr_for_recheck(
         ExprKind::For { body, .. } => {
             walk_ast_block_for_recheck(body, function_name, out);
         }
-        ExprKind::Paren(inner) => {
-            walk_ast_expr_for_recheck(inner, function_name, out)
-        }
+        ExprKind::Paren(inner) => walk_ast_expr_for_recheck(inner, function_name, out),
         // Other shapes (Path / Literal / Binary / Unary / Call /
         // MethodCall / etc.) don't introduce new bindings or
         // blocks — leaf for the body walker.
@@ -972,24 +954,20 @@ pub fn lift_types_type_to_core(ty: &TypesType) -> CoreTerm {
             // unwalked here.
             let mut acc = lift_types_type_to_core(return_type);
             for p in params.iter() {
-                acc = CoreTerm::App(
-                    Heap::new(acc),
-                    Heap::new(lift_types_type_to_core(p)),
-                );
+                acc = CoreTerm::App(Heap::new(acc), Heap::new(lift_types_type_to_core(p)));
             }
             acc
         }
         TypesType::Tuple(types) => fold_app_chain_types(types.iter()),
-        TypesType::Array { element, .. }
-        | TypesType::Slice { element } => lift_types_type_to_core(element),
+        TypesType::Array { element, .. } | TypesType::Slice { element } => {
+            lift_types_type_to_core(element)
+        }
         TypesType::Reference { inner, .. }
         | TypesType::CheckedReference { inner, .. }
         | TypesType::UnsafeReference { inner, .. }
         | TypesType::Ownership { inner, .. } => lift_types_type_to_core(inner),
         TypesType::Record(fields) => fold_app_chain_types(fields.values()),
-        TypesType::ExtensibleRecord { fields, .. } => {
-            fold_app_chain_types(fields.values())
-        }
+        TypesType::ExtensibleRecord { fields, .. } => fold_app_chain_types(fields.values()),
         TypesType::Variant(fields) => fold_app_chain_types(fields.values()),
         // Truly unrecognised shapes — opaque atomic placeholder.
         _ => CoreTerm::Var(Text::from("<unsupported-types-type>")),
@@ -1010,10 +988,7 @@ where
     };
     let mut acc = first;
     for t in iter {
-        acc = CoreTerm::App(
-            Heap::new(acc),
-            Heap::new(lift_types_type_to_core(t)),
-        );
+        acc = CoreTerm::App(Heap::new(acc), Heap::new(lift_types_type_to_core(t)));
     }
     acc
 }
@@ -1073,7 +1048,10 @@ pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
         }
         ExprKind::Paren(inner) => lift_expr_to_core(inner),
         ExprKind::MethodCall {
-            receiver, method, args, ..
+            receiver,
+            method,
+            args,
+            ..
         } => {
             let inner = lift_expr_to_core(receiver);
             match method.name.as_str() {
@@ -1085,10 +1063,7 @@ pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
                     // receiver's modal structure under the K-rule.
                     let mut acc = inner;
                     for arg in args.iter() {
-                        acc = CoreTerm::App(
-                            Heap::new(acc),
-                            Heap::new(lift_expr_to_core(arg)),
-                        );
+                        acc = CoreTerm::App(Heap::new(acc), Heap::new(lift_expr_to_core(arg)));
                     }
                     acc
                 }
@@ -1109,10 +1084,7 @@ pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
             // Left-associated App chain: lift(func)(arg0)(arg1)...
             let mut acc = lift_expr_to_core(func);
             for arg in args.iter() {
-                acc = CoreTerm::App(
-                    Heap::new(acc),
-                    Heap::new(lift_expr_to_core(arg)),
-                );
+                acc = CoreTerm::App(Heap::new(acc), Heap::new(lift_expr_to_core(arg)));
             }
             acc
         }
@@ -1138,10 +1110,7 @@ pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
             };
             let mut acc = first_body;
             for arm in iter {
-                acc = CoreTerm::App(
-                    Heap::new(acc),
-                    Heap::new(lift_match_arm_body_to_core(arm)),
-                );
+                acc = CoreTerm::App(Heap::new(acc), Heap::new(lift_match_arm_body_to_core(arm)));
             }
             acc
         }
@@ -1175,11 +1144,12 @@ pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
         ),
 
         // ----- pipelines / null-coalescing / cast / named-arg -----
-        ExprKind::Pipeline { left, right }
-        | ExprKind::NullCoalesce { left, right } => CoreTerm::App(
-            Heap::new(lift_expr_to_core(left)),
-            Heap::new(lift_expr_to_core(right)),
-        ),
+        ExprKind::Pipeline { left, right } | ExprKind::NullCoalesce { left, right } => {
+            CoreTerm::App(
+                Heap::new(lift_expr_to_core(left)),
+                Heap::new(lift_expr_to_core(right)),
+            )
+        }
         ExprKind::Cast { expr, .. } => lift_expr_to_core(expr),
         ExprKind::NamedArg { value, .. } => lift_expr_to_core(value),
 
@@ -1296,9 +1266,9 @@ pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
             }
             acc
         }
-        ExprKind::Nursery { body, .. }
-        | ExprKind::Unsafe(body)
-        | ExprKind::Meta(body) => lift_block_tail_to_core(body),
+        ExprKind::Nursery { body, .. } | ExprKind::Unsafe(body) | ExprKind::Meta(body) => {
+            lift_block_tail_to_core(body)
+        }
 
         // ----- atomic / not-yet-walked variants -----
         // Inject / StreamLiteral / Quote / StageEscape are atomic in
@@ -1430,7 +1400,10 @@ mod tests {
         use verum_ast::ty::{Path, PathSegment};
         let span = Span::default();
         let mut segs: verum_common::List<PathSegment> = verum_common::List::new();
-        segs.push(PathSegment::Name(Ident { name: Text::from(ext), span }));
+        segs.push(PathSegment::Name(Ident {
+            name: Text::from(ext),
+            span,
+        }));
         let mut args: verum_common::List<Expr> = verum_common::List::new();
         args.push(Expr::new(ExprKind::Path(Path::new(segs, span)), span));
         Attribute {
@@ -1535,7 +1508,10 @@ mod tests {
             ExtensionPolicy::OptOutOnly,
             &empty,
         );
-        assert!(matches!(result, Err(KernelRecheckError::RefineOmega { .. })));
+        assert!(matches!(
+            result,
+            Err(KernelRecheckError::RefineOmega { .. })
+        ));
 
         // OptOutOnly + vfe_7 explicitly disabled → rule skipped → vacuous Ok.
         let mut attrs: List<verum_ast::attr::Attribute> = List::new();
@@ -1641,10 +1617,10 @@ mod tests {
 
     // ---- V1 AST-to-CoreTerm lifting ----
 
+    use verum_ast::Ident;
     use verum_ast::Span;
     use verum_ast::expr::{Expr, ExprKind};
     use verum_ast::ty::{Path, RefinementPredicate as AstRefinementPredicate, Type as AstType};
-    use verum_ast::Ident;
     use verum_common::List;
 
     fn span() -> Span {
@@ -1748,8 +1724,10 @@ mod tests {
 
     // ---- V2 verum_types-IR lifter ----
 
+    use verum_types::refinement::{
+        RefinementBinding, RefinementPredicate as TypesRefinementPredicate,
+    };
     use verum_types::ty::Type as TypesType;
-    use verum_types::refinement::{RefinementBinding, RefinementPredicate as TypesRefinementPredicate};
 
     #[test]
     fn lift_types_type_atomic_int_to_var() {
@@ -1794,11 +1772,7 @@ mod tests {
     fn refine_omega_from_types_modal_overshoot_uses_binding_name() {
         let p = path_expr("p");
         let boxed = method_call_expr(method_call_expr(p, "box"), "box");
-        let pred = TypesRefinementPredicate::lambda(
-            boxed,
-            Text::from("y"),
-            span(),
-        );
+        let pred = TypesRefinementPredicate::lambda(boxed, Text::from("y"), span());
         let err = KernelRecheck::refine_omega_from_types(&TypesType::Int, &pred).unwrap_err();
         match err {
             KernelRecheckError::RefineOmega { binder, .. } => {
@@ -1946,10 +1920,8 @@ mod tests {
     fn lift_expr_if_takes_max_of_branches() {
         // if cond { p.box() } else { q } — then has md^ω = 1, else has 0;
         // App(then, else) ranks at max = 1.
-        let lifted = super::lift_expr_to_core(&if_expr(
-            box_call(path_expr("p")),
-            Some(path_expr("q")),
-        ));
+        let lifted =
+            super::lift_expr_to_core(&if_expr(box_call(path_expr("p")), Some(path_expr("q"))));
         match lifted {
             CoreTerm::App(_, _) => {}
             other => panic!("expected App, got {:?}", other),
@@ -2053,9 +2025,7 @@ mod tests {
 
     #[test]
     fn lift_types_type_tuple_folds_into_app_chain() {
-        let ty = TypesType::Tuple(
-            vec![TypesType::Int, TypesType::Bool, TypesType::Text].into(),
-        );
+        let ty = TypesType::Tuple(vec![TypesType::Int, TypesType::Bool, TypesType::Text].into());
         match super::lift_types_type_to_core(&ty) {
             CoreTerm::App(_, _) => {}
             other => panic!("expected App, got {:?}", other),
@@ -2191,8 +2161,10 @@ mod tests {
         // Identity pair → admits with empty audit (decidable).
         let f = core_var("F");
         let audit = KernelRecheck::round_trip_v2(&f, &f, "test").unwrap();
-        assert!(audit.is_decidable(),
-            "V0/V1-decidable pair must produce empty V2 audit");
+        assert!(
+            audit.is_decidable(),
+            "V0/V1-decidable pair must produce empty V2 audit"
+        );
     }
 
     #[test]
@@ -2200,19 +2172,21 @@ mod tests {
         // ModalBox(ModalBox(F)) ≡ ModalBox(F) via canonicalize.
         //  reject this; admits decidably (modal-idem rewrite).
         let f = core_var("F");
-        let bbf = CoreTerm::ModalBox(verum_common::Heap::new(
-            CoreTerm::ModalBox(verum_common::Heap::new(f.clone()))));
+        let bbf = CoreTerm::ModalBox(verum_common::Heap::new(CoreTerm::ModalBox(
+            verum_common::Heap::new(f.clone()),
+        )));
         let bf = CoreTerm::ModalBox(verum_common::Heap::new(f));
         let audit = KernelRecheck::round_trip_v2(&bbf, &bf, "Modal-Idem").unwrap();
-        assert!(audit.is_decidable(),
-            "Modal-Idem must be decidable in V2 (no bridge admit)");
+        assert!(
+            audit.is_decidable(),
+            "Modal-Idem must be decidable in V2 (no bridge admit)"
+        );
     }
 
     #[test]
     fn round_trip_v2_rejects_distinct_atoms() {
-        let err = KernelRecheck::round_trip_v2(
-            &core_var("a"), &core_var("b"), "distinct"
-        ).unwrap_err();
+        let err =
+            KernelRecheck::round_trip_v2(&core_var("a"), &core_var("b"), "distinct").unwrap_err();
         match err {
             KernelRecheckError::RoundTrip { .. } => {} // expected
             other => panic!("expected RoundTrip error, got {:?}", other),
@@ -2223,8 +2197,9 @@ mod tests {
     fn eps_mu_v3_final_admits_identity_with_empty_audit() {
         let f = core_var("F");
         let lhs = CoreTerm::EpsilonOf(verum_common::Heap::new(f.clone()));
-        let rhs = CoreTerm::AlphaOf(verum_common::Heap::new(
-            CoreTerm::EpsilonOf(verum_common::Heap::new(f))));
+        let rhs = CoreTerm::AlphaOf(verum_common::Heap::new(CoreTerm::EpsilonOf(
+            verum_common::Heap::new(f),
+        )));
         let audit = KernelRecheck::eps_mu_v3_final(&lhs, &rhs, "id-case").unwrap();
         assert!(audit.is_decidable());
     }
@@ -2234,16 +2209,21 @@ mod tests {
         // (App(F, x), App(x, F)) — same depth, same fvs, distinct shape.
         let m_alpha = CoreTerm::App(
             verum_common::Heap::new(core_var("F")),
-            verum_common::Heap::new(core_var("x")));
+            verum_common::Heap::new(core_var("x")),
+        );
         let alpha_rhs = CoreTerm::App(
             verum_common::Heap::new(core_var("x")),
-            verum_common::Heap::new(core_var("F")));
+            verum_common::Heap::new(core_var("F")),
+        );
         let lhs = CoreTerm::EpsilonOf(verum_common::Heap::new(m_alpha));
-        let rhs = CoreTerm::AlphaOf(verum_common::Heap::new(
-            CoreTerm::EpsilonOf(verum_common::Heap::new(alpha_rhs))));
+        let rhs = CoreTerm::AlphaOf(verum_common::Heap::new(CoreTerm::EpsilonOf(
+            verum_common::Heap::new(alpha_rhs),
+        )));
         let audit = KernelRecheck::eps_mu_v3_final(&lhs, &rhs, "non-id").unwrap();
-        assert!(!audit.is_decidable(),
-            "non-identity case must record an A-3 admit");
+        assert!(
+            !audit.is_decidable(),
+            "non-identity case must record an A-3 admit"
+        );
         assert_eq!(audit.admits().len(), 1);
     }
 
@@ -2251,8 +2231,9 @@ mod tests {
     fn canonicalize_returns_normal_form_with_audit() {
         // canonical_form(AlphaOf(EpsilonOf(F))) → F.
         let f = core_var("F");
-        let aef = CoreTerm::AlphaOf(verum_common::Heap::new(
-            CoreTerm::EpsilonOf(verum_common::Heap::new(f.clone()))));
+        let aef = CoreTerm::AlphaOf(verum_common::Heap::new(CoreTerm::EpsilonOf(
+            verum_common::Heap::new(f.clone()),
+        )));
         let (canon, audit) = KernelRecheck::canonicalize(&aef, "K-Adj-Unit");
         assert_eq!(canon, f, "K-Adj-Unit collapse must produce F");
         assert!(audit.is_decidable());
@@ -2271,9 +2252,15 @@ mod tests {
     #[test]
     fn merge_audits_dedups_same_bridge_same_context() {
         let mut a = BridgeAudit::new();
-        a.record(verum_kernel::BridgeId::ConfluenceOfModalRewrite, "ctx-shared");
+        a.record(
+            verum_kernel::BridgeId::ConfluenceOfModalRewrite,
+            "ctx-shared",
+        );
         let mut b = BridgeAudit::new();
-        b.record(verum_kernel::BridgeId::ConfluenceOfModalRewrite, "ctx-shared");
+        b.record(
+            verum_kernel::BridgeId::ConfluenceOfModalRewrite,
+            "ctx-shared",
+        );
         let merged = KernelRecheck::merge_audits(a, b);
         assert_eq!(merged.admits().len(), 1, "dup must collapse");
     }
@@ -2288,39 +2275,57 @@ mod tests {
     fn universe_ascent_v2_admits_v0_pair_with_empty_audit() {
         // κ_1 → κ_2 — canonical ascent; V2 must produce empty audit.
         let audit = KernelRecheck::universe_ascent_v2(
-            KappaTier::KappaN(1), KappaTier::KappaN(2), "κ_1→κ_2"
-        ).unwrap();
-        assert!(audit.is_decidable(),
-            "V0-decidable κ_1→κ_2 must produce empty V2 audit");
+            KappaTier::KappaN(1),
+            KappaTier::KappaN(2),
+            "κ_1→κ_2",
+        )
+        .unwrap();
+        assert!(
+            audit.is_decidable(),
+            "V0-decidable κ_1→κ_2 must produce empty V2 audit"
+        );
     }
 
     #[test]
     fn universe_ascent_v2_admits_kappa_3_via_drake_extended() {
         // κ_3 → κ_3 — beyond Theorem 134.T tight bound.
         let audit = KernelRecheck::universe_ascent_v2(
-            KappaTier::KappaN(3), KappaTier::KappaN(3), "κ_3 reflexive"
-        ).unwrap();
-        assert!(!audit.is_decidable(),
-            "κ_3 → κ_3 must invoke DrakeReflectionExtended bridge");
+            KappaTier::KappaN(3),
+            KappaTier::KappaN(3),
+            "κ_3 reflexive",
+        )
+        .unwrap();
+        assert!(
+            !audit.is_decidable(),
+            "κ_3 → κ_3 must invoke DrakeReflectionExtended bridge"
+        );
         assert_eq!(audit.admits().len(), 1);
-        assert_eq!(audit.admits()[0].bridge,
-            verum_kernel::BridgeId::DrakeReflectionExtended);
+        assert_eq!(
+            audit.admits()[0].bridge,
+            verum_kernel::BridgeId::DrakeReflectionExtended
+        );
     }
 
     #[test]
     fn universe_ascent_v2_admits_multi_step_via_drake_extended() {
         // κ_1 → κ_5 — multi-step jump.
         let audit = KernelRecheck::universe_ascent_v2(
-            KappaTier::KappaN(1), KappaTier::KappaN(5), "κ_1→κ_5"
-        ).unwrap();
+            KappaTier::KappaN(1),
+            KappaTier::KappaN(5),
+            "κ_1→κ_5",
+        )
+        .unwrap();
         assert_eq!(audit.admits().len(), 1);
     }
 
     #[test]
     fn universe_ascent_v2_rejects_tier_inversion() {
         let err = KernelRecheck::universe_ascent_v2(
-            KappaTier::KappaN(2), KappaTier::KappaN(1), "κ_2→κ_1 inversion"
-        ).unwrap_err();
+            KappaTier::KappaN(2),
+            KappaTier::KappaN(1),
+            "κ_2→κ_1 inversion",
+        )
+        .unwrap_err();
         match err {
             KernelRecheckError::UniverseAscent { .. } => {} // expected
             other => panic!("expected UniverseAscent error, got {:?}", other),
@@ -2330,8 +2335,11 @@ mod tests {
     #[test]
     fn universe_ascent_v2_rejects_truncated_to_kappa() {
         let err = KernelRecheck::universe_ascent_v2(
-            KappaTier::Truncated, KappaTier::KappaN(1), "Trunc→κ_1"
-        ).unwrap_err();
+            KappaTier::Truncated,
+            KappaTier::KappaN(1),
+            "Trunc→κ_1",
+        )
+        .unwrap_err();
         assert!(matches!(err, KernelRecheckError::UniverseAscent { .. }));
     }
 
@@ -2345,8 +2353,9 @@ mod tests {
         let f = core_var("F");
 
         // Rule 1: Modal-Idem (empty audit).
-        let bbf = CoreTerm::ModalBox(verum_common::Heap::new(
-            CoreTerm::ModalBox(verum_common::Heap::new(f.clone()))));
+        let bbf = CoreTerm::ModalBox(verum_common::Heap::new(CoreTerm::ModalBox(
+            verum_common::Heap::new(f.clone()),
+        )));
         let bf = CoreTerm::ModalBox(verum_common::Heap::new(f));
         let a1 = KernelRecheck::round_trip_v2(&bbf, &bf, "rule-1").unwrap();
         assert!(a1.is_decidable());
@@ -2354,20 +2363,23 @@ mod tests {
         // Rule 2: K-Eps-Mu non-identity (A-3 admit).
         let m_alpha = CoreTerm::App(
             verum_common::Heap::new(core_var("F")),
-            verum_common::Heap::new(core_var("x")));
+            verum_common::Heap::new(core_var("x")),
+        );
         let alpha_rhs = CoreTerm::App(
             verum_common::Heap::new(core_var("x")),
-            verum_common::Heap::new(core_var("F")));
+            verum_common::Heap::new(core_var("F")),
+        );
         let lhs2 = CoreTerm::EpsilonOf(verum_common::Heap::new(m_alpha));
-        let rhs2 = CoreTerm::AlphaOf(verum_common::Heap::new(
-            CoreTerm::EpsilonOf(verum_common::Heap::new(alpha_rhs))));
+        let rhs2 = CoreTerm::AlphaOf(verum_common::Heap::new(CoreTerm::EpsilonOf(
+            verum_common::Heap::new(alpha_rhs),
+        )));
         let a2 = KernelRecheck::eps_mu_v3_final(&lhs2, &rhs2, "rule-2").unwrap();
         assert_eq!(a2.admits().len(), 1);
 
         // Rule 3: Universe-Ascent V2 κ_3 → κ_3 (131.L4 admit).
-        let a3 = KernelRecheck::universe_ascent_v2(
-            KappaTier::KappaN(3), KappaTier::KappaN(3), "rule-3"
-        ).unwrap();
+        let a3 =
+            KernelRecheck::universe_ascent_v2(KappaTier::KappaN(3), KappaTier::KappaN(3), "rule-3")
+                .unwrap();
         assert_eq!(a3.admits().len(), 1);
 
         // Merge all three into one composite audit. Two distinct
@@ -2375,8 +2387,11 @@ mod tests {
         // audit contributes nothing.
         let merged = KernelRecheck::merge_audits(a1, a2);
         let merged = KernelRecheck::merge_audits(merged, a3);
-        assert_eq!(merged.admits().len(), 2,
-            "aggregate audit must record both A-3 and 131.L4");
+        assert_eq!(
+            merged.admits().len(),
+            2,
+            "aggregate audit must record both A-3 and 131.L4"
+        );
         let bridges = merged.bridges();
         let names: Vec<&str> = bridges.iter().copied().collect();
         assert!(names.contains(&"diakrisis-A-3"));
@@ -2662,10 +2677,7 @@ mod tests {
                 ExprKind::Await(verum_common::Heap::new(path_expr("f"))),
                 span_dummy(),
             ),
-            Expr::new(
-                ExprKind::Return(verum_common::Maybe::None),
-                span_dummy(),
-            ),
+            Expr::new(ExprKind::Return(verum_common::Maybe::None), span_dummy()),
             Expr::new(
                 ExprKind::Continue {
                     label: verum_common::Maybe::None,

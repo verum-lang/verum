@@ -51,7 +51,12 @@ impl Default for ResourceLimits {
 
 impl ResourceLimits {
     /// Create new resource limits with custom values
-    pub fn new(iteration_limit: u64, recursion_limit: u64, memory_limit: u64, timeout_ms: u64) -> Self {
+    pub fn new(
+        iteration_limit: u64,
+        recursion_limit: u64,
+        memory_limit: u64,
+        timeout_ms: u64,
+    ) -> Self {
         Self {
             iteration_limit,
             recursion_limit,
@@ -66,7 +71,7 @@ impl ResourceLimits {
             iteration_limit: 10_000,
             recursion_limit: 100,
             memory_limit: 10 * 1024 * 1024, // 10 MB
-            timeout_ms: 5_000,               // 5 seconds
+            timeout_ms: 5_000,              // 5 seconds
         }
     }
 
@@ -309,9 +314,9 @@ impl SecurityContext {
     /// Check if a path is trusted
     pub fn is_path_trusted(&self, path: &Text) -> bool {
         // Check exact match or prefix match
-        self.trusted_paths.iter().any(|trusted| {
-            path == trusted || path.starts_with(trusted.as_str())
-        })
+        self.trusted_paths
+            .iter()
+            .any(|trusted| path == trusted || path.starts_with(trusted.as_str()))
     }
 
     /// Get trusted paths

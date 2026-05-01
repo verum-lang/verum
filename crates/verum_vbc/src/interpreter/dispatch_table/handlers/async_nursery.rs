@@ -6,15 +6,18 @@
 //! NurseryInit (0xA8), NurserySpawn (0xA9), NurseryAwait (0xAA),
 //! NurseryCancel (0xAB), NurseryConfig (0xAC), NurseryError (0xAD)
 
+use super::super::super::error::{InterpreterError, InterpreterResult};
+use super::super::super::state::{GeneratorId, InterpreterState, TaskId, TaskStatus};
+use super::super::DispatchResult;
+use super::super::{
+    alloc_list_from_values, call_closure_sync, dispatch_loop_table_with_entry_depth,
+    execute_pending_task,
+};
+use super::bytecode_io::*;
+use super::string_helpers::alloc_string_value;
 use crate::instruction::Reg;
 use crate::module::FunctionId;
 use crate::value::Value;
-use super::super::super::error::{InterpreterError, InterpreterResult};
-use super::super::super::state::{InterpreterState, GeneratorId, TaskId, TaskStatus};
-use super::super::DispatchResult;
-use super::super::{call_closure_sync, execute_pending_task, alloc_list_from_values, dispatch_loop_table_with_entry_depth};
-use super::bytecode_io::*;
-use super::string_helpers::alloc_string_value;
 
 // ============================================================================
 // Task ID Encoding
@@ -45,7 +48,9 @@ pub(in super::super) fn decode_task_id(val: i64) -> Option<TaskId> {
 // ============================================================================
 
 /// Spawn (0xA0) - Spawn an async task (deferred execution).
-pub(in super::super) fn handle_spawn(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_spawn(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     // Honour the `[runtime].futures` feature gate from verum.toml.
     // When the user opted out of futures the dispatch handler must
     // refuse the operation rather than silently spawning a task the
@@ -54,10 +59,9 @@ pub(in super::super) fn handle_spawn(state: &mut InterpreterState) -> Interprete
     // declared but unenforced.
     if !state.config.futures_enabled {
         return Err(InterpreterError::Panic {
-            message:
-                "futures disabled by [runtime].futures = false in verum.toml — \
+            message: "futures disabled by [runtime].futures = false in verum.toml — \
                  spawn is unavailable in this build"
-                    .to_string(),
+                .to_string(),
         });
     }
     let dst = read_reg(state)?;
@@ -76,7 +80,9 @@ pub(in super::super) fn handle_spawn(state: &mut InterpreterState) -> Interprete
     let parent_contexts = state.context_stack.clone_entries();
 
     // Register task in the queue -- deferred, NOT executed
-    let task_id = state.tasks.spawn_deferred_with_contexts(func_id, arg_values, parent_contexts);
+    let task_id = state
+        .tasks
+        .spawn_deferred_with_contexts(func_id, arg_values, parent_contexts);
 
     state.set_reg(dst, Value::from_i64(encode_task_id(task_id)));
 
@@ -84,7 +90,9 @@ pub(in super::super) fn handle_spawn(state: &mut InterpreterState) -> Interprete
 }
 
 /// Await (0xA1) - Await an async task.
-pub(in super::super) fn handle_await(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_await(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let task_reg = read_reg(state)?;
 
@@ -92,24 +100,27 @@ pub(in super::super) fn handle_await(state: &mut InterpreterState) -> Interprete
 
     // Check if the value is a task handle (sentinel-encoded from Spawn)
     if task_val.is_int()
-        && let Some(task_id) = decode_task_id(task_val.as_i64()) {
-            // If the task is already completed, return its result immediately
-            if let Some(task) = state.tasks.get(task_id)
-                && let Some(result) = task.result {
-                    state.set_reg(dst, result);
-                    return Ok(DispatchResult::Continue);
-                }
-
-            // Task is pending -- execute it now (cooperative scheduling)
-            execute_pending_task(state, task_id)?;
-
-            // Retrieve the result
-            if let Some(task) = state.tasks.get(task_id)
-                && let Some(result) = task.result {
-                    state.set_reg(dst, result);
-                    return Ok(DispatchResult::Continue);
-                }
+        && let Some(task_id) = decode_task_id(task_val.as_i64())
+    {
+        // If the task is already completed, return its result immediately
+        if let Some(task) = state.tasks.get(task_id)
+            && let Some(result) = task.result
+        {
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
         }
+
+        // Task is pending -- execute it now (cooperative scheduling)
+        execute_pending_task(state, task_id)?;
+
+        // Retrieve the result
+        if let Some(task) = state.tasks.get(task_id)
+            && let Some(result) = task.result
+        {
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    }
 
     // Not a task handle -- value is a direct result
     state.set_reg(dst, task_val);
@@ -118,7 +129,9 @@ pub(in super::super) fn handle_await(state: &mut InterpreterState) -> Interprete
 }
 
 /// Select (0xA3) - Wait for the first of multiple futures to complete.
-pub(in super::super) fn handle_select(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_select(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let futures = read_reg_range(state)?;
 
@@ -132,7 +145,11 @@ pub(in super::super) fn handle_select(state: &mut InterpreterState) -> Interpret
     for i in 0..futures.count {
         let reg = Reg(futures.start.0 + i as u16);
         let val = state.get_reg(reg);
-        let tid = if val.is_int() { decode_task_id(val.as_i64()) } else { None };
+        let tid = if val.is_int() {
+            decode_task_id(val.as_i64())
+        } else {
+            None
+        };
         task_entries.push((tid, i as usize));
     }
 
@@ -140,23 +157,30 @@ pub(in super::super) fn handle_select(state: &mut InterpreterState) -> Interpret
     for &(tid_opt, _) in &task_entries {
         if let Some(tid) = tid_opt
             && let Some(task) = state.tasks.get(tid)
-                && let Some(result) = task.result {
-                    state.set_reg(dst, result);
-                    return Ok(DispatchResult::Continue);
-                }
+            && let Some(result) = task.result
+        {
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
     }
 
     // Execute pending tasks until one of our targets completes
     for &(tid_opt, _) in &task_entries {
         if let Some(tid) = tid_opt
-            && state.tasks.get(tid).map(|t| t.status == TaskStatus::Pending).unwrap_or(false) {
-                execute_pending_task(state, tid)?;
-                if let Some(task) = state.tasks.get(tid)
-                    && let Some(result) = task.result {
-                        state.set_reg(dst, result);
-                        return Ok(DispatchResult::Continue);
-                    }
+            && state
+                .tasks
+                .get(tid)
+                .map(|t| t.status == TaskStatus::Pending)
+                .unwrap_or(false)
+        {
+            execute_pending_task(state, tid)?;
+            if let Some(task) = state.tasks.get(tid)
+                && let Some(result) = task.result
+            {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
             }
+        }
     }
 
     // Fallback -- return first register value directly
@@ -167,7 +191,9 @@ pub(in super::super) fn handle_select(state: &mut InterpreterState) -> Interpret
 }
 
 /// Join (0xA4) - Wait for all tasks to complete.
-pub(in super::super) fn handle_join(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_join(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let tasks = read_reg_range(state)?;
 
@@ -176,16 +202,25 @@ pub(in super::super) fn handle_join(state: &mut InterpreterState) -> Interpreter
     for i in 0..tasks.count {
         let reg = Reg(tasks.start.0 + i as u16);
         let val = state.get_reg(reg);
-        let tid = if val.is_int() { decode_task_id(val.as_i64()) } else { None };
+        let tid = if val.is_int() {
+            decode_task_id(val.as_i64())
+        } else {
+            None
+        };
         task_entries.push(tid);
     }
 
     // Execute all pending tasks
     for &tid_opt in &task_entries {
         if let Some(tid) = tid_opt
-            && state.tasks.get(tid).map(|t| t.status == TaskStatus::Pending).unwrap_or(false) {
-                execute_pending_task(state, tid)?;
-            }
+            && state
+                .tasks
+                .get(tid)
+                .map(|t| t.status == TaskStatus::Pending)
+                .unwrap_or(false)
+        {
+            execute_pending_task(state, tid)?;
+        }
     }
 
     // Collect results
@@ -193,10 +228,11 @@ pub(in super::super) fn handle_join(state: &mut InterpreterState) -> Interpreter
     for (i, &tid_opt) in task_entries.iter().enumerate() {
         if let Some(tid) = tid_opt
             && let Some(task) = state.tasks.get(tid)
-                && let Some(result) = task.result {
-                    results.push(result);
-                    continue;
-                }
+            && let Some(result) = task.result
+        {
+            results.push(result);
+            continue;
+        }
         // Fallback: use register value directly
         let reg = Reg(tasks.start.0 + i as u16);
         results.push(state.get_reg(reg));
@@ -209,14 +245,18 @@ pub(in super::super) fn handle_join(state: &mut InterpreterState) -> Interpreter
 }
 
 /// FutureReady (0xA5) - Check if a future is ready (non-blocking).
-pub(in super::super) fn handle_future_ready(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_future_ready(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let future_reg = read_reg(state)?;
     let val = state.get_reg(future_reg);
 
     let is_ready = if val.is_int() {
         if let Some(task_id) = decode_task_id(val.as_i64()) {
-            state.tasks.get(task_id)
+            state
+                .tasks
+                .get(task_id)
                 .map(|t| t.status == TaskStatus::Completed || t.status == TaskStatus::Failed)
                 .unwrap_or(true)
         } else {
@@ -231,30 +271,40 @@ pub(in super::super) fn handle_future_ready(state: &mut InterpreterState) -> Int
 }
 
 /// FutureGet (0xA6) - Get future result (blocking).
-pub(in super::super) fn handle_future_get(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_future_get(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let future_reg = read_reg(state)?;
     let value = state.get_reg(future_reg);
 
     if value.is_int()
-        && let Some(task_id) = decode_task_id(value.as_i64()) {
-            // If completed, return result directly
-            if let Some(task) = state.tasks.get(task_id)
-                && let Some(result) = task.result {
-                    state.set_reg(dst, result);
-                    return Ok(DispatchResult::Continue);
-                }
+        && let Some(task_id) = decode_task_id(value.as_i64())
+    {
+        // If completed, return result directly
+        if let Some(task) = state.tasks.get(task_id)
+            && let Some(result) = task.result
+        {
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
 
-            // If pending, execute it
-            if state.tasks.get(task_id).map(|t| t.status == TaskStatus::Pending).unwrap_or(false) {
-                execute_pending_task(state, task_id)?;
-                if let Some(task) = state.tasks.get(task_id)
-                    && let Some(result) = task.result {
-                        state.set_reg(dst, result);
-                        return Ok(DispatchResult::Continue);
-                    }
+        // If pending, execute it
+        if state
+            .tasks
+            .get(task_id)
+            .map(|t| t.status == TaskStatus::Pending)
+            .unwrap_or(false)
+        {
+            execute_pending_task(state, task_id)?;
+            if let Some(task) = state.tasks.get(task_id)
+                && let Some(result) = task.result
+            {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
             }
         }
+    }
 
     // Not a task handle -- direct value pass-through
     state.set_reg(dst, value);
@@ -262,7 +312,9 @@ pub(in super::super) fn handle_future_get(state: &mut InterpreterState) -> Inter
 }
 
 /// AsyncNext (0xA7) - Get next from async iterator.
-pub(in super::super) fn handle_async_next(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_async_next(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     use super::super::super::state::GeneratorStatus;
 
     let dst = read_reg(state)?;
@@ -273,33 +325,54 @@ pub(in super::super) fn handle_async_next(state: &mut InterpreterState) -> Inter
     if iter_value.is_generator() {
         let gen_id = GeneratorId(iter_value.as_generator_id());
 
-        if !state.generators.get(gen_id).map(|g| g.can_resume()).unwrap_or(false) {
+        if !state
+            .generators
+            .get(gen_id)
+            .map(|g| g.can_resume())
+            .unwrap_or(false)
+        {
             state.set_reg(dst, Value::nil());
             return Ok(DispatchResult::Continue);
         }
 
         let (func_id, status, reg_count) = {
-            let generator = state.generators.get(gen_id)
-                .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+            let generator =
+                state
+                    .generators
+                    .get(gen_id)
+                    .ok_or(InterpreterError::InvalidGeneratorId {
+                        generator_id: gen_id,
+                    })?;
             (generator.func_id, generator.status, generator.reg_count)
         };
 
-        let (resume_pc, restore_registers, restore_contexts) = match status {
-            GeneratorStatus::Created => {
-                let generator = state.generators.get(gen_id)
-                    .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
-                (0u32, generator.saved_registers.clone(), Vec::new())
-            }
-            GeneratorStatus::Yielded => {
-                let generator = state.generators.get(gen_id)
-                    .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
-                (generator.saved_pc, generator.saved_registers.clone(), generator.saved_contexts.clone())
-            }
-            _ => {
-                state.set_reg(dst, Value::nil());
-                return Ok(DispatchResult::Continue);
-            }
-        };
+        let (resume_pc, restore_registers, restore_contexts) =
+            match status {
+                GeneratorStatus::Created => {
+                    let generator = state.generators.get(gen_id).ok_or(
+                        InterpreterError::InvalidGeneratorId {
+                            generator_id: gen_id,
+                        },
+                    )?;
+                    (0u32, generator.saved_registers.clone(), Vec::new())
+                }
+                GeneratorStatus::Yielded => {
+                    let generator = state.generators.get(gen_id).ok_or(
+                        InterpreterError::InvalidGeneratorId {
+                            generator_id: gen_id,
+                        },
+                    )?;
+                    (
+                        generator.saved_pc,
+                        generator.saved_registers.clone(),
+                        generator.saved_contexts.clone(),
+                    )
+                }
+                _ => {
+                    state.set_reg(dst, Value::nil());
+                    return Ok(DispatchResult::Continue);
+                }
+            };
 
         // Mark as Running
         if let Some(g) = state.generators.get_mut(gen_id) {
@@ -308,7 +381,9 @@ pub(in super::super) fn handle_async_next(state: &mut InterpreterState) -> Inter
 
         let entry_depth = state.call_stack.depth();
         let return_pc = state.pc();
-        state.call_stack.push_frame(func_id, reg_count, return_pc, dst)?;
+        state
+            .call_stack
+            .push_frame(func_id, reg_count, return_pc, dst)?;
         state.registers.push_frame(reg_count);
 
         let new_reg_base = state.reg_base();
@@ -351,7 +426,9 @@ pub(in super::super) fn handle_async_next(state: &mut InterpreterState) -> Inter
 // ============================================================================
 
 /// NurseryInit (0xA8) - Initialize a new nursery scope.
-pub(in super::super) fn handle_nursery_init(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_nursery_init(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     // Honour the `[runtime].nurseries` feature gate from verum.toml.
     // The nursery surface (init/spawn/await/cancel/config/error)
     // gates at construction so a single rejection covers every
@@ -360,10 +437,9 @@ pub(in super::super) fn handle_nursery_init(state: &mut InterpreterState) -> Int
     // `nurseries_enabled` config field was inert.
     if !state.config.nurseries_enabled {
         return Err(InterpreterError::Panic {
-            message:
-                "nurseries disabled by [runtime].nurseries = false in verum.toml — \
+            message: "nurseries disabled by [runtime].nurseries = false in verum.toml — \
                  nursery construction is unavailable in this build"
-                    .to_string(),
+                .to_string(),
         });
     }
     let dst = read_reg(state)?;
@@ -373,7 +449,9 @@ pub(in super::super) fn handle_nursery_init(state: &mut InterpreterState) -> Int
 }
 
 /// NurserySpawn (0xA9) - Spawn a task into nursery (deferred execution).
-pub(in super::super) fn handle_nursery_spawn(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_nursery_spawn(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let nursery_reg = read_reg(state)?;
     let task_reg = read_reg(state)?;
 
@@ -395,10 +473,11 @@ pub(in super::super) fn handle_nursery_spawn(state: &mut InterpreterState) -> In
             let status = task.status;
             state.nurseries.spawn_task(nursery_id, func_id);
             if let Some(nursery) = state.nurseries.get_mut(nursery_id)
-                && let Some(ntask) = nursery.tasks.last_mut() {
-                    ntask.status = status;
-                    ntask.result = result;
-                }
+                && let Some(ntask) = nursery.tasks.last_mut()
+            {
+                ntask.status = status;
+                ntask.result = result;
+            }
         }
     }
 
@@ -406,7 +485,9 @@ pub(in super::super) fn handle_nursery_spawn(state: &mut InterpreterState) -> In
 }
 
 /// NurseryAwait (0xAA) - Wait for all nursery tasks to complete.
-pub(in super::super) fn handle_nursery_await(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_nursery_await(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let nursery_reg = read_reg(state)?;
     let success_reg = read_reg(state)?;
 
@@ -414,32 +495,36 @@ pub(in super::super) fn handle_nursery_await(state: &mut InterpreterState) -> In
     let nursery_id = nursery_val.as_i64() as u64;
 
     // Collect pending closures from the nursery before executing
-    let pending_closures: Vec<(usize, Value)> = if let Some(nursery) = state.nurseries.get(nursery_id) {
-        nursery.tasks.iter().enumerate()
-            .filter(|(_, t)| t.status == TaskStatus::Pending && t.closure_val.is_some())
-            .filter_map(|(i, t)| t.closure_val.map(|v| (i, v)))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let pending_closures: Vec<(usize, Value)> =
+        if let Some(nursery) = state.nurseries.get(nursery_id) {
+            nursery
+                .tasks
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.status == TaskStatus::Pending && t.closure_val.is_some())
+                .filter_map(|(i, t)| t.closure_val.map(|v| (i, v)))
+                .collect()
+        } else {
+            Vec::new()
+        };
 
     // Execute each pending closure
     for (task_idx, closure_val) in pending_closures {
         match call_closure_sync(state, closure_val, &[]) {
             Ok(result) => {
                 if let Some(nursery) = state.nurseries.get_mut(nursery_id)
-                    && let Some(task) = nursery.tasks.get_mut(task_idx) {
-                        task.status = TaskStatus::Completed;
-                        task.result = Some(result);
-                    }
+                    && let Some(task) = nursery.tasks.get_mut(task_idx)
+                {
+                    task.status = TaskStatus::Completed;
+                    task.result = Some(result);
+                }
             }
             Err(e) => {
                 // Preserve error message instead of dropping it silently.
                 // Store the formatted error as a Verum string value in both
                 // task.error and nursery.accumulated_error for downstream inspection.
                 let err_str = format!("{}", e);
-                let err_value = alloc_string_value(state, &err_str)
-                    .unwrap_or(Value::nil());
+                let err_value = alloc_string_value(state, &err_str).unwrap_or(Value::nil());
                 if let Some(nursery) = state.nurseries.get_mut(nursery_id) {
                     if let Some(task) = nursery.tasks.get_mut(task_idx) {
                         task.status = TaskStatus::Failed;
@@ -452,21 +537,26 @@ pub(in super::super) fn handle_nursery_await(state: &mut InterpreterState) -> In
     }
 
     // Also execute any tasks that were linked from Spawn (not closures)
-    let linked_task_ids: Vec<(usize, FunctionId)> = if let Some(nursery) = state.nurseries.get(nursery_id) {
-        nursery.tasks.iter().enumerate()
-            .filter(|(_, t)| t.status == TaskStatus::Pending && t.closure_val.is_none())
-            .map(|(i, t)| (i, t.func_id))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let linked_task_ids: Vec<(usize, FunctionId)> =
+        if let Some(nursery) = state.nurseries.get(nursery_id) {
+            nursery
+                .tasks
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.status == TaskStatus::Pending && t.closure_val.is_none())
+                .map(|(i, t)| (i, t.func_id))
+                .collect()
+        } else {
+            Vec::new()
+        };
 
     for (task_idx, _func_id) in linked_task_ids {
         if let Some(nursery) = state.nurseries.get_mut(nursery_id)
-            && let Some(task) = nursery.tasks.get_mut(task_idx) {
-                task.status = TaskStatus::Completed;
-                task.result = Some(Value::unit());
-            }
+            && let Some(task) = nursery.tasks.get_mut(task_idx)
+        {
+            task.status = TaskStatus::Completed;
+            task.result = Some(Value::unit());
+        }
     }
 
     let all_ok = if let Some(nursery) = state.nurseries.get(nursery_id) {
@@ -481,7 +571,9 @@ pub(in super::super) fn handle_nursery_await(state: &mut InterpreterState) -> In
 }
 
 /// NurseryCancel (0xAB) - Cancel all tasks in nursery.
-pub(in super::super) fn handle_nursery_cancel(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_nursery_cancel(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let nursery_reg = read_reg(state)?;
 
     let nursery_val = state.get_reg(nursery_reg);
@@ -503,7 +595,9 @@ pub(in super::super) fn handle_nursery_cancel(state: &mut InterpreterState) -> I
 }
 
 /// NurseryConfig (0xAC) - Configure nursery options.
-pub(in super::super) fn handle_nursery_config(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_nursery_config(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let nursery_reg = read_reg(state)?;
     let config_reg = read_reg(state)?;
 
@@ -526,7 +620,9 @@ pub(in super::super) fn handle_nursery_config(state: &mut InterpreterState) -> I
 }
 
 /// NurseryError (0xAD) - Get nursery error (if any task failed).
-pub(in super::super) fn handle_nursery_error(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_nursery_error(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let nursery_reg = read_reg(state)?;
 

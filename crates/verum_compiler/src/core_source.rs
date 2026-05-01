@@ -81,7 +81,10 @@ impl LocalCoreSource {
         if !root.join("mod.vr").exists() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!("Not a valid stdlib directory: {} (missing mod.vr)", root.display()),
+                format!(
+                    "Not a valid stdlib directory: {} (missing mod.vr)",
+                    root.display()
+                ),
             ));
         }
 
@@ -324,9 +327,9 @@ impl CoreSourceTrait for CoreSource {
 // MODULE RESOLUTION
 // ============================================================================
 
+use crate::module_utils;
 use std::collections::{HashMap, HashSet};
 use verum_ast::cfg::TargetConfig;
-use crate::module_utils;
 
 /// A stdlib module with its source files.
 #[derive(Debug, Clone)]
@@ -464,13 +467,49 @@ impl<'a> CoreSourceResolver<'a> {
             ("mem", vec!["sys", "sys.linux", "sys.darwin", "sys.windows"]),
             ("core", vec!["sys", "mem"]),
             ("sync", vec!["core"]),
-            ("text", vec!["core", "sys.linux", "sys.darwin", "sys.windows"]),
+            (
+                "text",
+                vec!["core", "sys.linux", "sys.darwin", "sys.windows"],
+            ),
             ("collections", vec!["core", "text"]),
-            ("io", vec!["core", "text", "collections", "sys.linux", "sys.darwin", "sys.windows"]),
-            ("time", vec!["core", "sys.linux", "sys.darwin", "sys.windows"]),
-            ("runtime", vec!["core", "mem", "sync", "time", "sys", "async"]),
-            ("async", vec!["core", "collections", "io", "sync", "time", "sys"]),
-            ("term", vec!["core", "text", "collections", "io", "sync", "time", "sys", "sys.linux", "sys.darwin", "sys.windows"]),
+            (
+                "io",
+                vec![
+                    "core",
+                    "text",
+                    "collections",
+                    "sys.linux",
+                    "sys.darwin",
+                    "sys.windows",
+                ],
+            ),
+            (
+                "time",
+                vec!["core", "sys.linux", "sys.darwin", "sys.windows"],
+            ),
+            (
+                "runtime",
+                vec!["core", "mem", "sync", "time", "sys", "async"],
+            ),
+            (
+                "async",
+                vec!["core", "collections", "io", "sync", "time", "sys"],
+            ),
+            (
+                "term",
+                vec![
+                    "core",
+                    "text",
+                    "collections",
+                    "io",
+                    "sync",
+                    "time",
+                    "sys",
+                    "sys.linux",
+                    "sys.darwin",
+                    "sys.windows",
+                ],
+            ),
             ("net", vec!["core", "io", "async", "sys"]),
             ("cognitive", vec!["core", "collections"]),
             ("meta", vec!["core"]),
@@ -533,7 +572,13 @@ impl<'a> CoreSourceResolver<'a> {
 
         let module_names: Vec<String> = self.modules.keys().cloned().collect();
         for name in &module_names {
-            visit(name, &self.modules, &mut visited, &mut temp_mark, &mut order)?;
+            visit(
+                name,
+                &self.modules,
+                &mut visited,
+                &mut temp_mark,
+                &mut order,
+            )?;
         }
 
         self.compilation_order = order;
@@ -587,7 +632,9 @@ pub fn init_global_core_source(source: CoreSource) {
 
 /// Panics if not initialized.
 pub fn global_core_source() -> &'static CoreSource {
-    GLOBAL_CORE_SOURCE.get().expect("Stdlib source not initialized")
+    GLOBAL_CORE_SOURCE
+        .get()
+        .expect("Stdlib source not initialized")
 }
 
 /// Get the global stdlib source, auto-detecting if not initialized.

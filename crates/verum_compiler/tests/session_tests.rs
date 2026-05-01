@@ -20,8 +20,8 @@
 use std::path::PathBuf;
 use verum_compiler::{CompilerOptions, Session};
 use verum_diagnostics::DiagnosticBuilder;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 #[test]
 fn test_session_creation() {
@@ -104,8 +104,8 @@ fn test_module_caching() {
 use verum_cbgr::analysis::RefId;
 use verum_cbgr::tier_analysis::TierAnalysisResult;
 use verum_cbgr::tier_types::{ReferenceTier, TierStatistics};
-use verum_compiler::session::FunctionId;
 use verum_common::Map;
+use verum_compiler::session::FunctionId;
 
 #[test]
 fn test_tier_cache_store_and_retrieve() {

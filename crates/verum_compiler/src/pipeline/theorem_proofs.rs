@@ -33,8 +33,8 @@ impl<'s> CompilationPipeline<'s> {
     /// the module.
     pub(super) fn verify_theorem_proofs(&self, module: &Module) -> Result<()> {
         use crate::phases::proof_verification::{
-            build_refinement_alias_map, register_module_lemmas,
-            verify_proof_body_with_aliases, ProofVerificationResult,
+            ProofVerificationResult, build_refinement_alias_map, register_module_lemmas,
+            verify_proof_body_with_aliases,
         };
         use verum_smt::proof_search::{HintsDatabase, ProofSearchEngine};
 
@@ -180,7 +180,7 @@ impl<'s> CompilationPipeline<'s> {
             // closure_cache is None.
             let cache_outcome = closure_cache.as_ref().map(|store| {
                 use verum_verification::closure_cache::{
-                    cached_check, CachedVerdict, ClosureFingerprint,
+                    CachedVerdict, ClosureFingerprint, cached_check,
                 };
                 // Signature payload: name + requires + ensures +
                 // proposition rendering. Stable across runs so long
@@ -230,7 +230,9 @@ impl<'s> CompilationPipeline<'s> {
                                 cert.steps.len(),
                                 cert.total_duration.as_secs_f64() * 1000.0
                             );
-                            CachedVerdict::Ok { elapsed_ms: elapsed }
+                            CachedVerdict::Ok {
+                                elapsed_ms: elapsed,
+                            }
                         }
                         ProofVerificationResult::Failed { unproved, .. } => {
                             failed_count += 1;

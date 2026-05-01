@@ -187,7 +187,11 @@ impl NllPoint {
     /// Create a new program point.
     #[must_use]
     pub fn new(block: BlockId, statement: u32, kind: PointKind) -> Self {
-        Self { block, statement, kind }
+        Self {
+            block,
+            statement,
+            kind,
+        }
     }
 
     /// Start of a statement.
@@ -269,10 +273,14 @@ impl LivenessInfo {
     #[must_use]
     pub fn last_use(&self, var: RefId) -> Option<NllPoint> {
         self.use_points.get(&var).and_then(|uses| {
-            uses.iter().max_by(|a, b| {
-                a.block.0.cmp(&b.block.0)
-                    .then_with(|| a.statement.cmp(&b.statement))
-            }).copied()
+            uses.iter()
+                .max_by(|a, b| {
+                    a.block
+                        .0
+                        .cmp(&b.block.0)
+                        .then_with(|| a.statement.cmp(&b.statement))
+                })
+                .copied()
         })
     }
 }
@@ -360,9 +368,9 @@ impl BorrowSet {
     /// Prefer `has_conflict_at` for liveness-aware conflict checking.
     #[must_use]
     pub fn has_conflict(&self, place: RefId, kind: NllBorrowKind) -> Option<&BorrowData> {
-        self.borrows.values().find(|b| {
-            b.borrowed_place == place && b.conflicts_with(kind)
-        })
+        self.borrows
+            .values()
+            .find(|b| b.borrowed_place == place && b.conflicts_with(kind))
     }
 
     /// Check for conflicting borrows at a specific point (liveness-aware).
@@ -382,11 +390,9 @@ impl BorrowSet {
         kind: NllBorrowKind,
         point: &NllPoint,
     ) -> Option<&BorrowData> {
-        self.borrows.values().find(|b| {
-            b.borrowed_place == place
-                && b.conflicts_with(kind)
-                && b.is_live_at(point)
-        })
+        self.borrows
+            .values()
+            .find(|b| b.borrowed_place == place && b.conflicts_with(kind) && b.is_live_at(point))
     }
 }
 
@@ -534,10 +540,7 @@ impl NllConstraint {
 #[derive(Debug, Clone)]
 pub enum NllConstraintKind {
     /// Region subset constraint: sub ⊆ sup.
-    Subset {
-        sub: NllRegionId,
-        sup: NllRegionId,
-    },
+    Subset { sub: NllRegionId, sup: NllRegionId },
     /// Region must be live at point.
     LiveAt {
         region: NllRegionId,
@@ -588,33 +591,17 @@ impl NllViolation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NllViolationKind {
     /// Conflicting borrows.
-    ConflictingBorrow {
-        first: BorrowId,
-        second: BorrowId,
-    },
+    ConflictingBorrow { first: BorrowId, second: BorrowId },
     /// Use while mutably borrowed.
-    UseWhileMutablyBorrowed {
-        place: RefId,
-        borrow: BorrowId,
-    },
+    UseWhileMutablyBorrowed { place: RefId, borrow: BorrowId },
     /// Mutation while borrowed.
-    MutationWhileBorrowed {
-        place: RefId,
-        borrow: BorrowId,
-    },
+    MutationWhileBorrowed { place: RefId, borrow: BorrowId },
     /// Move while borrowed.
-    MoveWhileBorrowed {
-        place: RefId,
-        borrow: BorrowId,
-    },
+    MoveWhileBorrowed { place: RefId, borrow: BorrowId },
     /// Borrow outlives data.
-    BorrowOutlivesData {
-        borrow: BorrowId,
-    },
+    BorrowOutlivesData { borrow: BorrowId },
     /// Return of local reference.
-    ReturnLocalRef {
-        borrow: BorrowId,
-    },
+    ReturnLocalRef { borrow: BorrowId },
 }
 
 // ============================================================================
@@ -767,7 +754,10 @@ impl NllAnalyzer {
     #[must_use]
     pub fn new(cfg: ControlFlowGraph) -> Self {
         let mut regions = Map::new();
-        regions.insert(NllRegionId::STATIC, NllRegion::universal(NllRegionId::STATIC));
+        regions.insert(
+            NllRegionId::STATIC,
+            NllRegion::universal(NllRegionId::STATIC),
+        );
 
         Self {
             cfg,
@@ -879,7 +869,8 @@ impl NllAnalyzer {
             // Uses
             for (idx, use_site) in block.uses.iter().enumerate() {
                 let point = NllPoint::start(*block_id, idx as u32);
-                self.liveness.use_points
+                self.liveness
+                    .use_points
                     .entry(use_site.reference)
                     .or_insert_with(Set::new)
                     .insert(point);
@@ -900,12 +891,15 @@ impl NllAnalyzer {
                 if let Some(block) = self.cfg.blocks.get(block_id) {
                     // Each use extends the live range
                     for use_site in &block.uses {
-                        let range = self.liveness.live_ranges
+                        let range = self
+                            .liveness
+                            .live_ranges
                             .entry(use_site.reference)
                             .or_insert_with(LiveRange::new);
 
                         // Add all points from definition to this use
-                        if let Some(&_def_point) = self.liveness.def_points.get(&use_site.reference) {
+                        if let Some(&_def_point) = self.liveness.def_points.get(&use_site.reference)
+                        {
                             // Add points between def and use
                             for stmt in 0..=block.definitions.len() {
                                 let point = NllPoint::start(*block_id, stmt as u32);
@@ -924,12 +918,16 @@ impl NllAnalyzer {
     /// Create regions for borrow operations.
     fn create_borrow_regions(&mut self) {
         // Collect data first to avoid borrow conflicts
-        let def_data: List<(BlockId, u32, RefId)> = self.cfg.blocks
+        let def_data: List<(BlockId, u32, RefId)> = self
+            .cfg
+            .blocks
             .iter()
             .flat_map(|(block_id, block)| {
-                block.definitions.iter().enumerate().map(move |(idx, def)| {
-                    (*block_id, idx as u32, def.reference)
-                })
+                block
+                    .definitions
+                    .iter()
+                    .enumerate()
+                    .map(move |(idx, def)| (*block_id, idx as u32, def.reference))
             })
             .collect();
 
@@ -1012,7 +1010,8 @@ impl NllAnalyzer {
         for region_id in region_ids {
             if let Some(region) = self.regions.get(&region_id) {
                 for point in region.points.iter() {
-                    self.constraints.push(NllConstraint::live_at(region_id, *point));
+                    self.constraints
+                        .push(NllConstraint::live_at(region_id, *point));
                 }
             }
         }
@@ -1045,7 +1044,8 @@ impl NllAnalyzer {
                 match &constraint.kind {
                     NllConstraintKind::Subset { sub, sup } => {
                         // Propagate points from sub to sup
-                        let sub_points: Set<NllPoint> = self.regions
+                        let sub_points: Set<NllPoint> = self
+                            .regions
                             .get(sub)
                             .map(|r| r.points.clone())
                             .unwrap_or_default();
@@ -1068,7 +1068,10 @@ impl NllAnalyzer {
                             }
                         }
                     }
-                    NllConstraintKind::BorrowValid { borrow: _, region: _ } => {
+                    NllConstraintKind::BorrowValid {
+                        borrow: _,
+                        region: _,
+                    } => {
                         // Ensure borrow's region is subset of target region
                         // (handled by subset constraints)
                     }
@@ -1111,8 +1114,8 @@ impl NllAnalyzer {
                             // Liveness-based conflict check:
                             // Only report conflict if there's a point where BOTH borrows are live.
                             // This enables early release when first borrow is no longer used.
-                            let has_live_overlap = r1.points.intersection(&r2.points)
-                                .any(|point| {
+                            let has_live_overlap =
+                                r1.points.intersection(&r2.points).any(|point| {
                                     borrow1.is_live_at(point) && borrow2.is_live_at(point)
                                 });
 
@@ -1191,7 +1194,8 @@ impl TwoPhaseBorrowManager {
     #[must_use]
     pub fn allows_shared_access(&self, place: RefId) -> bool {
         // Shared access is allowed if the mutable borrow is only reserved
-        self.reserved.values()
+        self.reserved
+            .values()
             .filter(|b| b.borrowed_place == place)
             .all(|b| !self.activated.contains(&b.id))
     }
@@ -1310,10 +1314,18 @@ mod tests {
         borrows.create_borrow(shared);
 
         // Shared doesn't conflict with shared
-        assert!(borrows.has_conflict(RefId(1), NllBorrowKind::Shared).is_none());
+        assert!(
+            borrows
+                .has_conflict(RefId(1), NllBorrowKind::Shared)
+                .is_none()
+        );
 
         // Shared conflicts with mutable
-        assert!(borrows.has_conflict(RefId(1), NllBorrowKind::Mutable).is_some());
+        assert!(
+            borrows
+                .has_conflict(RefId(1), NllBorrowKind::Mutable)
+                .is_some()
+        );
     }
 
     #[test]
@@ -1359,7 +1371,9 @@ mod tests {
     #[test]
     fn test_nll_violation_creation() {
         let violation = NllViolation::new(
-            NllViolationKind::BorrowOutlivesData { borrow: BorrowId(0) },
+            NllViolationKind::BorrowOutlivesData {
+                borrow: BorrowId(0),
+            },
             "borrow outlives data",
         );
 
@@ -1412,11 +1426,13 @@ mod tests {
         let point1 = NllPoint::start(BlockId(0), 0);
         let point2 = NllPoint::end(BlockId(0), 1);
 
-        liveness.use_points
+        liveness
+            .use_points
             .entry(RefId(1))
             .or_insert_with(Set::new)
             .insert(point1);
-        liveness.use_points
+        liveness
+            .use_points
             .entry(RefId(1))
             .or_insert_with(Set::new)
             .insert(point2);
@@ -1535,11 +1551,19 @@ mod tests {
 
         // At point 0 (before release): conflict with mutable
         let point_before = NllPoint::start(BlockId(0), 0);
-        assert!(borrows.has_conflict_at(RefId(1), NllBorrowKind::Mutable, &point_before).is_some());
+        assert!(
+            borrows
+                .has_conflict_at(RefId(1), NllBorrowKind::Mutable, &point_before)
+                .is_some()
+        );
 
         // At point 2 (after release): NO conflict with mutable!
         let point_after = NllPoint::start(BlockId(0), 2);
-        assert!(borrows.has_conflict_at(RefId(1), NllBorrowKind::Mutable, &point_after).is_none());
+        assert!(
+            borrows
+                .has_conflict_at(RefId(1), NllBorrowKind::Mutable, &point_after)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1559,8 +1583,8 @@ mod tests {
         // Immutable borrow: created at stmt 0, released at stmt 1 (last use)
         let immutable_borrow = BorrowData {
             id: BorrowId(0),
-            borrowed_place: RefId(1),  // data
-            assigned_place: RefId(2),  // first
+            borrowed_place: RefId(1), // data
+            assigned_place: RefId(2), // first
             kind: NllBorrowKind::Shared,
             region: NllRegionId(1),
             reserve_point: NllPoint::start(BlockId(0), 0),
@@ -1575,7 +1599,10 @@ mod tests {
 
         // With liveness-based release, there should be NO conflict
         let conflict = borrows.has_conflict_at(RefId(1), NllBorrowKind::Mutable, &mutable_point);
-        assert!(conflict.is_none(), "Liveness-based release should allow mutable borrow after shared borrow is no longer used");
+        assert!(
+            conflict.is_none(),
+            "Liveness-based release should allow mutable borrow after shared borrow is no longer used"
+        );
     }
 
     #[test]
@@ -1592,8 +1619,8 @@ mod tests {
         // Immutable borrow: created at stmt 0, last use at stmt 2
         let immutable_borrow = BorrowData {
             id: BorrowId(0),
-            borrowed_place: RefId(1),  // data
-            assigned_place: RefId(2),  // first
+            borrowed_place: RefId(1), // data
+            assigned_place: RefId(2), // first
             kind: NllBorrowKind::Shared,
             region: NllRegionId(1),
             reserve_point: NllPoint::start(BlockId(0), 0),
@@ -1608,6 +1635,9 @@ mod tests {
 
         // There SHOULD be a conflict
         let conflict = borrows.has_conflict_at(RefId(1), NllBorrowKind::Mutable, &mutable_point);
-        assert!(conflict.is_some(), "Should detect conflict when shared borrow is still live");
+        assert!(
+            conflict.is_some(),
+            "Should detect conflict when shared borrow is still live"
+        );
     }
 }

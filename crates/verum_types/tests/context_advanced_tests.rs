@@ -27,8 +27,8 @@ use verum_ast::decl::{ContextDecl, Visibility};
 use verum_ast::span::Span;
 use verum_ast::ty::Ident;
 use verum_common::Text;
-use verum_types::context_check::*;
 use verum_types::TypeError;
+use verum_types::context_check::*;
 
 /// Helper to create a simple context declaration
 fn make_context(name: &str) -> ContextDecl {
@@ -46,10 +46,7 @@ fn make_context(name: &str) -> ContextDecl {
 }
 
 fn make_context_with_subs(name: &str, subs: Vec<&str>) -> ContextDecl {
-    let sub_contexts: Vec<ContextDecl> = subs
-        .iter()
-        .map(|s| make_context(s))
-        .collect();
+    let sub_contexts: Vec<ContextDecl> = subs.iter().map(|s| make_context(s)).collect();
     ContextDecl {
         visibility: Visibility::Public,
         name: Ident::new(name.to_string(), Span::default()),
@@ -296,7 +293,10 @@ fn test_propagation_empty_callee() {
     let callee = ContextSet::new();
 
     let result = checker.check_call_propagation(&callee, Span::default());
-    assert!(result.is_ok(), "Empty callee requirements should always succeed");
+    assert!(
+        result.is_ok(),
+        "Empty callee requirements should always succeed"
+    );
 }
 
 // ============================================================================
@@ -320,9 +320,21 @@ fn test_missing_context_error() {
 fn test_multiple_missing_context_errors() {
     let checker = ContextChecker::new();
 
-    assert!(checker.check_context_call("Database", "query", Span::default()).is_err());
-    assert!(checker.check_context_call("Logger", "log", Span::default()).is_err());
-    assert!(checker.check_context_call("Cache", "get", Span::default()).is_err());
+    assert!(
+        checker
+            .check_context_call("Database", "query", Span::default())
+            .is_err()
+    );
+    assert!(
+        checker
+            .check_context_call("Logger", "log", Span::default())
+            .is_err()
+    );
+    assert!(
+        checker
+            .check_context_call("Cache", "get", Span::default())
+            .is_err()
+    );
 }
 
 #[test]
@@ -351,9 +363,21 @@ fn test_valid_sub_context_check() {
     let fs = make_context_with_subs("FileSystem", vec!["Read", "Write", "Admin"]);
     checker.register_context("FileSystem".to_string(), fs);
 
-    assert!(checker.check_sub_context("FileSystem", "Read", Span::default()).is_ok());
-    assert!(checker.check_sub_context("FileSystem", "Write", Span::default()).is_ok());
-    assert!(checker.check_sub_context("FileSystem", "Admin", Span::default()).is_ok());
+    assert!(
+        checker
+            .check_sub_context("FileSystem", "Read", Span::default())
+            .is_ok()
+    );
+    assert!(
+        checker
+            .check_sub_context("FileSystem", "Write", Span::default())
+            .is_ok()
+    );
+    assert!(
+        checker
+            .check_sub_context("FileSystem", "Admin", Span::default())
+            .is_ok()
+    );
 }
 
 #[test]
@@ -364,7 +388,11 @@ fn test_invalid_sub_context_check() {
 
     let result = checker.check_sub_context("FileSystem", "Execute", Span::default());
     match result {
-        Err(TypeError::InvalidSubContext { context, sub_context, .. }) => {
+        Err(TypeError::InvalidSubContext {
+            context,
+            sub_context,
+            ..
+        }) => {
             assert_eq!(context, "FileSystem");
             assert_eq!(sub_context, "Execute");
         }

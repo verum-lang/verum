@@ -132,7 +132,6 @@ pub enum TestType {
     Benchmark,
 
     // === VBC-First Pipeline Verification Tests ===
-
     /// Full common pipeline test (parse + types + contracts + context)
     /// Uses verum_compiler::api::run_common_pipeline()
     CommonPipeline,
@@ -145,7 +144,6 @@ pub enum TestType {
     VbcCodegenFail,
 
     // === Meta-System Tests ===
-
     /// Meta-code should compile and evaluate successfully at compile-time
     /// Tests meta functions, builtins, and compile-time evaluation
     MetaPass,
@@ -157,7 +155,6 @@ pub enum TestType {
     MetaEval,
 
     // === Interpreter-Specific Execution Tests ===
-
     /// Program should run on Tier 0 VBC interpreter and produce expected output.
     /// Unlike `Run`, this always uses the interpreter (no AOT/JIT fallback).
     RunInterpreter,
@@ -201,7 +198,12 @@ impl TestType {
     pub fn requires_execution(&self) -> bool {
         matches!(
             self,
-            Self::Run | Self::RunPanic | Self::RunInterpreter | Self::RunInterpreterPanic | Self::Differential | Self::Benchmark
+            Self::Run
+                | Self::RunPanic
+                | Self::RunInterpreter
+                | Self::RunInterpreterPanic
+                | Self::Differential
+                | Self::Benchmark
         )
     }
 
@@ -467,7 +469,6 @@ pub enum ErrorCategory {
     Internal,
 
     // === Meta-System Error Categories (M-prefix) ===
-
     /// M0XX: Core meta errors (function not found, evaluation failed)
     MetaCore,
     /// M1XX: Builtin errors (unknown builtin, arity mismatch)
@@ -826,7 +827,6 @@ pub struct TestDirectives {
     pub parse_warnings: List<Text>,
 
     // === Meta-System Test Directives ===
-
     /// Expected value for meta-eval tests (e.g., "42", "[1, 2, 3]", "\"hello\"")
     pub expected_value: Option<Text>,
     /// Expected type of result for meta tests (e.g., "Int", "List<Text>")
@@ -984,20 +984,16 @@ impl TestDirectives {
             } else if let Some(rest) = comment.strip_prefix("@expected-error:") {
                 match ExpectedError::parse(rest.trim()) {
                     Ok(err) => directives.expected_errors.push(err),
-                    Err(e) => {
-                        directives
-                            .parse_warnings
-                            .push(format!("Line {}: {}", line_num + 1, e).into())
-                    }
+                    Err(e) => directives
+                        .parse_warnings
+                        .push(format!("Line {}: {}", line_num + 1, e).into()),
                 }
             } else if let Some(rest) = comment.strip_prefix("@expected-warning:") {
                 match ExpectedError::parse(rest.trim()) {
                     Ok(err) => directives.expected_warnings.push(err),
-                    Err(e) => {
-                        directives
-                            .parse_warnings
-                            .push(format!("Line {}: {}", line_num + 1, e).into())
-                    }
+                    Err(e) => directives
+                        .parse_warnings
+                        .push(format!("Line {}: {}", line_num + 1, e).into()),
                 }
             } else if let Some(rest) = comment.strip_prefix("@expected-error-count:") {
                 directives.expected_error_count =
@@ -1124,7 +1120,9 @@ impl TestDirectives {
         // Check for conflicting expectations
         if self.expected_stdout.is_some() && self.expected_stdout_file.is_some() {
             return Err(DirectiveError::ConflictingDirectives(
-                "Cannot specify both @expected-stdout and @expected-stdout-file".to_string().into(),
+                "Cannot specify both @expected-stdout and @expected-stdout-file"
+                    .to_string()
+                    .into(),
             ));
         }
 
@@ -1143,16 +1141,21 @@ impl TestDirectives {
         match self.test_type {
             TestType::ParsePass | TestType::TypecheckPass | TestType::VerifyPass => {
                 if !self.expected_errors.is_empty() {
-                    return Err(DirectiveError::ConflictingDirectives(format!(
-                        "{} test should not have @expected-error directives",
-                        self.test_type
-                    ).into()));
+                    return Err(DirectiveError::ConflictingDirectives(
+                        format!(
+                            "{} test should not have @expected-error directives",
+                            self.test_type
+                        )
+                        .into(),
+                    ));
                 }
             }
             TestType::RunPanic => {
                 if self.expected_panic.is_none() {
                     return Err(DirectiveError::ValidationError(
-                        "run-panic test requires @expected-panic directive".to_string().into(),
+                        "run-panic test requires @expected-panic directive"
+                            .to_string()
+                            .into(),
                     ));
                 }
             }
@@ -1429,7 +1432,10 @@ mod tests {
     fn test_parse_expected_error() {
         let err = ExpectedError::parse(r#"E302 "Use after move" at line 8"#).unwrap();
         assert_eq!(err.code.as_str(), "E302");
-        assert_eq!(err.message.as_ref().map(|t| t.as_str()), Some("Use after move"));
+        assert_eq!(
+            err.message.as_ref().map(|t| t.as_str()),
+            Some("Use after move")
+        );
         assert_eq!(err.line, Some(8));
         assert_eq!(err.column, None);
         assert_eq!(err.category, Some(ErrorCategory::Borrow));
@@ -1470,7 +1476,10 @@ mod tests {
         let err = ExpectedError::parse(r#"[error] E302 "Use after move""#).unwrap();
         assert_eq!(err.code.as_str(), "E302");
         assert_eq!(err.severity.as_ref().map(|t| t.as_str()), Some("error"));
-        assert_eq!(err.message.as_ref().map(|t| t.as_str()), Some("Use after move"));
+        assert_eq!(
+            err.message.as_ref().map(|t| t.as_str()),
+            Some("Use after move")
+        );
     }
 
     #[test]
@@ -1480,7 +1489,10 @@ mod tests {
             .at_position(10, Some(5));
 
         assert_eq!(err.code.as_str(), "E302");
-        assert_eq!(err.message.as_ref().map(|t| t.as_str()), Some("Use after move"));
+        assert_eq!(
+            err.message.as_ref().map(|t| t.as_str()),
+            Some("Use after move")
+        );
         assert_eq!(err.line, Some(10));
         assert_eq!(err.column, Some(5));
     }
@@ -1607,7 +1619,10 @@ fn main() {
 
         let directives = TestDirectives::parse(content, "fib.vr".to_string().into()).unwrap();
         assert_eq!(directives.test_type, TestType::Run);
-        assert_eq!(directives.expected_stdout.as_ref().map(|t| t.as_str()), Some("55"));
+        assert_eq!(
+            directives.expected_stdout.as_ref().map(|t| t.as_str()),
+            Some("55")
+        );
         assert_eq!(directives.timeout_ms, Some(5000));
         assert_eq!(directives.tiers.len(), 2);
     }
@@ -1680,7 +1695,10 @@ fn main() {}
 "#;
 
         let directives = TestDirectives::parse(content, "test.vr".to_string().into()).unwrap();
-        assert_eq!(directives.skip.as_ref().map(|t| t.as_str()), Some("Not implemented yet"));
+        assert_eq!(
+            directives.skip.as_ref().map(|t| t.as_str()),
+            Some("Not implemented yet")
+        );
     }
 
     #[test]

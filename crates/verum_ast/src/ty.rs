@@ -753,7 +753,6 @@ pub enum TypeKind {
         /// Body type expression (may reference params)
         body: Heap<Type>,
     },
-
 }
 
 impl TypeKind {
@@ -1161,12 +1160,10 @@ impl std::fmt::Display for KindAnnotation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             KindAnnotation::Type => write!(f, "Type"),
-            KindAnnotation::Arrow(lhs, rhs) => {
-                match lhs.as_ref() {
-                    KindAnnotation::Arrow(_, _) => write!(f, "({}) -> {}", lhs, rhs),
-                    _ => write!(f, "{} -> {}", lhs, rhs),
-                }
-            }
+            KindAnnotation::Arrow(lhs, rhs) => match lhs.as_ref() {
+                KindAnnotation::Arrow(_, _) => write!(f, "({}) -> {}", lhs, rhs),
+                _ => write!(f, "{} -> {}", lhs, rhs),
+            },
         }
     }
 }

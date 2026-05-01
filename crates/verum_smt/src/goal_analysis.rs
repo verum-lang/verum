@@ -483,10 +483,8 @@ impl TacticKind {
             }
             Self::Heavy => {
                 // simplify -> propagate-values -> nnf -> qe-light
-                let stage1 = Tactic::and_then(
-                    &Tactic::new("simplify"),
-                    &Tactic::new("propagate-values"),
-                );
+                let stage1 =
+                    Tactic::and_then(&Tactic::new("simplify"), &Tactic::new("propagate-values"));
                 let stage2 = Tactic::and_then(&stage1, &Tactic::new("nnf"));
                 Tactic::and_then(&stage2, &Tactic::new("qe-light"))
             }
@@ -573,7 +571,8 @@ impl AnalysisStats {
             } else {
                 0.0
             }
-        ).into()
+        )
+        .into()
     }
 }
 

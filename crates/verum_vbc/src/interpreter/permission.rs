@@ -157,8 +157,7 @@ pub enum PermissionDecision {
 /// (T1-I). It is invoked **only on cache misses**, so the cost
 /// of a database lookup or RPC round-trip is amortised across
 /// the surrounding hot loop.
-pub type PolicyFn =
-    dyn Fn(PermissionScope, PermissionTargetId) -> PermissionDecision + Send + Sync;
+pub type PolicyFn = dyn Fn(PermissionScope, PermissionTargetId) -> PermissionDecision + Send + Sync;
 
 /// Statistics recorded by the router.
 ///
@@ -298,18 +297,24 @@ impl PermissionRouter {
 
         // (1) one-entry warm path — ≤2ns, single compare.
         if let Some(last) = self.last
-            && last.scope == scope && last.target_id == target_id {
-                self.stats.last_entry_hits = self.stats.last_entry_hits.saturating_add(1);
-                if last.decision == PermissionDecision::Deny {
-                    self.stats.denials = self.stats.denials.saturating_add(1);
-                }
-                return last.decision;
+            && last.scope == scope
+            && last.target_id == target_id
+        {
+            self.stats.last_entry_hits = self.stats.last_entry_hits.saturating_add(1);
+            if last.decision == PermissionDecision::Deny {
+                self.stats.denials = self.stats.denials.saturating_add(1);
             }
+            return last.decision;
+        }
 
         // (2) backing map.
         if let Some(decision) = self.map.get(&(scope, target_id)).copied() {
             self.stats.map_hits = self.stats.map_hits.saturating_add(1);
-            self.last = Some(LastEntry { scope, target_id, decision });
+            self.last = Some(LastEntry {
+                scope,
+                target_id,
+                decision,
+            });
             if decision == PermissionDecision::Deny {
                 self.stats.denials = self.stats.denials.saturating_add(1);
             }
@@ -319,15 +324,18 @@ impl PermissionRouter {
         // (3) / (4) cold path.
         let decision = match &self.policy {
             Some(policy) => {
-                self.stats.policy_invocations =
-                    self.stats.policy_invocations.saturating_add(1);
+                self.stats.policy_invocations = self.stats.policy_invocations.saturating_add(1);
                 policy(scope, target_id)
             }
             None => PermissionDecision::Allow,
         };
 
         self.map.insert((scope, target_id), decision);
-        self.last = Some(LastEntry { scope, target_id, decision });
+        self.last = Some(LastEntry {
+            scope,
+            target_id,
+            decision,
+        });
         if decision == PermissionDecision::Deny {
             self.stats.denials = self.stats.denials.saturating_add(1);
         }
@@ -559,8 +567,7 @@ mod tests {
     #[test]
     fn has_policy_reflects_constructor() {
         assert!(!PermissionRouter::allow_all().has_policy());
-        let with =
-            PermissionRouter::with_policy(|_, _| PermissionDecision::Allow);
+        let with = PermissionRouter::with_policy(|_, _| PermissionDecision::Allow);
         assert!(with.has_policy());
     }
 

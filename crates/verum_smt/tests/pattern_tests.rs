@@ -32,6 +32,7 @@ use verum_ast::{
     literal::{IntLit, Literal, LiteralKind},
     span::Span,
 };
+use verum_common::{List, Map, Maybe, Set, Text};
 use verum_smt::{
     Context, Translator,
     pattern_quantifiers::{
@@ -40,7 +41,6 @@ use verum_smt::{
     refinement::RefinementVerifier,
     verify::VerifyMode,
 };
-use verum_common::{List, Map, Maybe, Set, Text};
 
 // ==================== Test Helpers ====================
 

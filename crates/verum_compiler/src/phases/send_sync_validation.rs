@@ -20,9 +20,9 @@
 
 use verum_ast::visitor::{Visitor, walk_expr};
 use verum_ast::{Expr, ExprKind, Module};
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 use verum_common::List;
 use verum_common::well_known_types::WellKnownType as WKT;
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 use super::ast_span_to_diagnostic_span;
 
@@ -45,9 +45,7 @@ impl SendSyncValidationPhase {
 }
 
 /// Known types that are NOT Send — produces hard errors at spawn/channel boundaries
-const NON_SEND_TYPES: &[&str] = &[
-    "RawPtr", "UnsafeCell", "Cell", "RefCell", "Rc",
-];
+const NON_SEND_TYPES: &[&str] = &["RawPtr", "UnsafeCell", "Cell", "RefCell", "Rc"];
 
 fn is_known_non_send(name: &str) -> bool {
     NON_SEND_TYPES.contains(&name)
@@ -97,7 +95,13 @@ impl SendSyncVisitor {
     }
 
     /// Check a method call for Channel.send with non-Send argument
-    fn check_channel_send(&mut self, receiver: &Expr, method: &str, args: &[Expr], span: verum_ast::Span) {
+    fn check_channel_send(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        args: &[Expr],
+        span: verum_ast::Span,
+    ) {
         if method != "send" {
             return;
         }
@@ -129,13 +133,17 @@ impl SendSyncVisitor {
                 if let Some(seg) = path.segments.last() {
                     if let verum_ast::ty::PathSegment::Name(ident) = seg {
                         let name = ident.name.as_str();
-                        return name.contains("ch") || name.contains("channel")
-                            || name.contains("chan") || name.contains("_ch");
+                        return name.contains("ch")
+                            || name.contains("channel")
+                            || name.contains("chan")
+                            || name.contains("_ch");
                     }
                 }
                 false
             }
-            ExprKind::MethodCall { receiver, method, .. } => {
+            ExprKind::MethodCall {
+                receiver, method, ..
+            } => {
                 if method.name.as_str() == "new" {
                     if let ExprKind::Path(path) = &receiver.kind {
                         if let Some(seg) = path.segments.last() {
@@ -159,7 +167,12 @@ impl Visitor for SendSyncVisitor {
                 self.check_spawn_expr(expr, body);
             }
 
-            ExprKind::MethodCall { receiver, method, args, .. } => {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
                 self.check_channel_send(receiver, method.name.as_str(), args, expr.span);
             }
 
@@ -169,7 +182,8 @@ impl Visitor for SendSyncVisitor {
                         if let verum_ast::ty::PathSegment::Name(ident) = seg {
                             if WKT::Shared.matches(ident.name.as_str()) {
                                 for arg in args {
-                                    if let Some(type_name) = self.expr_references_non_send_type(arg) {
+                                    if let Some(type_name) = self.expr_references_non_send_type(arg)
+                                    {
                                         self.diagnostics.push(
                                             DiagnosticBuilder::error()
                                                 .message(format!(

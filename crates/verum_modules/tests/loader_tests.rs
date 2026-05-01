@@ -52,14 +52,20 @@ fn test_path_collision_file_form_vs_directory_form() {
     std::fs::write(
         root.join("bar").join("mod.vr"),
         "public fn from_dir() -> Int { 2 }",
-    ).unwrap();
+    )
+    .unwrap();
 
     let mut loader = ModuleLoader::new(root);
     let module_path = ModulePath::from_str("bar");
     let result = loader.load_module(&module_path, ModuleId::new(1));
 
     match result {
-        Err(ModuleError::PathCollision { path, winning_path, losing_paths, .. }) => {
+        Err(ModuleError::PathCollision {
+            path,
+            winning_path,
+            losing_paths,
+            ..
+        }) => {
             assert_eq!(path.to_string(), "bar");
             // Both candidates should be enumerated — the diagnostic
             // must cite both files so the user can navigate to fix.
@@ -69,7 +75,8 @@ fn test_path_collision_file_form_vs_directory_form() {
             // emits first; the loser must be the OTHER file. We don't
             // pin which is winner — the diagnostic discipline is "cite
             // both", not "prefer file over dir".
-            let losers: Vec<String> = losing_paths.iter()
+            let losers: Vec<String> = losing_paths
+                .iter()
                 .map(|p| p.display().to_string())
                 .collect();
             let winning_str = winning_path.display().to_string();
@@ -98,7 +105,11 @@ fn test_path_collision_diagnostic_carries_E_MODULE_code() {
     let root = temp_dir.path();
     std::fs::write(root.join("foo.vr"), "public fn x() -> Int { 1 }").unwrap();
     std::fs::create_dir(root.join("foo")).unwrap();
-    std::fs::write(root.join("foo").join("mod.vr"), "public fn y() -> Int { 2 }").unwrap();
+    std::fs::write(
+        root.join("foo").join("mod.vr"),
+        "public fn y() -> Int { 2 }",
+    )
+    .unwrap();
 
     let mut loader = ModuleLoader::new(root);
     let result = loader.load_module(&ModulePath::from_str("foo"), ModuleId::new(1));

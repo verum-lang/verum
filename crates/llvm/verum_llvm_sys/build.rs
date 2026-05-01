@@ -50,7 +50,8 @@ fn main() {
         };
         panic!(
             "llvm-config not found at {}. Run: {}",
-            llvm_config.display(), build_cmd
+            llvm_config.display(),
+            build_cmd
         );
     }
 
@@ -111,7 +112,10 @@ fn get_llvm_install_dir() -> PathBuf {
         if has_llvm_config(&path) {
             return path;
         }
-        println!("cargo:warning=VERUM_LLVM_DIR={} but llvm-config not found there", dir);
+        println!(
+            "cargo:warning=VERUM_LLVM_DIR={} but llvm-config not found there",
+            dir
+        );
     }
 
     // 2. Use local llvm/install/ directory
@@ -202,7 +206,11 @@ fn auto_build_llvm(workspace_root: &Path) {
 fn verify_llvm_version(llvm_dir: &Path) {
     let llvm_config = if cfg!(windows) {
         let exe_path = llvm_dir.join("bin/llvm-config.exe");
-        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+        if exe_path.exists() {
+            exe_path
+        } else {
+            llvm_dir.join("bin/llvm-config")
+        }
     } else {
         llvm_dir.join("bin/llvm-config")
     };
@@ -256,7 +264,9 @@ fn link_llvm_libraries(llvm_dir: &Path, llvm_config: &Path) {
             .or_else(|| lib.strip_suffix(".lib"))
             .unwrap_or(lib);
 
-        if lib_name.is_empty() { continue; }
+        if lib_name.is_empty() {
+            continue;
+        }
         println!("cargo:rustc-link-lib=static={}", lib_name);
     }
 
@@ -313,16 +323,11 @@ fn link_mlir_libraries(lib_dir: &Path) {
                             .unwrap()
                             .strip_suffix(".a")
                             .unwrap()
-                            .to_string()
+                            .to_string(),
                     )
                 // Windows: MLIR*.lib
                 } else if name_str.starts_with("MLIR") && name_str.ends_with(".lib") {
-                    Some(
-                        name_str
-                            .strip_suffix(".lib")
-                            .unwrap()
-                            .to_string()
-                    )
+                    Some(name_str.strip_suffix(".lib").unwrap().to_string())
                 } else {
                     None
                 }
@@ -340,8 +345,8 @@ fn link_mlir_libraries(lib_dir: &Path) {
 
 /// Compile C wrapper for LLVM target initialization macros
 fn compile_target_wrappers(include_dir: &Path) {
-    let wrapper_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("wrappers/target.c");
+    let wrapper_path =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("wrappers/target.c");
 
     if !wrapper_path.exists() {
         // Create minimal wrapper if it doesn't exist
@@ -393,28 +398,28 @@ void verum_llvm_initialize_native_asm_parser(void) {
 /// Compile LLD C++ wrapper
 #[cfg(feature = "lld")]
 fn compile_lld_wrapper(llvm_dir: &Path) {
-    let wrapper_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("src/lld/linker.cpp");
+    let wrapper_path =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("src/lld/linker.cpp");
 
     if !wrapper_path.exists() {
-        println!("cargo:warning=LLD wrapper not found, skipping: {}", wrapper_path.display());
+        println!(
+            "cargo:warning=LLD wrapper not found, skipping: {}",
+            wrapper_path.display()
+        );
         return;
     }
 
     let include_dir = llvm_dir.join("include");
 
     let mut build = cc::Build::new();
-    build
-        .cpp(true)
-        .file(&wrapper_path)
-        .include(&include_dir);
+    build.cpp(true).file(&wrapper_path).include(&include_dir);
 
     // Platform-specific C++ flags
     #[cfg(target_os = "windows")]
     {
         build
             .flag_if_supported("/std:c++17")
-            .flag_if_supported("/GR-")   // Disable RTTI
+            .flag_if_supported("/GR-") // Disable RTTI
             .flag_if_supported("/EHs-c-"); // Disable exceptions
     }
 

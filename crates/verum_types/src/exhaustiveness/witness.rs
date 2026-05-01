@@ -4,7 +4,7 @@
 //! This module generates concrete examples of values not covered by patterns.
 //! Witnesses help developers understand what cases are missing from their match.
 
-use super::constructors::{get_type_constructors, Constructor};
+use super::constructors::{Constructor, get_type_constructors};
 use super::matrix::{CoverageMatrix, LiteralPattern, PatternColumn};
 use super::smt::{SmtValue, SmtWitness};
 use crate::context::TypeEnv;
@@ -17,10 +17,7 @@ use verum_common::{List, Text};
 #[derive(Debug, Clone)]
 pub enum Witness {
     /// A constructor with arguments
-    Constructor {
-        name: Text,
-        args: List<Witness>,
-    },
+    Constructor { name: Text, args: List<Witness> },
 
     /// A literal value
     Literal(WitnessLiteral),
@@ -32,9 +29,7 @@ pub enum Witness {
     Tuple(List<Witness>),
 
     /// A record with named fields
-    Record {
-        fields: List<(Text, Witness)>,
-    },
+    Record { fields: List<(Text, Witness)> },
 
     /// A range of values
     Range {
@@ -307,12 +302,8 @@ pub fn generate_uncovered_witness(
     match ty {
         Type::Bool => {
             // Find which bool value isn't covered
-            let covers_true = covered_patterns
-                .iter()
-                .any(|p| covers_bool_value(p, true));
-            let covers_false = covered_patterns
-                .iter()
-                .any(|p| covers_bool_value(p, false));
+            let covers_true = covered_patterns.iter().any(|p| covers_bool_value(p, true));
+            let covers_false = covered_patterns.iter().any(|p| covers_bool_value(p, false));
 
             if !covers_true {
                 Witness::Literal(WitnessLiteral::Bool(true))
@@ -373,7 +364,9 @@ pub fn generate_uncovered_witness(
             let is_stream_like = ctors.len() == 2
                 && ctors.iter().any(|c| c.arg_types.is_empty())
                 && ctors.iter().any(|c| !c.arg_types.is_empty())
-                && covered_patterns.iter().any(|p| matches!(p, PatternColumn::Stream { .. }));
+                && covered_patterns
+                    .iter()
+                    .any(|p| matches!(p, PatternColumn::Stream { .. }));
 
             if is_stream_like {
                 return generate_stream_witness(covered_patterns, args, env);
@@ -384,7 +377,11 @@ pub fn generate_uncovered_witness(
                     .iter()
                     .any(|p| covers_constructor(p, &ctor.name));
                 if !covers_ctor && !ctor.is_default {
-                    return generate_witness_for_constructor(ctor, &CoverageMatrix::new(ty.clone()), env);
+                    return generate_witness_for_constructor(
+                        ctor,
+                        &CoverageMatrix::new(ty.clone()),
+                        env,
+                    );
                 }
             }
             Witness::Wildcard
@@ -396,7 +393,9 @@ pub fn generate_uncovered_witness(
             let is_stream_like = ctors.len() == 2
                 && ctors.iter().any(|c| c.arg_types.is_empty())
                 && ctors.iter().any(|c| !c.arg_types.is_empty())
-                && covered_patterns.iter().any(|p| matches!(p, PatternColumn::Stream { .. }));
+                && covered_patterns
+                    .iter()
+                    .any(|p| matches!(p, PatternColumn::Stream { .. }));
 
             if is_stream_like {
                 return generate_stream_witness(covered_patterns, args, env);
@@ -407,7 +406,11 @@ pub fn generate_uncovered_witness(
                     .iter()
                     .any(|p| covers_constructor(p, &ctor.name));
                 if !covers_ctor && !ctor.is_default {
-                    return generate_witness_for_constructor(ctor, &CoverageMatrix::new(ty.clone()), env);
+                    return generate_witness_for_constructor(
+                        ctor,
+                        &CoverageMatrix::new(ty.clone()),
+                        env,
+                    );
                 }
             }
             Witness::Wildcard

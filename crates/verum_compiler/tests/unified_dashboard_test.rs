@@ -18,10 +18,10 @@
 //! Demonstrates the unified dashboard functionality with sample data.
 
 use std::time::Duration;
+use verum_common::Map;
 use verum_compiler::compilation_metrics::{CompilationProfileReport, PhasePerformanceMetrics};
 use verum_compiler::profile_cmd::{CbgrStats, FunctionProfile, ProfileReport};
 use verum_compiler::unified_dashboard::UnifiedDashboard;
-use verum_common::Map;
 
 #[test]
 fn test_unified_dashboard_creation() {

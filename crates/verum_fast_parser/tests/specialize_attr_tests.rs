@@ -25,8 +25,8 @@
 //! 4. Conditional specialization: @specialize(when(T: Clone))
 
 use verum_ast::{ItemKind, attr::SpecializeAttr, span::FileId};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper to parse and extract the first impl block's specialize attribute
 fn parse_impl_specialize_attr(source: &str) -> Option<SpecializeAttr> {
@@ -37,9 +37,10 @@ fn parse_impl_specialize_attr(source: &str) -> Option<SpecializeAttr> {
     match parser.parse_module(lexer, file_id) {
         Ok(module) => {
             if let Some(item) = module.items.first()
-                && let ItemKind::Impl(impl_decl) = &item.kind {
-                    return impl_decl.specialize_attr.clone();
-                }
+                && let ItemKind::Impl(impl_decl) = &item.kind
+            {
+                return impl_decl.specialize_attr.clone();
+            }
             None
         }
         Err(_) => None,
@@ -60,10 +61,7 @@ fn test_basic_specialize() {
 
     if let Some(attr) = attr {
         assert!(!attr.negative, "Basic @specialize should not be negative");
-        assert!(
-            attr.rank.is_none(),
-            "Basic @specialize should have no rank"
-        );
+        assert!(attr.rank.is_none(), "Basic @specialize should have no rank");
         assert!(
             attr.when_clause.is_none(),
             "Basic @specialize should have no when clause"
@@ -363,22 +361,23 @@ fn test_specialize_integration_with_type_system() {
     match parser.parse_module(lexer, file_id) {
         Ok(module) => {
             if let Some(item) = module.items.first()
-                && let ItemKind::Impl(impl_decl) = &item.kind {
-                    // Verify the attribute is properly attached
-                    assert!(impl_decl.specialize_attr.is_some());
+                && let ItemKind::Impl(impl_decl) = &item.kind
+            {
+                // Verify the attribute is properly attached
+                assert!(impl_decl.specialize_attr.is_some());
 
-                    if let Some(attr) = &impl_decl.specialize_attr {
-                        // Type system can use this for specialization lattice construction
-                        let rank = attr.effective_rank();
-                        assert_eq!(rank, 10);
+                if let Some(attr) = &impl_decl.specialize_attr {
+                    // Type system can use this for specialization lattice construction
+                    let rank = attr.effective_rank();
+                    assert_eq!(rank, 10);
 
-                        // Can check for negative reasoning
-                        assert!(!attr.negative);
+                    // Can check for negative reasoning
+                    assert!(!attr.negative);
 
-                        // Can check for conditional specialization
-                        assert!(!attr.has_when_clause());
-                    }
+                    // Can check for conditional specialization
+                    assert!(!attr.has_when_clause());
                 }
+            }
         }
         Err(e) => panic!("Parse error: {:?}", e),
     }

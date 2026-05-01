@@ -20,8 +20,8 @@
 //! pattern_comprehensive_tests.rs with more complex scenarios.
 
 use verum_ast::{FileId, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse_module(source: &str) -> Module {
     let file_id = FileId::new(0);

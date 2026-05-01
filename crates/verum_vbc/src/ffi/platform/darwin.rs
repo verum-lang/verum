@@ -44,10 +44,7 @@ impl DarwinPlatform {
         // Try common framework locations
         let framework_paths = [
             format!("/System/Library/Frameworks/{}.framework/{}", name, name),
-            format!(
-                "/Library/Frameworks/{}.framework/{}",
-                name, name
-            ),
+            format!("/Library/Frameworks/{}.framework/{}", name, name),
             format!(
                 "{}/Library/Frameworks/{}.framework/{}",
                 std::env::var("HOME").unwrap_or_default(),
@@ -227,21 +224,14 @@ impl FfiPlatform for DarwinPlatform {
         let prot = libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC;
         let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_JIT;
 
-        let ptr = unsafe {
-            libc::mmap(
-                ptr::null_mut(),
-                size,
-                prot,
-                flags,
-                -1,
-                0,
-            )
-        };
+        let ptr = unsafe { libc::mmap(ptr::null_mut(), size, prot, flags, -1, 0) };
 
         if ptr == libc::MAP_FAILED {
             return Err(FfiPlatformError::AllocationFailed {
                 size,
-                reason: format!("mmap failed with errno {}", unsafe { *self.errno_location() }),
+                reason: format!("mmap failed with errno {}", unsafe {
+                    *self.errno_location()
+                }),
             });
         }
 
@@ -272,22 +262,10 @@ mod tests {
     fn test_normalize_library_name() {
         let platform = DarwinPlatform::new();
 
-        assert_eq!(
-            platform.normalize_library_name("c"),
-            "libSystem.B.dylib"
-        );
-        assert_eq!(
-            platform.normalize_library_name("foo"),
-            "libfoo.dylib"
-        );
-        assert_eq!(
-            platform.normalize_library_name("libbar"),
-            "libbar.dylib"
-        );
-        assert_eq!(
-            platform.normalize_library_name("test.dylib"),
-            "test.dylib"
-        );
+        assert_eq!(platform.normalize_library_name("c"), "libSystem.B.dylib");
+        assert_eq!(platform.normalize_library_name("foo"), "libfoo.dylib");
+        assert_eq!(platform.normalize_library_name("libbar"), "libbar.dylib");
+        assert_eq!(platform.normalize_library_name("test.dylib"), "test.dylib");
     }
 
     #[test]
@@ -300,7 +278,9 @@ mod tests {
     #[cfg(feature = "ffi")]
     fn test_load_libsystem() {
         let platform = DarwinPlatform::new();
-        let handle = platform.load_library("System").expect("failed to load libSystem");
+        let handle = platform
+            .load_library("System")
+            .expect("failed to load libSystem");
         assert!(!handle.is_null());
 
         // Resolve getpid

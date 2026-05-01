@@ -27,8 +27,8 @@
 //! - Closure coercion patterns
 
 use verum_ast::{Expr, ExprKind, FileId, ItemKind, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse_expr(source: &str) -> Expr {
     let file_id = FileId::new(0);

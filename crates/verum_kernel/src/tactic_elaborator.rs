@@ -162,12 +162,14 @@ impl ElabContext {
 
     /// Register an axiom in the global registry. Returns the
     /// previous entry if the name was already present.
-    pub fn register_axiom(&mut self, name: impl Into<String>, claimed_type: Term) -> Option<AxiomEntry> {
+    pub fn register_axiom(
+        &mut self,
+        name: impl Into<String>,
+        claimed_type: Term,
+    ) -> Option<AxiomEntry> {
         let name = name.into();
-        self.global_axioms.insert(
-            name.clone(),
-            AxiomEntry { name, claimed_type },
-        )
+        self.global_axioms
+            .insert(name.clone(), AxiomEntry { name, claimed_type })
     }
 
     /// Look up an axiom by name.
@@ -250,13 +252,21 @@ impl std::fmt::Display for ElabError {
             ElabError::NoProofBody => write!(f, "theorem has no proof body — cannot elaborate"),
             ElabError::UnsupportedTactic(t) => write!(f, "unsupported tactic form: {}", t),
             ElabError::UndeclaredApplyTarget(name) => {
-                write!(f, "apply target `{}` is neither a local binder nor a registered axiom", name)
+                write!(
+                    f,
+                    "apply target `{}` is neither a local binder nor a registered axiom",
+                    name
+                )
             }
             ElabError::UnsupportedExpression(e) => {
                 write!(f, "expression form not supported by the elaborator: {}", e)
             }
             ElabError::KernelRejection(msg) => {
-                write!(f, "elaborator produced ill-typed term — kernel rejected: {}", msg)
+                write!(
+                    f,
+                    "elaborator produced ill-typed term — kernel rejected: {}",
+                    msg
+                )
             }
         }
     }
@@ -274,9 +284,8 @@ impl std::error::Error for ElabError {}
 
 /// Returns `head` unchanged when `args` is empty.
 pub fn build_app_chain(head: Term, args: Vec<Term>) -> Term {
-    args.into_iter().fold(head, |acc, arg| {
-        Term::App(Box::new(acc), Box::new(arg))
-    })
+    args.into_iter()
+        .fold(head, |acc, arg| Term::App(Box::new(acc), Box::new(arg)))
 }
 
 /// **Apply-target resolver.** Given an apply-target name, return the
@@ -290,10 +299,7 @@ pub fn build_app_chain(head: Term, args: Vec<Term>) -> Term {
 ///  before any local binders, so the axiom-table position lifts
 ///  correctly past the local-binder shift.
 ///  - **Unknown**: returns [`ElabError::UndeclaredApplyTarget`].
-pub fn resolve_apply_target(
-    ctx: &ElabContext,
-    name: &str,
-) -> Result<Term, ElabError> {
+pub fn resolve_apply_target(ctx: &ElabContext, name: &str) -> Result<Term, ElabError> {
     if let Some(idx) = ctx.lookup_local(name) {
         return Ok(Term::Var(idx));
     }
@@ -344,10 +350,7 @@ pub fn placeholder_proposition() -> Term {
 
 /// Quantifiers, blocks, conditionals, pattern matches return
 /// [`ElabError::UnsupportedExpression`].
-pub fn proposition_to_term(
-    prop: &Expr,
-    ctx: &ElabContext,
-) -> Result<Term, ElabError> {
+pub fn proposition_to_term(prop: &Expr, ctx: &ElabContext) -> Result<Term, ElabError> {
     use verum_ast::LiteralKind;
     match &prop.kind {
         ExprKind::Literal(lit) if matches!(lit.kind, LiteralKind::Bool(_)) => {
@@ -554,15 +557,9 @@ pub fn close_over_axioms(ctx: &ElabContext, body: Term, body_type: Term) -> (Ter
     // Wrap from innermost (last axiom) outwards.
     for entry in ctx.global_axioms.values().rev() {
         // Λ over the axiom-witness binder.
-        term = Term::Lam(
-            Box::new(entry.claimed_type.clone()),
-            Box::new(term),
-        );
+        term = Term::Lam(Box::new(entry.claimed_type.clone()), Box::new(term));
         // Π over the axiom-type in the claimed_type.
-        ty = Term::Pi(
-            Box::new(entry.claimed_type.clone()),
-            Box::new(ty),
-        );
+        ty = Term::Pi(Box::new(entry.claimed_type.clone()), Box::new(ty));
     }
     (term, ty)
 }
@@ -623,17 +620,15 @@ use verum_ast::expr::{Expr, ExprKind};
 /// downstream tooling can route around them. Adding support for
 /// a new tactic means: (1) build its kernel term shape here,
 /// (2) ensure the corresponding kernel rule is sound.
-pub fn elaborate_tactic(
-    tactic: &TacticExpr,
-    ctx: &mut ElabContext,
-) -> Result<Term, ElabError> {
+pub fn elaborate_tactic(tactic: &TacticExpr, ctx: &mut ElabContext) -> Result<Term, ElabError> {
     match tactic {
         TacticExpr::Apply { lemma, args } => {
-            let lemma_name = expr_to_path_name(lemma)
-                .ok_or_else(|| ElabError::UnsupportedExpression(format!(
+            let lemma_name = expr_to_path_name(lemma).ok_or_else(|| {
+                ElabError::UnsupportedExpression(format!(
                     "apply target is not a path: {:?}",
                     lemma.kind,
-                )))?;
+                ))
+            })?;
             let head = resolve_apply_target(ctx, &lemma_name)?;
             let mut arg_terms = Vec::with_capacity(args.len());
             for arg in args.iter() {
@@ -649,7 +644,8 @@ pub fn elaborate_tactic(
             if ctx.depth() == 0 {
                 return Err(ElabError::UnsupportedTactic(
                     "Reflexivity in empty context — needs a \
-                     DefinitionalEquality witness".into(),
+                     DefinitionalEquality witness"
+                        .into(),
                 ));
             }
             Ok(Term::Var(0))
@@ -677,10 +673,7 @@ pub fn elaborate_tactic(
             }
             let mut term = Term::Var(0);
             for _ in 0..depth {
-                term = Term::Lam(
-                    Box::new(Term::Universe(0)),
-                    Box::new(term),
-                );
+                term = Term::Lam(Box::new(Term::Universe(0)), Box::new(term));
             }
             for _ in 0..depth {
                 ctx.pop_binder();
@@ -761,10 +754,7 @@ fn elaborate_tactic_seq(
             // Wrap from innermost outwards.
             let mut term = body;
             for _ in 0..introduced.len() {
-                term = Term::Lam(
-                    Box::new(Term::Universe(0)),
-                    Box::new(term),
-                );
+                term = Term::Lam(Box::new(Term::Universe(0)), Box::new(term));
             }
             // Restore the context for the caller.
             for _ in 0..introduced.len() {
@@ -849,19 +839,14 @@ fn tactic_variant_name(t: &TacticExpr) -> &'static str {
 
 /// `Structured` and `ByMethod` proof bodies are not yet handled
 /// and return [`ElabError::UnsupportedTactic`].
-pub fn elaborate_proof_body(
-    body: &ProofBody,
-    ctx: &mut ElabContext,
-) -> Result<Term, ElabError> {
+pub fn elaborate_proof_body(body: &ProofBody, ctx: &mut ElabContext) -> Result<Term, ElabError> {
     match body {
         ProofBody::Tactic(t) => elaborate_tactic(t, ctx),
         ProofBody::Term(e) => expr_to_term(e, ctx),
-        ProofBody::Structured(_) => Err(ElabError::UnsupportedTactic(
-            "ProofBody::Structured".into(),
-        )),
-        ProofBody::ByMethod(_) => Err(ElabError::UnsupportedTactic(
-            "ProofBody::ByMethod".into(),
-        )),
+        ProofBody::Structured(_) => {
+            Err(ElabError::UnsupportedTactic("ProofBody::Structured".into()))
+        }
+        ProofBody::ByMethod(_) => Err(ElabError::UnsupportedTactic("ProofBody::ByMethod".into())),
     }
 }
 
@@ -893,12 +878,9 @@ pub fn elaborate_theorem(
     theorem: &TheoremDecl,
     ctx: &mut ElabContext,
 ) -> Result<Certificate, ElabError> {
-    use crate::verification_goal::{from_theorem_decl, TheoremKind};
+    use crate::verification_goal::{TheoremKind, from_theorem_decl};
 
-    let body = theorem
-        .proof
-        .as_ref()
-        .ok_or(ElabError::NoProofBody)?;
+    let body = theorem.proof.as_ref().ok_or(ElabError::NoProofBody)?;
     let body_term = elaborate_proof_body(body, ctx)?;
 
     let (body_type, prop_translation_status) =
@@ -938,7 +920,10 @@ pub fn expr_to_path_name(expr: &Expr) -> Option<String> {
             }
             Some(parts.join("."))
         }
-        ExprKind::Field { expr: object, field } => {
+        ExprKind::Field {
+            expr: object,
+            field,
+        } => {
             let base = expr_to_path_name(object)?;
             Some(format!("{}.{}", base, field.name))
         }
@@ -960,9 +945,8 @@ pub fn expr_to_path_name(expr: &Expr) -> Option<String> {
 pub fn expr_to_term(expr: &Expr, ctx: &ElabContext) -> Result<Term, ElabError> {
     match &expr.kind {
         ExprKind::Path(_) | ExprKind::Field { .. } => {
-            let name = expr_to_path_name(expr).ok_or_else(|| {
-                ElabError::UnsupportedExpression("path-walk failed".into())
-            })?;
+            let name = expr_to_path_name(expr)
+                .ok_or_else(|| ElabError::UnsupportedExpression("path-walk failed".into()))?;
             resolve_apply_target(ctx, &name)
         }
         ExprKind::Call { func, args, .. } => {
@@ -1071,10 +1055,7 @@ mod tests {
         assert_eq!(
             result,
             Term::App(
-                Box::new(Term::App(
-                    Box::new(Term::Var(0)),
-                    Box::new(Term::Var(1)),
-                )),
+                Box::new(Term::App(Box::new(Term::Var(0)), Box::new(Term::Var(1)),)),
                 Box::new(Term::Var(2)),
             ),
         );
@@ -1141,18 +1122,12 @@ mod tests {
         // Term: Lam(Universe(0), Var(0))
         assert_eq!(
             term,
-            Term::Lam(
-                Box::new(Term::Universe(0)),
-                Box::new(Term::Var(0)),
-            ),
+            Term::Lam(Box::new(Term::Universe(0)), Box::new(Term::Var(0)),),
         );
         // Type: Pi(Universe(0), Universe(0)) — `Universe(0) → Universe(0)`.
         assert_eq!(
             ty,
-            Term::Pi(
-                Box::new(Term::Universe(0)),
-                Box::new(Term::Universe(0)),
-            ),
+            Term::Pi(Box::new(Term::Universe(0)), Box::new(Term::Universe(0)),),
         );
     }
 
@@ -1162,14 +1137,8 @@ mod tests {
         // `Π(A: Universe(0)). Universe(0)`.
         // The identity at universe 0 — same as
         // `core/verify/proof_term_examples/identity_at_universe_0.vproof`.
-        let term = Term::Lam(
-            Box::new(Term::Universe(0)),
-            Box::new(Term::Var(0)),
-        );
-        let claimed_type = Term::Pi(
-            Box::new(Term::Universe(0)),
-            Box::new(Term::Universe(0)),
-        );
+        let term = Term::Lam(Box::new(Term::Universe(0)), Box::new(Term::Var(0)));
+        let claimed_type = Term::Pi(Box::new(Term::Universe(0)), Box::new(Term::Universe(0)));
         let cert = finalise_certificate(term, claimed_type, BTreeMap::new()).unwrap();
         // Certificate verified — the de Bruijn criterion holds.
         cert.verify().unwrap();
@@ -1246,7 +1215,8 @@ mod tests {
     #[test]
     fn expr_to_path_name_dotted_path() {
         assert_eq!(
-            expr_to_path_name(&path_expr_dotted(&["mathlib4", "lambda", "ChurchRosser"])).as_deref(),
+            expr_to_path_name(&path_expr_dotted(&["mathlib4", "lambda", "ChurchRosser"]))
+                .as_deref(),
             Some("mathlib4.lambda.ChurchRosser"),
         );
     }
@@ -1293,10 +1263,7 @@ mod tests {
         assert_eq!(
             term,
             Term::App(
-                Box::new(Term::App(
-                    Box::new(Term::Var(2)),
-                    Box::new(Term::Var(0)),
-                )),
+                Box::new(Term::App(Box::new(Term::Var(2)), Box::new(Term::Var(0)),)),
                 Box::new(Term::Var(1)),
             ),
         );
@@ -1322,7 +1289,13 @@ mod tests {
             Err(ElabError::UnsupportedTactic(t)) => assert_eq!(t, "Ring"),
             other => panic!("expected UnsupportedTactic(Ring), got {:?}", other),
         }
-        match elaborate_tactic(&TacticExpr::Smt { solver: verum_common::Maybe::None, timeout: verum_common::Maybe::None }, &mut ctx) {
+        match elaborate_tactic(
+            &TacticExpr::Smt {
+                solver: verum_common::Maybe::None,
+                timeout: verum_common::Maybe::None,
+            },
+            &mut ctx,
+        ) {
             Err(ElabError::UnsupportedTactic(t)) => assert_eq!(t, "Smt"),
             other => panic!("expected UnsupportedTactic(Smt), got {:?}", other),
         }
@@ -1369,14 +1342,14 @@ mod tests {
         let mut ctx = ElabContext::new();
         let span = Span::dummy();
         let mut idents = List::new();
-        idents.push(Ident { name: "x".into(), span });
+        idents.push(Ident {
+            name: "x".into(),
+            span,
+        });
         let term = elaborate_tactic(&TacticExpr::Intro(idents), &mut ctx).unwrap();
         assert_eq!(
             term,
-            Term::Lam(
-                Box::new(Term::Universe(0)),
-                Box::new(Term::Var(0)),
-            ),
+            Term::Lam(Box::new(Term::Universe(0)), Box::new(Term::Var(0)),),
         );
         // Context restored — Intro doesn't leak binders.
         assert_eq!(ctx.depth(), 0);
@@ -1389,7 +1362,10 @@ mod tests {
         let span = Span::dummy();
         let mut idents = List::new();
         for n in &["x", "y", "z"] {
-            idents.push(Ident { name: (*n).into(), span });
+            idents.push(Ident {
+                name: (*n).into(),
+                span,
+            });
         }
         let term = elaborate_tactic(&TacticExpr::Intro(idents), &mut ctx).unwrap();
         assert_eq!(
@@ -1415,7 +1391,10 @@ mod tests {
         let mut ctx = ElabContext::new();
         let span = Span::dummy();
         let mut idents = List::new();
-        idents.push(Ident { name: "x".into(), span });
+        idents.push(Ident {
+            name: "x".into(),
+            span,
+        });
         let mut steps = List::new();
         steps.push(TacticExpr::Intro(idents));
         steps.push(TacticExpr::Apply {
@@ -1425,10 +1404,7 @@ mod tests {
         let term = elaborate_tactic(&TacticExpr::Seq(steps), &mut ctx).unwrap();
         assert_eq!(
             term,
-            Term::Lam(
-                Box::new(Term::Universe(0)),
-                Box::new(Term::Var(0)),
-            ),
+            Term::Lam(Box::new(Term::Universe(0)), Box::new(Term::Var(0)),),
         );
         assert_eq!(ctx.depth(), 0, "Seq restores context after binder pop");
     }
@@ -1513,16 +1489,16 @@ mod tests {
         // The boolean-literal proposition `true` translates to
         // Universe(0); the body `apply foo` produces Var(0) with
         // type Universe(0) — they match, so the kernel accepts.
-        use verum_ast::decl::TheoremDecl;
         use verum_ast::Literal;
+        use verum_ast::decl::TheoremDecl;
         let span = Span::dummy();
         // Proposition is the boolean literal `true` (translates to Universe(0)).
-        let true_prop = Expr::new(
-            ExprKind::Literal(Literal::bool(true, span)),
-            span,
-        );
+        let true_prop = Expr::new(ExprKind::Literal(Literal::bool(true, span)), span);
         let mut theorem = TheoremDecl::new(
-            Ident { name: "id_proof".into(), span },
+            Ident {
+                name: "id_proof".into(),
+                span,
+            },
             true_prop,
             span,
         );
@@ -1556,10 +1532,7 @@ mod tests {
     fn proposition_to_term_handles_bool_literal_true() {
         use verum_ast::Literal;
         let span = Span::dummy();
-        let prop = Expr::new(
-            ExprKind::Literal(Literal::bool(true, span)),
-            span,
-        );
+        let prop = Expr::new(ExprKind::Literal(Literal::bool(true, span)), span);
         let ctx = ElabContext::new();
         let term = proposition_to_term(&prop, &ctx).unwrap();
         assert_eq!(term, Term::Universe(0));
@@ -1660,11 +1633,7 @@ mod tests {
         );
         match proposition_to_term(&prop, &ctx) {
             Err(ElabError::UnsupportedExpression(msg)) => {
-                assert!(
-                    msg.contains("Add"),
-                    "expected Add in error msg: {}",
-                    msg,
-                );
+                assert!(msg.contains("Add"), "expected Add in error msg: {}", msg,);
             }
             other => panic!("expected UnsupportedExpression(Add), got {:?}", other),
         }
@@ -1728,15 +1697,15 @@ mod tests {
     fn elaborate_proof_with_kernel_v0_lemma_apply_succeeds() {
         // A theorem that applies one of the kernel_v0 lemma stubs
         // resolves cleanly when register_kernel_v0_lemmas is called.
-        use verum_ast::decl::TheoremDecl;
         use verum_ast::Literal;
+        use verum_ast::decl::TheoremDecl;
         let span = Span::dummy();
-        let true_prop = Expr::new(
-            ExprKind::Literal(Literal::bool(true, span)),
-            span,
-        );
+        let true_prop = Expr::new(ExprKind::Literal(Literal::bool(true, span)), span);
         let mut theorem = TheoremDecl::new(
-            Ident { name: "uses_church_rosser".into(), span },
+            Ident {
+                name: "uses_church_rosser".into(),
+                span,
+            },
             true_prop,
             span,
         );
@@ -1775,7 +1744,10 @@ mod tests {
             span,
         );
         let mut theorem = TheoremDecl::new(
-            Ident { name: "binary_prop".into(), span },
+            Ident {
+                name: "binary_prop".into(),
+                span,
+            },
             prop,
             span,
         );
@@ -1802,7 +1774,10 @@ mod tests {
         use verum_ast::decl::TheoremDecl;
         let span = Span::dummy();
         let theorem = TheoremDecl::new(
-            Ident { name: "unproved".into(), span },
+            Ident {
+                name: "unproved".into(),
+                span,
+            },
             path_expr("foo"),
             span,
         );

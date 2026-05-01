@@ -46,23 +46,21 @@ use verum_ast::{FileId, Item, Module, SourceFile, Span, decl::ItemKind};
 use verum_common::{List, Map, Text};
 use verum_diagnostics::{DiagnosticBuilder, Severity};
 // VBC-first architecture imports
-use verum_vbc::codegen::{VbcCodegen, CodegenConfig};
+use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::interpreter::Interpreter as VbcInterpreter;
 
 // VBC → LLVM IR lowering (CPU compilation path)
 use verum_codegen::llvm::{
-    VbcToLlvmLowering, LoweringConfig as LlvmLoweringConfig,
-    LoweringStats as LlvmLoweringStats,
+    LoweringConfig as LlvmLoweringConfig, LoweringStats as LlvmLoweringStats, VbcToLlvmLowering,
 };
 
 // Compilation path analysis
 use crate::compilation_path::{
-    CompilationPath, TargetConfig as PathTargetConfig,
-    analyze_function, determine_compilation_path,
+    CompilationPath, TargetConfig as PathTargetConfig, analyze_function, determine_compilation_path,
 };
 use verum_lexer::Lexer;
 use verum_modules::{
-    ModuleId, ModuleLoader, ModuleInfo, ModulePath, ModuleRegistry, SharedModuleResolver,
+    ModuleId, ModuleInfo, ModuleLoader, ModulePath, ModuleRegistry, SharedModuleResolver,
     extract_exports_from_module, resolve_glob_reexports, resolve_specific_reexport_kinds,
 };
 // CoherenceChecker / ImplEntry now used only inside
@@ -83,19 +81,19 @@ use crate::meta::MetaRegistry;
 use crate::options::VerifyMode;
 // IntrinsicDiagnostics / IntrinsicLint / module_utils now used only inside
 // crate::pipeline::stdlib_bootstrap (#106 Phase 8).
+use crate::core_cache::global_cache_or_init;
+use crate::core_compiler::{CoreConfig, StdlibModuleResolver};
+use crate::core_source::CoreSource;
+use crate::phases::ExecutionTier;
 use crate::phases::linking::{FinalLinker, LinkingConfig, ObjectFile};
 use crate::phases::phase0_stdlib::{Phase0CoreCompiler, StdlibArtifacts};
-use crate::phases::ExecutionTier;
 use crate::phases::type_error_to_diagnostic;
 use crate::session::Session;
-use crate::core_cache::global_cache_or_init;
-use crate::core_source::CoreSource;
-use crate::core_compiler::{CoreConfig, StdlibModuleResolver};
 // StdlibCompilationResult / StdlibModule now used only inside
 // crate::pipeline::stdlib_bootstrap (#106 Phase 8).
 use crate::hash::compute_item_hashes_from_module;
 use crate::incremental_compiler::IncrementalCompiler;
-use crate::staged_pipeline::{StagedPipeline, StagedConfig};
+use crate::staged_pipeline::{StagedConfig, StagedPipeline};
 
 // Phase-specific submodule extractions (#106 — pipeline.rs split).
 // Each submodule is a sibling file under `pipeline/` declaring an
@@ -108,26 +106,26 @@ mod audit;
 mod bounds_stats;
 mod cbgr;
 mod coherence;
-mod cross_file;
 mod compile_orchestration;
+mod cross_file;
 mod dispatch;
-mod impl_axioms;
 mod gpu_detect;
+mod impl_axioms;
 mod interpreter;
 mod macros;
-pub use macros::reset_test_isolation;
 use crate::pipeline::macros::MacroExpander;
+pub use macros::reset_test_isolation;
+mod llvm_lowering;
 mod loading;
 mod mlir;
 mod native_codegen;
-mod phases_orchestration;
 mod phase0;
+mod phases_orchestration;
 mod profile_boundaries;
 mod refinement_verify;
 mod stdlib_bootstrap;
-mod llvm_lowering;
-mod tier_constructors;
 mod theorem_proofs;
+mod tier_constructors;
 mod vbc_codegen;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -226,15 +224,15 @@ fn install_canonical_module_aliases(registry: &mut ModuleRegistry) {
     // Semantic shorthand aliases — let user code address well-known
     // modules under intuitive short names without having to memorise
     // their exact submodule path.
-    registry.register_path_alias("core.memory",  "core.base.memory");
-    registry.register_path_alias("core.maybe",   "core.base.maybe");
-    registry.register_path_alias("core.result",  "core.base.result");
+    registry.register_path_alias("core.memory", "core.base.memory");
+    registry.register_path_alias("core.maybe", "core.base.maybe");
+    registry.register_path_alias("core.result", "core.base.result");
     registry.register_path_alias("core.process", "core.io.process");
-    registry.register_path_alias("core.string",  "core.text.text");
-    registry.register_path_alias("core.text",    "core.text.text");
-    registry.register_path_alias("core.list",    "core.collections.list");
-    registry.register_path_alias("core.map",     "core.collections.map");
-    registry.register_path_alias("core.set",     "core.collections.set");
+    registry.register_path_alias("core.string", "core.text.text");
+    registry.register_path_alias("core.text", "core.text.text");
+    registry.register_path_alias("core.list", "core.collections.list");
+    registry.register_path_alias("core.map", "core.collections.map");
+    registry.register_path_alias("core.set", "core.collections.set");
     // Channel module alias (tests use core.sync.mpsc but it's
     // core.async.channel under the canonical layout).
     registry.register_path_alias("core.sync.mpsc", "core.async.channel");
@@ -363,7 +361,10 @@ fn collect_vr_files(dir: &Path, files: &mut Vec<PathBuf>, depth: usize) {
 
 /// Get the disk cache directory for stdlib registry.
 fn stdlib_cache_dir(workspace_root: &Path) -> PathBuf {
-    workspace_root.join("target").join(".verum-cache").join("stdlib")
+    workspace_root
+        .join("target")
+        .join(".verum-cache")
+        .join("stdlib")
 }
 
 /// Try to load a cached ModuleRegistry from disk.
@@ -391,18 +392,26 @@ pub(super) fn try_load_registry_from_disk(
 
     // Validate cache
     if cached.format_version != REGISTRY_CACHE_FORMAT_VERSION {
-        debug!("Stdlib disk cache: format version mismatch ({} vs {})",
-            cached.format_version, REGISTRY_CACHE_FORMAT_VERSION);
+        debug!(
+            "Stdlib disk cache: format version mismatch ({} vs {})",
+            cached.format_version, REGISTRY_CACHE_FORMAT_VERSION
+        );
         return None;
     }
     if cached.compiler_version != env!("CARGO_PKG_VERSION") {
-        debug!("Stdlib disk cache: compiler version mismatch ({} vs {})",
-            cached.compiler_version, env!("CARGO_PKG_VERSION"));
+        debug!(
+            "Stdlib disk cache: compiler version mismatch ({} vs {})",
+            cached.compiler_version,
+            env!("CARGO_PKG_VERSION")
+        );
         return None;
     }
     if cached.llvm_version != verum_codegen::llvm::LLVM_VERSION {
-        debug!("Stdlib disk cache: LLVM version mismatch ({} vs {})",
-            cached.llvm_version, verum_codegen::llvm::LLVM_VERSION);
+        debug!(
+            "Stdlib disk cache: LLVM version mismatch ({} vs {})",
+            cached.llvm_version,
+            verum_codegen::llvm::LLVM_VERSION
+        );
         return None;
     }
     if cached.content_hash != content_hash {
@@ -470,9 +479,11 @@ pub(super) fn save_registry_to_disk(
             if let Err(e) = std::fs::write(&cache_file, &data) {
                 debug!("Failed to write stdlib registry cache: {}", e);
             } else {
-                info!("Saved stdlib registry cache ({:.1} MB) to {}",
+                info!(
+                    "Saved stdlib registry cache ({:.1} MB) to {}",
                     data.len() as f64 / 1_048_576.0,
-                    cache_file.display());
+                    cache_file.display()
+                );
             }
         }
         Err(e) => {
@@ -800,7 +811,6 @@ pub struct CompilationPipeline<'s> {
     // STDLIB BOOTSTRAP MODE FIELDS
     // =========================================================================
     // These fields are only used when build_mode == BuildMode::StdlibBootstrap
-
     /// Module resolver for stdlib bootstrap mode.
     /// Discovers modules and computes dependency order via topological sort.
     /// Only populated in StdlibBootstrap mode.
@@ -832,7 +842,6 @@ pub struct CompilationPipeline<'s> {
     // =========================================================================
     // INCREMENTAL COMPILATION SUPPORT
     // =========================================================================
-
     /// Incremental compiler for fine-grained change detection.
     /// Tracks item-level hashes to distinguish signature vs body changes,
     /// enabling minimal recompilation.
@@ -845,7 +854,6 @@ pub struct CompilationPipeline<'s> {
     // =========================================================================
     // STAGED METAPROGRAMMING SUPPORT
     // =========================================================================
-
     /// Staged pipeline for N-level metaprogramming with fine-grained caching.
     ///
 
@@ -971,8 +979,16 @@ mod script_parse_routing_tests {
     #[test]
     fn shebang_triggers_script_mode_regardless_of_flag() {
         let o = opts("", false);
-        assert!(should_parse_as_script("#!/usr/bin/env verum\nprint(1)", &o, None));
-        assert!(should_parse_as_script("#!/usr/bin/env verum\nprint(1)", &o, Some(std::path::Path::new("/tmp/x.vr"))));
+        assert!(should_parse_as_script(
+            "#!/usr/bin/env verum\nprint(1)",
+            &o,
+            None
+        ));
+        assert!(should_parse_as_script(
+            "#!/usr/bin/env verum\nprint(1)",
+            &o,
+            Some(std::path::Path::new("/tmp/x.vr"))
+        ));
     }
 
     #[test]
@@ -985,21 +1001,37 @@ mod script_parse_routing_tests {
     #[test]
     fn no_shebang_no_flag_is_library() {
         let o = opts("/tmp/foo.vr", false);
-        assert!(!should_parse_as_script("fn main(){}", &o, Some(std::path::Path::new("/tmp/foo.vr"))));
+        assert!(!should_parse_as_script(
+            "fn main(){}",
+            &o,
+            Some(std::path::Path::new("/tmp/foo.vr"))
+        ));
     }
 
     #[test]
     fn flag_alone_requires_path_match() {
         let o = opts("/tmp/entry.vr", true);
         assert!(!should_parse_as_script("fn main(){}", &o, None));
-        assert!(!should_parse_as_script("fn main(){}", &o, Some(std::path::Path::new("/tmp/other.vr"))));
-        assert!(should_parse_as_script("fn main(){}", &o, Some(std::path::Path::new("/tmp/entry.vr"))));
+        assert!(!should_parse_as_script(
+            "fn main(){}",
+            &o,
+            Some(std::path::Path::new("/tmp/other.vr"))
+        ));
+        assert!(should_parse_as_script(
+            "fn main(){}",
+            &o,
+            Some(std::path::Path::new("/tmp/entry.vr"))
+        ));
     }
 
     #[test]
     fn flag_with_empty_input_matches_nothing() {
         let o = opts("", true);
-        assert!(!should_parse_as_script("fn main(){}", &o, Some(std::path::Path::new("/tmp/x.vr"))));
+        assert!(!should_parse_as_script(
+            "fn main(){}",
+            &o,
+            Some(std::path::Path::new("/tmp/x.vr"))
+        ));
     }
 }
 
@@ -1021,9 +1053,13 @@ impl<'s> CompilationPipeline<'s> {
         let incremental = {
             let mut ic = IncrementalCompiler::new();
             if session.options().incremental {
-                let cache_dir = session.options().output.parent()
+                let cache_dir = session
+                    .options()
+                    .output
+                    .parent()
                     .unwrap_or(std::path::Path::new("."))
-                    .join("target").join("incremental");
+                    .join("target")
+                    .join("incremental");
                 ic.set_cache_dir(cache_dir);
                 let _ = ic.load_cache();
             }
@@ -1046,9 +1082,8 @@ impl<'s> CompilationPipeline<'s> {
         // ones on FileId or ModuleId.
         lazy_loader.set_file_id_allocator(file_id_alloc);
         lazy_loader.set_module_id_allocator(module_id_alloc);
-        let lazy_resolver: SharedModuleResolver = std::sync::Arc::new(
-            std::sync::Mutex::new(lazy_loader),
-        );
+        let lazy_resolver: SharedModuleResolver =
+            std::sync::Arc::new(std::sync::Mutex::new(lazy_loader));
         // Registry also canonicalises by "core" so its dedupe logic
         // matches the lazy resolver's key.
         {
@@ -1082,9 +1117,7 @@ impl<'s> CompilationPipeline<'s> {
             })
             .unwrap_or_default();
         let cached_version_stamp = (
-            crate::meta::subsystems::project_info::capture_git_revision(
-                &project_root_for_capture,
-            ),
+            crate::meta::subsystems::project_info::capture_git_revision(&project_root_for_capture),
             crate::meta::subsystems::project_info::capture_build_time_unix_ms(),
         );
 
@@ -1114,7 +1147,7 @@ impl<'s> CompilationPipeline<'s> {
             incremental_compiler: incremental,
             // Staged pipeline for N-level metaprogramming with caching
             staged_pipeline: StagedPipeline::new(StagedConfig {
-                max_stage: 2,  // Support meta(2), meta(1), runtime
+                max_stage: 2, // Support meta(2), meta(1), runtime
                 enable_caching: true,
                 warn_unused_stages: true,
                 suggest_stage_downgrade: true,
@@ -1182,9 +1215,8 @@ impl<'s> CompilationPipeline<'s> {
         lazy_loader.set_cog_name("core");
         lazy_loader.set_file_id_allocator(file_id_alloc);
         lazy_loader.set_module_id_allocator(module_id_alloc);
-        let lazy_resolver: SharedModuleResolver = std::sync::Arc::new(
-            std::sync::Mutex::new(lazy_loader),
-        );
+        let lazy_resolver: SharedModuleResolver =
+            std::sync::Arc::new(std::sync::Mutex::new(lazy_loader));
 
         // #20 / P7 — capture once for stdlib bootstrap path too;
         // see `new()` for rationale.
@@ -1200,9 +1232,7 @@ impl<'s> CompilationPipeline<'s> {
             })
             .unwrap_or_default();
         let cached_version_stamp = (
-            crate::meta::subsystems::project_info::capture_git_revision(
-                &project_root_for_capture,
-            ),
+            crate::meta::subsystems::project_info::capture_git_revision(&project_root_for_capture),
             crate::meta::subsystems::project_info::capture_build_time_unix_ms(),
         );
 
@@ -1233,9 +1263,9 @@ impl<'s> CompilationPipeline<'s> {
             // Staged pipeline for N-level metaprogramming with caching
             // For stdlib bootstrap, use higher max_stage to support complex meta macros
             staged_pipeline: StagedPipeline::new(StagedConfig {
-                max_stage: 3,  // Support meta(3), meta(2), meta(1), runtime for stdlib
+                max_stage: 3, // Support meta(3), meta(2), meta(1), runtime for stdlib
                 enable_caching: true,
-                warn_unused_stages: false,  // Stdlib may not use all stages
+                warn_unused_stages: false, // Stdlib may not use all stages
                 suggest_stage_downgrade: false,
                 lint_config: Default::default(),
             }),
@@ -1442,10 +1472,16 @@ impl<'s> CompilationPipeline<'s> {
                 self.stdlib_metadata = Some(std::sync::Arc::new(stdlib_meta));
 
                 let elapsed = start.elapsed();
-                info!("Stdlib cache initialization completed in {:.2}ms", elapsed.as_secs_f64() * 1000.0);
+                info!(
+                    "Stdlib cache initialization completed in {:.2}ms",
+                    elapsed.as_secs_f64() * 1000.0
+                );
             }
             Err(e) => {
-                warn!("Failed to load stdlib from cache: {}. Falling back to source parsing.", e);
+                warn!(
+                    "Failed to load stdlib from cache: {}. Falling back to source parsing.",
+                    e
+                );
                 // Fall through - load_stdlib_modules will be called later
             }
         }
@@ -1465,11 +1501,25 @@ impl<'s> CompilationPipeline<'s> {
         // Convert types
         for cached_type in &cached.types {
             let type_desc = TypeDescriptor {
-                name: Text::from(cached_type.path.split('.').next_back().unwrap_or(&cached_type.path)),
-                module_path: Text::from(cached_type.path.rsplit_once('.').map(|(p, _)| p).unwrap_or("")),
+                name: Text::from(
+                    cached_type
+                        .path
+                        .split('.')
+                        .next_back()
+                        .unwrap_or(&cached_type.path),
+                ),
+                module_path: Text::from(
+                    cached_type
+                        .path
+                        .rsplit_once('.')
+                        .map(|(p, _)| p)
+                        .unwrap_or(""),
+                ),
                 generic_params: Self::parse_generic_params_from_definition(&cached_type.definition),
                 kind: match cached_type.kind.as_str() {
-                    "struct" | "record" => TypeDescriptorKind::Record { fields: List::new() },
+                    "struct" | "record" => TypeDescriptorKind::Record {
+                        fields: List::new(),
+                    },
                     "variant" | "enum" => TypeDescriptorKind::Variant { cases: List::new() },
                     "protocol" | "trait" => TypeDescriptorKind::Protocol {
                         super_protocols: List::new(),
@@ -1477,22 +1527,40 @@ impl<'s> CompilationPipeline<'s> {
                         required_methods: List::new(),
                         default_methods: List::new(),
                     },
-                    "alias" => TypeDescriptorKind::Alias { target: Text::new() },
-                    _ => TypeDescriptorKind::Record { fields: List::new() },
+                    "alias" => TypeDescriptorKind::Alias {
+                        target: Text::new(),
+                    },
+                    _ => TypeDescriptorKind::Record {
+                        fields: List::new(),
+                    },
                 },
                 size: Maybe::None,
                 alignment: Maybe::None,
                 methods: List::new(),
                 implements: List::new(),
             };
-            metadata.types.insert(Text::from(cached_type.path.as_str()), type_desc);
+            metadata
+                .types
+                .insert(Text::from(cached_type.path.as_str()), type_desc);
         }
 
         // Convert functions
         for cached_func in &cached.functions {
             let func_desc = FunctionDescriptor {
-                name: Text::from(cached_func.path.split('.').next_back().unwrap_or(&cached_func.path)),
-                module_path: Text::from(cached_func.path.rsplit_once('.').map(|(p, _)| p).unwrap_or("")),
+                name: Text::from(
+                    cached_func
+                        .path
+                        .split('.')
+                        .next_back()
+                        .unwrap_or(&cached_func.path),
+                ),
+                module_path: Text::from(
+                    cached_func
+                        .path
+                        .rsplit_once('.')
+                        .map(|(p, _)| p)
+                        .unwrap_or(""),
+                ),
                 generic_params: List::new(),
                 params: List::new(),
                 return_type: Text::from("()"),
@@ -1505,7 +1573,9 @@ impl<'s> CompilationPipeline<'s> {
                     Maybe::None
                 },
             };
-            metadata.functions.insert(Text::from(cached_func.path.as_str()), func_desc);
+            metadata
+                .functions
+                .insert(Text::from(cached_func.path.as_str()), func_desc);
         }
 
         // Set version and content hash
@@ -1530,7 +1600,9 @@ impl<'s> CompilationPipeline<'s> {
     /// - `"type List<T> is { ... }"` -> `[GenericParam { name: "T", bounds: [], default: None }]`
     /// - `"type Map<K, V> is { ... }"` -> `[GenericParam { name: "K", ... }, GenericParam { name: "V", ... }]`
     /// - `"type Point is { ... }"` -> `[]`
-    fn parse_generic_params_from_definition(definition: &str) -> List<verum_types::core_metadata::GenericParam> {
+    fn parse_generic_params_from_definition(
+        definition: &str,
+    ) -> List<verum_types::core_metadata::GenericParam> {
         use verum_types::core_metadata::GenericParam;
 
         let mut params = List::new();
@@ -1582,7 +1654,6 @@ impl<'s> CompilationPipeline<'s> {
         params
     }
 
-
     /// Register meta declarations from a parsed module.
     ///
 
@@ -1597,10 +1668,7 @@ impl<'s> CompilationPipeline<'s> {
             match &item.kind {
                 ItemKind::Function(func) if func.is_meta => {
                     // Register meta function
-                    if let Err(e) = self
-                        .meta_registry
-                        .register_meta_function(path, func)
-                    {
+                    if let Err(e) = self.meta_registry.register_meta_function(path, func) {
                         let diag = DiagnosticBuilder::error()
                             .message(format!("Failed to register meta function: {}", e))
                             .build();
@@ -1663,23 +1731,27 @@ impl<'s> CompilationPipeline<'s> {
                 let body_expr = match &func.body {
                     Maybe::Some(FunctionBody::Block(block)) => {
                         // Create a block expression from the function body
-                        verum_ast::expr::Expr::new(
-                            ExprKind::Block(block.clone()),
-                            block.span,
-                        )
+                        verum_ast::expr::Expr::new(ExprKind::Block(block.clone()), block.span)
                     }
                     Maybe::Some(FunctionBody::Expr(expr)) => expr.clone(),
                     Maybe::None => continue, // No body (declaration only)
                 };
 
-                let mut ctx = self.fresh_meta_ctx_with_version_stamp()
+                let mut ctx = self
+                    .fresh_meta_ctx_with_version_stamp()
                     .with_registry(std::sync::Arc::new(self.meta_registry.clone()))
                     .with_current_module(module_path.clone());
 
                 // Enable contexts from the function's using clause
                 if !func.contexts.is_empty() {
-                    let context_names: Vec<verum_common::Text> = func.contexts.iter()
-                        .filter_map(|c| c.path.as_ident().map(|i| verum_common::Text::from(i.as_str())))
+                    let context_names: Vec<verum_common::Text> = func
+                        .contexts
+                        .iter()
+                        .filter_map(|c| {
+                            c.path
+                                .as_ident()
+                                .map(|i| verum_common::Text::from(i.as_str()))
+                        })
                         .collect();
                     let parsed = crate::meta::builtins::context_requirements::EnabledContexts::parse_using_clause(&context_names);
                     ctx.enabled_contexts = parsed.enabled_contexts;
@@ -1740,7 +1812,8 @@ impl<'s> CompilationPipeline<'s> {
     /// vs an infrastructure limitation (unsupported expression, function not found, etc.).
     fn is_reportable_meta_error(e: &crate::meta::MetaError) -> bool {
         use crate::meta::MetaError;
-        matches!(e,
+        matches!(
+            e,
             // M0XX: Core meta errors (type mismatches in user code)
             MetaError::TypeMismatch { .. } |
             // M1XX: Builtin errors (runtime failures in builtins)
@@ -1788,10 +1861,7 @@ impl<'s> CompilationPipeline<'s> {
                 if let Maybe::Some(body) = &func.body {
                     let body_expr = match body {
                         verum_ast::decl::FunctionBody::Block(block) => {
-                            verum_ast::expr::Expr::new(
-                                ExprKind::Block(block.clone()),
-                                block.span,
-                            )
+                            verum_ast::expr::Expr::new(ExprKind::Block(block.clone()), block.span)
                         }
                         verum_ast::decl::FunctionBody::Expr(expr) => expr.clone(),
                     };
@@ -1814,7 +1884,8 @@ impl<'s> CompilationPipeline<'s> {
             ExprKind::MetaFunction { name, args } if name.as_str() == "const" => {
                 // @const { ... } block — evaluate arguments
                 for arg in args.iter() {
-                    let mut ctx = self.fresh_meta_ctx_with_version_stamp()
+                    let mut ctx = self
+                        .fresh_meta_ctx_with_version_stamp()
                         .with_registry(std::sync::Arc::new(self.meta_registry.clone()))
                         .with_current_module(module_path.clone());
                     match ctx.ast_expr_to_meta_expr(arg) {
@@ -1840,7 +1911,10 @@ impl<'s> CompilationPipeline<'s> {
                         verum_ast::stmt::StmtKind::Expr { expr: e, .. } => {
                             self.collect_const_blocks_from_expr(e, module_path, errors);
                         }
-                        verum_ast::stmt::StmtKind::Let { value: Maybe::Some(e), .. } => {
+                        verum_ast::stmt::StmtKind::Let {
+                            value: Maybe::Some(e),
+                            ..
+                        } => {
                             self.collect_const_blocks_from_expr(e, module_path, errors);
                         }
                         _ => {}
@@ -1908,10 +1982,8 @@ impl<'s> CompilationPipeline<'s> {
                         *ffi_result.lock().unwrap() = self.phase_ffi_validation(module);
                     });
                 });
-                self.session.collect_phase_error(
-                    "ffi_validation",
-                    ffi_result.into_inner().unwrap(),
-                )?;
+                self.session
+                    .collect_phase_error("ffi_validation", ffi_result.into_inner().unwrap())?;
             } else {
                 self.phase_context_validation(module);
                 self.phase_send_sync_validation(module);
@@ -1959,24 +2031,16 @@ impl<'s> CompilationPipeline<'s> {
                 });
             });
 
-            self.session.collect_phase_error(
-                "dependency_analysis",
-                dep_result.into_inner().unwrap(),
-            )?;
+            self.session
+                .collect_phase_error("dependency_analysis", dep_result.into_inner().unwrap())?;
             if smt_enabled {
-                self.session.collect_phase_error(
-                    "verify",
-                    verify_result.into_inner().unwrap(),
-                )?;
+                self.session
+                    .collect_phase_error("verify", verify_result.into_inner().unwrap())?;
             }
-            self.session.collect_phase_error(
-                "cbgr_analysis",
-                cbgr_result.into_inner().unwrap(),
-            )?;
-            self.session.collect_phase_error(
-                "ffi_validation",
-                ffi_result.into_inner().unwrap(),
-            )?;
+            self.session
+                .collect_phase_error("cbgr_analysis", cbgr_result.into_inner().unwrap())?;
+            self.session
+                .collect_phase_error("ffi_validation", ffi_result.into_inner().unwrap())?;
         } else {
             let r = self.phase_dependency_analysis(module);
             self.session.collect_phase_error("dependency_analysis", r)?;
@@ -1999,11 +2063,7 @@ impl<'s> CompilationPipeline<'s> {
         // Err already short-circuited above.
         self.session.abort_if_errors()
     }
-
-
-
 }
-
 
 // ---------------------------------------------------------------------------
 // Inline tests

@@ -1,13 +1,13 @@
 use super::PassManager;
 use crate::{pass::Pass, string_ref::StringRef};
-use verum_mlir_sys::{
-    MlirOpPassManager, MlirStringRef, mlirOpPassManagerAddOwnedPass,
-    mlirOpPassManagerGetNestedUnder, mlirPrintPassPipeline,
-};
 use std::{
     ffi::c_void,
     fmt::{self, Display, Formatter},
     marker::PhantomData,
+};
+use verum_mlir_sys::{
+    MlirOpPassManager, MlirStringRef, mlirOpPassManagerAddOwnedPass,
+    mlirOpPassManagerGetNestedUnder, mlirPrintPassPipeline,
 };
 
 /// An operation pass manager.

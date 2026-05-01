@@ -23,13 +23,13 @@
 #![allow(unused_imports)]
 
 use verum_common::List;
+use verum_common::type_level::TypeLevelConfig;
 use verum_types::{
     const_eval::{ConstEvaluator, MAX_RECURSION_DEPTH},
     ty::Type,
-    type_level_computation::{TypeLevelEvaluator},
-    unify::{Unifier, DEFAULT_MAX_UNIFY_DEPTH},
+    type_level_computation::TypeLevelEvaluator,
+    unify::{DEFAULT_MAX_UNIFY_DEPTH, Unifier},
 };
-use verum_common::type_level::TypeLevelConfig;
 
 /// Pin: every recursion-budget evaluator exposes a `configured_*`
 /// getter that mirrors the builder/config input. A regression that

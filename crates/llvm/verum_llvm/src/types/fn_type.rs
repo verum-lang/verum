@@ -1,17 +1,18 @@
+use verum_llvm_sys::LLVMTypeKind;
 use verum_llvm_sys::core::{
-    LLVMCountParamTypes, LLVMGetParamTypes, LLVMGetReturnType, LLVMGetTypeKind, LLVMIsFunctionVarArg,
+    LLVMCountParamTypes, LLVMGetParamTypes, LLVMGetReturnType, LLVMGetTypeKind,
+    LLVMIsFunctionVarArg,
 };
 use verum_llvm_sys::prelude::LLVMTypeRef;
-use verum_llvm_sys::LLVMTypeKind;
 
 use std::fmt::{self, Display};
 use std::mem::forget;
 
+use crate::AddressSpace;
 use crate::context::ContextRef;
 use crate::support::LLVMString;
 use crate::types::traits::AsTypeRef;
 use crate::types::{AnyType, BasicMetadataTypeEnum, BasicTypeEnum, PointerType, Type};
-use crate::AddressSpace;
 
 /// A `FunctionType` is the type of a function variable.
 #[derive(PartialEq, Eq, Clone, Copy)]

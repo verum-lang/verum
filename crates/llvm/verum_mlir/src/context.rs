@@ -4,6 +4,7 @@ use crate::{
     logical_result::LogicalResult,
     string_ref::StringRef,
 };
+use std::{ffi::c_void, marker::PhantomData, mem::transmute};
 use verum_mlir_sys::{
     MlirContext, MlirDiagnostic, MlirLogicalResult, mlirContextAppendDialectRegistry,
     mlirContextAttachDiagnosticHandler, mlirContextCreate, mlirContextDestroy,
@@ -13,7 +14,6 @@ use verum_mlir_sys::{
     mlirContextIsRegisteredOperation, mlirContextLoadAllAvailableDialects,
     mlirContextSetAllowUnregisteredDialects,
 };
-use std::{ffi::c_void, marker::PhantomData, mem::transmute};
 
 /// A context of IR, dialects, and passes.
 ///

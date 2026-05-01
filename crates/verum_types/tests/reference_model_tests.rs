@@ -485,7 +485,11 @@ fn test_auto_borrow_nested_reference() {
     let inner = Type::list(Type::int());
     let ref_list = Type::reference(false, inner.clone());
 
-    if let Type::Reference { mutable, inner: ref_inner } = &ref_list {
+    if let Type::Reference {
+        mutable,
+        inner: ref_inner,
+    } = &ref_list
+    {
         assert!(!mutable);
         assert!(matches!(**ref_inner, Type::Generic { .. }));
     }

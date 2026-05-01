@@ -771,14 +771,12 @@ impl RefinementErrorGenerator {
                     let escaped: String = bytes.iter().map(|b| format!("\\x{:02x}", b)).collect();
                     format!("b\"{}\"", escaped).into()
                 }
-                LiteralKind::Text(s) => {
-                    match s {
-                        verum_ast::literal::StringLit::Regular(text) => format!("\"{}\"", text).into(),
-                        verum_ast::literal::StringLit::MultiLine(text) => {
-                            format!("\"\"\"{}\"\"\"", text).into()
-                        }
+                LiteralKind::Text(s) => match s {
+                    verum_ast::literal::StringLit::Regular(text) => format!("\"{}\"", text).into(),
+                    verum_ast::literal::StringLit::MultiLine(text) => {
+                        format!("\"\"\"{}\"\"\"", text).into()
                     }
-                }
+                },
                 LiteralKind::Composite(comp) => format!("{}#\"{}\"", comp.tag, comp.content).into(),
                 LiteralKind::InterpolatedString(interp) => {
                     // InterpolatedStringLit has prefix and content
@@ -2085,9 +2083,10 @@ impl RefinementChecker {
             }
 
             // Handle comparisons between int literals (including negated literals)
-            if let (Maybe::Some(left_val), Maybe::Some(right_val)) =
-                (Self::try_extract_int_value(left), Self::try_extract_int_value(right))
-            {
+            if let (Maybe::Some(left_val), Maybe::Some(right_val)) = (
+                Self::try_extract_int_value(left),
+                Self::try_extract_int_value(right),
+            ) {
                 let result = self.eval_comparison(*op, left_val, right_val);
                 return Maybe::Some(if result {
                     VerificationResult::Valid
@@ -2099,9 +2098,10 @@ impl RefinementChecker {
             }
 
             // Handle comparisons between float literals (including negated float literals)
-            if let (Maybe::Some(left_val), Maybe::Some(right_val)) =
-                (Self::try_extract_float_value(left), Self::try_extract_float_value(right))
-            {
+            if let (Maybe::Some(left_val), Maybe::Some(right_val)) = (
+                Self::try_extract_float_value(left),
+                Self::try_extract_float_value(right),
+            ) {
                 let result = self.eval_float_comparison(*op, left_val, right_val);
                 return Maybe::Some(if result {
                     VerificationResult::Valid
@@ -2135,38 +2135,35 @@ impl RefinementChecker {
             ExprKind::Unary {
                 op: verum_ast::expr::UnOp::Neg,
                 expr: inner,
-            } => {
-                Self::try_extract_int_value(inner).map(|val| -val)
-            }
+            } => Self::try_extract_int_value(inner).map(|val| -val),
             ExprKind::Paren(inner) => Self::try_extract_int_value(inner),
             // `<literal-list>.len()` / `<byte-string>.len()` / `"text".len()`
             // — common in refinement predicates where the bound variable
             // gets substituted with a concrete list / byte-string / text
             // literal. Fold to the compile-time length so the evaluator
             // can reduce `xs.len() > 0` against `xs = []` etc.
-            ExprKind::MethodCall { receiver, method, args, .. }
-                if method.name.as_str() == "len" && args.is_empty() =>
-            {
-                match &receiver.kind {
-                    ExprKind::Array(arr) => match arr {
-                        verum_ast::expr::ArrayExpr::List(items) => {
-                            Maybe::Some(items.len() as i64)
-                        }
-                        verum_ast::expr::ArrayExpr::Repeat { count, .. } => {
-                            Self::try_extract_int_value(count)
-                        }
-                    },
-                    ExprKind::Literal(Literal {
-                        kind: verum_ast::literal::LiteralKind::Text(s),
-                        ..
-                    }) => Maybe::Some(s.as_str().len() as i64),
-                    ExprKind::Literal(Literal {
-                        kind: verum_ast::literal::LiteralKind::ByteString(b),
-                        ..
-                    }) => Maybe::Some(b.len() as i64),
-                    _ => Maybe::None,
-                }
-            }
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } if method.name.as_str() == "len" && args.is_empty() => match &receiver.kind {
+                ExprKind::Array(arr) => match arr {
+                    verum_ast::expr::ArrayExpr::List(items) => Maybe::Some(items.len() as i64),
+                    verum_ast::expr::ArrayExpr::Repeat { count, .. } => {
+                        Self::try_extract_int_value(count)
+                    }
+                },
+                ExprKind::Literal(Literal {
+                    kind: verum_ast::literal::LiteralKind::Text(s),
+                    ..
+                }) => Maybe::Some(s.as_str().len() as i64),
+                ExprKind::Literal(Literal {
+                    kind: verum_ast::literal::LiteralKind::ByteString(b),
+                    ..
+                }) => Maybe::Some(b.len() as i64),
+                _ => Maybe::None,
+            },
 
             // Tuple-index `.0`, `.1`, ... on a literal-tuple receiver.
             // Refinements like `|p| { p.0 > 0 }` on `type T is (Int, Int)`
@@ -2200,23 +2197,35 @@ impl RefinementChecker {
                         BinOp::Sub => lv.checked_sub(rv).and_then(Maybe::Some),
                         BinOp::Mul => lv.checked_mul(rv).and_then(Maybe::Some),
                         BinOp::Div => {
-                            if rv == 0 { Maybe::None }
-                            else { lv.checked_div(rv).and_then(Maybe::Some) }
+                            if rv == 0 {
+                                Maybe::None
+                            } else {
+                                lv.checked_div(rv).and_then(Maybe::Some)
+                            }
                         }
                         BinOp::Rem => {
-                            if rv == 0 { Maybe::None }
-                            else { Maybe::Some(lv.rem_euclid(rv)) }
+                            if rv == 0 {
+                                Maybe::None
+                            } else {
+                                Maybe::Some(lv.rem_euclid(rv))
+                            }
                         }
                         BinOp::Shl => {
-                            if !(0..64).contains(&rv) { Maybe::None }
-                            else { Maybe::Some(lv << rv) }
+                            if !(0..64).contains(&rv) {
+                                Maybe::None
+                            } else {
+                                Maybe::Some(lv << rv)
+                            }
                         }
                         BinOp::Shr => {
-                            if !(0..64).contains(&rv) { Maybe::None }
-                            else { Maybe::Some(lv >> rv) }
+                            if !(0..64).contains(&rv) {
+                                Maybe::None
+                            } else {
+                                Maybe::Some(lv >> rv)
+                            }
                         }
                         BinOp::BitAnd => Maybe::Some(lv & rv),
-                        BinOp::BitOr  => Maybe::Some(lv | rv),
+                        BinOp::BitOr => Maybe::Some(lv | rv),
                         BinOp::BitXor => Maybe::Some(lv ^ rv),
                         _ => Maybe::None,
                     },
@@ -2257,9 +2266,7 @@ impl RefinementChecker {
             ExprKind::Unary {
                 op: verum_ast::expr::UnOp::Neg,
                 expr: inner,
-            } => {
-                Self::try_extract_float_value(inner).map(|val| -val)
-            }
+            } => Self::try_extract_float_value(inner).map(|val| -val),
             ExprKind::Paren(inner) => Self::try_extract_float_value(inner),
             _ => Maybe::None,
         }
@@ -2896,9 +2903,10 @@ impl RefinementChecker {
                     }
                     // x >= n implies x >= m for m <= n
                     (BinOp::Ge, BinOp::Ge) => {
-                        if let (Some(n1), Some(n2)) =
-                            (self.extract_int_literal(right1), self.extract_int_literal(right2))
-                        {
+                        if let (Some(n1), Some(n2)) = (
+                            self.extract_int_literal(right1),
+                            self.extract_int_literal(right2),
+                        ) {
                             if n1 >= n2 {
                                 return true;
                             }
@@ -2906,9 +2914,10 @@ impl RefinementChecker {
                     }
                     // x > n implies x > m for m < n
                     (BinOp::Gt, BinOp::Gt) => {
-                        if let (Some(n1), Some(n2)) =
-                            (self.extract_int_literal(right1), self.extract_int_literal(right2))
-                        {
+                        if let (Some(n1), Some(n2)) = (
+                            self.extract_int_literal(right1),
+                            self.extract_int_literal(right2),
+                        ) {
                             if n1 > n2 {
                                 return true;
                             }
@@ -3046,17 +3055,19 @@ impl RefinementChecker {
                             verum_ast::ty::PathSegment::Name(i1),
                             verum_ast::ty::PathSegment::Name(i2),
                         ) => i1.name == i2.name,
-                        (verum_ast::ty::PathSegment::SelfValue, verum_ast::ty::PathSegment::SelfValue) => true,
-                        (verum_ast::ty::PathSegment::Super, verum_ast::ty::PathSegment::Super) => true,
+                        (
+                            verum_ast::ty::PathSegment::SelfValue,
+                            verum_ast::ty::PathSegment::SelfValue,
+                        ) => true,
+                        (verum_ast::ty::PathSegment::Super, verum_ast::ty::PathSegment::Super) => {
+                            true
+                        }
                         (verum_ast::ty::PathSegment::Cog, verum_ast::ty::PathSegment::Cog) => true,
                         _ => false,
                     })
             }
 
-            (
-                ExprKind::Literal(l1),
-                ExprKind::Literal(l2),
-            ) => {
+            (ExprKind::Literal(l1), ExprKind::Literal(l2)) => {
                 use verum_ast::literal::LiteralKind;
                 match (&l1.kind, &l2.kind) {
                     (LiteralKind::Int(i1), LiteralKind::Int(i2)) => i1.value == i2.value,
@@ -3084,10 +3095,9 @@ impl RefinementChecker {
                     && self.expr_syntactically_equal(right1, right2)
             }
 
-            (
-                ExprKind::Unary { op: op1, expr: e1 },
-                ExprKind::Unary { op: op2, expr: e2 },
-            ) => op1 == op2 && self.expr_syntactically_equal(e1, e2),
+            (ExprKind::Unary { op: op1, expr: e1 }, ExprKind::Unary { op: op2, expr: e2 }) => {
+                op1 == op2 && self.expr_syntactically_equal(e1, e2)
+            }
 
             (
                 ExprKind::MethodCall {
@@ -3112,9 +3122,16 @@ impl RefinementChecker {
                         .all(|(e1, e2)| self.expr_syntactically_equal(e1, e2))
             }
 
-            (ExprKind::Field { expr: e1, field: f1 }, ExprKind::Field { expr: e2, field: f2 }) => {
-                f1.name == f2.name && self.expr_syntactically_equal(e1, e2)
-            }
+            (
+                ExprKind::Field {
+                    expr: e1,
+                    field: f1,
+                },
+                ExprKind::Field {
+                    expr: e2,
+                    field: f2,
+                },
+            ) => f1.name == f2.name && self.expr_syntactically_equal(e1, e2),
 
             _ => false,
         }

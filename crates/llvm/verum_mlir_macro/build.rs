@@ -18,7 +18,11 @@ fn main() {
     let llvm_dir = get_llvm_install_dir();
     let llvm_config = if cfg!(windows) {
         let exe_path = llvm_dir.join("bin/llvm-config.exe");
-        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+        if exe_path.exists() {
+            exe_path
+        } else {
+            llvm_dir.join("bin/llvm-config")
+        }
     } else {
         llvm_dir.join("bin/llvm-config")
     };

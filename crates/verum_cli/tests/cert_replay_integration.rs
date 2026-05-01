@@ -19,7 +19,8 @@ fn run(args: &[&str]) -> Output {
 // Well-formed ALETHE body — decomposes to one `assume` + one
 // `la_generic` step, both of which resolve in the canonical
 // kernel-rule registry.
-const VALID_BODY: &str = "(assume h1 (>= x 0))\n(step t1 (cl (>= (+ x 1) 1)) :rule la_generic :premises (h1))";
+const VALID_BODY: &str =
+    "(assume h1 (>= x 0))\n(step t1 (cl (>= (+ x 1) 1)) :rule la_generic :premises (h1))";
 const VALID_THEORY: &str = "QF_LIA";
 const VALID_CONCLUSION: &str = "(>= x 0)";
 
@@ -30,12 +31,18 @@ const VALID_CONCLUSION: &str = "(>= x 0)";
 #[test]
 fn replay_kernel_only_inline_accepts_well_formed_cert() {
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--format", "z3_proof",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--format",
+        "z3_proof",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
     ]);
     assert!(
         out.status.success(),
@@ -53,12 +60,18 @@ fn replay_external_backend_tool_missing_v0_still_succeeds() {
     // accepts → exit 0 with "tool missing" output for the
     // backend section.
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "z3",
-        "--format", "z3_proof",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
+        "cert-replay",
+        "replay",
+        "--backend",
+        "z3",
+        "--format",
+        "z3_proof",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -69,12 +82,18 @@ fn replay_external_backend_tool_missing_v0_still_succeeds() {
 #[test]
 fn replay_unknown_theory_fails() {
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--format", "z3_proof",
-        "--theory", "BOGUS",
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--format",
+        "z3_proof",
+        "--theory",
+        "BOGUS",
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
     ]);
     assert!(!out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -85,12 +104,18 @@ fn replay_unknown_theory_fails() {
 #[test]
 fn replay_rejects_unknown_backend() {
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "garbage",
-        "--format", "z3_proof",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
+        "cert-replay",
+        "replay",
+        "--backend",
+        "garbage",
+        "--format",
+        "z3_proof",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
     ]);
     assert!(!out.status.success());
 }
@@ -98,13 +123,20 @@ fn replay_rejects_unknown_backend() {
 #[test]
 fn replay_json_well_formed() {
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--format", "z3_proof",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
-        "--output", "json",
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--format",
+        "z3_proof",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
+        "--output",
+        "json",
     ]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
@@ -120,13 +152,20 @@ fn replay_json_well_formed() {
 #[test]
 fn replay_markdown_format() {
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--format", "z3_proof",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
-        "--output", "markdown",
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--format",
+        "z3_proof",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
+        "--output",
+        "markdown",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -155,9 +194,12 @@ fn replay_loads_cert_from_file() {
     });
     fs::write(&path, serde_json::to_string_pretty(&cert).unwrap()).unwrap();
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--cert", path.to_str().unwrap(),
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--cert",
+        path.to_str().unwrap(),
     ]);
     assert!(
         out.status.success(),
@@ -195,11 +237,17 @@ fn replay_rejects_tampered_cert_file() {
     );
     fs::write(&path, body).unwrap();
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--cert", path.to_str().unwrap(),
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--cert",
+        path.to_str().unwrap(),
     ]);
-    assert!(!out.status.success(), "tampered cert must produce non-zero exit");
+    assert!(
+        !out.status.success(),
+        "tampered cert must produce non-zero exit"
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("body_hash mismatch"));
 }
@@ -210,9 +258,12 @@ fn replay_rejects_invalid_cert_file_json() {
     let path = dir.path().join("cert.json");
     fs::write(&path, "not valid json").unwrap();
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--cert", path.to_str().unwrap(),
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--cert",
+        path.to_str().unwrap(),
     ]);
     assert!(!out.status.success());
 }
@@ -224,12 +275,18 @@ fn replay_rejects_invalid_cert_file_json() {
 #[test]
 fn cross_check_default_runs_kernel_plus_external_backends() {
     let out = run(&[
-        "cert-replay", "cross-check",
-        "--format", "z3_proof",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
-        "--output", "json",
+        "cert-replay",
+        "cross-check",
+        "--format",
+        "z3_proof",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
+        "--output",
+        "json",
     ]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
@@ -243,14 +300,22 @@ fn cross_check_default_runs_kernel_plus_external_backends() {
 #[test]
 fn cross_check_explicit_backends() {
     let out = run(&[
-        "cert-replay", "cross-check",
-        "--backend", "z3",
-        "--backend", "cvc5",
-        "--format", "z3_proof",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
-        "--output", "json",
+        "cert-replay",
+        "cross-check",
+        "--backend",
+        "z3",
+        "--backend",
+        "cvc5",
+        "--format",
+        "z3_proof",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
+        "--output",
+        "json",
     ]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
@@ -284,9 +349,12 @@ fn cross_check_kernel_rejection_blocks_consensus() {
     );
     fs::write(&path, body).unwrap();
     let out = run(&[
-        "cert-replay", "cross-check",
-        "--cert", path.to_str().unwrap(),
-        "--output", "json",
+        "cert-replay",
+        "cross-check",
+        "--cert",
+        path.to_str().unwrap(),
+        "--output",
+        "json",
     ]);
     // Exit 0 without --require-consensus. But the all_available_accept
     // flag should be false.
@@ -314,8 +382,10 @@ fn cross_check_require_consensus_fails_on_kernel_rejection() {
     );
     fs::write(&path, body).unwrap();
     let out = run(&[
-        "cert-replay", "cross-check",
-        "--cert", path.to_str().unwrap(),
+        "cert-replay",
+        "cross-check",
+        "--cert",
+        path.to_str().unwrap(),
         "--require-consensus",
     ]);
     assert!(
@@ -327,13 +397,20 @@ fn cross_check_require_consensus_fails_on_kernel_rejection() {
 #[test]
 fn cross_check_markdown_format() {
     let out = run(&[
-        "cert-replay", "cross-check",
-        "--backend", "z3",
-        "--format", "z3_proof",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
-        "--output", "markdown",
+        "cert-replay",
+        "cross-check",
+        "--backend",
+        "z3",
+        "--format",
+        "z3_proof",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
+        "--output",
+        "markdown",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -376,12 +453,18 @@ fn backends_lists_six_canonical_backends() {
 #[test]
 fn replay_rejects_empty_body() {
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--format", "z3_proof",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", "",
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--format",
+        "z3_proof",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        "",
     ]);
     assert!(!out.status.success());
 }
@@ -389,12 +472,18 @@ fn replay_rejects_empty_body() {
 #[test]
 fn replay_rejects_empty_theory() {
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--format", "z3_proof",
-        "--theory", "",
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--format",
+        "z3_proof",
+        "--theory",
+        "",
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
     ]);
     assert!(!out.status.success());
 }
@@ -402,12 +491,18 @@ fn replay_rejects_empty_theory() {
 #[test]
 fn replay_rejects_unknown_format() {
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--format", "garbage",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--format",
+        "garbage",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
     ]);
     assert!(!out.status.success());
 }
@@ -415,13 +510,20 @@ fn replay_rejects_unknown_format() {
 #[test]
 fn replay_rejects_unknown_output() {
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "kernel_only",
-        "--format", "z3_proof",
-        "--theory", VALID_THEORY,
-        "--conclusion", VALID_CONCLUSION,
-        "--body", VALID_BODY,
-        "--output", "yaml",
+        "cert-replay",
+        "replay",
+        "--backend",
+        "kernel_only",
+        "--format",
+        "z3_proof",
+        "--theory",
+        VALID_THEORY,
+        "--conclusion",
+        VALID_CONCLUSION,
+        "--body",
+        VALID_BODY,
+        "--output",
+        "yaml",
     ]);
     assert!(!out.status.success());
 }
@@ -453,9 +555,12 @@ fn task_81_kernel_check_is_unbypassable_trust_anchor() {
     );
     fs::write(&path, body).unwrap();
     let out = run(&[
-        "cert-replay", "replay",
-        "--backend", "z3",
-        "--cert", path.to_str().unwrap(),
+        "cert-replay",
+        "replay",
+        "--backend",
+        "z3",
+        "--cert",
+        path.to_str().unwrap(),
     ]);
     assert!(
         !out.status.success(),

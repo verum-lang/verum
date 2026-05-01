@@ -16,14 +16,12 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use libffi::low::{
-    ffi_abi_FFI_DEFAULT_ABI, ffi_cif, ffi_type, types, CodePtr, prep_cif, call,
-};
+use libffi::low::{CodePtr, call, ffi_abi_FFI_DEFAULT_ABI, ffi_cif, ffi_type, prep_cif, types};
 
-use super::marshal::{ArrayBufferInfo, MarshalError, Marshaller};
-use super::platform::{create_platform, FfiPlatform, FfiPlatformError, LibraryHandle};
-use super::trampolines::{TrampolineId, TrampolineRegistry, CallbackHandler};
 use super::CTypeRuntime;
+use super::marshal::{ArrayBufferInfo, MarshalError, Marshaller};
+use super::platform::{FfiPlatform, FfiPlatformError, LibraryHandle, create_platform};
+use super::trampolines::{CallbackHandler, TrampolineId, TrampolineRegistry};
 use crate::module::{FfiSymbolId, VbcModule};
 use crate::value::Value;
 
@@ -46,10 +44,7 @@ pub enum FfiError {
     /// Call failed.
     CallFailed(String),
     /// Argument count mismatch.
-    ArgumentCountMismatch {
-        expected: usize,
-        got: usize,
-    },
+    ArgumentCountMismatch { expected: usize, got: usize },
 }
 
 impl fmt::Display for FfiError {
@@ -65,7 +60,11 @@ impl fmt::Display for FfiError {
             FfiError::CifPreparationFailed => write!(f, "CIF preparation failed"),
             FfiError::CallFailed(msg) => write!(f, "FFI call failed: {}", msg),
             FfiError::ArgumentCountMismatch { expected, got } => {
-                write!(f, "argument count mismatch: expected {}, got {}", expected, got)
+                write!(
+                    f,
+                    "argument count mismatch: expected {}, got {}",
+                    expected, got
+                )
             }
         }
     }
@@ -231,8 +230,9 @@ impl FfiRuntime {
         }
 
         // Get the layout from the module
-        let layout = module.ffi_layouts.get(layout_idx as usize)
-            .ok_or_else(|| FfiError::CallFailed(format!("FFI struct layout {} not found", layout_idx)))?;
+        let layout = module.ffi_layouts.get(layout_idx as usize).ok_or_else(|| {
+            FfiError::CallFailed(format!("FFI struct layout {} not found", layout_idx))
+        })?;
 
         // Build the field type array
         let mut field_types: Vec<*mut ffi_type> = Vec::with_capacity(layout.fields.len());
@@ -247,7 +247,11 @@ impl FfiRuntime {
         self.struct_types.insert(layout_idx, Box::new(struct_type));
 
         // Return the pointer
-        Ok(self.struct_types.get_mut(&layout_idx).unwrap().as_ffi_type_ptr())
+        Ok(self
+            .struct_types
+            .get_mut(&layout_idx)
+            .unwrap()
+            .as_ffi_type_ptr())
     }
 
     /// Gets the libffi type for a CTypeRuntime, handling struct types.
@@ -503,7 +507,9 @@ impl FfiRuntime {
             .iter()
             .enumerate()
             .map(|(i, t)| {
-                let layout_idx = symbol.signature.param_layout_indices
+                let layout_idx = symbol
+                    .signature
+                    .param_layout_indices
                     .get(i)
                     .copied()
                     .flatten();
@@ -515,9 +521,8 @@ impl FfiRuntime {
         let symbol_name = module.strings.get(symbol.name).unwrap_or("");
 
         // Resolve the symbol with struct type support
-        let resolved = self.resolve_symbol_with_structs(
-            module, handle, symbol_name, return_type, arg_types
-        )?;
+        let resolved =
+            self.resolve_symbol_with_structs(module, handle, symbol_name, return_type, arg_types)?;
 
         self.symbols.insert(idx, resolved);
         Ok(self.symbols.get(&idx).unwrap())
@@ -578,7 +583,9 @@ impl FfiRuntime {
         // Handle struct-by-value returns specially
         if let CTypeRuntime::StructValue(layout_idx) = symbol.return_type {
             // Get struct size from the cached type
-            let struct_size = self.struct_types.get(&layout_idx)
+            let struct_size = self
+                .struct_types
+                .get(&layout_idx)
                 .map(|st| st.size as usize)
                 .unwrap_or(0);
 
@@ -594,7 +601,10 @@ impl FfiRuntime {
                     // Use ffi_call directly with a return buffer
                     libffi::raw::ffi_call(
                         cif_ptr,
-                        Some(std::mem::transmute::<*const std::ffi::c_void, unsafe extern "C" fn()>(code_ptr.as_ptr())),
+                        Some(std::mem::transmute::<
+                            *const std::ffi::c_void,
+                            unsafe extern "C" fn(),
+                        >(code_ptr.as_ptr())),
                         ret_ptr as *mut std::ffi::c_void,
                         arg_ptrs.as_mut_ptr(),
                     );
@@ -613,7 +623,9 @@ impl FfiRuntime {
             let ret_storage: u64 = unsafe { call::<u64>(cif_ptr, code_ptr, arg_ptrs.as_mut_ptr()) };
 
             // Marshal return value
-            *ret_value = self.marshaller.c_to_value(ret_storage, symbol.return_type)?;
+            *ret_value = self
+                .marshaller
+                .c_to_value(ret_storage, symbol.return_type)?;
         }
 
         Ok(())
@@ -690,7 +702,12 @@ impl FfiRuntime {
                 .iter()
                 .enumerate()
                 .map(|(i, t)| {
-                    let layout_idx = symbol.signature.param_layout_indices.get(i).copied().flatten();
+                    let layout_idx = symbol
+                        .signature
+                        .param_layout_indices
+                        .get(i)
+                        .copied()
+                        .flatten();
                     CTypeRuntime::from_ctype_with_layout(*t, layout_idx)
                 })
                 .collect();
@@ -699,7 +716,13 @@ impl FfiRuntime {
             let symbol_name = module.strings.get(symbol.name).unwrap_or("");
 
             // Resolve the symbol (with struct support for struct-by-value)
-            let resolved = self.resolve_symbol_with_structs(module, handle, symbol_name, return_type, arg_types)?;
+            let resolved = self.resolve_symbol_with_structs(
+                module,
+                handle,
+                symbol_name,
+                return_type,
+                arg_types,
+            )?;
             self.symbols.insert(idx, resolved);
         }
 
@@ -780,13 +803,16 @@ impl FfiRuntime {
             } else {
                 // For pointer types that are mutable, use the SOURCE register for write-back
                 // This is the original variable's register, not the temporary ref register
-                let write_back_reg = if matches!(ctype, CTypeRuntime::Ptr | CTypeRuntime::ArrayPtr) {
+                let write_back_reg = if matches!(ctype, CTypeRuntime::Ptr | CTypeRuntime::ArrayPtr)
+                {
                     // Look up the source register from the map
                     source_reg_map.get(&(i as u8)).copied()
                 } else {
                     None
                 };
-                let raw = self.marshaller.value_to_c_ref(*arg, *ctype, write_back_reg)?;
+                let raw = self
+                    .marshaller
+                    .value_to_c_ref(*arg, *ctype, write_back_reg)?;
                 raw_args.push(raw);
             }
         }
@@ -810,7 +836,9 @@ impl FfiRuntime {
         // Handle struct-by-value returns specially
         if let CTypeRuntime::StructValue(layout_idx) = return_type {
             // Get struct size from the cached type
-            let struct_size = self.struct_types.get(&layout_idx)
+            let struct_size = self
+                .struct_types
+                .get(&layout_idx)
                 .map(|st| st.size as usize)
                 .unwrap_or(0);
 
@@ -823,7 +851,10 @@ impl FfiRuntime {
                 unsafe {
                     libffi::raw::ffi_call(
                         cif_ptr,
-                        Some(std::mem::transmute::<*const std::ffi::c_void, unsafe extern "C" fn()>(code_ptr.as_ptr())),
+                        Some(std::mem::transmute::<
+                            *const std::ffi::c_void,
+                            unsafe extern "C" fn(),
+                        >(code_ptr.as_ptr())),
                         ret_ptr as *mut std::ffi::c_void,
                         arg_ptrs.as_mut_ptr(),
                     );
@@ -917,11 +948,14 @@ impl FfiRuntime {
         arg_types: Vec<CTypeRuntime>,
         fn_id: u32,
     ) -> Result<(TrampolineId, *const ()), FfiError> {
-        let id = self.trampolines.create_callback(return_type, arg_types, fn_id)
+        let id = self
+            .trampolines
+            .create_callback(return_type, arg_types, fn_id)
             .map_err(|e| FfiError::CallFailed(format!("Failed to create callback: {}", e)))?;
 
-        let code_ptr = self.trampolines.get_code_ptr(id)
-            .ok_or_else(|| FfiError::CallFailed("Failed to get callback code pointer".to_string()))?;
+        let code_ptr = self.trampolines.get_code_ptr(id).ok_or_else(|| {
+            FfiError::CallFailed("Failed to get callback code pointer".to_string())
+        })?;
 
         Ok((id, code_ptr))
     }
@@ -952,12 +986,17 @@ impl FfiRuntime {
         signature_idx: u32,
     ) -> Result<*const (), FfiError> {
         // Look up the FFI symbol to get the signature
-        let symbol = module.get_ffi_symbol(crate::module::FfiSymbolId(signature_idx))
-            .ok_or(FfiError::SymbolNotFound(crate::module::FfiSymbolId(signature_idx)))?;
+        let symbol = module
+            .get_ffi_symbol(crate::module::FfiSymbolId(signature_idx))
+            .ok_or(FfiError::SymbolNotFound(crate::module::FfiSymbolId(
+                signature_idx,
+            )))?;
 
         // Convert signature types to runtime types using From trait
         let return_type: CTypeRuntime = symbol.signature.return_type.into();
-        let arg_types: Vec<CTypeRuntime> = symbol.signature.param_types
+        let arg_types: Vec<CTypeRuntime> = symbol
+            .signature
+            .param_types
             .iter()
             .map(|ct| (*ct).into())
             .collect();
@@ -968,7 +1007,8 @@ impl FfiRuntime {
 
     /// Frees a callback trampoline created by `create_callback`.
     pub fn free_callback(&mut self, id: TrampolineId) -> Result<(), FfiError> {
-        self.trampolines.unregister_callback(id)
+        self.trampolines
+            .unregister_callback(id)
             .map_err(|e| FfiError::CallFailed(format!("Failed to free callback: {}", e)))
     }
 
@@ -1062,7 +1102,11 @@ impl Default for FfiRuntime {
 ///
 
 /// The c_field_ptr must point to valid writable memory of the appropriate type.
-unsafe fn marshal_field_to_c(field_value: Value, c_type: crate::module::CType, c_field_ptr: *mut u8) {
+unsafe fn marshal_field_to_c(
+    field_value: Value,
+    c_type: crate::module::CType,
+    c_field_ptr: *mut u8,
+) {
     // SAFETY: Caller guarantees c_field_ptr points to valid writable memory of the appropriate type.
     unsafe {
         match c_type {
@@ -1115,40 +1159,29 @@ unsafe fn marshal_field_to_c(field_value: Value, c_type: crate::module::CType, c
 ///
 
 /// The c_field_ptr must point to valid readable memory of the appropriate type.
-pub(crate) unsafe fn marshal_field_from_c(c_type: crate::module::CType, c_field_ptr: *const u8) -> Option<Value> {
+pub(crate) unsafe fn marshal_field_from_c(
+    c_type: crate::module::CType,
+    c_field_ptr: *const u8,
+) -> Option<Value> {
     // SAFETY: Caller guarantees c_field_ptr points to valid readable memory of the appropriate type.
     unsafe {
         match c_type {
-            crate::module::CType::I8 => {
-                Some(Value::from_i64(*(c_field_ptr as *const i8) as i64))
-            }
+            crate::module::CType::I8 => Some(Value::from_i64(*(c_field_ptr as *const i8) as i64)),
             crate::module::CType::U8 | crate::module::CType::Bool => {
                 Some(Value::from_i64(*c_field_ptr as i64))
             }
-            crate::module::CType::I16 => {
-                Some(Value::from_i64(*(c_field_ptr as *const i16) as i64))
-            }
-            crate::module::CType::U16 => {
-                Some(Value::from_i64(*(c_field_ptr as *const u16) as i64))
-            }
-            crate::module::CType::I32 => {
-                Some(Value::from_i64(*(c_field_ptr as *const i32) as i64))
-            }
-            crate::module::CType::U32 => {
-                Some(Value::from_i64(*(c_field_ptr as *const u32) as i64))
-            }
+            crate::module::CType::I16 => Some(Value::from_i64(*(c_field_ptr as *const i16) as i64)),
+            crate::module::CType::U16 => Some(Value::from_i64(*(c_field_ptr as *const u16) as i64)),
+            crate::module::CType::I32 => Some(Value::from_i64(*(c_field_ptr as *const i32) as i64)),
+            crate::module::CType::U32 => Some(Value::from_i64(*(c_field_ptr as *const u32) as i64)),
             crate::module::CType::I64 | crate::module::CType::Ssize => {
                 Some(Value::from_i64(*(c_field_ptr as *const i64)))
             }
             crate::module::CType::U64 | crate::module::CType::Size => {
                 Some(Value::from_i64(*(c_field_ptr as *const u64) as i64))
             }
-            crate::module::CType::F32 => {
-                Some(Value::from_f64(*(c_field_ptr as *const f32) as f64))
-            }
-            crate::module::CType::F64 => {
-                Some(Value::from_f64(*(c_field_ptr as *const f64)))
-            }
+            crate::module::CType::F32 => Some(Value::from_f64(*(c_field_ptr as *const f32) as f64)),
+            crate::module::CType::F64 => Some(Value::from_f64(*(c_field_ptr as *const f64))),
             crate::module::CType::Ptr
             | crate::module::CType::CStr
             | crate::module::CType::StructPtr
@@ -1211,7 +1244,8 @@ unsafe fn marshal_c_to_verum_struct(
             let c_field_ptr = struct_buffer.as_ptr().add(field.offset as usize);
             let value_ptr = obj_ptr
                 .add(crate::interpreter::OBJECT_HEADER_SIZE)
-                .add(string_id * std::mem::size_of::<Value>()) as *mut Value;
+                .add(string_id * std::mem::size_of::<Value>())
+                as *mut Value;
 
             if let Some(field_value) = marshal_field_from_c(field.c_type, c_field_ptr) {
                 *value_ptr = field_value;
@@ -1311,7 +1345,11 @@ mod tests {
     fn test_load_libsystem() {
         let mut runtime = FfiRuntime::new().unwrap();
         let result = runtime.load_library("System");
-        assert!(result.is_ok(), "failed to load libSystem: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "failed to load libSystem: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -1319,13 +1357,12 @@ mod tests {
         let mut runtime = FfiRuntime::new().unwrap();
         let handle = runtime.load_library("System").unwrap();
 
-        let symbol = runtime.resolve_symbol(
-            handle,
-            "getpid",
-            CTypeRuntime::I32,
-            vec![],
+        let symbol = runtime.resolve_symbol(handle, "getpid", CTypeRuntime::I32, vec![]);
+        assert!(
+            symbol.is_ok(),
+            "failed to resolve getpid: {:?}",
+            symbol.err()
         );
-        assert!(symbol.is_ok(), "failed to resolve getpid: {:?}", symbol.err());
     }
 
     #[test]

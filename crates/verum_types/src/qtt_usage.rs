@@ -306,10 +306,7 @@ pub fn assert_branches_agree(
                     binding: name.clone(),
                     declared: Quantity::One,
                     observed: l.max(r),
-                    kind: ViolationKind::BranchDisagreement {
-                        left: l,
-                        right: r,
-                    },
+                    kind: ViolationKind::BranchDisagreement { left: l, right: r },
                 });
             }
         }
@@ -477,10 +474,7 @@ mod tests {
     fn deterministic_violation_order() {
         // When multiple bindings violate, return the alphabetically
         // first one for deterministic diagnostics.
-        let d = decls(&[
-            ("zebra", Quantity::One),
-            ("alpha", Quantity::One),
-        ]);
+        let d = decls(&[("zebra", Quantity::One), ("alpha", Quantity::One)]);
         let u = UsageMap::new(); // both zero — both under-use
         let err = check_usage(&d, &u).unwrap_err();
         assert_eq!(err.binding.as_str(), "alpha");
@@ -502,9 +496,7 @@ mod tests {
 
     #[test]
     fn usage_count_saturates_on_overflow() {
-        let mut c = UsageCount {
-            runtime: u32::MAX,
-        };
+        let mut c = UsageCount { runtime: u32::MAX };
         c = c.add(UsageCount::ONCE);
         // Should not panic / overflow.
         assert_eq!(c.runtime, u32::MAX);

@@ -1,14 +1,15 @@
 use crate::context::Context;
 use crate::support::to_c_str;
 use crate::values::{AnyValueEnum, AsValueRef, BasicValueEnum, CallSiteValue};
-use verum_llvm_sys::core::{
-    LLVMCreateOperandBundle, LLVMDisposeOperandBundle, LLVMGetNumOperandBundleArgs, LLVMGetNumOperandBundles,
-    LLVMGetOperandBundleArgAtIndex, LLVMGetOperandBundleAtIndex, LLVMGetOperandBundleTag,
-};
-use verum_llvm_sys::prelude::{LLVMOperandBundleRef, LLVMValueRef};
 use std::cell::Cell;
 use std::ffi::CStr;
 use std::marker::PhantomData;
+use verum_llvm_sys::core::{
+    LLVMCreateOperandBundle, LLVMDisposeOperandBundle, LLVMGetNumOperandBundleArgs,
+    LLVMGetNumOperandBundles, LLVMGetOperandBundleArgAtIndex, LLVMGetOperandBundleAtIndex,
+    LLVMGetOperandBundleTag,
+};
+use verum_llvm_sys::prelude::{LLVMOperandBundleRef, LLVMValueRef};
 
 /// One of an instruction's operand bundles.
 #[derive(Debug)]
@@ -76,7 +77,12 @@ impl<'ctx> OperandBundle<'ctx> {
         let mut args: Vec<LLVMValueRef> = args.iter().map(|value| value.as_value_ref()).collect();
 
         unsafe {
-            let bundle = LLVMCreateOperandBundle(c_tag.as_ptr(), tag.len(), args.as_mut_ptr(), args.len() as u32);
+            let bundle = LLVMCreateOperandBundle(
+                c_tag.as_ptr(),
+                tag.len(),
+                args.as_mut_ptr(),
+                args.len() as u32,
+            );
             Self::new(bundle)
         }
     }

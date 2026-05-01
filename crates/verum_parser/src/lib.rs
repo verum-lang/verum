@@ -123,20 +123,39 @@
 
 // Re-export everything from verum_fast_parser
 pub use verum_fast_parser::{
-    // Main parser types
-    FastParser, Parser, VerumParser,
-    // Core parsing infrastructure
-    RecursiveParser, TokenStream, merge_spans, span_from_tokens,
-    // Error handling
-    ParseError, ParseResult,
     // Attribute validation
-    AttributeValidationWarning, AttributeValidator, AttributeValidatorTrait, ValidationConfig,
-    validate_field_attributes, validate_function_attributes, validate_match_arm_attributes,
-    validate_parsed_attributes, validate_type_attributes,
+    AttributeValidationWarning,
+    AttributeValidator,
+    AttributeValidatorTrait,
     // Base recovery types
-    Delimiter, RecoveryContext, RecoveryStrategy, SyncPoint,
-    can_start_expression, can_start_item, can_start_statement, is_statement_terminator,
-    missing_token_message, unexpected_token_message,
+    Delimiter,
+    // Main parser types
+    FastParser,
+    // Error handling
+    ParseError,
+    ParseResult,
+    Parser,
+    RecoveryContext,
+    RecoveryStrategy,
+    // Core parsing infrastructure
+    RecursiveParser,
+    SyncPoint,
+    TokenStream,
+    ValidationConfig,
+    VerumParser,
+    can_start_expression,
+    can_start_item,
+    can_start_statement,
+    is_statement_terminator,
+    merge_spans,
+    missing_token_message,
+    span_from_tokens,
+    unexpected_token_message,
+    validate_field_attributes,
+    validate_function_attributes,
+    validate_match_arm_attributes,
+    validate_parsed_attributes,
+    validate_type_attributes,
 };
 
 // Re-export error module for full access to error types
@@ -158,21 +177,21 @@ pub mod syntax_bridge;
 
 // Export LSP recovery types (extends base recovery from verum_fast_parser)
 pub use recovery::{
-    EventRecovery, Recoverable, RecoveryResult as RecoveryOpResult,
-    RecoverySet, recovery_sets, token_kind_to_syntax_kind,
+    EventRecovery, Recoverable, RecoveryResult as RecoveryOpResult, RecoverySet, recovery_sets,
+    token_kind_to_syntax_kind,
 };
 
 // Export incremental parsing infrastructure
 pub use incremental::{
-    BenchmarkResult, IncrementalDocument, IncrementalParserEngine,
-    benchmark_incremental_vs_full, run_benchmark_suite,
+    BenchmarkResult, IncrementalDocument, IncrementalParserEngine, benchmark_incremental_vs_full,
+    run_benchmark_suite,
 };
 
 // Export lossless parsing infrastructure
-pub use syntax_bridge::{LosslessParser, LosslessParse, IncrementalParser};
+pub use syntax_bridge::{IncrementalParser, LosslessParse, LosslessParser};
 
 // Export event-based parsing infrastructure
-pub use syntax_bridge::{EventBasedParser, EventBasedParse};
+pub use syntax_bridge::{EventBasedParse, EventBasedParser};
 
 // Export recovering event-based parser with full error recovery
 pub use recovery_parser::{RecoveringEventParser, RecoveringParse};

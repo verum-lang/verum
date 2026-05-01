@@ -117,18 +117,21 @@ use verum_common::well_known_types::WellKnownType as WKT;
 
 use crate::instruction::{Instruction, Reg};
 use crate::module::{
-    CallingConvention as FfiCallingConvention, CType, ErrorProtocol, FfiLibrary, FfiLibraryId,
-    FfiOwnership, FfiPlatform, FfiSignature, FfiStructField, FfiStructLayout, FfiSymbol, FfiSymbolId,
-    FunctionDescriptor, FunctionId, MemoryEffects, ParamDescriptor, VbcFunction, VbcModule,
+    CType, CallingConvention as FfiCallingConvention, ErrorProtocol, FfiLibrary, FfiLibraryId,
+    FfiOwnership, FfiPlatform, FfiSignature, FfiStructField, FfiStructLayout, FfiSymbol,
+    FfiSymbolId, FunctionDescriptor, FunctionId, MemoryEffects, ParamDescriptor, VbcFunction,
+    VbcModule,
 };
 use crate::types::{StringId, TypeDescriptor, TypeId, TypeRef};
 use crate::validate;
 
-use verum_ast::decl::{ExternBlockDecl, MountDecl, MountTree, MountTreeKind, TypeDeclBody, VariantData};
-use verum_ast::ffi::{FFIBoundary, CallingConvention as AstCallingConvention};
+use verum_ast::bitfield::ByteOrder;
+use verum_ast::decl::{
+    ExternBlockDecl, MountDecl, MountTree, MountTreeKind, TypeDeclBody, VariantData,
+};
+use verum_ast::ffi::{CallingConvention as AstCallingConvention, FFIBoundary};
 use verum_ast::ty::PathSegment;
 use verum_ast::{Block, FunctionBody, FunctionDecl, Item, ItemKind, Module, StmtKind};
-use verum_ast::bitfield::ByteOrder;
 
 /// Bitfield layout information for a type.
 ///
@@ -495,7 +498,6 @@ pub struct CodegenConfig {
     // ========================================================================
     // V-LLSI Profile Configuration
     // ========================================================================
-
     /// Whether the module can be executed by VBC interpreter.
     ///
 
@@ -766,7 +768,9 @@ impl VbcCodegen {
                 let base_name = self.type_to_simple_name(base);
                 // VBC-internal: Heap<T> and Shared<T> are transparent wrappers — unwrap
                 // to inner type T so method dispatch resolves against T, not the wrapper.
-                if (WKT::Heap.matches(&base_name) || WKT::Shared.matches(&base_name)) && args.len() == 1 {
+                if (WKT::Heap.matches(&base_name) || WKT::Shared.matches(&base_name))
+                    && args.len() == 1
+                {
                     // Transparent wrapper — return inner type for method dispatch
                     if let verum_ast::ty::GenericArg::Type(inner_ty) = &args[0] {
                         return self.type_to_simple_name(inner_ty);
@@ -776,16 +780,20 @@ impl VbcCodegen {
             }
             verum_ast::ty::TypeKind::Path(path) => {
                 // Get the last segment name (simple type name)
-                path.segments.iter().rev().find_map(|seg| {
-                    match seg {
+                path.segments
+                    .iter()
+                    .rev()
+                    .find_map(|seg| match seg {
                         verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
                         _ => None,
-                    }
-                }).unwrap_or_else(|| "Unknown".to_string())
+                    })
+                    .unwrap_or_else(|| "Unknown".to_string())
             }
-            _ if ty.kind.primitive_name().is_some() => {
-                ty.kind.primitive_name().map(|n| n.to_string()).unwrap_or_else(|| "Unknown".to_string())
-            }
+            _ if ty.kind.primitive_name().is_some() => ty
+                .kind
+                .primitive_name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "Unknown".to_string()),
             verum_ast::ty::TypeKind::Tuple(_) => "Tuple".to_string(),
             verum_ast::ty::TypeKind::Array { .. } => "Array".to_string(),
             verum_ast::ty::TypeKind::Reference { inner, .. } => {
@@ -810,16 +818,12 @@ impl VbcCodegen {
         match &ty.kind {
             // Generic type: extract base type name from the generic base
             // Vec<Float32, 4> → Vec
-            verum_ast::ty::TypeKind::Generic { base, .. } => {
-                self.extract_base_type_name(base)
-            }
+            verum_ast::ty::TypeKind::Generic { base, .. } => self.extract_base_type_name(base),
             // Path type: extract the last segment name
             verum_ast::ty::TypeKind::Path(path) => {
-                path.segments.iter().rev().find_map(|seg| {
-                    match seg {
-                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                        _ => None,
-                    }
+                path.segments.iter().rev().find_map(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                    _ => None,
                 })
             }
             // Primitive types
@@ -898,7 +902,10 @@ impl VbcCodegen {
     /// E.g., receiver="Map<Int, Node>", base="Map", ret="V" → Some("Node")
     /// because Map has params [K, V] and V is at index 1.
     pub fn resolve_generic_return_type(
-        &self, receiver_type: &str, base_type: &str, generic_name: &str,
+        &self,
+        receiver_type: &str,
+        base_type: &str,
+        generic_name: &str,
     ) -> Option<String> {
         // Look up generic param names from the data-driven collection_type_params registry
         let params = self.collection_type_params.get(base_type)?;
@@ -950,8 +957,8 @@ impl VbcCodegen {
             // These provide no useful type information and cause wrong field index
             // resolution when used as base_type in resolve_field_index.
             // Concrete type names are either longer or start lowercase (primitives).
-            let is_bare_generic = first_arg.len() <= 2
-                && first_arg.chars().all(|c| c.is_ascii_uppercase());
+            let is_bare_generic =
+                first_arg.len() <= 2 && first_arg.chars().all(|c| c.is_ascii_uppercase());
             if is_bare_generic {
                 None
             } else {
@@ -1084,7 +1091,10 @@ impl VbcCodegen {
             collection_type_params: {
                 let mut m = std::collections::HashMap::new();
                 m.insert("Map".to_string(), vec!["K".to_string(), "V".to_string()]);
-                m.insert("BTreeMap".to_string(), vec!["K".to_string(), "V".to_string()]);
+                m.insert(
+                    "BTreeMap".to_string(),
+                    vec!["K".to_string(), "V".to_string()],
+                );
                 m.insert("List".to_string(), vec!["T".to_string()]);
                 m.insert("Set".to_string(), vec!["T".to_string()]);
                 m.insert("BTreeSet".to_string(), vec!["T".to_string()]);
@@ -1153,13 +1163,17 @@ impl VbcCodegen {
     /// collections_codegen.import_functions(&core_functions);
     /// collections_codegen.compile_module(&collections_ast)?;
     /// ```
-    pub fn import_functions(&mut self, functions: &std::collections::HashMap<String, FunctionInfo>) {
+    pub fn import_functions(
+        &mut self,
+        functions: &std::collections::HashMap<String, FunctionInfo>,
+    ) {
         self.ctx.import_functions(functions);
         // Update next_func_id to avoid ID conflicts
         if let Some(max_id) = functions.values().map(|f| f.id.0).max()
-            && max_id >= self.next_func_id {
-                self.next_func_id = max_id.saturating_add(1);
-            }
+            && max_id >= self.next_func_id
+        {
+            self.next_func_id = max_id.saturating_add(1);
+        }
     }
 
     /// Imports protocols from previously compiled modules.
@@ -1170,12 +1184,17 @@ impl VbcCodegen {
     /// Iteration is sorted by name so that downstream codegen sees
     /// protocols in a deterministic order — this matters because some
     /// later passes assign function IDs in iteration order.
-    pub fn import_protocols(&mut self, protocols: &std::collections::HashMap<String, ProtocolInfo>) {
+    pub fn import_protocols(
+        &mut self,
+        protocols: &std::collections::HashMap<String, ProtocolInfo>,
+    ) {
         let mut sorted: Vec<&String> = protocols.keys().collect();
         sorted.sort();
         for name in sorted {
             let info = &protocols[name];
-            self.protocol_registry.entry(name.clone()).or_insert_with(|| info.clone());
+            self.protocol_registry
+                .entry(name.clone())
+                .or_insert_with(|| info.clone());
         }
     }
 
@@ -1197,54 +1216,65 @@ impl VbcCodegen {
                 continue;
             }
             if let ItemKind::Type(type_decl) = &item.kind
-                && let TypeDeclBody::Protocol(protocol_body) = &type_decl.body {
-                    let protocol_name = type_decl.name.name.to_string();
-                    let mut default_methods = std::collections::HashMap::new();
+                && let TypeDeclBody::Protocol(protocol_body) = &type_decl.body
+            {
+                let protocol_name = type_decl.name.name.to_string();
+                let mut default_methods = std::collections::HashMap::new();
 
-                    // Extract superprotocol names from extends clause
-                    let super_protocols: Vec<String> = protocol_body.extends.iter()
-                        .filter_map(|ty| {
-                            // Extract protocol name from type (e.g., Named { path: "PartialEq", .. })
-                            if let verum_ast::ty::Type {
-                                kind: verum_ast::ty::TypeKind::Path(path),
-                                ..
-                            } = ty {
-                                path.segments.last().and_then(|seg| {
-                                    if let verum_ast::ty::PathSegment::Name(ident) = seg {
-                                        Some(ident.name.to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
+                // Extract superprotocol names from extends clause
+                let super_protocols: Vec<String> = protocol_body
+                    .extends
+                    .iter()
+                    .filter_map(|ty| {
+                        // Extract protocol name from type (e.g., Named { path: "PartialEq", .. })
+                        if let verum_ast::ty::Type {
+                            kind: verum_ast::ty::TypeKind::Path(path),
+                            ..
+                        } = ty
+                        {
+                            path.segments.last().and_then(|seg| {
+                                if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                                    Some(ident.name.to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-                    // Extract default method implementations
-                    for protocol_item in &protocol_body.items {
-                        if let ProtocolItemKind::Function { decl, default_impl: verum_common::Maybe::Some(body) } = &protocol_item.kind {
-                            {
-                                let method_name = decl.name.name.to_string();
-                                // Create a FunctionDecl with the body from default_impl.
-                                // The `decl` might have body: None, so we need to merge them.
-                                let mut func_with_body = decl.clone();
-                                func_with_body.body = Some(body.clone());
-                                default_methods.insert(method_name, func_with_body);
-                            }
+                // Extract default method implementations
+                for protocol_item in &protocol_body.items {
+                    if let ProtocolItemKind::Function {
+                        decl,
+                        default_impl: verum_common::Maybe::Some(body),
+                    } = &protocol_item.kind
+                    {
+                        {
+                            let method_name = decl.name.name.to_string();
+                            // Create a FunctionDecl with the body from default_impl.
+                            // The `decl` might have body: None, so we need to merge them.
+                            let mut func_with_body = decl.clone();
+                            func_with_body.body = Some(body.clone());
+                            default_methods.insert(method_name, func_with_body);
                         }
                     }
+                }
 
-                    // Register protocol info even if no default methods - needed for inheritance tracking
-                    if !default_methods.is_empty() || !super_protocols.is_empty() {
-                        self.protocol_registry.insert(protocol_name.clone(), ProtocolInfo {
+                // Register protocol info even if no default methods - needed for inheritance tracking
+                if !default_methods.is_empty() || !super_protocols.is_empty() {
+                    self.protocol_registry.insert(
+                        protocol_name.clone(),
+                        ProtocolInfo {
                             name: protocol_name,
                             default_methods,
                             super_protocols,
-                        });
-                    }
+                        },
+                    );
                 }
+            }
 
             // Context declarations also need TypeDescriptors for dyn: dispatch.
             // When `implement Formatter for DecimalFormatter` is compiled, it looks
@@ -1309,13 +1339,17 @@ impl VbcCodegen {
             Ok(()) => {
                 tracing::trace!(
                     "[decl-collect] {} ok: +{} funcs (total {})",
-                    module_name, funcs_after - funcs_before, funcs_after
+                    module_name,
+                    funcs_after - funcs_before,
+                    funcs_after
                 );
             }
             Err(e) => {
                 tracing::warn!(
                     "[decl-collect] {} ERR: +{} funcs registered before fail: {}",
-                    module_name, funcs_after - funcs_before, e
+                    module_name,
+                    funcs_after - funcs_before,
+                    e
                 );
             }
         }
@@ -1356,7 +1390,9 @@ impl VbcCodegen {
     pub fn mark_user_defined_types(&mut self, module: &Module) {
         for item in module.items.iter() {
             if let ItemKind::Type(type_decl) = &item.kind {
-                self.ctx.user_defined_types.insert(type_decl.name.name.to_string());
+                self.ctx
+                    .user_defined_types
+                    .insert(type_decl.name.name.to_string());
             }
         }
     }
@@ -1384,8 +1420,10 @@ impl VbcCodegen {
         // Shadowed per-protocol override: blanket-impl entries carry their
         // own `explicit_methods` set that takes priority over the derived
         // protocol's default bodies for the same method name.
-        let mut per_proto_overrides: std::collections::HashMap<String, std::collections::HashSet<String>> =
-            std::collections::HashMap::new();
+        let mut per_proto_overrides: std::collections::HashMap<
+            String,
+            std::collections::HashSet<String>,
+        > = std::collections::HashMap::new();
         per_proto_overrides.insert(protocol_name.to_string(), implemented_methods.clone());
 
         while let Some(proto_name) = protocols_to_check.pop() {
@@ -1405,7 +1443,9 @@ impl VbcCodegen {
                 .map(|b| (b.derived_protocol.clone(), b.explicit_methods.clone()))
                 .collect();
             for (derived, overrides) in pending_derivations {
-                per_proto_overrides.entry(derived.clone()).or_insert(overrides);
+                per_proto_overrides
+                    .entry(derived.clone())
+                    .or_insert(overrides);
                 if !checked.contains(&derived) {
                     protocols_to_check.push(derived);
                 }
@@ -1446,7 +1486,8 @@ impl VbcCodegen {
                     }
 
                     self.register_impl_function(default_func, type_name)?;
-                    self.pending_default_methods.push((default_func.clone(), type_name.to_string()));
+                    self.pending_default_methods
+                        .push((default_func.clone(), type_name.to_string()));
                 }
             }
         }
@@ -1472,7 +1513,11 @@ impl VbcCodegen {
         let path = match &b.kind {
             TypeBoundKind::Protocol(path) => path,
             TypeBoundKind::GenericProtocol(ty) => {
-                if let TypeKind::Path(p) = &ty.kind { p } else { return None; }
+                if let TypeKind::Path(p) = &ty.kind {
+                    p
+                } else {
+                    return None;
+                }
             }
             _ => return None,
         };
@@ -1504,7 +1549,10 @@ impl VbcCodegen {
             // a valid ID before the body is compiled.
             if let Some(func_info) = self.ctx.lookup_function(&full_method_name) {
                 // Check if a function with this ID was already compiled (exists in self.functions)
-                let already_compiled = self.functions.iter().any(|f| f.descriptor.id == func_info.id);
+                let already_compiled = self
+                    .functions
+                    .iter()
+                    .any(|f| f.descriptor.id == func_info.id);
                 if already_compiled {
                     continue;
                 }
@@ -1773,11 +1821,17 @@ impl VbcCodegen {
         // agree with register_type_constructors and the register_builtin
         // table near compile_program.
         let variant_tags: &[(&str, u32)] = &[
-            ("Ok", 0), ("Err", 1),
-            ("None", 0), ("Some", 1),
-            ("Less", 0), ("Equal", 1), ("Greater", 2),
-            ("Continue", 0), ("Break", 1),
-            ("True", 1), ("False", 0),
+            ("Ok", 0),
+            ("Err", 1),
+            ("None", 0),
+            ("Some", 1),
+            ("Less", 0),
+            ("Equal", 1),
+            ("Greater", 2),
+            ("Continue", 0),
+            ("Break", 1),
+            ("True", 1),
+            ("False", 0),
         ];
         let tag_map: std::collections::HashMap<&str, u32> = variant_tags.iter().copied().collect();
 
@@ -1798,7 +1852,8 @@ impl VbcCodegen {
                 variant_tag: tag_map.get(name).copied(),
                 parent_type_name: None,
                 variant_payload_types: None,
-                is_partial_pattern: false, takes_self_mut_ref: false,
+                is_partial_pattern: false,
+                takes_self_mut_ref: false,
                 return_type_name: None,
                 return_type_inner: None,
             };
@@ -1869,66 +1924,140 @@ impl VbcCodegen {
             ("Stopwatch.reset", 1, "time_stopwatch_reset"),
             // PerfCounter impl methods
             ("PerfCounter.now", 0, "time_perf_counter_now"),
-            ("PerfCounter.elapsed_since", 2, "time_perf_counter_elapsed_since"),
+            (
+                "PerfCounter.elapsed_since",
+                2,
+                "time_perf_counter_elapsed_since",
+            ),
             ("PerfCounter.as_nanos", 1, "time_perf_counter_as_nanos"),
             // DeadlineTimer impl methods
-            ("DeadlineTimer.from_duration", 1, "time_deadline_timer_from_duration"),
-            ("DeadlineTimer.is_expired", 1, "time_deadline_timer_is_expired"),
-            ("DeadlineTimer.remaining", 1, "time_deadline_timer_remaining"),
+            (
+                "DeadlineTimer.from_duration",
+                1,
+                "time_deadline_timer_from_duration",
+            ),
+            (
+                "DeadlineTimer.is_expired",
+                1,
+                "time_deadline_timer_is_expired",
+            ),
+            (
+                "DeadlineTimer.remaining",
+                1,
+                "time_deadline_timer_remaining",
+            ),
             // Arithmetic intrinsics (core/intrinsics/arithmetic.vr)
-            ("add", 2, "add"), ("sub", 2, "sub"), ("mul", 2, "mul"),
-            ("div", 2, "div"), ("rem", 2, "rem"), ("neg", 1, "neg"),
-            ("abs_signed", 1, "abs_signed"), ("signum", 1, "signum"),
-            ("min", 2, "min"), ("max", 2, "max"), ("clamp", 3, "clamp"),
-            ("checked_add", 2, "checked_add"), ("checked_sub", 2, "checked_sub"),
-            ("checked_mul", 2, "checked_mul"), ("checked_div", 2, "checked_div"),
-            ("checked_add_u64", 2, "checked_add_u64"), ("checked_sub_u64", 2, "checked_sub_u64"),
+            ("add", 2, "add"),
+            ("sub", 2, "sub"),
+            ("mul", 2, "mul"),
+            ("div", 2, "div"),
+            ("rem", 2, "rem"),
+            ("neg", 1, "neg"),
+            ("abs_signed", 1, "abs_signed"),
+            ("signum", 1, "signum"),
+            ("min", 2, "min"),
+            ("max", 2, "max"),
+            ("clamp", 3, "clamp"),
+            ("checked_add", 2, "checked_add"),
+            ("checked_sub", 2, "checked_sub"),
+            ("checked_mul", 2, "checked_mul"),
+            ("checked_div", 2, "checked_div"),
+            ("checked_add_u64", 2, "checked_add_u64"),
+            ("checked_sub_u64", 2, "checked_sub_u64"),
             ("checked_mul_u64", 2, "checked_mul_u64"),
-            ("overflowing_add", 2, "overflowing_add"), ("overflowing_sub", 2, "overflowing_sub"),
+            ("overflowing_add", 2, "overflowing_add"),
+            ("overflowing_sub", 2, "overflowing_sub"),
             ("overflowing_mul", 2, "overflowing_mul"),
-            ("wrapping_add", 2, "wrapping_add"), ("wrapping_sub", 2, "wrapping_sub"),
-            ("wrapping_mul", 2, "wrapping_mul"), ("wrapping_neg", 1, "wrapping_neg"),
-            ("wrapping_shl", 2, "wrapping_shl"), ("wrapping_shr", 2, "wrapping_shr"),
-            ("saturating_add", 2, "saturating_add"), ("saturating_sub", 2, "saturating_sub"),
+            ("wrapping_add", 2, "wrapping_add"),
+            ("wrapping_sub", 2, "wrapping_sub"),
+            ("wrapping_mul", 2, "wrapping_mul"),
+            ("wrapping_neg", 1, "wrapping_neg"),
+            ("wrapping_shl", 2, "wrapping_shl"),
+            ("wrapping_shr", 2, "wrapping_shr"),
+            ("saturating_add", 2, "saturating_add"),
+            ("saturating_sub", 2, "saturating_sub"),
             ("saturating_mul", 2, "saturating_mul"),
             // Comparison intrinsics
-            ("eq", 2, "eq"), ("ne", 2, "ne"), ("lt", 2, "lt"),
-            ("le", 2, "le"), ("gt", 2, "gt"), ("ge", 2, "ge"),
+            ("eq", 2, "eq"),
+            ("ne", 2, "ne"),
+            ("lt", 2, "lt"),
+            ("le", 2, "le"),
+            ("gt", 2, "gt"),
+            ("ge", 2, "ge"),
             // Bitwise intrinsics (core/intrinsics/bitwise.vr)
-            ("clz", 1, "clz"), ("ctz", 1, "ctz"), ("bswap", 1, "bswap"),
-            ("bitreverse", 1, "bitreverse"), ("rotl", 2, "rotl"), ("rotr", 2, "rotr"),
-            ("bitand", 2, "bitand"), ("bitor", 2, "bitor"), ("bitxor", 2, "bitxor"),
-            ("bitnot", 1, "bitnot"), ("shl", 2, "shl"), ("shr", 2, "shr"),
+            ("clz", 1, "clz"),
+            ("ctz", 1, "ctz"),
+            ("bswap", 1, "bswap"),
+            ("bitreverse", 1, "bitreverse"),
+            ("rotl", 2, "rotl"),
+            ("rotr", 2, "rotr"),
+            ("bitand", 2, "bitand"),
+            ("bitor", 2, "bitor"),
+            ("bitxor", 2, "bitxor"),
+            ("bitnot", 1, "bitnot"),
+            ("shl", 2, "shl"),
+            ("shr", 2, "shr"),
             // Conversion intrinsics (core/intrinsics/conversion.vr)
-            ("int_to_float", 1, "int_to_float"), ("float_to_int", 1, "float_to_int"),
-            ("f32_to_bits", 1, "f32_to_bits"), ("f32_from_bits", 1, "f32_from_bits"),
-            ("f64_to_bits", 1, "f64_to_bits"), ("f64_from_bits", 1, "f64_from_bits"),
-            ("to_le_bytes", 1, "to_le_bytes"), ("to_be_bytes", 1, "to_be_bytes"),
-            ("from_le_bytes", 1, "from_le_bytes"), ("from_be_bytes", 1, "from_be_bytes"),
-            ("to_le_bytes_2", 1, "to_le_bytes_2"), ("to_le_bytes_4", 1, "to_le_bytes_4"),
+            ("int_to_float", 1, "int_to_float"),
+            ("float_to_int", 1, "float_to_int"),
+            ("f32_to_bits", 1, "f32_to_bits"),
+            ("f32_from_bits", 1, "f32_from_bits"),
+            ("f64_to_bits", 1, "f64_to_bits"),
+            ("f64_from_bits", 1, "f64_from_bits"),
+            ("to_le_bytes", 1, "to_le_bytes"),
+            ("to_be_bytes", 1, "to_be_bytes"),
+            ("from_le_bytes", 1, "from_le_bytes"),
+            ("from_be_bytes", 1, "from_be_bytes"),
+            ("to_le_bytes_2", 1, "to_le_bytes_2"),
+            ("to_le_bytes_4", 1, "to_le_bytes_4"),
             ("to_le_bytes_8", 1, "to_le_bytes_8"),
-            ("to_be_bytes_2", 1, "to_be_bytes_2"), ("to_be_bytes_4", 1, "to_be_bytes_4"),
+            ("to_be_bytes_2", 1, "to_be_bytes_2"),
+            ("to_be_bytes_4", 1, "to_be_bytes_4"),
             ("to_be_bytes_8", 1, "to_be_bytes_8"),
-            ("from_le_bytes_2", 1, "from_le_bytes_2"), ("from_le_bytes_4", 1, "from_le_bytes_4"),
+            ("from_le_bytes_2", 1, "from_le_bytes_2"),
+            ("from_le_bytes_4", 1, "from_le_bytes_4"),
             ("from_le_bytes_8", 1, "from_le_bytes_8"),
-            ("from_be_bytes_2", 1, "from_be_bytes_2"), ("from_be_bytes_4", 1, "from_be_bytes_4"),
+            ("from_be_bytes_2", 1, "from_be_bytes_2"),
+            ("from_be_bytes_4", 1, "from_be_bytes_4"),
             ("from_be_bytes_8", 1, "from_be_bytes_8"),
             // Float intrinsics (core/intrinsics/float.vr)
-            ("f32_infinity", 0, "f32_infinity"), ("f32_neg_infinity", 0, "f32_neg_infinity"),
+            ("f32_infinity", 0, "f32_infinity"),
+            ("f32_neg_infinity", 0, "f32_neg_infinity"),
             ("f32_nan", 0, "f32_nan"),
-            ("sqrt", 1, "sqrt"), ("cbrt", 1, "cbrt"),
-            ("exp", 1, "exp"), ("expm1", 1, "expm1"), ("exp2", 1, "exp2"),
-            ("log", 1, "log"), ("log1p", 1, "log1p"), ("log10", 1, "log10"),
-            ("log2", 1, "log2"), ("pow", 2, "pow"), ("powi", 2, "powi"),
-            ("floor", 1, "floor"), ("ceil", 1, "ceil"), ("round", 1, "round"),
-            ("trunc", 1, "trunc"), ("fabs", 1, "fabs"),
-            ("minnum", 2, "minnum"), ("maxnum", 2, "maxnum"),
-            ("fma", 3, "fma"), ("copysign", 2, "copysign"), ("hypot", 2, "hypot"),
-            ("sin", 1, "sin"), ("cos", 1, "cos"), ("tan", 1, "tan"),
-            ("asin", 1, "asin"), ("acos", 1, "acos"), ("atan", 1, "atan"),
+            ("sqrt", 1, "sqrt"),
+            ("cbrt", 1, "cbrt"),
+            ("exp", 1, "exp"),
+            ("expm1", 1, "expm1"),
+            ("exp2", 1, "exp2"),
+            ("log", 1, "log"),
+            ("log1p", 1, "log1p"),
+            ("log10", 1, "log10"),
+            ("log2", 1, "log2"),
+            ("pow", 2, "pow"),
+            ("powi", 2, "powi"),
+            ("floor", 1, "floor"),
+            ("ceil", 1, "ceil"),
+            ("round", 1, "round"),
+            ("trunc", 1, "trunc"),
+            ("fabs", 1, "fabs"),
+            ("minnum", 2, "minnum"),
+            ("maxnum", 2, "maxnum"),
+            ("fma", 3, "fma"),
+            ("copysign", 2, "copysign"),
+            ("hypot", 2, "hypot"),
+            ("sin", 1, "sin"),
+            ("cos", 1, "cos"),
+            ("tan", 1, "tan"),
+            ("asin", 1, "asin"),
+            ("acos", 1, "acos"),
+            ("atan", 1, "atan"),
             ("atan2", 2, "atan2"),
-            ("sinh", 1, "sinh"), ("cosh", 1, "cosh"), ("tanh", 1, "tanh"),
-            ("asinh", 1, "asinh"), ("acosh", 1, "acosh"), ("atanh", 1, "atanh"),
+            ("sinh", 1, "sinh"),
+            ("cosh", 1, "cosh"),
+            ("tanh", 1, "tanh"),
+            ("asinh", 1, "asinh"),
+            ("acosh", 1, "acosh"),
+            ("atanh", 1, "atanh"),
             // Char intrinsics (core/intrinsics/runtime/text.vr)
             ("char_is_alphabetic", 1, "char_is_alphabetic"),
             ("char_is_numeric", 1, "char_is_numeric"),
@@ -2200,7 +2329,11 @@ impl VbcCodegen {
             ("join_multicast_v4", 3, "net_join_multicast_v4_linux"),
             ("leave_multicast_v4", 3, "net_leave_multicast_v4_linux"),
             ("set_multicast_ttl_v4", 2, "net_set_multicast_ttl_v4_linux"),
-            ("set_multicast_loop_v4", 2, "net_set_multicast_loop_v4_linux"),
+            (
+                "set_multicast_loop_v4",
+                2,
+                "net_set_multicast_loop_v4_linux",
+            ),
             // Linux bare socket operations (used via @cfg blocks, no alias)
             ("socket", 3, "sys_socket"),
             ("bind", 3, "sys_bind"),
@@ -2261,7 +2394,8 @@ impl VbcCodegen {
                 variant_tag: None,
                 parent_type_name: None,
                 variant_payload_types: None,
-                is_partial_pattern: false, takes_self_mut_ref: false,
+                is_partial_pattern: false,
+                takes_self_mut_ref: false,
                 return_type_name: None,
                 return_type_inner: None,
             };
@@ -2344,7 +2478,8 @@ impl VbcCodegen {
 
     /// Convenience method when you have a `Map<ExprId, CbgrTier>`.
     pub fn set_tier_decisions(&mut self, decisions: Map<ExprId, CbgrTier>) {
-        self.ctx.set_tier_context(TierContext::with_decisions(decisions));
+        self.ctx
+            .set_tier_context(TierContext::with_decisions(decisions));
     }
 
     /// Gets reference statistics after compilation.
@@ -2383,11 +2518,7 @@ impl VbcCodegen {
             .cfg_evaluator
             .should_include_with_failures(&stmt.attributes);
         if !failures.is_empty() {
-            let fn_name = self
-                .ctx
-                .current_function
-                .as_deref()
-                .unwrap_or("<unknown>");
+            let fn_name = self.ctx.current_function.as_deref().unwrap_or("<unknown>");
             for attr in &failures {
                 tracing::warn!(
                     "[cfg] @{}(...) attribute on statement inside `{}` could \
@@ -2438,26 +2569,24 @@ impl VbcCodegen {
 
         // Walk the inner decl's attributes when present.
         match &item.kind {
-            ItemKind::Type(type_decl)
-                if !type_decl.attributes.is_empty() => {
-                    let (include, failures) = self
-                        .cfg_evaluator
-                        .should_include_with_failures(&type_decl.attributes);
-                    self.warn_cfg_parse_failures(&failures, item, "TypeDecl");
-                    if !include {
-                        return false;
-                    }
+            ItemKind::Type(type_decl) if !type_decl.attributes.is_empty() => {
+                let (include, failures) = self
+                    .cfg_evaluator
+                    .should_include_with_failures(&type_decl.attributes);
+                self.warn_cfg_parse_failures(&failures, item, "TypeDecl");
+                if !include {
+                    return false;
                 }
-            ItemKind::Function(func)
-                if !func.attributes.is_empty() => {
-                    let (include, failures) = self
-                        .cfg_evaluator
-                        .should_include_with_failures(&func.attributes);
-                    self.warn_cfg_parse_failures(&failures, item, "Function");
-                    if !include {
-                        return false;
-                    }
+            }
+            ItemKind::Function(func) if !func.attributes.is_empty() => {
+                let (include, failures) = self
+                    .cfg_evaluator
+                    .should_include_with_failures(&func.attributes);
+                self.warn_cfg_parse_failures(&failures, item, "Function");
+                if !include {
+                    return false;
                 }
+            }
             // ImplDecl carries its attributes in `Item.attributes`, not
             // an inner field — already covered by the outer check above.
             _ => {}
@@ -2530,11 +2659,12 @@ impl VbcCodegen {
         for attr in func.attributes.iter() {
             if attr.name.as_str() == "intrinsic"
                 && let verum_common::Maybe::Some(args) = &attr.args
-                    && let Some(first_arg) = args.first()
-                        && let verum_ast::ExprKind::Literal(lit) = &first_arg.kind
-                            && let verum_ast::LiteralKind::Text(s) = &lit.kind {
-                                return Some(s.as_str().to_string());
-                            }
+                && let Some(first_arg) = args.first()
+                && let verum_ast::ExprKind::Literal(lit) = &first_arg.kind
+                && let verum_ast::LiteralKind::Text(s) = &lit.kind
+            {
+                return Some(s.as_str().to_string());
+            }
         }
         // Check function body for @intrinsic("name", ...) expression
         // Core intrinsics use: fn int_to_float(x) { @intrinsic("sitofp", x) }
@@ -2556,12 +2686,13 @@ impl VbcCodegen {
             };
             if let Some(expr) = body_expr
                 && let verum_ast::ExprKind::MetaFunction { name, args } = &expr.kind
-                    && name.name.as_str() == "intrinsic"
-                        && let Some(first_arg) = args.first()
-                            && let verum_ast::ExprKind::Literal(lit) = &first_arg.kind
-                                && let verum_ast::LiteralKind::Text(s) = &lit.kind {
-                                    return Some(s.as_str().to_string());
-                                }
+                && name.name.as_str() == "intrinsic"
+                && let Some(first_arg) = args.first()
+                && let verum_ast::ExprKind::Literal(lit) = &first_arg.kind
+                && let verum_ast::LiteralKind::Text(s) = &lit.kind
+            {
+                return Some(s.as_str().to_string());
+            }
         }
         None
     }
@@ -2598,7 +2729,9 @@ impl VbcCodegen {
     /// - alignment: from @align(N) or @repr(packed)→1, default 8
     /// - is_packed: true if @repr(packed)
     /// - is_repr_c: true if @repr(C)
-    fn extract_type_layout_hints(attrs: &verum_common::List<verum_ast::attr::Attribute>) -> (u32, bool, bool) {
+    fn extract_type_layout_hints(
+        attrs: &verum_common::List<verum_ast::attr::Attribute>,
+    ) -> (u32, bool, bool) {
         let mut alignment = 8u32;
         let mut is_packed = false;
         let mut is_repr_c = false;
@@ -2608,33 +2741,35 @@ impl VbcCodegen {
                 "align" => {
                     if let verum_common::Maybe::Some(ref args) = attr.args
                         && let Some(first) = args.first()
-                            && let verum_ast::ExprKind::Literal(lit) = &first.kind
-                                && let verum_ast::LiteralKind::Int(int_lit) = &lit.kind {
-                                    let val = int_lit.value as u32;
-                                    if val > 0 && val.is_power_of_two() {
-                                        alignment = val;
-                                    }
-                                }
+                        && let verum_ast::ExprKind::Literal(lit) = &first.kind
+                        && let verum_ast::LiteralKind::Int(int_lit) = &lit.kind
+                    {
+                        let val = int_lit.value as u32;
+                        if val > 0 && val.is_power_of_two() {
+                            alignment = val;
+                        }
+                    }
                 }
                 "repr" => {
                     if let verum_common::Maybe::Some(ref args) = attr.args
                         && let Some(first) = args.first()
-                            && let Some(repr_name) = Self::attr_arg_as_ident(first) {
-                                match repr_name.as_str() {
-                                    "packed" => {
-                                        is_packed = true;
-                                        alignment = 1;
-                                    }
-                                    "C" => {
-                                        is_repr_c = true;
-                                    }
-                                    "cache_optimal" => {
-                                        // Cache line alignment (64 bytes)
-                                        alignment = 64;
-                                    }
-                                    _ => {}
-                                }
+                        && let Some(repr_name) = Self::attr_arg_as_ident(first)
+                    {
+                        match repr_name.as_str() {
+                            "packed" => {
+                                is_packed = true;
+                                alignment = 1;
                             }
+                            "C" => {
+                                is_repr_c = true;
+                            }
+                            "cache_optimal" => {
+                                // Cache line alignment (64 bytes)
+                                alignment = 64;
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -2671,42 +2806,46 @@ impl VbcCodegen {
                 "hot" => hints.is_hot = true,
                 "optimize" => {
                     if let verum_common::Maybe::Some(args) = &attr.args
-                        && let Some(first) = args.first() {
-                            hints.opt_level = match Self::attr_arg_as_ident(first).as_deref() {
-                                Some("none") => Some(OptLevel::None),
-                                Some("size") => Some(OptLevel::Size),
-                                Some("speed") => Some(OptLevel::Speed),
-                                Some("balanced") => Some(OptLevel::Balanced),
-                                _ => None,
-                            };
-                        }
+                        && let Some(first) = args.first()
+                    {
+                        hints.opt_level = match Self::attr_arg_as_ident(first).as_deref() {
+                            Some("none") => Some(OptLevel::None),
+                            Some("size") => Some(OptLevel::Size),
+                            Some("speed") => Some(OptLevel::Speed),
+                            Some("balanced") => Some(OptLevel::Balanced),
+                            _ => None,
+                        };
+                    }
                 }
                 "align" => {
                     if let verum_common::Maybe::Some(args) = &attr.args
                         && let Some(first) = args.first()
-                            && let verum_ast::ExprKind::Literal(lit) = &first.kind
-                                && let verum_ast::LiteralKind::Int(int_lit) = &lit.kind {
-                                    let val = int_lit.value as u32;
-                                    if val > 0 && val.is_power_of_two() {
-                                        hints.alignment = Some(val);
-                                    }
-                                }
+                        && let verum_ast::ExprKind::Literal(lit) = &first.kind
+                        && let verum_ast::LiteralKind::Int(int_lit) = &lit.kind
+                    {
+                        let val = int_lit.value as u32;
+                        if val > 0 && val.is_power_of_two() {
+                            hints.alignment = Some(val);
+                        }
+                    }
                 }
                 "target_feature" => {
                     if let verum_common::Maybe::Some(args) = &attr.args
                         && let Some(first) = args.first()
-                            && let verum_ast::ExprKind::Literal(lit) = &first.kind
-                                && let verum_ast::LiteralKind::Text(s) = &lit.kind {
-                                    hints.target_features = Some(s.as_str().to_string());
-                                }
+                        && let verum_ast::ExprKind::Literal(lit) = &first.kind
+                        && let verum_ast::LiteralKind::Text(s) = &lit.kind
+                    {
+                        hints.target_features = Some(s.as_str().to_string());
+                    }
                 }
                 "target_cpu" => {
                     if let verum_common::Maybe::Some(args) = &attr.args
                         && let Some(first) = args.first()
-                            && let verum_ast::ExprKind::Literal(lit) = &first.kind
-                                && let verum_ast::LiteralKind::Text(s) = &lit.kind {
-                                    hints.target_cpu = Some(s.as_str().to_string());
-                                }
+                        && let verum_ast::ExprKind::Literal(lit) = &first.kind
+                        && let verum_ast::LiteralKind::Text(s) = &lit.kind
+                    {
+                        hints.target_cpu = Some(s.as_str().to_string());
+                    }
                 }
                 _ => {}
             }
@@ -2717,15 +2856,13 @@ impl VbcCodegen {
     /// Extract an identifier name from an expression (for attribute args).
     fn attr_arg_as_ident(expr: &verum_ast::Expr) -> Option<String> {
         match &expr.kind {
-            verum_ast::ExprKind::Path(path) => {
-                path.segments.last().and_then(|seg| {
-                    if let verum_ast::ty::PathSegment::Name(ident) = seg {
-                        Some(ident.name.to_string())
-                    } else {
-                        None
-                    }
-                })
-            }
+            verum_ast::ExprKind::Path(path) => path.segments.last().and_then(|seg| {
+                if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                    Some(ident.name.to_string())
+                } else {
+                    None
+                }
+            }),
             verum_ast::ExprKind::Literal(lit) => {
                 if let verum_ast::LiteralKind::Text(s) = &lit.kind {
                     Some(s.as_str().to_string())
@@ -2751,10 +2888,11 @@ impl VbcCodegen {
         let mut result = Ok(());
         for item in module.items.iter() {
             if self.should_compile_item(item)
-                && let Err(e) = self.compile_item(item) {
-                    result = Err(e);
-                    break;
-                }
+                && let Err(e) = self.compile_item(item)
+            {
+                result = Err(e);
+                break;
+            }
         }
         self.ctx.current_source_module = prev;
         result
@@ -2782,9 +2920,10 @@ impl VbcCodegen {
                 // first `BugClass` error encountered so we can halt the build
                 // at the call site instead of papering over a real defect.
                 if let Err(e) = self.compile_item_lenient(item)
-                    && first_strict_err.is_none() {
-                        first_strict_err = Some(e);
-                    }
+                    && first_strict_err.is_none()
+                {
+                    first_strict_err = Some(e);
+                }
             }
         }
         self.ctx.current_source_module = prev;
@@ -2821,7 +2960,9 @@ impl VbcCodegen {
                     tracing::warn!(
                         "[lenient] SKIP top-level fn {} ({}): {} — runtime calls \
                          will panic with `FunctionNotFound`",
-                        fname, class.label(), e
+                        fname,
+                        class.label(),
+                        e
                     );
                     if let Some(undef) = e.undefined_function_name() {
                         let undef_owned = undef.to_string();
@@ -2840,17 +2981,22 @@ impl VbcCodegen {
                         if !near.is_empty() {
                             tracing::warn!(
                                 "[lenient]   near-matches for '{}' in ctx.functions: {:?}",
-                                undef_owned, near
+                                undef_owned,
+                                near
                             );
                         } else {
                             tracing::warn!(
                                 "[lenient]   no near-matches for '{}' in ctx.functions ({} entries total)",
-                                undef_owned, self.ctx.functions.len()
+                                undef_owned,
+                                self.ctx.functions.len()
                             );
                         }
                     }
                     tracing::debug!("[lenient] SKIP top-level fn {}: {}", fname, e);
-                    if self.config.strict_codegen && class == SkipClass::BugClass && first_strict_err.is_none() {
+                    if self.config.strict_codegen
+                        && class == SkipClass::BugClass
+                        && first_strict_err.is_none()
+                    {
                         first_strict_err = Some(e);
                     }
                 }
@@ -2863,7 +3009,9 @@ impl VbcCodegen {
                 // Compile each function individually, skipping those that fail
                 let type_name = self.extract_impl_type_name(&impl_decl.kind);
 
-                let impl_type_generics: Vec<String> = impl_decl.generics.iter()
+                let impl_type_generics: Vec<String> = impl_decl
+                    .generics
+                    .iter()
                     .filter_map(|g| {
                         if let verum_ast::ty::GenericParamKind::Type { name, .. } = &g.kind {
                             Some(name.name.to_string())
@@ -2873,7 +3021,9 @@ impl VbcCodegen {
                     })
                     .collect();
 
-                let impl_const_generics: Vec<String> = impl_decl.generics.iter()
+                let impl_const_generics: Vec<String> = impl_decl
+                    .generics
+                    .iter()
                     .filter_map(|g| {
                         if let verum_ast::ty::GenericParamKind::Const { name, .. } = &g.kind {
                             Some(name.name.to_string())
@@ -2959,7 +3109,13 @@ impl VbcCodegen {
                                  on value'.  Add the missing dependency to the \
                                  caller's mount list or fix the cross-module \
                                  reference in {} stdlib.",
-                                ty, fname, class.label(), e, ty, fname, ty
+                                ty,
+                                fname,
+                                class.label(),
+                                e,
+                                ty,
+                                fname,
+                                ty
                             );
                             // For debugging stdlib hygiene: dump near-matches
                             // from the ctx.functions table so the user can
@@ -2983,17 +3139,22 @@ impl VbcCodegen {
                                 if !near.is_empty() {
                                     tracing::warn!(
                                         "[lenient]   near-matches for '{}' in ctx.functions: {:?}",
-                                        undef_owned, near
+                                        undef_owned,
+                                        near
                                     );
                                 } else {
                                     tracing::warn!(
                                         "[lenient]   no near-matches for '{}' in ctx.functions ({} entries total)",
-                                        undef_owned, self.ctx.functions.len()
+                                        undef_owned,
+                                        self.ctx.functions.len()
                                     );
                                 }
                             }
                             tracing::debug!("[lenient] SKIP {}.{}: {}", ty, fname, e);
-                            if self.config.strict_codegen && class == SkipClass::BugClass && first_strict_err.is_none() {
+                            if self.config.strict_codegen
+                                && class == SkipClass::BugClass
+                                && first_strict_err.is_none()
+                            {
                                 first_strict_err = Some(e);
                             }
                         }
@@ -3059,14 +3220,16 @@ impl VbcCodegen {
                 for d in &report.duplicate_ids {
                     tracing::warn!(
                         "[type-table]   duplicate TypeId({}) shared by {:?}",
-                        d.type_id, d.descriptor_names,
+                        d.type_id,
+                        d.descriptor_names,
                     );
                 }
                 for d in &report.duplicate_names_with_different_ids {
                     tracing::warn!(
                         "[type-table]   name `{}` declared with conflicting \
                          TypeIds: {:?}",
-                        d.name, d.type_ids,
+                        d.name,
+                        d.type_ids,
                     );
                 }
                 for a in &report.variant_tag_anomalies {
@@ -3074,8 +3237,12 @@ impl VbcCodegen {
                         "[type-table]   variant tags non-dense in `{}` \
                          (TypeId({})): expected {} variants, max tag {}, \
                          duplicates {:?}, missing {:?}",
-                        a.type_name, a.type_id, a.expected_count,
-                        a.max_tag_seen, a.duplicate_tags, a.missing_tags,
+                        a.type_name,
+                        a.type_id,
+                        a.expected_count,
+                        a.max_tag_seen,
+                        a.duplicate_tags,
+                        a.missing_tags,
                     );
                 }
             }
@@ -3089,13 +3256,13 @@ impl VbcCodegen {
         // failure mode is far harder to localise. Default-off keeps
         // the codegen hot path unchanged for production builds.
         if self.config.validate
-            && let Err(e) = validate::validate_module(&module) {
-                return Err(CodegenError::internal(format!(
-                    "VBC structural validation failed for module `{}`: {}",
-                    module.name,
-                    e,
-                )));
-            }
+            && let Err(e) = validate::validate_module(&module)
+        {
+            return Err(CodegenError::internal(format!(
+                "VBC structural validation failed for module `{}`: {}",
+                module.name, e,
+            )));
+        }
 
         Ok(module)
     }
@@ -3215,17 +3382,13 @@ impl VbcCodegen {
                         field_count,
                     } => {
                         report.untyped_emissions += 1;
-                        if valid_pairs_known
-                            && !valid_pairs.contains(&(*tag, *field_count))
-                        {
+                        if valid_pairs_known && !valid_pairs.contains(&(*tag, *field_count)) {
                             let fname = self
                                 .ctx
                                 .strings
                                 .get(f.descriptor.name.0 as usize)
                                 .cloned()
-                                .unwrap_or_else(|| {
-                                    format!("<FunctionId({})>", f.descriptor.id.0)
-                                });
+                                .unwrap_or_else(|| format!("<FunctionId({})>", f.descriptor.id.0));
                             tracing::warn!(
                                 "[layout] MakeVariant {{ tag: {}, field_count: \
                                  {} }} in `{}` has no matching variant in this \
@@ -3252,9 +3415,7 @@ impl VbcCodegen {
                         // (legitimate) — analogous to the untyped
                         // false-positive class.
                         let type_id_v = TypeId(*type_id);
-                        if let Some(expected) =
-                            typed_lookup.get(&(type_id_v, *tag))
-                        {
+                        if let Some(expected) = typed_lookup.get(&(type_id_v, *tag)) {
                             if *expected != *field_count {
                                 let fname = self
                                     .ctx
@@ -3262,10 +3423,7 @@ impl VbcCodegen {
                                     .get(f.descriptor.name.0 as usize)
                                     .cloned()
                                     .unwrap_or_else(|| {
-                                        format!(
-                                            "<FunctionId({})>",
-                                            f.descriptor.id.0
-                                        )
+                                        format!("<FunctionId({})>", f.descriptor.id.0)
                                     });
                                 tracing::warn!(
                                     "[layout] MakeVariantTyped {{ type_id: {}, \
@@ -3424,8 +3582,7 @@ impl VbcCodegen {
         use crate::types::VariantKind;
         // Build the set of valid (tag, field_count) combos across all
         // declared types. HashSet for O(1) membership.
-        let mut valid: std::collections::HashSet<(u32, u32)> =
-            std::collections::HashSet::new();
+        let mut valid: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
         for ty in &self.types {
             for v in &ty.variants {
                 let count = match v.kind {
@@ -3444,22 +3601,25 @@ impl VbcCodegen {
         let mut orphans = Vec::new();
         for f in &self.functions {
             for ins in &f.instructions {
-                if let Instruction::MakeVariant { dst: _, tag, field_count } = ins
-                    && !valid.contains(&(*tag, *field_count)) {
-                        let fname = self
-                            .ctx
-                            .strings
-                            .get(f.descriptor.name.0 as usize)
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                format!("<FunctionId({})>", f.descriptor.id.0)
-                            });
-                        orphans.push(OrphanMakeVariant {
-                            function_name: fname,
-                            tag: *tag,
-                            field_count: *field_count,
-                        });
-                    }
+                if let Instruction::MakeVariant {
+                    dst: _,
+                    tag,
+                    field_count,
+                } = ins
+                    && !valid.contains(&(*tag, *field_count))
+                {
+                    let fname = self
+                        .ctx
+                        .strings
+                        .get(f.descriptor.name.0 as usize)
+                        .cloned()
+                        .unwrap_or_else(|| format!("<FunctionId({})>", f.descriptor.id.0));
+                    orphans.push(OrphanMakeVariant {
+                        function_name: fname,
+                        tag: *tag,
+                        field_count: *field_count,
+                    });
+                }
             }
         }
         orphans
@@ -3475,7 +3635,10 @@ impl VbcCodegen {
     ) -> TypeTableHealthReport {
         use std::collections::HashMap;
         let resolve_name = |idx: u32| -> String {
-            strings.get(idx as usize).cloned().unwrap_or_else(|| format!("<id {}>", idx))
+            strings
+                .get(idx as usize)
+                .cloned()
+                .unwrap_or_else(|| format!("<id {}>", idx))
         };
 
         // Pass 1: bucket by TypeId. >1 in a bucket means duplicate ids.
@@ -3486,7 +3649,8 @@ impl VbcCodegen {
         let mut duplicate_ids: Vec<DuplicateTypeId> = Vec::new();
         for (id, idxs) in &by_id {
             if idxs.len() > 1 {
-                let names: Vec<String> = idxs.iter()
+                let names: Vec<String> = idxs
+                    .iter()
                     .map(|&i| resolve_name(types[i].name.0))
                     .collect();
                 duplicate_ids.push(DuplicateTypeId {
@@ -3500,21 +3664,22 @@ impl VbcCodegen {
         // share the same id (alias case); different ids = a real bug.
         let mut by_name: HashMap<String, Vec<(u32, usize)>> = HashMap::new();
         for (i, ty) in types.iter().enumerate() {
-            by_name.entry(resolve_name(ty.name.0)).or_default().push((ty.id.0, i));
+            by_name
+                .entry(resolve_name(ty.name.0))
+                .or_default()
+                .push((ty.id.0, i));
         }
         let mut duplicate_names_with_different_ids: Vec<DuplicateNameDifferentId> = Vec::new();
         for (name, slots) in &by_name {
             if slots.len() > 1 {
-                let ids: std::collections::HashSet<u32> =
-                    slots.iter().map(|(id, _)| *id).collect();
+                let ids: std::collections::HashSet<u32> = slots.iter().map(|(id, _)| *id).collect();
                 if ids.len() > 1 {
                     let mut sorted_ids: Vec<u32> = ids.into_iter().collect();
                     sorted_ids.sort_unstable();
-                    duplicate_names_with_different_ids
-                        .push(DuplicateNameDifferentId {
-                            name: name.clone(),
-                            type_ids: sorted_ids,
-                        });
+                    duplicate_names_with_different_ids.push(DuplicateNameDifferentId {
+                        name: name.clone(),
+                        type_ids: sorted_ids,
+                    });
                 }
             }
         }
@@ -3531,8 +3696,7 @@ impl VbcCodegen {
             if ty.variants.is_empty() {
                 continue;
             }
-            let mut seen: std::collections::HashSet<u32> =
-                std::collections::HashSet::new();
+            let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
             let mut max_tag: u32 = 0;
             let mut duplicate_tags: Vec<u32> = Vec::new();
             for v in &ty.variants {
@@ -3547,8 +3711,7 @@ impl VbcCodegen {
             // Gap detection: a dense [0..n) means seen.len() == n AND
             // max_tag == n-1. Anything else has gaps or out-of-range
             // tags.
-            let dense = seen.len() as u32 == n
-                && (n == 0 || max_tag == n - 1);
+            let dense = seen.len() as u32 == n && (n == 0 || max_tag == n - 1);
             if !dense || !duplicate_tags.is_empty() {
                 let missing: Vec<u32> = (0..n.max(max_tag + 1))
                     .filter(|t| !seen.contains(t))
@@ -3594,7 +3757,10 @@ impl VbcCodegen {
     ) -> CodegenResult<()> {
         use crate::types::VariantKind;
         let resolve_name = |idx: u32| -> String {
-            strings.get(idx as usize).cloned().unwrap_or_else(|| format!("<id {}>", idx))
+            strings
+                .get(idx as usize)
+                .cloned()
+                .unwrap_or_else(|| format!("<id {}>", idx))
         };
         for ty in types {
             if ty.variants.is_empty() {
@@ -3610,7 +3776,10 @@ impl VbcCodegen {
                                 "type-layout invariant: variant `{}.{}` is `Unit` \
                                  but has arity={} and {} record-field(s); \
                                  unit variants must carry no payload",
-                                type_name, v_name, v.arity, v.fields.len(),
+                                type_name,
+                                v_name,
+                                v.arity,
+                                v.fields.len(),
                             )));
                         }
                     }
@@ -3621,7 +3790,10 @@ impl VbcCodegen {
                                  (arity={}) but also has {} record-field(s); \
                                  tuple variants store payload count in `arity`, \
                                  not `fields`",
-                                type_name, v_name, v.arity, v.fields.len(),
+                                type_name,
+                                v_name,
+                                v.arity,
+                                v.fields.len(),
                             )));
                         }
                         if v.arity == 0 {
@@ -3640,7 +3812,10 @@ impl VbcCodegen {
                                  (with {} field(s)) but also reports arity={}; \
                                  record variants store payload count in `fields`, \
                                  not `arity`",
-                                type_name, v_name, v.fields.len(), v.arity,
+                                type_name,
+                                v_name,
+                                v.fields.len(),
+                                v.arity,
                             )));
                         }
                         if v.fields.is_empty() {
@@ -3702,9 +3877,7 @@ impl VbcCodegen {
         // compiles its `public fn` bodies, emitting `_socket`/`_bind`/...
         // symbols that shadow libSystem's BSD socket API and SIGABRT
         // when called via the wrappers from `core/net/tcp.vr`.
-        if !module.attributes.is_empty()
-            && !self.cfg_evaluator.should_include(&module.attributes)
-        {
+        if !module.attributes.is_empty() && !self.cfg_evaluator.should_include(&module.attributes) {
             // Module gated out — produce an empty VbcModule.
             return self.build_module();
         }
@@ -3719,7 +3892,9 @@ impl VbcCodegen {
         // This ensures forward references in field types resolve correctly
         // (e.g., CompileResult.ast: Maybe<Module> needs Module's TypeId).
         for item in module.items.iter() {
-            if !self.should_compile_item(item) { continue; }
+            if !self.should_compile_item(item) {
+                continue;
+            }
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
                 if !self.type_name_to_id.contains_key(&type_name) {
@@ -3798,7 +3973,9 @@ impl VbcCodegen {
 
         // Pass 1.5: Pre-allocate TypeIds for all user-defined types.
         for item in module.items.iter() {
-            if !self.should_compile_item(item) { continue; }
+            if !self.should_compile_item(item) {
+                continue;
+            }
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
                 if !self.type_name_to_id.contains_key(&type_name) {
@@ -3855,7 +4032,9 @@ impl VbcCodegen {
         // (e.g., CharIndices, ByteIter, Lines in text.vr need TypeIds before
         // ast_type_to_type_ref is called for function descriptors).
         for item in module.items.iter() {
-            if !self.should_compile_item(item) { continue; }
+            if !self.should_compile_item(item) {
+                continue;
+            }
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
                 if !self.type_name_to_id.contains_key(&type_name) {
@@ -3907,7 +4086,9 @@ impl VbcCodegen {
     pub fn collect_all_declarations(&mut self, module: &Module) -> CodegenResult<()> {
         // Pre-allocate TypeIds for user-defined types before collecting declarations
         for item in module.items.iter() {
-            if !self.should_compile_item(item) { continue; }
+            if !self.should_compile_item(item) {
+                continue;
+            }
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
                 if !self.type_name_to_id.contains_key(&type_name) {
@@ -3949,13 +4130,9 @@ impl VbcCodegen {
     /// codegen.resolve_mounts(&module, "core/sync/mutex.vr", "core/");
     /// codegen.compile_module(&module)?;
     /// ```
-    pub fn resolve_mounts(
-        &mut self,
-        module: &Module,
-        source_path: &str,
-        core_root: &str,
-    ) {
-        let mut resolved_files: std::collections::HashSet<String> = std::collections::HashSet::new();
+    pub fn resolve_mounts(&mut self, module: &Module, source_path: &str, core_root: &str) {
+        let mut resolved_files: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         // Prevent re-resolving the source file itself
         if let Ok(canonical) = std::fs::canonicalize(source_path) {
             resolved_files.insert(canonical.to_string_lossy().to_string());
@@ -3995,7 +4172,8 @@ impl VbcCodegen {
             if let ItemKind::Mount(mount_decl) = &item.kind {
                 let paths = Self::extract_mount_file_paths(&mount_decl.tree, &[]);
                 for module_path in paths {
-                    let file_candidates = Self::module_path_to_file_candidates(&module_path, source_path, core_root);
+                    let file_candidates =
+                        Self::module_path_to_file_candidates(&module_path, source_path, core_root);
                     for candidate in file_candidates {
                         let canonical = match std::fs::canonicalize(&candidate) {
                             Ok(c) => c.to_string_lossy().to_string(),
@@ -4020,7 +4198,11 @@ impl VbcCodegen {
                 if let Ok(imported_module) = parser.parse_module() {
                     // Recursively resolve mounts from this imported file first
                     self.resolve_mounts_recursive(
-                        &imported_module, &file_path, core_root, resolved_files, depth + 1,
+                        &imported_module,
+                        &file_path,
+                        core_root,
+                        resolved_files,
+                        depth + 1,
                     );
                     // Then register its declarations
                     self.collect_protocol_definitions(&imported_module);
@@ -4070,7 +4252,10 @@ impl VbcCodegen {
                     results.push(segments);
                 }
             }
-            MountTreeKind::Nested { prefix: nested_prefix, trees } => {
+            MountTreeKind::Nested {
+                prefix: nested_prefix,
+                trees,
+            } => {
                 let mut segments: Vec<String> = prefix.to_vec();
                 for segment in nested_prefix.segments.iter() {
                     match segment {
@@ -4141,7 +4326,9 @@ impl VbcCodegen {
 
             for (i, seg) in module_path.iter().enumerate() {
                 match seg.as_str() {
-                    "." => { start_idx = i + 1; }
+                    "." => {
+                        start_idx = i + 1;
+                    }
                     "super" => {
                         super_count += 1;
                         // First `super` stays in source_dir (parent module = containing directory).
@@ -4155,7 +4342,10 @@ impl VbcCodegen {
                 }
             }
 
-            let remaining: Vec<&str> = module_path[start_idx..].iter().map(|s| s.as_str()).collect();
+            let remaining: Vec<&str> = module_path[start_idx..]
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
             if !remaining.is_empty() {
                 // Try as file: base/remaining.vr
                 let file_path = base.join(remaining.join("/")).with_extension("vr");
@@ -4163,7 +4353,9 @@ impl VbcCodegen {
 
                 // Try parent as file (last segment might be item name)
                 if remaining.len() > 1 {
-                    let parent_path = base.join(remaining[..remaining.len()-1].join("/")).with_extension("vr");
+                    let parent_path = base
+                        .join(remaining[..remaining.len() - 1].join("/"))
+                        .with_extension("vr");
                     candidates.push(parent_path.to_string_lossy().to_string());
                 }
 
@@ -4177,7 +4369,10 @@ impl VbcCodegen {
         // Handle absolute paths starting with "core"
         let (root, segments) = if module_path[0] == "core" {
             // Strip "core" prefix, use core_root as base
-            (std::path::Path::new(core_root).to_path_buf(), &module_path[1..])
+            (
+                std::path::Path::new(core_root).to_path_buf(),
+                &module_path[1..],
+            )
         } else {
             // Non-core paths: try under core/ anyway (e.g., "sys" → "core/sys")
             (std::path::Path::new(core_root).to_path_buf(), module_path)
@@ -4192,7 +4387,9 @@ impl VbcCodegen {
 
             // Parent file (last segment is item name): core_root/base.vr
             if path_segments.len() > 1 {
-                let parent = root.join(path_segments[..path_segments.len()-1].join("/")).with_extension("vr");
+                let parent = root
+                    .join(path_segments[..path_segments.len() - 1].join("/"))
+                    .with_extension("vr");
                 candidates.push(parent.to_string_lossy().to_string());
             }
 
@@ -4333,12 +4530,12 @@ impl VbcCodegen {
         use crate::module::FunctionId;
         let builtins: &[(&str, &str, u32, usize, Vec<String>)] = &[
             // (type_name, variant_name, tag, arity, param_names)
-            ("Maybe", "None",    0, 0, vec![]),
-            ("Maybe", "Some",    1, 1, vec!["_0".into()]),
-            ("Result", "Ok",     0, 1, vec!["_0".into()]),
-            ("Result", "Err",    1, 1, vec!["_0".into()]),
-            ("Ordering", "Less",    0, 0, vec![]),
-            ("Ordering", "Equal",   1, 0, vec![]),
+            ("Maybe", "None", 0, 0, vec![]),
+            ("Maybe", "Some", 1, 1, vec!["_0".into()]),
+            ("Result", "Ok", 0, 1, vec!["_0".into()]),
+            ("Result", "Err", 1, 1, vec!["_0".into()]),
+            ("Ordering", "Less", 0, 0, vec![]),
+            ("Ordering", "Equal", 1, 0, vec![]),
             ("Ordering", "Greater", 2, 0, vec![]),
         ];
         for (type_name, variant_name, tag, arity, param_names) in builtins {
@@ -4376,7 +4573,8 @@ impl VbcCodegen {
             // registration (follows the same "simple-on-no-collision" rule as
             // user variant registration).
             if self.ctx.lookup_function(variant_name).is_none() {
-                self.ctx.register_function((*variant_name).to_string(), info);
+                self.ctx
+                    .register_function((*variant_name).to_string(), info);
             }
         }
     }
@@ -4427,7 +4625,8 @@ impl VbcCodegen {
                 name: StringId(name_string_id),
                 ..Default::default()
             };
-            self.functions.push(VbcFunction::new(stub_descriptor, vec![]));
+            self.functions
+                .push(VbcFunction::new(stub_descriptor, vec![]));
 
             let info = FunctionInfo {
                 id: func_id,
@@ -4480,28 +4679,38 @@ impl VbcCodegen {
                 // onto Concrete. Without this, the default method bodies
                 // register under the generic-param name and runtime
                 // dispatch panics with "method not found on value".
-                if let verum_ast::decl::ImplKind::Protocol { protocol, for_type, .. } = &impl_decl.kind {
-                    let derived_name = protocol.segments.last()
-                        .and_then(|s| match s {
-                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                            _ => None,
-                        });
+                if let verum_ast::decl::ImplKind::Protocol {
+                    protocol, for_type, ..
+                } = &impl_decl.kind
+                {
+                    let derived_name = protocol.segments.last().and_then(|s| match s {
+                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                        _ => None,
+                    });
                     let for_type_name = Self::for_type_generic_param_name(for_type);
                     if let (Some(derived_name), Some(param_name)) = (derived_name, for_type_name) {
                         for g in impl_decl.generics.iter() {
-                            if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind
+                            if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } =
+                                &g.kind
                                 && name.name.as_str() == param_name
                             {
                                 for b in bounds.iter() {
                                     if let Some(base_name) = Self::type_bound_protocol_name(b) {
                                         let explicit_methods: std::collections::HashSet<String> =
-                                            impl_decl.items.iter().filter_map(|item| {
-                                                if let verum_ast::decl::ImplItemKind::Function(f) = &item.kind {
-                                                    Some(f.name.name.to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            }).collect();
+                                            impl_decl
+                                                .items
+                                                .iter()
+                                                .filter_map(|item| {
+                                                    if let verum_ast::decl::ImplItemKind::Function(
+                                                        f,
+                                                    ) = &item.kind
+                                                    {
+                                                        Some(f.name.name.to_string())
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                                .collect();
                                         self.blanket_impls.push(BlanketImpl {
                                             base_protocol: base_name,
                                             derived_protocol: derived_name.clone(),
@@ -4530,15 +4739,20 @@ impl VbcCodegen {
                 // unregisters bare `None`. That breaks every other stdlib
                 // body that legitimately uses the simple `Maybe.None` alias
                 // (BTreeMap, Receiver.poll, all Stream adapters, etc.).
-                let is_protocol_impl = matches!(&impl_decl.kind, verum_ast::decl::ImplKind::Protocol { .. });
+                let is_protocol_impl =
+                    matches!(&impl_decl.kind, verum_ast::decl::ImplKind::Protocol { .. });
                 let prev_prefer_existing = self.ctx.prefer_existing_functions;
                 if is_protocol_impl {
                     self.ctx.prefer_existing_functions = true;
                 }
 
                 // Check if this is a Drop implementation
-                let is_drop_impl = if let verum_ast::decl::ImplKind::Protocol { protocol, .. } = &impl_decl.kind {
-                    protocol.segments.first()
+                let is_drop_impl = if let verum_ast::decl::ImplKind::Protocol { protocol, .. } =
+                    &impl_decl.kind
+                {
+                    protocol
+                        .segments
+                        .first()
                         .and_then(|s| match s {
                             verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
                             _ => None,
@@ -4562,7 +4776,9 @@ impl VbcCodegen {
                                 // record the drop function ID in the TypeDescriptor
                                 if is_drop_impl && func.name.name == "drop" {
                                     let qualified_name = format!("{}.drop", ty_name);
-                                    if let Some(func_info) = self.ctx.lookup_function(&qualified_name) {
+                                    if let Some(func_info) =
+                                        self.ctx.lookup_function(&qualified_name)
+                                    {
                                         // Find the TypeDescriptor for this type and set drop_fn
                                         if let Some(type_id) = self.type_name_to_id.get(ty_name) {
                                             for type_desc in self.types.iter_mut() {
@@ -4591,7 +4807,11 @@ impl VbcCodegen {
                             // so that `Fd.INVALID` resolves to the constant value at codegen time.
                             if let Some(ref ty_name) = type_name {
                                 let qualified = format!("{}.{}", ty_name, name.name);
-                                self.register_constant_with_value(&qualified, Some(value), Some(ty))?;
+                                self.register_constant_with_value(
+                                    &qualified,
+                                    Some(value),
+                                    Some(ty),
+                                )?;
                             }
                         }
                         _ => {}
@@ -4600,36 +4820,42 @@ impl VbcCodegen {
 
                 // Generate default protocol methods for protocol impls
                 if let verum_ast::decl::ImplKind::Protocol { protocol, .. } = &impl_decl.kind
-                    && let Some(ref ty_name) = type_name {
-                        // Get the last segment of the protocol path (e.g., "Hasher" from "core.protocols.Hasher")
-                        let protocol_name = protocol.segments.last()
-                            .and_then(|s| match s {
-                                verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                                _ => None,
-                            });
-                        if let Some(pn) = protocol_name {
-                            // Get methods explicitly implemented
-                            let implemented_methods: std::collections::HashSet<String> = impl_decl.items.iter()
-                                .filter_map(|item| {
-                                    if let verum_ast::decl::ImplItemKind::Function(func) = &item.kind {
-                                        Some(func.name.name.to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
+                    && let Some(ref ty_name) = type_name
+                {
+                    // Get the last segment of the protocol path (e.g., "Hasher" from "core.protocols.Hasher")
+                    let protocol_name = protocol.segments.last().and_then(|s| match s {
+                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                        _ => None,
+                    });
+                    if let Some(pn) = protocol_name {
+                        // Get methods explicitly implemented
+                        let implemented_methods: std::collections::HashSet<String> = impl_decl
+                            .items
+                            .iter()
+                            .filter_map(|item| {
+                                if let verum_ast::decl::ImplItemKind::Function(func) = &item.kind {
+                                    Some(func.name.name.to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
 
-                            // Generate default methods from protocol
-                            self.generate_default_protocol_methods(&pn, ty_name, &implemented_methods)?;
+                        // Generate default methods from protocol
+                        self.generate_default_protocol_methods(&pn, ty_name, &implemented_methods)?;
 
-                            // Populate TypeDescriptor.protocols for vtable-based dispatch.
-                            // Look up protocol's TypeDescriptor to get canonical method order,
-                            // then map each method to the concrete Type.method FunctionId.
-                            if let Some(&proto_type_id) = self.type_name_to_id.get(&pn) {
-                                // Get protocol method names in vtable order (from protocol's variants)
-                                let method_names: Vec<String> = self.types.iter()
-                                    .find(|td| td.id == proto_type_id)
-                                    .map(|td| td.variants.iter()
+                        // Populate TypeDescriptor.protocols for vtable-based dispatch.
+                        // Look up protocol's TypeDescriptor to get canonical method order,
+                        // then map each method to the concrete Type.method FunctionId.
+                        if let Some(&proto_type_id) = self.type_name_to_id.get(&pn) {
+                            // Get protocol method names in vtable order (from protocol's variants)
+                            let method_names: Vec<String> = self
+                                .types
+                                .iter()
+                                .find(|td| td.id == proto_type_id)
+                                .map(|td| {
+                                    td.variants
+                                        .iter()
                                         .map(|v| {
                                             let idx = v.name.0 as usize;
                                             if idx < self.ctx.strings.len() {
@@ -4638,34 +4864,39 @@ impl VbcCodegen {
                                                 String::new()
                                             }
                                         })
-                                        .collect())
-                                    .unwrap_or_default();
+                                        .collect()
+                                })
+                                .unwrap_or_default();
 
-                                // Look up concrete FunctionIds for each method
-                                let method_fn_ids: Vec<u32> = method_names.iter()
-                                    .map(|method_name| {
-                                        let qualified = format!("{}.{}", ty_name, method_name);
-                                        self.ctx.lookup_function(&qualified)
-                                            .map(|fi| fi.id.0)
-                                            .unwrap_or(u32::MAX) // sentinel for missing method
-                                    })
-                                    .collect();
+                            // Look up concrete FunctionIds for each method
+                            let method_fn_ids: Vec<u32> = method_names
+                                .iter()
+                                .map(|method_name| {
+                                    let qualified = format!("{}.{}", ty_name, method_name);
+                                    self.ctx
+                                        .lookup_function(&qualified)
+                                        .map(|fi| fi.id.0)
+                                        .unwrap_or(u32::MAX) // sentinel for missing method
+                                })
+                                .collect();
 
-                                // Push protocol impl onto the concrete type's descriptor
-                                if let Some(&concrete_type_id) = self.type_name_to_id.get(ty_name.as_str()) {
-                                    for type_desc in self.types.iter_mut() {
-                                        if type_desc.id == concrete_type_id {
-                                            type_desc.protocols.push(crate::types::ProtocolImpl {
-                                                protocol: crate::types::ProtocolId(proto_type_id.0),
-                                                methods: method_fn_ids,
-                                            });
-                                            break;
-                                        }
+                            // Push protocol impl onto the concrete type's descriptor
+                            if let Some(&concrete_type_id) =
+                                self.type_name_to_id.get(ty_name.as_str())
+                            {
+                                for type_desc in self.types.iter_mut() {
+                                    if type_desc.id == concrete_type_id {
+                                        type_desc.protocols.push(crate::types::ProtocolImpl {
+                                            protocol: crate::types::ProtocolId(proto_type_id.0),
+                                            methods: method_fn_ids,
+                                        });
+                                        break;
                                     }
                                 }
                             }
                         }
                     }
+                }
 
                 // Restore prefer_existing_functions to its prior value
                 // (instead of unconditionally false) so caller-set context
@@ -4681,10 +4912,10 @@ impl VbcCodegen {
                 self.register_type_constructors(type_decl)?;
                 // Register record field layouts for sequential field indexing
                 if let TypeDeclBody::Record(fields) = &type_decl.body {
-                    let field_names: Vec<String> = fields.iter()
-                        .map(|f| f.name.name.to_string())
-                        .collect();
-                    let field_types: Vec<String> = fields.iter()
+                    let field_names: Vec<String> =
+                        fields.iter().map(|f| f.name.name.to_string()).collect();
+                    let field_types: Vec<String> = fields
+                        .iter()
                         .map(|f| Self::extract_type_name_from_ast(&f.ty))
                         .collect();
                     self.register_record_fields(&type_decl.name.name, field_names, field_types);
@@ -4695,7 +4926,11 @@ impl VbcCodegen {
             }
             // Constants and statics: register as zero-argument functions
             ItemKind::Const(const_decl) => {
-                self.register_constant_with_value(&const_decl.name.name, Some(&const_decl.value), Some(&const_decl.ty))?;
+                self.register_constant_with_value(
+                    &const_decl.name.name,
+                    Some(&const_decl.value),
+                    Some(&const_decl.ty),
+                )?;
             }
             ItemKind::Static(static_decl) => {
                 // `static mut` needs writable backing storage: the constant-function
@@ -4728,9 +4963,14 @@ impl VbcCodegen {
                     }
 
                     // Queue the init expression for compilation as a TLS initializer
-                    self.pending_tls_inits.push((name, static_decl.value.clone(), slot));
+                    self.pending_tls_inits
+                        .push((name, static_decl.value.clone(), slot));
                 } else {
-                    self.register_constant_with_value(&static_decl.name.name, Some(&static_decl.value), Some(&static_decl.ty))?;
+                    self.register_constant_with_value(
+                        &static_decl.name.name,
+                        Some(&static_decl.value),
+                        Some(&static_decl.ty),
+                    )?;
                     // Track static init functions as global constructors
                     if let Some(info) = self.ctx.lookup_function(&static_decl.name.name) {
                         self.static_init_functions.push(info.id);
@@ -4756,7 +4996,9 @@ impl VbcCodegen {
             ItemKind::ContextGroup(group_decl) => {
                 // Register context group for expansion in function using clauses
                 let group_name = group_decl.name.name.to_string();
-                let members: Vec<String> = group_decl.contexts.iter()
+                let members: Vec<String> = group_decl
+                    .contexts
+                    .iter()
                     .filter(|c| !c.is_negative) // Groups can include negative constraints
                     .filter_map(|c| {
                         c.path.segments.last().and_then(|seg| match seg {
@@ -4774,16 +5016,18 @@ impl VbcCodegen {
                 let layer_name = layer_decl.name.name.to_string();
                 match &layer_decl.kind {
                     verum_ast::decl::LayerKind::Inline { provides } => {
-                        let entries: Vec<(String, verum_ast::expr::Expr)> = provides.iter()
+                        let entries: Vec<(String, verum_ast::expr::Expr)> = provides
+                            .iter()
                             .map(|(name, expr)| (name.name.to_string(), expr.clone()))
                             .collect();
-                        self.context_layers.insert(layer_name, ContextLayer::Inline(entries));
+                        self.context_layers
+                            .insert(layer_name, ContextLayer::Inline(entries));
                     }
                     verum_ast::decl::LayerKind::Composite { layers } => {
-                        let names: Vec<String> = layers.iter()
-                            .map(|id| id.name.to_string())
-                            .collect();
-                        self.context_layers.insert(layer_name, ContextLayer::Composite(names));
+                        let names: Vec<String> =
+                            layers.iter().map(|id| id.name.to_string()).collect();
+                        self.context_layers
+                            .insert(layer_name, ContextLayer::Composite(names));
                     }
                 }
             }
@@ -4861,8 +5105,14 @@ impl VbcCodegen {
             .filter_map(|p| {
                 if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
                     let name = Self::extract_type_name_from_ast(ty);
-                    if !name.is_empty() && name != "()" { Some(name) } else { None }
-                } else { None }
+                    if !name.is_empty() && name != "()" {
+                        Some(name)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -4871,7 +5121,9 @@ impl VbcCodegen {
             .iter()
             .filter(|c| {
                 // Skip negative contexts and false conditional contexts
-                if c.is_negative { return false; }
+                if c.is_negative {
+                    return false;
+                }
                 if let verum_common::Maybe::Some(ref cond) = c.condition {
                     return Self::evaluate_context_condition(cond);
                 }
@@ -4891,7 +5143,10 @@ impl VbcCodegen {
         // Convert return type for method dispatch prefixing.
         // This enables correct method name prefixing when calling methods on function returns
         // (e.g., return_uint64().checked_add(1) should use uint64$checked_add).
-        let return_type = func.return_type.as_ref().map(|ret_ty| self.ast_type_to_type_ref(ret_ty));
+        let return_type = func
+            .return_type
+            .as_ref()
+            .map(|ret_ty| self.ast_type_to_type_ref(ret_ty));
 
         // Extract intrinsic name from @intrinsic("name") attribute if present.
         // This enables industrial-grade intrinsic resolution at declaration time.
@@ -4900,15 +5155,15 @@ impl VbcCodegen {
         // ONLY if this function is a forward declaration (no body). A user-defined
         // function with a body should override any previously registered intrinsic
         // stub of the same name, so it calls the user's implementation instead.
-        let intrinsic_name = self.extract_intrinsic_name(func)
-            .or_else(|| {
-                if matches!(func.body, verum_common::Maybe::None) {
-                    self.ctx.lookup_function(&name)
-                        .and_then(|existing| existing.intrinsic_name.clone())
-                } else {
-                    None
-                }
-            });
+        let intrinsic_name = self.extract_intrinsic_name(func).or_else(|| {
+            if matches!(func.body, verum_common::Maybe::None) {
+                self.ctx
+                    .lookup_function(&name)
+                    .and_then(|existing| existing.intrinsic_name.clone())
+            } else {
+                None
+            }
+        });
 
         // Extract the base return type name for method dispatch tracking
         let return_type_name = if let verum_common::Maybe::Some(ref ret_ty) = func.return_type {
@@ -4926,9 +5181,13 @@ impl VbcCodegen {
             is_generator: func.is_generator, // fn* syntax
             contexts,
             return_type,
-            yield_type: None,  // Will be inferred from yield expressions
+            yield_type: None, // Will be inferred from yield expressions
             intrinsic_name,
-            variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
+            takes_self_mut_ref: false,
             return_type_name,
             return_type_inner: None,
         };
@@ -4945,17 +5204,19 @@ impl VbcCodegen {
         // shows whether `try_alloc` reaches register_function at all, and
         // under what `effective_module`.
         if let Ok(filter) = std::env::var("VERUM_TRACE_REGISTER") {
-            let pass = filter == "1" || filter.is_empty()
+            let pass = filter == "1"
+                || filter.is_empty()
                 || base_name.contains(filter.as_str())
                 || name.contains(filter.as_str());
             if pass {
-                let eff_mod = self.ctx.current_source_module
+                let eff_mod = self
+                    .ctx
+                    .current_source_module
                     .as_deref()
                     .unwrap_or(&self.config.module_name);
                 eprintln!(
                     "[register-fn] module={} base={} mangled={} arity={} prefer_existing={}",
-                    eff_mod, base_name, name, info.param_count,
-                    self.ctx.prefer_existing_functions
+                    eff_mod, base_name, name, info.param_count, self.ctx.prefer_existing_functions
                 );
             }
         }
@@ -4982,7 +5243,9 @@ impl VbcCodegen {
         // single-file user run) but a single session processes many imported
         // stdlib modules, each with its own path. `current_source_module` is
         // scoped to the file currently being collected/compiled.
-        let effective_module = self.ctx.current_source_module
+        let effective_module = self
+            .ctx
+            .current_source_module
             .as_deref()
             .unwrap_or(&self.config.module_name);
         if self.nested_function_scope.is_empty()
@@ -4992,10 +5255,7 @@ impl VbcCodegen {
             && !base_name.contains("::")
         {
             let dot_qualified = format!("{}.{}", effective_module, base_name);
-            let colon_qualified = effective_module
-                .replace('.', "::")
-                + "::"
-                + &base_name;
+            let colon_qualified = effective_module.replace('.', "::") + "::" + &base_name;
             // Preserve existing registrations — don't clobber user-visible
             // qualified aliases already installed by import/mount passes.
             if self.ctx.lookup_function(&dot_qualified).is_none() {
@@ -5027,18 +5287,29 @@ impl VbcCodegen {
     /// Active patterns (`pattern Even(n: Int) -> Bool = ...`) are compiled
     /// as regular functions so that `compile_pattern_test` for `PatternKind::Active`
     /// can find them via `lookup_function`.
-    fn register_pattern_as_function(&mut self, pat: &verum_ast::decl::PatternDecl) -> CodegenResult<()> {
+    fn register_pattern_as_function(
+        &mut self,
+        pat: &verum_ast::decl::PatternDecl,
+    ) -> CodegenResult<()> {
         let name = pat.name.name.to_string();
         let id = FunctionId(self.next_func_id);
         self.next_func_id = self.next_func_id.saturating_add(1);
 
         // Combine type_params (parameterized patterns) + params (match params)
-        let mut param_names: Vec<String> = pat.type_params.iter()
+        let mut param_names: Vec<String> = pat
+            .type_params
+            .iter()
             .enumerate()
-            .map(|(i, p)| self.extract_param_name(p).unwrap_or_else(|| format!("_tp{}", i)))
+            .map(|(i, p)| {
+                self.extract_param_name(p)
+                    .unwrap_or_else(|| format!("_tp{}", i))
+            })
             .collect();
         for (i, p) in pat.params.iter().enumerate() {
-            param_names.push(self.extract_param_name(p).unwrap_or_else(|| format!("_arg{}", i)));
+            param_names.push(
+                self.extract_param_name(p)
+                    .unwrap_or_else(|| format!("_arg{}", i)),
+            );
         }
 
         // Detect partial patterns by checking if return type is Maybe<T>
@@ -5060,7 +5331,11 @@ impl VbcCodegen {
             variant_payload_types: None,
             is_partial_pattern: is_partial,
             takes_self_mut_ref: false,
-            return_type_name: if is_partial { Some("Maybe".to_string()) } else { None },
+            return_type_name: if is_partial {
+                Some("Maybe".to_string())
+            } else {
+                None
+            },
             return_type_inner: None,
         };
 
@@ -5075,7 +5350,7 @@ impl VbcCodegen {
     /// Partial active patterns return Maybe<T>; the codegen must emit different
     /// bytecode (conditional branch on None vs Some) for these patterns.
     fn is_maybe_return_type(ty: &verum_ast::ty::Type) -> bool {
-        use verum_ast::ty::{TypeKind, PathSegment};
+        use verum_ast::ty::{PathSegment, TypeKind};
         let check_path = |path: &verum_ast::ty::Path| -> bool {
             path.segments.iter().any(|seg| {
                 if let PathSegment::Name(ident) = seg {
@@ -5100,26 +5375,47 @@ impl VbcCodegen {
     }
 
     /// Compiles an active pattern declaration body as a function.
-    fn compile_pattern_as_function(&mut self, pat: &verum_ast::decl::PatternDecl) -> CodegenResult<()> {
+    fn compile_pattern_as_function(
+        &mut self,
+        pat: &verum_ast::decl::PatternDecl,
+    ) -> CodegenResult<()> {
         let name = pat.name.name.to_string();
 
-        let func_info = self.ctx.lookup_function(&name)
+        let func_info = self
+            .ctx
+            .lookup_function(&name)
             .ok_or_else(|| CodegenError::internal(format!("pattern not registered: {}", name)))?
             .clone();
 
         // Build params with mutability (patterns are immutable)
-        let mut params: Vec<(String, bool)> = pat.type_params.iter()
+        let mut params: Vec<(String, bool)> = pat
+            .type_params
+            .iter()
             .enumerate()
-            .map(|(i, p)| (self.extract_param_name(p).unwrap_or_else(|| format!("_tp{}", i)), false))
+            .map(|(i, p)| {
+                (
+                    self.extract_param_name(p)
+                        .unwrap_or_else(|| format!("_tp{}", i)),
+                    false,
+                )
+            })
             .collect();
         for (i, p) in pat.params.iter().enumerate() {
-            params.push((self.extract_param_name(p).unwrap_or_else(|| format!("_arg{}", i)), false));
+            params.push((
+                self.extract_param_name(p)
+                    .unwrap_or_else(|| format!("_arg{}", i)),
+                false,
+            ));
         }
 
-        self.ctx.begin_function(&name, &params, func_info.return_type.clone());
+        self.ctx
+            .begin_function(&name, &params, func_info.return_type.clone());
 
         // Register parameter types for correct operation selection
-        for (param_name, param) in params.iter().zip(pat.type_params.iter().chain(pat.params.iter())) {
+        for (param_name, param) in params
+            .iter()
+            .zip(pat.type_params.iter().chain(pat.params.iter()))
+        {
             if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
                 let var_type = self.type_kind_to_var_type(&ty.kind);
                 self.ctx.register_variable_type(&param_name.0, var_type);
@@ -5127,7 +5423,8 @@ impl VbcCodegen {
         }
 
         // Compile the body expression
-        let result = self.compile_expr(&pat.body)
+        let result = self
+            .compile_expr(&pat.body)
             .map_err(|e| e.with_context(format!("in pattern {}", name)))?;
 
         if let Some(reg) = result {
@@ -5223,7 +5520,12 @@ impl VbcCodegen {
             contexts: Vec::new(),
             return_type: None,
             yield_type: None,
-            intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+            intrinsic_name: None,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
+            takes_self_mut_ref: false,
             return_type_name,
             return_type_inner: None,
         };
@@ -5315,7 +5617,9 @@ impl VbcCodegen {
                 if full_path.len() >= 3 {
                     let module_name = &full_path[0];
                     let simplified_qualified = format!("{}.{}", module_name, func_name);
-                    if let Some(func_info) = self.ctx.lookup_function(&simplified_qualified).cloned() {
+                    if let Some(func_info) =
+                        self.ctx.lookup_function(&simplified_qualified).cloned()
+                    {
                         if should_register(&alias_name, &func_info) {
                             self.ctx.register_function(alias_name.clone(), func_info);
                         }
@@ -5330,7 +5634,9 @@ impl VbcCodegen {
                     // Try core.sys.linux.futex_wait, core.sys.darwin.futex_wait, etc.
                     let mut core_path = vec!["core".to_string()];
                     for p in &full_path {
-                        if p != "." { core_path.push(p.clone()); }
+                        if p != "." {
+                            core_path.push(p.clone());
+                        }
                     }
                     let core_qualified = core_path.join(".");
                     if let Some(func_info) = self.ctx.lookup_function(&core_qualified).cloned() {
@@ -5365,7 +5671,10 @@ impl VbcCodegen {
                 // Iterate sorted for deterministic registration order (HashMap iter
                 // would otherwise leak per-process random hasher seed into bytecode).
                 let type_prefix = format!("{}.", func_name);
-                let mut sorted_keys: Vec<&String> = self.ctx.functions.keys()
+                let mut sorted_keys: Vec<&String> = self
+                    .ctx
+                    .functions
+                    .keys()
                     .filter(|name| name.starts_with(&type_prefix))
                     .collect();
                 sorted_keys.sort();
@@ -5433,7 +5742,9 @@ impl VbcCodegen {
                     let info = &self.ctx.functions[name];
                     // Match qualified names like "core.io.protocols.StreamError" for prefix "io."
                     let matches = name.starts_with(&prefix_dot)
-                        || core_prefix_dot.as_ref().is_some_and(|cp| name.starts_with(cp));
+                        || core_prefix_dot
+                            .as_ref()
+                            .is_some_and(|cp| name.starts_with(cp));
                     if matches {
                         // Extract bare name (last segment after the last dot)
                         if let Some(bare) = name.rsplit('.').next() {
@@ -5451,7 +5762,10 @@ impl VbcCodegen {
 
                 Ok(())
             }
-            MountTreeKind::Nested { prefix: nested_prefix, trees } => {
+            MountTreeKind::Nested {
+                prefix: nested_prefix,
+                trees,
+            } => {
                 // Build the new prefix
                 let mut new_prefix: Vec<String> = prefix.to_vec();
                 for segment in nested_prefix.segments.iter() {
@@ -5514,15 +5828,16 @@ impl VbcCodegen {
             // Helper to check if we should register the alias
             // Don't overwrite existing registrations with FEWER params (e.g., FFI functions)
             // This prevents safe wrappers (fewer params) from overwriting raw FFI functions (more params)
-            let should_register = |ctx: &CodegenContext, alias: &str, new_info: &FunctionInfo| -> bool {
-                match ctx.lookup_function(alias) {
-                    Some(existing) => {
-                        // Only overwrite if new registration has same or more params
-                        new_info.param_count >= existing.param_count
+            let should_register =
+                |ctx: &CodegenContext, alias: &str, new_info: &FunctionInfo| -> bool {
+                    match ctx.lookup_function(alias) {
+                        Some(existing) => {
+                            // Only overwrite if new registration has same or more params
+                            new_info.param_count >= existing.param_count
+                        }
+                        None => true, // No existing registration, always register
                     }
-                    None => true, // No existing registration, always register
-                }
-            };
+                };
 
             // Try to look up the function in the registry with various qualified names
             let qualified_verum = full_path.join(".");
@@ -5589,19 +5904,18 @@ impl VbcCodegen {
 
     /// Helper to extract type name from a type.
     fn extract_impl_type_name_from_type(&self, ty: &verum_ast::ty::Type) -> Option<String> {
-        use verum_ast::ty::{TypeKind, PathSegment};
+        use verum_ast::ty::{PathSegment, TypeKind};
 
         match &ty.kind {
             TypeKind::Path(path) => {
                 if let Some(segment) = path.segments.first()
-                    && let PathSegment::Name(ident) = segment {
-                        return Some(ident.name.to_string());
-                    }
+                    && let PathSegment::Name(ident) = segment
+                {
+                    return Some(ident.name.to_string());
+                }
                 None
             }
-            TypeKind::Generic { base, .. } => {
-                self.extract_impl_type_name_from_type(base)
-            }
+            TypeKind::Generic { base, .. } => self.extract_impl_type_name_from_type(base),
             // Primitive types - use primitive_name() as canonical source,
             // but override Unit ("()" -> "Unit") and Unknown ("unknown" -> "Unknown")
             // since we need identifier-style names for method dispatch
@@ -5616,7 +5930,9 @@ impl VbcCodegen {
             TypeKind::Tuple(_) => Some("Tuple".to_string()),
             // Reference types - extract the inner type name
             TypeKind::Reference { inner, .. } => self.extract_impl_type_name_from_type(inner),
-            TypeKind::CheckedReference { inner, .. } => self.extract_impl_type_name_from_type(inner),
+            TypeKind::CheckedReference { inner, .. } => {
+                self.extract_impl_type_name_from_type(inner)
+            }
             TypeKind::UnsafeReference { inner, .. } => self.extract_impl_type_name_from_type(inner),
             TypeKind::Pointer { inner, .. } => self.extract_impl_type_name_from_type(inner),
             // Record types
@@ -5630,10 +5946,13 @@ impl VbcCodegen {
     ///
 
     /// This allows static method calls like `List.new()` to be resolved.
-    fn register_impl_function(&mut self, func: &FunctionDecl, type_name: &str) -> CodegenResult<()> {
+    fn register_impl_function(
+        &mut self,
+        func: &FunctionDecl,
+        type_name: &str,
+    ) -> CodegenResult<()> {
         let func_name = func.name.name.to_string();
         let qualified_name = format!("{}.{}", type_name, func_name);
-
 
         let id = FunctionId(self.next_func_id);
         self.next_func_id = self.next_func_id.saturating_add(1);
@@ -5654,8 +5973,14 @@ impl VbcCodegen {
             .filter_map(|p| {
                 if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
                     let name = Self::extract_type_name_from_ast(ty);
-                    if !name.is_empty() && name != "()" { Some(name) } else { None }
-                } else { None }
+                    if !name.is_empty() && name != "()" {
+                        Some(name)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -5664,7 +5989,9 @@ impl VbcCodegen {
             .iter()
             .filter(|c| {
                 // Skip negative contexts and false conditional contexts
-                if c.is_negative { return false; }
+                if c.is_negative {
+                    return false;
+                }
                 if let verum_common::Maybe::Some(ref cond) = c.condition {
                     return Self::evaluate_context_condition(cond);
                 }
@@ -5683,11 +6010,11 @@ impl VbcCodegen {
 
         // Extract intrinsic name from @intrinsic("name") attribute if present.
         // Preserve existing intrinsic_name from register_stdlib_intrinsics() if present.
-        let intrinsic_name = self.extract_intrinsic_name(func)
-            .or_else(|| {
-                self.ctx.lookup_function(&qualified_name)
-                    .and_then(|existing| existing.intrinsic_name.clone())
-            });
+        let intrinsic_name = self.extract_intrinsic_name(func).or_else(|| {
+            self.ctx
+                .lookup_function(&qualified_name)
+                .and_then(|existing| existing.intrinsic_name.clone())
+        });
 
         // Check if the first parameter is &mut self (mutable reference to self).
         // When true, method calls must create a CBGR reference to the receiver.
@@ -5709,7 +6036,10 @@ impl VbcCodegen {
         };
 
         // Convert return type for method dispatch and list/string register tracking
-        let return_type = func.return_type.as_ref().map(|ret_ty| self.ast_type_to_type_ref(ret_ty));
+        let return_type = func
+            .return_type
+            .as_ref()
+            .map(|ret_ty| self.ast_type_to_type_ref(ret_ty));
 
         let info = FunctionInfo {
             id,
@@ -5722,7 +6052,11 @@ impl VbcCodegen {
             return_type,
             yield_type: None,
             intrinsic_name,
-            variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
+            takes_self_mut_ref,
             return_type_name,
             return_type_inner: None,
         };
@@ -5742,7 +6076,11 @@ impl VbcCodegen {
     ///
 
     /// The parent function name is tracked in `nested_function_scope` for name mangling.
-    fn collect_nested_declarations(&mut self, body: &FunctionBody, parent_name: &str) -> CodegenResult<()> {
+    fn collect_nested_declarations(
+        &mut self,
+        body: &FunctionBody,
+        parent_name: &str,
+    ) -> CodegenResult<()> {
         // Push the parent function name onto the scope stack for name mangling
         self.nested_function_scope.push(parent_name.to_string());
 
@@ -5816,7 +6154,12 @@ impl VbcCodegen {
                 contexts: vec![],    // FFI functions don't use contexts
                 return_type: None,   // Type info is in FFISignature
                 yield_type: None,
-                intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+                intrinsic_name: None,
+                variant_tag: None,
+                parent_type_name: None,
+                variant_payload_types: None,
+                is_partial_pattern: false,
+                takes_self_mut_ref: false,
                 return_type_name,
                 return_type_inner: None,
             };
@@ -5825,10 +6168,12 @@ impl VbcCodegen {
 
             // Also create FfiSymbol entry with error protocol from the AST
             let signature = self.create_ffi_signature_from_boundary(ffi_func);
-            let (error_protocol, error_sentinel) = Self::map_ast_error_protocol(&ffi_func.error_protocol);
+            let (error_protocol, error_sentinel) =
+                Self::map_ast_error_protocol(&ffi_func.error_protocol);
             let memory_effects = Self::map_ast_memory_effects(&ffi_func.memory_effects);
             let ownership = Self::map_ast_ownership(&ffi_func.ownership);
-            let convention = Self::map_ast_calling_convention(&ffi_func.signature.calling_convention);
+            let convention =
+                Self::map_ast_calling_convention(&ffi_func.signature.calling_convention);
             let symbol_id = FfiSymbolId(self.ffi_symbols.len() as u32);
             self.ffi_symbols.push(FfiSymbol {
                 name: StringId(0),
@@ -5848,10 +6193,14 @@ impl VbcCodegen {
             if !ffi_func.requires.is_empty() || !ffi_func.ensures.is_empty() {
                 // Serializable metadata for VBC module
                 let contract = crate::module::FfiContract {
-                    requires: ffi_func.requires.iter()
+                    requires: ffi_func
+                        .requires
+                        .iter()
                         .map(|expr| format!("{:?}", expr))
                         .collect(),
-                    ensures: ffi_func.ensures.iter()
+                    ensures: ffi_func
+                        .ensures
+                        .iter()
                         .map(|expr| format!("{:?}", expr))
                         .collect(),
                     thread_safe: ffi_func.thread_safe,
@@ -5935,13 +6284,17 @@ impl VbcCodegen {
             AstCallingConvention::FastCall => FfiCallingConvention::Fastcall,
             AstCallingConvention::SysV64 => FfiCallingConvention::SysV64,
             AstCallingConvention::Interrupt => FfiCallingConvention::C, // No direct VBC equivalent
-            AstCallingConvention::Naked => FfiCallingConvention::C,    // No direct VBC equivalent
+            AstCallingConvention::Naked => FfiCallingConvention::C,     // No direct VBC equivalent
             AstCallingConvention::System => {
                 // System = stdcall on Windows, C elsewhere
                 #[cfg(target_os = "windows")]
-                { FfiCallingConvention::Stdcall }
+                {
+                    FfiCallingConvention::Stdcall
+                }
                 #[cfg(not(target_os = "windows"))]
-                { FfiCallingConvention::C }
+                {
+                    FfiCallingConvention::C
+                }
             }
         }
     }
@@ -5951,7 +6304,9 @@ impl VbcCodegen {
 
     /// `extern_abi` is a freeform string like `"C"`, `"stdcall"`, `"system"`.
     /// Absent means C ABI (the default for extern blocks).
-    fn extern_abi_to_convention(abi: &verum_common::Maybe<verum_common::Text>) -> FfiCallingConvention {
+    fn extern_abi_to_convention(
+        abi: &verum_common::Maybe<verum_common::Text>,
+    ) -> FfiCallingConvention {
         match abi {
             verum_common::Maybe::Some(s) => match s.as_str() {
                 "C" | "c" | "cdecl" => FfiCallingConvention::C,
@@ -5960,9 +6315,13 @@ impl VbcCodegen {
                 "sysv64" | "SysV64" => FfiCallingConvention::SysV64,
                 "system" | "System" => {
                     #[cfg(target_os = "windows")]
-                    { FfiCallingConvention::Stdcall }
+                    {
+                        FfiCallingConvention::Stdcall
+                    }
                     #[cfg(not(target_os = "windows"))]
-                    { FfiCallingConvention::C }
+                    {
+                        FfiCallingConvention::C
+                    }
                 }
                 _ => FfiCallingConvention::C,
             },
@@ -6007,13 +6366,11 @@ impl VbcCodegen {
             .signature
             .params
             .iter()
-            .map(|(_name, ty)| {
-                self.verum_type_to_ctype(&verum_common::Maybe::Some(ty.clone()))
-            })
+            .map(|(_name, ty)| self.verum_type_to_ctype(&verum_common::Maybe::Some(ty.clone())))
             .collect();
-        let return_type = self.verum_type_to_ctype(
-            &verum_common::Maybe::Some(func.signature.return_type.clone()),
-        );
+        let return_type = self.verum_type_to_ctype(&verum_common::Maybe::Some(
+            func.signature.return_type.clone(),
+        ));
         let mut sig = FfiSignature::new(return_type, param_types);
         sig.is_variadic = func.signature.is_variadic;
         sig
@@ -6123,23 +6480,26 @@ impl VbcCodegen {
             if attr.name.as_str() == "ffi" {
                 // Extract library name from args
                 if let verum_common::Maybe::Some(ref args) = attr.args
-                    && let Some(first_arg) = args.first() {
-                        // The first argument should be a string literal
-                        if let ExprKind::Literal(lit) = &first_arg.kind
-                            && let LiteralKind::Text(
-                                StringLit::Regular(s)
-                                | StringLit::MultiLine(s)
-                            ) = &lit.kind {
-                                return Some(s.to_string());
-                            }
+                    && let Some(first_arg) = args.first()
+                {
+                    // The first argument should be a string literal
+                    if let ExprKind::Literal(lit) = &first_arg.kind
+                        && let LiteralKind::Text(StringLit::Regular(s) | StringLit::MultiLine(s)) =
+                            &lit.kind
+                    {
+                        return Some(s.to_string());
                     }
+                }
             }
         }
         None
     }
 
     /// Checks if a function has an @ffi attribute.
-    fn has_ffi_attribute(&self, attributes: &verum_common::List<verum_ast::attr::Attribute>) -> bool {
+    fn has_ffi_attribute(
+        &self,
+        attributes: &verum_common::List<verum_ast::attr::Attribute>,
+    ) -> bool {
         for attr in attributes.iter() {
             if attr.name.as_str() == "ffi" {
                 return true;
@@ -6156,23 +6516,28 @@ impl VbcCodegen {
             if attr.name.as_str() == "repr" {
                 // Check for @repr(C) - the arg should be an identifier "C"
                 if let verum_common::Maybe::Some(ref args) = attr.args
-                    && let Some(first_arg) = args.first() {
-                        // The argument is a Path expression for an identifier like "C"
-                        if let ExprKind::Path(path) = &first_arg.kind
-                            && let Some(PathSegment::Name(ident)) = path.segments.first() {
-                                let name = ident.name.as_str();
-                                if name == "C" || name == "c" {
-                                    return true;
-                                }
-                            }
+                    && let Some(first_arg) = args.first()
+                {
+                    // The argument is a Path expression for an identifier like "C"
+                    if let ExprKind::Path(path) = &first_arg.kind
+                        && let Some(PathSegment::Name(ident)) = path.segments.first()
+                    {
+                        let name = ident.name.as_str();
+                        if name == "C" || name == "c" {
+                            return true;
+                        }
                     }
+                }
             }
         }
         false
     }
 
     /// Checks if a type definition has @bitfield attribute.
-    fn has_bitfield_attr(&self, attributes: &verum_common::List<verum_ast::attr::Attribute>) -> bool {
+    fn has_bitfield_attr(
+        &self,
+        attributes: &verum_common::List<verum_ast::attr::Attribute>,
+    ) -> bool {
         for attr in attributes.iter() {
             if attr.name.as_str() == "bitfield" {
                 return true;
@@ -6182,22 +6547,26 @@ impl VbcCodegen {
     }
 
     /// Extracts the byte order from @endian attribute, defaulting to little.
-    fn get_byte_order(&self, attributes: &verum_common::List<verum_ast::attr::Attribute>) -> ByteOrder {
+    fn get_byte_order(
+        &self,
+        attributes: &verum_common::List<verum_ast::attr::Attribute>,
+    ) -> ByteOrder {
         use verum_ast::expr::ExprKind;
 
         for attr in attributes.iter() {
             if attr.name.as_str() == "endian"
                 && let verum_common::Maybe::Some(ref args) = attr.args
-                    && let Some(first_arg) = args.first()
-                        && let ExprKind::Path(path) = &first_arg.kind
-                            && let Some(PathSegment::Name(ident)) = path.segments.first() {
-                                let name = ident.name.as_str();
-                                return match name {
-                                    "big" => ByteOrder::Big,
-                                    "native" => ByteOrder::Native,
-                                    _ => ByteOrder::Little, // Default to little
-                                };
-                            }
+                && let Some(first_arg) = args.first()
+                && let ExprKind::Path(path) = &first_arg.kind
+                && let Some(PathSegment::Name(ident)) = path.segments.first()
+            {
+                let name = ident.name.as_str();
+                return match name {
+                    "big" => ByteOrder::Big,
+                    "native" => ByteOrder::Native,
+                    _ => ByteOrder::Little, // Default to little
+                };
+            }
         }
         ByteOrder::Little // Default
     }
@@ -6230,7 +6599,8 @@ impl VbcCodegen {
                 let bit_width = bit_spec.width.bits;
 
                 // Use explicit offset if provided, otherwise use current offset
-                let bit_offset = bit_spec.offset
+                let bit_offset = bit_spec
+                    .offset
                     .as_ref()
                     .map(|o| *o)
                     .unwrap_or(current_bit_offset);
@@ -6271,7 +6641,15 @@ impl VbcCodegen {
                     contexts: vec![],
                     return_type: None,
                     yield_type: None,
-                    intrinsic_name: Some(format!("bitfield_get:{}:{}:{}", type_name, field_name, bit_offset)), variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+                    intrinsic_name: Some(format!(
+                        "bitfield_get:{}:{}:{}",
+                        type_name, field_name, bit_offset
+                    )),
+                    variant_tag: None,
+                    parent_type_name: None,
+                    variant_payload_types: None,
+                    is_partial_pattern: false,
+                    takes_self_mut_ref: false,
                     return_type_name: None, // Bitfield getters return primitive types
                     return_type_inner: None,
                 };
@@ -6292,7 +6670,15 @@ impl VbcCodegen {
                     contexts: vec![],
                     return_type: None,
                     yield_type: None,
-                    intrinsic_name: Some(format!("bitfield_set:{}:{}:{}", type_name, field_name, bit_offset)), variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+                    intrinsic_name: Some(format!(
+                        "bitfield_set:{}:{}:{}",
+                        type_name, field_name, bit_offset
+                    )),
+                    variant_tag: None,
+                    parent_type_name: None,
+                    variant_payload_types: None,
+                    is_partial_pattern: false,
+                    takes_self_mut_ref: false,
                     return_type_name: None, // Setters return unit
                     return_type_inner: None,
                 };
@@ -6517,9 +6903,15 @@ impl VbcCodegen {
             };
 
             // Check if it's a function type and extract the signature
-            if let TypeKind::Function { params, return_type, .. } = &param_type.kind {
+            if let TypeKind::Function {
+                params,
+                return_type,
+                ..
+            } = &param_type.kind
+            {
                 // Create the callback signature
-                let callback_return_type = self.verum_type_to_ctype(&verum_common::Maybe::Some((**return_type).clone()));
+                let callback_return_type =
+                    self.verum_type_to_ctype(&verum_common::Maybe::Some((**return_type).clone()));
                 let callback_param_types: smallvec::SmallVec<[crate::module::CType; 4]> = params
                     .iter()
                     .map(|t| self.verum_type_to_ctype(&verum_common::Maybe::Some(t.clone())))
@@ -6531,7 +6923,10 @@ impl VbcCodegen {
                     is_variadic: false,
                     fixed_param_count: params.len() as u8,
                     return_layout_idx: None, // Callbacks don't support struct-by-value yet
-                    param_layout_indices: smallvec::SmallVec::from_elem(None, callback_param_types.len()),
+                    param_layout_indices: smallvec::SmallVec::from_elem(
+                        None,
+                        callback_param_types.len(),
+                    ),
                 };
 
                 // Create a synthetic FfiSymbol for this callback signature
@@ -6550,10 +6945,8 @@ impl VbcCodegen {
                 });
 
                 // Store the mapping for lookup during FFI call compilation
-                self.ffi_callback_signatures.insert(
-                    (symbol_id, param_idx as u8),
-                    callback_symbol_id,
-                );
+                self.ffi_callback_signatures
+                    .insert((symbol_id, param_idx as u8), callback_symbol_id);
             }
         }
     }
@@ -6564,8 +6957,14 @@ impl VbcCodegen {
     /// Returns the synthetic FfiSymbol ID that contains the callback signature
     /// for the given FFI function and parameter index. Returns None if the
     /// parameter is not a function pointer type.
-    pub fn get_callback_signature_id(&self, ffi_symbol_id: FfiSymbolId, param_idx: u8) -> Option<FfiSymbolId> {
-        self.ffi_callback_signatures.get(&(ffi_symbol_id, param_idx)).copied()
+    pub fn get_callback_signature_id(
+        &self,
+        ffi_symbol_id: FfiSymbolId,
+        param_idx: u8,
+    ) -> Option<FfiSymbolId> {
+        self.ffi_callback_signatures
+            .get(&(ffi_symbol_id, param_idx))
+            .copied()
     }
 
     /// Maps a Verum type to a C type for FFI.
@@ -6612,7 +7011,7 @@ impl VbcCodegen {
                     TypeKind::Int => CType::I64,
                     TypeKind::Float => CType::F64,
                     TypeKind::Bool => CType::Bool,
-                    TypeKind::Char => CType::U32, // Unicode codepoint
+                    TypeKind::Char => CType::U32,  // Unicode codepoint
                     TypeKind::Text => CType::CStr, // String as C string
                     TypeKind::Unit => CType::Void,
                     TypeKind::Never => CType::Void, // Never returns
@@ -6636,7 +7035,10 @@ impl VbcCodegen {
 
     /// Gets the layout index for a @repr(C) struct type.
     /// Handles both direct struct types and references to struct types.
-    fn get_struct_layout_index(&self, ty: &verum_common::Maybe<verum_ast::ty::Type>) -> Option<u16> {
+    fn get_struct_layout_index(
+        &self,
+        ty: &verum_common::Maybe<verum_ast::ty::Type>,
+    ) -> Option<u16> {
         use verum_ast::ty::TypeKind;
 
         match ty {
@@ -6682,18 +7084,24 @@ impl VbcCodegen {
             }
             // Skip conditional contexts whose condition is false
             if let verum_common::Maybe::Some(ref cond) = ctx.condition
-                && !Self::evaluate_context_condition(cond) {
-                    continue;
-                }
+                && !Self::evaluate_context_condition(cond)
+            {
+                continue;
+            }
 
             // Get context name
-            let ctx_name = ctx.path.segments.last()
+            let ctx_name = ctx
+                .path
+                .segments
+                .last()
                 .and_then(|seg| match seg {
                     verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
                     _ => None,
                 })
                 .unwrap_or_default();
-            if ctx_name.is_empty() { continue; }
+            if ctx_name.is_empty() {
+                continue;
+            }
 
             let ctx_type_id = self.intern_string(&ctx_name);
 
@@ -6713,14 +7121,24 @@ impl VbcCodegen {
                 let args_start = if !transform.args.is_empty() {
                     let first = self.ctx.alloc_temp();
                     if let Ok(Some(val)) = self.compile_expr(&transform.args[0]) {
-                        self.ctx.emit(Instruction::Mov { dst: first, src: val });
-                        if val != first { self.ctx.free_temp(val); }
+                        self.ctx.emit(Instruction::Mov {
+                            dst: first,
+                            src: val,
+                        });
+                        if val != first {
+                            self.ctx.free_temp(val);
+                        }
                     }
                     for arg in transform.args.iter().skip(1) {
                         let arg_reg = self.ctx.alloc_temp();
                         if let Ok(Some(val)) = self.compile_expr(arg) {
-                            self.ctx.emit(Instruction::Mov { dst: arg_reg, src: val });
-                            if val != arg_reg { self.ctx.free_temp(val); }
+                            self.ctx.emit(Instruction::Mov {
+                                dst: arg_reg,
+                                src: val,
+                            });
+                            if val != arg_reg {
+                                self.ctx.free_temp(val);
+                            }
                         }
                     }
                     first
@@ -6769,7 +7187,10 @@ impl VbcCodegen {
         use verum_ast::expr::ExprKind;
 
         match &expr.kind {
-            ExprKind::Field { expr: object, field } => {
+            ExprKind::Field {
+                expr: object,
+                field,
+            } => {
                 if let ExprKind::Path(path) = &object.kind {
                     if let Some(ident) = path.as_ident() {
                         match ident.name.as_str() {
@@ -6788,8 +7209,12 @@ impl VbcCodegen {
                             },
                             _ => false,
                         }
-                    } else { false }
-                } else { false }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
             }
             ExprKind::Literal(lit) => {
                 matches!(lit.kind, verum_ast::literal::LiteralKind::Bool(true))
@@ -6797,7 +7222,9 @@ impl VbcCodegen {
             ExprKind::Path(path) => {
                 if let Some(ident) = path.as_ident() {
                     matches!(ident.name.as_str(), "true" | "debug")
-                } else { false }
+                } else {
+                    false
+                }
             }
             _ => false,
         }
@@ -6905,7 +7332,10 @@ impl VbcCodegen {
                     );
                     return Ok(());
                 }
-                tracing::debug!("[variant] register_type_constructors entering for {}", type_name);
+                tracing::debug!(
+                    "[variant] register_type_constructors entering for {}",
+                    type_name
+                );
 
                 for (variant_index, variant) in variants.iter().enumerate() {
                     let variant_name = variant.name.name.to_string();
@@ -6931,10 +7361,8 @@ impl VbcCodegen {
                         }
                         verum_common::Maybe::Some(VariantData::Record(fields)) => {
                             let count = fields.len();
-                            let names: Vec<String> = fields
-                                .iter()
-                                .map(|f| f.name.name.to_string())
-                                .collect();
+                            let names: Vec<String> =
+                                fields.iter().map(|f| f.name.name.to_string()).collect();
                             // Extract type names from each field
                             let type_names: Vec<String> = fields
                                 .iter()
@@ -6942,7 +7370,11 @@ impl VbcCodegen {
                                 .collect();
                             // Register field layout for the variant name so
                             // match destructuring with `..` resolves correct field indices
-                            self.register_record_fields(&variant_name, names.clone(), type_names.clone());
+                            self.register_record_fields(
+                                &variant_name,
+                                names.clone(),
+                                type_names.clone(),
+                            );
                             (count, names, type_names)
                         }
                     };
@@ -6963,8 +7395,13 @@ impl VbcCodegen {
                         intrinsic_name: None,
                         variant_tag: Some(tag),
                         parent_type_name: Some(type_name.clone()),
-                        variant_payload_types: if payload_types.is_empty() { None } else { Some(payload_types) },
-                        is_partial_pattern: false, takes_self_mut_ref: false,
+                        variant_payload_types: if payload_types.is_empty() {
+                            None
+                        } else {
+                            Some(payload_types)
+                        },
+                        is_partial_pattern: false,
+                        takes_self_mut_ref: false,
                         // Variant constructors return the parent type
                         return_type_name: Some(type_name.clone()),
                         return_type_inner: None,
@@ -6973,7 +7410,10 @@ impl VbcCodegen {
                     // 1. Always register with qualified name (TypeName::VariantName)
                     tracing::debug!(
                         "[variant] registering qualified {}.{} tag={} params={}",
-                        type_name, variant_name, tag, param_count
+                        type_name,
+                        variant_name,
+                        tag,
+                        param_count
                     );
                     self.ctx.register_function(qualified_name, info.clone());
 
@@ -7112,14 +7552,17 @@ impl VbcCodegen {
                             // ("variant is Record but also reports
                             // arity=N"). Keep arity=0 here so the
                             // descriptor is internally consistent.
-                            let fds: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> = fields
-                                .iter()
-                                .map(|f| crate::types::FieldDescriptor {
-                                    name: StringId(self.ctx.intern_string_raw(f.name.name.as_str())),
-                                    type_ref: self.ast_type_to_type_ref(&f.ty),
-                                    ..Default::default()
-                                })
-                                .collect();
+                            let fds: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> =
+                                fields
+                                    .iter()
+                                    .map(|f| crate::types::FieldDescriptor {
+                                        name: StringId(
+                                            self.ctx.intern_string_raw(f.name.name.as_str()),
+                                        ),
+                                        type_ref: self.ast_type_to_type_ref(&f.ty),
+                                        ..Default::default()
+                                    })
+                                    .collect();
                             (crate::types::VariantKind::Record, 0u8, fds)
                         }
                     };
@@ -7134,7 +7577,9 @@ impl VbcCodegen {
                 }
                 tracing::debug!(
                     "[variant] pushing Sum TypeDescriptor for {} (id={}, variants={})",
-                    type_name, type_id.0, sum_desc.variants.len(),
+                    type_name,
+                    type_id.0,
+                    sum_desc.variants.len(),
                 );
                 self.push_type_dedupe(sum_desc);
             }
@@ -7175,14 +7620,16 @@ impl VbcCodegen {
                 // @repr(packed) eliminates padding (alignment = 1).
                 // @repr(C) uses C-compatible layout rules.
                 // @repr(cache_optimal) reorders fields for cache locality.
-                let (type_align, is_packed, _is_repr_c) = Self::extract_type_layout_hints(&type_decl.attributes);
+                let (type_align, is_packed, _is_repr_c) =
+                    Self::extract_type_layout_hints(&type_decl.attributes);
                 let field_size = if is_packed { 1u32 } else { 8u32 }; // packed: minimum size per field
                 type_desc.size = (fields.len() as u32) * field_size;
                 type_desc.alignment = type_align;
 
                 // Build generic type param name → index mapping for field type resolution.
                 // E.g., for `type Pair<A, B>`, maps {"A"→0, "B"→1}.
-                let mut generic_param_map: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
+                let mut generic_param_map: std::collections::HashMap<String, u16> =
+                    std::collections::HashMap::new();
                 for (idx, generic) in type_decl.generics.iter().enumerate() {
                     if let verum_ast::ty::GenericParamKind::Type { name, .. } = &generic.kind {
                         generic_param_map.insert(name.name.to_string(), idx as u16);
@@ -7191,18 +7638,26 @@ impl VbcCodegen {
 
                 // Also populate type_params on the TypeDescriptor (was only done for protocols)
                 for generic in &type_decl.generics {
-                    if let verum_ast::ty::GenericParamKind::Type { name, bounds, default } = &generic.kind {
-                        let param_name_id = StringId(self.ctx.intern_string_raw(name.name.as_str()));
-                        let bound_ids: smallvec::SmallVec<[crate::types::ProtocolId; 2]> = bounds.iter()
+                    if let verum_ast::ty::GenericParamKind::Type {
+                        name,
+                        bounds,
+                        default,
+                    } = &generic.kind
+                    {
+                        let param_name_id =
+                            StringId(self.ctx.intern_string_raw(name.name.as_str()));
+                        let bound_ids: smallvec::SmallVec<[crate::types::ProtocolId; 2]> = bounds
+                            .iter()
                             .filter_map(|bound| {
                                 if let verum_ast::ty::TypeBoundKind::Protocol(path) = &bound.kind
                                     && let Some(seg) = path.segments.last()
-                                        && let verum_ast::ty::PathSegment::Name(ident) = seg {
-                                            let bname = ident.name.to_string();
-                                            if let Some(&pid) = self.type_name_to_id.get(&bname) {
-                                                return Some(crate::types::ProtocolId(pid.0));
-                                            }
-                                        }
+                                    && let verum_ast::ty::PathSegment::Name(ident) = seg
+                                {
+                                    let bname = ident.name.to_string();
+                                    if let Some(&pid) = self.type_name_to_id.get(&bname) {
+                                        return Some(crate::types::ProtocolId(pid.0));
+                                    }
+                                }
                                 None
                             })
                             .collect();
@@ -7245,10 +7700,8 @@ impl VbcCodegen {
 
                 let id = FunctionId(u32::MAX / 2);
 
-                let param_names: Vec<String> = fields
-                    .iter()
-                    .map(|f| f.name.name.to_string())
-                    .collect();
+                let param_names: Vec<String> =
+                    fields.iter().map(|f| f.name.name.to_string()).collect();
 
                 let info = FunctionInfo {
                     id,
@@ -7260,7 +7713,12 @@ impl VbcCodegen {
                     contexts: vec![],
                     return_type: None,
                     yield_type: None,
-                    intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+                    intrinsic_name: None,
+                    variant_tag: None,
+                    parent_type_name: None,
+                    variant_payload_types: None,
+                    is_partial_pattern: false,
+                    takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                 };
@@ -7301,22 +7759,32 @@ impl VbcCodegen {
 
                 // Encode method signatures as variants (VBC convention for protocol methods)
                 for protocol_item in &protocol_body.items {
-                    if let verum_ast::decl::ProtocolItemKind::Function { decl, .. } = &protocol_item.kind {
+                    if let verum_ast::decl::ProtocolItemKind::Function { decl, .. } =
+                        &protocol_item.kind
+                    {
                         let method_name = decl.name.name.to_string();
                         let method_name_id = StringId(self.ctx.intern_string_raw(&method_name));
 
                         // Build function TypeRef for the method
-                        let param_refs: Vec<crate::types::TypeRef> = decl.params.iter().filter_map(|p| {
-                            if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-                                Some(self.ast_type_to_type_ref(ty))
-                            } else {
-                                None // Skip self params
-                            }
-                        }).collect();
+                        let param_refs: Vec<crate::types::TypeRef> = decl
+                            .params
+                            .iter()
+                            .filter_map(|p| {
+                                if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } =
+                                    &p.kind
+                                {
+                                    Some(self.ast_type_to_type_ref(ty))
+                                } else {
+                                    None // Skip self params
+                                }
+                            })
+                            .collect();
 
                         let ret_ref = match &decl.return_type {
                             verum_common::Maybe::Some(ty) => self.ast_type_to_type_ref(ty),
-                            verum_common::Maybe::None => TypeRef::Concrete(crate::types::TypeId::UNIT),
+                            verum_common::Maybe::None => {
+                                TypeRef::Concrete(crate::types::TypeId::UNIT)
+                            }
                         };
 
                         let method_type_ref = TypeRef::Function {
@@ -7337,18 +7805,26 @@ impl VbcCodegen {
 
                 // Add generic type parameters
                 for generic in &type_decl.generics {
-                    if let verum_ast::ty::GenericParamKind::Type { name, bounds, default } = &generic.kind {
-                        let param_name_id = StringId(self.ctx.intern_string_raw(name.name.as_str()));
-                        let bound_ids: smallvec::SmallVec<[crate::types::ProtocolId; 2]> = bounds.iter()
+                    if let verum_ast::ty::GenericParamKind::Type {
+                        name,
+                        bounds,
+                        default,
+                    } = &generic.kind
+                    {
+                        let param_name_id =
+                            StringId(self.ctx.intern_string_raw(name.name.as_str()));
+                        let bound_ids: smallvec::SmallVec<[crate::types::ProtocolId; 2]> = bounds
+                            .iter()
                             .filter_map(|bound| {
                                 if let verum_ast::ty::TypeBoundKind::Protocol(path) = &bound.kind
                                     && let Some(seg) = path.segments.last()
-                                        && let verum_ast::ty::PathSegment::Name(ident) = seg {
-                                            let bname = ident.name.to_string();
-                                            if let Some(&pid) = self.type_name_to_id.get(&bname) {
-                                                return Some(crate::types::ProtocolId(pid.0));
-                                            }
-                                        }
+                                    && let verum_ast::ty::PathSegment::Name(ident) = seg
+                                {
+                                    let bname = ident.name.to_string();
+                                    if let Some(&pid) = self.type_name_to_id.get(&bname) {
+                                        return Some(crate::types::ProtocolId(pid.0));
+                                    }
+                                }
                                 None
                             })
                             .collect();
@@ -7388,7 +7864,9 @@ impl VbcCodegen {
                 // Track newtype names for GetF optimization (field .0 = identity)
                 self.ctx.newtype_names.insert(type_name.clone());
                 let inner_name = self.type_to_simple_name(_inner_type);
-                self.ctx.newtype_inner_type.insert(type_name.clone(), inner_name);
+                self.ctx
+                    .newtype_inner_type
+                    .insert(type_name.clone(), inner_name);
 
                 let id = FunctionId(u32::MAX / 2);
 
@@ -7402,7 +7880,12 @@ impl VbcCodegen {
                     contexts: vec![],
                     return_type: None,
                     yield_type: None,
-                    intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+                    intrinsic_name: None,
+                    variant_tag: None,
+                    parent_type_name: None,
+                    variant_payload_types: None,
+                    is_partial_pattern: false,
+                    takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                 };
@@ -7416,14 +7899,15 @@ impl VbcCodegen {
                 if types.len() == 1 {
                     self.ctx.newtype_names.insert(type_name.clone());
                     let inner_name = self.type_to_simple_name(&types[0]);
-                    self.ctx.newtype_inner_type.insert(type_name.clone(), inner_name);
+                    self.ctx
+                        .newtype_inner_type
+                        .insert(type_name.clone(), inner_name);
                 }
 
                 let id = FunctionId(u32::MAX / 2);
 
-                let param_names: Vec<String> = (0..types.len())
-                    .map(|i| format!("_{}", i))
-                    .collect();
+                let param_names: Vec<String> =
+                    (0..types.len()).map(|i| format!("_{}", i)).collect();
 
                 let info = FunctionInfo {
                     id,
@@ -7435,7 +7919,12 @@ impl VbcCodegen {
                     contexts: vec![],
                     return_type: None,
                     yield_type: None,
-                    intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+                    intrinsic_name: None,
+                    variant_tag: None,
+                    parent_type_name: None,
+                    variant_payload_types: None,
+                    is_partial_pattern: false,
+                    takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                 };
@@ -7457,7 +7946,12 @@ impl VbcCodegen {
                     contexts: vec![],
                     return_type: None,
                     yield_type: None,
-                    intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+                    intrinsic_name: None,
+                    variant_tag: None,
+                    parent_type_name: None,
+                    variant_payload_types: None,
+                    is_partial_pattern: false,
+                    takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                 };
@@ -7469,9 +7963,8 @@ impl VbcCodegen {
             TypeDeclBody::SigmaTuple(types) => {
                 let id = FunctionId(u32::MAX / 2);
 
-                let param_names: Vec<String> = (0..types.len())
-                    .map(|i| format!("_{}", i))
-                    .collect();
+                let param_names: Vec<String> =
+                    (0..types.len()).map(|i| format!("_{}", i)).collect();
 
                 let info = FunctionInfo {
                     id,
@@ -7483,7 +7976,12 @@ impl VbcCodegen {
                     contexts: vec![],
                     return_type: None,
                     yield_type: None,
-                    intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+                    intrinsic_name: None,
+                    variant_tag: None,
+                    parent_type_name: None,
+                    variant_payload_types: None,
+                    is_partial_pattern: false,
+                    takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                 };
@@ -7619,10 +8117,10 @@ impl VbcCodegen {
         // If the constant couldn't be inlined, queue it for compilation as a function.
         // This handles struct literals like `MemProt { read: false, write: false, exec: false }`.
         let needs_compilation = intrinsic_name.is_none() && value_expr.is_some();
-        if needs_compilation
-            && let Some(expr) = value_expr {
-                self.pending_constants.push((name.to_string(), expr.clone()));
-            }
+        if needs_compilation && let Some(expr) = value_expr {
+            self.pending_constants
+                .push((name.to_string(), expr.clone()));
+        }
 
         // Extract return type name from constant type if present
         let return_type_name = const_type.and_then(|ty| self.extract_type_name(ty));
@@ -7637,7 +8135,12 @@ impl VbcCodegen {
             contexts: vec![],
             return_type: None,
             yield_type: None,
-            intrinsic_name, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+            intrinsic_name,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
+            takes_self_mut_ref: false,
             return_type_name,
             return_type_inner: None,
         };
@@ -7738,8 +8241,14 @@ impl VbcCodegen {
             if let Ok(Some(result_reg)) = self.compile_expr(&init_expr) {
                 // Store result in TLS slot
                 let slot_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: slot_reg, value: slot as i64 });
-                self.ctx.emit(Instruction::TlsSet { slot: slot_reg, val: result_reg });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: slot_reg,
+                    value: slot as i64,
+                });
+                self.ctx.emit(Instruction::TlsSet {
+                    slot: slot_reg,
+                    val: result_reg,
+                });
                 self.ctx.free_temp(slot_reg);
                 // Return unit
                 self.ctx.emit(Instruction::Ret { value: result_reg });
@@ -7780,15 +8289,16 @@ impl VbcCodegen {
         use verum_ast::literal::LiteralKind;
 
         match &expr.kind {
-            ExprKind::Literal(lit) => {
-                match &lit.kind {
-                    LiteralKind::Int(int_lit) => Some(int_lit.value as i64),
-                    LiteralKind::Bool(b) => Some(if *b { 1 } else { 0 }),
-                    _ => None,
-                }
-            }
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Int(int_lit) => Some(int_lit.value as i64),
+                LiteralKind::Bool(b) => Some(if *b { 1 } else { 0 }),
+                _ => None,
+            },
             ExprKind::Paren(inner) => Self::extract_const_literal_value(inner),
-            ExprKind::Unary { op: verum_ast::UnOp::Neg, expr: operand } => {
+            ExprKind::Unary {
+                op: verum_ast::UnOp::Neg,
+                expr: operand,
+            } => {
                 // Use checked_neg to handle i64::MIN (which can't be negated)
                 Self::extract_const_literal_value(operand).and_then(|v| v.checked_neg())
             }
@@ -7810,16 +8320,17 @@ impl VbcCodegen {
     fn extract_param_name(&self, param: &verum_ast::FunctionParam) -> Option<String> {
         use verum_ast::FunctionParamKind;
         match &param.kind {
-            FunctionParamKind::Regular { pattern, .. } => {
-                self.extract_pattern_name(pattern)
-            }
-            FunctionParamKind::SelfValue | FunctionParamKind::SelfValueMut |
-            FunctionParamKind::SelfRef | FunctionParamKind::SelfRefMut |
-            FunctionParamKind::SelfOwn | FunctionParamKind::SelfOwnMut |
-            FunctionParamKind::SelfRefChecked | FunctionParamKind::SelfRefCheckedMut |
-            FunctionParamKind::SelfRefUnsafe | FunctionParamKind::SelfRefUnsafeMut => {
-                Some("self".to_string())
-            }
+            FunctionParamKind::Regular { pattern, .. } => self.extract_pattern_name(pattern),
+            FunctionParamKind::SelfValue
+            | FunctionParamKind::SelfValueMut
+            | FunctionParamKind::SelfRef
+            | FunctionParamKind::SelfRefMut
+            | FunctionParamKind::SelfOwn
+            | FunctionParamKind::SelfOwnMut
+            | FunctionParamKind::SelfRefChecked
+            | FunctionParamKind::SelfRefCheckedMut
+            | FunctionParamKind::SelfRefUnsafe
+            | FunctionParamKind::SelfRefUnsafeMut => Some("self".to_string()),
         }
     }
 
@@ -7834,7 +8345,10 @@ impl VbcCodegen {
     }
 
     /// Extracts the primary name and mutability from a pattern.
-    fn extract_pattern_name_and_mutable(&self, pattern: &verum_ast::Pattern) -> Option<(String, bool)> {
+    fn extract_pattern_name_and_mutable(
+        &self,
+        pattern: &verum_ast::Pattern,
+    ) -> Option<(String, bool)> {
         use verum_ast::PatternKind;
         match &pattern.kind {
             PatternKind::Ident { name, mutable, .. } => Some((name.name.to_string(), *mutable)),
@@ -7844,21 +8358,26 @@ impl VbcCodegen {
     }
 
     /// Extracts the parameter name and mutability from a function parameter.
-    fn extract_param_name_and_mutable(&self, param: &verum_ast::FunctionParam) -> Option<(String, bool)> {
+    fn extract_param_name_and_mutable(
+        &self,
+        param: &verum_ast::FunctionParam,
+    ) -> Option<(String, bool)> {
         use verum_ast::FunctionParamKind;
         match &param.kind {
             FunctionParamKind::Regular { pattern, .. } => {
                 self.extract_pattern_name_and_mutable(pattern)
             }
             // Self parameters: SelfValueMut, SelfRefCheckedMut, SelfRefUnsafeMut are mutable
-            FunctionParamKind::SelfValueMut | FunctionParamKind::SelfRefCheckedMut |
-            FunctionParamKind::SelfRefUnsafeMut => Some(("self".to_string(), true)),
-            FunctionParamKind::SelfValue |
-            FunctionParamKind::SelfRef | FunctionParamKind::SelfRefMut |
-            FunctionParamKind::SelfOwn | FunctionParamKind::SelfOwnMut |
-            FunctionParamKind::SelfRefChecked | FunctionParamKind::SelfRefUnsafe => {
-                Some(("self".to_string(), false))
-            }
+            FunctionParamKind::SelfValueMut
+            | FunctionParamKind::SelfRefCheckedMut
+            | FunctionParamKind::SelfRefUnsafeMut => Some(("self".to_string(), true)),
+            FunctionParamKind::SelfValue
+            | FunctionParamKind::SelfRef
+            | FunctionParamKind::SelfRefMut
+            | FunctionParamKind::SelfOwn
+            | FunctionParamKind::SelfOwnMut
+            | FunctionParamKind::SelfRefChecked
+            | FunctionParamKind::SelfRefUnsafe => Some(("self".to_string(), false)),
         }
     }
 
@@ -7879,12 +8398,12 @@ impl VbcCodegen {
             TypeKind::Path(path) => {
                 if let Some(ident) = path.as_ident() {
                     match ident.name.as_str() {
-                        "Float" | "Float64" | "f64" | "Float32" | "f32" => context::VarTypeKind::Float,
-                        "Int" | "Int64" | "i64" | "Int32" | "i32"
-                        | "UInt8" | "u8" | "Byte" | "UInt16" | "u16"
-                        | "UInt32" | "u32" | "UInt64" | "u64"
-                        | "Int8" | "i8" | "Int16" | "i16"
-                        | "UInt128" | "u128" | "Int128" | "i128"
+                        "Float" | "Float64" | "f64" | "Float32" | "f32" => {
+                            context::VarTypeKind::Float
+                        }
+                        "Int" | "Int64" | "i64" | "Int32" | "i32" | "UInt8" | "u8" | "Byte"
+                        | "UInt16" | "u16" | "UInt32" | "u32" | "UInt64" | "u64" | "Int8"
+                        | "i8" | "Int16" | "i16" | "UInt128" | "u128" | "Int128" | "i128"
                         | "UIntSize" | "usize" | "IntSize" | "isize" => context::VarTypeKind::Int,
                         "Bool" => context::VarTypeKind::Bool,
                         "Char" => context::VarTypeKind::Char,
@@ -7907,12 +8426,10 @@ impl VbcCodegen {
     fn type_name_to_var_type(&self, type_name: &str) -> context::VarTypeKind {
         match type_name {
             "Float" | "Float64" | "f64" | "Float32" | "f32" => context::VarTypeKind::Float,
-            "Int" | "Int64" | "i64" | "Int32" | "i32"
-            | "UInt8" | "u8" | "Byte" | "UInt16" | "u16"
-            | "UInt32" | "u32" | "UInt64" | "u64"
-            | "Int8" | "i8" | "Int16" | "i16"
-            | "UInt128" | "u128" | "Int128" | "i128"
-            | "UIntSize" | "usize" | "IntSize" | "isize" => context::VarTypeKind::Int,
+            "Int" | "Int64" | "i64" | "Int32" | "i32" | "UInt8" | "u8" | "Byte" | "UInt16"
+            | "u16" | "UInt32" | "u32" | "UInt64" | "u64" | "Int8" | "i8" | "Int16" | "i16"
+            | "UInt128" | "u128" | "Int128" | "i128" | "UIntSize" | "usize" | "IntSize"
+            | "isize" => context::VarTypeKind::Int,
             "Bool" => context::VarTypeKind::Bool,
             "Char" => context::VarTypeKind::Char,
             "Text" => context::VarTypeKind::Text,
@@ -7994,17 +8511,25 @@ impl VbcCodegen {
 
     /// Resolves a field type, mapping generic type parameters to TypeRef::Generic.
     /// `generic_param_map` maps param names (e.g., "A") to their TypeParamId index.
-    fn resolve_field_type_ref(&self, ty: &verum_ast::ty::Type, generic_param_map: &std::collections::HashMap<String, u16>) -> TypeRef {
-        use verum_ast::ty::{TypeKind, PathSegment};
+    fn resolve_field_type_ref(
+        &self,
+        ty: &verum_ast::ty::Type,
+        generic_param_map: &std::collections::HashMap<String, u16>,
+    ) -> TypeRef {
+        use verum_ast::ty::{PathSegment, TypeKind};
         // Check if the type is a simple path that matches a generic param
         if let TypeKind::Path(path) = &ty.kind {
-            let type_name = path.segments.iter().find_map(|seg| {
-                if let PathSegment::Name(ident) = seg {
-                    Some(ident.name.to_string())
-                } else {
-                    None
-                }
-            }).unwrap_or_default();
+            let type_name = path
+                .segments
+                .iter()
+                .find_map(|seg| {
+                    if let PathSegment::Name(ident) = seg {
+                        Some(ident.name.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
             if let Some(&param_idx) = generic_param_map.get(&type_name) {
                 return TypeRef::Generic(crate::types::TypeParamId(param_idx));
             }
@@ -8015,7 +8540,7 @@ impl VbcCodegen {
 
     /// This enables storing return type information for method dispatch prefixing.
     fn ast_type_to_type_ref(&self, ty: &verum_ast::ty::Type) -> TypeRef {
-        use verum_ast::ty::{TypeKind, PathSegment};
+        use verum_ast::ty::{PathSegment, TypeKind};
 
         match &ty.kind {
             TypeKind::Int => TypeRef::Concrete(TypeId::INT),
@@ -8026,13 +8551,17 @@ impl VbcCodegen {
             TypeKind::Never => TypeRef::Concrete(TypeId::NEVER),
             TypeKind::Path(path) => {
                 // Extract the first segment name for primitive type lookup
-                let type_name = path.segments.iter().find_map(|seg| {
-                    if let PathSegment::Name(ident) = seg {
-                        Some(ident.name.to_string())
-                    } else {
-                        None
-                    }
-                }).unwrap_or_default();
+                let type_name = path
+                    .segments
+                    .iter()
+                    .find_map(|seg| {
+                        if let PathSegment::Name(ident) = seg {
+                            Some(ident.name.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
 
                 // Map Verum type names to TypeId via the consolidated registry
                 match self.get_well_known_type_id(&type_name) {
@@ -8047,7 +8576,8 @@ impl VbcCodegen {
                 // Generic types like Maybe<T>, List<T>, etc.
                 let base_ref = self.ast_type_to_type_ref(base);
                 if let TypeRef::Concrete(base_id) = base_ref {
-                    let arg_refs: Vec<TypeRef> = args.iter()
+                    let arg_refs: Vec<TypeRef> = args
+                        .iter()
                         .filter_map(|arg| {
                             // Extract the inner Type from GenericArg::Type
                             if let verum_ast::ty::GenericArg::Type(inner_ty) = arg {
@@ -8057,7 +8587,10 @@ impl VbcCodegen {
                             }
                         })
                         .collect();
-                    TypeRef::Instantiated { base: base_id, args: arg_refs }
+                    TypeRef::Instantiated {
+                        base: base_id,
+                        args: arg_refs,
+                    }
                 } else {
                     base_ref
                 }
@@ -8076,18 +8609,27 @@ impl VbcCodegen {
                 } else {
                     // Multi-element tuples — produce TypeRef::Tuple with element types
                     // so LLVM lowering can track element types through Unpack
-                    let elem_refs: Vec<TypeRef> = elements.iter()
+                    let elem_refs: Vec<TypeRef> = elements
+                        .iter()
                         .map(|e| self.ast_type_to_type_ref(e))
                         .collect();
                     TypeRef::Tuple(elem_refs)
                 }
             }
-            TypeKind::Function { params, return_type, contexts, .. } => {
-                let param_refs: Vec<TypeRef> = params.iter()
+            TypeKind::Function {
+                params,
+                return_type,
+                contexts,
+                ..
+            } => {
+                let param_refs: Vec<TypeRef> = params
+                    .iter()
                     .map(|p| self.ast_type_to_type_ref(p))
                     .collect();
                 let ret_ref = self.ast_type_to_type_ref(return_type);
-                let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts.requirements.iter()
+                let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
+                    .requirements
+                    .iter()
                     .enumerate()
                     .map(|(i, _)| crate::types::ContextRef(i as u32))
                     .collect();
@@ -8129,7 +8671,7 @@ impl VbcCodegen {
     /// For primitive types like `Int`, returns `Some("Int")`.
     /// Used to track return types for correct method dispatch on function results.
     fn extract_type_name(&self, ty: &verum_ast::ty::Type) -> Option<String> {
-        use verum_ast::ty::{TypeKind, PathSegment};
+        use verum_ast::ty::{PathSegment, TypeKind};
 
         match &ty.kind {
             // Unit and Never have no extractable type name for dispatch
@@ -8155,14 +8697,15 @@ impl VbcCodegen {
                     Some(base_name)
                 } else {
                     // Build the full type string with generic arguments
-                    let arg_strs: Vec<String> = args.iter().filter_map(|arg| {
-                        match arg {
+                    let arg_strs: Vec<String> = args
+                        .iter()
+                        .filter_map(|arg| match arg {
                             verum_ast::ty::GenericArg::Type(ty) => self.extract_type_name(ty),
                             verum_ast::ty::GenericArg::Const(_) => None,
                             verum_ast::ty::GenericArg::Lifetime(_) => None,
                             verum_ast::ty::GenericArg::Binding(_) => None,
-                        }
-                    }).collect();
+                        })
+                        .collect();
                     if arg_strs.is_empty() {
                         Some(base_name)
                     } else {
@@ -8178,14 +8721,14 @@ impl VbcCodegen {
                 // `&[T]` / `[T]` — return the bracketed form so downstream
                 // method-dispatch code (which checks `starts_with('[')` to
                 // route to the Slice.* implementation) sees a slice type.
-                let inner_name = self.extract_type_name(inner)
+                let inner_name = self
+                    .extract_type_name(inner)
                     .unwrap_or_else(|| "T".to_string());
                 Some(format!("[{}]", inner_name))
             }
             _ => None,
         }
     }
-
 
     /// Converts a VBC TypeRef to a simple type name for method dispatch prefixing.
     ///
@@ -8221,7 +8764,8 @@ impl VbcCodegen {
                 if args.is_empty() {
                     base_name
                 } else {
-                    let arg_names: Vec<String> = args.iter().map(|a| self.type_ref_to_name(a)).collect();
+                    let arg_names: Vec<String> =
+                        args.iter().map(|a| self.type_ref_to_name(a)).collect();
                     format!("{}<{}>", base_name, arg_names.join(", "))
                 }
             }
@@ -8248,7 +8792,9 @@ impl VbcCodegen {
 
                 // Pre-populate impl block generics - these will be added to function generics
                 // in compile_function. This enables recognizing T, U etc. in impl<T, U> Foo<T> { ... }
-                let impl_type_generics: Vec<String> = impl_decl.generics.iter()
+                let impl_type_generics: Vec<String> = impl_decl
+                    .generics
+                    .iter()
                     .filter_map(|g| {
                         if let verum_ast::ty::GenericParamKind::Type { name, .. } = &g.kind {
                             Some(name.name.to_string())
@@ -8260,7 +8806,9 @@ impl VbcCodegen {
 
                 // Pre-populate impl block const generics - enables recognizing SIZE, N etc.
                 // in impl<const SIZE: Int> StackAllocator<SIZE> { ... }
-                let impl_const_generics: Vec<String> = impl_decl.generics.iter()
+                let impl_const_generics: Vec<String> = impl_decl
+                    .generics
+                    .iter()
                     .filter_map(|g| {
                         if let verum_ast::ty::GenericParamKind::Const { name, .. } = &g.kind {
                             Some(name.name.to_string())
@@ -8348,13 +8896,16 @@ impl VbcCodegen {
         Ok(())
     }
 
-
     /// Compiles a function declaration.
     ///
 
     /// The `impl_type_name` parameter is Some for functions inside impl blocks,
     /// allowing us to look up the function by its qualified name (e.g., "List.new").
-    fn compile_function(&mut self, func: &FunctionDecl, impl_type_name: Option<&String>) -> CodegenResult<()> {
+    fn compile_function(
+        &mut self,
+        func: &FunctionDecl,
+        impl_type_name: Option<&String>,
+    ) -> CodegenResult<()> {
         let base_name = func.name.name.to_string();
 
         // Build the lookup name - use qualified name for impl functions
@@ -8388,19 +8939,27 @@ impl VbcCodegen {
         // module and the lookup is for a bare top-level fn.
         let param_count = func.params.len();
         let qualified_lookup = if impl_type_name.is_none() {
-            self.ctx.current_source_module.as_deref()
+            self.ctx
+                .current_source_module
+                .as_deref()
                 .filter(|m| !m.is_empty() && *m != "main")
                 .and_then(|src_mod| {
                     let qn = format!("{}.{}", src_mod, base_name);
-                    self.ctx.lookup_function_with_arity(&qn, param_count).cloned()
+                    self.ctx
+                        .lookup_function_with_arity(&qn, param_count)
+                        .cloned()
                 })
         } else {
             None
         };
         let func_info = match qualified_lookup {
             Some(info) => info,
-            None => self.ctx.lookup_function_with_arity(&lookup_name, param_count)
-                .ok_or_else(|| CodegenError::internal(format!("function not registered: {}", lookup_name)))?
+            None => self
+                .ctx
+                .lookup_function_with_arity(&lookup_name, param_count)
+                .ok_or_else(|| {
+                    CodegenError::internal(format!("function not registered: {}", lookup_name))
+                })?
                 .clone(),
         };
 
@@ -8421,7 +8980,11 @@ impl VbcCodegen {
             .collect();
 
         // Begin function compilation
-        self.ctx.begin_function(&lookup_name, &params_with_mutability, func_info.return_type.clone());
+        self.ctx.begin_function(
+            &lookup_name,
+            &params_with_mutability,
+            func_info.return_type.clone(),
+        );
 
         // Set current function's return type name for variant disambiguation.
         // When a variant name collides (e.g., "Lt" in both user's "Ordering" and
@@ -8441,7 +9004,9 @@ impl VbcCodegen {
         // This MUST be after begin_function which clears variable_type_names.
         // This enables compile_method_call to qualify `self.method()` calls properly.
         if let Some(type_name) = impl_type_name {
-            self.ctx.variable_type_names.insert("self".to_string(), type_name.clone());
+            self.ctx
+                .variable_type_names
+                .insert("self".to_string(), type_name.clone());
         }
 
         // Set required contexts from the function's using clause.
@@ -8451,19 +9016,30 @@ impl VbcCodegen {
         // Register named/aliased context bindings from AST.
         // Grammar: named_context = identifier ':' context_path | context_path 'as' identifier
         for ctx in &func.contexts {
-            if ctx.is_negative { continue; }
-            let ctx_type_name = ctx.path.segments.last()
+            if ctx.is_negative {
+                continue;
+            }
+            let ctx_type_name = ctx
+                .path
+                .segments
+                .last()
                 .and_then(|seg| match seg {
                     verum_ast::ty::PathSegment::Name(id) => Some(id.name.to_string()),
                     _ => None,
                 })
                 .unwrap_or_default();
-            if ctx_type_name.is_empty() { continue; }
+            if ctx_type_name.is_empty() {
+                continue;
+            }
             if let verum_common::Maybe::Some(ref name_ident) = ctx.name {
-                self.ctx.context_aliases.insert(name_ident.name.to_string(), ctx_type_name.clone());
+                self.ctx
+                    .context_aliases
+                    .insert(name_ident.name.to_string(), ctx_type_name.clone());
             }
             if let verum_common::Maybe::Some(ref alias_ident) = ctx.alias {
-                self.ctx.context_aliases.insert(alias_ident.name.to_string(), ctx_type_name.clone());
+                self.ctx
+                    .context_aliases
+                    .insert(alias_ident.name.to_string(), ctx_type_name.clone());
             }
         }
 
@@ -8500,7 +9076,9 @@ impl VbcCodegen {
                 // Track type name for field index resolution
                 let type_name = Self::extract_type_name_from_ast(ty);
                 if type_name != "()" && !type_name.is_empty() {
-                    self.ctx.variable_type_names.insert(param_name.clone(), type_name);
+                    self.ctx
+                        .variable_type_names
+                        .insert(param_name.clone(), type_name);
                 }
             }
         }
@@ -8530,8 +9108,12 @@ impl VbcCodegen {
         // for pattern `fn f(x: Int { x > 0 })` with implicit `it`
         // collision guarded against), no alias is introduced.
         for param in func.params.iter() {
-            let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind else { continue };
-            let Some((param_name, _)) = self.extract_param_name_and_mutable(param) else { continue };
+            let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind else {
+                continue;
+            };
+            let Some((param_name, _)) = self.extract_param_name_and_mutable(param) else {
+                continue;
+            };
 
             // Extract (predicate_expr, binding_name) from the canonical
             // `Refined` node (post — the sigma surface form parses
@@ -8540,7 +9122,7 @@ impl VbcCodegen {
                 verum_ast::ty::TypeKind::Refined { predicate, .. } => {
                     let bname = match &predicate.binding {
                         verum_common::Maybe::Some(id) => id.name.to_string(),
-                        verum_common::Maybe::None    => "it".to_string(),
+                        verum_common::Maybe::None => "it".to_string(),
                     };
                     (predicate.expr.clone(), bname)
                 }
@@ -8551,7 +9133,9 @@ impl VbcCodegen {
             // skip this obligation — a missing param register means
             // the function never reached body compilation (extern /
             // placeholder) and there is nothing to assert against.
-            let Ok(param_reg) = self.ctx.get_var_reg(&param_name) else { continue };
+            let Ok(param_reg) = self.ctx.get_var_reg(&param_name) else {
+                continue;
+            };
 
             let message_id = {
                 let msg = format!(
@@ -8565,7 +9149,10 @@ impl VbcCodegen {
                 // No aliasing needed — predicate already references the
                 // parameter by the same name the caller bound.
                 if let Ok(Some(cond_reg)) = self.compile_expr(&pred_expr) {
-                    self.ctx.emit(Instruction::Assert { cond: cond_reg, message_id });
+                    self.ctx.emit(Instruction::Assert {
+                        cond: cond_reg,
+                        message_id,
+                    });
                     self.ctx.free_temp(cond_reg);
                 }
             } else {
@@ -8577,16 +9164,24 @@ impl VbcCodegen {
                 // (Int < vs Float lt, record field resolution, etc.).
                 self.ctx.enter_scope();
                 let alias_reg = self.ctx.define_var(&binding_name, false);
-                self.ctx.emit(Instruction::Mov { dst: alias_reg, src: param_reg });
+                self.ctx.emit(Instruction::Mov {
+                    dst: alias_reg,
+                    src: param_reg,
+                });
 
                 let vt = self.ctx.get_variable_type(&param_name);
                 self.ctx.register_variable_type(&binding_name, vt);
                 if let Some(type_name) = self.ctx.variable_type_names.get(&param_name).cloned() {
-                    self.ctx.variable_type_names.insert(binding_name.clone(), type_name);
+                    self.ctx
+                        .variable_type_names
+                        .insert(binding_name.clone(), type_name);
                 }
 
                 if let Ok(Some(cond_reg)) = self.compile_expr(&pred_expr) {
-                    self.ctx.emit(Instruction::Assert { cond: cond_reg, message_id });
+                    self.ctx.emit(Instruction::Assert {
+                        cond: cond_reg,
+                        message_id,
+                    });
                     self.ctx.free_temp(cond_reg);
                 }
                 self.ctx.exit_scope(false);
@@ -8603,14 +9198,21 @@ impl VbcCodegen {
         // These fire at function entry and abort if an excluded context is present.
         let func_name_id = self.intern_string(&lookup_name);
         for ctx_decl in &func.contexts {
-            if !ctx_decl.is_negative { continue; }
-            let ctx_type_name = ctx_decl.path.segments.last()
+            if !ctx_decl.is_negative {
+                continue;
+            }
+            let ctx_type_name = ctx_decl
+                .path
+                .segments
+                .last()
                 .and_then(|seg| match seg {
                     verum_ast::ty::PathSegment::Name(id) => Some(id.name.to_string()),
                     _ => None,
                 })
                 .unwrap_or_default();
-            if ctx_type_name.is_empty() { continue; }
+            if ctx_type_name.is_empty() {
+                continue;
+            }
             let ctx_type_id = self.intern_string(&ctx_type_name);
             self.ctx.emit(Instruction::CtxCheckNegative {
                 ctx_type: ctx_type_id,
@@ -8648,20 +9250,30 @@ impl VbcCodegen {
         if let Some(ref body) = func.body {
             match body {
                 verum_ast::FunctionBody::Block(block) => {
-                    let result = self.compile_block(block)
+                    let result = self
+                        .compile_block(block)
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the block result if present (implicit return)
                     if let Some(reg) = result {
-                        self.emit_return_refinement_assert(reg, func.return_type.as_ref(), &lookup_name);
+                        self.emit_return_refinement_assert(
+                            reg,
+                            func.return_type.as_ref(),
+                            &lookup_name,
+                        );
                         self.ctx.emit(Instruction::Ret { value: reg });
                     }
                 }
                 verum_ast::FunctionBody::Expr(expr) => {
-                    let result = self.compile_expr(expr)
+                    let result = self
+                        .compile_expr(expr)
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the expression result
                     if let Some(reg) = result {
-                        self.emit_return_refinement_assert(reg, func.return_type.as_ref(), &lookup_name);
+                        self.emit_return_refinement_assert(
+                            reg,
+                            func.return_type.as_ref(),
+                            &lookup_name,
+                        );
                         self.ctx.emit(Instruction::Ret { value: reg });
                     } else {
                         self.ctx.emit(Instruction::RetV);
@@ -8781,7 +9393,10 @@ impl VbcCodegen {
         // By copying to a fresh temp register, we ensure the result survives.
         let final_result = if let Some(result_reg) = result {
             let safe_reg = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::Mov { dst: safe_reg, src: result_reg });
+            self.ctx.emit(Instruction::Mov {
+                dst: safe_reg,
+                src: result_reg,
+            });
             Some(safe_reg)
         } else {
             None
@@ -8835,7 +9450,7 @@ impl VbcCodegen {
             verum_ast::ty::TypeKind::Refined { predicate, .. } => {
                 let bname = match &predicate.binding {
                     verum_common::Maybe::Some(id) => id.name.to_string(),
-                    verum_common::Maybe::None    => "it".to_string(),
+                    verum_common::Maybe::None => "it".to_string(),
                 };
                 (predicate.expr.clone(), bname)
             }
@@ -8845,15 +9460,11 @@ impl VbcCodegen {
         // Derive VarType from the underlying base (peel the refinement
         // layer) so predicate compilation picks the right comparisons.
         let base_vt = match &ret_ty.kind {
-            verum_ast::ty::TypeKind::Refined { base, .. } => {
-                self.type_kind_to_var_type(&base.kind)
-            }
+            verum_ast::ty::TypeKind::Refined { base, .. } => self.type_kind_to_var_type(&base.kind),
             _ => context::VarTypeKind::Unknown,
         };
         let base_type_name = match &ret_ty.kind {
-            verum_ast::ty::TypeKind::Refined { base, .. } => {
-                Self::extract_type_name_from_ast(base)
-            }
+            verum_ast::ty::TypeKind::Refined { base, .. } => Self::extract_type_name_from_ast(base),
             _ => String::new(),
         };
 
@@ -8864,15 +9475,23 @@ impl VbcCodegen {
 
         self.ctx.enter_scope();
         let alias_reg = self.ctx.define_var(&binding_name, false);
-        self.ctx.emit(Instruction::Mov { dst: alias_reg, src: result_reg });
+        self.ctx.emit(Instruction::Mov {
+            dst: alias_reg,
+            src: result_reg,
+        });
 
         self.ctx.register_variable_type(&binding_name, base_vt);
         if !base_type_name.is_empty() && base_type_name != "()" {
-            self.ctx.variable_type_names.insert(binding_name.clone(), base_type_name);
+            self.ctx
+                .variable_type_names
+                .insert(binding_name.clone(), base_type_name);
         }
 
         if let Ok(Some(cond_reg)) = self.compile_expr(&pred_expr) {
-            self.ctx.emit(Instruction::Assert { cond: cond_reg, message_id });
+            self.ctx.emit(Instruction::Assert {
+                cond: cond_reg,
+                message_id,
+            });
             self.ctx.free_temp(cond_reg);
         }
         self.ctx.exit_scope(false);
@@ -8943,7 +9562,7 @@ impl VbcCodegen {
         // Strip Heap<...> or Shared<...> wrappers
         for prefix in &["Heap<", "Shared<"] {
             if s.starts_with(prefix) && s.ends_with('>') {
-                s = &s[prefix.len()..s.len()-1];
+                s = &s[prefix.len()..s.len() - 1];
             }
         }
         s
@@ -8953,44 +9572,75 @@ impl VbcCodegen {
         if let Some(tn) = type_name {
             // Try exact match first
             if let Some(fields) = self.type_field_layouts.get(tn)
-                && let Some(pos) = fields.iter().position(|f| f == field_name) {
-                    if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                        tracing::debug!("[FIELD] {}.{} → per-type idx {} (fields: {:?})", tn, field_name, pos, fields);
-                    }
-                    return pos as u32;
+                && let Some(pos) = fields.iter().position(|f| f == field_name)
+            {
+                if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
+                    tracing::debug!(
+                        "[FIELD] {}.{} → per-type idx {} (fields: {:?})",
+                        tn,
+                        field_name,
+                        pos,
+                        fields
+                    );
                 }
+                return pos as u32;
+            }
             // Try with generic params stripped (e.g., "Slot<K, V>" → "Slot")
             if let Some(angle) = tn.find('<') {
                 let base = &tn[..angle];
                 if let Some(fields) = self.type_field_layouts.get(base)
-                    && let Some(pos) = fields.iter().position(|f| f == field_name) {
-                        if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                            tracing::debug!("[FIELD] {}.{} → per-type idx {} (stripped from '{}', fields: {:?})", base, field_name, pos, tn, fields);
-                        }
-                        return pos as u32;
+                    && let Some(pos) = fields.iter().position(|f| f == field_name)
+                {
+                    if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
+                        tracing::debug!(
+                            "[FIELD] {}.{} → per-type idx {} (stripped from '{}', fields: {:?})",
+                            base,
+                            field_name,
+                            pos,
+                            tn,
+                            fields
+                        );
                     }
+                    return pos as u32;
+                }
             }
             // Try stripping transparent wrappers (Heap<X> → X, Shared<X> → X, &X → X)
             let unwrapped = Self::strip_wrapper_type(tn);
             if unwrapped != tn {
                 // Try exact match on unwrapped
                 if let Some(fields) = self.type_field_layouts.get(unwrapped)
-                    && let Some(pos) = fields.iter().position(|f| f == field_name) {
-                        if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                            tracing::debug!("[FIELD] {}.{} → per-type idx {} (unwrapped from '{}', fields: {:?})", unwrapped, field_name, pos, tn, fields);
-                        }
-                        return pos as u32;
+                    && let Some(pos) = fields.iter().position(|f| f == field_name)
+                {
+                    if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
+                        tracing::debug!(
+                            "[FIELD] {}.{} → per-type idx {} (unwrapped from '{}', fields: {:?})",
+                            unwrapped,
+                            field_name,
+                            pos,
+                            tn,
+                            fields
+                        );
                     }
+                    return pos as u32;
+                }
                 // Try with generic params stripped on the unwrapped type
                 if let Some(angle) = unwrapped.find('<') {
                     let base = &unwrapped[..angle];
                     if let Some(fields) = self.type_field_layouts.get(base)
-                        && let Some(pos) = fields.iter().position(|f| f == field_name) {
-                            if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                                tracing::debug!("[FIELD] {}.{} → per-type idx {} (unwrapped+stripped from '{}', fields: {:?})", base, field_name, pos, tn, fields);
-                            }
-                            return pos as u32;
+                        && let Some(pos) = fields.iter().position(|f| f == field_name)
+                    {
+                        if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
+                            tracing::debug!(
+                                "[FIELD] {}.{} → per-type idx {} (unwrapped+stripped from '{}', fields: {:?})",
+                                base,
+                                field_name,
+                                pos,
+                                tn,
+                                fields
+                            );
                         }
+                        return pos as u32;
+                    }
                 }
             }
             // Bare wrapper types without generic args: treat as transparent.
@@ -9006,20 +9656,33 @@ impl VbcCodegen {
                 let simple_name = tn.rsplit('.').next().unwrap_or(tn);
                 for (type_n, fields) in &self.type_field_layouts {
                     let registered_simple = type_n.rsplit('.').next().unwrap_or(type_n);
-                    if registered_simple == simple_name && type_n != tn
-                        && let Some(pos) = fields.iter().position(|f| f == field_name) {
-                            if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                                tracing::debug!("[FIELD] {}.{} → cross-module match '{}' idx {} (fields: {:?})", tn, field_name, type_n, pos, fields);
-                            }
-                            return pos as u32;
+                    if registered_simple == simple_name
+                        && type_n != tn
+                        && let Some(pos) = fields.iter().position(|f| f == field_name)
+                    {
+                        if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
+                            tracing::debug!(
+                                "[FIELD] {}.{} → cross-module match '{}' idx {} (fields: {:?})",
+                                tn,
+                                field_name,
+                                type_n,
+                                pos,
+                                fields
+                            );
                         }
+                        return pos as u32;
+                    }
                 }
             }
 
             // Type known but field not found — fall through to type=None scan below.
             if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                tracing::debug!("[FIELD] type '{}' NOT in type_field_layouts, field '{}' → scanning all types (fn={})",
-                    tn, field_name, self.ctx.current_function.as_deref().unwrap_or("?"));
+                tracing::debug!(
+                    "[FIELD] type '{}' NOT in type_field_layouts, field '{}' → scanning all types (fn={})",
+                    tn,
+                    field_name,
+                    self.ctx.current_function.as_deref().unwrap_or("?")
+                );
             }
         }
         // type_name is None or didn't match — search all registered types.
@@ -9034,8 +9697,13 @@ impl VbcCodegen {
             if candidates.len() == 1 {
                 let (ref type_n, pos) = candidates[0];
                 if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                    tracing::debug!("[FIELD] scan: field '{}' → unique {}.{} idx {}",
-                        field_name, type_n, field_name, pos);
+                    tracing::debug!(
+                        "[FIELD] scan: field '{}' → unique {}.{} idx {}",
+                        field_name,
+                        type_n,
+                        field_name,
+                        pos
+                    );
                 }
                 return pos as u32;
             }
@@ -9044,8 +9712,12 @@ impl VbcCodegen {
                 let first_pos = candidates[0].1;
                 if candidates.iter().all(|(_, p)| *p == first_pos) {
                     if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                        tracing::debug!("[FIELD] scan: field '{}' → all at idx {} ({} types)",
-                            field_name, first_pos, candidates.len());
+                        tracing::debug!(
+                            "[FIELD] scan: field '{}' → all at idx {} ({} types)",
+                            field_name,
+                            first_pos,
+                            candidates.len()
+                        );
                     }
                     return first_pos as u32;
                 }
@@ -9060,13 +9732,21 @@ impl VbcCodegen {
                     }
                 }
                 if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                    tracing::debug!("[FIELD] scan: field '{}' ambiguous, picked {}.{} idx {} (most fields)",
-                        field_name, best.0, field_name, best.1);
+                    tracing::debug!(
+                        "[FIELD] scan: field '{}' ambiguous, picked {}.{} idx {} (most fields)",
+                        field_name,
+                        best.0,
+                        field_name,
+                        best.1
+                    );
                 }
                 return best.1 as u32;
             }
             if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                tracing::debug!("[FIELD] scan: field '{}' → not found in any type", field_name);
+                tracing::debug!(
+                    "[FIELD] scan: field '{}' → not found in any type",
+                    field_name
+                );
             }
         }
         // Fallback: use global interned ID (self-consistent but not FFI-correct)
@@ -9080,7 +9760,9 @@ impl VbcCodegen {
     /// Returns the number of declared fields for a record type.
     /// Returns None if the type is not registered.
     fn type_field_count(&self, type_name: &str) -> Option<u32> {
-        self.type_field_layouts.get(type_name).map(|f| f.len() as u32)
+        self.type_field_layouts
+            .get(type_name)
+            .map(|f| f.len() as u32)
     }
 
     /// Returns the type name of a field within a record type.
@@ -9093,14 +9775,15 @@ impl VbcCodegen {
     /// Generic parameters are preserved so that element types can be extracted
     /// later via `extract_element_type` (e.g., "List<Token>" → "Token").
     fn extract_type_name_from_ast(ty: &verum_ast::ty::Type) -> String {
-        use verum_ast::ty::{TypeKind, PathSegment, GenericArg};
+        use verum_ast::ty::{GenericArg, PathSegment, TypeKind};
         if let Some(name) = ty.kind.primitive_name() {
             return name.to_string();
         }
         match &ty.kind {
             TypeKind::Path(path) => {
                 // Get the last segment name (handles qualified paths like core.collections.List)
-                path.segments.last()
+                path.segments
+                    .last()
                     .and_then(|seg| match seg {
                         PathSegment::Name(ident) => Some(ident.name.to_string()),
                         _ => None,
@@ -9113,28 +9796,28 @@ impl VbcCodegen {
                 if args.is_empty() {
                     base_name
                 } else {
-                    let arg_strs: Vec<String> = args.iter().map(|arg| {
-                        match arg {
+                    let arg_strs: Vec<String> = args
+                        .iter()
+                        .map(|arg| match arg {
                             GenericArg::Type(ty) => Self::extract_type_name_from_ast(ty),
                             GenericArg::Const(_) => "_".to_string(),
                             _ => "_".to_string(),
-                        }
-                    }).collect();
+                        })
+                        .collect();
                     format!("{}<{}>", base_name, arg_strs.join(", "))
                 }
             }
             TypeKind::Reference { inner, .. }
             | TypeKind::CheckedReference { inner, .. }
             | TypeKind::UnsafeReference { inner, .. }
-            | TypeKind::Pointer { inner, .. } => {
-                Self::extract_type_name_from_ast(inner)
-            }
+            | TypeKind::Pointer { inner, .. } => Self::extract_type_name_from_ast(inner),
             TypeKind::Slice(inner) => {
                 format!("[{}]", Self::extract_type_name_from_ast(inner))
             }
             TypeKind::DynProtocol { bounds, .. } => {
                 // dyn Protocol → "dyn:Protocol" for dispatch tracking
-                let bound_names: Vec<String> = bounds.iter()
+                let bound_names: Vec<String> = bounds
+                    .iter()
                     .filter_map(|b| {
                         if let verum_ast::ty::TypeBoundKind::Protocol(path) = &b.kind {
                             path.as_ident().map(|id| id.name.to_string())
@@ -9151,7 +9834,12 @@ impl VbcCodegen {
 
     /// Registers the field layout for a record type.
     /// Called during type declaration collection.
-    fn register_record_fields(&mut self, type_name: &str, field_names: Vec<String>, field_types: Vec<String>) {
+    fn register_record_fields(
+        &mut self,
+        type_name: &str,
+        field_names: Vec<String>,
+        field_types: Vec<String>,
+    ) {
         // Intern all field names to ensure they have assigned indices
         for name in &field_names {
             self.intern_field_name(name);
@@ -9161,12 +9849,11 @@ impl VbcCodegen {
         // first (Pass 1b) and must not be overwritten by stdlib types (Pass 1c).
         if !self.type_field_layouts.contains_key(type_name) {
             for (name, ty) in field_names.iter().zip(field_types.iter()) {
-                self.type_field_type_names.insert(
-                    (type_name.to_string(), name.clone()),
-                    ty.clone(),
-                );
+                self.type_field_type_names
+                    .insert((type_name.to_string(), name.clone()), ty.clone());
             }
-            self.type_field_layouts.insert(type_name.to_string(), field_names.clone());
+            self.type_field_layouts
+                .insert(type_name.to_string(), field_names.clone());
 
             // Cross-module field access support: also register under the simple name
             // (without module path) so imports using unqualified names can find fields.
@@ -9175,12 +9862,11 @@ impl VbcCodegen {
                 let simple = type_name.rsplit('.').next().unwrap_or(type_name);
                 if !self.type_field_layouts.contains_key(simple) {
                     for (name, ty) in field_names.iter().zip(field_types.iter()) {
-                        self.type_field_type_names.insert(
-                            (simple.to_string(), name.clone()),
-                            ty.clone(),
-                        );
+                        self.type_field_type_names
+                            .insert((simple.to_string(), name.clone()), ty.clone());
                     }
-                    self.type_field_layouts.insert(simple.to_string(), field_names);
+                    self.type_field_layouts
+                        .insert(simple.to_string(), field_names);
                 }
             }
         } else {
@@ -9210,7 +9896,9 @@ impl VbcCodegen {
         // IMPORTANT: Intern strings FIRST and build mapping from codegen index to module StringId.
         // Codegen uses simple indices (0, 1, 2...) while VbcModule uses byte offsets.
         // This mapping is needed for function names, constants, and any other StringIds.
-        let string_id_map: Vec<StringId> = self.ctx.strings
+        let string_id_map: Vec<StringId> = self
+            .ctx
+            .strings
             .iter()
             .map(|s| module.intern_string(s))
             .collect();
@@ -9285,7 +9973,9 @@ impl VbcCodegen {
                                 .unwrap_or_default();
                             eprintln!(
                                 "[codegen-dedup]   duplicate id={} name='{}' bytecode_len={}",
-                                f.descriptor.id.0, n, f.instructions.len(),
+                                f.descriptor.id.0,
+                                n,
+                                f.instructions.len(),
                             );
                         }
                     }
@@ -9313,7 +10003,8 @@ impl VbcCodegen {
         // When stdlib functions are imported, next_func_id starts high, so the
         // module's own functions have non-zero-based IDs. The module stores functions
         // in a Vec indexed by FunctionId, so IDs must be contiguous from 0.
-        let func_id_remap: std::collections::HashMap<u32, u32> = self.functions
+        let func_id_remap: std::collections::HashMap<u32, u32> = self
+            .functions
             .iter()
             .enumerate()
             .map(|(new_idx, f)| (f.descriptor.id.0, new_idx as u32))
@@ -9359,21 +10050,24 @@ impl VbcCodegen {
             }
             // Remap drop_fn from sparse ID to contiguous 0-based ID
             if let Some(drop_fn) = remapped_ty.drop_fn
-                && let Some(&new_id) = func_id_remap.get(&drop_fn) {
-                    remapped_ty.drop_fn = Some(new_id);
-                }
+                && let Some(&new_id) = func_id_remap.get(&drop_fn)
+            {
+                remapped_ty.drop_fn = Some(new_id);
+            }
             // Remap clone_fn from sparse ID to contiguous 0-based ID
             if let Some(clone_fn) = remapped_ty.clone_fn
-                && let Some(&new_id) = func_id_remap.get(&clone_fn) {
-                    remapped_ty.clone_fn = Some(new_id);
-                }
+                && let Some(&new_id) = func_id_remap.get(&clone_fn)
+            {
+                remapped_ty.clone_fn = Some(new_id);
+            }
             // Remap protocol method FunctionIds from sparse to contiguous 0-based IDs
             for proto_impl in remapped_ty.protocols.iter_mut() {
                 for fn_id in proto_impl.methods.iter_mut() {
                     if *fn_id != u32::MAX
-                        && let Some(&new_id) = func_id_remap.get(fn_id) {
-                            *fn_id = new_id;
-                        }
+                        && let Some(&new_id) = func_id_remap.get(fn_id)
+                    {
+                        *fn_id = new_id;
+                    }
                 }
             }
             module.add_type(remapped_ty);
@@ -9700,21 +10394,29 @@ impl TypeTableHealthReport {
         for d in &self.duplicate_ids {
             msg.push_str(&format!(
                 "  - duplicate TypeId({}) shared by {} descriptor(s): {:?}\n",
-                d.type_id, d.descriptor_names.len(), d.descriptor_names,
+                d.type_id,
+                d.descriptor_names.len(),
+                d.descriptor_names,
             ));
         }
         for d in &self.duplicate_names_with_different_ids {
             msg.push_str(&format!(
                 "  - name `{}` declared with {} different TypeIds: {:?}\n",
-                d.name, d.type_ids.len(), d.type_ids,
+                d.name,
+                d.type_ids.len(),
+                d.type_ids,
             ));
         }
         for a in &self.variant_tag_anomalies {
             msg.push_str(&format!(
                 "  - variant tags non-dense in `{}` (TypeId({})): expected {} \
                  variants, max tag seen {}, duplicates {:?}, missing {:?}\n",
-                a.type_name, a.type_id, a.expected_count, a.max_tag_seen,
-                a.duplicate_tags, a.missing_tags,
+                a.type_name,
+                a.type_id,
+                a.expected_count,
+                a.max_tag_seen,
+                a.duplicate_tags,
+                a.missing_tags,
             ));
         }
         Err(CodegenError::internal(msg))
@@ -9797,8 +10499,7 @@ mod tests {
 
     #[test]
     fn test_optimization_level_clamped() {
-        let config = CodegenConfig::new("test")
-            .with_optimization_level(10); // Should be clamped to 3
+        let config = CodegenConfig::new("test").with_optimization_level(10); // Should be clamped to 3
 
         assert_eq!(config.optimization_level, 3);
     }
@@ -9901,7 +10602,7 @@ mod tests {
     /// into a single id slot.
     #[test]
     fn test_global_type_table_detects_duplicate_id() {
-        use crate::types::{TypeDescriptor, TypeId, StringId, TypeKind};
+        use crate::types::{StringId, TypeDescriptor, TypeId, TypeKind};
         let strings = vec!["Foo".to_string(), "Bar".to_string()];
         let mk = |name_idx: u32, id: u32| TypeDescriptor {
             id: TypeId(id),
@@ -9927,7 +10628,7 @@ mod tests {
     /// passes that didn't share state.
     #[test]
     fn test_global_type_table_detects_same_name_different_ids() {
-        use crate::types::{TypeDescriptor, TypeId, StringId, TypeKind};
+        use crate::types::{StringId, TypeDescriptor, TypeId, TypeKind};
         let strings = vec!["Counter".to_string(), "Counter".to_string()];
         let mk = |name_idx: u32, id: u32| TypeDescriptor {
             id: TypeId(id),
@@ -9953,7 +10654,7 @@ mod tests {
     /// neither name is itself ambiguous.
     #[test]
     fn test_global_type_table_two_descriptors_same_id_different_names_flagged() {
-        use crate::types::{TypeDescriptor, TypeId, StringId, TypeKind};
+        use crate::types::{StringId, TypeDescriptor, TypeId, TypeKind};
         let strings = vec!["Int".to_string(), "i64".to_string()];
         let mk = |name_idx: u32, id: u32| TypeDescriptor {
             id: TypeId(id),
@@ -9992,20 +10693,26 @@ mod tests {
             let id = codegen.alloc_user_type_id();
             assert!(
                 id.0 >= TypeId::FIRST_USER,
-                "allocated id {} below FIRST_USER ({})", id.0, TypeId::FIRST_USER,
+                "allocated id {} below FIRST_USER ({})",
+                id.0,
+                TypeId::FIRST_USER,
             );
             assert!(
                 !(256..260).contains(&id.0),
-                "allocated id {} inside meta-system range 256..260", id.0,
+                "allocated id {} inside meta-system range 256..260",
+                id.0,
             );
             assert!(
                 !(TypeId::FIRST_SEMANTIC..=TypeId::LAST_SEMANTIC).contains(&id.0),
                 "allocated id {} inside semantic-collection range {}..={}",
-                id.0, TypeId::FIRST_SEMANTIC, TypeId::LAST_SEMANTIC,
+                id.0,
+                TypeId::FIRST_SEMANTIC,
+                TypeId::LAST_SEMANTIC,
             );
             assert!(
                 seen.insert(id.0),
-                "duplicate id {} returned from alloc_user_type_id", id.0,
+                "duplicate id {} returned from alloc_user_type_id",
+                id.0,
             );
         }
         // After 1100 allocations starting from id 16, we should have
@@ -10022,8 +10729,7 @@ mod tests {
     #[test]
     fn test_global_type_table_detects_variant_tag_gap() {
         use crate::types::{
-            TypeDescriptor, TypeId, StringId, TypeKind,
-            VariantDescriptor, VariantKind,
+            StringId, TypeDescriptor, TypeId, TypeKind, VariantDescriptor, VariantKind,
         };
         use smallvec::smallvec;
         let strings = vec![

@@ -1,6 +1,8 @@
 #[allow(deprecated)]
 use verum_llvm_sys::core::LLVMGetElementAsConstant;
-use verum_llvm_sys::core::{LLVMConstExtractElement, LLVMConstInsertElement, LLVMConstShuffleVector};
+use verum_llvm_sys::core::{
+    LLVMConstExtractElement, LLVMConstInsertElement, LLVMConstShuffleVector,
+};
 use verum_llvm_sys::prelude::LLVMValueRef;
 
 use std::ffi::CStr;
@@ -87,11 +89,20 @@ impl<'ctx> ScalableVectorValue<'ctx> {
     }
 
     pub fn const_extract_element(self, index: IntValue<'ctx>) -> BasicValueEnum<'ctx> {
-        unsafe { BasicValueEnum::new(LLVMConstExtractElement(self.as_value_ref(), index.as_value_ref())) }
+        unsafe {
+            BasicValueEnum::new(LLVMConstExtractElement(
+                self.as_value_ref(),
+                index.as_value_ref(),
+            ))
+        }
     }
 
     // SubTypes: value should really be T in self: ScalableVectorValue<T> I think
-    pub fn const_insert_element<BV: BasicValue<'ctx>>(self, index: IntValue<'ctx>, value: BV) -> BasicValueEnum<'ctx> {
+    pub fn const_insert_element<BV: BasicValue<'ctx>>(
+        self,
+        index: IntValue<'ctx>,
+        value: BV,
+    ) -> BasicValueEnum<'ctx> {
         unsafe {
             BasicValueEnum::new(LLVMConstInsertElement(
                 self.as_value_ref(),
@@ -102,7 +113,8 @@ impl<'ctx> ScalableVectorValue<'ctx> {
     }
 
     pub fn replace_all_uses_with(self, other: ScalableVectorValue<'ctx>) {
-        self.scalable_vec_value.replace_all_uses_with(other.as_value_ref())
+        self.scalable_vec_value
+            .replace_all_uses_with(other.as_value_ref())
     }
 
     /// Returns the element at `index` as a constant. LLVM returns a zero-initialized

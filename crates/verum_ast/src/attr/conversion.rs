@@ -26,17 +26,17 @@ use crate::span::Span;
 use verum_common::{List, Maybe, Text};
 
 use super::typed::{
-    AccessPattern, AccessPatternAttr, AlignAttr, AliasAttr, AssumeAttr, BlackBoxAttr,
-    ColdAttr, ConstEvalAttr, ConstEvalMode, CpuDispatchAttr, DeadlockDetectionAttr,
-    DifferentiableAttr, EnsuresAttr, ExportAttr, FeatureAttr, GhostAttr, HotAttr,
-    InitPriorityAttr, InlineAttr, InlineMode, InvariantAttr, IvdepAttr, LikelihoodAttr,
-    LinkageAttr, LinkageKind, LinkNameAttr, LockLevelAttr, LtoAttr, LtoMode, MultiversionAttr,
-    LlvmOnlyAttr, MultiversionVariant, NakedAttr, NoAliasAttr, NoMangleAttr, NoReturnAttr, OptimizationLevel,
-    OptimizeAttr, OptimizeBarrierAttr, ParallelAttr, PerformanceContract, PgoAttr, PrefetchAccess,
-    PrefetchAttr, Profile, ProfileAttr, ReduceAttr, ReductionOp, Repr, ReprAttr, RequiresAttr,
-    SectionAttr, SpecializeAttr, StdAttr, SymbolVisibility, TaggedLiteralAttr, TargetCpuAttr,
-    TargetFeatureAttr, UnrollAttr, UnrollMode, UsedAttr, VectorizeAttr, VectorizeMode,
-    VerificationMode, VerifyAttr, VisibilityAttr, WeakAttr,
+    AccessPattern, AccessPatternAttr, AliasAttr, AlignAttr, AssumeAttr, BlackBoxAttr, ColdAttr,
+    ConstEvalAttr, ConstEvalMode, CpuDispatchAttr, DeadlockDetectionAttr, DifferentiableAttr,
+    EnsuresAttr, ExportAttr, FeatureAttr, GhostAttr, HotAttr, InitPriorityAttr, InlineAttr,
+    InlineMode, InvariantAttr, IvdepAttr, LikelihoodAttr, LinkNameAttr, LinkageAttr, LinkageKind,
+    LlvmOnlyAttr, LockLevelAttr, LtoAttr, LtoMode, MultiversionAttr, MultiversionVariant,
+    NakedAttr, NoAliasAttr, NoMangleAttr, NoReturnAttr, OptimizationLevel, OptimizeAttr,
+    OptimizeBarrierAttr, ParallelAttr, PerformanceContract, PgoAttr, PrefetchAccess, PrefetchAttr,
+    Profile, ProfileAttr, ReduceAttr, ReductionOp, Repr, ReprAttr, RequiresAttr, SectionAttr,
+    SpecializeAttr, StdAttr, SymbolVisibility, TaggedLiteralAttr, TargetCpuAttr, TargetFeatureAttr,
+    UnrollAttr, UnrollMode, UsedAttr, VectorizeAttr, VectorizeMode, VerificationMode, VerifyAttr,
+    VisibilityAttr, WeakAttr,
 };
 use super::{Attribute, AttributeConversionError, FromAttribute};
 
@@ -259,7 +259,11 @@ pub fn extract_float(expr: &Expr) -> Result<f64, AttributeConversionError> {
 pub fn extract_named_arg<'a>(args: &'a [Expr], name: &str) -> Option<&'a Expr> {
     for arg in args {
         // Check for NamedArg { name, value } (colon syntax: name: value)
-        if let ExprKind::NamedArg { name: arg_name, value } = &arg.kind {
+        if let ExprKind::NamedArg {
+            name: arg_name,
+            value,
+        } = &arg.kind
+        {
             if arg_name.as_str() == name {
                 return Some(value);
             }
@@ -1182,22 +1186,18 @@ impl FromAttribute for AssumeAttr {
         }
 
         match &attr.args {
-            Maybe::None => {
-                Err(AttributeConversionError::invalid_args(
-                    "@assume requires a condition expression",
-                    attr.span,
-                ))
-            }
+            Maybe::None => Err(AttributeConversionError::invalid_args(
+                "@assume requires a condition expression",
+                attr.span,
+            )),
             Maybe::Some(args) if args.len() == 1 => Ok(AssumeAttr::Condition {
                 condition: args[0].clone(),
                 span: attr.span,
             }),
-            Maybe::Some(_) => {
-                Err(AttributeConversionError::invalid_args(
-                    "@assume takes exactly one condition expression",
-                    attr.span,
-                ))
-            }
+            Maybe::Some(_) => Err(AttributeConversionError::invalid_args(
+                "@assume takes exactly one condition expression",
+                attr.span,
+            )),
         }
     }
 }
@@ -1725,9 +1725,7 @@ impl FromAttribute for SectionAttr {
                     attr.span,
                 ));
             }
-            Maybe::Some(args) if args.len() == 1 => {
-                extract_string(&args[0])?
-            }
+            Maybe::Some(args) if args.len() == 1 => extract_string(&args[0])?,
             Maybe::Some(_) => {
                 return Err(AttributeConversionError::invalid_args(
                     "@section takes exactly one string argument",
@@ -2861,11 +2859,7 @@ mod tests {
     use crate::literal::Literal;
 
     fn make_attr(name: &str, args: Option<Vec<Expr>>) -> Attribute {
-        Attribute::new(
-            Text::from(name),
-            args.map(|a| a.into()),
-            Span::default(),
-        )
+        Attribute::new(Text::from(name), args.map(|a| a.into()), Span::default())
     }
 
     fn ident_expr(name: &str) -> Expr {

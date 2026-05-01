@@ -454,7 +454,7 @@ fn test_default_method_ne_from_eq() {
                     context_requirements: List::new(),
                     type_param_names: List::new(),
                     type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+                    receiver_kind: Maybe::None,
                 },
             );
             methods.insert(
@@ -469,7 +469,7 @@ fn test_default_method_ne_from_eq() {
                     context_requirements: List::new(),
                     type_param_names: List::new(),
                     type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+                    receiver_kind: Maybe::None,
                 },
             );
             methods
@@ -545,7 +545,7 @@ fn test_explicit_method_overrides_default() {
                     context_requirements: List::new(),
                     type_param_names: List::new(),
                     type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+                    receiver_kind: Maybe::None,
                 },
             );
             methods.insert(
@@ -560,7 +560,7 @@ fn test_explicit_method_overrides_default() {
                     context_requirements: List::new(),
                     type_param_names: List::new(),
                     type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+                    receiver_kind: Maybe::None,
                 },
             );
             methods
@@ -640,7 +640,7 @@ fn test_missing_required_method_error() {
                     context_requirements: List::new(),
                     type_param_names: List::new(),
                     type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+                    receiver_kind: Maybe::None,
                 },
             );
             methods
@@ -1314,7 +1314,7 @@ fn test_error_message_method_not_found() {
                     context_requirements: List::new(),
                     type_param_names: List::new(),
                     type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+                    receiver_kind: Maybe::None,
                 },
             );
             methods

@@ -1,16 +1,17 @@
 use verum_llvm_sys::core::LLVMGlobalSetMetadata;
 
 use verum_llvm_sys::core::{
-    LLVMDeleteGlobal, LLVMGetAlignment, LLVMGetDLLStorageClass, LLVMGetInitializer, LLVMGetLinkage, LLVMGetNextGlobal,
-    LLVMGetPreviousGlobal, LLVMGetThreadLocalMode, LLVMGetVisibility, LLVMIsDeclaration, LLVMIsExternallyInitialized,
-    LLVMIsGlobalConstant, LLVMIsThreadLocal, LLVMSetAlignment, LLVMSetDLLStorageClass, LLVMSetExternallyInitialized,
-    LLVMSetGlobalConstant, LLVMSetInitializer, LLVMSetLinkage, LLVMSetThreadLocal, LLVMSetThreadLocalMode,
+    LLVMDeleteGlobal, LLVMGetAlignment, LLVMGetDLLStorageClass, LLVMGetInitializer, LLVMGetLinkage,
+    LLVMGetNextGlobal, LLVMGetPreviousGlobal, LLVMGetThreadLocalMode, LLVMGetVisibility,
+    LLVMIsDeclaration, LLVMIsExternallyInitialized, LLVMIsGlobalConstant, LLVMIsThreadLocal,
+    LLVMSetAlignment, LLVMSetDLLStorageClass, LLVMSetExternallyInitialized, LLVMSetGlobalConstant,
+    LLVMSetInitializer, LLVMSetLinkage, LLVMSetThreadLocal, LLVMSetThreadLocalMode,
     LLVMSetVisibility,
 };
 
+use verum_llvm_sys::LLVMThreadLocalMode;
 use verum_llvm_sys::core::{LLVMGetUnnamedAddress, LLVMSetUnnamedAddress};
 use verum_llvm_sys::prelude::LLVMValueRef;
-use verum_llvm_sys::LLVMThreadLocalMode;
 
 use verum_llvm_sys::LLVMUnnamedAddr;
 
@@ -164,7 +165,9 @@ impl<'ctx> GlobalValue<'ctx> {
     }
 
     pub fn has_unnamed_addr(self) -> bool {
-        unsafe { LLVMGetUnnamedAddress(self.as_value_ref()) == LLVMUnnamedAddr::LLVMGlobalUnnamedAddr }
+        unsafe {
+            LLVMGetUnnamedAddress(self.as_value_ref()) == LLVMUnnamedAddr::LLVMGlobalUnnamedAddr
+        }
     }
 
     pub fn set_unnamed_addr(self, has_unnamed_addr: bool) {
@@ -277,7 +280,11 @@ impl<'ctx> GlobalValue<'ctx> {
     }
 
     pub fn get_value_type(self) -> AnyTypeEnum<'ctx> {
-        unsafe { AnyTypeEnum::new(verum_llvm_sys::core::LLVMGlobalGetValueType(self.as_value_ref())) }
+        unsafe {
+            AnyTypeEnum::new(verum_llvm_sys::core::LLVMGlobalGetValueType(
+                self.as_value_ref(),
+            ))
+        }
     }
 }
 

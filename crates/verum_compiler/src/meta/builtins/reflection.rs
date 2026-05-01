@@ -110,11 +110,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("type_id"),
-        BuiltinInfo::meta_types(
-            meta_type_id,
-            "Get unique type identifier",
-            "(Type) -> UInt",
-        ),
+        BuiltinInfo::meta_types(meta_type_id, "Get unique type identifier", "(Type) -> UInt"),
     );
     map.insert(
         Text::from("type_of"),
@@ -184,11 +180,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("is_tuple"),
-        BuiltinInfo::meta_types(
-            meta_is_tuple,
-            "Check if type is a tuple",
-            "(Type) -> Bool",
-        ),
+        BuiltinInfo::meta_types(meta_is_tuple, "Check if type is a tuple", "(Type) -> Bool"),
     );
     map.insert(
         Text::from("kind_of"),
@@ -237,11 +229,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("is_sized"),
-        BuiltinInfo::meta_types(
-            meta_is_sized,
-            "Check if type is Sized",
-            "(Type) -> Bool",
-        ),
+        BuiltinInfo::meta_types(meta_is_sized, "Check if type is Sized", "(Type) -> Bool"),
     );
     map.insert(
         Text::from("needs_drop"),
@@ -485,14 +473,20 @@ fn meta_type_name(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Cons
     if args.len() > 1 {
         let all_types = args.iter().all(|a| matches!(a, ConstValue::Type(_)));
         if all_types {
-            let names: Vec<String> = args.iter().map(|a| {
-                if let ConstValue::Type(ty) = a {
-                    compute_type_name(&ty.kind).to_string()
-                } else {
-                    "unknown".to_string()
-                }
-            }).collect();
-            return Ok(ConstValue::Text(Text::from(format!("({})", names.join(", ")))));
+            let names: Vec<String> = args
+                .iter()
+                .map(|a| {
+                    if let ConstValue::Type(ty) = a {
+                        compute_type_name(&ty.kind).to_string()
+                    } else {
+                        "unknown".to_string()
+                    }
+                })
+                .collect();
+            return Ok(ConstValue::Text(Text::from(format!(
+                "({})",
+                names.join(", ")
+            ))));
         }
         return Err(MetaError::ArityMismatch {
             expected: 1,
@@ -507,14 +501,20 @@ fn meta_type_name(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Cons
         }
         // Handle tuple of types: type_name((Int, Text)) when parsed as tuple ConstValue
         ConstValue::Tuple(elements) => {
-            let names: Vec<String> = elements.iter().map(|e| {
-                if let ConstValue::Type(ty) = e {
-                    compute_type_name(&ty.kind).to_string()
-                } else {
-                    "unknown".to_string()
-                }
-            }).collect();
-            Ok(ConstValue::Text(Text::from(format!("({})", names.join(", ")))))
+            let names: Vec<String> = elements
+                .iter()
+                .map(|e| {
+                    if let ConstValue::Type(ty) = e {
+                        compute_type_name(&ty.kind).to_string()
+                    } else {
+                        "unknown".to_string()
+                    }
+                })
+                .collect();
+            Ok(ConstValue::Text(Text::from(format!(
+                "({})",
+                names.join(", ")
+            ))))
         }
         // Handle Expr that might represent a type
         ConstValue::Expr(expr) => {
@@ -810,20 +810,27 @@ fn meta_kind_of(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstVa
                 TypeKind::Never => MetaTypeKind::Never,
                 TypeKind::Unit => MetaTypeKind::Unit,
                 TypeKind::Unknown => MetaTypeKind::Infer,
-                TypeKind::Bool | TypeKind::Char | TypeKind::Int | TypeKind::Float | TypeKind::Text => {
-                    MetaTypeKind::Primitive
-                }
+                TypeKind::Bool
+                | TypeKind::Char
+                | TypeKind::Int
+                | TypeKind::Float
+                | TypeKind::Text => MetaTypeKind::Primitive,
                 TypeKind::Path(path) => {
                     // Look up in type definitions
                     if let Some(first) = path.segments.first() {
-                        let type_name = segment_name(first).unwrap_or_else(|| Text::from("unknown"));
+                        let type_name =
+                            segment_name(first).unwrap_or_else(|| Text::from("unknown"));
                         if let Some(def) = ctx.get_type_definition(&type_name) {
                             match def {
                                 crate::meta::TypeDefinition::Struct { .. } => MetaTypeKind::Struct,
                                 crate::meta::TypeDefinition::Enum { .. } => MetaTypeKind::Enum,
-                                crate::meta::TypeDefinition::Protocol { .. } => MetaTypeKind::Protocol,
+                                crate::meta::TypeDefinition::Protocol { .. } => {
+                                    MetaTypeKind::Protocol
+                                }
                                 crate::meta::TypeDefinition::Alias { .. } => MetaTypeKind::Alias,
-                                crate::meta::TypeDefinition::Newtype { .. } => MetaTypeKind::Newtype,
+                                crate::meta::TypeDefinition::Newtype { .. } => {
+                                    MetaTypeKind::Newtype
+                                }
                             }
                         } else {
                             MetaTypeKind::Unknown
@@ -848,10 +855,7 @@ fn meta_kind_of(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstVa
 // ============================================================================
 
 /// Check if type implements a protocol
-fn meta_implements(
-    ctx: &mut MetaContext,
-    args: List<ConstValue>,
-) -> Result<ConstValue, MetaError> {
+fn meta_implements(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 2 {
         return Err(MetaError::ArityMismatch {
             expected: 2,
@@ -956,7 +960,10 @@ fn meta_is_sized(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Const
 }
 
 /// Check if type needs drop
-fn meta_needs_drop(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_needs_drop(
+    _ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
         return Err(MetaError::ArityMismatch {
             expected: 1,
@@ -1063,7 +1070,10 @@ fn meta_generics_of(
     match &args[0] {
         ConstValue::Type(ty) => {
             // Handle Generic types (e.g., List<T>, Option<T>)
-            if let TypeKind::Generic { args: type_args, .. } = &ty.kind {
+            if let TypeKind::Generic {
+                args: type_args, ..
+            } = &ty.kind
+            {
                 let generics: Vec<ConstValue> = type_args
                     .iter()
                     .filter_map(|arg| {
@@ -1124,40 +1134,38 @@ fn meta_inner_type_of(
     }
 
     match &args[0] {
-        ConstValue::Type(ty) => {
-            match &ty.kind {
-                TypeKind::Reference { inner, .. }
-                | TypeKind::CheckedReference { inner, .. }
-                | TypeKind::UnsafeReference { inner, .. } => {
-                    let inner_ty = verum_ast::ty::Type {
-                        kind: inner.kind.clone(),
-                        span: verum_ast::Span::dummy(),
-                    };
-                    Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
-                        inner_ty,
-                    )))))
-                }
-                TypeKind::Pointer { inner, .. } => {
-                    let inner_ty = verum_ast::ty::Type {
-                        kind: inner.kind.clone(),
-                        span: verum_ast::Span::dummy(),
-                    };
-                    Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
-                        inner_ty,
-                    )))))
-                }
-                TypeKind::Array { element, .. } | TypeKind::Slice(element) => {
-                    let inner_ty = verum_ast::ty::Type {
-                        kind: element.kind.clone(),
-                        span: verum_ast::Span::dummy(),
-                    };
-                    Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
-                        inner_ty,
-                    )))))
-                }
-                _ => Ok(ConstValue::Maybe(Maybe::None)),
+        ConstValue::Type(ty) => match &ty.kind {
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. } => {
+                let inner_ty = verum_ast::ty::Type {
+                    kind: inner.kind.clone(),
+                    span: verum_ast::Span::dummy(),
+                };
+                Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
+                    inner_ty,
+                )))))
             }
-        }
+            TypeKind::Pointer { inner, .. } => {
+                let inner_ty = verum_ast::ty::Type {
+                    kind: inner.kind.clone(),
+                    span: verum_ast::Span::dummy(),
+                };
+                Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
+                    inner_ty,
+                )))))
+            }
+            TypeKind::Array { element, .. } | TypeKind::Slice(element) => {
+                let inner_ty = verum_ast::ty::Type {
+                    kind: element.kind.clone(),
+                    span: verum_ast::Span::dummy(),
+                };
+                Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
+                    inner_ty,
+                )))))
+            }
+            _ => Ok(ConstValue::Maybe(Maybe::None)),
+        },
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Type"),
             found: args[0].type_name(),
@@ -1178,26 +1186,24 @@ fn meta_element_type_of(
     }
 
     match &args[0] {
-        ConstValue::Type(ty) => {
-            match &ty.kind {
-                TypeKind::Array { element, .. } | TypeKind::Slice(element) => {
-                    let elem_ty = verum_ast::ty::Type {
-                        kind: element.kind.clone(),
-                        span: verum_ast::Span::dummy(),
-                    };
-                    Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
-                        elem_ty,
-                    )))))
-                }
-                TypeKind::Tuple(elements) if !elements.is_empty() => {
-                    let first_ty = elements[0].clone();
-                    Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
-                        first_ty,
-                    )))))
-                }
-                _ => Ok(ConstValue::Maybe(Maybe::None)),
+        ConstValue::Type(ty) => match &ty.kind {
+            TypeKind::Array { element, .. } | TypeKind::Slice(element) => {
+                let elem_ty = verum_ast::ty::Type {
+                    kind: element.kind.clone(),
+                    span: verum_ast::Span::dummy(),
+                };
+                Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
+                    elem_ty,
+                )))))
             }
-        }
+            TypeKind::Tuple(elements) if !elements.is_empty() => {
+                let first_ty = elements[0].clone();
+                Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
+                    first_ty,
+                )))))
+            }
+            _ => Ok(ConstValue::Maybe(Maybe::None)),
+        },
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Type"),
             found: args[0].type_name(),
@@ -1558,12 +1564,21 @@ fn meta_key_value_types_of(
     match &args[0] {
         ConstValue::Type(ty) => {
             // Check if it's a Generic type like Map<K, V>
-            if let TypeKind::Generic { base, args: type_args } = &ty.kind {
+            if let TypeKind::Generic {
+                base,
+                args: type_args,
+            } = &ty.kind
+            {
                 // Check if base is a Map type
                 if let TypeKind::Path(path) = &base.kind {
                     if let Some(first) = path.segments.first() {
                         if let Some(name) = segment_name_str(first) {
-                            if matches!(name, verum_common::well_known_types::type_names::MAP | "HashMap" | "BTreeMap") {
+                            if matches!(
+                                name,
+                                verum_common::well_known_types::type_names::MAP
+                                    | "HashMap"
+                                    | "BTreeMap"
+                            ) {
                                 // Extract key and value types from generic args
                                 let types: Vec<verum_ast::ty::Type> = type_args
                                     .iter()

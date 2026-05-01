@@ -360,10 +360,14 @@ mod tests {
     fn projection_well_formed_check() {
         assert!(PrimitiveRecursive::Proj { i: 1, k: 1 }.is_well_formed());
         assert!(PrimitiveRecursive::Proj { i: 3, k: 3 }.is_well_formed());
-        assert!(!PrimitiveRecursive::Proj { i: 0, k: 1 }.is_well_formed(),
-            "0-based projection is invalid");
-        assert!(!PrimitiveRecursive::Proj { i: 4, k: 3 }.is_well_formed(),
-            "Out-of-bounds projection is invalid");
+        assert!(
+            !PrimitiveRecursive::Proj { i: 0, k: 1 }.is_well_formed(),
+            "0-based projection is invalid"
+        );
+        assert!(
+            !PrimitiveRecursive::Proj { i: 4, k: 3 }.is_well_formed(),
+            "Out-of-bounds projection is invalid"
+        );
     }
 
     #[test]
@@ -463,9 +467,16 @@ mod tests {
             for b in 0..20 {
                 let z = cantor_pair(a, b);
                 let (a2, b2) = cantor_unpair(z);
-                assert_eq!((a, b), (a2, b2),
+                assert_eq!(
+                    (a, b),
+                    (a2, b2),
                     "Cantor pair round-trip failure: ({}, {}) → {} → ({}, {})",
-                    a, b, z, a2, b2);
+                    a,
+                    b,
+                    z,
+                    a2,
+                    b2
+                );
             }
         }
     }
@@ -476,8 +487,13 @@ mod tests {
         for a in 0..30 {
             for b in 0..30 {
                 let z = cantor_pair(a, b);
-                assert!(seen.insert(z),
-                    "Cantor pair collision: ({}, {}) → {} already seen", a, b, z);
+                assert!(
+                    seen.insert(z),
+                    "Cantor pair collision: ({}, {}) → {} already seen",
+                    a,
+                    b,
+                    z
+                );
             }
         }
     }
@@ -486,16 +502,14 @@ mod tests {
 
     #[test]
     fn encode_decode_list_roundtrip() {
-        for input in [
-            vec![1u64],
-            vec![1, 2, 3],
-            vec![5, 0, 7, 0],
-            vec![],
-        ] {
+        for input in [vec![1u64], vec![1, 2, 3], vec![5, 0, 7, 0], vec![]] {
             let z = encode_list(&input);
             let out = decode_list(z, input.len());
-            assert_eq!(out, input,
-                "List round-trip failure: {:?} → {} → {:?}", input, z, out);
+            assert_eq!(
+                out, input,
+                "List round-trip failure: {:?} → {} → {:?}",
+                input, z, out
+            );
         }
     }
 

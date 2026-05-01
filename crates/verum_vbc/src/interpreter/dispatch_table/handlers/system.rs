@@ -7,20 +7,22 @@
 //! GradBegin (0xEB), GradEnd (0xEC), GradCheckpoint (0xED),
 //! GradAccumulate (0xEE), GradStop (0xEF)
 
-use crate::types::TypeId;
-use crate::value::Value;
+use super::super::super::autodiff::GradMode as AutodiffGradMode;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
-use super::super::super::autodiff::GradMode as AutodiffGradMode;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::types::TypeId;
+use crate::value::Value;
 
 // ============================================================================
 // Syscall (0xE0)
 // ============================================================================
 
 /// SyscallLinux (0xE0) - Raw syscall with up to 6 arguments.
-pub(in super::super) fn handle_syscall(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_syscall(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let num_reg = read_reg(state)?;
     let a1_reg = read_reg(state)?;
@@ -40,18 +42,14 @@ pub(in super::super) fn handle_syscall(state: &mut InterpreterState) -> Interpre
 
     #[cfg(target_os = "linux")]
     {
-        let result = unsafe {
-            libc::syscall(num, a1, a2, a3, a4, a5, a6)
-        };
+        let result = unsafe { libc::syscall(num, a1, a2, a3, a4, a5, a6) };
         state.set_reg(dst, Value::from_i64(result as i64));
         Ok(DispatchResult::Continue)
     }
 
     #[cfg(target_os = "macos")]
     {
-        let result = unsafe {
-            libc::syscall(num as i32, a1, a2, a3, a4, a5, a6)
-        };
+        let result = unsafe { libc::syscall(num as i32, a1, a2, a3, a4, a5, a6) };
         state.set_reg(dst, Value::from_i64(result as i64));
         Ok(DispatchResult::Continue)
     }
@@ -71,7 +69,9 @@ pub(in super::super) fn handle_syscall(state: &mut InterpreterState) -> Interpre
 // ============================================================================
 
 /// AtomicLoad (0xE3)
-pub(in super::super) fn handle_atomic_load(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_atomic_load(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let ptr_reg = read_reg(state)?;
     let ordering = read_u8(state)?;
@@ -172,7 +172,9 @@ fn i64_to_nan_box_payload(v: i64) -> u64 {
 }
 
 /// AtomicStore (0xE4)
-pub(in super::super) fn handle_atomic_store(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_atomic_store(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let ptr_reg = read_reg(state)?;
     let val_reg = read_reg(state)?;
     let ordering = read_u8(state)?;
@@ -238,7 +240,9 @@ pub(in super::super) fn handle_atomic_store(state: &mut InterpreterState) -> Int
 }
 
 /// AtomicCas (0xE5)
-pub(in super::super) fn handle_atomic_cas(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_atomic_cas(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let ptr_reg = read_reg(state)?;
     let expected_reg = read_reg(state)?;
@@ -280,21 +284,36 @@ pub(in super::super) fn handle_atomic_cas(state: &mut InterpreterState) -> Inter
         match size {
             1 => {
                 let atomic = &*(ptr as *const std::sync::atomic::AtomicU8);
-                match atomic.compare_exchange(expected as u8, desired as u8, success_ord, failure_ord) {
+                match atomic.compare_exchange(
+                    expected as u8,
+                    desired as u8,
+                    success_ord,
+                    failure_ord,
+                ) {
                     Ok(old) => (old as i64, true),
                     Err(old) => (old as i64, false),
                 }
             }
             2 => {
                 let atomic = &*(ptr as *const std::sync::atomic::AtomicU16);
-                match atomic.compare_exchange(expected as u16, desired as u16, success_ord, failure_ord) {
+                match atomic.compare_exchange(
+                    expected as u16,
+                    desired as u16,
+                    success_ord,
+                    failure_ord,
+                ) {
                     Ok(old) => (old as i64, true),
                     Err(old) => (old as i64, false),
                 }
             }
             4 => {
                 let atomic = &*(ptr as *const std::sync::atomic::AtomicU32);
-                match atomic.compare_exchange(expected as u32, desired as u32, success_ord, failure_ord) {
+                match atomic.compare_exchange(
+                    expected as u32,
+                    desired as u32,
+                    success_ord,
+                    failure_ord,
+                ) {
                     Ok(old) => (old as i64, true),
                     Err(old) => (old as i64, false),
                 }
@@ -308,7 +327,12 @@ pub(in super::super) fn handle_atomic_cas(state: &mut InterpreterState) -> Inter
                 let atomic = &*(ptr as *const std::sync::atomic::AtomicU64);
                 let expected_boxed = i64_to_nan_box_payload(expected);
                 let desired_boxed = i64_to_nan_box_payload(desired);
-                match atomic.compare_exchange(expected_boxed, desired_boxed, success_ord, failure_ord) {
+                match atomic.compare_exchange(
+                    expected_boxed,
+                    desired_boxed,
+                    success_ord,
+                    failure_ord,
+                ) {
                     Ok(old) => (nan_box_payload_to_i64(old), true),
                     Err(old) => (nan_box_payload_to_i64(old), false),
                 }
@@ -331,11 +355,9 @@ pub(in super::super) fn handle_atomic_cas(state: &mut InterpreterState) -> Inter
     // validating task #39's NaN-box CAS fix: the underlying CAS
     // succeeded but the result tuple destructure read garbage.
     let data_size = 2 * std::mem::size_of::<Value>();
-    let obj = state.heap.alloc_with_init(
-        TypeId::TUPLE,
-        data_size,
-        |_| {},
-    )?;
+    let obj = state
+        .heap
+        .alloc_with_init(TypeId::TUPLE, data_size, |_| {})?;
     let data_ptr = obj.data_ptr();
     unsafe {
         let slot_ptr = data_ptr as *mut Value;
@@ -347,7 +369,9 @@ pub(in super::super) fn handle_atomic_cas(state: &mut InterpreterState) -> Inter
 }
 
 /// AtomicFence (0xE6)
-pub(in super::super) fn handle_atomic_fence(_state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_atomic_fence(
+    _state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
     Ok(DispatchResult::Continue)
 }
@@ -357,7 +381,9 @@ pub(in super::super) fn handle_atomic_fence(_state: &mut InterpreterState) -> In
 // ============================================================================
 
 /// TlsGet (0xE9) - Get thread-local storage value
-pub(in super::super) fn handle_tls_get(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tls_get(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let slot_reg = read_reg(state)?;
 
@@ -369,7 +395,9 @@ pub(in super::super) fn handle_tls_get(state: &mut InterpreterState) -> Interpre
 }
 
 /// TlsSet (0xEA) - Set thread-local storage value
-pub(in super::super) fn handle_tls_set(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tls_set(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let slot_reg = read_reg(state)?;
     let val_reg = read_reg(state)?;
 
@@ -386,7 +414,9 @@ pub(in super::super) fn handle_tls_set(state: &mut InterpreterState) -> Interpre
 // ============================================================================
 
 /// GradBegin (0xEB) - Begin a gradient computation scope
-pub(in super::super) fn handle_grad_begin(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_grad_begin(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let _scope_id = read_u32(state)?;
     let mode_byte = read_u8(state)?;
     let num_wrt = read_u8(state)? as usize;
@@ -408,7 +438,9 @@ pub(in super::super) fn handle_grad_begin(state: &mut InterpreterState) -> Inter
 }
 
 /// GradEnd (0xEC) - End gradient scope and compute gradients
-pub(in super::super) fn handle_grad_end(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_grad_end(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let _scope_id = read_u32(state)?;
     let _output_reg = read_reg(state)?;
     let _grad_out_reg = read_reg(state)?;
@@ -459,7 +491,9 @@ pub(in super::super) fn handle_grad_end(state: &mut InterpreterState) -> Interpr
 }
 
 /// GradCheckpoint (0xED) - Create a gradient checkpoint
-pub(in super::super) fn handle_grad_checkpoint(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_grad_checkpoint(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let _checkpoint_id = read_u32(state)?;
     let num_tensors = read_u8(state)? as usize;
 
@@ -473,7 +507,9 @@ pub(in super::super) fn handle_grad_checkpoint(state: &mut InterpreterState) -> 
 }
 
 /// GradAccumulate (0xEE) - Accumulate gradients
-pub(in super::super) fn handle_grad_accumulate(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_grad_accumulate(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
 
@@ -494,7 +530,9 @@ pub(in super::super) fn handle_grad_accumulate(state: &mut InterpreterState) -> 
 }
 
 /// GradStop (0xEF) - Stop gradient flow (detach tensor)
-pub(in super::super) fn handle_grad_stop(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_grad_stop(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
 
@@ -510,7 +548,9 @@ pub(in super::super) fn handle_grad_stop(state: &mut InterpreterState) -> Interp
 
 /// Mmap (0xE1) - Memory map a region.
 #[cfg(target_os = "linux")]
-pub(in super::super) fn handle_mmap(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_mmap(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let _addr = read_varint(state)?;
     let _len = read_varint(state)?;
@@ -523,7 +563,9 @@ pub(in super::super) fn handle_mmap(state: &mut InterpreterState) -> Interpreter
 }
 
 #[cfg(not(target_os = "linux"))]
-pub(in super::super) fn handle_mmap(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_mmap(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let _ = read_varint(state)?;
     let _ = read_varint(state)?;
@@ -537,7 +579,9 @@ pub(in super::super) fn handle_mmap(state: &mut InterpreterState) -> Interpreter
 
 /// Munmap (0xE2) - Unmap a memory region.
 #[cfg(target_os = "linux")]
-pub(in super::super) fn handle_munmap(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_munmap(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let _addr = read_varint(state)?;
     let _len = read_varint(state)?;
@@ -546,7 +590,9 @@ pub(in super::super) fn handle_munmap(state: &mut InterpreterState) -> Interpret
 }
 
 #[cfg(not(target_os = "linux"))]
-pub(in super::super) fn handle_munmap(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_munmap(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let _ = read_varint(state)?;
     let _ = read_varint(state)?;
@@ -559,7 +605,9 @@ pub(in super::super) fn handle_munmap(state: &mut InterpreterState) -> Interpret
 // ============================================================================
 
 /// IoSubmit (0xE7) - Submit I/O operation to IOEngine.
-pub(in super::super) fn handle_io_submit(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_io_submit(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let _ops_reg = read_reg(state)?;
     state.set_reg(dst, Value::from_i64(0));
@@ -567,10 +615,14 @@ pub(in super::super) fn handle_io_submit(state: &mut InterpreterState) -> Interp
 }
 
 /// IoPoll (0xE8) - Poll IOEngine for completions.
-pub(in super::super) fn handle_io_poll(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_io_poll(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let _timeout_reg = read_reg(state)?;
-    let list_obj = state.heap.alloc(TypeId::UNIT, 2 * std::mem::size_of::<Value>())?;
+    let list_obj = state
+        .heap
+        .alloc(TypeId::UNIT, 2 * std::mem::size_of::<Value>())?;
     state.record_allocation();
     unsafe {
         let base = list_obj.as_ptr() as *mut Value;

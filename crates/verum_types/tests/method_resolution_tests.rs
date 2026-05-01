@@ -80,7 +80,7 @@ fn test_simple_method_call_eq() {
                     context_requirements: List::new(),
                     type_param_names: List::new(),
                     type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+                    receiver_kind: Maybe::None,
                 },
             );
             methods
@@ -142,7 +142,8 @@ fn test_record_field_function_call() {
     ];
 
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("compute"),
             args: args.into(),
@@ -174,7 +175,8 @@ fn test_method_not_found() {
     let receiver = Expr::new(ExprKind::Path(path("x")), span);
 
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("nonexistent"),
             args: vec![].into(),
@@ -222,7 +224,8 @@ fn test_wrong_arg_count() {
     let args = vec![Expr::literal(Literal::int(1, span))];
 
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("add"),
             args: args.into(),
@@ -280,7 +283,8 @@ fn test_method_call_correct_args() {
     ];
 
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("multiply"),
             args: args.into(),
@@ -330,7 +334,8 @@ fn test_method_return_type() {
         let args = vec![Expr::literal(Literal::int(5, span))];
 
         let method_call = Expr::new(
-            ExprKind::MethodCall { type_args: vec![].into(),
+            ExprKind::MethodCall {
+                type_args: vec![].into(),
                 receiver: Box::new(receiver),
                 method: ident("is_positive"),
                 args: args.into(),
@@ -348,7 +353,8 @@ fn test_method_return_type() {
         let args = vec![Expr::literal(Literal::int(42, span))];
 
         let method_call = Expr::new(
-            ExprKind::MethodCall { type_args: vec![].into(),
+            ExprKind::MethodCall {
+                type_args: vec![].into(),
                 receiver: Box::new(receiver),
                 method: ident("to_string"),
                 args: args.into(),
@@ -405,7 +411,8 @@ fn test_chained_method_calls() {
     // Then: .double(5)
     let args = vec![Expr::literal(Literal::int(5, span))];
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(math_field),
             method: ident("double"),
             args: args.into(),
@@ -453,7 +460,8 @@ fn test_method_with_generic_return() {
     ];
 
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("pair"),
             args: args.into(),
@@ -495,7 +503,8 @@ fn test_argument_type_mismatch() {
     let args = vec![Expr::literal(Literal::bool(true, span))];
 
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("process"),
             args: args.into(),
@@ -538,7 +547,8 @@ fn test_method_on_non_record() {
     let receiver = Expr::new(ExprKind::Path(path("n")), span);
 
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("some_method"),
             args: vec![].into(),
@@ -584,7 +594,8 @@ fn test_zero_argument_method() {
     let receiver = Expr::new(ExprKind::Path(path("getter")), span);
 
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("get_value"),
             args: vec![].into(),
@@ -630,7 +641,8 @@ fn test_method_multiple_param_types() {
     ];
 
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("complex"),
             args: args.into(),
@@ -671,7 +683,8 @@ fn test_method_returning_function() {
     let receiver = Expr::new(ExprKind::Path(path("factory")), span);
 
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("get_adder"),
             args: vec![].into(),
@@ -736,7 +749,8 @@ fn test_nested_record_method() {
 
     let args = vec![Expr::literal(Literal::int(10, span))];
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(inner_field),
             method: ident("execute"),
             args: args.into(),
@@ -776,7 +790,8 @@ fn test_method_call_metrics() {
     // Build: obj.test()
     let receiver = Expr::new(ExprKind::Path(path("obj")), span);
     let method_call = Expr::new(
-        ExprKind::MethodCall { type_args: vec![].into(),
+        ExprKind::MethodCall {
+            type_args: vec![].into(),
             receiver: Box::new(receiver),
             method: ident("test"),
             args: vec![].into(),

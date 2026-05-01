@@ -8,9 +8,9 @@
 use std::collections::HashMap;
 
 use verum_common::Text;
+use verum_vbc::interpreter::InterpreterState;
 use verum_vbc::module::FunctionId;
 use verum_vbc::value::Value;
-use verum_vbc::interpreter::InterpreterState;
 
 use super::pipeline::CompiledCell;
 use crate::CellId;
@@ -271,7 +271,9 @@ impl ExecutionContext {
     pub fn inject_contexts(&self, state: &mut InterpreterState) {
         for context in &self.active_contexts {
             let depth = state.call_stack.depth();
-            state.context_stack.provide(context.type_id, context.value, depth);
+            state
+                .context_stack
+                .provide(context.type_id, context.value, depth);
         }
     }
 

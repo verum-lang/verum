@@ -122,9 +122,7 @@ impl KernelRecheckPass {
             }
             IK::Impl(impl_decl) => {
                 for impl_item in impl_decl.items.iter() {
-                    if let verum_ast::decl::ImplItemKind::Function(func) =
-                        &impl_item.kind
-                    {
+                    if let verum_ast::decl::ImplItemKind::Function(func) = &impl_item.kind {
                         self.recheck_one_function(func, level, costs);
                     }
                 }

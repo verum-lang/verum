@@ -84,10 +84,7 @@ use crate::tactics::{TacticCombinator, TacticKind};
 /// `user_tactic::compile_tactic` for `Quote` / `Unquote` /
 /// `GoalIntro`.
 pub fn skip() -> TacticCombinator {
-    TacticCombinator::Repeat(
-        Box::new(TacticCombinator::Single(TacticKind::Simplify)),
-        0,
-    )
+    TacticCombinator::Repeat(Box::new(TacticCombinator::Single(TacticKind::Simplify)), 0)
 }
 
 /// The identity element for OrElse: a maximally-failing tactic.
@@ -422,11 +419,7 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
             // simplifier-internal optimisation that the catalogue
             // does not expose because it's a degenerate case of
             // OrElse rather than a primitive algebraic law.
-            if let (
-                TacticCombinator::Single(a),
-                TacticCombinator::Single(b),
-            ) = (&l, &r)
-            {
+            if let (TacticCombinator::Single(a), TacticCombinator::Single(b)) = (&l, &r) {
                 if a == b {
                     return TacticCombinator::Single(a.clone());
                 }
@@ -513,10 +506,7 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
                         tail
                     });
                     acc = normalize_once(acc); // recursively reduce tail
-                    normalize_once(TacticCombinator::OrElse(
-                        Box::new(first),
-                        Box::new(acc),
-                    ))
+                    normalize_once(TacticCombinator::OrElse(Box::new(first), Box::new(acc)))
                 }
             }
         }
@@ -704,18 +694,12 @@ mod tests {
         // equal as Rust Debug strings (the same canonicalisation
         // AndThen has shipped since V0).
         let left_assoc = TacticCombinator::OrElse(
-            Box::new(TacticCombinator::OrElse(
-                Box::new(simp()),
-                Box::new(smt()),
-            )),
+            Box::new(TacticCombinator::OrElse(Box::new(simp()), Box::new(smt()))),
             Box::new(lia()),
         );
         let right_assoc = TacticCombinator::OrElse(
             Box::new(simp()),
-            Box::new(TacticCombinator::OrElse(
-                Box::new(smt()),
-                Box::new(lia()),
-            )),
+            Box::new(TacticCombinator::OrElse(Box::new(smt()), Box::new(lia()))),
         );
         let n_left = format!("{:?}", normalize(left_assoc));
         let n_right = format!("{:?}", normalize(right_assoc));
@@ -738,10 +722,7 @@ mod tests {
         // `try { t } ↪ t || skip`
         let t = TacticCombinator::Try(Box::new(smt()));
         let n = normalize(t);
-        let want = normalize(TacticCombinator::OrElse(
-            Box::new(smt()),
-            Box::new(skip()),
-        ));
+        let want = normalize(TacticCombinator::OrElse(Box::new(smt()), Box::new(skip())));
         assert_eq!(format!("{:?}", n), format!("{:?}", want));
     }
 
@@ -783,10 +764,7 @@ mod tests {
         branches.push(simp());
         branches.push(smt());
         let n = normalize(TacticCombinator::FirstOf(branches));
-        let want = normalize(TacticCombinator::OrElse(
-            Box::new(simp()),
-            Box::new(smt()),
-        ));
+        let want = normalize(TacticCombinator::OrElse(Box::new(simp()), Box::new(smt())));
         assert_eq!(format!("{:?}", n), format!("{:?}", want));
     }
 
@@ -800,10 +778,7 @@ mod tests {
         let n = normalize(TacticCombinator::FirstOf(branches));
         let want = normalize(TacticCombinator::OrElse(
             Box::new(simp()),
-            Box::new(TacticCombinator::OrElse(
-                Box::new(smt()),
-                Box::new(lia()),
-            )),
+            Box::new(TacticCombinator::OrElse(Box::new(smt()), Box::new(lia()))),
         ));
         assert_eq!(format!("{:?}", n), format!("{:?}", want));
     }
@@ -935,10 +910,7 @@ mod tests {
         // Applying normalize twice yields the same tree.
         let t = TacticCombinator::AndThen(
             Box::new(skip()),
-            Box::new(TacticCombinator::OrElse(
-                Box::new(fail()),
-                Box::new(simp()),
-            )),
+            Box::new(TacticCombinator::OrElse(Box::new(fail()), Box::new(simp()))),
         );
         let once = normalize(t.clone());
         let twice = normalize(once.clone());

@@ -61,7 +61,8 @@ fn test_item_construction() {
     let mount_item = Item::new(
         ItemKind::Mount(MountDecl {
             visibility: Visibility::Private,
-            tree: MountTree { alias: Maybe::None,
+            tree: MountTree {
+                alias: Maybe::None,
                 kind: MountTreeKind::Path(Path::single(test_ident("std"))),
                 span,
             },
@@ -568,7 +569,10 @@ fn test_protocol_with_supertraits() {
         is_context: false,
         name: test_ident("Eq"),
         generics: List::new(),
-        bounds: List::from(vec![Type::new(TypeKind::Path(Path::single(test_ident("PartialEq"))), test_span())]),
+        bounds: List::from(vec![Type::new(
+            TypeKind::Path(Path::single(test_ident("PartialEq"))),
+            test_span(),
+        )]),
         generic_where_clause: Maybe::None,
         meta_where_clause: Maybe::None,
         items: List::new(),
@@ -848,7 +852,8 @@ fn test_mount_declaration() {
     // Simple mount: mount std.io
     let simple_mount = MountDecl {
         visibility: Visibility::Private,
-        tree: MountTree { alias: Maybe::None,
+        tree: MountTree {
+            alias: Maybe::None,
             kind: MountTreeKind::Path(Path::new(
                 {
                     let mut segments = List::new();
@@ -874,7 +879,8 @@ fn test_mount_declaration() {
     // Mount with alias: mount std.collections.HashMap as Map
     let aliased_mount = MountDecl {
         visibility: Visibility::Private,
-        tree: MountTree { alias: Maybe::None,
+        tree: MountTree {
+            alias: Maybe::None,
             kind: MountTreeKind::Path(Path::new(
                 {
                     let mut segments = List::new();
@@ -897,7 +903,8 @@ fn test_mount_declaration() {
     // Mount with specific items: mount std.io.{print, println}
     let specific_mount = MountDecl {
         visibility: Visibility::Private,
-        tree: MountTree { alias: Maybe::None,
+        tree: MountTree {
+            alias: Maybe::None,
             kind: MountTreeKind::Nested {
                 prefix: Path::new(
                     {
@@ -909,11 +916,13 @@ fn test_mount_declaration() {
                     span,
                 ),
                 trees: List::from(vec![
-                    MountTree { alias: Maybe::None,
+                    MountTree {
+                        alias: Maybe::None,
                         kind: MountTreeKind::Path(Path::single(test_ident("print"))),
                         span,
                     },
-                    MountTree { alias: Maybe::None,
+                    MountTree {
+                        alias: Maybe::None,
                         kind: MountTreeKind::Path(Path::single(test_ident("println"))),
                         span,
                     },

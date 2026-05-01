@@ -222,8 +222,7 @@ pub fn run_target(target: &FuzzTarget, max_total_time: Duration) -> FuzzOutcome 
         .output();
 
     let after = snapshot_artifacts(&target.artifacts_dir);
-    let new_artifacts: Vec<String> =
-        after.difference(&before).cloned().collect();
+    let new_artifacts: Vec<String> = after.difference(&before).cloned().collect();
 
     let status = match output {
         Ok(o) if o.status.success() => {
@@ -331,7 +330,10 @@ serde = "1"
 name = "not_a_fuzz_bin"
 "#;
         let bins = parse_bin_entries_from_toml(sample);
-        assert!(bins.is_empty(), "non-bin sections should not produce targets");
+        assert!(
+            bins.is_empty(),
+            "non-bin sections should not produce targets"
+        );
     }
 
     #[test]
@@ -340,7 +342,10 @@ name = "not_a_fuzz_bin"
 [[bin]]
 name = 'single_quoted_target'
 "#;
-        assert_eq!(parse_bin_entries_from_toml(sample), vec!["single_quoted_target"]);
+        assert_eq!(
+            parse_bin_entries_from_toml(sample),
+            vec!["single_quoted_target"]
+        );
     }
 
     #[test]

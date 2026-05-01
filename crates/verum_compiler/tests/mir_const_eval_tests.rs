@@ -23,8 +23,8 @@ use verum_ast::{
     span::Span,
     ty::{Path, PathSegment, TypeKind},
 };
-use verum_compiler::phases::mir_lowering::{LoweringContext, MirType};
 use verum_common::{List, Maybe};
+use verum_compiler::phases::mir_lowering::{LoweringContext, MirType};
 
 /// Helper to create a module with a simple function
 fn create_test_module(body_expr: Expr) -> Module {
@@ -61,7 +61,8 @@ fn create_test_module(body_expr: Expr) -> Module {
             kind: verum_ast::decl::ItemKind::Function(func),
             attributes: List::new(),
             span: Span::dummy(),
-        }].into(),
+        }]
+        .into(),
         attributes: List::new(),
         file_id: verum_ast::FileId::dummy(),
         span: Span::dummy(),

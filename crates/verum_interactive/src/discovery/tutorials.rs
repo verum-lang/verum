@@ -205,7 +205,12 @@ impl Challenge {
     }
 
     /// Add a test case
-    pub fn add_test(mut self, name: impl Into<String>, expr: impl Into<String>, expected: impl Into<String>) -> Self {
+    pub fn add_test(
+        mut self,
+        name: impl Into<String>,
+        expr: impl Into<String>,
+        expected: impl Into<String>,
+    ) -> Self {
         self.test_cases.push(TestCase {
             name: name.into(),
             setup: None,
@@ -392,11 +397,7 @@ fn tutorial_collections() -> Tutorial {
         .with_category(ExampleCategory::Collections)
         .with_tags(["list", "map", "set", "iteration"])
         .add_step(
-            TutorialStep::new(
-                "Lists",
-                "List<T> is Verum's dynamic array type.",
-            )
-            .with_example(
+            TutorialStep::new("Lists", "List<T> is Verum's dynamic array type.").with_example(
                 r#"let nums = List.from([1, 2, 3, 4, 5])
 print(f"Length: {nums.len()}")
 print(f"First: {nums.first()}")
@@ -440,11 +441,7 @@ print(f"Contains Bob: {scores.contains_key("Bob")}")"#,
             ),
         )
         .add_step(
-            TutorialStep::new(
-                "Sets",
-                "Set<T> stores unique values.",
-            )
-            .with_example(
+            TutorialStep::new("Sets", "Set<T> stores unique values.").with_example(
                 r#"let mut colors = Set.new()
 colors.insert("red")
 colors.insert("green")
@@ -463,17 +460,14 @@ fn tutorial_functions() -> Tutorial {
         .with_category(ExampleCategory::Basics)
         .with_tags(["functions", "parameters", "return"])
         .add_step(
-            TutorialStep::new(
-                "Basic Functions",
-                "Define functions with the `fn` keyword.",
-            )
-            .with_example(
-                r#"fn greet(name: Text) -> Text {
+            TutorialStep::new("Basic Functions", "Define functions with the `fn` keyword.")
+                .with_example(
+                    r#"fn greet(name: Text) -> Text {
     f"Hello, {name}!"
 }
 
 print(greet("World"))"#,
-            ),
+                ),
         )
         .add_step(
             TutorialStep::new(
@@ -511,18 +505,21 @@ print(squared)"#,
 }
 
 fn tutorial_pattern_matching() -> Tutorial {
-    Tutorial::new("Pattern Matching", "Master Verum's powerful pattern matching")
-        .with_difficulty(2)
-        .with_time(20)
-        .with_category(ExampleCategory::Patterns)
-        .with_tags(["match", "patterns", "destructuring"])
-        .add_step(
-            TutorialStep::new(
-                "Match Expressions",
-                "The `match` expression provides exhaustive pattern matching.",
-            )
-            .with_example(
-                r#"let x = 2
+    Tutorial::new(
+        "Pattern Matching",
+        "Master Verum's powerful pattern matching",
+    )
+    .with_difficulty(2)
+    .with_time(20)
+    .with_category(ExampleCategory::Patterns)
+    .with_tags(["match", "patterns", "destructuring"])
+    .add_step(
+        TutorialStep::new(
+            "Match Expressions",
+            "The `match` expression provides exhaustive pattern matching.",
+        )
+        .with_example(
+            r#"let x = 2
 
 let result = match x {
     0 => "zero",
@@ -532,15 +529,15 @@ let result = match x {
 }
 
 print(result)  // "two""#,
-            ),
+        ),
+    )
+    .add_step(
+        TutorialStep::new(
+            "Matching Sum Types",
+            "Match is especially powerful with sum types (enums).",
         )
-        .add_step(
-            TutorialStep::new(
-                "Matching Sum Types",
-                "Match is especially powerful with sum types (enums).",
-            )
-            .with_example(
-                r#"type Shape is
+        .with_example(
+            r#"type Shape is
     | Circle(Float)
     | Rectangle { width: Float, height: Float };
 
@@ -553,15 +550,11 @@ fn area(shape: Shape) -> Float {
 
 print(area(Circle(5.0)))
 print(area(Rectangle { width: 4.0, height: 3.0 }))"#,
-            ),
-        )
-        .add_step(
-            TutorialStep::new(
-                "Guards",
-                "Add conditions to patterns with `if` guards.",
-            )
-            .with_example(
-                r#"fn classify(n: Int) -> Text {
+        ),
+    )
+    .add_step(
+        TutorialStep::new("Guards", "Add conditions to patterns with `if` guards.").with_example(
+            r#"fn classify(n: Int) -> Text {
     match n {
         0 => "zero",
         x if x < 0 => "negative",
@@ -574,23 +567,26 @@ print(classify(-5))
 print(classify(0))
 print(classify(4))
 print(classify(7))"#,
-            ),
-        )
+        ),
+    )
 }
 
 fn tutorial_error_handling() -> Tutorial {
-    Tutorial::new("Error Handling", "Handle errors gracefully with Result and Maybe")
-        .with_difficulty(2)
-        .with_time(15)
-        .with_category(ExampleCategory::ErrorHandling)
-        .with_tags(["result", "maybe", "errors"])
-        .add_step(
-            TutorialStep::new(
-                "The Result Type",
-                "Result<T, E> represents success (Ok) or failure (Err).",
-            )
-            .with_example(
-                r#"fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    Tutorial::new(
+        "Error Handling",
+        "Handle errors gracefully with Result and Maybe",
+    )
+    .with_difficulty(2)
+    .with_time(15)
+    .with_category(ExampleCategory::ErrorHandling)
+    .with_tags(["result", "maybe", "errors"])
+    .add_step(
+        TutorialStep::new(
+            "The Result Type",
+            "Result<T, E> represents success (Ok) or failure (Err).",
+        )
+        .with_example(
+            r#"fn divide(a: Int, b: Int) -> Result<Int, Text> {
     if b == 0 {
         Err("Division by zero")
     } else {
@@ -602,30 +598,30 @@ match divide(10, 2) {
     Ok(result) => print(f"Result: {result}"),
     Err(msg) => print(f"Error: {msg}"),
 }"#,
-            ),
+        ),
+    )
+    .add_step(
+        TutorialStep::new(
+            "The ? Operator",
+            "Use `?` to propagate errors automatically.",
         )
-        .add_step(
-            TutorialStep::new(
-                "The ? Operator",
-                "Use `?` to propagate errors automatically.",
-            )
-            .with_example(
-                r#"fn calculate() -> Result<Int, Text> {
+        .with_example(
+            r#"fn calculate() -> Result<Int, Text> {
     let a = divide(100, 5)?  // If Err, returns early
     let b = divide(a, 2)?
     Ok(b)
 }
 
 print(f"Calculate: {calculate()}")"#,
-            ),
+        ),
+    )
+    .add_step(
+        TutorialStep::new(
+            "The Maybe Type",
+            "Maybe<T> represents an optional value (Some or None).",
         )
-        .add_step(
-            TutorialStep::new(
-                "The Maybe Type",
-                "Maybe<T> represents an optional value (Some or None).",
-            )
-            .with_example(
-                r#"let items = List.from([1, 2, 3])
+        .with_example(
+            r#"let items = List.from([1, 2, 3])
 
 match items.get(1) {
     Some(value) => print(f"Found: {value}"),
@@ -635,8 +631,8 @@ match items.get(1) {
 // Using unwrap_or for default values
 let value = items.get(10).unwrap_or(0)
 print(f"Value: {value}")"#,
-            ),
-        )
+        ),
+    )
 }
 
 fn tutorial_generators() -> Tutorial {
@@ -688,18 +684,21 @@ print(f"Fibonacci: {fibs}")"#,
 }
 
 fn tutorial_async() -> Tutorial {
-    Tutorial::new("Async Programming", "Write concurrent code with async/await")
-        .with_difficulty(3)
-        .with_time(25)
-        .with_category(ExampleCategory::Async)
-        .with_tags(["async", "await", "concurrent"])
-        .add_step(
-            TutorialStep::new(
-                "Async Functions",
-                "Use `async fn` to define asynchronous functions.",
-            )
-            .with_example(
-                r#"async fn fetch_data(url: Text) -> Result<Text, Error> {
+    Tutorial::new(
+        "Async Programming",
+        "Write concurrent code with async/await",
+    )
+    .with_difficulty(3)
+    .with_time(25)
+    .with_category(ExampleCategory::Async)
+    .with_tags(["async", "await", "concurrent"])
+    .add_step(
+        TutorialStep::new(
+            "Async Functions",
+            "Use `async fn` to define asynchronous functions.",
+        )
+        .with_example(
+            r#"async fn fetch_data(url: Text) -> Result<Text, Error> {
     // Simulated async operation
     await sleep(100ms)
     Ok(f"Data from {url}")
@@ -709,15 +708,15 @@ async fn main() {
     let result = await fetch_data("https://api.example.com")
     print(result)
 }"#,
-            ),
+        ),
+    )
+    .add_step(
+        TutorialStep::new(
+            "Concurrent Execution",
+            "Use `join` to run multiple async operations concurrently.",
         )
-        .add_step(
-            TutorialStep::new(
-                "Concurrent Execution",
-                "Use `join` to run multiple async operations concurrently.",
-            )
-            .with_example(
-                r#"async fn main() {
+        .with_example(
+            r#"async fn main() {
     let (a, b, c) = join(
         fetch_data("url1"),
         fetch_data("url2"),
@@ -725,8 +724,8 @@ async fn main() {
     )
     print(f"Got: {a}, {b}, {c}")
 }"#,
-            ),
-        )
+        ),
+    )
 }
 
 fn tutorial_tensors() -> Tutorial {
@@ -748,11 +747,7 @@ print(a)"#,
             ),
         )
         .add_step(
-            TutorialStep::new(
-                "Random Tensors",
-                "Create tensors with random values.",
-            )
-            .with_example(
+            TutorialStep::new("Random Tensors", "Create tensors with random values.").with_example(
                 r#"let zeros = Tensor.zeros([3, 3])
 let ones = Tensor.ones([2, 4])
 let random = Tensor.randn([2, 2])
@@ -833,7 +828,11 @@ fn challenge_fibonacci() -> Challenge {
     // Your code here
 }"#,
     )
-    .add_test("first 8", "fibonacci().take(8).collect()", "[0, 1, 1, 2, 3, 5, 8, 13]")
+    .add_test(
+        "first 8",
+        "fibonacci().take(8).collect()",
+        "[0, 1, 1, 2, 3, 5, 8, 13]",
+    )
     .add_hint("You need two variables to track the previous two numbers")
     .add_hint("Use `yield` to produce each number")
     .with_solution(
@@ -891,9 +890,21 @@ fn challenge_binary_search() -> Challenge {
     // Your code here
 }"#,
     )
-    .add_test("found", "binary_search(List.from([1,2,3,4,5]), 3)", "Some(2)")
-    .add_test("not found", "binary_search(List.from([1,2,3,4,5]), 6)", "None")
-    .add_test("first", "binary_search(List.from([1,2,3,4,5]), 1)", "Some(0)")
+    .add_test(
+        "found",
+        "binary_search(List.from([1,2,3,4,5]), 3)",
+        "Some(2)",
+    )
+    .add_test(
+        "not found",
+        "binary_search(List.from([1,2,3,4,5]), 6)",
+        "None",
+    )
+    .add_test(
+        "first",
+        "binary_search(List.from([1,2,3,4,5]), 1)",
+        "Some(0)",
+    )
     .add_hint("Use low and high pointers")
     .add_hint("Calculate mid as (low + high) / 2")
     .add_hint("Narrow the search range based on comparison")
@@ -933,7 +944,11 @@ fn challenge_matrix_transpose() -> Challenge {
     // Your code here
 }"#,
     )
-    .add_test("2x3", "transpose(Tensor.from([[1,2,3],[4,5,6]])).shape()", "[3, 2]")
+    .add_test(
+        "2x3",
+        "transpose(Tensor.from([[1,2,3],[4,5,6]])).shape()",
+        "[3, 2]",
+    )
     .add_hint("The result has shape [cols, rows] where the input has [rows, cols]")
     .add_hint("Use Tensor.t() method!")
     .with_solution(
@@ -966,33 +981,38 @@ fn template_blank() -> PlaybookTemplate {
 }
 
 fn template_data_analysis() -> PlaybookTemplate {
-    PlaybookTemplate::new("Data Analysis", "Template for data exploration and analysis")
-        .with_category(ExampleCategory::Collections)
-        .add_markdown("# Data Analysis Playbook\n\nThis template helps you explore and analyze data.")
-        .add_code(
-            r#"// Load your data
+    PlaybookTemplate::new(
+        "Data Analysis",
+        "Template for data exploration and analysis",
+    )
+    .with_category(ExampleCategory::Collections)
+    .add_markdown("# Data Analysis Playbook\n\nThis template helps you explore and analyze data.")
+    .add_code(
+        r#"// Load your data
 let data = List.from([
     { name: "Alice", age: 30, score: 85 },
     { name: "Bob", age: 25, score: 92 },
     { name: "Charlie", age: 35, score: 78 },
 ])"#,
-        )
-        .add_code(
-            r#"// Basic statistics
+    )
+    .add_code(
+        r#"// Basic statistics
 let ages = data.map(fn(x) x.age)
 print(f"Average age: {ages.mean()}")"#,
-        )
-        .add_code(
-            r#"// Filter and transform
+    )
+    .add_code(
+        r#"// Filter and transform
 let high_scorers = data.filter(fn(x) x.score > 80)
 print(f"High scorers: {high_scorers.map(fn(x) x.name)}")"#,
-        )
+    )
 }
 
 fn template_machine_learning() -> PlaybookTemplate {
     PlaybookTemplate::new("Machine Learning", "Template for ML experimentation")
         .with_category(ExampleCategory::NeuralNet)
-        .add_markdown("# Machine Learning Playbook\n\nExperiment with neural networks and training.")
+        .add_markdown(
+            "# Machine Learning Playbook\n\nExperiment with neural networks and training.",
+        )
         .add_code(
             r#"// Define a simple neural network
 type MLP is {
@@ -1024,23 +1044,26 @@ print(f"Output shape: {y.shape()}")"#,
 }
 
 fn template_web_scraping() -> PlaybookTemplate {
-    PlaybookTemplate::new("Web/API Client", "Template for HTTP requests and API interactions")
-        .with_category(ExampleCategory::Async)
-        .add_markdown("# Web/API Client Playbook\n\nMake HTTP requests and process responses.")
-        .add_code(
-            r#"// Define an async fetch function
+    PlaybookTemplate::new(
+        "Web/API Client",
+        "Template for HTTP requests and API interactions",
+    )
+    .with_category(ExampleCategory::Async)
+    .add_markdown("# Web/API Client Playbook\n\nMake HTTP requests and process responses.")
+    .add_code(
+        r#"// Define an async fetch function
 async fn fetch_json(url: Text) -> Result<Value, Error> {
     let response = await http.get(url)
     response.json()
 }"#,
-        )
-        .add_code(
-            r#"// Example usage (uncomment to run)
+    )
+    .add_code(
+        r#"// Example usage (uncomment to run)
 // async fn main() {
 //  let data = await fetch_json("https://api.example.com/data")
 //  print(data)
 // }"#,
-        )
+    )
 }
 
 #[cfg(test)]
@@ -1065,7 +1088,11 @@ mod tests {
 
         // Check all tutorials have at least one step
         for tutorial in &tutorials {
-            assert!(!tutorial.steps.is_empty(), "Tutorial '{}' has no steps", tutorial.title);
+            assert!(
+                !tutorial.steps.is_empty(),
+                "Tutorial '{}' has no steps",
+                tutorial.title
+            );
         }
     }
 
@@ -1087,7 +1114,11 @@ mod tests {
 
         // Check all challenges have test cases
         for challenge in &challenges {
-            assert!(!challenge.test_cases.is_empty(), "Challenge '{}' has no tests", challenge.title);
+            assert!(
+                !challenge.test_cases.is_empty(),
+                "Challenge '{}' has no tests",
+                challenge.title
+            );
         }
     }
 
@@ -1098,7 +1129,11 @@ mod tests {
 
         // Check all templates have cells
         for template in &templates {
-            assert!(!template.cells.is_empty(), "Template '{}' has no cells", template.name);
+            assert!(
+                !template.cells.is_empty(),
+                "Template '{}' has no cells",
+                template.name
+            );
         }
     }
 }

@@ -254,9 +254,10 @@ impl BuildAssetsInfo {
     fn resolve_path(&self, relative_path: &str) -> Result<std::path::PathBuf, MetaError> {
         Self::validate_path(relative_path)?;
 
-        let project_root = self.project_root.as_ref().ok_or_else(|| {
-            MetaError::Other(Text::from("Project root not set for BuildAssets"))
-        })?;
+        let project_root = self
+            .project_root
+            .as_ref()
+            .ok_or_else(|| MetaError::Other(Text::from("Project root not set for BuildAssets")))?;
 
         let root = std::path::Path::new(project_root.as_str());
 
@@ -294,9 +295,8 @@ impl BuildAssetsInfo {
     /// touch is dropped.
     pub fn read_text_uncached(&self, path: &str) -> Result<Text, MetaError> {
         let resolved = self.resolve_path(path)?;
-        let content = std::fs::read_to_string(&resolved).map_err(|e| {
-            MetaError::Other(Text::from(format!("Failed to read file: {}", e)))
-        })?;
+        let content = std::fs::read_to_string(&resolved)
+            .map_err(|e| MetaError::Other(Text::from(format!("Failed to read file: {}", e))))?;
         Ok(Text::from(content))
     }
 
@@ -305,9 +305,8 @@ impl BuildAssetsInfo {
     /// `load_build_asset` from the sandboxed meta executor.
     pub fn read_bytes_uncached(&self, path: &str) -> Result<Vec<u8>, MetaError> {
         let resolved = self.resolve_path(path)?;
-        std::fs::read(&resolved).map_err(|e| {
-            MetaError::Other(Text::from(format!("Failed to read file: {}", e)))
-        })
+        std::fs::read(&resolved)
+            .map_err(|e| MetaError::Other(Text::from(format!("Failed to read file: {}", e))))
     }
 
     /// Load binary content from a file
@@ -320,9 +319,8 @@ impl BuildAssetsInfo {
         }
 
         let resolved = self.resolve_path(path)?;
-        let content = std::fs::read(&resolved).map_err(|e| {
-            MetaError::Other(Text::from(format!("Failed to read file: {}", e)))
-        })?;
+        let content = std::fs::read(&resolved)
+            .map_err(|e| MetaError::Other(Text::from(format!("Failed to read file: {}", e))))?;
 
         // Cache the result
         self.binary_cache.insert(path_text, content.clone());
@@ -339,9 +337,8 @@ impl BuildAssetsInfo {
         }
 
         let resolved = self.resolve_path(path)?;
-        let content = std::fs::read_to_string(&resolved).map_err(|e| {
-            MetaError::Other(Text::from(format!("Failed to read file: {}", e)))
-        })?;
+        let content = std::fs::read_to_string(&resolved)
+            .map_err(|e| MetaError::Other(Text::from(format!("Failed to read file: {}", e))))?;
 
         let text = Text::from(content);
         // Cache the result
@@ -466,9 +463,7 @@ impl BuildAssetsInfo {
     /// cycles from exhausting the stack.
     pub fn load_glob(&mut self, pattern: &str) -> Result<Vec<(Text, Vec<u8>)>, MetaError> {
         if pattern.is_empty() {
-            return Err(MetaError::Other(Text::from(
-                "@embed_glob: empty pattern",
-            )));
+            return Err(MetaError::Other(Text::from("@embed_glob: empty pattern")));
         }
         // Sandbox precheck: any literal segment that escapes
         // the project root (`..`, absolute path) must be
@@ -542,7 +537,11 @@ impl BuildAssetsInfo {
         }
 
         let seg = segments[seg_idx];
-        let listing_path = if current_path.is_empty() { "." } else { current_path };
+        let listing_path = if current_path.is_empty() {
+            "."
+        } else {
+            current_path
+        };
         let entries = match self.list_dir(listing_path) {
             Ok(es) => es,
             // A pattern that touches a missing directory
@@ -563,13 +562,7 @@ impl BuildAssetsInfo {
                         format!("{}/{}", current_path, entry.as_str())
                     };
                     if self.is_directory(&full) {
-                        self.walk_glob_segments(
-                            segments,
-                            &full,
-                            seg_idx,
-                            depth + 1,
-                            matched,
-                        )?;
+                        self.walk_glob_segments(segments, &full, seg_idx, depth + 1, matched)?;
                     } else {
                         let bytes = self.load(&full)?;
                         matched.push((Text::from(full), bytes));
@@ -580,13 +573,7 @@ impl BuildAssetsInfo {
             // Non-terminal `**` — match zero components: skip
             // the `**`, try the remaining segments at the same
             // path.
-            self.walk_glob_segments(
-                segments,
-                current_path,
-                seg_idx + 1,
-                depth,
-                matched,
-            )?;
+            self.walk_glob_segments(segments, current_path, seg_idx + 1, depth, matched)?;
             // Match one-or-more components: descend into every
             // subdirectory and re-attempt with the same `**`
             // segment (zero or more).
@@ -597,13 +584,7 @@ impl BuildAssetsInfo {
                     format!("{}/{}", current_path, entry.as_str())
                 };
                 if self.is_directory(&full) {
-                    self.walk_glob_segments(
-                        segments,
-                        &full,
-                        seg_idx,
-                        depth + 1,
-                        matched,
-                    )?;
+                    self.walk_glob_segments(segments, &full, seg_idx, depth + 1, matched)?;
                 }
             }
             return Ok(());
@@ -624,13 +605,7 @@ impl BuildAssetsInfo {
                     matched.push((Text::from(full), bytes));
                 }
             } else if self.is_directory(&full) {
-                self.walk_glob_segments(
-                    segments,
-                    &full,
-                    seg_idx + 1,
-                    depth + 1,
-                    matched,
-                )?;
+                self.walk_glob_segments(segments, &full, seg_idx + 1, depth + 1, matched)?;
             }
         }
         Ok(())
@@ -654,9 +629,8 @@ impl BuildAssetsInfo {
     pub fn metadata(&self, path: &str) -> Result<AssetMetadata, MetaError> {
         let resolved = self.resolve_path(path)?;
 
-        let meta = std::fs::metadata(&resolved).map_err(|e| {
-            MetaError::Other(Text::from(format!("Failed to get metadata: {}", e)))
-        })?;
+        let meta = std::fs::metadata(&resolved)
+            .map_err(|e| MetaError::Other(Text::from(format!("Failed to get metadata: {}", e))))?;
 
         let modified_ns = meta
             .modified()

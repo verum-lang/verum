@@ -168,30 +168,30 @@ pub mod permissions;
 pub mod target_triple;
 
 // Re-export main types
-pub use error::{LlvmLoweringError, Result, BuildExt, OptionExt};
-pub use types::{RefTier, TypeLowering, THIN_REF_SIZE, FAT_REF_SIZE};
+pub use asm::{AsmCall, InlineAsmGenerator};
+pub use bitfield::{BitfieldLowering, BitfieldStats, min_container_bytes, optimal_container_bits};
 pub use cbgr::{CbgrLowering, CbgrStats, capabilities};
 pub use context::{FunctionContext, FunctionStats, TierDistribution};
-pub use register_types::{RegisterType, RegisterTypeMap, MethodDispatchTable, MethodDispatchTarget};
-pub use well_known_types::{WellKnownType, WellKnownTypeExt};
-pub use vbc_lowering::{VbcToLlvmLowering, LoweringConfig, LoweringStats, PanicStrategy};
-pub use mmio::{MmioLowering, MmioStats, VolatileOrdering, RegisterWidth};
-pub use interrupt::{InterruptLowering, InterruptStats, TargetArch, InterruptHandlerKind};
-pub use simd::{
-    SimdBinaryOp, SimdCompareOp, SimdElementKind, SimdFeatureLevel, SimdLowering,
-    SimdReduceOp, SimdStats, SimdTargetArch, SimdUnaryOp,
-};
-pub use asm::{InlineAsmGenerator, AsmCall};
-pub use symbols::{
-    SymbolAttributes, apply_to_function, apply_to_global, linkage_to_llvm, visibility_to_llvm,
-    create_alias, add_global_ctor, add_global_dtor, emit_global_ctors, emit_global_dtors,
-    DEFAULT_CTOR_DTOR_PRIORITY,
-};
-pub use bitfield::{
-    BitfieldLowering, BitfieldStats, min_container_bytes, optimal_container_bits,
-};
+pub use error::{BuildExt, LlvmLoweringError, OptionExt, Result};
 pub use ffi::{FfiLowering, FfiLoweringStats, ffi_subop_to_calling_convention};
+pub use interrupt::{InterruptHandlerKind, InterruptLowering, InterruptStats, TargetArch};
+pub use mmio::{MmioLowering, MmioStats, RegisterWidth, VolatileOrdering};
 pub use permissions::AotPermissionPolicy;
+pub use register_types::{
+    MethodDispatchTable, MethodDispatchTarget, RegisterType, RegisterTypeMap,
+};
+pub use simd::{
+    SimdBinaryOp, SimdCompareOp, SimdElementKind, SimdFeatureLevel, SimdLowering, SimdReduceOp,
+    SimdStats, SimdTargetArch, SimdUnaryOp,
+};
+pub use symbols::{
+    DEFAULT_CTOR_DTOR_PRIORITY, SymbolAttributes, add_global_ctor, add_global_dtor,
+    apply_to_function, apply_to_global, create_alias, emit_global_ctors, emit_global_dtors,
+    linkage_to_llvm, visibility_to_llvm,
+};
+pub use types::{FAT_REF_SIZE, RefTier, THIN_REF_SIZE, TypeLowering};
+pub use vbc_lowering::{LoweringConfig, LoweringStats, PanicStrategy, VbcToLlvmLowering};
+pub use well_known_types::{WellKnownType, WellKnownTypeExt};
 
 // Re-export verum_llvm for convenience
 pub use verum_llvm;

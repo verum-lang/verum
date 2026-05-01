@@ -17,7 +17,10 @@ fn binary() -> &'static str {
 
 fn make_fixture(name: &str, body: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
-    dir.push(format!("verum_lint_fix_edits_{name}_{}", std::process::id()));
+    dir.push(format!(
+        "verum_lint_fix_edits_{name}_{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("src")).expect("create src");
     std::fs::write(

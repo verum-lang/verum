@@ -1,12 +1,14 @@
 //! Tensor extended opcode handler for VBC interpreter dispatch.
 
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
-use crate::instruction::{Opcode, TensorSubOpcode, TensorExtSubOpcode, TensorBinaryOp, TensorUnaryOp, TensorReduceOp};
-use super::bytecode_io::*;
 use super::super::alloc_list_from_values;
+use super::bytecode_io::*;
+use crate::instruction::{
+    Opcode, TensorBinaryOp, TensorExtSubOpcode, TensorReduceOp, TensorSubOpcode, TensorUnaryOp,
+};
+use crate::value::Value;
 
 // ============================================================================
 // Tensor Extended Handler (0xFC)
@@ -17,50 +19,48 @@ use super::super::alloc_list_from_values;
 
 /// This dispatches to tensor operations based on the sub-opcode byte.
 /// Uses the tensor.rs module for actual tensor computations.
-pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
     let sub_op = TensorSubOpcode::from_byte(sub_op_byte);
 
-    use super::super::super::tensor::{
-        TensorHandle, PoolOp,
-        tensor_pool2d, tensor_argmin, tensor_permute, tensor_softmax, tensor_argmax,
-        tensor_layer_norm, tensor_batch_norm,
-        tensor_batch_matmul, tensor_topk, tensor_conv2d,
-        tensor_clone,
+    use super::super::super::kernel::tokenizer::{
+        TokenizerHandle, dispatch_tokenizer_decode, dispatch_tokenizer_encode,
+        dispatch_tokenizer_load_bpe, dispatch_tokenizer_load_pretrained,
+        dispatch_tokenizer_load_spm, dispatch_tokenizer_spm_decode, dispatch_tokenizer_spm_encode,
     };
     use super::super::super::kernel::{
-        dispatch_solve, dispatch_gather, dispatch_qr, dispatch_svd, dispatch_lu,
-        dispatch_eig, dispatch_nansum, dispatch_nanmean, dispatch_flip, dispatch_roll,
-        dispatch_lstsq, dispatch_trisolve, dispatch_eig_symmetric, dispatch_schur,
-        dispatch_rank, dispatch_cond, dispatch_norm, dispatch_kron, dispatch_cross,
-        dispatch_contract, dispatch_matrix_power, dispatch_expm, dispatch_logm,
-        dispatch_inverse, dispatch_rfft, dispatch_irfft, dispatch_complex_mul,
-        dispatch_complex_pow, dispatch_ssm_scan, dispatch_uniform, dispatch_bincount,
-        dispatch_gather_nd, dispatch_arange_usize, dispatch_repeat, dispatch_tanh,
-        dispatch_sum_all, dispatch_from_array, dispatch_random_float_01,
-        dispatch_sample_top_p, dispatch_sample_temperature, dispatch_paged_attention,
-        dispatch_parse_tool_call, dispatch_format_value, dispatch_tensor_from_slice_usize,
-        dispatch_quantized_matmul, dispatch_tensor_norm, dispatch_generate_request_id,
-        dispatch_json_schema_to_json, dispatch_function_schema_to_json, dispatch_parse_function_calls,
-        dispatch_all_reduce, dispatch_all_gather, dispatch_broadcast, dispatch_reduce_scatter,
-        dispatch_barrier, dispatch_pmap_psum, dispatch_pmap_pmean, dispatch_pmap_pmax,
-        dispatch_pmap_all_gather, dispatch_vmap_transform, dispatch_pmap_transform,
-        dispatch_dist_world_group, dispatch_dist_new_group, dispatch_dist_get_rank,
-        dispatch_p2p_send, dispatch_p2p_recv, dispatch_collective_gather, dispatch_collective_scatter,
-        dispatch_bucket_gradients, dispatch_get_grad, dispatch_set_grad, dispatch_module_backward,
-        dispatch_mesh_select, dispatch_actor_new_id, dispatch_rdma_create_ref, dispatch_rdma_fetch,
-        dispatch_rdma_write, dispatch_rdma_check_valid, dispatch_regex_find_all, dispatch_regex_replace_all,
-        dispatch_regex_is_match, dispatch_regex_split,
-        dispatch_regex_find, dispatch_regex_replace, dispatch_regex_captures,
-        ProcessGroupHandle, ActorMeshHandle,
-        RdmaRefHandle, ParameterHandle, ReduceOp,
-        dispatch_cholesky, dispatch_einsum, dispatch_diag, dispatch_triu, dispatch_tril,
+        ActorMeshHandle, ParameterHandle, ProcessGroupHandle, RdmaRefHandle, ReduceOp,
+        dispatch_actor_new_id, dispatch_all_gather, dispatch_all_reduce, dispatch_arange_usize,
+        dispatch_barrier, dispatch_bincount, dispatch_broadcast, dispatch_bucket_gradients,
+        dispatch_cholesky, dispatch_collective_gather, dispatch_collective_scatter,
+        dispatch_complex_mul, dispatch_complex_pow, dispatch_cond, dispatch_contract,
+        dispatch_cross, dispatch_diag, dispatch_dist_get_rank, dispatch_dist_new_group,
+        dispatch_dist_world_group, dispatch_eig, dispatch_eig_symmetric, dispatch_einsum,
+        dispatch_expm, dispatch_flip, dispatch_format_value, dispatch_from_array,
+        dispatch_function_schema_to_json, dispatch_gather, dispatch_gather_nd,
+        dispatch_generate_request_id, dispatch_get_grad, dispatch_inverse, dispatch_irfft,
+        dispatch_json_schema_to_json, dispatch_kron, dispatch_logm, dispatch_lstsq, dispatch_lu,
+        dispatch_matrix_power, dispatch_mesh_select, dispatch_module_backward, dispatch_nanmean,
+        dispatch_nansum, dispatch_norm, dispatch_p2p_recv, dispatch_p2p_send,
+        dispatch_paged_attention, dispatch_parse_function_calls, dispatch_parse_tool_call,
+        dispatch_pmap_all_gather, dispatch_pmap_pmax, dispatch_pmap_pmean, dispatch_pmap_psum,
+        dispatch_pmap_transform, dispatch_qr, dispatch_quantized_matmul, dispatch_random_float_01,
+        dispatch_rank, dispatch_rdma_check_valid, dispatch_rdma_create_ref, dispatch_rdma_fetch,
+        dispatch_rdma_write, dispatch_reduce_scatter, dispatch_regex_captures, dispatch_regex_find,
+        dispatch_regex_find_all, dispatch_regex_is_match, dispatch_regex_replace,
+        dispatch_regex_replace_all, dispatch_regex_split, dispatch_repeat, dispatch_rfft,
+        dispatch_roll, dispatch_sample_temperature, dispatch_sample_top_p, dispatch_schur,
+        dispatch_set_grad, dispatch_solve, dispatch_ssm_scan, dispatch_sum_all, dispatch_svd,
+        dispatch_tanh, dispatch_tensor_from_slice_usize, dispatch_tensor_norm, dispatch_tril,
+        dispatch_trisolve, dispatch_triu, dispatch_uniform, dispatch_vmap_transform,
     };
     use super::super::super::tensor::DType;
-    use super::super::super::kernel::tokenizer::{
-        dispatch_tokenizer_load_bpe, dispatch_tokenizer_load_pretrained, dispatch_tokenizer_encode,
-        dispatch_tokenizer_decode, dispatch_tokenizer_load_spm, dispatch_tokenizer_spm_encode,
-        dispatch_tokenizer_spm_decode, TokenizerHandle,
+    use super::super::super::tensor::{
+        PoolOp, TensorHandle, tensor_argmax, tensor_argmin, tensor_batch_matmul, tensor_batch_norm,
+        tensor_clone, tensor_conv2d, tensor_layer_norm, tensor_permute, tensor_pool2d,
+        tensor_softmax, tensor_topk,
     };
 
     match sub_op {
@@ -103,7 +103,8 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 let ph = padding.first().copied().unwrap_or(0);
                 let pw = padding.get(1).copied().unwrap_or(ph);
 
-                if let Some(result) = tensor_pool2d(input_handle, op, (kh, kw), (sh, sw), (ph, pw)) {
+                if let Some(result) = tensor_pool2d(input_handle, op, (kh, kw), (sh, sw), (ph, pw))
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -119,7 +120,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // Register-based tensor operations (from intrinsic calls)
         // All arguments come from registers, values extracted at runtime.
         // ================================================================
-
         Some(TensorSubOpcode::NewFromArgs) => {
             // tensor_new(shape, dtype) — create zero-filled tensor
             let dst = read_reg(state)?;
@@ -161,7 +161,9 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 let data_ptr = tensor.data_ptr_f64_mut();
                 if !data_ptr.is_null() {
                     for i in 0..tensor.numel {
-                        unsafe { *data_ptr.add(i) = fill_val; }
+                        unsafe {
+                            *data_ptr.add(i) = fill_val;
+                        }
                     }
                 }
                 let ptr = Box::into_raw(Box::new(tensor));
@@ -189,7 +191,9 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if !data_ptr.is_null() {
                     let copy_len = data_values.len().min(tensor.numel);
                     for (i, &val) in data_values.iter().enumerate().take(copy_len) {
-                        unsafe { *data_ptr.add(i) = val; }
+                        unsafe {
+                            *data_ptr.add(i) = val;
+                        }
                     }
                 }
                 let ptr = Box::into_raw(Box::new(tensor));
@@ -291,7 +295,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let op = TensorReduceOp::from_byte(op_val);
             let axis_val = state.get_reg(axis_reg).as_i64();
             // axis -1 means reduce all
-            let axis = if axis_val < 0 { None } else { Some(axis_val as usize) };
+            let axis = if axis_val < 0 {
+                None
+            } else {
+                Some(axis_val as usize)
+            };
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
 
@@ -432,7 +440,9 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(mut result) = super::super::super::tensor::tensor_clone(src) {
                     let data_ptr = result.data_ptr_f64_mut();
                     if !data_ptr.is_null() && index < result.numel {
-                        unsafe { *data_ptr.add(index) = value; }
+                        unsafe {
+                            *data_ptr.add(index) = value;
+                        }
                     }
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
@@ -703,8 +713,16 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                let gamma = if gamma_ptr.is_null() { None } else { Some(unsafe { &*gamma_ptr }) };
-                let beta = if beta_ptr.is_null() { None } else { Some(unsafe { &*beta_ptr }) };
+                let gamma = if gamma_ptr.is_null() {
+                    None
+                } else {
+                    Some(unsafe { &*gamma_ptr })
+                };
+                let beta = if beta_ptr.is_null() {
+                    None
+                } else {
+                    Some(unsafe { &*beta_ptr })
+                };
                 if let Some(result) = tensor_layer_norm(src_handle, gamma, beta, eps) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
@@ -740,12 +758,30 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                let gamma = if gamma_ptr.is_null() { None } else { Some(unsafe { &*gamma_ptr }) };
-                let beta = if beta_ptr.is_null() { None } else { Some(unsafe { &*beta_ptr }) };
-                let mean = if mean_ptr.is_null() { None } else { Some(unsafe { &*mean_ptr }) };
-                let var = if var_ptr.is_null() { None } else { Some(unsafe { &*var_ptr }) };
+                let gamma = if gamma_ptr.is_null() {
+                    None
+                } else {
+                    Some(unsafe { &*gamma_ptr })
+                };
+                let beta = if beta_ptr.is_null() {
+                    None
+                } else {
+                    Some(unsafe { &*beta_ptr })
+                };
+                let mean = if mean_ptr.is_null() {
+                    None
+                } else {
+                    Some(unsafe { &*mean_ptr })
+                };
+                let var = if var_ptr.is_null() {
+                    None
+                } else {
+                    Some(unsafe { &*var_ptr })
+                };
                 // Inference mode (training=false) - use running statistics
-                if let Some(result) = tensor_batch_norm(src_handle, gamma, beta, mean, var, eps, false) {
+                if let Some(result) =
+                    tensor_batch_norm(src_handle, gamma, beta, mean, var, eps, false)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -784,14 +820,24 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             if !input_ptr.is_null() && !weight_ptr.is_null() {
                 let input_handle = unsafe { &*input_ptr };
                 let weight_handle = unsafe { &*weight_ptr };
-                let bias = if bias_ptr.is_null() { None } else { Some(unsafe { &*bias_ptr }) };
+                let bias = if bias_ptr.is_null() {
+                    None
+                } else {
+                    Some(unsafe { &*bias_ptr })
+                };
                 let sh = stride.first().copied().unwrap_or(1);
                 let sw = stride.get(1).copied().unwrap_or(sh);
                 let ph = padding.first().copied().unwrap_or(0);
                 let pw = padding.get(1).copied().unwrap_or(ph);
 
                 if let Some(result) = tensor_conv2d(
-                    input_handle, weight_handle, bias, (sh, sw), (ph, pw), (1, 1), 1
+                    input_handle,
+                    weight_handle,
+                    bias,
+                    (sh, sw),
+                    (ph, pw),
+                    (1, 1),
+                    1,
                 ) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
@@ -867,7 +913,8 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
                 // sorted=true by default for topk
-                if let Some((values, indices)) = tensor_topk(src_handle, k, axis_opt, largest, true) {
+                if let Some((values, indices)) = tensor_topk(src_handle, k, axis_opt, largest, true)
+                {
                     let values_ptr = Box::into_raw(Box::new(values));
                     let indices_ptr = Box::into_raw(Box::new(indices));
                     state.set_reg(values_reg, Value::from_ptr(values_ptr));
@@ -886,7 +933,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Reduction Variants (0x10-0x1F)
         // ====================================================================
-
         Some(TensorSubOpcode::Nansum) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
@@ -938,7 +984,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Advanced Indexing (0x20-0x2F)
         // ====================================================================
-
         Some(TensorSubOpcode::Flip) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
@@ -991,7 +1036,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Linear System Solvers (0x30-0x3F)
         // ====================================================================
-
         Some(TensorSubOpcode::Lstsq) => {
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
@@ -1047,7 +1091,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Matrix Decompositions (0x40-0x5F)
         // ====================================================================
-
         Some(TensorSubOpcode::EigSymmetric) => {
             let eigenvalues_reg = read_reg(state)?;
             let eigenvectors_reg = read_reg(state)?;
@@ -1103,7 +1146,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Matrix Properties (0x60-0x6F)
         // ====================================================================
-
         Some(TensorSubOpcode::Rank) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
@@ -1173,7 +1215,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Advanced Operations (0x70-0x7F)
         // ====================================================================
-
         Some(TensorSubOpcode::Kron) => {
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
@@ -1470,8 +1511,16 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
 
             let low_val = state.get_reg(low_reg);
             let high_val = state.get_reg(high_reg);
-            let low = if low_val.is_float() { low_val.as_f64() } else { 0.0 };
-            let high = if high_val.is_float() { high_val.as_f64() } else { 1.0 };
+            let low = if low_val.is_float() {
+                low_val.as_f64()
+            } else {
+                0.0
+            };
+            let high = if high_val.is_float() {
+                high_val.as_f64()
+            } else {
+                1.0
+            };
 
             if let Some(result) = dispatch_uniform(&shape, low, high, DType::F64) {
                 let ptr = Box::into_raw(Box::new(result));
@@ -1538,9 +1587,21 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let start_val = state.get_reg(start_reg);
             let end_val = state.get_reg(end_reg);
             let step_val = state.get_reg(step_reg);
-            let start = if start_val.is_int() { start_val.as_i64() as usize } else { 0 };
-            let end = if end_val.is_int() { end_val.as_i64() as usize } else { 0 };
-            let step = if step_val.is_int() { step_val.as_i64() as usize } else { 1 };
+            let start = if start_val.is_int() {
+                start_val.as_i64() as usize
+            } else {
+                0
+            };
+            let end = if end_val.is_int() {
+                end_val.as_i64() as usize
+            } else {
+                0
+            };
+            let step = if step_val.is_int() {
+                step_val.as_i64() as usize
+            } else {
+                1
+            };
 
             if let Some(result) = dispatch_arange_usize(start, end, step) {
                 let ptr = Box::into_raw(Box::new(result));
@@ -1554,7 +1615,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Extended Tensor Operations (0x80-0x8F)
         // ====================================================================
-
         Some(TensorSubOpcode::Repeat) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
@@ -1654,7 +1714,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Tokenizer Operations (0x90-0x9F)
         // ====================================================================
-
         Some(TensorSubOpcode::TokenizerLoadBpe) => {
             let dst = read_reg(state)?;
             let vocab_path_reg = read_reg(state)?;
@@ -1663,10 +1722,24 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             // Get paths from string table via registers
             let vocab_val = state.get_reg(vocab_path_reg);
             let merges_val = state.get_reg(merges_path_reg);
-            let vocab_id = if vocab_val.is_int() { vocab_val.as_i64() as u32 } else { 0 };
-            let merges_id = if merges_val.is_int() { merges_val.as_i64() as u32 } else { 0 };
-            let vocab_path = state.module.get_string(crate::types::StringId(vocab_id)).unwrap_or("");
-            let merges_path = state.module.get_string(crate::types::StringId(merges_id)).unwrap_or("");
+            let vocab_id = if vocab_val.is_int() {
+                vocab_val.as_i64() as u32
+            } else {
+                0
+            };
+            let merges_id = if merges_val.is_int() {
+                merges_val.as_i64() as u32
+            } else {
+                0
+            };
+            let vocab_path = state
+                .module
+                .get_string(crate::types::StringId(vocab_id))
+                .unwrap_or("");
+            let merges_path = state
+                .module
+                .get_string(crate::types::StringId(merges_id))
+                .unwrap_or("");
 
             if let Some(tokenizer) = dispatch_tokenizer_load_bpe(vocab_path, merges_path) {
                 let ptr = Box::into_raw(Box::new(tokenizer));
@@ -1682,8 +1755,15 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let model_name_reg = read_reg(state)?;
 
             let model_name_val = state.get_reg(model_name_reg);
-            let model_name_id = if model_name_val.is_int() { model_name_val.as_i64() as u32 } else { 0 };
-            let model_name = state.module.get_string(crate::types::StringId(model_name_id)).unwrap_or("");
+            let model_name_id = if model_name_val.is_int() {
+                model_name_val.as_i64() as u32
+            } else {
+                0
+            };
+            let model_name = state
+                .module
+                .get_string(crate::types::StringId(model_name_id))
+                .unwrap_or("");
 
             if let Some(tokenizer) = dispatch_tokenizer_load_pretrained(model_name) {
                 let ptr = Box::into_raw(Box::new(tokenizer));
@@ -1702,8 +1782,15 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let tokenizer_val = state.get_reg(tokenizer_reg);
             let tokenizer_ptr = tokenizer_val.as_ptr::<TokenizerHandle>();
             let text_val = state.get_reg(text_reg);
-            let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
-            let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
+            let text_id = if text_val.is_int() {
+                text_val.as_i64() as u32
+            } else {
+                0
+            };
+            let text = state
+                .module
+                .get_string(crate::types::StringId(text_id))
+                .unwrap_or("");
 
             if !tokenizer_ptr.is_null() {
                 let tokenizer = unsafe { &*tokenizer_ptr };
@@ -1768,8 +1855,15 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let model_path_reg = read_reg(state)?;
 
             let model_path_val = state.get_reg(model_path_reg);
-            let model_path_id = if model_path_val.is_int() { model_path_val.as_i64() as u32 } else { 0 };
-            let model_path = state.module.get_string(crate::types::StringId(model_path_id)).unwrap_or("");
+            let model_path_id = if model_path_val.is_int() {
+                model_path_val.as_i64() as u32
+            } else {
+                0
+            };
+            let model_path = state
+                .module
+                .get_string(crate::types::StringId(model_path_id))
+                .unwrap_or("");
 
             if let Some(tokenizer) = dispatch_tokenizer_load_spm(model_path) {
                 let ptr = Box::into_raw(Box::new(tokenizer));
@@ -1788,8 +1882,15 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let tokenizer_val = state.get_reg(tokenizer_reg);
             let tokenizer_ptr = tokenizer_val.as_ptr::<TokenizerHandle>();
             let text_val = state.get_reg(text_reg);
-            let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
-            let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
+            let text_id = if text_val.is_int() {
+                text_val.as_i64() as u32
+            } else {
+                0
+            };
+            let text = state
+                .module
+                .get_string(crate::types::StringId(text_id))
+                .unwrap_or("");
 
             if !tokenizer_ptr.is_null() {
                 let tokenizer = unsafe { &*tokenizer_ptr };
@@ -1848,7 +1949,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Sampling Operations (0xA0-0xAF)
         // ====================================================================
-
         Some(TensorSubOpcode::SampleTopP) => {
             let dst = read_reg(state)?;
             let logits_reg = read_reg(state)?;
@@ -1857,7 +1957,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let logits_val = state.get_reg(logits_reg);
             let logits_ptr = logits_val.as_ptr::<TensorHandle>();
             let p_val = state.get_reg(p_reg);
-            let p = if p_val.is_float() { p_val.as_f64() } else { 0.9 };
+            let p = if p_val.is_float() {
+                p_val.as_f64()
+            } else {
+                0.9
+            };
 
             if !logits_ptr.is_null() {
                 let logits_handle = unsafe { &*logits_ptr };
@@ -1880,7 +1984,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let logits_val = state.get_reg(logits_reg);
             let logits_ptr = logits_val.as_ptr::<TensorHandle>();
             let temperature_val = state.get_reg(temperature_reg);
-            let temperature = if temperature_val.is_float() { temperature_val.as_f64() } else { 1.0 };
+            let temperature = if temperature_val.is_float() {
+                temperature_val.as_f64()
+            } else {
+                1.0
+            };
 
             if !logits_ptr.is_null() {
                 let logits_handle = unsafe { &*logits_ptr };
@@ -1909,13 +2017,19 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let kv_ptr = kv_val.as_ptr::<TensorHandle>();
             let block_ptr = block_val.as_ptr::<TensorHandle>();
             let context_len_val = state.get_reg(context_len_reg);
-            let context_len = if context_len_val.is_int() { context_len_val.as_i64() as usize } else { 0 };
+            let context_len = if context_len_val.is_int() {
+                context_len_val.as_i64() as usize
+            } else {
+                0
+            };
 
             if !q_ptr.is_null() && !kv_ptr.is_null() && !block_ptr.is_null() {
                 let q_handle = unsafe { &*q_ptr };
                 let kv_handle = unsafe { &*kv_ptr };
                 let block_handle = unsafe { &*block_ptr };
-                if let Some(result) = dispatch_paged_attention(q_handle, kv_handle, block_handle, context_len) {
+                if let Some(result) =
+                    dispatch_paged_attention(q_handle, kv_handle, block_handle, context_len)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -1930,14 +2044,20 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Inference Utility Operations (0xB0-0xBF)
         // ====================================================================
-
         Some(TensorSubOpcode::ParseToolCall) => {
             let dst = read_reg(state)?;
             let action_reg = read_reg(state)?;
 
             let action_val = state.get_reg(action_reg);
-            let action_id = if action_val.is_int() { action_val.as_i64() as u32 } else { 0 };
-            let action = state.module.get_string(crate::types::StringId(action_id)).unwrap_or("");
+            let action_id = if action_val.is_int() {
+                action_val.as_i64() as u32
+            } else {
+                0
+            };
+            let action = state
+                .module
+                .get_string(crate::types::StringId(action_id))
+                .unwrap_or("");
 
             if let Some((_tool, _args)) = dispatch_parse_tool_call(action) {
                 // Return tuple would need allocation
@@ -2007,7 +2127,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let scale_ptr = scale_val.as_ptr::<TensorHandle>();
             let zp_ptr = zp_val.as_ptr::<TensorHandle>();
 
-            if !input_ptr.is_null() && !weight_ptr.is_null() && !scale_ptr.is_null() && !zp_ptr.is_null() {
+            if !input_ptr.is_null()
+                && !weight_ptr.is_null()
+                && !scale_ptr.is_null()
+                && !zp_ptr.is_null()
+            {
                 let input = unsafe { &*input_ptr };
                 let weight = unsafe { &*weight_ptr };
                 let scale = unsafe { &*scale_ptr };
@@ -2075,8 +2199,15 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let response_reg = read_reg(state)?;
 
             let response_val = state.get_reg(response_reg);
-            let response_id = if response_val.is_int() { response_val.as_i64() as u32 } else { 0 };
-            let response = state.module.get_string(crate::types::StringId(response_id)).unwrap_or("");
+            let response_id = if response_val.is_int() {
+                response_val.as_i64() as u32
+            } else {
+                0
+            };
+            let response = state
+                .module
+                .get_string(crate::types::StringId(response_id))
+                .unwrap_or("");
 
             if let Some(_calls) = dispatch_parse_function_calls(response) {
                 state.set_reg(dst, Value::nil());
@@ -2089,7 +2220,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Distributed/Collective Operations (0xC0-0xCF)
         // ====================================================================
-
         Some(TensorSubOpcode::AllReduce) => {
             let dst = read_reg(state)?;
             let tensor_reg = read_reg(state)?;
@@ -2162,7 +2292,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let tensor_ptr = tensor_val.as_ptr::<TensorHandle>();
             let group_ptr = group_val.as_ptr::<ProcessGroupHandle>();
             let src_rank_val = state.get_reg(src_rank_reg);
-            let src_rank = if src_rank_val.is_int() { src_rank_val.as_i64() as usize } else { 0 };
+            let src_rank = if src_rank_val.is_int() {
+                src_rank_val.as_i64() as usize
+            } else {
+                0
+            };
 
             if !tensor_ptr.is_null() && !group_ptr.is_null() {
                 let tensor_handle = unsafe { &*tensor_ptr };
@@ -2235,8 +2369,15 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let tensor_val = state.get_reg(tensor_reg);
             let tensor_ptr = tensor_val.as_ptr::<TensorHandle>();
             let axis_val = state.get_reg(axis_name_reg);
-            let axis_id = if axis_val.is_int() { axis_val.as_i64() as u32 } else { 0 };
-            let axis_name = state.module.get_string(crate::types::StringId(axis_id)).unwrap_or("");
+            let axis_id = if axis_val.is_int() {
+                axis_val.as_i64() as u32
+            } else {
+                0
+            };
+            let axis_name = state
+                .module
+                .get_string(crate::types::StringId(axis_id))
+                .unwrap_or("");
 
             if !tensor_ptr.is_null() {
                 let tensor_handle = unsafe { &*tensor_ptr };
@@ -2260,8 +2401,15 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let tensor_val = state.get_reg(tensor_reg);
             let tensor_ptr = tensor_val.as_ptr::<TensorHandle>();
             let axis_val = state.get_reg(axis_name_reg);
-            let axis_id = if axis_val.is_int() { axis_val.as_i64() as u32 } else { 0 };
-            let axis_name = state.module.get_string(crate::types::StringId(axis_id)).unwrap_or("");
+            let axis_id = if axis_val.is_int() {
+                axis_val.as_i64() as u32
+            } else {
+                0
+            };
+            let axis_name = state
+                .module
+                .get_string(crate::types::StringId(axis_id))
+                .unwrap_or("");
 
             if !tensor_ptr.is_null() {
                 let tensor_handle = unsafe { &*tensor_ptr };
@@ -2285,8 +2433,15 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let tensor_val = state.get_reg(tensor_reg);
             let tensor_ptr = tensor_val.as_ptr::<TensorHandle>();
             let axis_val = state.get_reg(axis_name_reg);
-            let axis_id = if axis_val.is_int() { axis_val.as_i64() as u32 } else { 0 };
-            let axis_name = state.module.get_string(crate::types::StringId(axis_id)).unwrap_or("");
+            let axis_id = if axis_val.is_int() {
+                axis_val.as_i64() as u32
+            } else {
+                0
+            };
+            let axis_name = state
+                .module
+                .get_string(crate::types::StringId(axis_id))
+                .unwrap_or("");
 
             if !tensor_ptr.is_null() {
                 let tensor_handle = unsafe { &*tensor_ptr };
@@ -2310,8 +2465,15 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let tensor_val = state.get_reg(tensor_reg);
             let tensor_ptr = tensor_val.as_ptr::<TensorHandle>();
             let axis_val = state.get_reg(axis_name_reg);
-            let axis_id = if axis_val.is_int() { axis_val.as_i64() as u32 } else { 0 };
-            let axis_name = state.module.get_string(crate::types::StringId(axis_id)).unwrap_or("");
+            let axis_id = if axis_val.is_int() {
+                axis_val.as_i64() as u32
+            } else {
+                0
+            };
+            let axis_name = state
+                .module
+                .get_string(crate::types::StringId(axis_id))
+                .unwrap_or("");
 
             if !tensor_ptr.is_null() {
                 let tensor_handle = unsafe { &*tensor_ptr };
@@ -2353,7 +2515,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Process Group Operations (0xCB-0xCD)
         // ====================================================================
-
         Some(TensorSubOpcode::DistWorldGroup) => {
             let dst = read_reg(state)?;
             let group = dispatch_dist_world_group();
@@ -2410,7 +2571,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Point-to-Point Operations (0xCE-0xCF)
         // ====================================================================
-
         Some(TensorSubOpcode::P2PSend) => {
             let tensor_reg = read_reg(state)?;
             let dst_rank_reg = read_reg(state)?;
@@ -2421,7 +2581,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let tensor_ptr = tensor_val.as_ptr::<TensorHandle>();
             let group_ptr = group_val.as_ptr::<ProcessGroupHandle>();
             let dst_rank_val = state.get_reg(dst_rank_reg);
-            let dst_rank = if dst_rank_val.is_int() { dst_rank_val.as_i64() as usize } else { 0 };
+            let dst_rank = if dst_rank_val.is_int() {
+                dst_rank_val.as_i64() as usize
+            } else {
+                0
+            };
 
             if !tensor_ptr.is_null() && !group_ptr.is_null() {
                 let tensor_handle = unsafe { &*tensor_ptr };
@@ -2439,7 +2603,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let group_val = state.get_reg(group_reg);
             let group_ptr = group_val.as_ptr::<ProcessGroupHandle>();
             let src_rank_val = state.get_reg(src_rank_reg);
-            let src_rank = if src_rank_val.is_int() { src_rank_val.as_i64() as usize } else { 0 };
+            let src_rank = if src_rank_val.is_int() {
+                src_rank_val.as_i64() as usize
+            } else {
+                0
+            };
 
             if !group_ptr.is_null() {
                 let group_handle = unsafe { &*group_ptr };
@@ -2458,7 +2626,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Additional Collective Operations (0xD0-0xD1)
         // ====================================================================
-
         Some(TensorSubOpcode::CollectiveGather) => {
             let dst = read_reg(state)?;
             let tensor_reg = read_reg(state)?;
@@ -2470,12 +2637,18 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let tensor_ptr = tensor_val.as_ptr::<TensorHandle>();
             let group_ptr = group_val.as_ptr::<ProcessGroupHandle>();
             let dst_rank_val = state.get_reg(dst_rank_reg);
-            let dst_rank = if dst_rank_val.is_int() { dst_rank_val.as_i64() as usize } else { 0 };
+            let dst_rank = if dst_rank_val.is_int() {
+                dst_rank_val.as_i64() as usize
+            } else {
+                0
+            };
 
             if !tensor_ptr.is_null() && !group_ptr.is_null() {
                 let tensor_handle = unsafe { &*tensor_ptr };
                 let group_handle = unsafe { &*group_ptr };
-                if let Some(result) = dispatch_collective_gather(tensor_handle, dst_rank, group_handle) {
+                if let Some(result) =
+                    dispatch_collective_gather(tensor_handle, dst_rank, group_handle)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -2498,12 +2671,18 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let tensor_ptr = tensor_val.as_ptr::<TensorHandle>();
             let group_ptr = group_val.as_ptr::<ProcessGroupHandle>();
             let src_rank_val = state.get_reg(src_rank_reg);
-            let src_rank = if src_rank_val.is_int() { src_rank_val.as_i64() as usize } else { 0 };
+            let src_rank = if src_rank_val.is_int() {
+                src_rank_val.as_i64() as usize
+            } else {
+                0
+            };
 
             if !tensor_ptr.is_null() && !group_ptr.is_null() {
                 let tensor_handle = unsafe { &*tensor_ptr };
                 let group_handle = unsafe { &*group_ptr };
-                if let Some(result) = dispatch_collective_scatter(tensor_handle, src_rank, group_handle) {
+                if let Some(result) =
+                    dispatch_collective_scatter(tensor_handle, src_rank, group_handle)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -2518,7 +2697,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Gradient Operations (0xD2-0xD5)
         // ====================================================================
-
         Some(TensorSubOpcode::BucketGradients) => {
             let dst = read_reg(state)?;
             let gradients_reg = read_reg(state)?;
@@ -2527,7 +2705,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let gradients_val = state.get_reg(gradients_reg);
             let gradients_ptr = gradients_val.as_ptr::<TensorHandle>();
             let bucket_size_val = state.get_reg(bucket_size_reg);
-            let bucket_size = if bucket_size_val.is_int() { bucket_size_val.as_i64() as usize } else { 25_000_000 };
+            let bucket_size = if bucket_size_val.is_int() {
+                bucket_size_val.as_i64() as usize
+            } else {
+                25_000_000
+            };
 
             if !gradients_ptr.is_null() {
                 // BucketGradients takes a list of tensors; for single tensor, wrap it
@@ -2611,7 +2793,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Actor Mesh Operations (0xD6-0xD7)
         // ====================================================================
-
         Some(TensorSubOpcode::MeshSelect) => {
             let dst = read_reg(state)?;
             let mesh_reg = read_reg(state)?;
@@ -2655,7 +2836,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // RDMA Operations (0xD8-0xDB)
         // ====================================================================
-
         Some(TensorSubOpcode::RdmaCreateRef) => {
             let dst = read_reg(state)?;
             let tensor_reg = read_reg(state)?;
@@ -2732,7 +2912,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Regex Operations (0xE0-0xE3)
         // ====================================================================
-
         Some(TensorSubOpcode::RegexFindAll) => {
             let dst = read_reg(state)?;
             let pattern_reg = read_reg(state)?;
@@ -2740,10 +2919,24 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
 
             let pattern_val = state.get_reg(pattern_reg);
             let text_val = state.get_reg(text_reg);
-            let pattern_id = if pattern_val.is_int() { pattern_val.as_i64() as u32 } else { 0 };
-            let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
-            let pattern = state.module.get_string(crate::types::StringId(pattern_id)).unwrap_or("");
-            let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
+            let pattern_id = if pattern_val.is_int() {
+                pattern_val.as_i64() as u32
+            } else {
+                0
+            };
+            let text_id = if text_val.is_int() {
+                text_val.as_i64() as u32
+            } else {
+                0
+            };
+            let pattern = state
+                .module
+                .get_string(crate::types::StringId(pattern_id))
+                .unwrap_or("");
+            let text = state
+                .module
+                .get_string(crate::types::StringId(text_id))
+                .unwrap_or("");
 
             if let Some(_matches) = dispatch_regex_find_all(pattern, text) {
                 // Returning list of strings would need allocation
@@ -2763,12 +2956,33 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let pattern_val = state.get_reg(pattern_reg);
             let text_val = state.get_reg(text_reg);
             let replacement_val = state.get_reg(replacement_reg);
-            let pattern_id = if pattern_val.is_int() { pattern_val.as_i64() as u32 } else { 0 };
-            let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
-            let replacement_id = if replacement_val.is_int() { replacement_val.as_i64() as u32 } else { 0 };
-            let pattern = state.module.get_string(crate::types::StringId(pattern_id)).unwrap_or("");
-            let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
-            let replacement = state.module.get_string(crate::types::StringId(replacement_id)).unwrap_or("");
+            let pattern_id = if pattern_val.is_int() {
+                pattern_val.as_i64() as u32
+            } else {
+                0
+            };
+            let text_id = if text_val.is_int() {
+                text_val.as_i64() as u32
+            } else {
+                0
+            };
+            let replacement_id = if replacement_val.is_int() {
+                replacement_val.as_i64() as u32
+            } else {
+                0
+            };
+            let pattern = state
+                .module
+                .get_string(crate::types::StringId(pattern_id))
+                .unwrap_or("");
+            let text = state
+                .module
+                .get_string(crate::types::StringId(text_id))
+                .unwrap_or("");
+            let replacement = state
+                .module
+                .get_string(crate::types::StringId(replacement_id))
+                .unwrap_or("");
 
             if let Some(_result) = dispatch_regex_replace_all(pattern, text, replacement) {
                 state.set_reg(dst, Value::nil());
@@ -2785,10 +2999,24 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
 
             let pattern_val = state.get_reg(pattern_reg);
             let text_val = state.get_reg(text_reg);
-            let pattern_id = if pattern_val.is_int() { pattern_val.as_i64() as u32 } else { 0 };
-            let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
-            let pattern = state.module.get_string(crate::types::StringId(pattern_id)).unwrap_or("");
-            let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
+            let pattern_id = if pattern_val.is_int() {
+                pattern_val.as_i64() as u32
+            } else {
+                0
+            };
+            let text_id = if text_val.is_int() {
+                text_val.as_i64() as u32
+            } else {
+                0
+            };
+            let pattern = state
+                .module
+                .get_string(crate::types::StringId(pattern_id))
+                .unwrap_or("");
+            let text = state
+                .module
+                .get_string(crate::types::StringId(text_id))
+                .unwrap_or("");
 
             let is_match = dispatch_regex_is_match(pattern, text);
             state.set_reg(dst, Value::from_bool(is_match));
@@ -2802,10 +3030,24 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
 
             let pattern_val = state.get_reg(pattern_reg);
             let text_val = state.get_reg(text_reg);
-            let pattern_id = if pattern_val.is_int() { pattern_val.as_i64() as u32 } else { 0 };
-            let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
-            let pattern = state.module.get_string(crate::types::StringId(pattern_id)).unwrap_or("");
-            let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
+            let pattern_id = if pattern_val.is_int() {
+                pattern_val.as_i64() as u32
+            } else {
+                0
+            };
+            let text_id = if text_val.is_int() {
+                text_val.as_i64() as u32
+            } else {
+                0
+            };
+            let pattern = state
+                .module
+                .get_string(crate::types::StringId(pattern_id))
+                .unwrap_or("");
+            let text = state
+                .module
+                .get_string(crate::types::StringId(text_id))
+                .unwrap_or("");
 
             if let Some(_parts) = dispatch_regex_split(pattern, text) {
                 state.set_reg(dst, Value::nil());
@@ -2818,7 +3060,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Shape Manipulation Operations
         // ====================================================================
-
         Some(TensorSubOpcode::Squeeze) => {
             use super::super::super::tensor::tensor_squeeze;
 
@@ -2870,7 +3111,7 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         }
 
         Some(TensorSubOpcode::Cmp) => {
-            use super::super::super::tensor::{tensor_cmp, CompareOp};
+            use super::super::super::tensor::{CompareOp, tensor_cmp};
 
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
@@ -2952,8 +3193,16 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let max_val = state.get_reg(max_reg);
 
             let src_ptr = src_val.as_ptr::<TensorHandle>();
-            let min_f = if min_val.is_float() { min_val.as_f64() } else { min_val.as_i64() as f64 };
-            let max_f = if max_val.is_float() { max_val.as_f64() } else { max_val.as_i64() as f64 };
+            let min_f = if min_val.is_float() {
+                min_val.as_f64()
+            } else {
+                min_val.as_i64() as f64
+            };
+            let max_f = if max_val.is_float() {
+                max_val.as_f64()
+            } else {
+                max_val.as_i64() as f64
+            };
 
             if !src_ptr.is_null() {
                 let src = unsafe { &*src_ptr };
@@ -2997,7 +3246,6 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         // ====================================================================
         // Newly wired TensorSubOpcodes (31 ops)
         // ====================================================================
-
         Some(TensorSubOpcode::Clone) => {
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
@@ -3008,8 +3256,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = super::super::super::tensor::tensor_clone(src_handle) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3018,10 +3270,14 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let start = read_f64(state)?;
             let end = read_f64(state)?;
             let step = read_f64(state)?;
-            if let Some(result) = super::super::super::tensor::tensor_arange(start, end, step, DType::F64) {
+            if let Some(result) =
+                super::super::super::tensor::tensor_arange(start, end, step, DType::F64)
+            {
                 let ptr = Box::into_raw(Box::new(result));
                 state.set_reg(dst, Value::from_ptr(ptr));
-            } else { state.set_reg(dst, Value::nil()); }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3030,10 +3286,14 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let start = read_f64(state)?;
             let end = read_f64(state)?;
             let steps = read_varint(state)? as usize;
-            if let Some(result) = super::super::super::tensor::tensor_linspace(start, end, steps, DType::F64) {
+            if let Some(result) =
+                super::super::super::tensor::tensor_linspace(start, end, steps, DType::F64)
+            {
                 let ptr = Box::into_raw(Box::new(result));
                 state.set_reg(dst, Value::from_ptr(ptr));
-            } else { state.set_reg(dst, Value::nil()); }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3043,7 +3303,9 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             if let Some(result) = super::super::super::tensor::tensor_identity(n, DType::F64) {
                 let ptr = Box::into_raw(Box::new(result));
                 state.set_reg(dst, Value::from_ptr(ptr));
-            } else { state.set_reg(dst, Value::nil()); }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3051,11 +3313,15 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let dst = read_reg(state)?;
             let ndim = read_varint(state)? as usize;
             let mut shape = Vec::with_capacity(ndim);
-            for _ in 0..ndim { shape.push(read_varint(state)? as usize); }
+            for _ in 0..ndim {
+                shape.push(read_varint(state)? as usize);
+            }
             if let Some(result) = super::super::super::tensor::tensor_rand(&shape, DType::F64) {
                 let ptr = Box::into_raw(Box::new(result));
                 state.set_reg(dst, Value::from_ptr(ptr));
-            } else { state.set_reg(dst, Value::nil()); }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3073,8 +3339,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = super::super::super::tensor::tensor_dot(a_h, b_h) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3092,8 +3362,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = super::super::super::tensor::tensor_outer(a_h, b_h) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3112,8 +3386,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = super::super::super::tensor::tensor_lerp(a_h, b_h, t) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3126,8 +3404,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 let src_handle = unsafe { &*src_ptr };
                 if let Some(result) = super::super::super::tensor::tensor_det(src_handle) {
                     state.set_reg(dst, Value::from_f64(result));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3140,8 +3422,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 let src_handle = unsafe { &*src_ptr };
                 if let Some(result) = super::super::super::tensor::tensor_trace(src_handle) {
                     state.set_reg(dst, Value::from_f64(result));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3150,16 +3436,24 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let src_reg = read_reg(state)?;
             let ndim = read_varint(state)? as usize;
             let mut shape = Vec::with_capacity(ndim);
-            for _ in 0..ndim { shape.push(read_varint(state)? as usize); }
+            for _ in 0..ndim {
+                shape.push(read_varint(state)? as usize);
+            }
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some(result) = super::super::super::tensor::tensor_broadcast(src_handle, &shape) {
+                if let Some(result) =
+                    super::super::super::tensor::tensor_broadcast(src_handle, &shape)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3173,8 +3467,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = super::super::super::tensor::tensor_clone(src_handle) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3189,8 +3487,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = super::super::super::tensor::tensor_clone(src_handle) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3198,20 +3500,27 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let dst = read_reg(state)?;
             let count = read_varint(state)? as usize;
             let mut tensor_regs = Vec::with_capacity(count);
-            for _ in 0..count { tensor_regs.push(read_reg(state)?); }
+            for _ in 0..count {
+                tensor_regs.push(read_reg(state)?);
+            }
             let axis = read_varint(state)? as usize;
             let mut handles: Vec<*const TensorHandle> = Vec::with_capacity(count);
             for &reg in &tensor_regs {
                 let val = state.get_reg(reg);
                 let ptr = val.as_ptr::<TensorHandle>();
-                if ptr.is_null() { state.set_reg(dst, Value::nil()); return Ok(DispatchResult::Continue); }
+                if ptr.is_null() {
+                    state.set_reg(dst, Value::nil());
+                    return Ok(DispatchResult::Continue);
+                }
                 handles.push(ptr);
             }
             let refs: Vec<&TensorHandle> = handles.iter().map(|&p| unsafe { &*p }).collect();
             if let Some(result) = super::super::super::tensor::tensor_concat(&refs, axis) {
                 let ptr = Box::into_raw(Box::new(result));
                 state.set_reg(dst, Value::from_ptr(ptr));
-            } else { state.set_reg(dst, Value::nil()); }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3219,20 +3528,27 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let dst = read_reg(state)?;
             let count = read_varint(state)? as usize;
             let mut tensor_regs = Vec::with_capacity(count);
-            for _ in 0..count { tensor_regs.push(read_reg(state)?); }
+            for _ in 0..count {
+                tensor_regs.push(read_reg(state)?);
+            }
             let axis = read_varint(state)? as usize;
             let mut handles: Vec<*const TensorHandle> = Vec::with_capacity(count);
             for &reg in &tensor_regs {
                 let val = state.get_reg(reg);
                 let ptr = val.as_ptr::<TensorHandle>();
-                if ptr.is_null() { state.set_reg(dst, Value::nil()); return Ok(DispatchResult::Continue); }
+                if ptr.is_null() {
+                    state.set_reg(dst, Value::nil());
+                    return Ok(DispatchResult::Continue);
+                }
                 handles.push(ptr);
             }
             let refs: Vec<&TensorHandle> = handles.iter().map(|&p| unsafe { &*p }).collect();
             if let Some(result) = super::super::super::tensor::tensor_stack(&refs, axis) {
                 let ptr = Box::into_raw(Box::new(result));
                 state.set_reg(dst, Value::from_ptr(ptr));
-            } else { state.set_reg(dst, Value::nil()); }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3251,11 +3567,19 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some(result) = super::super::super::tensor::tensor_cumulative(src_handle, op, Some(axis as i32)) {
+                if let Some(result) = super::super::super::tensor::tensor_cumulative(
+                    src_handle,
+                    op,
+                    Some(axis as i32),
+                ) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3264,13 +3588,17 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let src_reg = read_reg(state)?;
             let count = read_varint(state)? as usize;
             let mut sizes = Vec::with_capacity(count);
-            for _ in 0..count { sizes.push(read_varint(state)? as usize); }
+            for _ in 0..count {
+                sizes.push(read_varint(state)? as usize);
+            }
             let axis = read_varint(state)? as usize;
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some(results) = super::super::super::tensor::tensor_split(src_handle, &sizes, axis) {
+                if let Some(results) =
+                    super::super::super::tensor::tensor_split(src_handle, &sizes, axis)
+                {
                     let mut values = Vec::with_capacity(results.len());
                     for r in results {
                         let ptr = Box::into_raw(Box::new(r));
@@ -3278,8 +3606,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     }
                     let list = alloc_list_from_values(state, values)?;
                     state.set_reg(dst, list);
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3293,11 +3625,19 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some((a, b)) = super::super::super::tensor::tensor_split_at(src_handle, pos, axis) {
+                if let Some((a, b)) =
+                    super::super::super::tensor::tensor_split_at(src_handle, pos, axis)
+                {
                     state.set_reg(dst1, Value::from_ptr(Box::into_raw(Box::new(a))));
                     state.set_reg(dst2, Value::from_ptr(Box::into_raw(Box::new(b))));
-                } else { state.set_reg(dst1, Value::nil()); state.set_reg(dst2, Value::nil()); }
-            } else { state.set_reg(dst1, Value::nil()); state.set_reg(dst2, Value::nil()); }
+                } else {
+                    state.set_reg(dst1, Value::nil());
+                    state.set_reg(dst2, Value::nil());
+                }
+            } else {
+                state.set_reg(dst1, Value::nil());
+                state.set_reg(dst2, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3312,8 +3652,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = dispatch_diag(src_handle, offset) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3328,8 +3672,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = dispatch_triu(src_handle, offset) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3344,8 +3692,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = dispatch_tril(src_handle, offset) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3359,8 +3711,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = dispatch_cholesky(src_handle, false) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3369,21 +3725,31 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let subscripts_id = read_varint(state)? as u32;
             let count = read_varint(state)? as usize;
             let mut tensor_regs = Vec::with_capacity(count);
-            for _ in 0..count { tensor_regs.push(read_reg(state)?); }
-            let equation = state.module.get_string(crate::types::StringId(subscripts_id))
-                .unwrap_or("").to_string();
+            for _ in 0..count {
+                tensor_regs.push(read_reg(state)?);
+            }
+            let equation = state
+                .module
+                .get_string(crate::types::StringId(subscripts_id))
+                .unwrap_or("")
+                .to_string();
             let mut handles: Vec<*const TensorHandle> = Vec::with_capacity(count);
             for &reg in &tensor_regs {
                 let val = state.get_reg(reg);
                 let ptr = val.as_ptr::<TensorHandle>();
-                if ptr.is_null() { state.set_reg(dst, Value::nil()); return Ok(DispatchResult::Continue); }
+                if ptr.is_null() {
+                    state.set_reg(dst, Value::nil());
+                    return Ok(DispatchResult::Continue);
+                }
                 handles.push(ptr);
             }
             let refs: Vec<&TensorHandle> = handles.iter().map(|&p| unsafe { &*p }).collect();
             if let Some(result) = dispatch_einsum(&equation, &refs) {
                 let ptr = Box::into_raw(Box::new(result));
                 state.set_reg(dst, Value::from_ptr(ptr));
-            } else { state.set_reg(dst, Value::nil()); }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3402,8 +3768,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = super::super::super::tensor::tensor_masked_fill(s, m, value) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3421,8 +3791,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = super::super::super::tensor::tensor_masked_select(s, m) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3436,8 +3810,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = super::super::super::tensor::tensor_nonzero(src_handle) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3449,11 +3827,17 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let idx_ptr = idx_val.as_ptr::<TensorHandle>();
             if !idx_ptr.is_null() {
                 let idx_handle = unsafe { &*idx_ptr };
-                if let Some(result) = super::super::super::tensor::tensor_one_hot(idx_handle, num_classes) {
+                if let Some(result) =
+                    super::super::super::tensor::tensor_one_hot(idx_handle, num_classes)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3466,8 +3850,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 let src_handle = unsafe { &*src_ptr };
                 if let Some(scalar) = src_handle.get_scalar_f64() {
                     state.set_reg(dst, Value::from_f64(scalar));
-                } else { state.set_reg(dst, Value::from_f64(0.0)); }
-            } else { state.set_reg(dst, Value::from_f64(0.0)); }
+                } else {
+                    state.set_reg(dst, Value::from_f64(0.0));
+                }
+            } else {
+                state.set_reg(dst, Value::from_f64(0.0));
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3483,13 +3871,19 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     if result.numel > 0 {
                         let data_ptr = result.data_ptr_f64_mut();
                         if !data_ptr.is_null() {
-                            unsafe { *data_ptr = value; }
+                            unsafe {
+                                *data_ptr = value;
+                            }
                         }
                     }
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3508,8 +3902,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 if let Some(result) = super::super::super::tensor::tensor_index_select(s, i, axis) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3521,11 +3919,17 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some(result) = super::super::super::tensor::tensor_leaky_relu(src_handle, alpha) {
+                if let Some(result) =
+                    super::super::super::tensor::tensor_leaky_relu(src_handle, alpha)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
-                } else { state.set_reg(dst, Value::nil()); }
-            } else { state.set_reg(dst, Value::nil()); }
+                } else {
+                    state.set_reg(dst, Value::nil());
+                }
+            } else {
+                state.set_reg(dst, Value::nil());
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3540,7 +3944,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     let dst = read_reg(state)?;
                     let input_reg = read_reg(state)?;
                     let gamma_flag = read_u8(state)?;
-                    let gamma_reg = if gamma_flag != 0 { Some(read_reg(state)?) } else { None };
+                    let gamma_reg = if gamma_flag != 0 {
+                        Some(read_reg(state)?)
+                    } else {
+                        None
+                    };
                     let eps_bits = read_u32(state)?;
                     let eps = f32::from_bits(eps_bits) as f64;
 
@@ -3553,10 +3961,18 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                         let gamma_handle: Option<&TensorHandle> = gamma_reg.and_then(|g_reg| {
                             let g_val = state.get_reg(g_reg);
                             let g_ptr = g_val.as_ptr::<TensorHandle>();
-                            if !g_ptr.is_null() { Some(unsafe { &*g_ptr }) } else { None }
+                            if !g_ptr.is_null() {
+                                Some(unsafe { &*g_ptr })
+                            } else {
+                                None
+                            }
                         });
                         // Delegate to tensor_rms_norm helper
-                        if let Some(result) = super::super::super::tensor::tensor_rms_norm(input_handle, gamma_handle, eps) {
+                        if let Some(result) = super::super::super::tensor::tensor_rms_norm(
+                            input_handle,
+                            gamma_handle,
+                            eps,
+                        ) {
                             let ptr = Box::into_raw(Box::new(result));
                             state.set_reg(dst, Value::from_ptr(ptr));
                         } else {
@@ -3576,7 +3992,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     let k_reg = read_reg(state)?;
                     let v_reg = read_reg(state)?;
                     let mask_flag = read_u8(state)?;
-                    let _mask_reg = if mask_flag != 0 { Some(read_reg(state)?) } else { None };
+                    let _mask_reg = if mask_flag != 0 {
+                        Some(read_reg(state)?)
+                    } else {
+                        None
+                    };
                     let scale_reg = read_reg(state)?;
                     let causal = read_u8(state)? != 0;
 
@@ -3614,8 +4034,16 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                                     }
                                     let mut dot = 0.0;
                                     for dk in 0..d_k {
-                                        let qi = if i * d_k + dk < q.numel { *q_data.add(i * d_k + dk) } else { 0.0 };
-                                        let kj = if j * d_k + dk < k.numel { *k_data.add(j * d_k + dk) } else { 0.0 };
+                                        let qi = if i * d_k + dk < q.numel {
+                                            *q_data.add(i * d_k + dk)
+                                        } else {
+                                            0.0
+                                        };
+                                        let kj = if j * d_k + dk < k.numel {
+                                            *k_data.add(j * d_k + dk)
+                                        } else {
+                                            0.0
+                                        };
                                         dot += qi * kj;
                                     }
                                     scores[i * seq_len + j] = dot * scale_val;
@@ -3661,7 +4089,11 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                                         for j in 0..seq_len {
                                             let s = scores[i * seq_len + j];
                                             for d in 0..v_dim {
-                                                let vj = if j * v_dim + d < v.numel { *v_data.add(j * v_dim + d) } else { 0.0 };
+                                                let vj = if j * v_dim + d < v.numel {
+                                                    *v_data.add(j * v_dim + d)
+                                                } else {
+                                                    0.0
+                                                };
                                                 *out_ptr.add(i * v_dim + d) += s * vj;
                                             }
                                         }
@@ -3740,7 +4172,12 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
 
                         // Clone src into mutable result, then scatter values into it
                         if let Some(mut result) = tensor_clone(src) {
-                            let _ = super::super::super::tensor::tensor_scatter(&mut result, values, index, axis as usize);
+                            let _ = super::super::super::tensor::tensor_scatter(
+                                &mut result,
+                                values,
+                                index,
+                                axis as usize,
+                            );
                             let ptr = Box::into_raw(Box::new(result));
                             state.set_reg(dst, Value::from_ptr(ptr));
                         } else {
@@ -3826,7 +4263,8 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     // Allocate new memory ID (incrementing counter)
                     let dst = read_reg(state)?;
                     // Use a simple atomic counter
-                    static NEXT_MEM_ID: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+                    static NEXT_MEM_ID: std::sync::atomic::AtomicI64 =
+                        std::sync::atomic::AtomicI64::new(1);
                     let id = NEXT_MEM_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     state.set_reg(dst, Value::from_i64(id));
                     Ok(DispatchResult::Continue)
@@ -3866,10 +4304,24 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     let text_reg = read_reg(state)?;
                     let pattern_val = state.get_reg(pattern_reg);
                     let text_val = state.get_reg(text_reg);
-                    let pattern_id = if pattern_val.is_int() { pattern_val.as_i64() as u32 } else { 0 };
-                    let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
-                    let pattern = state.module.get_string(crate::types::StringId(pattern_id)).unwrap_or("");
-                    let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
+                    let pattern_id = if pattern_val.is_int() {
+                        pattern_val.as_i64() as u32
+                    } else {
+                        0
+                    };
+                    let text_id = if text_val.is_int() {
+                        text_val.as_i64() as u32
+                    } else {
+                        0
+                    };
+                    let pattern = state
+                        .module
+                        .get_string(crate::types::StringId(pattern_id))
+                        .unwrap_or("");
+                    let text = state
+                        .module
+                        .get_string(crate::types::StringId(text_id))
+                        .unwrap_or("");
                     let _maybe_match = dispatch_regex_find(pattern, text);
                     state.set_reg(dst, Value::nil());
                     Ok(DispatchResult::Continue)
@@ -3883,12 +4335,33 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     let pattern_val = state.get_reg(pattern_reg);
                     let text_val = state.get_reg(text_reg);
                     let replacement_val = state.get_reg(replacement_reg);
-                    let pattern_id = if pattern_val.is_int() { pattern_val.as_i64() as u32 } else { 0 };
-                    let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
-                    let replacement_id = if replacement_val.is_int() { replacement_val.as_i64() as u32 } else { 0 };
-                    let pattern = state.module.get_string(crate::types::StringId(pattern_id)).unwrap_or("");
-                    let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
-                    let replacement = state.module.get_string(crate::types::StringId(replacement_id)).unwrap_or("");
+                    let pattern_id = if pattern_val.is_int() {
+                        pattern_val.as_i64() as u32
+                    } else {
+                        0
+                    };
+                    let text_id = if text_val.is_int() {
+                        text_val.as_i64() as u32
+                    } else {
+                        0
+                    };
+                    let replacement_id = if replacement_val.is_int() {
+                        replacement_val.as_i64() as u32
+                    } else {
+                        0
+                    };
+                    let pattern = state
+                        .module
+                        .get_string(crate::types::StringId(pattern_id))
+                        .unwrap_or("");
+                    let text = state
+                        .module
+                        .get_string(crate::types::StringId(text_id))
+                        .unwrap_or("");
+                    let replacement = state
+                        .module
+                        .get_string(crate::types::StringId(replacement_id))
+                        .unwrap_or("");
                     let _maybe_text = dispatch_regex_replace(pattern, text, replacement);
                     state.set_reg(dst, Value::nil());
                     Ok(DispatchResult::Continue)
@@ -3900,10 +4373,24 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     let text_reg = read_reg(state)?;
                     let pattern_val = state.get_reg(pattern_reg);
                     let text_val = state.get_reg(text_reg);
-                    let pattern_id = if pattern_val.is_int() { pattern_val.as_i64() as u32 } else { 0 };
-                    let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
-                    let pattern = state.module.get_string(crate::types::StringId(pattern_id)).unwrap_or("");
-                    let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
+                    let pattern_id = if pattern_val.is_int() {
+                        pattern_val.as_i64() as u32
+                    } else {
+                        0
+                    };
+                    let text_id = if text_val.is_int() {
+                        text_val.as_i64() as u32
+                    } else {
+                        0
+                    };
+                    let pattern = state
+                        .module
+                        .get_string(crate::types::StringId(pattern_id))
+                        .unwrap_or("");
+                    let text = state
+                        .module
+                        .get_string(crate::types::StringId(text_id))
+                        .unwrap_or("");
                     let _maybe_caps = dispatch_regex_captures(pattern, text);
                     state.set_reg(dst, Value::nil());
                     Ok(DispatchResult::Continue)
@@ -3923,9 +4410,7 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 // remain available for code that wants to surface
                 // a typed Result instead of a panic.
                 Some(TensorExtSubOpcode::PermissionAssert) => {
-                    use crate::interpreter::permission::{
-                        PermissionDecision, PermissionScope,
-                    };
+                    use crate::interpreter::permission::{PermissionDecision, PermissionScope};
                     let scope_byte = read_u8(state)?;
                     let target_reg = read_reg(state)?;
                     let target_val = state.get_reg(target_reg);
@@ -3955,10 +4440,7 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                             // surrounding catch frame sees this
                             // as a PermissionDenied panic and can
                             // pattern-match on it.
-                            let message = format!(
-                                "permission denied: {:?}({})",
-                                scope, target_id
-                            );
+                            let message = format!("permission denied: {:?}({})", scope, target_id);
                             Err(InterpreterError::Panic { message })
                         }
                     }
@@ -3971,9 +4453,7 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 // 1 (Deny). The router itself holds the warm-path
                 // cache so repeats hit ≤2ns regardless of scope.
                 Some(TensorExtSubOpcode::PermissionCheckWire) => {
-                    use crate::interpreter::permission::{
-                        PermissionDecision, PermissionScope,
-                    };
+                    use crate::interpreter::permission::{PermissionDecision, PermissionScope};
                     let dst = read_reg(state)?;
                     let scope_reg = read_reg(state)?;
                     let target_reg = read_reg(state)?;
@@ -4052,12 +4532,10 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     Ok(DispatchResult::Continue)
                 }
 
-                None => {
-                    Err(InterpreterError::NotImplemented {
-                        feature: "tensor sub-opcode",
-                        opcode: Some(Opcode::TensorExtended),
-                    })
-                }
+                None => Err(InterpreterError::NotImplemented {
+                    feature: "tensor sub-opcode",
+                    opcode: Some(Opcode::TensorExtended),
+                }),
             }
         }
     }

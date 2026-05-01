@@ -29,16 +29,16 @@ use std::fs::File;
 use std::io::Write;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
-use verum_ast::{Expr, FunctionDecl, FunctionParamKind, ItemKind, Module, Type, TypeKind};
 use verum_ast::decl::TheoremDecl;
+use verum_ast::{Expr, FunctionDecl, FunctionParamKind, ItemKind, Module, Type, TypeKind};
 use verum_common::span::Span;
 use verum_smt::{
     Context as SmtContext, ContextConfig, Translator, VerificationError,
+    proof_search::ProofSearchEngine,
     verification_cache::{
         CacheConfig, DistributedCacheConfig as VerifyDistributedCacheConfig,
         TrustLevel as VerifyTrustLevel, VerificationCache,
     },
-    proof_search::ProofSearchEngine,
 };
 
 use verum_common::{List, Map, Text, ToText};
@@ -145,9 +145,7 @@ impl<'s> VerifyCommand<'s> {
             trust,
             verify_signatures: trust != VerifyTrustLevel::All,
         };
-        VerificationCache::with_config(
-            CacheConfig::default().with_distributed_cache(dc_config),
-        )
+        VerificationCache::with_config(CacheConfig::default().with_distributed_cache(dc_config))
     }
 
     /// Record a discharged obligation's elapsed time. Called by the
@@ -267,8 +265,7 @@ impl<'s> VerifyCommand<'s> {
         // map through to `verify_proof_body_with_aliases`, which uses it to
         // turn `n: FanoDim` into the implicit hypothesis `n == 7` without
         // forcing the author to repeat the refinement via `requires`.
-        let alias_map =
-            crate::phases::proof_verification::build_refinement_alias_map(module);
+        let alias_map = crate::phases::proof_verification::build_refinement_alias_map(module);
 
         // Pre-populate a hints database with every sibling theorem / lemma /
         // corollary / axiom in this module so `apply <name>` can find them.
@@ -294,8 +291,7 @@ impl<'s> VerifyCommand<'s> {
         // emitting `FuncDecl`s so Bool-returning functions translate
         // to Bool sort (and not the Int-default that breaks
         // `exists p: Nat. is_prime(p)`-style goals).
-        let mut callee_signatures_for_module: Vec<(Text, Vec<Text>, Text)> =
-            Vec::new();
+        let mut callee_signatures_for_module: Vec<(Text, Vec<Text>, Text)> = Vec::new();
         for item in &module.items {
             if let ItemKind::Function(fd) = &item.kind {
                 if let Some(rf) = verum_smt::expr_to_smtlib::try_reflect_function(fd) {
@@ -330,8 +326,7 @@ impl<'s> VerifyCommand<'s> {
         // These are asserted on the solver so claims like
         //  theorem variants_distinct(): T.A != T.B
         // close automatically.
-        let variant_axioms =
-            crate::phases::proof_verification::variant_disjointness_axioms(module);
+        let variant_axioms = crate::phases::proof_verification::variant_disjointness_axioms(module);
 
         // Variant-type registry — (name, ctor-names) pairs for
         // every `type T is A | B | C;`. Threaded to each theorem
@@ -396,10 +391,7 @@ impl<'s> VerifyCommand<'s> {
                     for t in obligation_timings {
                         timings_list.push(t);
                     }
-                    report.add_obligation_timings(
-                        func.name.as_str().to_text(),
-                        timings_list,
-                    );
+                    report.add_obligation_timings(func.name.as_str().to_text(), timings_list);
                 }
 
                 // Profile if enabled (extract location before mutable borrow)
@@ -474,8 +466,13 @@ impl<'s> VerifyCommand<'s> {
                 }
             }
 
-            debug!("Verifying {} '{}' ({} requires, {} ensures)",
-                kind_name, thm.name, thm.requires.len(), thm.ensures.len());
+            debug!(
+                "Verifying {} '{}' ({} requires, {} ensures)",
+                kind_name,
+                thm.name,
+                thm.requires.len(),
+                thm.ensures.len()
+            );
 
             // Check budget before starting
             if self.budget_tracker.should_stop() {
@@ -487,9 +484,15 @@ impl<'s> VerifyCommand<'s> {
             }
 
             let result = self.verify_theorem(
-                thm, kind_name, timeout, &alias_map, &module_hints,
-                &reflection_registry, &callee_signatures_for_module,
-                &variant_axioms, &variant_registry,
+                thm,
+                kind_name,
+                timeout,
+                &alias_map,
+                &module_hints,
+                &reflection_registry,
+                &callee_signatures_for_module,
+                &variant_axioms,
+                &variant_registry,
             );
 
             // Note: Profiler is not used for theorem verification (different result type)
@@ -508,10 +511,7 @@ impl<'s> VerifyCommand<'s> {
                 _ => {}
             }
 
-            report.add_result(
-                format!("{} {}", kind_name, thm.name).to_text(),
-                result,
-            );
+            report.add_result(format!("{} {}", kind_name, thm.name).to_text(), result);
         }
 
         Ok(report)
@@ -540,7 +540,10 @@ impl<'s> VerifyCommand<'s> {
 
         // Theorems without proof bodies are axioms - accept them
         if theorem.proof.is_none() {
-            info!("{} '{}' accepted as axiom (no proof body)", kind_name, theorem.name);
+            info!(
+                "{} '{}' accepted as axiom (no proof body)",
+                kind_name, theorem.name
+            );
             return VerificationResult::Proved {
                 elapsed: start.elapsed(),
             };
@@ -581,11 +584,7 @@ impl<'s> VerifyCommand<'s> {
         //  theorem t(): exists p: Nat. is_prime(p)
         // fail with "exists body must be a boolean expression".
         for (name, ps, r) in callee_signatures_for_module {
-            proof_engine.register_callee_signature(
-                name.clone(),
-                ps.clone(),
-                r.clone(),
-            );
+            proof_engine.register_callee_signature(name.clone(), ps.clone(), r.clone());
         }
 
         // Register variant-disjointness axioms (computed once per
@@ -620,7 +619,11 @@ impl<'s> VerifyCommand<'s> {
                     theorem.name,
                     cert.steps.len(),
                     cert.total_duration.as_secs_f64() * 1000.0,
-                    if has_incomplete { " [incomplete: uses admit/sorry]" } else { "" }
+                    if has_incomplete {
+                        " [incomplete: uses admit/sorry]"
+                    } else {
+                        ""
+                    }
                 );
                 VerificationResult::Proved {
                     elapsed: start.elapsed(),
@@ -632,7 +635,12 @@ impl<'s> VerifyCommand<'s> {
                     if !first.suggestions.is_empty() {
                         msg.push_str(&format!(
                             " (hint: {})",
-                            first.suggestions.iter().next().map(|s| s.as_str()).unwrap_or("")
+                            first
+                                .suggestions
+                                .iter()
+                                .next()
+                                .map(|s| s.as_str())
+                                .unwrap_or("")
                         ));
                     }
                     msg
@@ -679,8 +687,7 @@ impl<'s> VerifyCommand<'s> {
         // precondition without repeating it in a `requires` clause.
         let has_requires = !func.requires.is_empty();
         let has_ensures = !func.ensures.is_empty();
-        let has_refined_params =
-            self.has_refinement_types_in_params_with_aliases(func, alias_map);
+        let has_refined_params = self.has_refinement_types_in_params_with_aliases(func, alias_map);
         let has_refined_return =
             self.has_refinement_type_with_aliases(&func.return_type, alias_map);
 
@@ -688,8 +695,7 @@ impl<'s> VerifyCommand<'s> {
         // refinements on parameters. For `fn foo(p: PageNo)` where
         // `type PageNo is Int where |n| { n >= 1 }`, this adds an
         // expression equivalent to `p >= 1` to the requires set.
-        let implicit_requires =
-            self.synthesize_alias_refinement_requires(func, alias_map);
+        let implicit_requires = self.synthesize_alias_refinement_requires(func, alias_map);
         let has_implicit_requires = !implicit_requires.is_empty();
 
         if !has_requires
@@ -720,9 +726,15 @@ impl<'s> VerifyCommand<'s> {
         // + inline refinement predicates.
         let effective_requires: List<Expr> = {
             let mut list = List::new();
-            for e in &func.requires { list.push(e.clone()); }
-            for e in &implicit_requires { list.push(e.clone()); }
-            for e in &inline_refinement_requires { list.push(e.clone()); }
+            for e in &func.requires {
+                list.push(e.clone());
+            }
+            for e in &implicit_requires {
+                list.push(e.clone());
+            }
+            for e in &inline_refinement_requires {
+                list.push(e.clone());
+            }
             list
         };
 
@@ -788,8 +800,7 @@ impl<'s> VerifyCommand<'s> {
             );
         }
         for (name, ps, r) in callee_signatures_for_module {
-            let param_sorts: Vec<String> =
-                ps.iter().map(|s| s.as_str().to_string()).collect();
+            let param_sorts: Vec<String> = ps.iter().map(|s| s.as_str().to_string()).collect();
             translator.register_callee_signature(
                 name.as_str(),
                 param_sorts,
@@ -938,7 +949,9 @@ impl<'s> VerifyCommand<'s> {
         func: &FunctionDecl,
         alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
     ) -> bool {
-        if self.has_refinement_types_in_params(func) { return true; }
+        if self.has_refinement_types_in_params(func) {
+            return true;
+        }
         func.params.iter().any(|p| {
             if let FunctionParamKind::Regular { pattern: _, ty, .. } = &p.kind {
                 self.type_has_refinement_with_aliases(ty, alias_map)
@@ -969,29 +982,36 @@ impl<'s> VerifyCommand<'s> {
     ) -> bool {
         match &ty.kind {
             TypeKind::Refined { .. } => true,
-            TypeKind::Path(path) => {
-                path.as_ident()
-                    .map(|id| alias_map.contains_key(&id.name))
-                    .unwrap_or(false)
-            }
+            TypeKind::Path(path) => path
+                .as_ident()
+                .map(|id| alias_map.contains_key(&id.name))
+                .unwrap_or(false),
             TypeKind::Generic { base, args } => {
                 self.type_has_refinement_with_aliases(base, alias_map)
                     || args.iter().any(|arg| {
                         if let verum_ast::ty::GenericArg::Type(t) = arg {
                             self.type_has_refinement_with_aliases(t, alias_map)
-                        } else { false }
+                        } else {
+                            false
+                        }
                     })
             }
-            TypeKind::Tuple(types) => {
-                types.iter().any(|t| self.type_has_refinement_with_aliases(t, alias_map))
-            }
+            TypeKind::Tuple(types) => types
+                .iter()
+                .any(|t| self.type_has_refinement_with_aliases(t, alias_map)),
             TypeKind::Reference { inner, .. }
             | TypeKind::CheckedReference { inner, .. }
             | TypeKind::UnsafeReference { inner, .. } => {
                 self.type_has_refinement_with_aliases(inner, alias_map)
             }
-            TypeKind::Function { params, return_type, .. } => {
-                params.iter().any(|t| self.type_has_refinement_with_aliases(t, alias_map))
+            TypeKind::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                params
+                    .iter()
+                    .any(|t| self.type_has_refinement_with_aliases(t, alias_map))
                     || self.type_has_refinement_with_aliases(return_type, alias_map)
             }
             _ => false,
@@ -1011,19 +1031,30 @@ impl<'s> VerifyCommand<'s> {
         use crate::phases::proof_verification::substitute_ident;
         let mut out: Vec<Expr> = Vec::new();
         for param in &func.params {
-            let FunctionParamKind::Regular { pattern, ty, .. } = &param.kind else { continue; };
-            let Some(param_name) = self.extract_param_name(pattern) else { continue; };
+            let FunctionParamKind::Regular { pattern, ty, .. } = &param.kind else {
+                continue;
+            };
+            let Some(param_name) = self.extract_param_name(pattern) else {
+                continue;
+            };
             // Follow the alias chain on the declared type.
             let alias_name = match &ty.kind {
                 TypeKind::Path(p) => p.as_ident().map(|id| id.name.clone()),
                 _ => None,
             };
-            let Some(alias_name) = alias_name else { continue; };
-            let Some(preds) = alias_map.get(&alias_name) else { continue; };
+            let Some(alias_name) = alias_name else {
+                continue;
+            };
+            let Some(preds) = alias_map.get(&alias_name) else {
+                continue;
+            };
             for pred in preds {
                 let substituted = substitute_ident(
                     pred,
-                    &[(Text::from("self"), verum_ast::ty::Ident::new(param_name.as_str(), pred.span))],
+                    &[(
+                        Text::from("self"),
+                        verum_ast::ty::Ident::new(param_name.as_str(), pred.span),
+                    )],
                 );
                 out.push(substituted);
             }
@@ -1190,8 +1221,8 @@ impl<'s> VerifyCommand<'s> {
         // that's weaker but sound for existential reading of `ensures`.
         if let verum_common::Maybe::Some(b) = body {
             use verum_ast::decl::FunctionBody;
-            use verum_ast::stmt::StmtKind;
             use verum_ast::pattern::PatternKind;
+            use verum_ast::stmt::StmtKind;
 
             // Assert each `let name = expr;` in the block's statement
             // list as a fresh Z3 binding so the tail expression can
@@ -1211,7 +1242,11 @@ impl<'s> VerifyCommand<'s> {
                 FunctionBody::Block(blk) => {
                     for stmt in &blk.stmts {
                         match &stmt.kind {
-                            StmtKind::Let { pattern, value: verum_common::Maybe::Some(val), .. } => {
+                            StmtKind::Let {
+                                pattern,
+                                value: verum_common::Maybe::Some(val),
+                                ..
+                            } => {
                                 if let PatternKind::Ident { name, .. } = &pattern.kind {
                                     if let Ok(val_z3) = translator.translate_expr(val) {
                                         let n = name.as_str();
@@ -1228,7 +1263,10 @@ impl<'s> VerifyCommand<'s> {
                                     }
                                 }
                             }
-                            StmtKind::Expr { expr, has_semi: false } => {
+                            StmtKind::Expr {
+                                expr,
+                                has_semi: false,
+                            } => {
                                 // Tail expression appearing as the final
                                 // stmt (block without separate `.expr`
                                 // — some parser shapes produce this).
@@ -1330,11 +1368,8 @@ impl<'s> VerifyCommand<'s> {
                                 };
                                 solver.pop(1);
                                 return Err(VerifyError::Failed(
-                                    format!(
-                                        "Postcondition violation\n{}",
-                                        ce_summary.as_str()
-                                    )
-                                    .to_text(),
+                                    format!("Postcondition violation\n{}", ce_summary.as_str())
+                                        .to_text(),
                                     ce_opt,
                                 ));
                             }
@@ -1352,8 +1387,7 @@ impl<'s> VerifyCommand<'s> {
                                 // the ensures holds. If CVC5 also
                                 // returns Unknown we surface the
                                 // timeout as before.
-                                let cvc5_result =
-                                    self.cvc5_discharge_negated(ens, requires);
+                                let cvc5_result = self.cvc5_discharge_negated(ens, requires);
                                 solver.pop(1);
                                 match cvc5_result {
                                     Cvc5Outcome::Valid => {
@@ -1387,10 +1421,7 @@ impl<'s> VerifyCommand<'s> {
             // obligation row in the `--profile-obligation`
             // breakdown. Label is `ensures[i]` so multi-clause
             // functions surface which specific clause dominates.
-            self.record_obligation(
-                &format!("ensures[{}]", ens_idx),
-                ens_start.elapsed(),
-            );
+            self.record_obligation(&format!("ensures[{}]", ens_idx), ens_start.elapsed());
         }
 
         Ok(())
@@ -1399,11 +1430,7 @@ impl<'s> VerifyCommand<'s> {
     /// Outcome of a CVC5 fallback check for a function ensures.
     /// Same trichotomy Z3 uses: Valid (ensures holds), Invalid
     /// (counterexample), Unknown (solver can't decide).
-    fn cvc5_discharge_negated(
-        &self,
-        ensures: &Expr,
-        requires: &[Expr],
-    ) -> Cvc5Outcome {
+    fn cvc5_discharge_negated(&self, ensures: &Expr, requires: &[Expr]) -> Cvc5Outcome {
         use verum_smt::cvc5_backend::{Cvc5Backend, Cvc5Config, SatResult};
         let mut cvc5 = match Cvc5Backend::new(Cvc5Config::default()) {
             Ok(b) => b,
@@ -1565,12 +1592,11 @@ impl<'s> VerifyCommand<'s> {
         // render true per-obligation rows (function.obligation,
         // one row per discharge). Otherwise fall back to the
         // function-granular view (one row per function).
-        let rows: Vec<(Text, Duration)> =
-            if report.total_obligation_count() > 0 {
-                self.collect_per_obligation_rows(report)
-            } else {
-                self.collect_per_function_rows(report)
-            };
+        let rows: Vec<(Text, Duration)> = if report.total_obligation_count() > 0 {
+            self.collect_per_obligation_rows(report)
+        } else {
+            self.collect_per_function_rows(report)
+        };
 
         if rows.is_empty() {
             println!("  (no obligations discharged in this run)");
@@ -1588,8 +1614,7 @@ impl<'s> VerifyCommand<'s> {
         );
         println!("  {}", "-".repeat(64));
 
-        let total_ms: f64 =
-            sorted.iter().map(|(_, d)| d.as_secs_f64() * 1000.0).sum();
+        let total_ms: f64 = sorted.iter().map(|(_, d)| d.as_secs_f64() * 1000.0).sum();
 
         for (name, elapsed) in sorted.iter().take(take) {
             let ms = elapsed.as_secs_f64() * 1000.0;
@@ -1598,12 +1623,7 @@ impl<'s> VerifyCommand<'s> {
             } else {
                 0.0
             };
-            println!(
-                "  {:<40} {:>12.1} {:>9.1}%",
-                name.as_str(),
-                ms,
-                share
-            );
+            println!("  {:<40} {:>12.1} {:>9.1}%", name.as_str(), ms, share);
         }
 
         if sorted.len() > take {
@@ -1619,18 +1639,11 @@ impl<'s> VerifyCommand<'s> {
     /// Collect rows from instrumented per-obligation timings.
     /// Row label is `function.obligation` so the renderer can
     /// tell which function each obligation came from.
-    fn collect_per_obligation_rows(
-        &self,
-        report: &VerificationReport,
-    ) -> Vec<(Text, Duration)> {
+    fn collect_per_obligation_rows(&self, report: &VerificationReport) -> Vec<(Text, Duration)> {
         let mut rows = Vec::new();
         for (fn_name, timings) in &report.obligation_timings {
             for (label, elapsed) in timings {
-                let composite = Text::from(format!(
-                    "{}.{}",
-                    fn_name.as_str(),
-                    label.as_str()
-                ));
+                let composite = Text::from(format!("{}.{}", fn_name.as_str(), label.as_str()));
                 rows.push((composite, *elapsed));
             }
         }
@@ -1640,10 +1653,7 @@ impl<'s> VerifyCommand<'s> {
     /// Collect rows from function-granular aggregate timings.
     /// Used when obligation-level instrumentation is
     /// unavailable. One row per function.
-    fn collect_per_function_rows(
-        &self,
-        report: &VerificationReport,
-    ) -> Vec<(Text, Duration)> {
+    fn collect_per_function_rows(&self, report: &VerificationReport) -> Vec<(Text, Duration)> {
         let mut rows = Vec::new();
         for (name, result) in &report.results {
             let elapsed = match result {
@@ -1878,11 +1888,7 @@ impl VerificationReport {
 
     /// Multiple calls for the same function name append to
     /// the existing timing list, preserving discharge order.
-    pub fn add_obligation_timings(
-        &mut self,
-        function: Text,
-        timings: List<(Text, Duration)>,
-    ) {
+    pub fn add_obligation_timings(&mut self, function: Text, timings: List<(Text, Duration)>) {
         // Look up existing entry for this function; append or
         // create. List<(K, V)> is the stdlib pattern for
         // order-preserving maps — we match it here.
@@ -1899,10 +1905,7 @@ impl VerificationReport {
 
     /// Return the per-obligation timings for `function`, or
     /// empty if none were recorded.
-    pub fn obligation_timings_for(
-        &self,
-        function: &str,
-    ) -> &[(Text, Duration)] {
+    pub fn obligation_timings_for(&self, function: &str) -> &[(Text, Duration)] {
         for (name, timings) in &self.obligation_timings {
             if name.as_str() == function {
                 return timings.as_slice();
@@ -1916,10 +1919,7 @@ impl VerificationReport {
     /// is available — the caller should fall back to the
     /// function-granular view.
     pub fn total_obligation_count(&self) -> usize {
-        self.obligation_timings
-            .iter()
-            .map(|(_, t)| t.len())
-            .sum()
+        self.obligation_timings.iter().map(|(_, t)| t.len()).sum()
     }
 
     /// Count of successfully proved functions
@@ -2076,10 +2076,7 @@ fn build_counterexample_from_model(model: &z3::Model) -> verum_smt::CounterExamp
             CounterExampleValue::Bool(false)
         } else if let Ok(f) = as_text.parse::<f64>() {
             CounterExampleValue::Float(f)
-        } else if as_text.starts_with('"')
-            && as_text.ends_with('"')
-            && as_text.len() >= 2
-        {
+        } else if as_text.starts_with('"') && as_text.ends_with('"') && as_text.len() >= 2 {
             CounterExampleValue::Text(Text::from(&as_text[1..as_text.len() - 1]))
         } else {
             CounterExampleValue::Unknown(Text::from(as_text.clone()))
@@ -2088,10 +2085,7 @@ fn build_counterexample_from_model(model: &z3::Model) -> verum_smt::CounterExamp
         assignments.insert(Text::from(name.as_str()), value);
     }
 
-    CounterExample::new(
-        assignments,
-        Text::from("postcondition violation"),
-    )
+    CounterExample::new(assignments, Text::from("postcondition violation"))
 }
 
 // ==================== JSON Export Structures ====================
@@ -2207,10 +2201,7 @@ mod trust_level_tests {
         // silently downgrades to a different trust stance.
         assert_eq!(parse_trust_level(None), VerifyTrustLevel::Signatures);
         assert_eq!(parse_trust_level(Some("")), VerifyTrustLevel::Signatures);
-        assert_eq!(
-            parse_trust_level(Some("   ")),
-            VerifyTrustLevel::Signatures
-        );
+        assert_eq!(parse_trust_level(Some("   ")), VerifyTrustLevel::Signatures);
     }
 
     #[test]

@@ -111,22 +111,14 @@ impl CheckResult {
                 elapsed,
                 ..
             } => FormatStatus::Passed {
-                message: Text::from(format!(
-                    "{} ({}ms)",
-                    tool_version,
-                    elapsed.as_millis()
-                )),
+                message: Text::from(format!("{} ({}ms)", tool_version, elapsed.as_millis())),
             },
             CheckResult::Failed {
                 exit_code,
                 stderr_excerpt,
                 ..
             } => FormatStatus::Failed {
-                reason: Text::from(format!(
-                    "exit {}: {}",
-                    exit_code,
-                    stderr_excerpt.trim()
-                )),
+                reason: Text::from(format!("exit {}: {}", exit_code, stderr_excerpt.trim())),
             },
             CheckResult::ToolMissing { install_hint } => FormatStatus::NotRun {
                 reason: Text::from(format!("tool missing — {}", install_hint)),
@@ -276,9 +268,15 @@ fn excerpt_utf8(bytes: &[u8], max_bytes: usize) -> String {
 pub struct CoqChecker;
 
 impl ForeignSystemChecker for CoqChecker {
-    fn format(&self) -> ExportFormat { ExportFormat::Coq }
-    fn is_available(&self) -> bool { is_tool_on_path("coqc") }
-    fn install_hint(&self) -> &'static str { "brew install coq  /  apt install coq  /  opam install coq" }
+    fn format(&self) -> ExportFormat {
+        ExportFormat::Coq
+    }
+    fn is_available(&self) -> bool {
+        is_tool_on_path("coqc")
+    }
+    fn install_hint(&self) -> &'static str {
+        "brew install coq  /  apt install coq  /  opam install coq"
+    }
     fn check_file(&self, path: &Path) -> CheckResult {
         let p = path.to_string_lossy();
         run_external_tool("coqc", &["-q", &p], self.install_hint(), 4096)
@@ -290,9 +288,15 @@ impl ForeignSystemChecker for CoqChecker {
 pub struct LeanChecker;
 
 impl ForeignSystemChecker for LeanChecker {
-    fn format(&self) -> ExportFormat { ExportFormat::Lean4 }
-    fn is_available(&self) -> bool { is_tool_on_path("lean") }
-    fn install_hint(&self) -> &'static str { "curl https://elan.lean-lang.org/elan-init.sh -sSf | sh" }
+    fn format(&self) -> ExportFormat {
+        ExportFormat::Lean4
+    }
+    fn is_available(&self) -> bool {
+        is_tool_on_path("lean")
+    }
+    fn install_hint(&self) -> &'static str {
+        "curl https://elan.lean-lang.org/elan-init.sh -sSf | sh"
+    }
     fn check_file(&self, path: &Path) -> CheckResult {
         let p = path.to_string_lossy();
         run_external_tool("lean", &[&p], self.install_hint(), 4096)
@@ -310,8 +314,12 @@ impl ForeignSystemChecker for LeanChecker {
 pub struct AgdaChecker;
 
 impl ForeignSystemChecker for AgdaChecker {
-    fn format(&self) -> ExportFormat { ExportFormat::Agda }
-    fn is_available(&self) -> bool { is_tool_on_path("agda") }
+    fn format(&self) -> ExportFormat {
+        ExportFormat::Agda
+    }
+    fn is_available(&self) -> bool {
+        is_tool_on_path("agda")
+    }
     fn install_hint(&self) -> &'static str {
         "cabal install Agda  /  brew install agda  /  nix-env -iA nixpkgs.agda"
     }
@@ -337,11 +345,20 @@ impl ForeignSystemChecker for AgdaChecker {
 pub struct IsabelleChecker;
 
 impl ForeignSystemChecker for IsabelleChecker {
-    fn format(&self) -> ExportFormat { ExportFormat::Isabelle }
-    fn is_available(&self) -> bool { is_tool_on_path("isabelle") }
-    fn install_hint(&self) -> &'static str { "brew install --cask isabelle  /  download from isabelle.in.tum.de" }
+    fn format(&self) -> ExportFormat {
+        ExportFormat::Isabelle
+    }
+    fn is_available(&self) -> bool {
+        is_tool_on_path("isabelle")
+    }
+    fn install_hint(&self) -> &'static str {
+        "brew install --cask isabelle  /  download from isabelle.in.tum.de"
+    }
     fn check_file(&self, path: &Path) -> CheckResult {
-        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let cmd = format!("use_thy \"{}\"", stem);
         run_external_tool(
             "isabelle",
@@ -357,7 +374,9 @@ impl ForeignSystemChecker for IsabelleChecker {
 pub struct DeduktiChecker;
 
 impl ForeignSystemChecker for DeduktiChecker {
-    fn format(&self) -> ExportFormat { ExportFormat::Dedukti }
+    fn format(&self) -> ExportFormat {
+        ExportFormat::Dedukti
+    }
     fn is_available(&self) -> bool {
         is_tool_on_path("kontroli") || is_tool_on_path("dkcheck")
     }
@@ -386,11 +405,11 @@ impl ForeignSystemChecker for DeduktiChecker {
 /// `ExportFormat` enum after #156 closed Agda (was the last gap).
 pub fn checker_for(format: ExportFormat) -> Option<Box<dyn ForeignSystemChecker>> {
     match format {
-        ExportFormat::Coq      => Some(Box::new(CoqChecker)),
-        ExportFormat::Lean4    => Some(Box::new(LeanChecker)),
-        ExportFormat::Agda     => Some(Box::new(AgdaChecker)),
+        ExportFormat::Coq => Some(Box::new(CoqChecker)),
+        ExportFormat::Lean4 => Some(Box::new(LeanChecker)),
+        ExportFormat::Agda => Some(Box::new(AgdaChecker)),
         ExportFormat::Isabelle => Some(Box::new(IsabelleChecker)),
-        ExportFormat::Dedukti  => Some(Box::new(DeduktiChecker)),
+        ExportFormat::Dedukti => Some(Box::new(DeduktiChecker)),
     }
 }
 
@@ -897,12 +916,18 @@ mod tests {
             "Error response from daemon: pull access denied for nonexistent/image"
         ));
         assert!(is_docker_infrastructure_error("manifest unknown"));
-        assert!(is_docker_infrastructure_error("Unable to find image 'foo:bar' locally\n\nError: No such image: foo:bar"));
+        assert!(is_docker_infrastructure_error(
+            "Unable to find image 'foo:bar' locally\n\nError: No such image: foo:bar"
+        ));
         // Real proof-tool errors must NOT match (false positives would
         // mis-classify legitimate failures).
         assert!(!is_docker_infrastructure_error("Error: type mismatch"));
-        assert!(!is_docker_infrastructure_error("syntax error: unexpected token"));
-        assert!(!is_docker_infrastructure_error("Coq < error: definition refused"));
+        assert!(!is_docker_infrastructure_error(
+            "syntax error: unexpected token"
+        ));
+        assert!(!is_docker_infrastructure_error(
+            "Coq < error: definition refused"
+        ));
     }
 
     #[test]

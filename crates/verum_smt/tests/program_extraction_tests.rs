@@ -25,13 +25,13 @@ use verum_ast::literal::{IntLit, Literal, LiteralKind};
 use verum_ast::pattern::{Pattern, PatternKind};
 use verum_ast::span::Span;
 use verum_ast::ty::{GenericArg, Ident, Path, PathSegment, Type, TypeKind};
+use verum_common::Text;
 use verum_common::{Heap, List, Maybe};
+use verum_smt::ProofTerm;
 use verum_smt::program_extraction::{
     CodeGenerator, ExtractedProgram, ExtractionConfig, ExtractionTarget, ProgramExtractor,
     ProofEraser,
 };
-use verum_smt::ProofTerm;
-use verum_common::Text;
 
 // ==================== ProgramExtractor Tests ====================
 
@@ -645,7 +645,10 @@ fn test_extraction_statistics() {
 
     // Attempt extraction - stats should be updated
     let _ = extractor.extract_program(&proof);
-    assert!(extractor.stats().attempts >= 1, "Extraction attempt should be recorded");
+    assert!(
+        extractor.stats().attempts >= 1,
+        "Extraction attempt should be recorded"
+    );
 }
 
 #[test]
@@ -667,8 +670,16 @@ fn test_reset_statistics() {
     extractor.reset_stats();
 
     // Stats should be reset to zero
-    assert_eq!(extractor.stats().attempts, 0, "Attempts should be reset to 0");
-    assert_eq!(extractor.stats().successful, 0, "Successful should be reset to 0");
+    assert_eq!(
+        extractor.stats().attempts,
+        0,
+        "Attempts should be reset to 0"
+    );
+    assert_eq!(
+        extractor.stats().successful,
+        0,
+        "Successful should be reset to 0"
+    );
     let _ = attempts_before_reset; // Use the variable
 }
 

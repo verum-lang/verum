@@ -241,8 +241,8 @@ impl<'s> CompilationPipeline<'s> {
                 CoherenceError::ConflictingCrateImpl { span, .. } => *span,
             };
 
-            let mut builder = DiagnosticBuilder::new(Severity::Warning)
-                .message(format!("[coherence] {}", error));
+            let mut builder =
+                DiagnosticBuilder::new(Severity::Warning).message(format!("[coherence] {}", error));
             if let Some(ast_span) = ast_span {
                 let diag_span = self.session.convert_span(ast_span);
                 builder = builder.span(diag_span);

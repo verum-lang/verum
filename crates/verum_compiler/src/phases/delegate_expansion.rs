@@ -134,11 +134,8 @@ pub fn expand_delegates_in_module(module: &mut Module) -> Vec<DelegateExpansion>
                             });
                             continue;
                         }
-                        let synthetic = synthesise_delegate_body(
-                            &target_name,
-                            target_span,
-                            &d.params,
-                        );
+                        let synthetic =
+                            synthesise_delegate_body(&target_name, target_span, &d.params);
                         d.proof = Maybe::Some(synthetic);
                         DelegateExpansion::Synthesised {
                             theorem: theorem_name.clone(),
@@ -159,9 +156,7 @@ pub fn expand_delegates_in_module(module: &mut Module) -> Vec<DelegateExpansion>
 /// `@delegate(<ident>)`. Returns `None` for an absent attribute, or
 /// when the attribute's argument shape isn't a single Path-ident
 /// (the only currently-supported form).
-fn find_delegate_target(
-    attrs: &List<verum_ast::attr::Attribute>,
-) -> Option<(Text, Span)> {
+fn find_delegate_target(attrs: &List<verum_ast::attr::Attribute>) -> Option<(Text, Span)> {
     for attr in attrs.iter() {
         if !attr.is_named(DELEGATE_ATTR) {
             continue;
@@ -208,10 +203,7 @@ fn synthesise_delegate_body(
     for fp in params.iter() {
         if let FunctionParamKind::Regular { pattern, .. } = &fp.kind {
             if let PatternKind::Ident { name, .. } = &pattern.kind {
-                let arg_expr = Expr::new(
-                    ExprKind::Path(Path::single(name.clone())),
-                    name.span,
-                );
+                let arg_expr = Expr::new(ExprKind::Path(Path::single(name.clone())), name.span);
                 arg_list.push(arg_expr);
             }
         }
@@ -251,7 +243,11 @@ mod tests {
     }
 
     fn delegate_attr(target: &str) -> Attribute {
-        Attribute::new(Text::from(DELEGATE_ATTR), Maybe::Some(path_arg(target)), span())
+        Attribute::new(
+            Text::from(DELEGATE_ATTR),
+            Maybe::Some(path_arg(target)),
+            span(),
+        )
     }
 
     fn ident_param(name: &str) -> FunctionParam {

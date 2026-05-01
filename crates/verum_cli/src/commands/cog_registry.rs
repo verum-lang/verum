@@ -40,18 +40,13 @@ fn open_registry(root: Option<&PathBuf>, id: &str) -> Result<LocalFilesystemRegi
             .join(".verum_cache")
             .join("cog-registry"),
     };
-    LocalFilesystemRegistry::new(&path, id).map_err(|e| {
-        CliError::VerificationFailed(format!("registry open: {}", e))
-    })
+    LocalFilesystemRegistry::new(&path, id)
+        .map_err(|e| CliError::VerificationFailed(format!("registry open: {}", e)))
 }
 
 fn load_manifest(path: &PathBuf) -> Result<CogManifest> {
     let raw = std::fs::read_to_string(path).map_err(|e| {
-        CliError::VerificationFailed(format!(
-            "reading manifest {}: {}",
-            path.display(),
-            e
-        ))
+        CliError::VerificationFailed(format!("reading manifest {}: {}", path.display(), e))
     })?;
     serde_json::from_str::<CogManifest>(&raw).map_err(|e| {
         CliError::InvalidArgument(format!(
@@ -75,9 +70,9 @@ pub fn run_publish(
     validate_format(output)?;
     let manifest = load_manifest(manifest_path)?;
     let registry = open_registry(root, registry_id)?;
-    let outcome = registry.publish(&manifest).map_err(|e| {
-        CliError::VerificationFailed(format!("publish: {}", e))
-    })?;
+    let outcome = registry
+        .publish(&manifest)
+        .map_err(|e| CliError::VerificationFailed(format!("publish: {}", e)))?;
     match output {
         "plain" => emit_publish_plain(&outcome, &manifest),
         "json" => emit_publish_json(&outcome, &manifest),
@@ -133,10 +128,7 @@ fn emit_publish_markdown(o: &PublishOutcome, m: &CogManifest) {
     println!("# Cog publish\n");
     println!("- **name** — `{}`", m.name.as_str());
     println!("- **version** — `{}`", m.version);
-    println!(
-        "- **chain_hash** — `{}`\n",
-        m.envelope.chain_hash.as_str()
-    );
+    println!("- **chain_hash** — `{}`\n", m.envelope.chain_hash.as_str());
     match o {
         PublishOutcome::Accepted { .. } => println!("**Outcome:** ✓ accepted"),
         PublishOutcome::Rejected { reason } => {
@@ -170,9 +162,9 @@ pub fn run_lookup(
     }
     let v = parse_version(version)?;
     let registry = open_registry(root, registry_id)?;
-    let outcome = registry.lookup(name, &v).map_err(|e| {
-        CliError::VerificationFailed(format!("lookup: {}", e))
-    })?;
+    let outcome = registry
+        .lookup(name, &v)
+        .map_err(|e| CliError::VerificationFailed(format!("lookup: {}", e)))?;
     match output {
         "plain" => emit_lookup_plain(&outcome, name, &v),
         "json" => emit_lookup_json(&outcome),
@@ -218,18 +210,11 @@ fn emit_lookup_plain(o: &LookupOutcome, name: &str, v: &CogVersion) {
                 "    chain_hash     : {}",
                 manifest.envelope.chain_hash.as_str()
             );
-            println!(
-                "    valid          : {}",
-                manifest.envelope_valid()
-            );
+            println!("    valid          : {}", manifest.envelope_valid());
             if !manifest.dependencies.is_empty() {
                 println!("  dependencies:");
                 for d in &manifest.dependencies {
-                    println!(
-                        "    {} {}",
-                        d.name.as_str(),
-                        d.version_constraint.as_str()
-                    );
+                    println!("    {} {}", d.name.as_str(), d.version_constraint.as_str());
                 }
             }
             if !manifest.attestations.is_empty() {
@@ -270,10 +255,7 @@ fn emit_lookup_markdown(o: &LookupOutcome, name: &str, v: &CogVersion) {
                 "- **chain_hash** — `{}`",
                 manifest.envelope.chain_hash.as_str()
             );
-            println!(
-                "- **envelope valid** — {}\n",
-                manifest.envelope_valid()
-            );
+            println!("- **envelope valid** — {}\n", manifest.envelope_valid());
             if !manifest.attestations.is_empty() {
                 println!("## Attestations\n");
                 println!("| Kind | Signer | Timestamp |");
@@ -321,9 +303,9 @@ pub fn run_search(
         q.require_attestation = Some(parse_attestation(s)?);
     }
     let registry = open_registry(root, registry_id)?;
-    let results = registry.search(&q).map_err(|e| {
-        CliError::VerificationFailed(format!("search: {}", e))
-    })?;
+    let results = registry
+        .search(&q)
+        .map_err(|e| CliError::VerificationFailed(format!("search: {}", e)))?;
     match output {
         "plain" => {
             println!("Search results: {} match(es)", results.len());
@@ -377,9 +359,9 @@ pub fn run_verify(
     }
     let v = parse_version(version)?;
     let registry = open_registry(root, registry_id)?;
-    let look = registry.lookup(name, &v).map_err(|e| {
-        CliError::VerificationFailed(format!("lookup: {}", e))
-    })?;
+    let look = registry
+        .lookup(name, &v)
+        .map_err(|e| CliError::VerificationFailed(format!("lookup: {}", e)))?;
     let manifest = match look {
         LookupOutcome::Found { manifest } => manifest,
         LookupOutcome::NotFound { .. } => {
@@ -403,7 +385,11 @@ pub fn run_verify(
     }
     match output {
         "plain" => {
-            println!("Verify cog `{}@{}`", manifest.name.as_str(), manifest.version);
+            println!(
+                "Verify cog `{}@{}`",
+                manifest.name.as_str(),
+                manifest.version
+            );
             println!();
             println!(
                 "  envelope chain_hash valid : {}",
@@ -411,11 +397,7 @@ pub fn run_verify(
             );
             println!("  attestations:");
             for (k, present) in &attestations {
-                println!(
-                    "    {:<22} {}",
-                    k,
-                    if *present { "✓" } else { "—" }
-                );
+                println!("    {:<22} {}", k, if *present { "✓" } else { "—" });
             }
         }
         "json" => {
@@ -425,10 +407,7 @@ pub fn run_verify(
                 "  \"name\": \"{}\",\n",
                 json_escape(manifest.name.as_str())
             ));
-            out.push_str(&format!(
-                "  \"version\": \"{}\",\n",
-                manifest.version
-            ));
+            out.push_str(&format!("  \"version\": \"{}\",\n", manifest.version));
             out.push_str(&format!(
                 "  \"chain_hash\": \"{}\",\n",
                 json_escape(manifest.envelope.chain_hash.as_str())
@@ -448,7 +427,11 @@ pub fn run_verify(
             println!("{}", out);
         }
         "markdown" => {
-            println!("# Verify `{}@{}`\n", manifest.name.as_str(), manifest.version);
+            println!(
+                "# Verify `{}@{}`\n",
+                manifest.name.as_str(),
+                manifest.version
+            );
             println!(
                 "- **chain_hash** — `{}`",
                 manifest.envelope.chain_hash.as_str()
@@ -497,9 +480,8 @@ pub fn run_consensus(
     let mut clients: Vec<Box<dyn RegistryClient>> = Vec::new();
     for (i, root) in mirror_roots.iter().enumerate() {
         let id = format!("mirror-{}", i + 1);
-        let r = LocalFilesystemRegistry::new(root, id.as_str()).map_err(|e| {
-            CliError::VerificationFailed(format!("opening mirror {}: {}", id, e))
-        })?;
+        let r = LocalFilesystemRegistry::new(root, id.as_str())
+            .map_err(|e| CliError::VerificationFailed(format!("opening mirror {}: {}", id, e)))?;
         clients.push(Box::new(r));
     }
     let multi = MultiMirrorClient::new(clients);
@@ -612,9 +594,8 @@ pub fn run_seed_demo(output: &str) -> Result<()> {
         theorem_catalogue: vec![Text::from("hello_world_thm")],
     };
     let r = MemoryRegistry::new("demo");
-    r.publish(&m).map_err(|e| {
-        CliError::VerificationFailed(format!("demo publish: {}", e))
-    })?;
+    r.publish(&m)
+        .map_err(|e| CliError::VerificationFailed(format!("demo publish: {}", e)))?;
     let look = r
         .lookup("verum.demo.hello-world", &CogVersion::new(0, 1, 0))
         .map_err(|e| CliError::VerificationFailed(format!("demo lookup: {}", e)))?;
@@ -622,18 +603,12 @@ pub fn run_seed_demo(output: &str) -> Result<()> {
         "plain" => {
             println!("Demo registry seeded with 1 cog.  Inspecting:");
             println!();
-            emit_lookup_plain(
-                &look,
-                "verum.demo.hello-world",
-                &CogVersion::new(0, 1, 0),
-            );
+            emit_lookup_plain(&look, "verum.demo.hello-world", &CogVersion::new(0, 1, 0));
         }
         "json" => emit_lookup_json(&look),
-        "markdown" => emit_lookup_markdown(
-            &look,
-            "verum.demo.hello-world",
-            &CogVersion::new(0, 1, 0),
-        ),
+        "markdown" => {
+            emit_lookup_markdown(&look, "verum.demo.hello-world", &CogVersion::new(0, 1, 0))
+        }
         _ => unreachable!(),
     }
     Ok(())
@@ -812,7 +787,13 @@ mod tests {
     fn lookup_validates_inputs() {
         let dir = tempfile::tempdir().unwrap();
         assert!(matches!(
-            run_lookup("", "1.0.0", Some(&dir.path().to_path_buf()), "test", "plain"),
+            run_lookup(
+                "",
+                "1.0.0",
+                Some(&dir.path().to_path_buf()),
+                "test",
+                "plain"
+            ),
             Err(CliError::InvalidArgument(_))
         ));
         assert!(matches!(
@@ -950,8 +931,7 @@ mod tests {
         let dir2 = tempfile::tempdir().unwrap();
         let m1 = fixture_manifest("alpha");
         let mut m2 = fixture_manifest("alpha");
-        m2.envelope =
-            CogReproEnvelope::compute(b"sources", b"toolchain", b"DIFFERENT");
+        m2.envelope = CogReproEnvelope::compute(b"sources", b"toolchain", b"DIFFERENT");
         let f1 = write_temp_manifest(&m1);
         let f2 = write_temp_manifest(&m2);
         run_publish(

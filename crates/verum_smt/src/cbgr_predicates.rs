@@ -48,15 +48,14 @@ use std::time::Instant;
 
 use verum_ast::span::Span;
 use verum_ast::ty::Type;
+use verum_common::ToText;
 use verum_common::{Map, Maybe};
 use verum_protocol_types::cbgr_predicates::{
     CBGRCounterexample, CBGRStats, CBGRVerificationResult, ReferenceValue,
 };
-use verum_common::ToText;
 
 use z3::ast::{BV, Bool};
 use z3::{FuncDecl, SatResult, Solver, Sort, Symbol};
-
 
 // ==================== Core Types ====================
 // Verification result types are imported from verum_protocol_types to avoid circular dependency

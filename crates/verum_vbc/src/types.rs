@@ -185,6 +185,16 @@ impl TypeId {
     /// proof term that discharged the refinement predicate.
     pub const WITNESS: TypeId = TypeId(526);
 
+    /// `List<Byte>` — packed-byte specialised list.
+    /// Layout: `[len: i64, cap: i64, backing_ptr: *u8]` where `backing`
+    /// is a contiguous `[u8; cap]` array (1 byte/element) rather than
+    /// the canonical `LIST` Value-per-element backing (8 bytes/element).
+    /// Closes red-team §4: 8× memory reduction for byte buffers.
+    /// 10K-connection × 16-KiB-buffer pool drops from 1.28 GiB to 160 MiB.
+    /// Operations dispatch on TypeId so `BYTE_LIST` shares the surface
+    /// vocabulary (push/pop/get/set/len/slice/iter/clone) of `LIST`.
+    pub const BYTE_LIST: TypeId = TypeId(527);
+
     /// First semantic type ID (for range checks).
     pub const FIRST_SEMANTIC: u32 = 512;
 
@@ -210,8 +220,16 @@ impl TypeId {
     pub fn is_iterable(self) -> bool {
         matches!(
             self.0,
-            512 | 513 | 514 | 517 | 518  // LIST, MAP, SET, RANGE, ARRAY
+            512 | 513 | 514 | 517 | 518 | 527 // LIST, MAP, SET, RANGE, ARRAY, BYTE_LIST
         )
+    }
+
+    /// Checks if this is one of the list-shaped types (canonical `LIST`
+    /// with NaN-boxed Value backing, or `BYTE_LIST` with packed-byte
+    /// backing).  Both share the push/pop/get/set/len surface and
+    /// dispatch by TypeId in the runtime handlers.
+    pub fn is_list_like(self) -> bool {
+        matches!(self.0, 512 | 527)
     }
 
     /// Checks if this is a built-in type.
@@ -221,10 +239,7 @@ impl TypeId {
 
     /// Checks if this is a primitive numeric type.
     pub fn is_numeric(self) -> bool {
-        matches!(
-            self.0,
-            2 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13
-        )
+        matches!(self.0, 2 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13)
     }
 
     /// Checks if this is an integer type.
@@ -497,11 +512,7 @@ impl ReferenceCapability {
     /// Required capability for a dereference operation.
     #[must_use]
     pub fn for_deref(is_mut: bool) -> Self {
-        if is_mut {
-            Self::ReadWrite
-        } else {
-            Self::Read
-        }
+        if is_mut { Self::ReadWrite } else { Self::Read }
     }
 
     /// Required capability for a store operation.
@@ -1974,7 +1985,10 @@ mod tests {
     fn test_type_ref_instantiated_serde() {
         let tr = TypeRef::Instantiated {
             base: TypeId(100),
-            args: vec![TypeRef::Concrete(TypeId::INT), TypeRef::Concrete(TypeId::FLOAT)],
+            args: vec![
+                TypeRef::Concrete(TypeId::INT),
+                TypeRef::Concrete(TypeId::FLOAT),
+            ],
         };
         let json = serde_json::to_string(&tr).unwrap();
         let deserialized: TypeRef = serde_json::from_str(&json).unwrap();
@@ -2085,7 +2099,11 @@ mod tests {
 
     #[test]
     fn test_variance_serde() {
-        for v in [Variance::Covariant, Variance::Contravariant, Variance::Invariant] {
+        for v in [
+            Variance::Covariant,
+            Variance::Contravariant,
+            Variance::Invariant,
+        ] {
             let json = serde_json::to_string(&v).unwrap();
             let deserialized: Variance = serde_json::from_str(&json).unwrap();
             assert_eq!(v, deserialized);

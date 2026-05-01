@@ -314,13 +314,7 @@ fn update_lockfile(manifest_dir: &std::path::Path, manifest: &Manifest) -> Resul
                 // Create edge from root to dependency
                 let version_req = semver::VersionReq::parse(version_req.as_str())
                     .unwrap_or(semver::VersionReq::STAR);
-                resolver.add_dependency(
-                    root_idx,
-                    dep_idx,
-                    version_req,
-                    List::new(),
-                    false,
-                );
+                resolver.add_dependency(root_idx, dep_idx, version_req, List::new(), false);
 
                 // Update lockfile
                 lockfile

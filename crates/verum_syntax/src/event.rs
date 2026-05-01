@@ -339,7 +339,10 @@ impl EventBuilder {
         // Process from end to start to handle nested forward parents
         for i in (0..self.events.len()).rev() {
             let forward_parent = match &self.events[i] {
-                Event::Start { forward_parent: Some(fp), .. } => *fp as usize,
+                Event::Start {
+                    forward_parent: Some(fp),
+                    ..
+                } => *fp as usize,
                 _ => continue,
             };
 
@@ -350,7 +353,10 @@ impl EventBuilder {
             };
 
             // Clear the forward_parent link
-            if let Event::Start { forward_parent: fp, .. } = &mut self.events[i] {
+            if let Event::Start {
+                forward_parent: fp, ..
+            } = &mut self.events[i]
+            {
                 *fp = None;
             }
 
@@ -426,7 +432,11 @@ pub fn process<S: EventSink>(events: Vec<Event>, tokens: &[TokenSource], sink: &
 fn reorder_events(mut events: Vec<Event>) -> Vec<Event> {
     // Process forward_parent links from end to start
     for i in (0..events.len()).rev() {
-        if let Event::Start { forward_parent: Some(parent_pos), .. } = events[i].clone() {
+        if let Event::Start {
+            forward_parent: Some(parent_pos),
+            ..
+        } = events[i].clone()
+        {
             // Insert the current event before its parent
             let current = std::mem::replace(&mut events[i], Event::Tombstone);
             let parent_idx = parent_pos as usize;
@@ -506,9 +516,27 @@ mod tests {
         let events = builder.finish();
         assert_eq!(events.len(), 4);
 
-        assert!(matches!(events[0], Event::Start { kind: SyntaxKind::LET_STMT, .. }));
-        assert!(matches!(events[1], Event::Token { kind: SyntaxKind::LET_KW, .. }));
-        assert!(matches!(events[2], Event::Token { kind: SyntaxKind::IDENT, .. }));
+        assert!(matches!(
+            events[0],
+            Event::Start {
+                kind: SyntaxKind::LET_STMT,
+                ..
+            }
+        ));
+        assert!(matches!(
+            events[1],
+            Event::Token {
+                kind: SyntaxKind::LET_KW,
+                ..
+            }
+        ));
+        assert!(matches!(
+            events[2],
+            Event::Token {
+                kind: SyntaxKind::IDENT,
+                ..
+            }
+        ));
         assert!(matches!(events[3], Event::Finish));
     }
 

@@ -36,10 +36,10 @@ use verum_modules::{
 };
 use verum_vbc::codegen::VbcCodegen;
 
+use super::BuildMode;
 use crate::core_compiler::{CoreConfig, StdlibCompilationResult, StdlibModule};
 use crate::lint::{IntrinsicDiagnostics, IntrinsicLint};
 use crate::module_utils;
-use super::BuildMode;
 
 use super::CompilationPipeline;
 
@@ -121,23 +121,28 @@ impl<'s> CompilationPipeline<'s> {
         // STEP 1: Discover modules
         // ====================================================================
         if config.verbose {
-            eprintln!("Discovering stdlib modules in {}...", config.stdlib_path.display());
+            eprintln!(
+                "Discovering stdlib modules in {}...",
+                config.stdlib_path.display()
+            );
         }
 
-        let resolver = self.stdlib_resolver.as_mut()
+        let resolver = self
+            .stdlib_resolver
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("StdlibModuleResolver not initialized"))?;
 
-        resolver.discover().map_err(|e| anyhow::anyhow!("Module discovery failed: {}", e))?;
+        resolver
+            .discover()
+            .map_err(|e| anyhow::anyhow!("Module discovery failed: {}", e))?;
 
         if config.verbose {
             eprintln!("Found {} modules", resolver.module_count());
         }
 
         // Get modules in dependency order
-        let modules_to_compile: Vec<StdlibModule> = resolver.modules_in_order()
-            .into_iter()
-            .cloned()
-            .collect();
+        let modules_to_compile: Vec<StdlibModule> =
+            resolver.modules_in_order().into_iter().cloned().collect();
 
         // ====================================================================
         // STEP 2: Parse ALL modules
@@ -192,27 +197,25 @@ impl<'s> CompilationPipeline<'s> {
                 &mut self.module_loader,
                 &resolver_seeds,
                 |source| {
-                    use verum_lexer::Lexer;
                     use verum_fast_parser::VerumParser;
+                    use verum_lexer::Lexer;
                     let lexer = Lexer::new(source.source.as_str(), source.file_id);
                     let parser = VerumParser::new();
-                    parser
-                        .parse_module(lexer, source.file_id)
-                        .map_err(|errs| {
-                            let summary: String = errs
-                                .iter()
-                                .map(|e| e.to_string())
-                                .collect::<Vec<_>>()
-                                .join("; ");
-                            verum_modules::error::ModuleError::Other {
-                                message: verum_common::Text::from(format!(
-                                    "parse error in file mount `{}`: {}",
-                                    source.file_path.display(),
-                                    summary
-                                )),
-                                span: None,
-                            }
-                        })
+                    parser.parse_module(lexer, source.file_id).map_err(|errs| {
+                        let summary: String = errs
+                            .iter()
+                            .map(|e| e.to_string())
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        verum_modules::error::ModuleError::Other {
+                            message: verum_common::Text::from(format!(
+                                "parse error in file mount `{}`: {}",
+                                source.file_path.display(),
+                                summary
+                            )),
+                            span: None,
+                        }
+                    })
                 },
             ) {
                 Ok(resolved) => {
@@ -234,10 +237,7 @@ impl<'s> CompilationPipeline<'s> {
                         // the resolver callback is dropped.
                         // (Cheap: the loader cached the read,
                         // and parse is fast.)
-                        let lexer = verum_lexer::Lexer::new(
-                            entry.source.as_str(),
-                            entry.file_id,
-                        );
+                        let lexer = verum_lexer::Lexer::new(entry.source.as_str(), entry.file_id);
                         let parser = verum_fast_parser::VerumParser::new();
                         let ast = match parser.parse_module(lexer, entry.file_id) {
                             Ok(m) => m,
@@ -263,10 +263,7 @@ impl<'s> CompilationPipeline<'s> {
                     // resilient to accidental mount syntax
                     // sneaking into core/).
                     if config.verbose {
-                        eprintln!(
-                            "Phase 1.25: file-mount resolution warning: {}",
-                            e
-                        );
+                        eprintln!("Phase 1.25: file-mount resolution warning: {}", e);
                     }
                 }
             }
@@ -291,12 +288,13 @@ impl<'s> CompilationPipeline<'s> {
                     let module_path = ModulePath::from_str(module_name.as_str());
                     let module_id = module_registry.read().allocate_id();
 
-                    let file_id = ast_module.items.first()
+                    let file_id = ast_module
+                        .items
+                        .first()
                         .map(|item| item.span.file_id)
                         .unwrap_or_else(|| verum_ast::FileId::new(0));
 
-                    let source_text = std::fs::read_to_string(file_path)
-                        .unwrap_or_default();
+                    let source_text = std::fs::read_to_string(file_path).unwrap_or_default();
 
                     let mut module_info = ModuleInfo::new(
                         module_id,
@@ -342,12 +340,19 @@ impl<'s> CompilationPipeline<'s> {
                                 Text::from(std::fs::read_to_string(file_path).unwrap_or_default()),
                             );
 
-                            match extract_exports_from_module(ast_module, sub_module_id, &sub_module_path) {
+                            match extract_exports_from_module(
+                                ast_module,
+                                sub_module_id,
+                                &sub_module_path,
+                            ) {
                                 Ok(export_table) => {
                                     sub_module_info.exports = export_table;
                                 }
                                 Err(e) => {
-                                    debug!("Failed to extract exports from {}: {:?}", sub_module_name, e);
+                                    debug!(
+                                        "Failed to extract exports from {}: {:?}",
+                                        sub_module_name, e
+                                    );
                                 }
                             }
 
@@ -356,7 +361,8 @@ impl<'s> CompilationPipeline<'s> {
                             // Also add to self.modules
                             let sub_path_text = Text::from(sub_module_name.as_str());
                             if !self.modules.contains_key(&sub_path_text) {
-                                self.modules.insert(sub_path_text, Arc::new(ast_module.clone()));
+                                self.modules
+                                    .insert(sub_path_text, Arc::new(ast_module.clone()));
                             }
                         }
                     }
@@ -418,25 +424,26 @@ impl<'s> CompilationPipeline<'s> {
 
         for (idx, (module_name, ast_modules_with_paths)) in all_parsed_modules.iter().enumerate() {
             let module_start = std::time::Instant::now();
-            let module = modules_to_compile.iter()
+            let module = modules_to_compile
+                .iter()
                 .find(|m| &m.name == module_name)
                 .expect("module should exist");
 
             if config.verbose {
-                eprintln!("  Compiling module: {} ({} files)", module.name, module.source_files.len());
+                eprintln!(
+                    "  Compiling module: {} ({} files)",
+                    module.name,
+                    module.source_files.len()
+                );
             }
 
             // Build set of modules that will be compiled AFTER this one (forward references)
-            let later_modules: std::collections::HashSet<&str> = all_module_names[idx + 1..]
-                .iter()
-                .copied()
-                .collect();
+            let later_modules: std::collections::HashSet<&str> =
+                all_module_names[idx + 1..].iter().copied().collect();
 
             // Extract just the AST modules for compilation
-            let ast_modules: Vec<&verum_ast::Module> = ast_modules_with_paths
-                .iter()
-                .map(|(_, ast)| ast)
-                .collect();
+            let ast_modules: Vec<&verum_ast::Module> =
+                ast_modules_with_paths.iter().map(|(_, ast)| ast).collect();
 
             let (vbc_module, funcs) = self.compile_core_module_from_ast(
                 module,
@@ -448,7 +455,8 @@ impl<'s> CompilationPipeline<'s> {
             functions_compiled += funcs;
 
             module_times.insert(module.name.clone(), module_start.elapsed());
-            self.compiled_stdlib_modules.insert(module.name.clone(), vbc_module);
+            self.compiled_stdlib_modules
+                .insert(module.name.clone(), vbc_module);
         }
 
         // ====================================================================
@@ -562,17 +570,18 @@ impl<'s> CompilationPipeline<'s> {
             for (module_name, ast_modules) in all_modules {
                 // For each file in the module, compute the correct current_module_path
                 for (file_path, ast_module) in ast_modules {
-                    let current_module_path = if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                        if file_stem == "mod" {
-                            // mod.vr represents its parent directory module
-                            module_name.clone()
+                    let current_module_path =
+                        if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
+                            if file_stem == "mod" {
+                                // mod.vr represents its parent directory module
+                                module_name.clone()
+                            } else {
+                                // Regular file: module_name.file_stem
+                                format!("{}.{}", module_name, file_stem)
+                            }
                         } else {
-                            // Regular file: module_name.file_stem
-                            format!("{}.{}", module_name, file_stem)
-                        }
-                    } else {
-                        module_name.clone()
-                    };
+                            module_name.clone()
+                        };
 
                     for item in &ast_module.items {
                         if let verum_ast::ItemKind::Mount(import_decl) = &item.kind {
@@ -620,24 +629,29 @@ impl<'s> CompilationPipeline<'s> {
                 // this the qualified-name layer stays empty and same-named
                 // stdlib types (e.g. `RecvError` in broadcast/channel/quic)
                 // silently collide on the flat lookup table.
-                let per_file_module_path = if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                    if file_stem == "mod" {
-                        module_name.clone()
+                let per_file_module_path =
+                    if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
+                        if file_stem == "mod" {
+                            module_name.clone()
+                        } else {
+                            format!("{}.{}", module_name, file_stem)
+                        }
                     } else {
-                        format!("{}.{}", module_name, file_stem)
-                    }
-                } else {
-                    module_name.clone()
-                };
+                        module_name.clone()
+                    };
                 type_checker.set_current_module_path(per_file_module_path);
 
                 for item in &ast_module.items {
                     if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-                        let filtered_decl = module_utils::filter_type_decl_for_target(type_decl, &target);
+                        let filtered_decl =
+                            module_utils::filter_type_decl_for_target(type_decl, &target);
                         if let Err(e) = type_checker.register_type_declaration(&filtered_decl) {
                             let warning = verum_diagnostics::DiagnosticBuilder::warning()
                                 .code("W0910")
-                                .message(format!("Type registration warning in {}: {}", module_name, e))
+                                .message(format!(
+                                    "Type registration warning in {}: {}",
+                                    module_name, e
+                                ))
                                 .build();
                             self.stdlib_warnings.push(warning);
                         }
@@ -656,15 +670,16 @@ impl<'s> CompilationPipeline<'s> {
                 // (`Result<_, RecvError>`) that may collide across modules, so
                 // anchor each file to its qualified module path before
                 // registration.
-                let per_file_module_path = if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                    if file_stem == "mod" {
-                        module_name.clone()
+                let per_file_module_path =
+                    if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
+                        if file_stem == "mod" {
+                            module_name.clone()
+                        } else {
+                            format!("{}.{}", module_name, file_stem)
+                        }
                     } else {
-                        format!("{}.{}", module_name, file_stem)
-                    }
-                } else {
-                    module_name.clone()
-                };
+                        module_name.clone()
+                    };
                 type_checker.set_current_module_path(per_file_module_path);
 
                 for item in &ast_module.items {
@@ -672,7 +687,10 @@ impl<'s> CompilationPipeline<'s> {
                         if let Err(e) = type_checker.register_function_signature(func) {
                             let warning = verum_diagnostics::DiagnosticBuilder::warning()
                                 .code("W0911")
-                                .message(format!("Function signature warning in {}: {}", module_name, e))
+                                .message(format!(
+                                    "Function signature warning in {}: {}",
+                                    module_name, e
+                                ))
                                 .build();
                             self.stdlib_warnings.push(warning);
                         }
@@ -688,15 +706,16 @@ impl<'s> CompilationPipeline<'s> {
         for (module_name, ast_modules) in all_modules {
             for (file_path, ast_module) in ast_modules {
                 // Module-scoped resolution for protocol method signatures.
-                let per_file_module_path = if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                    if file_stem == "mod" {
-                        module_name.clone()
+                let per_file_module_path =
+                    if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
+                        if file_stem == "mod" {
+                            module_name.clone()
+                        } else {
+                            format!("{}.{}", module_name, file_stem)
+                        }
                     } else {
-                        format!("{}.{}", module_name, file_stem)
-                    }
-                } else {
-                    module_name.clone()
-                };
+                        module_name.clone()
+                    };
                 type_checker.set_current_module_path(per_file_module_path);
 
                 for item in &ast_module.items {
@@ -704,7 +723,10 @@ impl<'s> CompilationPipeline<'s> {
                         if let Err(e) = type_checker.register_protocol(protocol_decl) {
                             let warning = verum_diagnostics::DiagnosticBuilder::warning()
                                 .code("W0912")
-                                .message(format!("Protocol registration warning in {}: {}", module_name, e))
+                                .message(format!(
+                                    "Protocol registration warning in {}: {}",
+                                    module_name, e
+                                ))
                                 .build();
                             self.stdlib_warnings.push(warning);
                         }
@@ -724,15 +746,16 @@ impl<'s> CompilationPipeline<'s> {
                 // `Stream for BroadcastReceiver`) resolve against the
                 // qualified-name layer first — avoiding collisions between
                 // same-named types in different stdlib modules.
-                let per_file_module_path = if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                    if file_stem == "mod" {
-                        module_name.clone()
+                let per_file_module_path =
+                    if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
+                        if file_stem == "mod" {
+                            module_name.clone()
+                        } else {
+                            format!("{}.{}", module_name, file_stem)
+                        }
                     } else {
-                        format!("{}.{}", module_name, file_stem)
-                    }
-                } else {
-                    module_name.clone()
-                };
+                        module_name.clone()
+                    };
                 type_checker.set_current_module_path(per_file_module_path);
 
                 for item in &ast_module.items {
@@ -740,7 +763,10 @@ impl<'s> CompilationPipeline<'s> {
                         if let Err(e) = type_checker.register_impl_block(impl_decl) {
                             let warning = verum_diagnostics::DiagnosticBuilder::warning()
                                 .code("W0913")
-                                .message(format!("Impl block registration warning in {}: {}", module_name, e))
+                                .message(format!(
+                                    "Impl block registration warning in {}: {}",
+                                    module_name, e
+                                ))
                                 .build();
                             self.stdlib_warnings.push(warning);
                         }
@@ -789,9 +815,7 @@ impl<'s> CompilationPipeline<'s> {
         // Each stdlib retrofit (adding `implement IntCoercible for X`)
         // lets us delete X from the hardcoded list with safe
         // rollback at every step.
-        crate::stdlib_coercion_registry::register_stdlib_coercions(
-            type_checker.unifier_mut(),
-        );
+        crate::stdlib_coercion_registry::register_stdlib_coercions(type_checker.unifier_mut());
 
         // Pass 6: Validate imports
         // Now that all types, functions, and protocols are registered,
@@ -801,7 +825,8 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         let export_index = crate::core_compiler::build_export_index(all_modules);
-        let import_errors = crate::core_compiler::validate_imports(all_modules, &export_index, &target);
+        let import_errors =
+            crate::core_compiler::validate_imports(all_modules, &export_index, &target);
 
         for (module_path, item_name, similar, span) in import_errors {
             let message = if similar.is_empty() {
@@ -850,8 +875,8 @@ impl<'s> CompilationPipeline<'s> {
         later_modules: &std::collections::HashSet<&str>,
     ) -> Result<(verum_vbc::VbcModule, usize)> {
         use verum_vbc::codegen::CodegenConfig;
-        use verum_vbc::module::{FunctionDescriptor, VbcFunction};
         use verum_vbc::instruction::Instruction;
+        use verum_vbc::module::{FunctionDescriptor, VbcFunction};
 
         // Configure VBC codegen
         let codegen_config = CodegenConfig::new(&module.name)
@@ -883,7 +908,11 @@ impl<'s> CompilationPipeline<'s> {
         for ast_module in ast_modules {
             if let Err(e) = codegen.collect_non_protocol_declarations(ast_module) {
                 let diag = lint_diagnostics.codegen_warning(&module.name, &e.to_string(), None);
-                let level = self.session.options().lint_config.level_for(IntrinsicLint::MissingImplementation);
+                let level = self
+                    .session
+                    .options()
+                    .lint_config
+                    .level_for(IntrinsicLint::MissingImplementation);
                 if level.is_error() {
                     self.stdlib_errors.push(diag);
                 } else if level.should_emit() {
@@ -931,7 +960,11 @@ impl<'s> CompilationPipeline<'s> {
                             e.to_string()
                         };
                         let diag = lint_diagnostics.codegen_warning(&module.name, &error_msg, None);
-                        let level = self.session.options().lint_config.level_for(IntrinsicLint::MissingImplementation);
+                        let level = self
+                            .session
+                            .options()
+                            .lint_config
+                            .level_for(IntrinsicLint::MissingImplementation);
                         if level.is_error() {
                             self.stdlib_errors.push(diag);
                         } else if level.should_emit() {
@@ -1099,10 +1132,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Build the VBC archive from compiled stdlib modules.
-    fn build_stdlib_archive(
-        &self,
-        config: &CoreConfig,
-    ) -> Result<verum_vbc::VbcArchive> {
+    fn build_stdlib_archive(&self, config: &CoreConfig) -> Result<verum_vbc::VbcArchive> {
         use verum_vbc::{ArchiveBuilder, ArchiveFlags};
 
         let mut flags = ArchiveFlags::IS_STDLIB;
@@ -1115,18 +1145,22 @@ impl<'s> CompilationPipeline<'s> {
 
         let mut builder = ArchiveBuilder::stdlib().with_flags(flags);
 
-        let resolver = self.stdlib_resolver.as_ref()
+        let resolver = self
+            .stdlib_resolver
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("StdlibModuleResolver not initialized"))?;
 
         // Add modules in compilation order
         for name in resolver.compilation_order() {
             if let Some(module) = self.compiled_stdlib_modules.get(name) {
-                let deps: Vec<&str> = resolver.get_module(name)
+                let deps: Vec<&str> = resolver
+                    .get_module(name)
                     .map(|m| m.dependencies.iter().map(|s: &String| s.as_str()).collect())
                     .unwrap_or_default();
 
-                builder.add_module(name, module, &deps)
-                    .map_err(|e| anyhow::anyhow!("Failed to add module {} to archive: {}", name, e))?;
+                builder.add_module(name, module, &deps).map_err(|e| {
+                    anyhow::anyhow!("Failed to add module {} to archive: {}", name, e)
+                })?;
             }
         }
 

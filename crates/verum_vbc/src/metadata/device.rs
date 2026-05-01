@@ -55,8 +55,7 @@ impl DeviceType {
 }
 
 /// Device preference for block/function placement.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DevicePreference {
     /// No preference, compiler decides.
     #[default]
@@ -117,7 +116,6 @@ impl DevicePreference {
         }
     }
 }
-
 
 /// Device transfer specification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,11 +227,7 @@ impl DeviceHints {
                 DevicePreference::Prefer(dt) => dt.is_gpu(),
                 _ => false,
             };
-            if is_gpu_preference {
-                Some(block)
-            } else {
-                None
-            }
+            if is_gpu_preference { Some(block) } else { None }
         })
     }
 

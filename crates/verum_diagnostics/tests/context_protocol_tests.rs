@@ -159,11 +159,7 @@ fn test_metadata() {
 
     assert_eq!(err.context.metadata.len(), 2);
     assert!(err.context.metadata.contains_key(&Text::from("user_id")));
-    assert!(
-        err.context
-            .metadata
-            .contains_key(&Text::from("request_id"))
-    );
+    assert!(err.context.metadata.contains_key(&Text::from("request_id")));
 }
 
 // Test 8: Display formats - full
@@ -276,11 +272,14 @@ fn test_display_log_with_nested_metadata() {
     });
 
     // Create a nested List
-    let list_value = ContextValue::List(vec![
-        ContextValue::Text("item1".into()),
-        ContextValue::Int(100),
-        ContextValue::Bool(true),
-    ].into());
+    let list_value = ContextValue::List(
+        vec![
+            ContextValue::Text("item1".into()),
+            ContextValue::Int(100),
+            ContextValue::Bool(true),
+        ]
+        .into(),
+    );
 
     // Create a nested Map
     let mut inner_map = HashMap::new();
@@ -326,11 +325,14 @@ fn test_display_log_with_deeply_nested_structures() {
         ContextValue::Text("nested_value".into()),
     );
 
-    let nested_list = ContextValue::List(vec![
-        ContextValue::Int(1),
-        ContextValue::Map(inner_map),
-        ContextValue::List(vec![ContextValue::Bool(false), ContextValue::Float(3.14)].into()),
-    ].into());
+    let nested_list = ContextValue::List(
+        vec![
+            ContextValue::Int(1),
+            ContextValue::Map(inner_map),
+            ContextValue::List(vec![ContextValue::Bool(false), ContextValue::Float(3.14)].into()),
+        ]
+        .into(),
+    );
 
     let err = result.meta("complex", nested_list).unwrap_err();
     let log = err.display_log();

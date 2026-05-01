@@ -15,18 +15,26 @@
 //! ordering, independent of any name-based priority.
 
 use verum_common::{List, Maybe, Text};
+use verum_types::TypeChecker;
 use verum_types::core_metadata::{
     CoreMetadata, GenericParam, TypeDescriptor, TypeDescriptorKind, VariantCase, VariantPayload,
 };
-use verum_types::TypeChecker;
 
 fn variant_type_with_ok_err(name: &str) -> TypeDescriptor {
     TypeDescriptor {
         name: name.into(),
         module_path: "test.module".into(),
         generic_params: List::from_iter([
-            GenericParam { name: "T".into(), bounds: List::new(), default: Maybe::None },
-            GenericParam { name: "E".into(), bounds: List::new(), default: Maybe::None },
+            GenericParam {
+                name: "T".into(),
+                bounds: List::new(),
+                default: Maybe::None,
+            },
+            GenericParam {
+                name: "E".into(),
+                bounds: List::new(),
+                default: Maybe::None,
+            },
         ]),
         kind: TypeDescriptorKind::Variant {
             cases: List::from_iter([
@@ -51,7 +59,9 @@ fn make_metadata(declaration_order: &[&str]) -> CoreMetadata {
     let mut metadata = CoreMetadata::default();
     for name in declaration_order {
         let text: Text = (*name).into();
-        metadata.types.insert(text.clone(), variant_type_with_ok_err(name));
+        metadata
+            .types
+            .insert(text.clone(), variant_type_with_ok_err(name));
         metadata.type_declaration_order.push(text);
     }
     metadata

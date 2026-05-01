@@ -268,9 +268,7 @@ impl InterpolationEngine {
             config.algorithm,
             InterpolationAlgorithm::MBI | InterpolationAlgorithm::PingPong
         );
-        if config.proof_based != algo_proof_based
-            || config.model_based != algo_model_based
-        {
+        if config.proof_based != algo_proof_based || config.model_based != algo_model_based {
             tracing::debug!(
                 "InterpolationConfig: proof_based={}, model_based={}, \
                  algorithm={:?} — boolean flags are inconsistent with the \
@@ -611,8 +609,10 @@ impl InterpolationEngine {
             })
             .collect();
 
-        let bound_refs: List<&dyn z3::ast::Ast> =
-            bound_dynamics.iter().map(|v| v as &dyn z3::ast::Ast).collect();
+        let bound_refs: List<&dyn z3::ast::Ast> = bound_dynamics
+            .iter()
+            .map(|v| v as &dyn z3::ast::Ast)
+            .collect();
 
         // Create existential quantifier: ∃ vars. formula
         let quantified = z3::ast::exists_const(&bound_refs, &[], formula);

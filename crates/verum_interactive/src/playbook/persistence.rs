@@ -24,9 +24,15 @@ pub struct PlaybookSettings {
     pub execution_timeout_ms: u64,
 }
 
-fn default_keybinding_mode() -> String { "standard".into() }
-fn default_true() -> bool { true }
-fn default_timeout() -> u64 { 5000 }
+fn default_keybinding_mode() -> String {
+    "standard".into()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_timeout() -> u64 {
+    5000
+}
 
 /// Root structure for .vrbook files
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +91,11 @@ pub fn load_playbook(path: &Path) -> io::Result<(Vec<Cell>, Option<PlaybookSetti
 }
 
 /// Save a playbook to a file
-pub fn save_playbook(path: &Path, cells: &[Cell], settings: Option<&PlaybookSettings>) -> io::Result<()> {
+pub fn save_playbook(
+    path: &Path,
+    cells: &[Cell],
+    settings: Option<&PlaybookSettings>,
+) -> io::Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
 
     let playbook = PlaybookFile {
@@ -163,7 +173,8 @@ pub fn export_to_markdown(cells: &[Cell]) -> String {
 /// Export playbook to standalone HTML with dark theme
 pub fn export_to_html(cells: &[Cell]) -> String {
     use super::session::CellOutput;
-    let mut html = String::from(r#"<!DOCTYPE html>
+    let mut html = String::from(
+        r#"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -183,7 +194,8 @@ pub fn export_to_html(cells: &[Cell]) -> String {
 </head>
 <body>
 <h1>Verum Playbook</h1>
-"#);
+"#,
+    );
 
     for cell in cells {
         html.push_str("<div class=\"cell\">\n");
@@ -244,13 +256,17 @@ fn html_escape(s: &str) -> String {
 fn format_output_for_export(output: &super::session::CellOutput) -> String {
     use super::session::CellOutput;
     match output {
-        CellOutput::Value { repr, type_info, .. } => {
+        CellOutput::Value {
+            repr, type_info, ..
+        } => {
             format!("{} : {}", repr, type_info)
         }
         CellOutput::Stream { stdout, stderr, .. } => {
             let mut s = stdout.to_string();
             if !stderr.is_empty() {
-                if !s.is_empty() { s.push('\n'); }
+                if !s.is_empty() {
+                    s.push('\n');
+                }
                 s.push_str(&format!("[stderr] {}", stderr));
             }
             s
@@ -258,27 +274,42 @@ fn format_output_for_export(output: &super::session::CellOutput) -> String {
         CellOutput::Error { message, .. } => {
             format!("Error: {}", message)
         }
-        CellOutput::Timing { compile_time_ms, execution_time_ms } => {
-            format!("compile: {}ms, exec: {}ms", compile_time_ms, execution_time_ms)
+        CellOutput::Timing {
+            compile_time_ms,
+            execution_time_ms,
+        } => {
+            format!(
+                "compile: {}ms, exec: {}ms",
+                compile_time_ms, execution_time_ms
+            )
         }
-        CellOutput::Multi { outputs } => {
-            outputs.iter()
-                .map(format_output_for_export)
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
+        CellOutput::Multi { outputs } => outputs
+            .iter()
+            .map(format_output_for_export)
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
         CellOutput::Empty => String::new(),
-        CellOutput::Tensor { shape, dtype, preview, .. } => {
+        CellOutput::Tensor {
+            shape,
+            dtype,
+            preview,
+            ..
+        } => {
             format!("Tensor<{}> {:?}: {}", dtype, shape, preview)
         }
-        CellOutput::Structured { type_name, fields, .. } => {
-            let field_strs: Vec<String> = fields.iter()
+        CellOutput::Structured {
+            type_name, fields, ..
+        } => {
+            let field_strs: Vec<String> = fields
+                .iter()
                 .map(|(k, v)| format!("{}: {}", k, format_output_for_export(v)))
                 .collect();
             format!("{} {{ {} }}", type_name, field_strs.join(", "))
         }
-        CellOutput::Collection { len, element_type, .. } => {
+        CellOutput::Collection {
+            len, element_type, ..
+        } => {
             format!("[{} x {}]", element_type, len)
         }
     }

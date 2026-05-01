@@ -74,9 +74,9 @@ pub mod value;
 
 pub mod bytecode;
 pub mod compression;
+pub mod deserialize;
 pub mod encoding;
 pub mod serialize;
-pub mod deserialize;
 pub mod validate;
 
 /// VBC module disassembler for human-readable bytecode dumps.
@@ -152,15 +152,25 @@ pub mod token_stream;
 
 // Re-exports for convenience
 pub use archive::{
-    ArchiveBuilder, ArchiveFlags, ArchiveHeader, ModuleEntry, VbcArchive,
-    read_archive, read_archive_from_file, write_archive, write_archive_to_file,
-    // Metadata stripping (VBC Optimization Audit Phase 3)
-    strip_module_metadata, estimate_stripping_savings,
+    ArchiveBuilder,
+    ArchiveFlags,
+    ArchiveHeader,
+    DEFAULT_COMPRESSION_LEVEL,
+    ModuleEntry,
+    VbcArchive,
     // Compression support (VBC Optimization Audit Phase 3)
-    compress_data, decompress_data, DEFAULT_COMPRESSION_LEVEL,
+    compress_data,
+    decompress_data,
+    estimate_stripping_savings,
+    read_archive,
+    read_archive_from_file,
+    // Metadata stripping (VBC Optimization Audit Phase 3)
+    strip_module_metadata,
+    write_archive,
+    write_archive_to_file,
 };
 pub use error::{VbcError, VbcResult};
-pub use format::{VbcFlags, VbcHeader, MAGIC, VERSION_MAJOR, VERSION_MINOR};
+pub use format::{MAGIC, VERSION_MAJOR, VERSION_MINOR, VbcFlags, VbcHeader};
 pub use instruction::{
     ArithSubOpcode, CbgrSubOpcode, CmpSubOpcode, FfiSubOpcode, GpuSubOpcode, Instruction,
     MathSubOpcode, Opcode, Reg, RegRange,
@@ -168,10 +178,10 @@ pub use instruction::{
 pub use module::{ConstId, FunctionDescriptor, FunctionId, VbcFunction, VbcModule};
 pub use types::{
     CbgrTier, FieldDescriptor, Mutability, PropertySet, ProtocolId, StringId, TypeDescriptor,
-    TypeId, TypeKind, TypeParamDescriptor, TypeParamId, TypeRef, VariantDescriptor, VariantKind,
-    Variance, Visibility,
+    TypeId, TypeKind, TypeParamDescriptor, TypeParamId, TypeRef, Variance, VariantDescriptor,
+    VariantKind, Visibility,
 };
-pub use value::{reset_global_value_tables, Capabilities, FatRef, ThinRef, Value};
+pub use value::{Capabilities, FatRef, ThinRef, Value, reset_global_value_tables};
 
 // Re-export CBGR codegen types
 pub use cbgr::{
@@ -183,12 +193,12 @@ pub use cbgr::{
 pub use ffi::{CTypeRuntime, FfiPlatform, FfiPlatformError, LibraryHandle};
 
 // Re-export metadata types for tensor operations
-pub use metadata::{
-    AutodiffGraph, DeviceHints, DevicePreference, DeviceType, DistributionMetadata,
-    MeshTopology, MlirHints, ShapeMetadata, ShardingSpec, StaticShape,
-};
 #[cfg(feature = "ffi")]
-pub use ffi::{create_platform, FfiError, FfiRuntime, MarshalError, Marshaller, ResolvedSymbol};
+pub use ffi::{FfiError, FfiRuntime, MarshalError, Marshaller, ResolvedSymbol, create_platform};
+pub use metadata::{
+    AutodiffGraph, DeviceHints, DevicePreference, DeviceType, DistributionMetadata, MeshTopology,
+    MlirHints, ShapeMetadata, ShardingSpec, StaticShape,
+};
 
 #[cfg(test)]
 mod tests;

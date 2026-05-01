@@ -54,7 +54,8 @@ fn assert_fails(source: &str) {
 #[test]
 fn test_calc_chain_basic_equality() {
     // Basic calc chain with == relation
-    assert_parses(r#"
+    assert_parses(
+        r#"
 theorem commutative(): x + y == y + x {
     proof {
         calc {
@@ -63,13 +64,15 @@ theorem commutative(): x + y == y + x {
         }
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_calc_chain_multiple_steps() {
     // Calc chain with multiple steps
-    assert_parses(r#"
+    assert_parses(
+        r#"
 theorem transitivity(): a == d {
     proof {
         calc {
@@ -80,13 +83,15 @@ theorem transitivity(): a == d {
         }
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_calc_chain_comparison_relations() {
     // Calc chain with < and <= relations
-    assert_parses(r#"
+    assert_parses(
+        r#"
 theorem ordering(): a < d {
     proof {
         calc {
@@ -97,13 +102,15 @@ theorem ordering(): a < d {
         }
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_calc_chain_alt_syntax() {
     // Alternative syntax: relation target_expr by justification
-    assert_parses(r#"
+    assert_parses(
+        r#"
 theorem equiv(): x == z {
     proof {
         calc {
@@ -113,13 +120,15 @@ theorem equiv(): x == z {
         }
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_calc_chain_implies() {
     // Calc chain with implies (=>) relation
-    assert_parses(r#"
+    assert_parses(
+        r#"
 theorem implication(): p {
     proof {
         calc {
@@ -129,13 +138,15 @@ theorem implication(): p {
         }
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_calc_chain_complex_expressions() {
     // Calc chain with complex expressions
-    assert_parses(r#"
+    assert_parses(
+        r#"
 theorem algebra(): f(x) + g(y) == result {
     proof {
         calc {
@@ -145,7 +156,8 @@ theorem algebra(): f(x) + g(y) == result {
         }
     }
 }
-"#);
+"#,
+    );
 }
 
 // =============================================================================
@@ -167,7 +179,9 @@ fn identity<T, using C>(value: T) -> T using C {
     if let ItemKind::Function(f) = &module.items[0].kind {
         let generics = &f.generics;
         assert_eq!(generics.len(), 2);
-        assert!(matches!(&generics[1].kind, GenericParamKind::Context { name } if name.as_str() == "C"));
+        assert!(
+            matches!(&generics[1].kind, GenericParamKind::Context { name } if name.as_str() == "C")
+        );
     } else {
         panic!("Expected function item");
     }
@@ -176,31 +190,37 @@ fn identity<T, using C>(value: T) -> T using C {
 #[test]
 fn test_context_param_multiple() {
     // Multiple context parameters
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn combine<T, U, using C1, using C2>(a: T, b: U) -> T using [C1, C2] {
     a
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_context_param_higher_order() {
     // Context parameter used in higher-order function type
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn map<T, U, using C>(iter: List<T>, f: fn(T) -> U using C) -> List<U> using C {
     iter
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_context_param_in_type_def() {
     // Context parameter used in a type definition
-    assert_parses(r#"
+    assert_parses(
+        r#"
 type Transformer<T, U, using C> is {
     transform: fn(T) -> U using C,
 };
-"#);
+"#,
+    );
 }
 
 // =============================================================================
@@ -310,7 +330,8 @@ fn* count() {
 #[test]
 fn test_generator_function_with_params() {
     // Generator with parameters
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn* range(start: Int, end: Int) {
     let mut i = start;
     while i < end {
@@ -318,13 +339,15 @@ fn* range(start: Int, end: Int) {
         i = i + 1;
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_generator_function_with_return_type() {
     // Generator with explicit return type
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn* fibonacci() -> Int {
     let mut a = 0;
     let mut b = 1;
@@ -335,25 +358,29 @@ fn* fibonacci() -> Int {
         b = temp;
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_async_generator_function() {
     // Async generator function
-    assert_parses(r#"
+    assert_parses(
+        r#"
 async fn* fetch_pages(urls: List<Text>) {
     for url in urls {
         yield url;
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_generator_function_with_generics() {
     // Generic generator function
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn* repeat<T: Clone>(value: T, count: Int) {
     let mut i = 0;
     while i < count {
@@ -361,7 +388,8 @@ fn* repeat<T: Clone>(value: T, count: Int) {
         i = i + 1;
     }
 }
-"#);
+"#,
+    );
 }
 
 // =============================================================================
@@ -467,11 +495,13 @@ fn test_regex_not_validated() {
 #[test]
 fn test_generator_with_context_param() {
     // Generator function with context parameter
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn* items<T, using C>(source: Source<T>) -> T using C {
     yield source.next();
 }
-"#);
+"#,
+    );
 }
 
 #[test]
@@ -483,7 +513,8 @@ fn test_constrained_type_alias_with_hkt() {
 #[test]
 fn test_calc_chain_in_lemma() {
     // Calc chain inside a lemma
-    assert_parses(r#"
+    assert_parses(
+        r#"
 lemma simple_lemma(): x + 0 == x {
     proof {
         calc {
@@ -492,5 +523,6 @@ lemma simple_lemma(): x + 0 == x {
         }
     }
 }
-"#);
+"#,
+    );
 }

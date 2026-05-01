@@ -37,14 +37,14 @@ use verum_common::{List, Text};
 use verum_types::cubical::CubicalTerm;
 use verum_types::instance_search::{CoherenceReport, InstanceRegistry};
 use verum_types::universe_solver::{
-    solve_universe_constraints, UniverseConstraint, UniverseSubstitution,
+    UniverseConstraint, UniverseSubstitution, solve_universe_constraints,
 };
 
 // SMT domain encodings are wired via their concrete types.
 use verum_smt::domains::epistemic::{
-    verify_invariants_preserved, EpistemicInvariant, EpistemicResult,
+    EpistemicInvariant, EpistemicResult, verify_invariants_preserved,
 };
-use verum_smt::domains::sheaf::{verify_descent, DescentProblem, DescentResult};
+use verum_smt::domains::sheaf::{DescentProblem, DescentResult, verify_descent};
 
 // ==================== Goal kinds ====================
 
@@ -52,10 +52,7 @@ use verum_smt::domains::sheaf::{verify_descent, DescentProblem, DescentResult};
 #[derive(Debug, Clone)]
 pub enum DependentGoalKind {
     /// Verify definitional equality of two cubical terms via WHNF.
-    CubicalEquality {
-        lhs: CubicalTerm,
-        rhs: CubicalTerm,
-    },
+    CubicalEquality { lhs: CubicalTerm, rhs: CubicalTerm },
     /// Solve a batch of universe constraints.
     UniverseConstraints(List<UniverseConstraint>),
     /// Check ∞-sheaf descent for a given problem.
@@ -161,9 +158,9 @@ impl DependentVerifier {
                 DescentResult::UniqueGlobalSection | DescentResult::EmptyCover => {
                     DependentVerdict::Verified
                 }
-                DescentResult::CompatibilityNotVerified => DependentVerdict::Refuted(
-                    Text::from("sheaf descent: compatibility on overlaps not verified"),
-                ),
+                DescentResult::CompatibilityNotVerified => DependentVerdict::Refuted(Text::from(
+                    "sheaf descent: compatibility on overlaps not verified",
+                )),
                 DescentResult::Undetermined => DependentVerdict::Undetermined,
             },
             DependentGoalKind::EpistemicInvariant { pre, post } => {
@@ -213,16 +210,12 @@ pub struct VerificationReport {
 impl VerificationReport {
     /// Are all goals verified and coherence clean?
     pub fn is_all_good(&self) -> bool {
-        self.verdicts.iter().all(DependentVerdict::is_verified)
-            && self.coherence.is_coherent()
+        self.verdicts.iter().all(DependentVerdict::is_verified) && self.coherence.is_coherent()
     }
 
     /// Number of goals that were verified successfully.
     pub fn verified_count(&self) -> usize {
-        self.verdicts
-            .iter()
-            .filter(|v| v.is_verified())
-            .count()
+        self.verdicts.iter().filter(|v| v.is_verified()).count()
     }
 
     /// Number of goals that were refuted.
@@ -267,10 +260,7 @@ mod tests {
             ))))),
             value: Box::new(x.clone()),
         };
-        v.add_goal(DependentGoalKind::CubicalEquality {
-            lhs,
-            rhs: x,
-        });
+        v.add_goal(DependentGoalKind::CubicalEquality { lhs, rhs: x });
         let report = v.verify_all();
         assert_eq!(report.verified_count(), 1);
         assert_eq!(report.refuted_count(), 0);

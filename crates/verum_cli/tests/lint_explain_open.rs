@@ -40,10 +40,7 @@ fn explain_open_known_rule_prints_url_in_dry_run() {
 
 #[test]
 fn explain_open_unknown_rule_errors() {
-    let out = run(
-        &["lint", "--explain", "totally-not-a-rule", "--open"],
-        true,
-    );
+    let out = run(&["lint", "--explain", "totally-not-a-rule", "--open"], true);
     assert!(
         !out.status.success(),
         "explain --open should fail on unknown rule"
@@ -69,10 +66,7 @@ fn open_without_explain_is_rejected_by_clap() {
 fn explain_without_open_still_prints_text() {
     // Sanity: the existing text-explain path still works after
     // adding --open.
-    let out = run(
-        &["lint", "--explain", "redundant-refinement"],
-        false,
-    );
+    let out = run(&["lint", "--explain", "redundant-refinement"], false);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(

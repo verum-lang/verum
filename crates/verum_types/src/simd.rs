@@ -33,9 +33,9 @@
 //! | aarch64 | NEON | - | SVE |
 //! | riscv64 | V ext | V ext | V ext |
 
+use crate::ty::Type;
 use verum_ast::span::Span;
 use verum_common::{List, Map, Text};
-use crate::ty::Type;
 
 // =============================================================================
 // ERROR TYPES
@@ -451,10 +451,7 @@ impl SimdTypeChecker {
             self.stats.errors += 1;
             return Err(SimdTypeError::with_span(
                 SimdErrorKind::InvalidLaneCount,
-                format!(
-                    "SIMD lane count must be a power of 2, got {}",
-                    lane_count
-                ),
+                format!("SIMD lane count must be a power of 2, got {}", lane_count),
                 span,
             ));
         }
@@ -482,11 +479,7 @@ impl SimdTypeChecker {
     }
 
     /// Check if a type is a valid SIMD element type
-    fn check_element_type(
-        &self,
-        ty: &Type,
-        span: Span,
-    ) -> Result<SimdElementType, SimdTypeError> {
+    fn check_element_type(&self, ty: &Type, span: Span) -> Result<SimdElementType, SimdTypeError> {
         // Check primitive types
         match ty {
             Type::Int => Ok(SimdElementType::Int64), // Default Int is 64-bit
@@ -509,7 +502,8 @@ impl SimdTypeChecker {
             _ => Err(SimdTypeError::with_span(
                 SimdErrorKind::InvalidElementType,
                 "Type is not a valid SIMD element type. \
-                    SIMD elements must be numeric primitives: Int8-64, UInt8-64, Float32, Float64".to_string(),
+                    SIMD elements must be numeric primitives: Int8-64, UInt8-64, Float32, Float64"
+                    .to_string(),
                 span,
             )),
         }
@@ -537,10 +531,7 @@ impl SimdTypeChecker {
             self.stats.errors += 1;
             return Err(SimdTypeError::with_span(
                 SimdErrorKind::InvalidLaneCount,
-                format!(
-                    "Mask lane count must be a power of 2, got {}",
-                    lane_count
-                ),
+                format!("Mask lane count must be a power of 2, got {}", lane_count),
                 span,
             ));
         }
@@ -584,8 +575,8 @@ impl SimdTypeChecker {
             }
 
             // Binary operations
-            "simd_add" | "simd_sub" | "simd_mul" | "simd_div"
-            | "simd_min" | "simd_max" | "simd_and" | "simd_or" | "simd_xor" => {
+            "simd_add" | "simd_sub" | "simd_mul" | "simd_div" | "simd_min" | "simd_max"
+            | "simd_and" | "simd_or" | "simd_xor" => {
                 self.validate_binary_intrinsic(intrinsic, operands, span)
             }
 
@@ -595,31 +586,28 @@ impl SimdTypeChecker {
             }
 
             // Reduction operations
-            "simd_reduce_add" | "simd_reduce_mul"
-            | "simd_reduce_min" | "simd_reduce_max" => {
+            "simd_reduce_add" | "simd_reduce_mul" | "simd_reduce_min" | "simd_reduce_max" => {
                 self.validate_reduction_intrinsic(intrinsic, operands, span)
             }
 
             // Comparison operations
-            "simd_lt" | "simd_le" | "simd_gt" | "simd_ge"
-            | "simd_eq" | "simd_ne" => {
+            "simd_lt" | "simd_le" | "simd_gt" | "simd_ge" | "simd_eq" | "simd_ne" => {
                 self.validate_comparison_intrinsic(intrinsic, operands, span)
             }
 
             // Load/store operations
-            "simd_load_aligned" | "simd_load_unaligned"
-            | "simd_store_aligned" | "simd_store_unaligned" => {
+            "simd_load_aligned"
+            | "simd_load_unaligned"
+            | "simd_store_aligned"
+            | "simd_store_unaligned" => {
                 self.validate_load_store_intrinsic(intrinsic, operands, span)
             }
 
             // Shuffle operations
-            "simd_shuffle" => {
-                self.validate_shuffle_intrinsic(operands, span)
-            }
+            "simd_shuffle" => self.validate_shuffle_intrinsic(operands, span),
 
             // Gather/scatter
-            "simd_gather" | "simd_scatter"
-            | "simd_masked_gather" | "simd_masked_scatter" => {
+            "simd_gather" | "simd_scatter" | "simd_masked_gather" | "simd_masked_scatter" => {
                 self.validate_gather_scatter_intrinsic(intrinsic, operands, span)
             }
 
@@ -933,7 +921,10 @@ mod tests {
         // Valid: 4 lanes of 32-bit = 128 bits
         let float32_path = Path::single(Ident::new("Float32", Span::default()));
         let result = checker.validate_vec_type(
-            &Type::Named { path: float32_path, args: List::new() },
+            &Type::Named {
+                path: float32_path,
+                args: List::new(),
+            },
             4,
             Span::default(),
         );

@@ -11,9 +11,9 @@
 //! - Wildcard detection (early termination)
 
 use super::constructors::Constructor;
+use crate::TypeError;
 use crate::context::TypeEnv;
 use crate::ty::Type;
-use crate::TypeError;
 use std::sync::Arc;
 use verum_ast::expr::Expr;
 use verum_ast::literal::Literal;
@@ -212,7 +212,8 @@ impl PatternColumn {
         match self {
             PatternColumn::Wildcard => Pattern::wildcard(span),
             PatternColumn::Constructor { name, args } => {
-                let path = verum_ast::ty::Path::single(verum_ast::ty::Ident::new(name.clone(), span));
+                let path =
+                    verum_ast::ty::Path::single(verum_ast::ty::Ident::new(name.clone(), span));
                 let data = if args.is_empty() {
                     Maybe::None
                 } else {
@@ -260,10 +261,8 @@ impl PatternColumn {
                         )
                     })
                     .collect();
-                let path = verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
-                    Text::from("_"),
-                    span,
-                ));
+                let path =
+                    verum_ast::ty::Path::single(verum_ast::ty::Ident::new(Text::from("_"), span));
                 Pattern::new(
                     PatternKind::Record {
                         path,
@@ -280,7 +279,11 @@ impl PatternColumn {
                 },
                 span,
             ),
-            PatternColumn::Range { start, end, inclusive } => {
+            PatternColumn::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 let start_lit = start.map(|v| Heap::new(Literal::int(v, span)));
                 let end_lit = end.map(|v| Heap::new(Literal::int(v, span)));
                 Pattern::new(
@@ -292,7 +295,10 @@ impl PatternColumn {
                     span,
                 )
             }
-            PatternColumn::Stream { head_patterns, tail } => {
+            PatternColumn::Stream {
+                head_patterns,
+                tail,
+            } => {
                 let head = head_patterns.iter().map(|p| p.to_pattern()).collect();
                 // rest is optional binding for remaining iterator
                 let rest = if tail.is_some() {
@@ -308,13 +314,14 @@ impl PatternColumn {
                     span,
                 )
             }
-            PatternColumn::TypeTest { type_name, binding: _ } => {
+            PatternColumn::TypeTest {
+                type_name,
+                binding: _,
+            } => {
                 // TypeTest pattern has binding: Ident and test_type: verum_ast::ty::Type
-                let path = verum_ast::ty::Path::single(verum_ast::ty::Ident::new(type_name.clone(), span));
-                let test_type = verum_ast::ty::Type::new(
-                    verum_ast::ty::TypeKind::Path(path),
-                    span,
-                );
+                let path =
+                    verum_ast::ty::Path::single(verum_ast::ty::Ident::new(type_name.clone(), span));
+                let test_type = verum_ast::ty::Type::new(verum_ast::ty::TypeKind::Path(path), span);
                 Pattern::new(
                     PatternKind::TypeTest {
                         binding: verum_ast::ty::Ident::new(Text::from("_tested"), span),
@@ -323,16 +330,14 @@ impl PatternColumn {
                     span,
                 )
             }
-            PatternColumn::Active { name, bindings, .. } => {
-                Pattern::new(
-                    PatternKind::Active {
-                        name: verum_ast::ty::Ident::new(name.clone(), span),
-                        params: List::new(),
-                        bindings: bindings.iter().map(|p| p.to_pattern()).collect(),
-                    },
-                    span,
-                )
-            }
+            PatternColumn::Active { name, bindings, .. } => Pattern::new(
+                PatternKind::Active {
+                    name: verum_ast::ty::Ident::new(name.clone(), span),
+                    params: List::new(),
+                    bindings: bindings.iter().map(|p| p.to_pattern()).collect(),
+                },
+                span,
+            ),
         }
     }
 }
@@ -377,7 +382,9 @@ impl CoverageMatrix {
 fn collect_pattern_bindings(pattern: &Pattern) -> List<Text> {
     fn walk(pattern: &Pattern, out: &mut List<Text>) {
         match &pattern.kind {
-            PatternKind::Ident { name, subpattern, .. } => {
+            PatternKind::Ident {
+                name, subpattern, ..
+            } => {
                 out.push(Text::from(name.name.as_str()));
                 if let Maybe::Some(sub) = subpattern {
                     walk(sub, out);
@@ -388,7 +395,11 @@ fn collect_pattern_bindings(pattern: &Pattern) -> List<Text> {
                     walk(p, out);
                 }
             }
-            PatternKind::Slice { before, rest, after } => {
+            PatternKind::Slice {
+                before,
+                rest,
+                after,
+            } => {
                 for p in before.iter() {
                     walk(p, out);
                 }
@@ -492,9 +503,10 @@ pub fn build_matrix(
         // to the conservative all-guarded verdict, mirroring the
         // pre-fix behaviour.
         let (top_pattern, top_guard) = match &pattern.kind {
-            PatternKind::Guard { pattern: inner, guard } => {
-                (inner.as_ref(), Some(Arc::new((**guard).clone())))
-            }
+            PatternKind::Guard {
+                pattern: inner,
+                guard,
+            } => (inner.as_ref(), Some(Arc::new((**guard).clone()))),
             _ => (pattern, None),
         };
         let (columns, has_guard) = pattern_to_columns(top_pattern)?;
@@ -547,12 +559,22 @@ fn pattern_to_column(pattern: &Pattern, has_guard: &mut bool) -> Result<PatternC
 
         PatternKind::Literal(lit) => {
             let lit_pattern = match &lit.kind {
-                verum_ast::literal::LiteralKind::Int(int_lit) => LiteralPattern::Int(int_lit.value as i64),
-                verum_ast::literal::LiteralKind::Float(float_lit) => LiteralPattern::Float(float_lit.value),
+                verum_ast::literal::LiteralKind::Int(int_lit) => {
+                    LiteralPattern::Int(int_lit.value as i64)
+                }
+                verum_ast::literal::LiteralKind::Float(float_lit) => {
+                    LiteralPattern::Float(float_lit.value)
+                }
                 verum_ast::literal::LiteralKind::Bool(b) => LiteralPattern::Bool(*b),
                 verum_ast::literal::LiteralKind::Char(c) => LiteralPattern::Char(*c),
-                verum_ast::literal::LiteralKind::Text(string_lit) => LiteralPattern::Text(Text::from(string_lit.as_str())),
-                _ => return Err(TypeError::Other(Text::from("Unsupported literal in pattern"))),
+                verum_ast::literal::LiteralKind::Text(string_lit) => {
+                    LiteralPattern::Text(Text::from(string_lit.as_str()))
+                }
+                _ => {
+                    return Err(TypeError::Other(Text::from(
+                        "Unsupported literal in pattern",
+                    )));
+                }
             };
             Ok(PatternColumn::Literal(lit_pattern))
         }
@@ -573,7 +595,11 @@ fn pattern_to_column(pattern: &Pattern, has_guard: &mut bool) -> Result<PatternC
             Ok(PatternColumn::Array(columns?))
         }
 
-        PatternKind::Slice { before, rest, after } => {
+        PatternKind::Slice {
+            before,
+            rest,
+            after,
+        } => {
             // Slice pattern - convert to array-like representation
             let mut columns = List::new();
             for p in before.iter() {
@@ -615,10 +641,7 @@ fn pattern_to_column(pattern: &Pattern, has_guard: &mut bool) -> Result<PatternC
             if ctor_name.as_str() != "_" {
                 Ok(PatternColumn::Constructor {
                     name: ctor_name,
-                    args: field_columns?
-                        .iter()
-                        .map(|(_, col)| col.clone())
-                        .collect(),
+                    args: field_columns?.iter().map(|(_, col)| col.clone()).collect(),
                 })
             } else {
                 Ok(PatternColumn::Record {
@@ -650,11 +673,9 @@ fn pattern_to_column(pattern: &Pattern, has_guard: &mut bool) -> Result<PatternC
                 Maybe::Some(VariantPatternData::Record { fields, .. }) => {
                     let cols: Result<List<_>, _> = fields
                         .iter()
-                        .map(|f| {
-                            match &f.pattern {
-                                Maybe::Some(p) => pattern_to_column(p, has_guard),
-                                Maybe::None => Ok(PatternColumn::Wildcard),
-                            }
+                        .map(|f| match &f.pattern {
+                            Maybe::Some(p) => pattern_to_column(p, has_guard),
+                            Maybe::None => Ok(PatternColumn::Wildcard),
                         })
                         .collect();
                     cols?
@@ -714,7 +735,8 @@ fn pattern_to_column(pattern: &Pattern, has_guard: &mut bool) -> Result<PatternC
             })
         }
 
-        PatternKind::Paren(inner) => pattern_to_column(inner, has_guard),        PatternKind::View { pattern, .. } => {
+        PatternKind::Paren(inner) => pattern_to_column(inner, has_guard),
+        PatternKind::View { pattern, .. } => {
             // Deprecated view patterns - just check inner pattern
             pattern_to_column(pattern, has_guard)
         }
@@ -764,7 +786,9 @@ fn pattern_to_column(pattern: &Pattern, has_guard: &mut bool) -> Result<PatternC
                             .segments
                             .last()
                             .map(|s| match s {
-                                verum_ast::ty::PathSegment::Name(id) => Text::from(id.name.as_str()),
+                                verum_ast::ty::PathSegment::Name(id) => {
+                                    Text::from(id.name.as_str())
+                                }
                                 _ => Text::from("_"),
                             })
                             .unwrap_or_else(|| Text::from("_")),
@@ -784,7 +808,10 @@ fn pattern_to_column(pattern: &Pattern, has_guard: &mut bool) -> Result<PatternC
             })
         }
 
-        PatternKind::Stream { head_patterns, rest } => {
+        PatternKind::Stream {
+            head_patterns,
+            rest,
+        } => {
             // Stream patterns decompose iterators/streams
             // Structure: stream[a, b, ...rest]
             let head_cols: Result<List<_>, _> = head_patterns
@@ -828,8 +855,9 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
             match first {
                 PatternColumn::Wildcard => {
                     // Wildcard matches all constructors
-                    let mut new_columns: List<PatternColumn> =
-                        (0..ctor.arg_types.len()).map(|_| PatternColumn::Wildcard).collect();
+                    let mut new_columns: List<PatternColumn> = (0..ctor.arg_types.len())
+                        .map(|_| PatternColumn::Wildcard)
+                        .collect();
                     for col in row.columns.iter().skip(1) {
                         new_columns.push(col.clone());
                     }
@@ -863,7 +891,7 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                             specialized.add_row(
                                 PatternRow::new(new_columns, row.original_index, row.has_guard)
                                     .with_guard_expr(row.guard.clone())
-                            .with_bindings(row.bindings.clone()),
+                                    .with_bindings(row.bindings.clone()),
                             );
                         }
                     }
@@ -884,7 +912,7 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                         specialized.add_row(
                             PatternRow::new(new_columns, row.original_index, true)
                                 .with_guard_expr(row.guard.clone())
-                            .with_bindings(row.bindings.clone()),
+                                .with_bindings(row.bindings.clone()),
                         );
                     }
                 }
@@ -901,7 +929,7 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                         specialized.add_row(
                             PatternRow::new(new_columns, row.original_index, row.has_guard)
                                 .with_guard_expr(row.guard.clone())
-                            .with_bindings(row.bindings.clone()),
+                                .with_bindings(row.bindings.clone()),
                         );
                     }
                 }
@@ -917,14 +945,12 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                         specialized.add_row(
                             PatternRow::new(new_columns, row.original_index, row.has_guard)
                                 .with_guard_expr(row.guard.clone())
-                            .with_bindings(row.bindings.clone()),
+                                .with_bindings(row.bindings.clone()),
                         );
                     }
                 }
                 // Tuple patterns match the tuple constructor "()"
-                PatternColumn::Tuple(elements)
-                    if ctor.name.as_str() == "()" || ctor.is_default =>
-                {
+                PatternColumn::Tuple(elements) if ctor.name.as_str() == "()" || ctor.is_default => {
                     let mut new_columns = elements.clone();
                     for col in row.columns.iter().skip(1) {
                         new_columns.push(col.clone());
@@ -939,8 +965,9 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                 PatternColumn::TypeTest { type_name, .. }
                     if type_name.as_str() == ctor.name.as_str() || ctor.is_default =>
                 {
-                    let mut new_columns: List<PatternColumn> =
-                        (0..ctor.arg_types.len()).map(|_| PatternColumn::Wildcard).collect();
+                    let mut new_columns: List<PatternColumn> = (0..ctor.arg_types.len())
+                        .map(|_| PatternColumn::Wildcard)
+                        .collect();
                     for col in row.columns.iter().skip(1) {
                         new_columns.push(col.clone());
                     }
@@ -951,7 +978,11 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                     // Strip both `has_guard` and `guard` on exact matches — the
                     // specialized row no longer carries the conditional.
                     let is_exact_match = type_name.as_str() == ctor.name.as_str();
-                    let propagated_guard = if is_exact_match { None } else { row.guard.clone() };
+                    let propagated_guard = if is_exact_match {
+                        None
+                    } else {
+                        row.guard.clone()
+                    };
                     let propagated_bindings = if is_exact_match {
                         List::new()
                     } else {
@@ -1047,11 +1078,9 @@ fn matches_constructor(col: &PatternColumn, ctor: &Constructor) -> bool {
 /// Expand a pattern column for a constructor
 fn expand_alternative(col: &PatternColumn, ctor: &Constructor) -> List<PatternColumn> {
     match col {
-        PatternColumn::Wildcard => {
-            (0..ctor.arg_types.len())
-                .map(|_| PatternColumn::Wildcard)
-                .collect()
-        }
+        PatternColumn::Wildcard => (0..ctor.arg_types.len())
+            .map(|_| PatternColumn::Wildcard)
+            .collect(),
         PatternColumn::Constructor { args, .. } => args.clone(),
         PatternColumn::Guarded(inner) => expand_alternative(inner, ctor),
         PatternColumn::And(conjuncts) => {
@@ -1069,7 +1098,10 @@ fn expand_alternative(col: &PatternColumn, ctor: &Constructor) -> List<PatternCo
         // Tuple patterns: expand to element patterns (like constructor args)
         PatternColumn::Tuple(elements) => elements.clone(),
         // Stream patterns: expand head and tail for Cons constructor
-        PatternColumn::Stream { head_patterns, tail } => {
+        PatternColumn::Stream {
+            head_patterns,
+            tail,
+        } => {
             if !ctor.arg_types.is_empty() && !head_patterns.is_empty() {
                 // Cons(head, tail) - first element + rest
                 let mut result = List::new();
@@ -1094,11 +1126,9 @@ fn expand_alternative(col: &PatternColumn, ctor: &Constructor) -> List<PatternCo
             }
         }
         // TypeTest and Active patterns don't expand to constructor args
-        PatternColumn::TypeTest { .. } | PatternColumn::Active { .. } => {
-            (0..ctor.arg_types.len())
-                .map(|_| PatternColumn::Wildcard)
-                .collect()
-        }
+        PatternColumn::TypeTest { .. } | PatternColumn::Active { .. } => (0..ctor.arg_types.len())
+            .map(|_| PatternColumn::Wildcard)
+            .collect(),
         _ => List::new(),
     }
 }
@@ -1129,10 +1159,7 @@ mod tests {
     #[test]
     fn test_variant_pattern() {
         let span = verum_ast::span::Span::dummy();
-        let path = verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
-            Text::from("Some"),
-            span,
-        ));
+        let path = verum_ast::ty::Path::single(verum_ast::ty::Ident::new(Text::from("Some"), span));
         let pattern = Pattern::new(
             PatternKind::Variant {
                 path,

@@ -66,34 +66,23 @@ pub fn execute(path: &str) -> Result<()> {
     // Read + parse the certificate. The .vproof format is JSON for
     // v0 (structured s-expression is a future refinement; the JSON
     // shape is the schema, not the exchange).
-    let text = std::fs::read_to_string(&file_path).map_err(|e| {
-        CliError::custom(format!("read {}: {}", path, e))
-    })?;
+    let text = std::fs::read_to_string(&file_path)
+        .map_err(|e| CliError::custom(format!("read {}: {}", path, e)))?;
     let cert: Certificate = serde_json::from_str(&text).map_err(|e| {
-        CliError::InvalidArgument(format!(
-            "failed to parse .vproof JSON in {}: {}",
-            path, e
-        ))
+        CliError::InvalidArgument(format!("failed to parse .vproof JSON in {}: {}", path, e))
     })?;
 
-    let name = cert
-        .metadata
-        .get("name")
-        .cloned()
-        .unwrap_or_else(|| {
-            file_path
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "(anonymous)".to_string())
-        });
+    let name = cert.metadata.get("name").cloned().unwrap_or_else(|| {
+        file_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "(anonymous)".to_string())
+    });
 
     // Verify.
     match cert.verify() {
         Ok(()) => {
-            ui::success(&format!(
-                "{}: certificate verified",
-                name,
-            ));
+            ui::success(&format!("{}: certificate verified", name,));
             println!(
                 "    ({} LOC trusted base; CIC fragment with 6 inference rules)",
                 approx_trusted_base_loc(),
@@ -127,14 +116,8 @@ mod tests {
     #[test]
     fn check_proof_accepts_polymorphic_identity_certificate() {
         let cert = Certificate {
-            term: Term::lam(
-                Term::Universe(0),
-                Term::lam(Term::Var(0), Term::Var(0)),
-            ),
-            claimed_type: Term::pi(
-                Term::Universe(0),
-                Term::pi(Term::Var(0), Term::Var(1)),
-            ),
+            term: Term::lam(Term::Universe(0), Term::lam(Term::Var(0), Term::Var(0))),
+            claimed_type: Term::pi(Term::Universe(0), Term::pi(Term::Var(0), Term::Var(1))),
             metadata: {
                 let mut m = std::collections::BTreeMap::new();
                 m.insert("name".to_string(), "polymorphic_id".to_string());

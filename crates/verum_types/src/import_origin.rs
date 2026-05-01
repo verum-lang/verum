@@ -114,7 +114,10 @@ pub struct ImportProvenance {
 
 impl ImportProvenance {
     pub fn new(origin: ImportOrigin, module_path: Text) -> Self {
-        Self { origin, module_path }
+        Self {
+            origin,
+            module_path,
+        }
     }
 
     /// Decision logic: should the incoming glob (with `incoming`
@@ -138,7 +141,10 @@ mod tests {
 
     #[test]
     fn stdlib_classification() {
-        assert_eq!(ImportOrigin::classify("core", "myapp"), ImportOrigin::Stdlib);
+        assert_eq!(
+            ImportOrigin::classify("core", "myapp"),
+            ImportOrigin::Stdlib
+        );
         assert_eq!(
             ImportOrigin::classify("core.collections.list", "myapp"),
             ImportOrigin::Stdlib
@@ -185,40 +191,22 @@ mod tests {
 
     #[test]
     fn project_overwrites_stdlib() {
-        let stdlib = ImportProvenance::new(
-            ImportOrigin::Stdlib,
-            Text::from("core.base"),
-        );
-        let project = ImportProvenance::new(
-            ImportOrigin::Project,
-            Text::from("cog.types"),
-        );
+        let stdlib = ImportProvenance::new(ImportOrigin::Stdlib, Text::from("core.base"));
+        let project = ImportProvenance::new(ImportOrigin::Project, Text::from("cog.types"));
         assert!(ImportProvenance::allows_overwrite(&stdlib, &project));
     }
 
     #[test]
     fn stdlib_does_not_overwrite_project() {
-        let project = ImportProvenance::new(
-            ImportOrigin::Project,
-            Text::from("cog.types"),
-        );
-        let stdlib = ImportProvenance::new(
-            ImportOrigin::Stdlib,
-            Text::from("core.base"),
-        );
+        let project = ImportProvenance::new(ImportOrigin::Project, Text::from("cog.types"));
+        let stdlib = ImportProvenance::new(ImportOrigin::Stdlib, Text::from("core.base"));
         assert!(!ImportProvenance::allows_overwrite(&project, &stdlib));
     }
 
     #[test]
     fn same_origin_first_wins() {
-        let first = ImportProvenance::new(
-            ImportOrigin::Project,
-            Text::from("cog.a"),
-        );
-        let second = ImportProvenance::new(
-            ImportOrigin::Project,
-            Text::from("cog.b"),
-        );
+        let first = ImportProvenance::new(ImportOrigin::Project, Text::from("cog.a"));
+        let second = ImportProvenance::new(ImportOrigin::Project, Text::from("cog.b"));
         assert!(!ImportProvenance::allows_overwrite(&first, &second));
     }
 }

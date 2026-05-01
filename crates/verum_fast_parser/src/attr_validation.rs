@@ -891,10 +891,7 @@ mod tests {
             warnings[0]
         );
         assert!(
-            warnings[0]
-                .message
-                .as_str()
-                .contains("strict mode"),
+            warnings[0].message.as_str().contains("strict mode"),
             "rejection message must name the strict-mode gate: {}",
             warnings[0].message
         );

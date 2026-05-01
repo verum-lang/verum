@@ -186,8 +186,11 @@ impl DependencyResolver {
             // Stable order — by requirer (name, version) for diff-
             // friendly diagnostics.
             requirements.sort_by(|a, b| match (&a.requirer, &b.requirer) {
-                (Some(ra), Some(rb)) => (&ra.name, &ra.version, &a.requirement)
-                    .cmp(&(&rb.name, &rb.version, &b.requirement)),
+                (Some(ra), Some(rb)) => (&ra.name, &ra.version, &a.requirement).cmp(&(
+                    &rb.name,
+                    &rb.version,
+                    &b.requirement,
+                )),
                 _ => a.requirement.cmp(&b.requirement),
             });
             requirements.dedup();
@@ -365,25 +368,37 @@ mod resolver_diagnostic_tests {
         let foo1 = r.add_cog(
             Text::from("foo"),
             ver("1.0.0"),
-            CogSource::Registry { registry: Text::new(), version: Text::new() },
+            CogSource::Registry {
+                registry: Text::new(),
+                version: Text::new(),
+            },
             Set::new(),
         );
         let foo2 = r.add_cog(
             Text::from("foo"),
             ver("2.0.0"),
-            CogSource::Registry { registry: Text::new(), version: Text::new() },
+            CogSource::Registry {
+                registry: Text::new(),
+                version: Text::new(),
+            },
             Set::new(),
         );
         let a = r.add_cog(
             Text::from("a"),
             ver("1.0.0"),
-            CogSource::Registry { registry: Text::new(), version: Text::new() },
+            CogSource::Registry {
+                registry: Text::new(),
+                version: Text::new(),
+            },
             Set::new(),
         );
         let b = r.add_cog(
             Text::from("b"),
             ver("2.0.0"),
-            CogSource::Registry { registry: Text::new(), version: Text::new() },
+            CogSource::Registry {
+                registry: Text::new(),
+                version: Text::new(),
+            },
             Set::new(),
         );
         r.graph.add_edge(

@@ -38,8 +38,8 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::time::Instant;
 use verum_ast::Module;
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_common::{List, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 
 use super::{CompilationPhase, ExecutionTier, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
 
@@ -214,10 +214,7 @@ impl CodegenTiersPhase {
         Self {
             tier,
             stats: CodegenStats::default(),
-            enable_escape_analysis: matches!(
-                tier,
-                ExecutionTier::Aot
-            ),
+            enable_escape_analysis: matches!(tier, ExecutionTier::Aot),
             jit_config: JitConfig::default(),
             aot_config: AotConfig::default(),
             inline_depth: 3, // default from [codegen].inline_depth
@@ -290,7 +287,6 @@ impl CodegenTiersPhase {
 
         Ok(())
     }
-
 
     /// Generate code for Tier 3: AOT LLVM
     ///
@@ -549,7 +545,8 @@ impl CodegenTiersPhase {
 
         // Count parameters that are references
         for param in &func.params {
-            if let verum_ast::decl::FunctionParamKind::Regular { pattern: _, ty, .. } = &param.kind {
+            if let verum_ast::decl::FunctionParamKind::Regular { pattern: _, ty, .. } = &param.kind
+            {
                 if Self::is_reference_type(ty) {
                     total_refs += 1;
                     // Tier 0 references need checks (unless proven safe)
@@ -965,7 +962,10 @@ impl CompilationPhase for CodegenTiersPhase {
             ExecutionTier::Aot => match phase.codegen_aot_llvm(modules, &llvm_ctx) {
                 Ok(()) => Ok(()),
                 Err(e) => {
-                    tracing::warn!("AOT compilation failed ({}), falling back to interpreter", e);
+                    tracing::warn!(
+                        "AOT compilation failed ({}), falling back to interpreter",
+                        e
+                    );
                     phase.codegen_interpreter(modules)
                 }
             },

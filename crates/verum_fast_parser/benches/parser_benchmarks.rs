@@ -10,7 +10,7 @@
 //! - Real-world file parsing
 //! - Specific construct parsing (expressions, types, declarations)
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 use verum_ast::span::FileId;
 use verum_fast_parser::FastParser;
@@ -386,9 +386,15 @@ fn parse_expressions(c: &mut Criterion) {
         ("simple_arithmetic", "1 + 2 * 3"),
         ("complex_arithmetic", "((1 + 2) * (3 - 4)) / ((5 + 6) % 7)"),
         ("pipeline_short", "x |> f |> g"),
-        ("pipeline_long", "x |> filter(a => a > 0) |> map(a => a * 2) |> fold(0, |a, b| a + b)"),
+        (
+            "pipeline_long",
+            "x |> filter(a => a > 0) |> map(a => a * 2) |> fold(0, |a, b| a + b)",
+        ),
         ("match_simple", "match x { 0 => a, _ => b }"),
-        ("match_complex", "match x { Some(v) if v > 0 => v, Some(v) => -v, None => 0 }"),
+        (
+            "match_complex",
+            "match x { Some(v) if v > 0 => v, Some(v) => -v, None => 0 }",
+        ),
         ("closure_simple", "|x| x + 1"),
         ("closure_typed", "|x: Int, y: Int| -> Int { x + y }"),
         ("method_chain", "obj.method1().method2().method3().result"),
@@ -424,13 +430,22 @@ fn parse_types(c: &mut Criterion) {
         ("generic_simple", "fn test(x: List<Int>) {}"),
         ("generic_nested", "fn test(x: Map<Text, List<Int>>) {}"),
         ("function_type", "fn test(f: fn(Int, Int) -> Int) {}"),
-        ("function_with_context", "fn test(f: fn(Int) -> Int using [Logger]) {}"),
+        (
+            "function_with_context",
+            "fn test(f: fn(Int) -> Int using [Logger]) {}",
+        ),
         ("reference", "fn test(x: &Int, y: &mut Int) {}"),
         ("tuple", "fn test(x: (Int, Text, Bool)) {}"),
         ("array", "fn test(x: [Int; 10]) {}"),
         ("refinement", "fn test(x: Int{x > 0 && x < 100}) {}"),
-        ("where_clause", "fn test<T>(x: T) where T: Clone + Send + Sync {}"),
-        ("complex", "fn test<T, E>(x: Result<List<T>, E>) -> Maybe<T> where T: Clone, E: Debug {}"),
+        (
+            "where_clause",
+            "fn test<T>(x: T) where T: Clone + Send + Sync {}",
+        ),
+        (
+            "complex",
+            "fn test<T, E>(x: Result<List<T>, E>) -> Maybe<T> where T: Clone, E: Debug {}",
+        ),
     ];
 
     let parser = FastParser::new();
@@ -464,7 +479,10 @@ fn parse_declarations(c: &mut Criterion) {
             "type_protocol",
             "type Iterator is protocol { type Item; fn next(&mut self) -> Maybe<Self.Item>; };",
         ),
-        ("impl_simple", "implement Point { fn new(x: Float, y: Float) -> Point { Point { x, y } } }"),
+        (
+            "impl_simple",
+            "implement Point { fn new(x: Float, y: Float) -> Point { Point { x, y } } }",
+        ),
         (
             "impl_protocol",
             "implement Iterator for Range { type Item = Int; fn next(&mut self) -> Maybe<Int> { None } }",
@@ -522,18 +540,9 @@ fn error_recovery_benchmark(c: &mut Criterion) {
 
     // Code with various errors to test recovery performance
     let error_inputs = [
-        (
-            "missing_semicolon",
-            r#"fn test() { let x = 1 let y = 2; }"#,
-        ),
-        (
-            "unclosed_brace",
-            r#"fn test() { if true { let x = 1; }"#,
-        ),
-        (
-            "invalid_token",
-            r#"fn test() { let @ = 1; let y = 2; }"#,
-        ),
+        ("missing_semicolon", r#"fn test() { let x = 1 let y = 2; }"#),
+        ("unclosed_brace", r#"fn test() { if true { let x = 1; }"#),
+        ("invalid_token", r#"fn test() { let @ = 1; let y = 2; }"#),
         (
             "multiple_errors",
             r#"fn test() { let x = let y = 2 match { } }"#,

@@ -37,7 +37,8 @@ fn test_find_similar_contexts() {
         Text::from("Database"),
         Text::from("Auth"),
         Text::from("Metrics"),
-    ].into();
+    ]
+    .into();
 
     let similar = find_similar_contexts("Loger", &available);
     assert!(similar.contains(&Text::from("Logger")));

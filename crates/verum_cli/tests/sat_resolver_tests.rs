@@ -16,7 +16,7 @@
 // Migrated from src/sat_resolver.rs per CLAUDE.md standards
 
 use verum_cli::registry::sat_resolver::*;
-use verum_cli::{DependencySpec, List, Map, CogMetadata, Text, TierArtifacts};
+use verum_cli::{CogMetadata, DependencySpec, List, Map, Text, TierArtifacts};
 
 #[test]
 fn test_sat_resolver_creation() {

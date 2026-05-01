@@ -172,8 +172,16 @@ impl Process {
                 message,
                 cont,
             } => {
-                let new_ch = if channel == from { to.clone() } else { channel.clone() };
-                let new_msg = if message == from { to.clone() } else { message.clone() };
+                let new_ch = if channel == from {
+                    to.clone()
+                } else {
+                    channel.clone()
+                };
+                let new_msg = if message == from {
+                    to.clone()
+                } else {
+                    message.clone()
+                };
                 Process::send(new_ch, new_msg, cont.substitute(from, to))
             }
             Process::Recv {
@@ -181,7 +189,11 @@ impl Process {
                 binder,
                 cont,
             } => {
-                let new_ch = if channel == from { to.clone() } else { channel.clone() };
+                let new_ch = if channel == from {
+                    to.clone()
+                } else {
+                    channel.clone()
+                };
                 if binder == from {
                     Process::recv(new_ch, binder.clone(), (**cont).clone())
                 } else {
@@ -260,9 +272,7 @@ pub fn step(p: &Process) -> Option<Process> {
         }
         // Step under a restriction: the result is wrapped back in
         // the restriction.
-        Process::Restrict(name, body) => {
-            step(body).map(|b2| Process::restrict(name.clone(), b2))
-        }
+        Process::Restrict(name, body) => step(body).map(|b2| Process::restrict(name.clone(), b2)),
         // No reduction at the immediate level for atomic processes.
         _ => None,
     }
@@ -329,7 +339,10 @@ mod tests {
         let q = p.substitute(&t("x"), &t("y"));
         // The channel is renamed but the inner binder still
         // protects its body.
-        if let Process::Recv { channel, binder, .. } = q {
+        if let Process::Recv {
+            channel, binder, ..
+        } = q
+        {
             assert_eq!(channel.as_str(), "y");
             assert_eq!(binder.as_str(), "y");
         }
@@ -346,7 +359,10 @@ mod tests {
         let q = step(&p).expect("expected COMM step");
         // The receive's `z` should be substituted with `a`.
         if let Process::Par(_, right) = &q {
-            if let Process::Send { channel, message, .. } = right.as_ref() {
+            if let Process::Send {
+                channel, message, ..
+            } = right.as_ref()
+            {
                 assert_eq!(channel.as_str(), "a");
                 assert_eq!(message.as_str(), "b");
             } else {

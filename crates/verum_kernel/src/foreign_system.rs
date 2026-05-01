@@ -126,7 +126,9 @@ impl ForeignSystem {
     pub fn install_hint(self) -> &'static str {
         match self {
             Self::Coq => "install Coq via opam: `opam install coq`",
-            Self::Lean4 => "install Lean 4 via elan: `curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh`",
+            Self::Lean4 => {
+                "install Lean 4 via elan: `curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh`"
+            }
             Self::Mizar => "install Mizar from https://mizar.uwb.edu.pl/",
             Self::Isabelle => "install Isabelle from https://isabelle.in.tum.de/installation.html",
             Self::Agda => "install Agda via cabal: `cabal install Agda`",
@@ -171,7 +173,13 @@ impl ForeignSystem {
     /// Systems that have proof-replay backends (lower an SMT
     /// certificate to target proof script).
     pub fn with_proof_replay() -> [ForeignSystem; 5] {
-        [Self::Coq, Self::Lean4, Self::Agda, Self::Dedukti, Self::Metamath]
+        [
+            Self::Coq,
+            Self::Lean4,
+            Self::Agda,
+            Self::Dedukti,
+            Self::Metamath,
+        ]
     }
 
     /// Whether this system has a hermetic re-check Checker (native
@@ -224,9 +232,14 @@ mod tests {
 
     #[test]
     fn all_metadata_distinct() {
-        let names: std::collections::BTreeSet<_> = ForeignSystem::all().iter().map(|s| s.name()).collect();
-        let exts: std::collections::BTreeSet<_> = ForeignSystem::all().iter().map(|s| s.extension()).collect();
-        let tags: std::collections::BTreeSet<_> = ForeignSystem::all().iter().map(|s| s.framework_tag()).collect();
+        let names: std::collections::BTreeSet<_> =
+            ForeignSystem::all().iter().map(|s| s.name()).collect();
+        let exts: std::collections::BTreeSet<_> =
+            ForeignSystem::all().iter().map(|s| s.extension()).collect();
+        let tags: std::collections::BTreeSet<_> = ForeignSystem::all()
+            .iter()
+            .map(|s| s.framework_tag())
+            .collect();
         assert_eq!(names.len(), 7);
         assert_eq!(exts.len(), 7);
         assert_eq!(tags.len(), 7);
@@ -236,10 +249,19 @@ mod tests {
     fn aliases_resolve() {
         assert_eq!(ForeignSystem::from_name("rocq"), Some(ForeignSystem::Coq));
         assert_eq!(ForeignSystem::from_name("lean"), Some(ForeignSystem::Lean4));
-        assert_eq!(ForeignSystem::from_name("mathlib"), Some(ForeignSystem::Lean4));
-        assert_eq!(ForeignSystem::from_name("hol"), Some(ForeignSystem::Isabelle));
+        assert_eq!(
+            ForeignSystem::from_name("mathlib"),
+            Some(ForeignSystem::Lean4)
+        );
+        assert_eq!(
+            ForeignSystem::from_name("hol"),
+            Some(ForeignSystem::Isabelle)
+        );
         assert_eq!(ForeignSystem::from_name("dk"), Some(ForeignSystem::Dedukti));
-        assert_eq!(ForeignSystem::from_name("mm"), Some(ForeignSystem::Metamath));
+        assert_eq!(
+            ForeignSystem::from_name("mm"),
+            Some(ForeignSystem::Metamath)
+        );
     }
 
     #[test]
@@ -253,15 +275,19 @@ mod tests {
         for s in ForeignSystem::with_importer() {
             assert!(matches!(
                 s,
-                ForeignSystem::Coq | ForeignSystem::Lean4
-                    | ForeignSystem::Mizar | ForeignSystem::Isabelle
+                ForeignSystem::Coq
+                    | ForeignSystem::Lean4
+                    | ForeignSystem::Mizar
+                    | ForeignSystem::Isabelle
             ));
         }
         for s in ForeignSystem::with_proof_replay() {
             assert!(matches!(
                 s,
-                ForeignSystem::Coq | ForeignSystem::Lean4
-                    | ForeignSystem::Agda | ForeignSystem::Dedukti
+                ForeignSystem::Coq
+                    | ForeignSystem::Lean4
+                    | ForeignSystem::Agda
+                    | ForeignSystem::Dedukti
                     | ForeignSystem::Metamath
             ));
         }

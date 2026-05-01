@@ -459,7 +459,7 @@ unsafe extern "C" {
     ) -> LLVMErrorRef;
     pub fn LLVMOrcCreateNewThreadSafeContext() -> LLVMOrcThreadSafeContextRef;
     pub fn LLVMOrcThreadSafeContextGetContext(TSCtx: LLVMOrcThreadSafeContextRef)
-        -> LLVMContextRef;
+    -> LLVMContextRef;
     pub fn LLVMOrcDisposeThreadSafeContext(TSCtx: LLVMOrcThreadSafeContextRef);
     pub fn LLVMOrcCreateNewThreadSafeModule(
         M: LLVMModuleRef,

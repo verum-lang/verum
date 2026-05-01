@@ -82,7 +82,13 @@ impl Morphism {
 
 impl std::fmt::Display for Morphism {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} : {} → {}", self.name.as_str(), self.source, self.target)
+        write!(
+            f,
+            "{} : {} → {}",
+            self.name.as_str(),
+            self.source,
+            self.target
+        )
     }
 }
 
@@ -114,19 +120,14 @@ impl Category {
 
     /// Declare that `m` is the identity morphism on `obj`.
     /// `m` must already be registered with `m.source = m.target = obj`.
-    pub fn set_identity(
-        &mut self,
-        obj: Object,
-        m: impl Into<Text>,
-    ) -> Result<(), CategoryError> {
+    pub fn set_identity(&mut self, obj: Object, m: impl Into<Text>) -> Result<(), CategoryError> {
         let name = m.into();
-        let morph = self.morphisms.get(&name).ok_or_else(|| CategoryError::UnknownMorphism {
-            name: name.clone(),
-        })?;
+        let morph = self
+            .morphisms
+            .get(&name)
+            .ok_or_else(|| CategoryError::UnknownMorphism { name: name.clone() })?;
         if morph.source != obj || morph.target != obj {
-            return Err(CategoryError::IdentityShape {
-                name: name.clone(),
-            });
+            return Err(CategoryError::IdentityShape { name: name.clone() });
         }
         self.identities.insert(obj, name);
         Ok(())
@@ -147,24 +148,29 @@ impl Category {
         let gm = self
             .morphisms
             .get(&g_name)
-            .ok_or_else(|| CategoryError::UnknownMorphism { name: g_name.clone() })?;
+            .ok_or_else(|| CategoryError::UnknownMorphism {
+                name: g_name.clone(),
+            })?;
         let fm = self
             .morphisms
             .get(&f_name)
-            .ok_or_else(|| CategoryError::UnknownMorphism { name: f_name.clone() })?;
+            .ok_or_else(|| CategoryError::UnknownMorphism {
+                name: f_name.clone(),
+            })?;
         if fm.target != gm.source {
             return Err(CategoryError::CompositionTypeMismatch {
                 g: g_name,
                 f: f_name,
             });
         }
-        let rm = self.morphisms.get(&res_name).ok_or_else(|| {
-            CategoryError::UnknownMorphism { name: res_name.clone() }
-        })?;
+        let rm = self
+            .morphisms
+            .get(&res_name)
+            .ok_or_else(|| CategoryError::UnknownMorphism {
+                name: res_name.clone(),
+            })?;
         if rm.source != fm.source || rm.target != gm.target {
-            return Err(CategoryError::CompositionResultShape {
-                result: res_name,
-            });
+            return Err(CategoryError::CompositionResultShape { result: res_name });
         }
         self.composition.insert((g_name, f_name), res_name);
         Ok(())
@@ -347,7 +353,10 @@ mod tests {
         c.add_morphism(Morphism::new("g", obj("C"), obj("D")));
         // f.target = B but g.source = C — mismatch.
         let r = c.set_composition("g", "f", "f");
-        assert!(matches!(r, Err(CategoryError::CompositionTypeMismatch { .. })));
+        assert!(matches!(
+            r,
+            Err(CategoryError::CompositionTypeMismatch { .. })
+        ));
     }
 
     #[test]
@@ -357,7 +366,10 @@ mod tests {
         c.add_morphism(Morphism::new("g", obj("B"), obj("C")));
         c.add_morphism(Morphism::new("h", obj("X"), obj("Y"))); // wrong shape
         let r = c.set_composition("g", "f", "h");
-        assert!(matches!(r, Err(CategoryError::CompositionResultShape { .. })));
+        assert!(matches!(
+            r,
+            Err(CategoryError::CompositionResultShape { .. })
+        ));
     }
 
     #[test]

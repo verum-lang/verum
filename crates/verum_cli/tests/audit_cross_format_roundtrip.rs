@@ -156,9 +156,7 @@ public theorem trivial_thm()
     assert_eq!(payload["command"], "audit-cross-format-roundtrip");
     assert_eq!(payload["theorems_walked"], 1);
     assert_eq!(payload["backend_count"], 2);
-    let roundtrips = payload["roundtrips"]
-        .as_array()
-        .expect("roundtrips array");
+    let roundtrips = payload["roundtrips"].as_array().expect("roundtrips array");
     // 1 theorem × 2 backends = 2 rows
     assert_eq!(roundtrips.len(), 2);
     let backends: Vec<&str> = roundtrips
@@ -174,8 +172,14 @@ public theorem trivial_thm()
         // verdict_kind is `tool_missing` and gate still exits 0.
         let verdict = r["verdict"].as_str().unwrap();
         assert!(
-            ["passed", "failed", "tool_missing", "runner_error", "no_checker"]
-                .contains(&verdict),
+            [
+                "passed",
+                "failed",
+                "tool_missing",
+                "runner_error",
+                "no_checker"
+            ]
+            .contains(&verdict),
             "unexpected verdict: {}",
             verdict,
         );
@@ -211,7 +215,10 @@ public theorem thm_c()
             name,
         );
         assert!(
-            report_dir.join("lean").join(format!("{}.lean", name)).exists(),
+            report_dir
+                .join("lean")
+                .join(format!("{}.lean", name))
+                .exists(),
             "missing Lean file for {}",
             name,
         );

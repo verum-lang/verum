@@ -42,7 +42,11 @@ impl<'ctx> MetadataType<'ctx> {
     /// let md_type = context.metadata_type();
     /// let fn_type = md_type.fn_type(&[], false);
     /// ```
-    pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type(
+        self,
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+        is_var_args: bool,
+    ) -> FunctionType<'ctx> {
         self.metadata_type.fn_type(param_types, is_var_args)
     }
 

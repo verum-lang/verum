@@ -877,7 +877,14 @@ fn exprs_equal(e1: &Expr, e2: &Expr) -> bool {
         }
 
         // Function calls
-        (ExprKind::Call { func: f1, args: a1, .. }, ExprKind::Call { func: f2, args: a2, .. }) => {
+        (
+            ExprKind::Call {
+                func: f1, args: a1, ..
+            },
+            ExprKind::Call {
+                func: f2, args: a2, ..
+            },
+        ) => {
             exprs_equal(f1, f2)
                 && a1.len() == a2.len()
                 && a1.iter().zip(a2.iter()).all(|(x1, x2)| exprs_equal(x1, x2))

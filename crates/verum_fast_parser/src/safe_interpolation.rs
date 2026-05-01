@@ -174,7 +174,10 @@ fn parse_interpolation_expr(
     if actual_expr_str.is_empty() && format_spec.is_some() {
         // Empty expression with format spec (e.g., {:?}) - not valid in Verum
         return Err(ParseError::invalid_interpolation(
-            format!("empty expression with format spec `{}`", format_spec.unwrap_or("")),
+            format!(
+                "empty expression with format spec `{}`",
+                format_spec.unwrap_or("")
+            ),
             Span::new(
                 start_pos as u32,
                 (start_pos + expr_str.len()) as u32,
@@ -237,10 +240,7 @@ fn parse_interpolation_expr(
     if is_raw {
         let span = expr.span;
         let ident = Ident::new("__raw_interpolation", span);
-        let raw_fn = Expr::new(
-            ExprKind::Path(Path::from_ident(ident)),
-            span,
-        );
+        let raw_fn = Expr::new(ExprKind::Path(Path::from_ident(ident)), span);
         Ok(Expr::new(
             ExprKind::Call {
                 func: verum_common::Heap::new(raw_fn),

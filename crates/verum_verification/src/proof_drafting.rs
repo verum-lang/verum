@@ -124,7 +124,10 @@ impl ProofStateView {
 
     /// The currently-focused goal, if any.
     pub fn focused_goal(&self) -> Option<&ProofGoalSummary> {
-        self.goals.iter().find(|g| g.is_focused).or(self.goals.first())
+        self.goals
+            .iter()
+            .find(|g| g.is_focused)
+            .or(self.goals.first())
     }
 }
 
@@ -168,9 +171,9 @@ impl SuggestionCategory {
         match self {
             SuggestionCategory::LemmaApplication => "lemma",
             SuggestionCategory::TacticInvocation => "tactic",
-            SuggestionCategory::StateNavigation  => "navigation",
-            SuggestionCategory::Rewriting        => "rewrite",
-            SuggestionCategory::LlmProposal      => "llm",
+            SuggestionCategory::StateNavigation => "navigation",
+            SuggestionCategory::Rewriting => "rewrite",
+            SuggestionCategory::LlmProposal => "llm",
         }
     }
 }
@@ -244,8 +247,7 @@ impl SuggestionEngine for DefaultSuggestionEngine {
         //  head as the goal — a textual proxy for typed-head
         //  unification.
         for lemma in &view.available_lemmas {
-            let score =
-                lemma_score(prop, lemma.signature.as_str(), &goal_head);
+            let score = lemma_score(prop, lemma.signature.as_str(), &goal_head);
             if score > 0.0 {
                 suggestions.push(TacticSuggestion {
                     snippet: Text::from(format!("apply {};", lemma.name.as_str())),
@@ -379,8 +381,7 @@ impl SuggestionEngine for DefaultSuggestionEngine {
         //  arrow is at the *top level* (parenthesis-aware via the
         //  `has_top_level` helper) so `(A -> B) -> C` ranks intro
         //  over a structurally-internal arrow.
-        let is_universal = prop_lower.starts_with("forall")
-            || prop_lower.starts_with("∀");
+        let is_universal = prop_lower.starts_with("forall") || prop_lower.starts_with("∀");
         if is_universal || has_top_level(prop, &["->", "→"]) {
             suggestions.push(TacticSuggestion {
                 snippet: Text::from("intro h;"),
@@ -419,7 +420,9 @@ impl SuggestionEngine for DefaultSuggestionEngine {
 
         // Rank: descending score, stable; truncate to max_results.
         suggestions.sort_by(|a, b| {
-            b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         suggestions.truncate(max_results);
         suggestions
@@ -573,7 +576,11 @@ impl SuggestionEngine for CompositeEngine {
         for e in &self.engines {
             all.extend(e.suggest(view, max_results));
         }
-        all.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        all.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         all.truncate(max_results);
         all
     }
@@ -643,8 +650,12 @@ mod tests {
         assert!(!s.is_empty());
         // The relevant lemma `nat_succ_pos` should rank above the
         // unrelated `unrelated_lemma`.
-        let nat_pos = s.iter().position(|x| x.snippet.as_str().contains("nat_succ_pos"));
-        let unrel = s.iter().position(|x| x.snippet.as_str().contains("unrelated_lemma"));
+        let nat_pos = s
+            .iter()
+            .position(|x| x.snippet.as_str().contains("nat_succ_pos"));
+        let unrel = s
+            .iter()
+            .position(|x| x.snippet.as_str().contains("unrelated_lemma"));
         assert!(nat_pos.is_some(), "relevant lemma should appear");
         if let (Some(np), Some(un)) = (nat_pos, unrel) {
             assert!(np < un, "relevant lemma must rank above unrelated");
@@ -873,9 +884,7 @@ mod tests {
     fn does_not_suggest_induction_for_non_inductive_hypothesis() {
         let v = view_with("P x", vec![("x", "Bool")]);
         let s = DefaultSuggestionEngine::new().suggest(&v, 20);
-        assert!(!s
-            .iter()
-            .any(|x| x.snippet.as_str() == "induction x;"));
+        assert!(!s.iter().any(|x| x.snippet.as_str() == "induction x;"));
     }
 
     #[test]
@@ -947,10 +956,7 @@ mod tests {
         // Pin: every shape-aware suggestion carries a non-empty
         // rationale that cites *why* it fired. Empty rationales
         // would defeat the IDE's hover-explanation panel.
-        let v = view_with(
-            "x = x",
-            vec![("h", "P x"), ("n", "Nat")],
-        );
+        let v = view_with("x = x", vec![("h", "P x"), ("n", "Nat")]);
         let s = DefaultSuggestionEngine::new().suggest(&v, 20);
         for sug in &s {
             assert!(

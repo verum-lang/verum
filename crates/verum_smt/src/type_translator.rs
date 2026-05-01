@@ -139,7 +139,7 @@ impl TypeTranslator {
         }
 
         let sort = match ty {
-            Type::Unit => Ok(Sort::bool()), // Model unit as singleton bool
+            Type::Unit => Ok(Sort::bool()),  // Model unit as singleton bool
             Type::Never => Ok(Sort::bool()), // Bottom type as bool (all proofs lead here)
             Type::Bool => Ok(Sort::bool()),
             Type::Int => Ok(Sort::int()),
@@ -336,14 +336,10 @@ impl TypeTranslator {
                 return_ty: _,
             } => {
                 // Generator as uninterpreted sort
-                Ok(Sort::uninterpreted(Symbol::String(
-                    "Generator".to_string(),
-                )))
+                Ok(Sort::uninterpreted(Symbol::String("Generator".to_string())))
             }
 
-            Type::Tensor {
-                element, shape, ..
-            } => {
+            Type::Tensor { element, shape, .. } => {
                 // Tensor as nested arrays
                 let elem_sort = self.translate_type_to_sort(element)?;
                 // For multi-dimensional: build nested array sorts
@@ -372,16 +368,16 @@ impl TypeTranslator {
                 ))))
             }
 
-            Type::TypeApp { constructor: _, args: _ } => {
+            Type::TypeApp {
+                constructor: _,
+                args: _,
+            } => {
                 // Type application - evaluate to concrete type if possible
                 // For now, use uninterpreted sort
-                Ok(Sort::uninterpreted(Symbol::String(
-                    "TypeApp".to_string(),
-                )))
+                Ok(Sort::uninterpreted(Symbol::String("TypeApp".to_string())))
             }
 
             // ===== DEPENDENT TYPES =====
-
             Type::Pi {
                 param_name,
                 param_type,
@@ -422,12 +418,9 @@ impl TypeTranslator {
                 params,
                 point_constructors,
                 path_constructors,
-            } => self.translate_higher_inductive(
-                name,
-                params,
-                point_constructors,
-                path_constructors,
-            ),
+            } => {
+                self.translate_higher_inductive(name, params, point_constructors, path_constructors)
+            }
 
             Type::Quantified { inner, quantity } => {
                 // Track quantity and use inner type
@@ -450,12 +443,9 @@ impl TypeTranslator {
             // is not tracked in SMT; encode as an arity-keyed
             // uninterpreted sort so closed fragments with the same field
             // count share a sort.
-            Type::ExtensibleRecord { fields, .. } => {
-                Ok(Sort::uninterpreted(Symbol::String(format!(
-                    "ExtRecord_{}",
-                    fields.len()
-                ))))
-            }
+            Type::ExtensibleRecord { fields, .. } => Ok(Sort::uninterpreted(Symbol::String(
+                format!("ExtRecord_{}", fields.len()),
+            ))),
 
             // Volatile pointers (MMIO) are semantically transparent to the
             // type system — unwrap like other reference forms.
@@ -605,11 +595,7 @@ impl TypeTranslator {
         let mut dt_builder = DatatypeBuilder::new(name.as_str());
         let field_names: Vec<Vec<String>> = constructors
             .iter()
-            .map(|c| {
-                (0..c.args.len())
-                    .map(|i| format!("arg_{}", i))
-                    .collect()
-            })
+            .map(|c| (0..c.args.len()).map(|i| format!("arg_{}", i)).collect())
             .collect();
 
         for (ctor, ctor_field_names) in constructors.iter().zip(field_names.iter()) {
@@ -667,11 +653,7 @@ impl TypeTranslator {
         let mut dt_builder = DatatypeBuilder::new(hit_name.as_str());
         let field_names: Vec<Vec<String>> = point_constructors
             .iter()
-            .map(|c| {
-                (0..c.args.len())
-                    .map(|i| format!("arg_{}", i))
-                    .collect()
-            })
+            .map(|c| (0..c.args.len()).map(|i| format!("arg_{}", i)).collect())
             .collect();
 
         for (ctor, ctor_field_names) in point_constructors.iter().zip(field_names.iter()) {
@@ -733,17 +715,11 @@ impl TypeTranslator {
                 let arg_sort_refs: Vec<&Sort> = arg_sorts.iter().collect();
                 let result_sort = Sort::int();
 
-                let func_decl = FuncDecl::new(
-                    Symbol::String(func_name),
-                    &arg_sort_refs,
-                    &result_sort,
-                );
+                let func_decl =
+                    FuncDecl::new(Symbol::String(func_name), &arg_sort_refs, &result_sort);
 
                 // Apply the function
-                let z3_arg_refs: Vec<&dyn Ast> = z3_args
-                    .iter()
-                    .map(|a| a as &dyn Ast)
-                    .collect();
+                let z3_arg_refs: Vec<&dyn Ast> = z3_args.iter().map(|a| a as &dyn Ast).collect();
 
                 let result = func_decl.apply(&z3_arg_refs);
                 Ok(result)
@@ -768,7 +744,11 @@ impl TypeTranslator {
                 Ok(Dynamic::from_ast(&eq))
             }
 
-            EqTerm::J { proof: _, motive: _, base: _ } => {
+            EqTerm::J {
+                proof: _,
+                motive: _,
+                base: _,
+            } => {
                 // J eliminator (path induction)
                 // Model as Bool::from_bool(true) for now
                 let bool_val = Bool::from_bool(true);

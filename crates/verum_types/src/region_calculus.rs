@@ -186,10 +186,7 @@ impl RegionType {
 
     /// Apply a region substitution: replace each region in
     /// `from_to` with its target.
-    pub fn substitute(
-        &self,
-        from_to: &std::collections::HashMap<Region, Region>,
-    ) -> RegionType {
+    pub fn substitute(&self, from_to: &std::collections::HashMap<Region, Region>) -> RegionType {
         let mut new_set = RegionSet::new();
         for r in self.regions.iter() {
             let target = from_to.get(r).cloned().unwrap_or_else(|| r.clone());

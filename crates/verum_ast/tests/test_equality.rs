@@ -477,7 +477,8 @@ fn test_module_equality() {
         List::from(vec![Item::new(
             ItemKind::Mount(MountDecl {
                 visibility: Visibility::Private,
-                tree: MountTree { alias: Maybe::None,
+                tree: MountTree {
+                    alias: Maybe::None,
                     kind: MountTreeKind::Path(Path::single(test_ident("std"))),
                     span,
                 },
@@ -494,7 +495,8 @@ fn test_module_equality() {
         List::from(vec![Item::new(
             ItemKind::Mount(MountDecl {
                 visibility: Visibility::Private,
-                tree: MountTree { alias: Maybe::None,
+                tree: MountTree {
+                    alias: Maybe::None,
                     kind: MountTreeKind::Path(Path::single(test_ident("std"))),
                     span,
                 },
@@ -511,7 +513,8 @@ fn test_module_equality() {
         List::from(vec![Item::new(
             ItemKind::Mount(MountDecl {
                 visibility: Visibility::Private,
-                tree: MountTree { alias: Maybe::None,
+                tree: MountTree {
+                    alias: Maybe::None,
                     kind: MountTreeKind::Path(Path::single(test_ident("io"))), // Different mount
                     span,
                 },
@@ -615,7 +618,10 @@ fn test_match_arm_equality() {
         attributes: verum_common::List::new(),
         pattern: Pattern::literal(Literal::int(1, span)),
         guard: Maybe::None,
-        body: Heap::new(Expr::literal(Literal::string("one".to_string().into(), span))),
+        body: Heap::new(Expr::literal(Literal::string(
+            "one".to_string().into(),
+            span,
+        ))),
         with_clause: Maybe::None,
         span,
     };
@@ -624,7 +630,10 @@ fn test_match_arm_equality() {
         attributes: verum_common::List::new(),
         pattern: Pattern::literal(Literal::int(1, span)),
         guard: Maybe::None,
-        body: Heap::new(Expr::literal(Literal::string("one".to_string().into(), span))),
+        body: Heap::new(Expr::literal(Literal::string(
+            "one".to_string().into(),
+            span,
+        ))),
         with_clause: Maybe::None,
         span,
     };
@@ -633,7 +642,10 @@ fn test_match_arm_equality() {
         attributes: verum_common::List::new(),
         pattern: Pattern::literal(Literal::int(2, span)), // Different pattern
         guard: Maybe::None,
-        body: Heap::new(Expr::literal(Literal::string("one".to_string().into(), span))),
+        body: Heap::new(Expr::literal(Literal::string(
+            "one".to_string().into(),
+            span,
+        ))),
         with_clause: Maybe::None,
         span,
     };
@@ -642,7 +654,10 @@ fn test_match_arm_equality() {
         attributes: verum_common::List::new(),
         pattern: Pattern::literal(Literal::int(1, span)),
         guard: Maybe::Some(Heap::new(Expr::literal(Literal::bool(true, span)))), // Added guard
-        body: Heap::new(Expr::literal(Literal::string("one".to_string().into(), span))),
+        body: Heap::new(Expr::literal(Literal::string(
+            "one".to_string().into(),
+            span,
+        ))),
         with_clause: Maybe::None,
         span,
     };

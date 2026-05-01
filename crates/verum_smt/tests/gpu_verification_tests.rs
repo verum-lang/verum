@@ -25,7 +25,9 @@
 
 //! Tests GPU verification extensions to Verum type system
 
+use verum_common::List;
 use verum_common::Maybe;
+use verum_common::ToText;
 use verum_smt::{
     // Synchronization
     AtomicOpType,
@@ -44,8 +46,6 @@ use verum_smt::{
     SyncVerifier,
     ThreadId,
 };
-use verum_common::List;
-use verum_common::ToText;
 
 use z3::ast::Int;
 

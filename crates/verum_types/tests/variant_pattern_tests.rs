@@ -155,11 +155,14 @@ fn test_variant_pattern_tuple_multi_field() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Ok".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("value".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("value".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -235,7 +238,8 @@ fn test_variant_pattern_record_simple() {
                 fields: vec![
                     FieldPattern::shorthand(Ident::new("code".to_string(), span)),
                     FieldPattern::shorthand(Ident::new("message".to_string(), span)),
-                ].into(),
+                ]
+                .into(),
                 rest: false,
             }),
         },
@@ -296,7 +300,8 @@ fn test_variant_pattern_record_explicit_bindings() {
                         )),
                         span,
                     ),
-                ].into(),
+                ]
+                .into(),
                 rest: false,
             }),
         },
@@ -381,11 +386,14 @@ fn test_variant_pattern_nested() {
     let nested_pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Some".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("x".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("x".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -463,10 +471,13 @@ fn test_variant_pattern_wrong_arity() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Point".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![
-                Pattern::ident(Ident::new("x".to_string(), span), false, span),
-                Pattern::ident(Ident::new("y".to_string(), span), false, span),
-            ].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![
+                    Pattern::ident(Ident::new("x".to_string(), span), false, span),
+                    Pattern::ident(Ident::new("y".to_string(), span), false, span),
+                ]
+                .into(),
+            )),
         },
         span,
     );
@@ -542,7 +553,8 @@ fn test_variant_pattern_record_unknown_field() {
                     FieldPattern::shorthand(Ident::new("code".to_string(), span)),
                     FieldPattern::shorthand(Ident::new("message".to_string(), span)),
                     FieldPattern::shorthand(Ident::new("unknown".to_string(), span)),
-                ].into(),
+                ]
+                .into(),
                 rest: false,
             }),
         },
@@ -575,11 +587,14 @@ fn test_variant_pattern_not_variant_type() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Some".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("x".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("x".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -594,7 +609,8 @@ fn test_variant_pattern_not_variant_type() {
     // about the type mismatch (variant pattern on non-variant type)
     assert!(
         err_msg.contains("variant") || err_msg.contains("Int") || err_msg.contains("Some"),
-        "Error should indicate pattern/type mismatch: {}", err_msg
+        "Error should indicate pattern/type mismatch: {}",
+        err_msg
     );
 }
 
@@ -619,7 +635,8 @@ fn test_variant_pattern_record_style_on_tuple_payload() {
                 fields: vec![
                     FieldPattern::shorthand(Ident::new("x", span)),
                     FieldPattern::shorthand(Ident::new("y", span)),
-                ].into(),
+                ]
+                .into(),
                 rest: false,
             }),
         },
@@ -673,11 +690,14 @@ fn test_variant_pattern_in_match_expression() {
     let some_pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Some".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("x".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("x".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -712,7 +732,8 @@ fn test_variant_pattern_in_match_expression() {
             arms: vec![
                 MatchArm::new(some_pattern, None, Box::new(some_body), span),
                 MatchArm::new(none_pattern, None, Box::new(none_body), span),
-            ].into(),
+            ]
+            .into(),
         },
         span,
     );
@@ -746,11 +767,14 @@ fn test_variant_pattern_multi_segment_path() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::new(segments.into(), span),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("x".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("x".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );

@@ -59,7 +59,10 @@ fn test_variable_declaration_pipeline() {
     "#;
 
     let module = parse_ok(source);
-    assert!(!module.items.is_empty(), "Should parse variable declarations");
+    assert!(
+        !module.items.is_empty(),
+        "Should parse variable declarations"
+    );
 }
 
 #[test]

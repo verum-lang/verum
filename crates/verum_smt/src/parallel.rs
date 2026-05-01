@@ -320,14 +320,20 @@ impl ParallelSolver {
     /// Add assertion (converts to SMT-LIB string)
     pub fn assert(&mut self, assertion: Bool) {
         let smtlib = format!("{}", assertion);
-        let mut problem = self.problem.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut problem = self
+            .problem
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         problem.assertions.push(Text::from(smtlib));
     }
 
     /// Add assumption (converts to SMT-LIB string)
     pub fn assume(&mut self, assumption: Bool) {
         let smtlib = format!("{}", assumption);
-        let mut problem = self.problem.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut problem = self
+            .problem
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         problem.assumptions.push(Text::from(smtlib));
     }
 
@@ -355,8 +361,7 @@ impl ParallelSolver {
         // pattern around `enable_sharing`: without this gate the
         // field had no observable effect.
         let (result_tx, result_rx) = bounded(self.config.num_workers);
-        let sharing_active =
-            self.config.enable_sharing && self.config.enable_lemma_exchange;
+        let sharing_active = self.config.enable_sharing && self.config.enable_lemma_exchange;
         let (lemma_tx, lemma_rx) = if sharing_active {
             let (tx, rx) = unbounded();
             (Maybe::Some(tx), Maybe::Some(rx))
@@ -475,10 +480,16 @@ impl ParallelSolver {
             });
         }
 
-        let mut problem = self.problem.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut problem = self
+            .problem
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         problem.cubes = cubes.clone();
 
-        let mut stats = self.stats.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut stats = self
+            .stats
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         stats.cubes_generated = cubes.len();
     }
 
@@ -507,7 +518,10 @@ impl ParallelSolver {
                     tracing::debug!("Worker {} progress: {} conflicts", worker_id, conflicts);
                 }
                 Ok(WorkerMessage::Stats(worker_stats)) => {
-                    let mut stats = self.stats.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let mut stats = self
+                        .stats
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     stats
                         .worker_stats
                         .insert(worker_stats.worker_id, worker_stats);
@@ -576,7 +590,9 @@ impl ParallelSolver {
                 for (lemma, _) in sorted {
                     // Broadcast to all workers via lemma_tx
                     // In practice, would use separate control channels
-                    let mut stats = stats.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let mut stats = stats
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     stats.lemmas_exchanged += 1;
                 }
 
@@ -588,7 +604,10 @@ impl ParallelSolver {
     /// Collect statistics from workers
     fn collect_statistics(&self, start: Instant, workers_used: usize) -> ParallelStats {
         let total_time_ms = start.elapsed().as_millis() as u64;
-        let stats = self.stats.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let stats = self
+            .stats
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         ParallelStats {
             total_time_ms,
@@ -881,7 +900,10 @@ impl Worker {
     /// Parses SMT-LIB strings from the shared problem and reconstructs
     /// them as Z3 AST in this worker's context.
     fn load_problem(&self, solver: &Solver) -> bool {
-        let problem = self.problem.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let problem = self
+            .problem
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         // Parse and assert all SMT-LIB assertions
         for assertion in &problem.assertions {
@@ -956,7 +978,10 @@ impl Worker {
                     }
                 }
             }
-            let mut stats = self.stats.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut stats = self
+                .stats
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             stats.cubes_solved += 1;
         }
 

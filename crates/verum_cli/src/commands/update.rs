@@ -175,8 +175,7 @@ fn update_all_cogs(options: &UpdateOptions) -> Result<()> {
         ));
 
         if !options.dry_run {
-            let metadata = match client.get_metadata(cog_name.as_str(), latest_version.as_str())
-            {
+            let metadata = match client.get_metadata(cog_name.as_str(), latest_version.as_str()) {
                 Ok(m) => m,
                 Err(e) => {
                     failed.push((cog_name.clone(), e.to_string().into()));
@@ -184,11 +183,7 @@ fn update_all_cogs(options: &UpdateOptions) -> Result<()> {
                 }
             };
 
-            lockfile.update_cog(
-                cog_name.as_str(),
-                latest_version.clone(),
-                metadata.checksum,
-            );
+            lockfile.update_cog(cog_name.as_str(), latest_version.clone(), metadata.checksum);
             updated.push(cog_name);
         }
     }

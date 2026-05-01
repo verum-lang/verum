@@ -43,10 +43,7 @@ use verum_kernel::SmtCertificate;
 pub enum ReplayError {
     /// The target backend isn't registered or doesn't recognise the
     /// certificate's source backend (`SmtCertificate.backend`).
-    UnsupportedBackend {
-        target: Text,
-        cert_backend: Text,
-    },
+    UnsupportedBackend { target: Text, cert_backend: Text },
     /// The certificate's envelope schema is too new for this
     /// backend's lowering rules.
     UnsupportedSchema {
@@ -66,12 +63,19 @@ pub enum ReplayError {
 impl std::fmt::Display for ReplayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnsupportedBackend { target, cert_backend } => write!(
+            Self::UnsupportedBackend {
+                target,
+                cert_backend,
+            } => write!(
                 f,
                 "proof-replay: target `{}` does not know how to lower certificates from backend `{}`",
                 target, cert_backend
             ),
-            Self::UnsupportedSchema { target, found, max_supported } => write!(
+            Self::UnsupportedSchema {
+                target,
+                found,
+                max_supported,
+            } => write!(
                 f,
                 "proof-replay: target `{}` supports envelope schema ≤ {}, certificate is at {}",
                 target, max_supported, found

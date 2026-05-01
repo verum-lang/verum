@@ -18,7 +18,11 @@ fn binary() -> &'static str {
 
 fn make_fixture(name: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
-    dir.push(format!("verum_lint_watch_test_{}_{}", name, std::process::id()));
+    dir.push(format!(
+        "verum_lint_watch_test_{}_{}",
+        name,
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("src")).expect("create src");
     std::fs::write(
@@ -26,11 +30,7 @@ fn make_fixture(name: &str) -> PathBuf {
         format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
     )
     .expect("write manifest");
-    std::fs::write(
-        dir.join("src").join("main.vr"),
-        "fn main() {}\n",
-    )
-    .expect("write main.vr");
+    std::fs::write(dir.join("src").join("main.vr"), "fn main() {}\n").expect("write main.vr");
     dir
 }
 
@@ -71,9 +71,10 @@ fn watch_responds_to_file_change() {
     let mut saw_initial = false;
     while Instant::now() < deadline && !saw_initial {
         if let Ok(line) = rx.recv_timeout(Duration::from_millis(500))
-            && line.contains("Watching for changes") {
-                saw_initial = true;
-            }
+            && line.contains("Watching for changes")
+        {
+            saw_initial = true;
+        }
     }
     assert!(
         saw_initial,
@@ -96,9 +97,10 @@ fn watch_responds_to_file_change() {
     let mut saw_rerun = false;
     while Instant::now() < deadline && !saw_rerun {
         if let Ok(line) = rx.recv_timeout(Duration::from_millis(500))
-            && line.contains("change detected") {
-                saw_rerun = true;
-            }
+            && line.contains("change detected")
+        {
+            saw_rerun = true;
+        }
     }
 
     let _ = child.kill();

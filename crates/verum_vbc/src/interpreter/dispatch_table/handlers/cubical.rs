@@ -15,14 +15,14 @@
 //! Complex cubical terms are normalized at the type-checking level by
 //! `verum_types::cubical` and do not need full runtime interpretation.
 
-use crate::instruction::{CubicalSubOpcode, Opcode};
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
+use super::super::call_closure_sync;
 use super::bytecode_io::*;
-use super::super::{call_closure_sync};
 use super::method_dispatch::call_function_sync;
+use crate::instruction::{CubicalSubOpcode, Opcode};
+use crate::value::Value;
 
 // ============================================================================
 // CubicalExtended Handler (0xDE)
@@ -66,7 +66,9 @@ pub(in super::super) fn handle_cubical_extended(
 
 /// Helper: read dst register and arg_count, then consume arg regs.
 /// Returns (dst, list of arg values).
-fn read_cubical_args(state: &mut InterpreterState) -> InterpreterResult<(crate::instruction::Reg, Vec<Value>)> {
+fn read_cubical_args(
+    state: &mut InterpreterState,
+) -> InterpreterResult<(crate::instruction::Reg, Vec<Value>)> {
     let dst = read_reg(state)?;
     let arg_count = read_u8(state)?;
     let mut args = Vec::with_capacity(arg_count as usize);
@@ -144,9 +146,7 @@ fn read_object_field(obj: Value, field_idx: usize) -> Value {
     // `ptr` is a live, aligned heap object. The field at the computed
     // offset is an initialized Value (set at object construction time).
     unsafe {
-        let field_ptr =
-            ptr.add(OBJECT_HEADER_SIZE + field_offset)
-                as *const Value;
+        let field_ptr = ptr.add(OBJECT_HEADER_SIZE + field_offset) as *const Value;
         std::ptr::read(field_ptr)
     }
 }
@@ -163,7 +163,11 @@ fn read_object_field(obj: Value, field_idx: usize) -> Value {
 /// exact for all downstream consumers.
 fn handle_path_refl(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let value = if !args.is_empty() { args[0] } else { Value::unit() };
+    let value = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)
 }
@@ -175,7 +179,11 @@ fn handle_path_refl(state: &mut InterpreterState) -> InterpreterResult<DispatchR
 /// The value is passed through unchanged so that `PathApp` can later invoke it.
 fn handle_path_lambda(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let func = if !args.is_empty() { args[0] } else { Value::unit() };
+    let func = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
     state.set_reg(dst, func);
     Ok(DispatchResult::Continue)
 }
@@ -191,8 +199,16 @@ fn handle_path_lambda(state: &mut InterpreterState) -> InterpreterResult<Dispatc
 /// - Otherwise (`p` is a constant / refl) → `p` is already the point, return it.
 fn handle_path_app(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let path = if !args.is_empty() { args[0] } else { Value::unit() };
-    let interval = if args.len() >= 2 { args[1] } else { Value::from_i64(1) };
+    let path = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
+    let interval = if args.len() >= 2 {
+        args[1]
+    } else {
+        Value::from_i64(1)
+    };
 
     let result = match try_call_value(state, path, interval)? {
         Some(v) => v,
@@ -211,7 +227,11 @@ fn handle_path_app(state: &mut InterpreterState) -> InterpreterResult<DispatchRe
 /// path value so that any downstream `PathApp` receives the correct callable.
 fn handle_path_sym(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let path = if !args.is_empty() { args[0] } else { Value::unit() };
+    let path = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
     state.set_reg(dst, path);
     Ok(DispatchResult::Continue)
 }
@@ -227,7 +247,13 @@ fn handle_path_sym(state: &mut InterpreterState) -> InterpreterResult<DispatchRe
 /// path — the best approximation achievable without a live interval value.
 fn handle_path_trans(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let q = if args.len() >= 2 { args[1] } else if !args.is_empty() { args[0] } else { Value::unit() };
+    let q = if args.len() >= 2 {
+        args[1]
+    } else if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
     state.set_reg(dst, q);
     Ok(DispatchResult::Continue)
 }
@@ -241,8 +267,16 @@ fn handle_path_trans(state: &mut InterpreterState) -> InterpreterResult<Dispatch
 /// - Otherwise treat `p` as a constant and apply `f` directly.
 fn handle_path_ap(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let f    = if !args.is_empty() { args[0] } else { Value::unit() };
-    let path = if args.len() >= 2  { args[1] } else { Value::unit() };
+    let f = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
+    let path = if args.len() >= 2 {
+        args[1]
+    } else {
+        Value::unit()
+    };
 
     // Evaluate path at i1 to obtain the endpoint value.
     let endpoint = match try_call_value(state, path, Value::from_i64(1))? {
@@ -285,8 +319,18 @@ fn handle_path_ap(state: &mut InterpreterState) -> InterpreterResult<DispatchRes
 ///  evaluating at i1 gives back the same type, so transport is identity.
 fn handle_transport(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let type_path = if !args.is_empty() { args[0] } else { Value::unit() };
-    let value     = if args.len() >= 2  { args[1] } else if !args.is_empty() { args[0] } else { Value::unit() };
+    let type_path = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
+    let value = if args.len() >= 2 {
+        args[1]
+    } else if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
 
     // Case 1: type_path is a heap object (equiv struct from ua).
     // Equiv layout: [forward: fn(A)->B, inverse: fn(B)->A, ...]
@@ -323,9 +367,23 @@ fn handle_transport(state: &mut InterpreterState) -> InterpreterResult<DispatchR
 /// - Otherwise → return `base` (the open face is the best approximation).
 fn handle_hcomp(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let face  = if !args.is_empty() { args[0] } else { Value::from_i64(1) };
-    let walls = if args.len() >= 2  { args[1] } else { Value::unit() };
-    let base  = if args.len() >= 3  { args[2] } else if !args.is_empty() { args[args.len() - 1] } else { Value::unit() };
+    let face = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::from_i64(1)
+    };
+    let walls = if args.len() >= 2 {
+        args[1]
+    } else {
+        Value::unit()
+    };
+    let base = if args.len() >= 3 {
+        args[2]
+    } else if !args.is_empty() {
+        args[args.len() - 1]
+    } else {
+        Value::unit()
+    };
 
     // Try walls(face) to obtain the wall at the given face.
     if let Some(wall_fn) = try_call_value(state, walls, face)? {
@@ -406,7 +464,11 @@ fn handle_interval_rev(state: &mut InterpreterState) -> InterpreterResult<Dispat
 /// through so that `transport` can later extract `equiv.forward`.
 fn handle_ua(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let equiv = if !args.is_empty() { args[0] } else { Value::unit() };
+    let equiv = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
     state.set_reg(dst, equiv);
     Ok(DispatchResult::Continue)
 }
@@ -418,7 +480,11 @@ fn handle_ua(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> 
 /// We pass it through unchanged.
 fn handle_ua_inv(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let path = if !args.is_empty() { args[0] } else { Value::unit() };
+    let path = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
     state.set_reg(dst, path);
     Ok(DispatchResult::Continue)
 }
@@ -434,8 +500,16 @@ fn handle_ua_inv(state: &mut InterpreterState) -> InterpreterResult<DispatchResu
 /// 3. If field 0 is not callable, return `value` unchanged (identity fallback).
 fn handle_equiv_fwd(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let equiv = if !args.is_empty() { args[0] } else { Value::unit() };
-    let value = if args.len() >= 2  { args[1] } else { Value::unit() };
+    let equiv = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
+    let value = if args.len() >= 2 {
+        args[1]
+    } else {
+        Value::unit()
+    };
 
     if equiv.is_ptr() && !equiv.is_nil() {
         let forward_fn = read_object_field(equiv, 0);
@@ -461,8 +535,16 @@ fn handle_equiv_fwd(state: &mut InterpreterState) -> InterpreterResult<DispatchR
 /// 3. If field 1 is not callable, return `value` unchanged (identity fallback).
 fn handle_equiv_bwd(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
-    let equiv = if !args.is_empty() { args[0] } else { Value::unit() };
-    let value = if args.len() >= 2  { args[1] } else { Value::unit() };
+    let equiv = if !args.is_empty() {
+        args[0]
+    } else {
+        Value::unit()
+    };
+    let value = if args.len() >= 2 {
+        args[1]
+    } else {
+        Value::unit()
+    };
 
     if equiv.is_ptr() && !equiv.is_nil() {
         let inverse_fn = read_object_field(equiv, 1);

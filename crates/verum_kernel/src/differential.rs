@@ -60,7 +60,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::proof_checker::{self, CheckError, Certificate};
+use crate::proof_checker::{self, Certificate, CheckError};
 use crate::soundness::kernel_v0_manifest::{self, KernelV0Rule};
 
 // =============================================================================
@@ -255,10 +255,7 @@ impl DifferentialReport {
 /// [`run_differential_test_with_verum`] and the agreement
 /// classification will become live without touching this function's
 /// callers.
-pub fn run_differential_test(
-    rule: &KernelV0Rule,
-    certificate: &Certificate,
-) -> DifferentialReport {
+pub fn run_differential_test(rule: &KernelV0Rule, certificate: &Certificate) -> DifferentialReport {
     let rust_verdict: KernelVerdict = certificate.verify().into();
     let verum_verdict = KernelVerdict::NotYetSelfHosting;
     DifferentialReport::new(rule.name.clone(), rust_verdict, verum_verdict)
@@ -332,14 +329,8 @@ pub fn differential_test_rule(rule_name: &str) -> Option<DifferentialReport> {
 /// `core/verify/proof_term_examples/polymorphic_identity.vproof`.)
 pub fn stub_polymorphic_identity_certificate() -> Certificate {
     use proof_checker::Term;
-    let term = Term::lam(
-        Term::universe(0),
-        Term::lam(Term::var(0), Term::var(0)),
-    );
-    let claimed_type = Term::pi(
-        Term::universe(0),
-        Term::pi(Term::var(0), Term::var(1)),
-    );
+    let term = Term::lam(Term::universe(0), Term::lam(Term::var(0), Term::var(0)));
+    let claimed_type = Term::pi(Term::universe(0), Term::pi(Term::var(0), Term::var(1)));
     Certificate {
         term,
         claimed_type,
@@ -378,9 +369,7 @@ impl DifferentialOutcome {
                 DifferentialAgreement::BothAccept => out.accepted += 1,
                 DifferentialAgreement::BothReject => out.rejected += 1,
                 DifferentialAgreement::Disagreement => out.disagreement += 1,
-                DifferentialAgreement::NotYetSelfHosting => {
-                    out.not_yet_self_hosting += 1
-                }
+                DifferentialAgreement::NotYetSelfHosting => out.not_yet_self_hosting += 1,
             }
         }
         out
@@ -540,8 +529,7 @@ mod tests {
             rule.lemma_symbol,
         );
         // And a stub differential-test against it executes cleanly.
-        let report = differential_test_rule(&rule.name)
-            .expect("manifest rule resolvable by name");
+        let report = differential_test_rule(&rule.name).expect("manifest rule resolvable by name");
         assert_eq!(report.rule_name, rule.name);
     }
 
@@ -556,11 +544,7 @@ mod tests {
     #[test]
     fn differential_outcome_from_reports_tallies_correctly() {
         let reports = vec![
-            DifferentialReport::new(
-                "r1",
-                KernelVerdict::Accepted,
-                KernelVerdict::Accepted,
-            ),
+            DifferentialReport::new("r1", KernelVerdict::Accepted, KernelVerdict::Accepted),
             DifferentialReport::new(
                 "r2",
                 KernelVerdict::Rejected {
@@ -599,9 +583,7 @@ mod tests {
         // The audit gate must NOT flag this as a divergence.
         let reports: Vec<_> = kernel_v0_manifest::manifest()
             .iter()
-            .map(|rule| {
-                run_differential_test(rule, &stub_polymorphic_identity_certificate())
-            })
+            .map(|rule| run_differential_test(rule, &stub_polymorphic_identity_certificate()))
             .collect();
         let outcome = DifferentialOutcome::from_reports(&reports);
         assert_eq!(outcome.disagreement, 0);
@@ -620,11 +602,7 @@ mod tests {
         // classifier handles the rest.
         let rule = synthetic_rule("K-PlugIn");
         let cert = stub_polymorphic_identity_certificate();
-        let report = run_differential_test_with_verum(
-            &rule,
-            &cert,
-            KernelVerdict::Accepted,
-        );
+        let report = run_differential_test_with_verum(&rule, &cert, KernelVerdict::Accepted);
         assert_eq!(report.agreement, DifferentialAgreement::BothAccept);
 
         let report = run_differential_test_with_verum(
@@ -645,8 +623,7 @@ mod tests {
             KernelVerdict::NotYetSelfHosting,
         );
         let json = serde_json::to_string(&report).expect("serialise");
-        let restored: DifferentialReport =
-            serde_json::from_str(&json).expect("deserialise");
+        let restored: DifferentialReport = serde_json::from_str(&json).expect("deserialise");
         assert_eq!(restored, report);
     }
 
@@ -659,8 +636,7 @@ mod tests {
             not_yet_self_hosting: 10,
         };
         let json = serde_json::to_string(&outcome).expect("serialise");
-        let restored: DifferentialOutcome =
-            serde_json::from_str(&json).expect("deserialise");
+        let restored: DifferentialOutcome = serde_json::from_str(&json).expect("deserialise");
         assert_eq!(restored, outcome);
     }
 
@@ -683,10 +659,7 @@ mod tests {
 
         assert_eq!(DifferentialAgreement::BothAccept.tag(), "both_accept");
         assert_eq!(DifferentialAgreement::BothReject.tag(), "both_reject");
-        assert_eq!(
-            DifferentialAgreement::Disagreement.tag(),
-            "disagreement",
-        );
+        assert_eq!(DifferentialAgreement::Disagreement.tag(), "disagreement",);
         assert_eq!(
             DifferentialAgreement::NotYetSelfHosting.tag(),
             "not_yet_self_hosting",

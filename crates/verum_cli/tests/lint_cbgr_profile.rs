@@ -16,14 +16,15 @@ fn binary() -> &'static str {
 
 fn make_fixture(name: &str, manifest_extra: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
-    dir.push(format!("verum_lint_cbgr_prof_{name}_{}", std::process::id()));
+    dir.push(format!(
+        "verum_lint_cbgr_prof_{name}_{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("src")).expect("create src");
     std::fs::write(
         dir.join("verum.toml"),
-        format!(
-            "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n{manifest_extra}\n"
-        ),
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n{manifest_extra}\n"),
     )
     .expect("manifest");
     // A function with managed CBGR refs in a tight loop.
@@ -82,10 +83,7 @@ fn profile_loader_parses_valid_json() {
     // fixture syntax interacting with other rules, so we focus
     // here on the loader invariants: schema version, module entry
     // shape, atomic lookup behaviour.
-    let dir = make_fixture(
-        "loader",
-        "\n[lint.cbgr_budgets]\ndefault_check_ns = 18\n",
-    );
+    let dir = make_fixture("loader", "\n[lint.cbgr_budgets]\ndefault_check_ns = 18\n");
     let profile = dir.join("cbgr-profile.json");
     std::fs::write(
         &profile,
@@ -107,10 +105,7 @@ fn profile_loader_parses_valid_json() {
 
 #[test]
 fn profile_within_budget_silent() {
-    let dir = make_fixture(
-        "within",
-        "\n[lint.cbgr_budgets]\ndefault_check_ns = 30\n",
-    );
+    let dir = make_fixture("within", "\n[lint.cbgr_budgets]\ndefault_check_ns = 30\n");
     let profile = dir.join("cbgr-profile.json");
     std::fs::write(
         &profile,
@@ -119,7 +114,11 @@ fn profile_within_budget_silent() {
     .expect("profile");
     let manifest = dir.join("verum.toml");
     let body = std::fs::read_to_string(&manifest).expect("read");
-    std::fs::write(&manifest, format!("{body}measurements = \"{}\"\n", profile.display())).expect("rewrite");
+    std::fs::write(
+        &manifest,
+        format!("{body}measurements = \"{}\"\n", profile.display()),
+    )
+    .expect("rewrite");
 
     let out = run_lint(&dir);
     // Budget 30ns ≥ measured 20ns → silent.
@@ -141,7 +140,11 @@ fn malformed_profile_does_not_crash() {
     std::fs::write(&profile, "this is not json").expect("profile");
     let manifest = dir.join("verum.toml");
     let body = std::fs::read_to_string(&manifest).expect("read");
-    std::fs::write(&manifest, format!("{body}measurements = \"{}\"\n", profile.display())).expect("rewrite");
+    std::fs::write(
+        &manifest,
+        format!("{body}measurements = \"{}\"\n", profile.display()),
+    )
+    .expect("rewrite");
 
     // Run should succeed (maybe with stderr warning); not crash.
     let out = Command::new(binary())

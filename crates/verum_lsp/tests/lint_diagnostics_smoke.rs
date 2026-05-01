@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use tower_lsp::lsp_types::Url;
-use verum_lsp::lint_diagnostics::{lint_diagnostics, LintSettings};
+use verum_lsp::lint_diagnostics::{LintSettings, lint_diagnostics};
 
 fn binary_path() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

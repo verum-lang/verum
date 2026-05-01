@@ -31,20 +31,19 @@
 
 use verum_ast::{FileId, Module, Span};
 use verum_common::List;
-use verum_lexer::{Lexer, Token, TokenKind};
 use verum_lexer::lossless::{LosslessLexer, RichToken, TriviaKind as LexerTriviaKind};
-use verum_syntax::{
-    GreenBuilder, GreenNode, SyntaxNode, SyntaxKind,
-    TextEdit, TextRange, TextSize, IncrementalEngine, ChangeTracker,
-    EventBuilder, Event, CompletedMarker, Marker, GreenTreeSink, EventSink,
-    TokenSource, TriviaSource,
-};
+use verum_lexer::{Lexer, Token, TokenKind};
 use verum_syntax::event::process;
+use verum_syntax::{
+    ChangeTracker, CompletedMarker, Event, EventBuilder, EventSink, GreenBuilder, GreenNode,
+    GreenTreeSink, IncrementalEngine, Marker, SyntaxKind, SyntaxNode, TextEdit, TextRange,
+    TextSize, TokenSource, TriviaSource,
+};
 
 use crate::ParseError;
 use crate::RecursiveParser;
 use crate::recovery::{
-    recovery_sets, EventRecovery, Recoverable, RecoveryResult, RecoverySet,
+    EventRecovery, Recoverable, RecoveryResult, RecoverySet, recovery_sets,
     token_kind_to_syntax_kind as recovery_token_to_syntax,
 };
 
@@ -306,12 +305,9 @@ impl IncrementalParser {
                         result.green
                     };
 
-                    let new_green = self.engine.apply_edit(
-                        cached,
-                        &edit,
-                        reparse_fn,
-                        &self.cached_source,
-                    );
+                    let new_green =
+                        self.engine
+                            .apply_edit(cached, &edit, reparse_fn, &self.cached_source);
 
                     // Re-parse AST (we always need fresh AST)
                     let lexer = Lexer::new(source, file_id);
@@ -354,10 +350,7 @@ impl IncrementalParser {
         file_id: FileId,
     ) -> LosslessParse {
         let edit = TextEdit::replace(
-            TextRange::new(
-                TextSize::from(start as u32),
-                TextSize::from(end as u32),
-            ),
+            TextRange::new(TextSize::from(start as u32), TextSize::from(end as u32)),
             replacement,
         );
 
@@ -381,14 +374,18 @@ impl IncrementalParser {
         }
 
         // Find first differing position
-        let start = old.chars().zip(new.chars())
+        let start = old
+            .chars()
+            .zip(new.chars())
             .position(|(a, b)| a != b)
             .unwrap_or(std::cmp::min(old.len(), new.len()));
 
         // Find last differing position
         let old_rev: Vec<_> = old.chars().rev().collect();
         let new_rev: Vec<_> = new.chars().rev().collect();
-        let end_offset = old_rev.iter().zip(new_rev.iter())
+        let end_offset = old_rev
+            .iter()
+            .zip(new_rev.iter())
             .position(|(a, b)| a != b)
             .unwrap_or(std::cmp::min(old.len(), new.len()));
 
@@ -400,10 +397,7 @@ impl IncrementalParser {
         let replacement = &new[start..new_end];
 
         Some(TextEdit::replace(
-            TextRange::new(
-                TextSize::from(start as u32),
-                TextSize::from(old_end as u32),
-            ),
+            TextRange::new(TextSize::from(start as u32), TextSize::from(old_end as u32)),
             replacement,
         ))
     }
@@ -608,16 +602,15 @@ impl EventBasedParser {
 
         match &token.token.kind {
             // Visibility modifier - look ahead to determine item type
-            TokenKind::Pub => {
-                self.parse_item_with_visibility(source, tokens, start_pos, builder)
-            }
+            TokenKind::Pub => self.parse_item_with_visibility(source, tokens, start_pos, builder),
             // Function modifiers - look ahead to determine if it's a function
             TokenKind::Async | TokenKind::Pure | TokenKind::Meta | TokenKind::Unsafe => {
                 self.parse_item_with_modifiers(source, tokens, start_pos, builder)
             }
             // Function definition
             TokenKind::Fn => {
-                let (new_pos, parsed) = self.parse_fn_def_events(source, tokens, start_pos, builder);
+                let (new_pos, parsed) =
+                    self.parse_fn_def_events(source, tokens, start_pos, builder);
                 (new_pos, parsed)
             }
             // Generator function (fn*)
@@ -627,7 +620,8 @@ impl EventBasedParser {
             }
             // Type definition
             TokenKind::Type => {
-                let (new_pos, parsed) = self.parse_type_def_events(source, tokens, start_pos, builder);
+                let (new_pos, parsed) =
+                    self.parse_type_def_events(source, tokens, start_pos, builder);
                 (new_pos, parsed)
             }
             // Implement block
@@ -635,25 +629,21 @@ impl EventBasedParser {
                 self.parse_impl_block_events(source, tokens, start_pos, builder)
             }
             // Using statement (context group alias)
-            TokenKind::Using => {
-                self.parse_using_stmt_events(source, tokens, start_pos, builder)
-            }
+            TokenKind::Using => self.parse_using_stmt_events(source, tokens, start_pos, builder),
             // Const definition
-            TokenKind::Const => {
-                self.parse_const_def_events(tokens, start_pos, builder)
-            }
+            TokenKind::Const => self.parse_const_def_events(tokens, start_pos, builder),
             // Static definition
-            TokenKind::Static => {
-                self.parse_static_def_events(tokens, start_pos, builder)
-            }
+            TokenKind::Static => self.parse_static_def_events(tokens, start_pos, builder),
             // Let statement (in script mode)
             TokenKind::Let => {
-                let (new_pos, parsed) = self.parse_let_stmt_events(source, tokens, start_pos, builder);
+                let (new_pos, parsed) =
+                    self.parse_let_stmt_events(source, tokens, start_pos, builder);
                 (new_pos, parsed)
             }
             // Attribute
             TokenKind::At => {
-                let (new_pos, parsed) = self.parse_attribute_and_item(source, tokens, start_pos, builder);
+                let (new_pos, parsed) =
+                    self.parse_attribute_and_item(source, tokens, start_pos, builder);
                 (new_pos, parsed)
             }
             // Skip other tokens for now
@@ -683,21 +673,15 @@ impl EventBasedParser {
         }
 
         match &tokens[next_pos].token.kind {
-            TokenKind::Fn | TokenKind::Async | TokenKind::Pure | TokenKind::Meta | TokenKind::Unsafe => {
-                self.parse_fn_def_events(source, tokens, pos, builder)
-            }
-            TokenKind::Type => {
-                self.parse_type_def_events(source, tokens, pos, builder)
-            }
-            TokenKind::Const => {
-                self.parse_const_def_events(tokens, pos, builder)
-            }
-            TokenKind::Static => {
-                self.parse_static_def_events(tokens, pos, builder)
-            }
-            TokenKind::Implement => {
-                self.parse_impl_block_events(source, tokens, pos, builder)
-            }
+            TokenKind::Fn
+            | TokenKind::Async
+            | TokenKind::Pure
+            | TokenKind::Meta
+            | TokenKind::Unsafe => self.parse_fn_def_events(source, tokens, pos, builder),
+            TokenKind::Type => self.parse_type_def_events(source, tokens, pos, builder),
+            TokenKind::Const => self.parse_const_def_events(tokens, pos, builder),
+            TokenKind::Static => self.parse_static_def_events(tokens, pos, builder),
+            TokenKind::Implement => self.parse_impl_block_events(source, tokens, pos, builder),
             _ => (start_pos, false),
         }
     }
@@ -714,7 +698,11 @@ impl EventBasedParser {
         let mut look_ahead = start_pos;
         while look_ahead < tokens.len() {
             match &tokens[look_ahead].token.kind {
-                TokenKind::Async | TokenKind::Pure | TokenKind::Meta | TokenKind::Unsafe | TokenKind::Pub => {
+                TokenKind::Async
+                | TokenKind::Pure
+                | TokenKind::Meta
+                | TokenKind::Unsafe
+                | TokenKind::Pub => {
                     look_ahead += 1;
                 }
                 TokenKind::Fn => {
@@ -1026,7 +1014,10 @@ impl EventBasedParser {
         // Parse predicates
         while pos < tokens.len() {
             // Stop at block start or semicolon
-            if matches!(tokens[pos].token.kind, TokenKind::LBrace | TokenKind::Semicolon) {
+            if matches!(
+                tokens[pos].token.kind,
+                TokenKind::LBrace | TokenKind::Semicolon
+            ) {
                 break;
             }
 
@@ -1188,7 +1179,8 @@ impl EventBasedParser {
                     // Look ahead to detect if this is a variant type (has |)
                     let is_variant = self.is_variant_type(tokens, pos);
                     if is_variant {
-                        let (new_pos, _) = self.parse_variant_list_events(source, tokens, pos, builder);
+                        let (new_pos, _) =
+                            self.parse_variant_list_events(source, tokens, pos, builder);
                         pos = new_pos;
                     } else {
                         // Type alias - parse a single type
@@ -1224,7 +1216,9 @@ impl EventBasedParser {
 
         while pos < tokens.len() {
             match &tokens[pos].token.kind {
-                TokenKind::Semicolon if brace_depth == 0 && paren_depth == 0 && angle_depth == 0 => {
+                TokenKind::Semicolon
+                    if brace_depth == 0 && paren_depth == 0 && angle_depth == 0 =>
+                {
                     return false;
                 }
                 TokenKind::Pipe if brace_depth == 0 && paren_depth == 0 && angle_depth == 0 => {
@@ -1377,10 +1371,11 @@ impl EventBasedParser {
         let mut pos = start_pos;
 
         // Variant names can be identifiers or the special keywords None/Some
-        let is_variant_name = pos < tokens.len() && matches!(
-            tokens[pos].token.kind,
-            TokenKind::Ident(_) | TokenKind::None | TokenKind::Some
-        );
+        let is_variant_name = pos < tokens.len()
+            && matches!(
+                tokens[pos].token.kind,
+                TokenKind::Ident(_) | TokenKind::None | TokenKind::Some
+            );
         if !is_variant_name {
             return (start_pos, false);
         }
@@ -1721,7 +1716,9 @@ impl EventBasedParser {
         let mut pos = start_pos;
 
         // Skip if we hit ')' or EOF
-        if pos >= tokens.len() || matches!(tokens[pos].token.kind, TokenKind::RParen | TokenKind::Eof) {
+        if pos >= tokens.len()
+            || matches!(tokens[pos].token.kind, TokenKind::RParen | TokenKind::Eof)
+        {
             return (pos, false);
         }
 
@@ -1868,13 +1865,9 @@ impl EventBasedParser {
 
         match &tokens[pos].token.kind {
             // Reference types: &T, &mut T, &checked T, &checked mut T, &unsafe T, &unsafe mut T
-            TokenKind::Ampersand => {
-                self.parse_reference_type_events(source, tokens, pos, builder)
-            }
+            TokenKind::Ampersand => self.parse_reference_type_events(source, tokens, pos, builder),
             // Tuple types: (T1, T2, ...)
-            TokenKind::LParen => {
-                self.parse_tuple_type_events(source, tokens, pos, builder)
-            }
+            TokenKind::LParen => self.parse_tuple_type_events(source, tokens, pos, builder),
             // Path types: Ident<T>
             TokenKind::Ident(_) | TokenKind::SelfType => {
                 self.parse_path_type_events(source, tokens, pos, builder)
@@ -2116,7 +2109,10 @@ impl EventBasedParser {
 
                 // Optional expression
                 if pos < tokens.len()
-                    && !matches!(tokens[pos].token.kind, TokenKind::Semicolon | TokenKind::RBrace)
+                    && !matches!(
+                        tokens[pos].token.kind,
+                        TokenKind::Semicolon | TokenKind::RBrace
+                    )
                 {
                     let (new_pos, _) = self.parse_expr_events(source, tokens, pos, builder);
                     pos = new_pos;
@@ -2134,7 +2130,10 @@ impl EventBasedParser {
             // Other tokens are treated as expression statements
             _ => {
                 let (new_pos, parsed) = self.parse_expr_events(source, tokens, start_pos, builder);
-                if parsed && new_pos < tokens.len() && matches!(tokens[new_pos].token.kind, TokenKind::Semicolon) {
+                if parsed
+                    && new_pos < tokens.len()
+                    && matches!(tokens[new_pos].token.kind, TokenKind::Semicolon)
+                {
                     builder.token(SyntaxKind::SEMICOLON);
                     (new_pos + 1, true)
                 } else {
@@ -2161,9 +2160,16 @@ impl EventBasedParser {
         // Check for binary operators (simplified - uses precede pattern)
         while pos < tokens.len() {
             match &tokens[pos].token.kind {
-                TokenKind::Plus | TokenKind::Minus | TokenKind::Star | TokenKind::Slash
-                | TokenKind::EqEq | TokenKind::BangEq | TokenKind::Lt | TokenKind::Gt
-                | TokenKind::LtEq | TokenKind::GtEq => {
+                TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Star
+                | TokenKind::Slash
+                | TokenKind::EqEq
+                | TokenKind::BangEq
+                | TokenKind::Lt
+                | TokenKind::Gt
+                | TokenKind::LtEq
+                | TokenKind::GtEq => {
                     // This is where the precede pattern shines!
                     // We already emitted the left operand, now we wrap it in a binary expr
                     let op_kind = token_kind_to_syntax_kind(&tokens[pos].token.kind);
@@ -2319,7 +2325,11 @@ impl EventBasedParser {
     }
 
     /// Convert rich tokens to TokenSource format for event processing.
-    fn convert_tokens_to_sources(&self, source: &str, tokens: &List<RichToken>) -> Vec<TokenSource> {
+    fn convert_tokens_to_sources(
+        &self,
+        source: &str,
+        tokens: &List<RichToken>,
+    ) -> Vec<TokenSource> {
         let mut sources = Vec::new();
 
         for rich_token in tokens.iter() {
@@ -2347,13 +2357,12 @@ impl EventBasedParser {
 
             // Get main token text
             let span = &rich_token.token.span;
-            let text = if (span.start as usize) < source.len()
-                && (span.end as usize) <= source.len()
-            {
-                source[span.start as usize..span.end as usize].to_string()
-            } else {
-                String::new()
-            };
+            let text =
+                if (span.start as usize) < source.len() && (span.end as usize) <= source.len() {
+                    source[span.start as usize..span.end as usize].to_string()
+                } else {
+                    String::new()
+                };
 
             sources.push(TokenSource {
                 kind: token_kind_to_syntax_kind(&rich_token.token.kind),
@@ -3071,11 +3080,7 @@ mod tests {
         let parser = EventBasedParser::new();
         let result = parser.parse(source, file_id);
 
-        assert_eq!(
-            result.text(),
-            source,
-            "Binary expression should round-trip"
-        );
+        assert_eq!(result.text(), source, "Binary expression should round-trip");
     }
 
     #[test]
@@ -3178,7 +3183,10 @@ mod tests {
         );
 
         // Both should have SOURCE_FILE as root
-        assert_eq!(lossless_result.syntax().kind(), event_result.syntax().kind());
+        assert_eq!(
+            lossless_result.syntax().kind(),
+            event_result.syntax().kind()
+        );
     }
 
     #[test]
@@ -3241,7 +3249,9 @@ fn main() {
         // - BLOCK (start + finish)
         // - Plus token events
         // This is a basic sanity check
-        assert!(result.event_count >= 8, "Should have at least 8 events for minimal function");
+        assert!(
+            result.event_count >= 8,
+            "Should have at least 8 events for minimal function"
+        );
     }
-
 }

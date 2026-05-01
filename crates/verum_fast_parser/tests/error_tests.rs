@@ -19,8 +19,8 @@
 
 use verum_ast::span::{FileId, Span};
 use verum_common::List;
-use verum_lexer::TokenKind;
 use verum_fast_parser::error::*;
+use verum_lexer::TokenKind;
 
 #[test]
 fn test_error_display() {

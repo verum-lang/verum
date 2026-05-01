@@ -44,28 +44,28 @@ use crate::literal_registry::ParsedLiteral;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SqlDialect {
-    Generic,    // sql#"..."
-    Postgres,   // sql.postgres#"..."
-    Sqlite,     // sql.sqlite#"..."
-    Mysql,      // sql.mysql#"..."
+    Generic,  // sql#"..."
+    Postgres, // sql.postgres#"..."
+    Sqlite,   // sql.sqlite#"..."
+    Mysql,    // sql.mysql#"..."
 }
 
 impl SqlDialect {
     pub fn from_tag(tag: &str) -> Self {
         match tag {
             "sql.postgres" | "pg" | "psql" => Self::Postgres,
-            "sql.sqlite"   | "sqlite"      => Self::Sqlite,
-            "sql.mysql"    | "mysql"       => Self::Mysql,
-            _                              => Self::Generic,
+            "sql.sqlite" | "sqlite" => Self::Sqlite,
+            "sql.mysql" | "mysql" => Self::Mysql,
+            _ => Self::Generic,
         }
     }
 
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Generic  => "generic",
+            Self::Generic => "generic",
             Self::Postgres => "postgres",
-            Self::Sqlite   => "sqlite",
-            Self::Mysql    => "mysql",
+            Self::Sqlite => "sqlite",
+            Self::Mysql => "mysql",
         }
     }
 }
@@ -95,7 +95,11 @@ pub fn parse_sql(
     // Step 1 — structural balance + quote / comment closure.
     let bal = scan_balance(s);
     if let Err(reason) = bal {
-        return Err(make_err(&format!("malformed SQL: {}", reason), span, source_file));
+        return Err(make_err(
+            &format!("malformed SQL: {}", reason),
+            span,
+            source_file,
+        ));
     }
 
     // Step 2 — count `${...}` interpolations. The lexer already
@@ -132,12 +136,12 @@ pub fn parse_sql(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LexState {
     Code,
-    SingleQuote,            // '...'
-    DoubleQuote,            // "..."   (Postgres identifier; SQLite TEXT)
-    BacktickQuote,          // `...`   (MySQL identifier)
-    DollarQuote,            // $$...$$ or $tag$...$tag$ (Postgres)
-    LineComment,            // -- ... \n
-    BlockComment(u32),      // /* ... */ — depth counter (Postgres allows nesting)
+    SingleQuote,       // '...'
+    DoubleQuote,       // "..."   (Postgres identifier; SQLite TEXT)
+    BacktickQuote,     // `...`   (MySQL identifier)
+    DollarQuote,       // $$...$$ or $tag$...$tag$ (Postgres)
+    LineComment,       // -- ... \n
+    BlockComment(u32), // /* ... */ — depth counter (Postgres allows nesting)
 }
 
 fn scan_balance(s: &str) -> Result<(), String> {
@@ -154,15 +158,21 @@ fn scan_balance(s: &str) -> Result<(), String> {
         match state {
             LexState::Code => {
                 match b {
-                    b'\'' => { state = LexState::SingleQuote; }
-                    b'"'  => { state = LexState::DoubleQuote; }
-                    b'`'  => { state = LexState::BacktickQuote; }
-                    b'(' => paren_depth   += 1,
-                    b')' => paren_depth   -= 1,
+                    b'\'' => {
+                        state = LexState::SingleQuote;
+                    }
+                    b'"' => {
+                        state = LexState::DoubleQuote;
+                    }
+                    b'`' => {
+                        state = LexState::BacktickQuote;
+                    }
+                    b'(' => paren_depth += 1,
+                    b')' => paren_depth -= 1,
                     b'[' => bracket_depth += 1,
                     b']' => bracket_depth -= 1,
-                    b'{' => brace_depth   += 1,
-                    b'}' => brace_depth   -= 1,
+                    b'{' => brace_depth += 1,
+                    b'}' => brace_depth -= 1,
                     b'-' if i + 1 < n && bytes[i + 1] == b'-' => {
                         state = LexState::LineComment;
                         i += 1;
@@ -233,7 +243,9 @@ fn scan_balance(s: &str) -> Result<(), String> {
                 }
             }
             LexState::LineComment => {
-                if b == b'\n' { state = LexState::Code; }
+                if b == b'\n' {
+                    state = LexState::Code;
+                }
             }
             LexState::BlockComment(depth) => {
                 if b == b'*' && i + 1 < n && bytes[i + 1] == b'/' {
@@ -255,11 +267,13 @@ fn scan_balance(s: &str) -> Result<(), String> {
 
     match state {
         LexState::Code => {}
-        LexState::SingleQuote   => return Err("unterminated single-quoted string".to_string()),
-        LexState::DoubleQuote   => return Err("unterminated double-quoted identifier".to_string()),
-        LexState::BacktickQuote => return Err("unterminated backtick-quoted identifier".to_string()),
-        LexState::DollarQuote   => return Err("unterminated dollar-quoted string".to_string()),
-        LexState::LineComment   => {} // EOF after `--` is OK
+        LexState::SingleQuote => return Err("unterminated single-quoted string".to_string()),
+        LexState::DoubleQuote => return Err("unterminated double-quoted identifier".to_string()),
+        LexState::BacktickQuote => {
+            return Err("unterminated backtick-quoted identifier".to_string());
+        }
+        LexState::DollarQuote => return Err("unterminated dollar-quoted string".to_string()),
+        LexState::LineComment => {} // EOF after `--` is OK
         LexState::BlockComment(_) => return Err("unterminated /* */ comment".to_string()),
     }
     if paren_depth != 0 {
@@ -278,7 +292,9 @@ fn scan_balance(s: &str) -> Result<(), String> {
 fn read_dollar_tag(bytes: &[u8], i: usize) -> (usize, Vec<u8>) {
     // `$$` is the empty-tag form — `$$...$$`.
     // `$foo$` is the tagged form — `$foo$...$foo$`.
-    if i + 1 >= bytes.len() { return (0, Vec::new()); }
+    if i + 1 >= bytes.len() {
+        return (0, Vec::new());
+    }
     if bytes[i + 1] == b'$' {
         // `$$`
         return (2, b"$$".to_vec());
@@ -307,7 +323,9 @@ fn is_dollar_tag_byte(b: u8) -> bool {
 }
 
 fn matches_at(bytes: &[u8], i: usize, want: &[u8]) -> bool {
-    if i + want.len() > bytes.len() { return false; }
+    if i + want.len() > bytes.len() {
+        return false;
+    }
     &bytes[i..i + want.len()] == want
 }
 
@@ -324,10 +342,13 @@ fn count_interpolations(s: &str) -> usize {
         let b = bytes[i];
         match state {
             LexState::Code => {
-                if b == b'\'' { state = LexState::SingleQuote; }
-                else if b == b'"' { state = LexState::DoubleQuote; }
-                else if b == b'`' { state = LexState::BacktickQuote; }
-                else if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+                if b == b'\'' {
+                    state = LexState::SingleQuote;
+                } else if b == b'"' {
+                    state = LexState::DoubleQuote;
+                } else if b == b'`' {
+                    state = LexState::BacktickQuote;
+                } else if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
                     state = LexState::LineComment;
                     i += 1;
                 } else if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
@@ -340,8 +361,11 @@ fn count_interpolations(s: &str) -> usize {
                     let mut depth = 1i32;
                     i += 2;
                     while i < bytes.len() && depth > 0 {
-                        if bytes[i] == b'{' { depth += 1; }
-                        else if bytes[i] == b'}' { depth -= 1; }
+                        if bytes[i] == b'{' {
+                            depth += 1;
+                        } else if bytes[i] == b'}' {
+                            depth -= 1;
+                        }
                         i += 1;
                     }
                     continue;
@@ -363,13 +387,18 @@ fn count_interpolations(s: &str) -> usize {
                 }
             }
             LexState::LineComment => {
-                if b == b'\n' { state = LexState::Code; }
+                if b == b'\n' {
+                    state = LexState::Code;
+                }
             }
             LexState::BlockComment(depth) => {
                 if b == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
                     let nd = depth - 1;
-                    if nd == 0 { state = LexState::Code; }
-                    else { state = LexState::BlockComment(nd); }
+                    if nd == 0 {
+                        state = LexState::Code;
+                    } else {
+                        state = LexState::BlockComment(nd);
+                    }
                     i += 1;
                 } else if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
                     state = LexState::BlockComment(depth + 1);
@@ -407,11 +436,9 @@ fn reject_concat_antipatterns(s: &str) -> Result<(), String> {
     // We are conservative: only flag patterns that look intentional.
     // Catching every false positive here is bad UX.
     if s.contains("' + ") || s.contains("\" + ") {
-        return Err(
-            "raw '+' concatenation across a string boundary — \
+        return Err("raw '+' concatenation across a string boundary — \
              use ${expr} instead of breaking out of the literal"
-                .to_string(),
-        );
+            .to_string());
     }
     Ok(())
 }
@@ -431,9 +458,27 @@ fn normalise(s: &str) -> String {
         let b = bytes[i];
         match state {
             LexState::Code => {
-                if b == b'\'' { state = LexState::SingleQuote;   out.push(b as char); i += 1; last_was_space = false; continue; }
-                if b == b'"'  { state = LexState::DoubleQuote;   out.push(b as char); i += 1; last_was_space = false; continue; }
-                if b == b'`'  { state = LexState::BacktickQuote; out.push(b as char); i += 1; last_was_space = false; continue; }
+                if b == b'\'' {
+                    state = LexState::SingleQuote;
+                    out.push(b as char);
+                    i += 1;
+                    last_was_space = false;
+                    continue;
+                }
+                if b == b'"' {
+                    state = LexState::DoubleQuote;
+                    out.push(b as char);
+                    i += 1;
+                    last_was_space = false;
+                    continue;
+                }
+                if b == b'`' {
+                    state = LexState::BacktickQuote;
+                    out.push(b as char);
+                    i += 1;
+                    last_was_space = false;
+                    continue;
+                }
                 if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
                     state = LexState::LineComment;
                     i += 2;
@@ -447,7 +492,9 @@ fn normalise(s: &str) -> String {
                 if b == b'$' {
                     let (consumed, tag) = read_dollar_tag(bytes, i);
                     if consumed > 0 {
-                        for k in 0..consumed { out.push(bytes[i + k] as char); }
+                        for k in 0..consumed {
+                            out.push(bytes[i + k] as char);
+                        }
                         dollar_tag = Some(tag);
                         state = LexState::DollarQuote;
                         i += consumed;
@@ -569,7 +616,7 @@ fn normalise(s: &str) -> String {
 
 fn fingerprint64(s: &str) -> i64 {
     const FNV_OFFSET: u64 = 0xCBF2_9CE4_8422_2325;
-    const FNV_PRIME:  u64 = 0x0000_0100_0000_01B3;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
     let mut h = FNV_OFFSET;
     for &b in s.as_bytes() {
         h ^= b as u64;
@@ -582,6 +629,12 @@ fn fingerprint64(s: &str) -> i64 {
 // Diagnostic helper.
 // ---------------------------------------------------------------------------
 
-fn make_err(message: &str, _span: Span, _source_file: Option<&verum_ast::SourceFile>) -> Diagnostic {
-    DiagnosticBuilder::error().message(message.to_string()).build()
+fn make_err(
+    message: &str,
+    _span: Span,
+    _source_file: Option<&verum_ast::SourceFile>,
+) -> Diagnostic {
+    DiagnosticBuilder::error()
+        .message(message.to_string())
+        .build()
 }

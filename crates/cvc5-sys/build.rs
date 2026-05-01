@@ -138,7 +138,10 @@ fn link_prebuilt(root: &Path) -> Result<(), String> {
         return Err(format!("lib directory not found: {}", lib_dir.display()));
     }
     if !include_dir.exists() {
-        return Err(format!("include directory not found: {}", include_dir.display()));
+        return Err(format!(
+            "include directory not found: {}",
+            include_dir.display()
+        ));
     }
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
@@ -237,7 +240,10 @@ fn build_vendored() {
                 DEFAULT_CVC5_VERSION
             );
         });
-    println!("cargo:warning=cvc5-sys: using CVC5 source at {}", cvc5_src.display());
+    println!(
+        "cargo:warning=cvc5-sys: using CVC5 source at {}",
+        cvc5_src.display()
+    );
 
     let jobs = env::var("CVC5_JOBS")
         .ok()
@@ -338,7 +344,7 @@ fn build_vendored() {
         .profile(profile)
         // === Core build settings ===
         .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON")
-        .define("BUILD_SHARED_LIBS", "OFF")            // CRITICAL: static libraries
+        .define("BUILD_SHARED_LIBS", "OFF") // CRITICAL: static libraries
         .define("CMAKE_CXX_STANDARD", "17")
         // === Disable language bindings we don't need ===
         .define("BUILD_BINDINGS_PYTHON", "OFF")
@@ -356,12 +362,16 @@ fn build_vendored() {
         // production use; relax via `CVC5_UNSAFE_MODE=1` for experimental features.
         .define(
             "CVC5_SAFE_MODE",
-            if env::var("CVC5_UNSAFE_MODE").is_ok() { "none" } else { "safe" }
+            if env::var("CVC5_UNSAFE_MODE").is_ok() {
+                "none"
+            } else {
+                "safe"
+            },
         )
         // === SMT theory extensions ===
-        .define("USE_POLY", "ON")                      // LibPoly: polynomial arithmetic (NRA)
+        .define("USE_POLY", "ON") // LibPoly: polynomial arithmetic (NRA)
         // === License-compatible dependencies only (no GPL) ===
-        .define("USE_CLN", feature_gpl("ON", "OFF"))   // CLN is GPL — off by default
+        .define("USE_CLN", feature_gpl("ON", "OFF")) // CLN is GPL — off by default
         .define("USE_CRYPTOMINISAT", feature_gpl("ON", "OFF")) // GPL — off
         // === Optimizations ===
         .define("ENABLE_ASSERTIONS", bool_define(profile != "Production"))
@@ -415,13 +425,7 @@ fn build_vendored() {
 /// - `symfpu`: Floating-point bit-blasting (MIT)
 fn link_static_deps() {
     // Order: depended-upon libraries last (reverse topological order).
-    for lib in &[
-        "cadical",
-        "antlr4-runtime",
-        "polyxx",
-        "poly",
-        "symfpu",
-    ] {
+    for lib in &["cadical", "antlr4-runtime", "polyxx", "poly", "symfpu"] {
         println!("cargo:rustc-link-lib=static={}", lib);
     }
 
@@ -468,9 +472,17 @@ fn link_cxx_runtime() {
 
 /// Compute a library filename for the target platform.
 fn lib_name(base: &str, static_lib: bool) -> String {
-    let prefix = if cfg!(target_os = "windows") { "" } else { "lib" };
+    let prefix = if cfg!(target_os = "windows") {
+        ""
+    } else {
+        "lib"
+    };
     let ext = if static_lib {
-        if cfg!(target_os = "windows") { "lib" } else { "a" }
+        if cfg!(target_os = "windows") {
+            "lib"
+        } else {
+            "a"
+        }
     } else if cfg!(target_os = "macos") {
         "dylib"
     } else if cfg!(target_os = "windows") {
@@ -515,15 +527,16 @@ fn bool_define(b: bool) -> &'static str {
 /// clearer error for the user).
 fn detect_gmp_prefix() -> Option<String> {
     if let Ok(prefix) = env::var("GMP_PREFIX")
-        && Path::new(&prefix).join("include/gmp.h").exists() {
-            return Some(prefix);
-        }
+        && Path::new(&prefix).join("include/gmp.h").exists()
+    {
+        return Some(prefix);
+    }
 
     let candidates = [
-        "/opt/homebrew",   // Apple Silicon Homebrew
-        "/usr/local",      // Intel Homebrew, MacPorts, manual install
-        "/usr",            // Linux system packages
-        "/opt/local",      // MacPorts alternative location
+        "/opt/homebrew", // Apple Silicon Homebrew
+        "/usr/local",    // Intel Homebrew, MacPorts, manual install
+        "/usr",          // Linux system packages
+        "/opt/local",    // MacPorts alternative location
     ];
 
     for candidate in &candidates {
@@ -532,7 +545,9 @@ fn detect_gmp_prefix() -> Option<String> {
             let has_static = Path::new(candidate).join("lib/libgmp.a").exists();
             let has_dynamic_macos = Path::new(candidate).join("lib/libgmp.dylib").exists();
             let has_dynamic_linux = Path::new(candidate).join("lib/libgmp.so").exists()
-                || Path::new(candidate).join("lib/x86_64-linux-gnu/libgmp.so").exists();
+                || Path::new(candidate)
+                    .join("lib/x86_64-linux-gnu/libgmp.so")
+                    .exists();
             if has_static || has_dynamic_macos || has_dynamic_linux {
                 return Some(candidate.to_string());
             }

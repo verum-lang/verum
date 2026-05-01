@@ -482,7 +482,9 @@ impl UnifiedDashboard {
                         cbgr_funcs[0].function_name
                     )
                     .into(),
-                    benefit: Maybe::Some(format!("Eliminate {} CBGR overhead", cbgr_funcs[0].cost).into()),
+                    benefit: Maybe::Some(
+                        format!("Eliminate {} CBGR overhead", cbgr_funcs[0].cost).into(),
+                    ),
                 });
                 priority += 1;
             }
@@ -539,7 +541,11 @@ impl UnifiedDashboard {
         ];
 
         for (i, (name, metrics)) in phases.iter().enumerate() {
-            let connector = if i < phases.len() - 1 { "├─" } else { "└─" };
+            let connector = if i < phases.len() - 1 {
+                "├─"
+            } else {
+                "└─"
+            };
             let time_str = if metrics.duration.as_millis() > 0 {
                 format!("{:.1}ms", metrics.duration.as_secs_f64() * 1000.0)
             } else {
@@ -625,11 +631,7 @@ impl UnifiedDashboard {
                     hot_spot.cost.as_str(),
                     format!("[{}]", kind_label).dimmed()
                 );
-                println!(
-                    "     {} {}",
-                    "Target:".dimmed(),
-                    hot_spot.target.as_str()
-                );
+                println!("     {} {}", "Target:".dimmed(), hot_spot.target.as_str());
             }
             println!();
         }
@@ -667,16 +669,9 @@ impl UnifiedDashboard {
             println!();
 
             for rec in &self.recommendations {
-                println!(
-                    "  {}. {}",
-                    rec.priority,
-                    rec.text.as_str().yellow()
-                );
+                println!("  {}. {}", rec.priority, rec.text.as_str().yellow());
                 if let Maybe::Some(ref benefit) = rec.benefit {
-                    println!(
-                        "     {}",
-                        benefit.as_str().dimmed()
-                    );
+                    println!("     {}", benefit.as_str().dimmed());
                 }
             }
             println!();

@@ -58,8 +58,8 @@ use verum_ast::{
     BinOp, ContextList, Expr, ExprKind, Literal, LiteralKind, Pattern, PatternKind, Type, TypeKind,
     UnOp,
 };
-use verum_common::{Heap, List, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{Heap, List, Maybe, Text};
 
 use crate::proof_term_unified::ProofTerm;
 
@@ -842,7 +842,6 @@ impl ProgramExtractor {
         }
     }
 
-
     /// Convert expression to pattern
     ///
 
@@ -1113,8 +1112,6 @@ impl ProgramExtractor {
             _ => Maybe::None,
         }
     }
-
-
 
     /// Infer parameter type from proof context
     ///
@@ -1536,7 +1533,6 @@ impl ProgramExtractor {
         }
     }
 
-
     /// Build recursive function from induction proof
     ///
 
@@ -1759,7 +1755,6 @@ impl ProgramExtractor {
         })
     }
 
-
     /// Get Nat type
     fn nat_type(&self) -> Type {
         Type {
@@ -1770,7 +1765,6 @@ impl ProgramExtractor {
             span: Span::default(),
         }
     }
-
 
     /// Get extraction statistics
     pub fn stats(&self) -> &ExtractionStats {
@@ -2199,10 +2193,8 @@ impl CodeGenerator {
                             assoc_name,
                             bounds,
                         } => {
-                            let bound_strs: Vec<String> = bounds
-                                .iter()
-                                .map(|b| self.format_type_bound(b))
-                                .collect();
+                            let bound_strs: Vec<String> =
+                                bounds.iter().map(|b| self.format_type_bound(b)).collect();
                             format!(
                                 "{}.{}: {}",
                                 self.format_path(type_path),
@@ -2222,9 +2214,7 @@ impl CodeGenerator {
                                 self.format_type(eq_type)
                             )
                         }
-                        verum_ast::ty::TypeBoundKind::GenericProtocol(ty) => {
-                            self.format_type(ty)
-                        }
+                        verum_ast::ty::TypeBoundKind::GenericProtocol(ty) => self.format_type(ty),
                     })
                     .collect();
                 if bounds.is_empty() {
@@ -2300,10 +2290,8 @@ impl CodeGenerator {
 
             // Existential types: some T: Bound
             TypeKind::Existential { name, bounds } => {
-                let bound_strs: Vec<String> = bounds
-                    .iter()
-                    .map(|b| self.format_type_bound(b))
-                    .collect();
+                let bound_strs: Vec<String> =
+                    bounds.iter().map(|b| self.format_type_bound(b)).collect();
                 if bounds.is_empty() {
                     format!("some {}", name.name)
                 } else {
@@ -2343,18 +2331,16 @@ impl CodeGenerator {
             }
 
             // Universe types: Type, Type(0), Type(1), Type(u)
-            TypeKind::Universe { level } => {
-                match level {
-                    verum_common::Maybe::None => "Type".to_string(),
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Concrete(n)) => {
-                        format!("Type({})", n)
-                    }
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(ident)) => {
-                        format!("Type({})", ident.name)
-                    }
-                    verum_common::Maybe::Some(_) => "Type".to_string(),
+            TypeKind::Universe { level } => match level {
+                verum_common::Maybe::None => "Type".to_string(),
+                verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Concrete(n)) => {
+                    format!("Type({})", n)
                 }
-            }
+                verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(ident)) => {
+                    format!("Type({})", ident.name)
+                }
+                verum_common::Maybe::Some(_) => "Type".to_string(),
+            },
 
             // Meta types: meta T
             TypeKind::Meta { inner } => {
@@ -2372,24 +2358,17 @@ impl CodeGenerator {
                 format!(
                     "Path<{}>({})",
                     self.format_type(carrier),
-                    format!(
-                        "{}, {}",
-                        self.format_expr(lhs),
-                        self.format_expr(rhs)
-                    )
+                    format!("{}, {}", self.format_expr(lhs), self.format_expr(rhs))
                 )
             }
             // General dependent-type application: T<A1..>(v1, v2, ..).
-            TypeKind::DependentApp { carrier, value_args } => {
-                let arg_strs: Vec<String> = value_args
-                    .iter()
-                    .map(|e| self.format_expr(e))
-                    .collect();
-                format!(
-                    "{}({})",
-                    self.format_type(carrier),
-                    arg_strs.join(", ")
-                )
+            TypeKind::DependentApp {
+                carrier,
+                value_args,
+            } => {
+                let arg_strs: Vec<String> =
+                    value_args.iter().map(|e| self.format_expr(e)).collect();
+                format!("{}({})", self.format_type(carrier), arg_strs.join(", "))
             }
         }
     }
@@ -2424,10 +2403,8 @@ impl CodeGenerator {
                 assoc_name,
                 bounds,
             } => {
-                let bound_strs: Vec<String> = bounds
-                    .iter()
-                    .map(|b| self.format_type_bound(b))
-                    .collect();
+                let bound_strs: Vec<String> =
+                    bounds.iter().map(|b| self.format_type_bound(b)).collect();
                 format!(
                     "{}.{}: {}",
                     self.format_path(type_path),
@@ -2849,7 +2826,11 @@ impl CodeGenerator {
                         format!("{{ {} }}", arm_strs.join(", "))
                     }
                     RecoverBody::Closure { param, body, .. } => {
-                        format!("|{}| {}", self.format_pattern(&param.pattern), self.format_expr(body))
+                        format!(
+                            "|{}| {}",
+                            self.format_pattern(&param.pattern),
+                            self.format_expr(body)
+                        )
                     }
                 };
                 format!(
@@ -2890,7 +2871,11 @@ impl CodeGenerator {
                         format!("{{ {} }}", arm_strs.join(", "))
                     }
                     RecoverBody::Closure { param, body, .. } => {
-                        format!("|{}| {}", self.format_pattern(&param.pattern), self.format_expr(body))
+                        format!(
+                            "|{}| {}",
+                            self.format_pattern(&param.pattern),
+                            self.format_expr(body)
+                        )
                     }
                 };
                 format!(
@@ -2929,12 +2914,10 @@ impl CodeGenerator {
                     value_str
                 }
             }
-            LiteralKind::Text(string_lit) => {
-                match string_lit {
-                    verum_ast::literal::StringLit::Regular(s) => format!("\"{}\"", s),
-                    verum_ast::literal::StringLit::MultiLine(s) => format!("\"\"\"{}\"\"\"", s),
-                }
-            }
+            LiteralKind::Text(string_lit) => match string_lit {
+                verum_ast::literal::StringLit::Regular(s) => format!("\"{}\"", s),
+                verum_ast::literal::StringLit::MultiLine(s) => format!("\"\"\"{}\"\"\"", s),
+            },
             LiteralKind::Char(c) => format!("'{}'", c),
             LiteralKind::ByteChar(b) => format!("b'{}'", *b as char),
             LiteralKind::ByteString(bytes) => {
@@ -2954,7 +2937,10 @@ impl CodeGenerator {
     }
 
     /// Format quantifier bindings for forall/exists expressions
-    fn format_quantifier_bindings(&self, bindings: &[verum_ast::expr::QuantifierBinding]) -> String {
+    fn format_quantifier_bindings(
+        &self,
+        bindings: &[verum_ast::expr::QuantifierBinding],
+    ) -> String {
         bindings
             .iter()
             .map(|binding| {
@@ -3101,7 +3087,8 @@ impl CodeGenerator {
                 let op = if *inclusive { "..=" } else { ".." };
                 format!("{}{}{}", start_str, op, end_str)
             }
-            PatternKind::Paren(inner) => format!("({})", self.format_pattern(inner)),            PatternKind::View {
+            PatternKind::Paren(inner) => format!("({})", self.format_pattern(inner)),
+            PatternKind::View {
                 view_function,
                 pattern,
             } => {
@@ -3111,7 +3098,11 @@ impl CodeGenerator {
                     self.format_pattern(pattern)
                 )
             }
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 let mut result = String::new();
                 result.push_str(&name.name);
                 if !params.is_empty() {
@@ -3120,14 +3111,16 @@ impl CodeGenerator {
                 }
                 result.push('(');
                 if !bindings.is_empty() {
-                    let binding_strs: Vec<String> = bindings.iter().map(|p| self.format_pattern(p)).collect();
+                    let binding_strs: Vec<String> =
+                        bindings.iter().map(|p| self.format_pattern(p)).collect();
                     result.push_str(&binding_strs.join(", "));
                 }
                 result.push(')');
                 result
             }
             PatternKind::And(patterns) => {
-                let pat_strs: Vec<String> = patterns.iter().map(|p| self.format_pattern(p)).collect();
+                let pat_strs: Vec<String> =
+                    patterns.iter().map(|p| self.format_pattern(p)).collect();
                 pat_strs.join(" & ")
             }
             PatternKind::TypeTest { binding, test_type } => {
@@ -3135,8 +3128,14 @@ impl CodeGenerator {
             }
             // Stream pattern: stream[first, second, ...rest]
             // Stream pattern matching: destructure stream into head elements and rest
-            PatternKind::Stream { head_patterns, rest } => {
-                let head_strs: Vec<String> = head_patterns.iter().map(|p| self.format_pattern(p)).collect();
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
+                let head_strs: Vec<String> = head_patterns
+                    .iter()
+                    .map(|p| self.format_pattern(p))
+                    .collect();
                 let rest_str = if let Maybe::Some(rest_ident) = rest {
                     if head_strs.is_empty() {
                         format!("...{}", rest_ident.name)
@@ -3150,12 +3149,20 @@ impl CodeGenerator {
             }
             // Cons pattern: head :: tail
             PatternKind::Cons { head, tail } => {
-                format!("{} :: {}", self.format_pattern(head), self.format_pattern(tail))
+                format!(
+                    "{} :: {}",
+                    self.format_pattern(head),
+                    self.format_pattern(tail)
+                )
             }
             // Guard pattern: pattern if guard_expr
             // Spec: Rust RFC 3637 - Guard Patterns
             PatternKind::Guard { pattern, guard } => {
-                format!("{} if {}", self.format_pattern(pattern), self.format_expr(guard))
+                format!(
+                    "{} if {}",
+                    self.format_pattern(pattern),
+                    self.format_expr(guard)
+                )
             }
         }
     }
@@ -3211,12 +3218,21 @@ impl CodeGenerator {
             verum_ast::stmt::StmtKind::Errdefer(expr) => {
                 format!("errdefer {}", self.format_expr(expr))
             }
-            verum_ast::stmt::StmtKind::Provide { context, value, alias } => {
+            verum_ast::stmt::StmtKind::Provide {
+                context,
+                value,
+                alias,
+            } => {
                 let alias_str = match alias {
                     Some(a) => format!(" as {}", a),
                     None => String::new(),
                 };
-                format!("provide {}{} = {}", context, alias_str, self.format_expr(value))
+                format!(
+                    "provide {}{} = {}",
+                    context,
+                    alias_str,
+                    self.format_expr(value)
+                )
             }
             verum_ast::stmt::StmtKind::ProvideScope {
                 context,

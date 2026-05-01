@@ -26,12 +26,15 @@ pub fn execute(_workspace: bool, strict: bool, verbose: bool) -> Result<()> {
     // Determine project root - either manifest dir or first src file's parent
     let project_root = manifest_dir.clone();
 
-    ui::status("Checking", &format!(
-        "{} v{} ({})",
-        manifest.cog.name.as_str(),
-        manifest.cog.version.as_str(),
-        manifest_dir.display()
-    ));
+    ui::status(
+        "Checking",
+        &format!(
+            "{} v{} ({})",
+            manifest.cog.name.as_str(),
+            manifest.cog.version.as_str(),
+            manifest_dir.display()
+        ),
+    );
 
     // Create compiler options for check mode. Populate the unified
     // language-feature set from the merged manifest (validated) so the

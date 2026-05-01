@@ -17,10 +17,10 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use std::hint::black_box;
 use std::path::PathBuf;
 use tempfile::TempDir;
+use verum_ast::span::FileId;
 use verum_compiler::{CompilationPipeline, CompilerOptions, Session};
 use verum_fast_parser::Parser;
 use verum_lexer::Lexer;
-use verum_ast::span::FileId;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 
 // ============================================================================
@@ -157,16 +157,12 @@ fn bench_parse_1k_loc(c: &mut Criterion) {
         let src = generate_n_functions(size);
         let lines = src.lines().count();
         group.throughput(Throughput::Elements(lines as u64));
-        group.bench_with_input(
-            BenchmarkId::new("scale_funcs", size),
-            &src,
-            |b, source| {
-                b.iter(|| {
-                    let mut parser = Parser::new(source);
-                    black_box(parser.parse_module())
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("scale_funcs", size), &src, |b, source| {
+            b.iter(|| {
+                let mut parser = Parser::new(source);
+                black_box(parser.parse_module())
+            });
+        });
     }
 
     group.finish();
@@ -222,22 +218,18 @@ fn bench_type_check_50_functions(c: &mut Criterion) {
         let src = generate_n_functions(n);
         let lines = src.lines().count();
         group.throughput(Throughput::Elements(lines as u64));
-        group.bench_with_input(
-            BenchmarkId::new("scale_funcs", n),
-            &src,
-            |b, source| {
-                b.iter(|| {
-                    let temp_dir = TempDir::new().expect("temp dir");
-                    let mut session = Session::new(CompilerOptions {
-                        input: PathBuf::from("bench_scale.vr"),
-                        output: temp_dir.path().join("bench_scale"),
-                        ..Default::default()
-                    });
-                    let mut pipeline = CompilationPipeline::new(&mut session);
-                    black_box(pipeline.compile_string(source))
+        group.bench_with_input(BenchmarkId::new("scale_funcs", n), &src, |b, source| {
+            b.iter(|| {
+                let temp_dir = TempDir::new().expect("temp dir");
+                let mut session = Session::new(CompilerOptions {
+                    input: PathBuf::from("bench_scale.vr"),
+                    output: temp_dir.path().join("bench_scale"),
+                    ..Default::default()
                 });
-            },
-        );
+                let mut pipeline = CompilationPipeline::new(&mut session);
+                black_box(pipeline.compile_string(source))
+            });
+        });
     }
 
     group.finish();
@@ -478,30 +470,15 @@ fn main() {
 // Benchmark Groups
 // ============================================================================
 
-criterion_group!(
-    parse_regression,
-    bench_parse_1k_loc
-);
+criterion_group!(parse_regression, bench_parse_1k_loc);
 
-criterion_group!(
-    type_check_regression,
-    bench_type_check_50_functions
-);
+criterion_group!(type_check_regression, bench_type_check_50_functions);
 
-criterion_group!(
-    vbc_codegen_regression,
-    bench_vbc_codegen
-);
+criterion_group!(vbc_codegen_regression, bench_vbc_codegen);
 
-criterion_group!(
-    stdlib_regression,
-    bench_stdlib_loading
-);
+criterion_group!(stdlib_regression, bench_stdlib_loading);
 
-criterion_group!(
-    end_to_end_regression,
-    bench_end_to_end
-);
+criterion_group!(end_to_end_regression, bench_end_to_end);
 
 criterion_main!(
     parse_regression,

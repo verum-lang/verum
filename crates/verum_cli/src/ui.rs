@@ -78,7 +78,9 @@ pub fn init(verbose: bool, quiet: bool, color: &str) -> crate::error::Result<()>
         .with_target(false)
         .try_init();
 
-    let mut state = UI_STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut state = UI_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     *state = Some(UiState { verbose, quiet });
 
     Ok(())
@@ -90,13 +92,17 @@ pub fn init(verbose: bool, quiet: bool, color: &str) -> crate::error::Result<()>
 
 /// Check if quiet mode is active.
 pub fn is_quiet() -> bool {
-    let state = UI_STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let state = UI_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     state.as_ref().map_or(false, |ui| ui.quiet)
 }
 
 /// Check if verbose mode is active.
 pub fn is_verbose() -> bool {
-    let state = UI_STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let state = UI_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     state.as_ref().map_or(false, |ui| ui.verbose)
 }
 
@@ -104,7 +110,9 @@ pub fn is_verbose() -> bool {
 /// Returns: 0 = quiet, 1 = normal, 2 = verbose (debug output enabled).
 /// Note: Level 2 is only available in debug builds.
 pub fn verbose_level() -> u8 {
-    let state = UI_STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let state = UI_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(ref ui) = *state {
         if ui.quiet {
             0
@@ -130,12 +138,16 @@ pub fn verbose_level() -> u8 {
 // ---------------------------------------------------------------------------
 
 fn shown_by_default() -> bool {
-    let state = UI_STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let state = UI_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     state.as_ref().map_or(true, |ui| !ui.quiet)
 }
 
 fn shown_verbose() -> bool {
-    let state = UI_STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let state = UI_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     state.as_ref().map_or(false, |ui| ui.verbose && !ui.quiet)
 }
 

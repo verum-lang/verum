@@ -50,8 +50,8 @@ use verum_ast::{FileId, ItemKind};
 use verum_compiler::options::{CompilerOptions, OutputFormat, VerifyMode};
 use verum_compiler::pipeline::CompilationPipeline;
 use verum_compiler::session::Session;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 // --------------------------------------------------------------------
 // Public options & entry
@@ -170,7 +170,12 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     let filtered: Vec<Test> = all
         .into_iter()
         .filter(|t| matches_filter(&t.name, &opts.filter, opts.exact))
-        .filter(|t| !opts.skip.iter().any(|p| t.name.as_str().contains(p.as_str())))
+        .filter(|t| {
+            !opts
+                .skip
+                .iter()
+                .any(|p| t.name.as_str().contains(p.as_str()))
+        })
         .collect();
 
     // Ignore resolution:
@@ -207,7 +212,11 @@ pub fn execute(opts: TestOptions) -> Result<()> {
             }
             _ => {
                 for t in &filtered {
-                    let tag = if t.ignored { " (ignored)".dimmed() } else { "".normal() };
+                    let tag = if t.ignored {
+                        " (ignored)".dimmed()
+                    } else {
+                        "".normal()
+                    };
                     ui::output(&format!("{}{}", t.name, tag));
                 }
                 ui::output(&format!("\n{} tests", filtered.len()));
@@ -338,11 +347,9 @@ pub fn execute(opts: TestOptions) -> Result<()> {
                     })
                 ),
                 TestFormat::Terse => { /* keep dots-only output clean */ }
-                TestFormat::Pretty => ui::output(&format!(
-                    "test {} ... {}",
-                    t.name,
-                    "ignored".yellow()
-                )),
+                TestFormat::Pretty => {
+                    ui::output(&format!("test {} ... {}", t.name, "ignored".yellow()))
+                }
                 // Aggregate formats emit per-test entries at summary time.
                 TestFormat::Junit | TestFormat::Tap | TestFormat::Sarif => {}
             }
@@ -397,7 +404,11 @@ pub fn execute(opts: TestOptions) -> Result<()> {
             );
         }
         TestFormat::Terse => {
-            let verdict = if failed > 0 { "FAILED".red().bold() } else { "ok".green().bold() };
+            let verdict = if failed > 0 {
+                "FAILED".red().bold()
+            } else {
+                "ok".green().bold()
+            };
             ui::output(&format!(
                 "\ntest result: {}. {} passed; {} failed; {} ignored; finished in {}",
                 verdict,
@@ -409,7 +420,11 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         }
         TestFormat::Pretty => {
             ui::output("");
-            let verdict = if failed > 0 { "FAILED".red().bold() } else { "ok".green().bold() };
+            let verdict = if failed > 0 {
+                "FAILED".red().bold()
+            } else {
+                "ok".green().bold()
+            };
             ui::output(&format!(
                 "test result: {}. {} passed; {} failed; {} ignored; {} total; finished in {}",
                 verdict,
@@ -446,10 +461,8 @@ pub fn execute(opts: TestOptions) -> Result<()> {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(30);
-        let report = crate::commands::fuzz::run(
-            &manifest_dir,
-            std::time::Duration::from_secs(budget),
-        );
+        let report =
+            crate::commands::fuzz::run(&manifest_dir, std::time::Duration::from_secs(budget));
         if !quiet {
             ui::output("");
             ui::output(&format!("{}", "fuzz:".bold()));
@@ -481,7 +494,10 @@ pub fn execute(opts: TestOptions) -> Result<()> {
                     }
                 }
                 if let crate::commands::fuzz::FuzzStatus::HarnessError(msg) = &o.status {
-                    ui::output(&format!("      stderr: {}", msg.lines().next().unwrap_or("")));
+                    ui::output(&format!(
+                        "      stderr: {}",
+                        msg.lines().next().unwrap_or("")
+                    ));
                 }
             }
         }
@@ -544,7 +560,13 @@ fn present_result(
     }
     match result {
         TestResult::Pass { .. } => *passed += 1,
-        TestResult::Fail { stdout, stderr, exit_code, error, .. } => {
+        TestResult::Fail {
+            stdout,
+            stderr,
+            exit_code,
+            error,
+            ..
+        } => {
             *failed += 1;
             failures.push(TestFailure {
                 name: test.name.clone(),
@@ -570,8 +592,12 @@ fn present_result(
 fn present_json(test: &Test, result: &TestResult) {
     let (outcome, duration, error): (&str, Duration, Option<&str>) = match result {
         TestResult::Pass { duration, .. } => ("ok", *duration, None),
-        TestResult::Fail { duration, error, .. } => ("failed", *duration, Some(error.as_str())),
-        TestResult::CompileError { duration, error } => ("compile-error", *duration, Some(error.as_str())),
+        TestResult::Fail {
+            duration, error, ..
+        } => ("failed", *duration, Some(error.as_str())),
+        TestResult::CompileError { duration, error } => {
+            ("compile-error", *duration, Some(error.as_str()))
+        }
     };
     let mut obj = serde_json::json!({
         "event": "test",
@@ -598,13 +624,22 @@ fn present_terse(result: &TestResult) {
 
 fn present_pretty(test: &Test, result: &TestResult, nocapture: bool) {
     let (status, duration, stdout, stderr): (String, Duration, String, String) = match result {
-        TestResult::Pass { duration, stdout, stderr } => (
+        TestResult::Pass {
+            duration,
+            stdout,
+            stderr,
+        } => (
             "ok".green().to_string(),
             *duration,
             stdout.clone(),
             stderr.clone(),
         ),
-        TestResult::Fail { duration, stdout, stderr, .. } => (
+        TestResult::Fail {
+            duration,
+            stdout,
+            stderr,
+            ..
+        } => (
             "FAILED".red().bold().to_string(),
             *duration,
             stdout.clone(),
@@ -786,11 +821,7 @@ fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResu
 
 /// The duration field aggregates both tiers so the test report
 /// reflects total cross-tier work.
-fn run_test_differential(
-    test: &Test,
-    target_dir: &Path,
-    cfg: &TestRunCfg,
-) -> TestResult {
+fn run_test_differential(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult {
     // Run T0 first — it's the fastest path and a CompileError
     // here short-circuits T1 (no point lowering a program that
     // already failed at the type-checker / VBC codegen layer).
@@ -801,9 +832,7 @@ fn run_test_differential(
     if let TestResult::CompileError { error, .. } = &t0 {
         return TestResult::CompileError {
             duration: t0_dur,
-            error: format!(
-                "differential[T0=compile-error]: {error}"
-            ),
+            error: format!("differential[T0=compile-error]: {error}"),
         };
     }
 
@@ -868,7 +897,9 @@ fn combine_differential_outcomes(
     let summarise = |r: &TestResult| -> String {
         match r {
             TestResult::Pass { stdout, .. } => format!("PASS ({} bytes stdout)", stdout.len()),
-            TestResult::Fail { error, exit_code, .. } => {
+            TestResult::Fail {
+                error, exit_code, ..
+            } => {
                 format!("FAIL (exit={:?}): {error}", exit_code)
             }
             TestResult::CompileError { error, .. } => {
@@ -884,9 +915,7 @@ fn combine_differential_outcomes(
         (false, false) => "both tiers failed",
         (true, true) => unreachable!("handled above"),
     };
-    let error = format!(
-        "{header}\n  [T0 interpret] {t0_summary}\n  [T1 aot]       {t1_summary}"
-    );
+    let error = format!("{header}\n  [T0 interpret] {t0_summary}\n  [T1 aot]       {t1_summary}");
     let exit_code = match (&t0, &t1) {
         (TestResult::Fail { exit_code, .. }, _) => *exit_code,
         (_, TestResult::Fail { exit_code, .. }) => *exit_code,
@@ -911,8 +940,8 @@ fn run_test_property(
     cfg: &TestRunCfg,
 ) -> TestResult {
     use crate::commands::property::{
-        load_regression_db, record_regression, run_property, save_regression_db,
-        seeds_for, RunnerConfig, Seed,
+        RunnerConfig, Seed, load_regression_db, record_regression, run_property,
+        save_regression_db, seeds_for,
     };
     use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 
@@ -967,9 +996,7 @@ fn run_test_property(
     // we fall back to TestConfig::default()'s 256 (the historical
     // hard-coded literal here was 100, which silently masked the
     // manifest setting since the pre-fix runner ignored cfg).
-    let default_runs = prop
-        .runs_override
-        .unwrap_or(cfg.proptest_cases);
+    let default_runs = prop.runs_override.unwrap_or(cfg.proptest_cases);
     let pinned = prop.seed_override;
 
     // Replay pass (one run each, pinned seed). If a stored seed now
@@ -1004,7 +1031,8 @@ fn run_test_property(
     }
     if !pruned_hex.is_empty() {
         let name = test.name.as_str().to_string();
-        db.entries.retain(|e| !(e.test == name && pruned_hex.contains(&e.seed)));
+        db.entries
+            .retain(|e| !(e.test == name && pruned_hex.contains(&e.seed)));
         let _ = save_regression_db(&db);
     }
 
@@ -1064,7 +1092,11 @@ fn run_test_property(
 fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult {
     let start = Instant::now();
 
-    let stem = test.file.file_stem().and_then(|s| s.to_str()).unwrap_or("test");
+    let stem = test
+        .file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("test");
     let binary_name = format!("test_{}", stem);
     let output_path = target_dir.join(&binary_name);
 
@@ -1084,12 +1116,9 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     // @test function and exits 0 on success, so the AOT-compiled
     // binary's exit code matches the test convention (mirrors what
     // run_test_interpret does in-process via Interpreter::call).
-    let test_input = synthesise_test_input_with_crate_root(
-        &test.file,
-        target_dir,
-        test.fn_name.as_deref(),
-    )
-    .unwrap_or_else(|| test.file.clone());
+    let test_input =
+        synthesise_test_input_with_crate_root(&test.file, target_dir, test.fn_name.as_deref())
+            .unwrap_or_else(|| test.file.clone());
 
     // Wire CLI `--verify` and `--release` into the compilation:
     //  * `verify_mode_override` overrides the default Runtime mode
@@ -1155,10 +1184,7 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
                             stdout: String::new(),
                             stderr: String::new(),
                             exit_code: None,
-                            error: format!(
-                                "timed out after {}s",
-                                cfg.timeout_secs
-                            ),
+                            error: format!("timed out after {}s", cfg.timeout_secs),
                         };
                     }
                     std::thread::sleep(poll);
@@ -1192,13 +1218,23 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let duration = start.elapsed();
     if output.status.success() {
-        TestResult::Pass { duration, stdout, stderr }
+        TestResult::Pass {
+            duration,
+            stdout,
+            stderr,
+        }
     } else {
         let code = output.status.code();
         let error = code
             .map(|c| format!("process exited with code {}", c))
             .unwrap_or_else(|| "process terminated by signal".to_string());
-        TestResult::Fail { duration, stdout, stderr, exit_code: code, error }
+        TestResult::Fail {
+            duration,
+            stdout,
+            stderr,
+            exit_code: code,
+            error,
+        }
     }
 }
 
@@ -1248,7 +1284,10 @@ fn synthesise_test_input_with_crate_root(
         .join("\n");
     let stripped_root = if stripped_root.trim_start().starts_with("module ") {
         // Drop the module header line (and its trailing semicolon).
-        stripped_root.split_once(';').map(|(_, rest)| rest).unwrap_or(&stripped_root)
+        stripped_root
+            .split_once(';')
+            .map(|(_, rest)| rest)
+            .unwrap_or(&stripped_root)
             .to_string()
     } else {
         stripped_root
@@ -1340,7 +1379,11 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     let mut ast = match parser.parse_module(lexer, file_id) {
         Ok(m) => m,
         Err(errs) => {
-            let joined = errs.iter().map(|e| format!("{}", e)).collect::<Vec<_>>().join("\n");
+            let joined = errs
+                .iter()
+                .map(|e| format!("{}", e))
+                .collect::<Vec<_>>()
+                .join("\n");
             return TestResult::CompileError {
                 duration: start.elapsed(),
                 error: format!("parse: {}", joined),
@@ -1393,7 +1436,12 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
         .functions
         .iter()
         .find(|vf| module.get_string(vf.name) == Some(fn_name_tail))
-        .or_else(|| module.functions.iter().find(|vf| module.get_string(vf.name) == Some("main")))
+        .or_else(|| {
+            module
+                .functions
+                .iter()
+                .find(|vf| module.get_string(vf.name) == Some("main"))
+        })
         .map(|vf| vf.id);
     let fid = match fid_opt {
         Some(id) => id,
@@ -1414,10 +1462,8 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
 
     let outcome = if let Some(args) = &test.case_args {
         // @test_case path: convert literal args → VBC Values, call directly.
-        let vbc_args: std::result::Result<Vec<_>, _> = args
-            .iter()
-            .map(|tv| tv.to_vbc_value(&mut interp))
-            .collect();
+        let vbc_args: std::result::Result<Vec<_>, _> =
+            args.iter().map(|tv| tv.to_vbc_value(&mut interp)).collect();
         match vbc_args {
             Ok(vs) => crate::commands::property::call_parametrised(&mut interp, fid, &vs),
             Err(e) => {
@@ -1436,7 +1482,11 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
         Ok(v) => {
             let exit = if v.is_int() { v.as_i64() as i32 } else { 0 };
             if exit == 0 {
-                TestResult::Pass { duration, stdout, stderr: String::new() }
+                TestResult::Pass {
+                    duration,
+                    stdout,
+                    stderr: String::new(),
+                }
             } else {
                 TestResult::Fail {
                     duration,
@@ -1493,22 +1543,25 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
             matches!(&item.kind, ItemKind::Function(f) if f.attributes.iter().any(|a| a.name.as_str() == "test"))
         });
         // Pass 1: property-based tests (@property).
-        let property_funcs = crate::commands::property::discover_properties_in_module(
-            &module, module_name, file,
-        );
+        let property_funcs =
+            crate::commands::property::discover_properties_in_module(&module, module_name, file);
         let has_property_attrs = !property_funcs.is_empty();
 
         if has_test_attrs || has_property_attrs {
             for item in &module.items {
                 if let ItemKind::Function(func) = &item.kind {
                     let is_test = func.attributes.iter().any(|a| a.name.as_str() == "test");
-                    let is_property = func.attributes.iter().any(|a| a.name.as_str() == "property");
+                    let is_property = func
+                        .attributes
+                        .iter()
+                        .any(|a| a.name.as_str() == "property");
                     if !is_test && !is_property {
                         continue;
                     }
-                    let is_ignored = func.attributes.iter().any(|a| {
-                        a.name.as_str() == "ignore" || a.name.as_str() == "ignored"
-                    });
+                    let is_ignored = func
+                        .attributes
+                        .iter()
+                        .any(|a| a.name.as_str() == "ignore" || a.name.as_str() == "ignored");
                     let property = if is_property {
                         property_funcs
                             .iter()
@@ -1544,9 +1597,9 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
             }
         } else {
             // Whole-file test — must have main()
-            let has_main = module.items.iter().any(|item| {
-                matches!(&item.kind, ItemKind::Function(f) if f.name.as_str() == "main")
-            });
+            let has_main = module.items.iter().any(
+                |item| matches!(&item.kind, ItemKind::Function(f) if f.name.as_str() == "main"),
+            );
             if has_main {
                 let is_ignored = source.lines().take(10).any(|l| {
                     let t = l.trim();
@@ -1575,12 +1628,8 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                 if let Some(name) = extract_fn_name(next) {
                     let ignored = l.contains("ignore");
                     tests.push(Test {
-                        name: format!(
-                            "{}::{}",
-                            file.file_stem().unwrap().to_str().unwrap(),
-                            name
-                        )
-                        .into(),
+                        name: format!("{}::{}", file.file_stem().unwrap().to_str().unwrap(), name)
+                            .into(),
                         file: file.to_path_buf(),
                         ignored,
                         property: None,
@@ -1658,8 +1707,6 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
-
-
 /// Parse `@test_case(arg, arg, ...)` attributes on a function into a
 /// list of argument vectors ready for call_with_args. Returns empty
 /// vec if no @test_case attributes are present.
@@ -1712,7 +1759,10 @@ fn expr_to_tree_value(e: &verum_ast::Expr) -> Option<crate::commands::property::
             }),
             _ => None,
         },
-        ExprKind::Unary { op: UnOp::Neg, expr: inner } => {
+        ExprKind::Unary {
+            op: UnOp::Neg,
+            expr: inner,
+        } => {
             if let ExprKind::Literal(lit) = &inner.kind {
                 match &lit.kind {
                     LiteralKind::Int(il) => Some(TreeValue::Int {
@@ -1731,7 +1781,6 @@ fn expr_to_tree_value(e: &verum_ast::Expr) -> Option<crate::commands::property::
     }
 }
 
-
 // ----------------------------------------------------------------
 // Aggregate CI-output emitters (JUnit XML / TAP v13 / SARIF 2.1.0)
 // ----------------------------------------------------------------
@@ -1744,12 +1793,7 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn emit_junit(
-    results: &[(Text, TestResult)],
-    active: &[&Test],
-    ignored: usize,
-    total: Duration,
-) {
+fn emit_junit(results: &[(Text, TestResult)], active: &[&Test], ignored: usize, total: Duration) {
     let n = results.len() + ignored;
     let failures = results
         .iter()
@@ -1772,7 +1816,9 @@ fn emit_junit(
     for (name, r) in results {
         let (elapsed, ok, err, kind) = match r {
             TestResult::Pass { duration, .. } => (*duration, true, String::new(), ""),
-            TestResult::Fail { duration, error, .. } => (*duration, false, error.clone(), "failure"),
+            TestResult::Fail {
+                duration, error, ..
+            } => (*duration, false, error.clone(), "failure"),
             TestResult::CompileError { duration, error } => {
                 (*duration, false, error.clone(), "error")
             }
@@ -1805,14 +1851,18 @@ fn emit_tap(results: &[(Text, TestResult)], _active: &[&Test], ignored: usize) {
     let mut i: usize = 1;
     for (name, r) in results {
         match r {
-            TestResult::Pass { duration, .. } => println!(
-                "ok {} - {} # time={:.3}s",
-                i,
-                name,
-                duration.as_secs_f64()
-            ),
-            TestResult::Fail { duration, error, .. } => {
-                println!("not ok {} - {} # time={:.3}s", i, name, duration.as_secs_f64());
+            TestResult::Pass { duration, .. } => {
+                println!("ok {} - {} # time={:.3}s", i, name, duration.as_secs_f64())
+            }
+            TestResult::Fail {
+                duration, error, ..
+            } => {
+                println!(
+                    "not ok {} - {} # time={:.3}s",
+                    i,
+                    name,
+                    duration.as_secs_f64()
+                );
                 println!("  ---");
                 for line in error.lines() {
                     println!("  message: {}", line);
@@ -1922,8 +1972,14 @@ mod tests {
 
     #[test]
     fn verify_flag_runtime_maps_to_runtime() {
-        assert_eq!(parse_verify("runtime"), Some(verum_compiler::options::VerifyMode::Runtime));
-        assert_eq!(parse_verify("RUNTIME"), Some(verum_compiler::options::VerifyMode::Runtime));
+        assert_eq!(
+            parse_verify("runtime"),
+            Some(verum_compiler::options::VerifyMode::Runtime)
+        );
+        assert_eq!(
+            parse_verify("RUNTIME"),
+            Some(verum_compiler::options::VerifyMode::Runtime)
+        );
     }
 
     #[test]
@@ -1931,8 +1987,14 @@ mod tests {
         // Pin: both `static` and `proof` route to the same VerifyMode
         // because the documented CLI surface accepts the user-facing
         // synonym `static` for the SMT-backed proof mode.
-        assert_eq!(parse_verify("proof"), Some(verum_compiler::options::VerifyMode::Proof));
-        assert_eq!(parse_verify("static"), Some(verum_compiler::options::VerifyMode::Proof));
+        assert_eq!(
+            parse_verify("proof"),
+            Some(verum_compiler::options::VerifyMode::Proof)
+        );
+        assert_eq!(
+            parse_verify("static"),
+            Some(verum_compiler::options::VerifyMode::Proof)
+        );
     }
 
     #[test]
@@ -1955,8 +2017,7 @@ mod tests {
             deny_warnings: false,
             coverage: false,
             nocapture: false,
-            language_features:
-                verum_compiler::language_features::LanguageFeatures::default(),
+            language_features: verum_compiler::language_features::LanguageFeatures::default(),
             tier: Tier::Interpret,
             release: false,
             verify_mode_override: None,
@@ -1973,8 +2034,7 @@ mod tests {
             deny_warnings: false,
             coverage: false,
             nocapture: false,
-            language_features:
-                verum_compiler::language_features::LanguageFeatures::default(),
+            language_features: verum_compiler::language_features::LanguageFeatures::default(),
             tier: Tier::Interpret,
             release: false,
             verify_mode_override: None,
@@ -2086,13 +2146,25 @@ mod tests {
 
     #[test]
     fn differential_t0_pass_t1_fail_yields_disagreement_failure() {
-        let r = combine_differential_outcomes(pass("ok"), fail("assertion blew up", Some(1)), ms(10));
+        let r =
+            combine_differential_outcomes(pass("ok"), fail("assertion blew up", Some(1)), ms(10));
         match r {
-            TestResult::Fail { error, exit_code, .. } => {
-                assert!(error.contains("T0 PASS / T1 FAIL"), "header missing: {error}");
-                assert!(error.contains("[T0 interpret]"), "T0 summary missing: {error}");
+            TestResult::Fail {
+                error, exit_code, ..
+            } => {
+                assert!(
+                    error.contains("T0 PASS / T1 FAIL"),
+                    "header missing: {error}"
+                );
+                assert!(
+                    error.contains("[T0 interpret]"),
+                    "T0 summary missing: {error}"
+                );
                 assert!(error.contains("[T1 aot]"), "T1 summary missing: {error}");
-                assert!(error.contains("assertion blew up"), "T1 detail missing: {error}");
+                assert!(
+                    error.contains("assertion blew up"),
+                    "T1 detail missing: {error}"
+                );
                 assert_eq!(exit_code, Some(1));
             }
             _ => panic!("expected Fail"),
@@ -2101,14 +2173,15 @@ mod tests {
 
     #[test]
     fn differential_t0_fail_t1_pass_yields_disagreement_failure() {
-        let r = combine_differential_outcomes(
-            fail("interp panic", Some(101)),
-            pass("ok"),
-            ms(10),
-        );
+        let r = combine_differential_outcomes(fail("interp panic", Some(101)), pass("ok"), ms(10));
         match r {
-            TestResult::Fail { error, exit_code, .. } => {
-                assert!(error.contains("T0 FAIL / T1 PASS"), "header missing: {error}");
+            TestResult::Fail {
+                error, exit_code, ..
+            } => {
+                assert!(
+                    error.contains("T0 FAIL / T1 PASS"),
+                    "header missing: {error}"
+                );
                 assert!(error.contains("interp panic"), "T0 detail missing: {error}");
                 assert_eq!(exit_code, Some(101));
             }
@@ -2124,8 +2197,13 @@ mod tests {
             ms(10),
         );
         match r {
-            TestResult::Fail { error, exit_code, .. } => {
-                assert!(error.contains("both tiers failed"), "header missing: {error}");
+            TestResult::Fail {
+                error, exit_code, ..
+            } => {
+                assert!(
+                    error.contains("both tiers failed"),
+                    "header missing: {error}"
+                );
                 assert!(error.contains("interp side"));
                 assert!(error.contains("aot side"));
                 // First-found exit-code wins (T0 is checked first).

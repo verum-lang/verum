@@ -1,12 +1,12 @@
 use verum_llvm_sys::core::{LLVMConstVector, LLVMGetVectorSize};
 use verum_llvm_sys::prelude::{LLVMTypeRef, LLVMValueRef};
 
+use crate::AddressSpace;
 use crate::context::ContextRef;
 use crate::support::LLVMString;
 use crate::types::enums::BasicMetadataTypeEnum;
-use crate::types::{traits::AsTypeRef, ArrayType, BasicTypeEnum, FunctionType, PointerType, Type};
+use crate::types::{ArrayType, BasicTypeEnum, FunctionType, PointerType, Type, traits::AsTypeRef};
 use crate::values::{ArrayValue, BasicValue, IntValue, VectorValue};
-use crate::AddressSpace;
 
 use std::fmt::{self, Display};
 
@@ -233,7 +233,11 @@ impl<'ctx> VectorType<'ctx> {
     /// let f32_vec_type = f32_type.vec_type(3);
     /// let fn_type = f32_vec_type.fn_type(&[], false);
     /// ```
-    pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type(
+        self,
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+        is_var_args: bool,
+    ) -> FunctionType<'ctx> {
         self.vec_type.fn_type(param_types, is_var_args)
     }
 

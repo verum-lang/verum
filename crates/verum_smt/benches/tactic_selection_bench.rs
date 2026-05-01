@@ -12,8 +12,7 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use verum_smt::tactics::{
-    FormulaGoalAnalyzer, TacticCache, TacticExecutor, auto_select_tactic,
-    auto_select_tactic_cached,
+    FormulaGoalAnalyzer, TacticCache, TacticExecutor, auto_select_tactic, auto_select_tactic_cached,
 };
 use z3::{
     Goal, Solver,

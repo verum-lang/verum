@@ -19,8 +19,8 @@
 
 use verum_ast::{Expr, ExprKind, expr::Capability};
 use verum_common::Maybe;
-use verum_lexer::Lexer;
 use verum_fast_parser::RecursiveParser;
+use verum_lexer::Lexer;
 
 /// Helper to parse an expression from a string
 fn parse_expr(input: &str) -> Result<Expr, Box<dyn std::error::Error>> {
@@ -223,7 +223,8 @@ fn test_parse_attenuate_with_path_context() {
 #[test]
 fn test_parse_attenuate_mixed_capabilities() {
     // Mix standard and custom capabilities
-    let input = "Context.attenuate(Capability.ReadOnly | Capability.MyCustomCap | Capability.Query)";
+    let input =
+        "Context.attenuate(Capability.ReadOnly | Capability.MyCustomCap | Capability.Query)";
     let expr = parse_expr(input).expect("failed to parse");
 
     match expr.kind {
@@ -313,10 +314,7 @@ fn test_error_invalid_capability_syntax_rust_style() {
     // Rust-style :: separator is not valid in Verum (should use .)
     let input = "Database.attenuate(Capability::ReadOnly)";
     let result = parse_expr(input);
-    assert!(
-        result.is_err(),
-        "Should fail to parse Rust-style :: syntax"
-    );
+    assert!(result.is_err(), "Should fail to parse Rust-style :: syntax");
 }
 
 #[test]

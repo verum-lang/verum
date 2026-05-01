@@ -68,9 +68,7 @@
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
 
-use crate::grothendieck::{
-    GrothendieckConstruction, SIndexedDiagram, build_grothendieck,
-};
+use crate::grothendieck::{GrothendieckConstruction, SIndexedDiagram, build_grothendieck};
 use crate::infinity_category::InfinityCategory;
 use crate::ordinal::Ordinal;
 
@@ -213,9 +211,7 @@ pub fn build_straightening_equivalence(c: &InfinityCategory) -> StraighteningEqu
 /// algorithmic content* of the unstraightening direction of the
 /// HTT 3.2.0.1 equivalence. current surface returns the constructed
 /// fibration's data (via `build_grothendieck`).
-pub fn unstraighten_to_grothendieck(
-    diagram: &SIndexedDiagram,
-) -> Option<GrothendieckConstruction> {
+pub fn unstraighten_to_grothendieck(diagram: &SIndexedDiagram) -> Option<GrothendieckConstruction> {
     build_grothendieck(diagram)
 }
 
@@ -243,13 +239,7 @@ mod tests {
 
     #[test]
     fn cartesian_fibration_construction() {
-        let p = CartesianFibration::new(
-            "p",
-            sample_total(),
-            sample_base(),
-            true,
-            true,
-        );
+        let p = CartesianFibration::new("p", sample_total(), sample_base(), true, true);
         assert!(p.has_cartesian_lifts);
         assert!(p.is_cocartesian);
         assert_eq!(p.name.as_str(), "p");
@@ -269,9 +259,7 @@ mod tests {
 
     #[test]
     fn is_cartesian_decides_via_witness() {
-        let p = CartesianFibration::new(
-            "p", sample_total(), sample_base(), true, true,
-        );
+        let p = CartesianFibration::new("p", sample_total(), sample_base(), true, true);
         let f_cart = CartesianMorphism {
             name: Text::from("f"),
             fibration_name: Text::from("p"),
@@ -328,33 +316,27 @@ mod tests {
             Ordinal::Kappa(1),
         );
         let result = unstraighten_to_grothendieck(&diagram);
-        assert!(result.is_some(), "Un applied to a well-formed diagram succeeds");
+        assert!(
+            result.is_some(),
+            "Un applied to a well-formed diagram succeeds"
+        );
     }
 
     #[test]
     fn unstraighten_propagates_grothendieck_failure() {
-        let diagram = SIndexedDiagram::finite(
-            "D",
-            "B",
-            vec![],
-            Ordinal::Kappa(1),
-        );
+        let diagram = SIndexedDiagram::finite("D", "B", vec![], Ordinal::Kappa(1));
         // build_grothendieck rejects empty diagrams; Un must propagate.
-        assert!(unstraighten_to_grothendieck(&diagram).is_none(),
-            "Un must propagate Grothendieck's empty-diagram rejection");
+        assert!(
+            unstraighten_to_grothendieck(&diagram).is_none(),
+            "Un must propagate Grothendieck's empty-diagram rejection"
+        );
     }
 
     #[test]
     fn fibration_is_unstraightened_requires_both_witnesses() {
-        let p_full = CartesianFibration::new(
-            "p", sample_total(), sample_base(), true, true,
-        );
-        let p_no_cart = CartesianFibration::new(
-            "p", sample_total(), sample_base(), false, true,
-        );
-        let p_no_cocart = CartesianFibration::new(
-            "p", sample_total(), sample_base(), true, false,
-        );
+        let p_full = CartesianFibration::new("p", sample_total(), sample_base(), true, true);
+        let p_no_cart = CartesianFibration::new("p", sample_total(), sample_base(), false, true);
+        let p_no_cocart = CartesianFibration::new("p", sample_total(), sample_base(), true, false);
         assert!(fibration_is_unstraightened(&p_full));
         assert!(!fibration_is_unstraightened(&p_no_cart));
         assert!(!fibration_is_unstraightened(&p_no_cocart));

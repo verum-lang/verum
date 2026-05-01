@@ -14,8 +14,8 @@
 )]
 // Migrated from src/literal_registry.rs per CLAUDE.md standards
 
-use verum_compiler::literal_registry::*;
 use verum_common::{Maybe, Text};
+use verum_compiler::literal_registry::*;
 
 #[test]
 fn test_registry_creation() {
@@ -69,10 +69,6 @@ fn test_builtin_handlers() {
     ];
     for tag in tags {
         let handler = registry.get_handler(&Text::from(tag));
-        assert!(
-            handler.is_some(),
-            "Handler for '{}' not found",
-            tag
-        );
+        assert!(handler.is_some(), "Handler for '{}' not found", tag);
     }
 }

@@ -247,7 +247,8 @@ impl ContextEnv {
     ) {
         let type_id = TypeId::of::<T>();
         let alias_text = alias.into();
-        self.aliased_contexts.insert(alias_text, (type_id, Box::new(value)));
+        self.aliased_contexts
+            .insert(alias_text, (type_id, Box::new(value)));
     }
 
     /// Insert a boxed context provider with an alias
@@ -526,7 +527,8 @@ impl ContextEnv {
         let type_id = TypeId::of::<T>();
         self.contexts
             .get(&type_id)
-            .and_then(|boxed| boxed.downcast_ref::<T>()).and_then(Maybe::Some)
+            .and_then(|boxed| boxed.downcast_ref::<T>())
+            .and_then(Maybe::Some)
     }
 
     /// Get a mutable reference to a context provider (local only)
@@ -546,7 +548,8 @@ impl ContextEnv {
         let type_id = TypeId::of::<T>();
         self.contexts
             .get_mut(&type_id)
-            .and_then(|boxed| boxed.downcast_mut::<T>()).and_then(Maybe::Some)
+            .and_then(|boxed| boxed.downcast_mut::<T>())
+            .and_then(Maybe::Some)
     }
 
     /// Get a context provider, searching parent chain if needed
@@ -1024,8 +1027,18 @@ mod tests {
     fn test_insert_and_get_by_alias() {
         let mut env = ContextEnv::new();
 
-        env.insert_with_alias("primary", TestDatabase { url: "postgres://primary".to_string() });
-        env.insert_with_alias("replica", TestDatabase { url: "postgres://replica".to_string() });
+        env.insert_with_alias(
+            "primary",
+            TestDatabase {
+                url: "postgres://primary".to_string(),
+            },
+        );
+        env.insert_with_alias(
+            "replica",
+            TestDatabase {
+                url: "postgres://replica".to_string(),
+            },
+        );
 
         assert_eq!(env.aliases_len(), 2);
 
@@ -1047,22 +1060,49 @@ mod tests {
     fn test_alias_with_different_types() {
         let mut env = ContextEnv::new();
 
-        env.insert_with_alias("main_logger", TestLogger { name: "main".to_string() });
-        env.insert_with_alias("backup_db", TestDatabase { url: "postgres://backup".to_string() });
+        env.insert_with_alias(
+            "main_logger",
+            TestLogger {
+                name: "main".to_string(),
+            },
+        );
+        env.insert_with_alias(
+            "backup_db",
+            TestDatabase {
+                url: "postgres://backup".to_string(),
+            },
+        );
 
         // Get with correct type
-        assert!(matches!(env.get_by_alias::<TestLogger>("main_logger"), Maybe::Some(_)));
-        assert!(matches!(env.get_by_alias::<TestDatabase>("backup_db"), Maybe::Some(_)));
+        assert!(matches!(
+            env.get_by_alias::<TestLogger>("main_logger"),
+            Maybe::Some(_)
+        ));
+        assert!(matches!(
+            env.get_by_alias::<TestDatabase>("backup_db"),
+            Maybe::Some(_)
+        ));
 
         // Get with wrong type should return None
-        assert!(matches!(env.get_by_alias::<TestDatabase>("main_logger"), Maybe::None));
-        assert!(matches!(env.get_by_alias::<TestLogger>("backup_db"), Maybe::None));
+        assert!(matches!(
+            env.get_by_alias::<TestDatabase>("main_logger"),
+            Maybe::None
+        ));
+        assert!(matches!(
+            env.get_by_alias::<TestLogger>("backup_db"),
+            Maybe::None
+        ));
     }
 
     #[test]
     fn test_has_alias() {
         let mut env = ContextEnv::new();
-        env.insert_with_alias("my_alias", TestLogger { name: "aliased".to_string() });
+        env.insert_with_alias(
+            "my_alias",
+            TestLogger {
+                name: "aliased".to_string(),
+            },
+        );
 
         assert!(env.has_alias("my_alias"));
         assert!(!env.has_alias("unknown"));
@@ -1071,16 +1111,32 @@ mod tests {
     #[test]
     fn test_alias_parent_chain() {
         let mut parent = ContextEnv::new();
-        parent.insert_with_alias("parent_db", TestDatabase { url: "postgres://parent".to_string() });
+        parent.insert_with_alias(
+            "parent_db",
+            TestDatabase {
+                url: "postgres://parent".to_string(),
+            },
+        );
 
         let mut child = ContextEnv::with_parent(Arc::new(parent));
-        child.insert_with_alias("child_db", TestDatabase { url: "postgres://child".to_string() });
+        child.insert_with_alias(
+            "child_db",
+            TestDatabase {
+                url: "postgres://child".to_string(),
+            },
+        );
 
         // Child can access its own alias
-        assert!(matches!(child.get_by_alias::<TestDatabase>("child_db"), Maybe::Some(_)));
+        assert!(matches!(
+            child.get_by_alias::<TestDatabase>("child_db"),
+            Maybe::Some(_)
+        ));
 
         // Child can access parent's alias via parent chain lookup
-        assert!(matches!(child.get_by_alias_or_parent::<TestDatabase>("parent_db"), Maybe::Some(_)));
+        assert!(matches!(
+            child.get_by_alias_or_parent::<TestDatabase>("parent_db"),
+            Maybe::Some(_)
+        ));
 
         // has_alias checks parent chain
         assert!(child.has_alias("parent_db"));
@@ -1090,10 +1146,20 @@ mod tests {
     #[test]
     fn test_alias_shadowing() {
         let mut parent = ContextEnv::new();
-        parent.insert_with_alias("db", TestDatabase { url: "parent_url".to_string() });
+        parent.insert_with_alias(
+            "db",
+            TestDatabase {
+                url: "parent_url".to_string(),
+            },
+        );
 
         let mut child = ContextEnv::with_parent(Arc::new(parent));
-        child.insert_with_alias("db", TestDatabase { url: "child_url".to_string() });
+        child.insert_with_alias(
+            "db",
+            TestDatabase {
+                url: "child_url".to_string(),
+            },
+        );
 
         // Child's alias shadows parent's
         if let Maybe::Some(db) = child.get_by_alias_or_parent::<TestDatabase>("db") {
@@ -1104,7 +1170,12 @@ mod tests {
     #[test]
     fn test_get_by_alias_mut() {
         let mut env = ContextEnv::new();
-        env.insert_with_alias("mutable_db", TestDatabase { url: "original".to_string() });
+        env.insert_with_alias(
+            "mutable_db",
+            TestDatabase {
+                url: "original".to_string(),
+            },
+        );
 
         // Modify via mutable reference
         if let Maybe::Some(db) = env.get_by_alias_mut::<TestDatabase>("mutable_db") {
@@ -1120,7 +1191,12 @@ mod tests {
     #[test]
     fn test_remove_alias() {
         let mut env = ContextEnv::new();
-        env.insert_with_alias("removable", TestLogger { name: "to_remove".to_string() });
+        env.insert_with_alias(
+            "removable",
+            TestLogger {
+                name: "to_remove".to_string(),
+            },
+        );
 
         assert!(env.has_alias("removable"));
 
@@ -1128,14 +1204,24 @@ mod tests {
         assert!(matches!(removed, Maybe::Some(_)));
 
         assert!(!env.has_alias("removable"));
-        assert!(matches!(env.get_by_alias::<TestLogger>("removable"), Maybe::None));
+        assert!(matches!(
+            env.get_by_alias::<TestLogger>("removable"),
+            Maybe::None
+        ));
     }
 
     #[test]
     fn test_clear_includes_aliases() {
         let mut env = ContextEnv::new();
-        env.insert(TestLogger { name: "typed".to_string() });
-        env.insert_with_alias("alias1", TestDatabase { url: "url1".to_string() });
+        env.insert(TestLogger {
+            name: "typed".to_string(),
+        });
+        env.insert_with_alias(
+            "alias1",
+            TestDatabase {
+                url: "url1".to_string(),
+            },
+        );
 
         assert_eq!(env.len(), 1);
         assert_eq!(env.aliases_len(), 1);
@@ -1150,23 +1236,47 @@ mod tests {
     #[test]
     fn test_len_with_aliases() {
         let mut env = ContextEnv::new();
-        env.insert(TestLogger { name: "typed".to_string() });
-        env.insert_with_alias("alias1", TestDatabase { url: "url1".to_string() });
-        env.insert_with_alias("alias2", TestDatabase { url: "url2".to_string() });
+        env.insert(TestLogger {
+            name: "typed".to_string(),
+        });
+        env.insert_with_alias(
+            "alias1",
+            TestDatabase {
+                url: "url1".to_string(),
+            },
+        );
+        env.insert_with_alias(
+            "alias2",
+            TestDatabase {
+                url: "url2".to_string(),
+            },
+        );
 
-        assert_eq!(env.len(), 1);            // Only typed contexts
-        assert_eq!(env.aliases_len(), 2);    // Only aliased contexts
+        assert_eq!(env.len(), 1); // Only typed contexts
+        assert_eq!(env.aliases_len(), 2); // Only aliased contexts
         assert_eq!(env.len_with_aliases(), 3); // Both
     }
 
     #[test]
     fn test_total_len_with_aliases() {
         let mut parent = ContextEnv::new();
-        parent.insert(TestLogger { name: "parent".to_string() });
-        parent.insert_with_alias("parent_alias", TestDatabase { url: "parent".to_string() });
+        parent.insert(TestLogger {
+            name: "parent".to_string(),
+        });
+        parent.insert_with_alias(
+            "parent_alias",
+            TestDatabase {
+                url: "parent".to_string(),
+            },
+        );
 
         let mut child = ContextEnv::with_parent(Arc::new(parent));
-        child.insert_with_alias("child_alias", TestDatabase { url: "child".to_string() });
+        child.insert_with_alias(
+            "child_alias",
+            TestDatabase {
+                url: "child".to_string(),
+            },
+        );
 
         // 1 typed in parent + 1 alias in parent + 1 alias in child = 3
         assert_eq!(child.total_len(), 3);
@@ -1175,8 +1285,18 @@ mod tests {
     #[test]
     fn test_aliases_iterator() {
         let mut env = ContextEnv::new();
-        env.insert_with_alias("alias_a", TestLogger { name: "a".to_string() });
-        env.insert_with_alias("alias_b", TestDatabase { url: "b".to_string() });
+        env.insert_with_alias(
+            "alias_a",
+            TestLogger {
+                name: "a".to_string(),
+            },
+        );
+        env.insert_with_alias(
+            "alias_b",
+            TestDatabase {
+                url: "b".to_string(),
+            },
+        );
 
         let aliases: Vec<&Text> = env.aliases().collect();
         assert_eq!(aliases.len(), 2);
@@ -1189,10 +1309,17 @@ mod tests {
         let mut env = ContextEnv::new();
 
         // Insert typed context
-        env.insert(TestDatabase { url: "typed_url".to_string() });
+        env.insert(TestDatabase {
+            url: "typed_url".to_string(),
+        });
 
         // Insert same type with alias - they should be independent
-        env.insert_with_alias("aliased", TestDatabase { url: "aliased_url".to_string() });
+        env.insert_with_alias(
+            "aliased",
+            TestDatabase {
+                url: "aliased_url".to_string(),
+            },
+        );
 
         // Both should be accessible independently
         if let Maybe::Some(typed) = env.get::<TestDatabase>() {

@@ -141,11 +141,17 @@ pub enum MlirType {
     Vector(Box<MlirType>, usize),
     Struct(Vec<MlirType>),
     /// Tensor type with element type and shape (empty vec = dynamic shape).
-    Tensor { elem: Box<MlirType>, shape: Vec<usize> },
+    Tensor {
+        elem: Box<MlirType>,
+        shape: Vec<usize>,
+    },
     /// Complex type with underlying float type (F32 or F64).
     Complex(Box<MlirType>),
     /// MemRef type with element type and shape (for memory references).
-    MemRef { elem: Box<MlirType>, shape: Vec<usize> },
+    MemRef {
+        elem: Box<MlirType>,
+        shape: Vec<usize>,
+    },
 }
 
 /// MLIR region (for control flow).
@@ -300,11 +306,7 @@ impl IntrinsicLowering {
     }
 
     /// Lower an intrinsic to MLIR.
-    pub fn lower(
-        mut self,
-        intrinsic: &Intrinsic,
-        operands: &[usize],
-    ) -> LoweringResult {
+    pub fn lower(mut self, intrinsic: &Intrinsic, operands: &[usize]) -> LoweringResult {
         let result = match &intrinsic.strategy {
             CodegenStrategy::DirectOpcode(opcode) => {
                 self.lower_direct_opcode(intrinsic, *opcode, operands)
@@ -321,9 +323,7 @@ impl IntrinsicLowering {
             CodegenStrategy::InlineSequenceWithWidth(seq_id, _width) => {
                 self.lower_inline_sequence(*seq_id, operands)
             }
-            CodegenStrategy::CompileTimeConstant => {
-                self.lower_compile_time_constant(intrinsic)
-            }
+            CodegenStrategy::CompileTimeConstant => self.lower_compile_time_constant(intrinsic),
             CodegenStrategy::ArithExtendedOpcode(sub_op) => {
                 self.lower_arith_extended_opcode(intrinsic, *sub_op, operands)
             }
@@ -378,100 +378,80 @@ impl IntrinsicLowering {
 
         match opcode {
             // Arithmetic operations -> arith dialect
-            Opcode::AddI => {
-                self.emit(MlirOp {
-                    name: "arith.addi".to_string(),
-                    attrs: vec![],
-                    result_types: vec![result_type],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            Opcode::SubI => {
-                self.emit(MlirOp {
-                    name: "arith.subi".to_string(),
-                    attrs: vec![],
-                    result_types: vec![result_type],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            Opcode::MulI => {
-                self.emit(MlirOp {
-                    name: "arith.muli".to_string(),
-                    attrs: vec![],
-                    result_types: vec![result_type],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            Opcode::NegI => {
-                self.emit(MlirOp {
-                    name: "arith.negsi".to_string(),
-                    attrs: vec![],
-                    result_types: vec![result_type],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            Opcode::Shl => {
-                self.emit(MlirOp {
-                    name: "arith.shli".to_string(),
-                    attrs: vec![],
-                    result_types: vec![result_type],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            Opcode::Shr => {
-                self.emit(MlirOp {
-                    name: "arith.shrsi".to_string(),
-                    attrs: vec![],
-                    result_types: vec![result_type],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            Opcode::AddI => self.emit(MlirOp {
+                name: "arith.addi".to_string(),
+                attrs: vec![],
+                result_types: vec![result_type],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            Opcode::SubI => self.emit(MlirOp {
+                name: "arith.subi".to_string(),
+                attrs: vec![],
+                result_types: vec![result_type],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            Opcode::MulI => self.emit(MlirOp {
+                name: "arith.muli".to_string(),
+                attrs: vec![],
+                result_types: vec![result_type],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            Opcode::NegI => self.emit(MlirOp {
+                name: "arith.negsi".to_string(),
+                attrs: vec![],
+                result_types: vec![result_type],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            Opcode::Shl => self.emit(MlirOp {
+                name: "arith.shli".to_string(),
+                attrs: vec![],
+                result_types: vec![result_type],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            Opcode::Shr => self.emit(MlirOp {
+                name: "arith.shrsi".to_string(),
+                attrs: vec![],
+                result_types: vec![result_type],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Float operations
-            Opcode::PowF => {
-                self.emit(MlirOp {
-                    name: "math.powf".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            Opcode::AbsF => {
-                self.emit(MlirOp {
-                    name: "math.absf".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            Opcode::PowF => self.emit(MlirOp {
+                name: "math.powf".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            Opcode::AbsF => self.emit(MlirOp {
+                name: "math.absf".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Memory operations
-            Opcode::Deref => {
-                self.emit(MlirOp {
-                    name: "llvm.load".to_string(),
-                    attrs: vec![],
-                    result_types: vec![result_type],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            Opcode::DerefMut => {
-                self.emit(MlirOp {
-                    name: "llvm.store".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            Opcode::Deref => self.emit(MlirOp {
+                name: "llvm.load".to_string(),
+                attrs: vec![],
+                result_types: vec![result_type],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            Opcode::DerefMut => self.emit(MlirOp {
+                name: "llvm.store".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // TLS operations
             Opcode::TlsGet => {
@@ -484,7 +464,12 @@ impl IntrinsicLowering {
                             attrs: vec![MlirAttr {
                                 name: "name".to_string(),
                                 value: MlirAttrValue::String(
-                                    if self.target.os == Os::Linux { "fs" } else { "gs" }.to_string()
+                                    if self.target.os == Os::Linux {
+                                        "fs"
+                                    } else {
+                                        "gs"
+                                    }
+                                    .to_string(),
                                 ),
                             }],
                             result_types: vec![MlirType::Ptr],
@@ -492,18 +477,16 @@ impl IntrinsicLowering {
                             region: None,
                         })
                     }
-                    Arch::Aarch64 => {
-                        self.emit(MlirOp {
-                            name: "llvm.intr.read.register".to_string(),
-                            attrs: vec![MlirAttr {
-                                name: "name".to_string(),
-                                value: MlirAttrValue::String("tpidr_el0".to_string()),
-                            }],
-                            result_types: vec![MlirType::Ptr],
-                            operands: operands.to_vec(),
-                            region: None,
-                        })
-                    }
+                    Arch::Aarch64 => self.emit(MlirOp {
+                        name: "llvm.intr.read.register".to_string(),
+                        attrs: vec![MlirAttr {
+                            name: "name".to_string(),
+                            value: MlirAttrValue::String("tpidr_el0".to_string()),
+                        }],
+                        result_types: vec![MlirType::Ptr],
+                        operands: operands.to_vec(),
+                        region: None,
+                    }),
                     _ => {
                         // Generic: use llvm.thread.local
                         self.emit(MlirOp {
@@ -521,39 +504,33 @@ impl IntrinsicLowering {
             }
 
             // Context operations
-            Opcode::PushContext | Opcode::PopContext => {
-                self.emit(MlirOp {
-                    name: mlir_op.to_string(),
-                    attrs: vec![],
-                    result_types: if intrinsic.return_count > 0 {
-                        vec![MlirType::Ptr]
-                    } else {
-                        vec![]
-                    },
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            Opcode::PushContext | Opcode::PopContext => self.emit(MlirOp {
+                name: mlir_op.to_string(),
+                attrs: vec![],
+                result_types: if intrinsic.return_count > 0 {
+                    vec![MlirType::Ptr]
+                } else {
+                    vec![]
+                },
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Control flow
-            Opcode::Panic => {
-                self.emit(MlirOp {
-                    name: "llvm.trap".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            Opcode::Unreachable => {
-                self.emit(MlirOp {
-                    name: "llvm.unreachable".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: vec![],
-                    region: None,
-                })
-            }
+            Opcode::Panic => self.emit(MlirOp {
+                name: "llvm.trap".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            Opcode::Unreachable => self.emit(MlirOp {
+                name: "llvm.unreachable".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: vec![],
+                region: None,
+            }),
 
             // Generic size operations
             Opcode::SizeOfG => {
@@ -569,33 +546,29 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
-            Opcode::AlignOfG => {
-                self.emit(MlirOp {
-                    name: "llvm.mlir.constant".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "value".to_string(),
-                        value: MlirAttrValue::Integer(0),
-                    }],
-                    result_types: vec![MlirType::I64],
-                    operands: vec![],
-                    region: None,
-                })
-            }
+            Opcode::AlignOfG => self.emit(MlirOp {
+                name: "llvm.mlir.constant".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "value".to_string(),
+                    value: MlirAttrValue::Integer(0),
+                }],
+                result_types: vec![MlirType::I64],
+                operands: vec![],
+                region: None,
+            }),
 
             // Default: use intrinsic's MLIR op
-            _ => {
-                self.emit(MlirOp {
-                    name: mlir_op.to_string(),
-                    attrs: vec![],
-                    result_types: if intrinsic.return_count > 0 {
-                        vec![result_type]
-                    } else {
-                        vec![]
-                    },
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            _ => self.emit(MlirOp {
+                name: mlir_op.to_string(),
+                attrs: vec![],
+                result_types: if intrinsic.return_count > 0 {
+                    vec![result_type]
+                } else {
+                    vec![]
+                },
+                operands: operands.to_vec(),
+                region: None,
+            }),
         }
     }
 
@@ -612,15 +585,13 @@ impl IntrinsicLowering {
                 if mode == 0xFF {
                     // spin_hint -> x86 PAUSE or ARM YIELD
                     match self.target.arch {
-                        Arch::X86_64 => {
-                            self.emit(MlirOp {
-                                name: "llvm.intr.x86.sse2.pause".to_string(),
-                                attrs: vec![],
-                                result_types: vec![],
-                                operands: vec![],
-                                region: None,
-                            })
-                        }
+                        Arch::X86_64 => self.emit(MlirOp {
+                            name: "llvm.intr.x86.sse2.pause".to_string(),
+                            attrs: vec![],
+                            result_types: vec![],
+                            operands: vec![],
+                            region: None,
+                        }),
                         Arch::Aarch64 => {
                             self.emit(MlirOp {
                                 name: "llvm.intr.aarch64.hint".to_string(),
@@ -666,19 +637,15 @@ impl IntrinsicLowering {
                     attrs: vec![
                         MlirAttr {
                             name: "asm".to_string(),
-                            value: MlirAttrValue::String(
-                                match self.target.arch {
-                                    Arch::X86_64 => "syscall".to_string(),
-                                    Arch::Aarch64 => "svc #0".to_string(),
-                                    _ => "syscall".to_string(),
-                                }
-                            ),
+                            value: MlirAttrValue::String(match self.target.arch {
+                                Arch::X86_64 => "syscall".to_string(),
+                                Arch::Aarch64 => "svc #0".to_string(),
+                                _ => "syscall".to_string(),
+                            }),
                         },
                         MlirAttr {
                             name: "constraints".to_string(),
-                            value: MlirAttrValue::String(
-                                self.syscall_constraints(argc)
-                            ),
+                            value: MlirAttrValue::String(self.syscall_constraints(argc)),
                         },
                     ],
                     result_types: vec![MlirType::I64],
@@ -764,20 +731,16 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
-            Opcode::AtomicStore => {
-                self.emit(MlirOp {
-                    name: "llvm.store".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "ordering".to_string(),
-                            value: MlirAttrValue::String("release".to_string()),
-                        },
-                    ],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            Opcode::AtomicStore => self.emit(MlirOp {
+                name: "llvm.store".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "ordering".to_string(),
+                    value: MlirAttrValue::String("release".to_string()),
+                }],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             Opcode::AtomicCas => {
                 // llvm.cmpxchg returns {T, i1}
                 self.emit(MlirOp {
@@ -828,48 +791,36 @@ impl IntrinsicLowering {
         operands: &[usize],
     ) -> Option<usize> {
         match seq_id {
-            InlineSequenceId::Memcpy => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.memcpy".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "isVolatile".to_string(),
-                            value: MlirAttrValue::Bool(false),
-                        },
-                    ],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Memmove => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.memmove".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "isVolatile".to_string(),
-                            value: MlirAttrValue::Bool(false),
-                        },
-                    ],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Memset => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.memset".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "isVolatile".to_string(),
-                            value: MlirAttrValue::Bool(false),
-                        },
-                    ],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::Memcpy => self.emit(MlirOp {
+                name: "llvm.intr.memcpy".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "isVolatile".to_string(),
+                    value: MlirAttrValue::Bool(false),
+                }],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Memmove => self.emit(MlirOp {
+                name: "llvm.intr.memmove".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "isVolatile".to_string(),
+                    value: MlirAttrValue::Bool(false),
+                }],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Memset => self.emit(MlirOp {
+                name: "llvm.intr.memset".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "isVolatile".to_string(),
+                    value: MlirAttrValue::Bool(false),
+                }],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::SecureZero => {
                 // Volatile memset(0) — must survive every optimisation pass.
                 // The `isVolatile = true` attribute on `llvm.intr.memset`
@@ -879,12 +830,10 @@ impl IntrinsicLowering {
                 // §2 Action #2.
                 self.emit(MlirOp {
                     name: "llvm.intr.memset".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "isVolatile".to_string(),
-                            value: MlirAttrValue::Bool(true),
-                        },
-                    ],
+                    attrs: vec![MlirAttr {
+                        name: "isVolatile".to_string(),
+                        value: MlirAttrValue::Bool(true),
+                    }],
                     result_types: vec![],
                     operands: operands.to_vec(),
                     region: None,
@@ -900,93 +849,75 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
-            InlineSequenceId::Clz | InlineSequenceId::Ilog2 => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.ctlz".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "is_zero_poison".to_string(),
-                        value: MlirAttrValue::Bool(false),
-                    }],
-                    result_types: vec![MlirType::I32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Ctz => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.cttz".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "is_zero_poison".to_string(),
-                        value: MlirAttrValue::Bool(false),
-                    }],
-                    result_types: vec![MlirType::I32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Popcnt => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.ctpop".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Bswap => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.bswap".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::RotateLeft => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.fshl".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::RotateRight => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.fshr".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::CheckedAdd => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.sadd.with.overflow".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::CheckedSub => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.ssub.with.overflow".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::CheckedMul => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.smul.with.overflow".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::Clz | InlineSequenceId::Ilog2 => self.emit(MlirOp {
+                name: "llvm.intr.ctlz".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "is_zero_poison".to_string(),
+                    value: MlirAttrValue::Bool(false),
+                }],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Ctz => self.emit(MlirOp {
+                name: "llvm.intr.cttz".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "is_zero_poison".to_string(),
+                    value: MlirAttrValue::Bool(false),
+                }],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Popcnt => self.emit(MlirOp {
+                name: "llvm.intr.ctpop".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Bswap => self.emit(MlirOp {
+                name: "llvm.intr.bswap".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::RotateLeft => self.emit(MlirOp {
+                name: "llvm.intr.fshl".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::RotateRight => self.emit(MlirOp {
+                name: "llvm.intr.fshr".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CheckedAdd => self.emit(MlirOp {
+                name: "llvm.intr.sadd.with.overflow".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CheckedSub => self.emit(MlirOp {
+                name: "llvm.intr.ssub.with.overflow".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CheckedMul => self.emit(MlirOp {
+                name: "llvm.intr.smul.with.overflow".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::CheckedDiv => {
                 // Division doesn't have an intrinsic, use sdiv with guard for zero/overflow
                 self.emit(MlirOp {
@@ -997,234 +928,188 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
-            InlineSequenceId::OverflowingAdd => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.sadd.with.overflow".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::OverflowingSub => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.ssub.with.overflow".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::OverflowingMul => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.smul.with.overflow".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::AtomicFetchAdd => {
-                self.emit(MlirOp {
-                    name: "llvm.atomicrmw".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "bin_op".to_string(),
-                            value: MlirAttrValue::String("add".to_string()),
-                        },
-                        MlirAttr {
-                            name: "ordering".to_string(),
-                            value: MlirAttrValue::String("seq_cst".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::AtomicFetchSub => {
-                self.emit(MlirOp {
-                    name: "llvm.atomicrmw".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "bin_op".to_string(),
-                            value: MlirAttrValue::String("sub".to_string()),
-                        },
-                        MlirAttr {
-                            name: "ordering".to_string(),
-                            value: MlirAttrValue::String("seq_cst".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::AtomicFetchAnd => {
-                self.emit(MlirOp {
-                    name: "llvm.atomicrmw".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "bin_op".to_string(),
-                            value: MlirAttrValue::String("and".to_string()),
-                        },
-                        MlirAttr {
-                            name: "ordering".to_string(),
-                            value: MlirAttrValue::String("seq_cst".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::AtomicFetchOr => {
-                self.emit(MlirOp {
-                    name: "llvm.atomicrmw".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "bin_op".to_string(),
-                            value: MlirAttrValue::String("or".to_string()),
-                        },
-                        MlirAttr {
-                            name: "ordering".to_string(),
-                            value: MlirAttrValue::String("seq_cst".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::AtomicFetchXor => {
-                self.emit(MlirOp {
-                    name: "llvm.atomicrmw".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "bin_op".to_string(),
-                            value: MlirAttrValue::String("xor".to_string()),
-                        },
-                        MlirAttr {
-                            name: "ordering".to_string(),
-                            value: MlirAttrValue::String("seq_cst".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::OverflowingAdd => self.emit(MlirOp {
+                name: "llvm.intr.sadd.with.overflow".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::OverflowingSub => self.emit(MlirOp {
+                name: "llvm.intr.ssub.with.overflow".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::OverflowingMul => self.emit(MlirOp {
+                name: "llvm.intr.smul.with.overflow".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Struct(vec![MlirType::I64, MlirType::I1])],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::AtomicFetchAdd => self.emit(MlirOp {
+                name: "llvm.atomicrmw".to_string(),
+                attrs: vec![
+                    MlirAttr {
+                        name: "bin_op".to_string(),
+                        value: MlirAttrValue::String("add".to_string()),
+                    },
+                    MlirAttr {
+                        name: "ordering".to_string(),
+                        value: MlirAttrValue::String("seq_cst".to_string()),
+                    },
+                ],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::AtomicFetchSub => self.emit(MlirOp {
+                name: "llvm.atomicrmw".to_string(),
+                attrs: vec![
+                    MlirAttr {
+                        name: "bin_op".to_string(),
+                        value: MlirAttrValue::String("sub".to_string()),
+                    },
+                    MlirAttr {
+                        name: "ordering".to_string(),
+                        value: MlirAttrValue::String("seq_cst".to_string()),
+                    },
+                ],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::AtomicFetchAnd => self.emit(MlirOp {
+                name: "llvm.atomicrmw".to_string(),
+                attrs: vec![
+                    MlirAttr {
+                        name: "bin_op".to_string(),
+                        value: MlirAttrValue::String("and".to_string()),
+                    },
+                    MlirAttr {
+                        name: "ordering".to_string(),
+                        value: MlirAttrValue::String("seq_cst".to_string()),
+                    },
+                ],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::AtomicFetchOr => self.emit(MlirOp {
+                name: "llvm.atomicrmw".to_string(),
+                attrs: vec![
+                    MlirAttr {
+                        name: "bin_op".to_string(),
+                        value: MlirAttrValue::String("or".to_string()),
+                    },
+                    MlirAttr {
+                        name: "ordering".to_string(),
+                        value: MlirAttrValue::String("seq_cst".to_string()),
+                    },
+                ],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::AtomicFetchXor => self.emit(MlirOp {
+                name: "llvm.atomicrmw".to_string(),
+                attrs: vec![
+                    MlirAttr {
+                        name: "bin_op".to_string(),
+                        value: MlirAttrValue::String("xor".to_string()),
+                    },
+                    MlirAttr {
+                        name: "ordering".to_string(),
+                        value: MlirAttrValue::String("seq_cst".to_string()),
+                    },
+                ],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             // Math functions -> math dialect
-            InlineSequenceId::SinF64 => {
-                self.emit(MlirOp {
-                    name: "math.sin".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::CosF64 => {
-                self.emit(MlirOp {
-                    name: "math.cos".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::TanF64 => {
-                self.emit(MlirOp {
-                    name: "math.tan".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::AsinF64 => {
-                self.emit(MlirOp {
-                    name: "math.asin".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::AcosF64 => {
-                self.emit(MlirOp {
-                    name: "math.acos".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::AtanF64 => {
-                self.emit(MlirOp {
-                    name: "math.atan".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Atan2F64 => {
-                self.emit(MlirOp {
-                    name: "math.atan2".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::ExpF64 => {
-                self.emit(MlirOp {
-                    name: "math.exp".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::LogF64 => {
-                self.emit(MlirOp {
-                    name: "math.log".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Log10F64 => {
-                self.emit(MlirOp {
-                    name: "math.log10".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::SinF64 => self.emit(MlirOp {
+                name: "math.sin".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CosF64 => self.emit(MlirOp {
+                name: "math.cos".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::TanF64 => self.emit(MlirOp {
+                name: "math.tan".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::AsinF64 => self.emit(MlirOp {
+                name: "math.asin".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::AcosF64 => self.emit(MlirOp {
+                name: "math.acos".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::AtanF64 => self.emit(MlirOp {
+                name: "math.atan".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Atan2F64 => self.emit(MlirOp {
+                name: "math.atan2".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::ExpF64 => self.emit(MlirOp {
+                name: "math.exp".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::LogF64 => self.emit(MlirOp {
+                name: "math.log".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Log10F64 => self.emit(MlirOp {
+                name: "math.log10".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             // Time intrinsics -> platform syscall or VDSO
-            InlineSequenceId::MonotonicNanos => {
-                self.lower_time_intrinsic("monotonic", operands)
-            }
-            InlineSequenceId::RealtimeSecs => {
-                self.lower_time_intrinsic("realtime", operands)
-            }
+            InlineSequenceId::MonotonicNanos => self.lower_time_intrinsic("monotonic", operands),
+            InlineSequenceId::RealtimeSecs => self.lower_time_intrinsic("realtime", operands),
             InlineSequenceId::RealtimeNanos => {
                 self.lower_time_intrinsic("realtime_nanos", operands)
             }
             // Futex/spinlock -> platform-specific
-            InlineSequenceId::SpinlockLock => {
-                self.lower_spinlock_lock(operands)
-            }
-            InlineSequenceId::FutexWait => {
-                self.lower_futex_wait(operands)
-            }
-            InlineSequenceId::FutexWake => {
-                self.lower_futex_wake(operands)
-            }
+            InlineSequenceId::SpinlockLock => self.lower_spinlock_lock(operands),
+            InlineSequenceId::FutexWait => self.lower_futex_wait(operands),
+            InlineSequenceId::FutexWake => self.lower_futex_wake(operands),
             // Memory lifecycle intrinsics
             InlineSequenceId::DropInPlace => {
                 // Call destructor via LLVM lifetime end + custom drop
@@ -1245,10 +1130,7 @@ impl IntrinsicLowering {
                 self.emit(MlirOp {
                     name: "llvm.mlir.undef".to_string(),
                     attrs: vec![],
-                    result_types: vec![MlirType::Struct(vec![
-                        MlirType::Ptr,
-                        MlirType::I64,
-                    ])],
+                    result_types: vec![MlirType::Struct(vec![MlirType::Ptr, MlirType::I64])],
                     operands: operands.to_vec(),
                     region: None,
                 })
@@ -1276,127 +1158,157 @@ impl IntrinsicLowering {
 
             // F64 extended math functions - use LLVM intrinsics (NO LIBC dependency)
             // LLVM will inline or use hardware instructions where available
-            InlineSequenceId::CbrtF64 => self.lower_llvm_intrinsic("llvm.cbrt.f64", operands, MlirType::F64),
-            InlineSequenceId::Expm1F64 => self.lower_llvm_intrinsic("llvm.expm1.f64", operands, MlirType::F64),
-            InlineSequenceId::Exp2F64 => self.lower_llvm_intrinsic("llvm.exp2.f64", operands, MlirType::F64),
-            InlineSequenceId::Log1pF64 => self.lower_llvm_intrinsic("llvm.log1p.f64", operands, MlirType::F64),
-            InlineSequenceId::Log2F64 => self.lower_llvm_intrinsic("llvm.log2.f64", operands, MlirType::F64),
-            InlineSequenceId::PowiF64 => self.lower_llvm_intrinsic("llvm.powi.f64.i32", operands, MlirType::F64),
-            InlineSequenceId::TruncF64 => self.lower_llvm_intrinsic("llvm.trunc.f64", operands, MlirType::F64),
-            InlineSequenceId::MinnumF64 => self.lower_llvm_intrinsic("llvm.minnum.f64", operands, MlirType::F64),
-            InlineSequenceId::MaxnumF64 => self.lower_llvm_intrinsic("llvm.maxnum.f64", operands, MlirType::F64),
-            InlineSequenceId::FmaF64 => self.lower_llvm_intrinsic("llvm.fma.f64", operands, MlirType::F64),
-            InlineSequenceId::CopysignF64 => self.lower_llvm_intrinsic("llvm.copysign.f64", operands, MlirType::F64),
-            InlineSequenceId::HypotF64 => self.lower_llvm_intrinsic("llvm.hypot.f64", operands, MlirType::F64),
+            InlineSequenceId::CbrtF64 => {
+                self.lower_llvm_intrinsic("llvm.cbrt.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::Expm1F64 => {
+                self.lower_llvm_intrinsic("llvm.expm1.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::Exp2F64 => {
+                self.lower_llvm_intrinsic("llvm.exp2.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::Log1pF64 => {
+                self.lower_llvm_intrinsic("llvm.log1p.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::Log2F64 => {
+                self.lower_llvm_intrinsic("llvm.log2.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::PowiF64 => {
+                self.lower_llvm_intrinsic("llvm.powi.f64.i32", operands, MlirType::F64)
+            }
+            InlineSequenceId::TruncF64 => {
+                self.lower_llvm_intrinsic("llvm.trunc.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::MinnumF64 => {
+                self.lower_llvm_intrinsic("llvm.minnum.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::MaxnumF64 => {
+                self.lower_llvm_intrinsic("llvm.maxnum.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::FmaF64 => {
+                self.lower_llvm_intrinsic("llvm.fma.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::CopysignF64 => {
+                self.lower_llvm_intrinsic("llvm.copysign.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::HypotF64 => {
+                self.lower_llvm_intrinsic("llvm.hypot.f64", operands, MlirType::F64)
+            }
             // F64 hyperbolic functions - LLVM intrinsics
-            InlineSequenceId::SinhF64 => self.lower_llvm_intrinsic("llvm.sinh.f64", operands, MlirType::F64),
-            InlineSequenceId::CoshF64 => self.lower_llvm_intrinsic("llvm.cosh.f64", operands, MlirType::F64),
-            InlineSequenceId::TanhF64 => self.lower_llvm_intrinsic("llvm.tanh.f64", operands, MlirType::F64),
-            InlineSequenceId::AsinhF64 => self.lower_llvm_intrinsic("llvm.asinh.f64", operands, MlirType::F64),
-            InlineSequenceId::AcoshF64 => self.lower_llvm_intrinsic("llvm.acosh.f64", operands, MlirType::F64),
-            InlineSequenceId::AtanhF64 => self.lower_llvm_intrinsic("llvm.atanh.f64", operands, MlirType::F64),
+            InlineSequenceId::SinhF64 => {
+                self.lower_llvm_intrinsic("llvm.sinh.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::CoshF64 => {
+                self.lower_llvm_intrinsic("llvm.cosh.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::TanhF64 => {
+                self.lower_llvm_intrinsic("llvm.tanh.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::AsinhF64 => {
+                self.lower_llvm_intrinsic("llvm.asinh.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::AcoshF64 => {
+                self.lower_llvm_intrinsic("llvm.acosh.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::AtanhF64 => {
+                self.lower_llvm_intrinsic("llvm.atanh.f64", operands, MlirType::F64)
+            }
             // F64 power and basic functions - LLVM intrinsics
-            InlineSequenceId::PowF64 => self.lower_llvm_intrinsic("llvm.pow.f64", operands, MlirType::F64),
-            InlineSequenceId::AbsF64 => self.lower_llvm_intrinsic("llvm.fabs.f64", operands, MlirType::F64),
-            InlineSequenceId::FloorF64 => self.lower_llvm_intrinsic("llvm.floor.f64", operands, MlirType::F64),
-            InlineSequenceId::CeilF64 => self.lower_llvm_intrinsic("llvm.ceil.f64", operands, MlirType::F64),
-            InlineSequenceId::RoundF64 => self.lower_llvm_intrinsic("llvm.round.f64", operands, MlirType::F64),
-            InlineSequenceId::SqrtF64 => self.lower_llvm_intrinsic("llvm.sqrt.f64", operands, MlirType::F64),
+            InlineSequenceId::PowF64 => {
+                self.lower_llvm_intrinsic("llvm.pow.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::AbsF64 => {
+                self.lower_llvm_intrinsic("llvm.fabs.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::FloorF64 => {
+                self.lower_llvm_intrinsic("llvm.floor.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::CeilF64 => {
+                self.lower_llvm_intrinsic("llvm.ceil.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::RoundF64 => {
+                self.lower_llvm_intrinsic("llvm.round.f64", operands, MlirType::F64)
+            }
+            InlineSequenceId::SqrtF64 => {
+                self.lower_llvm_intrinsic("llvm.sqrt.f64", operands, MlirType::F64)
+            }
 
             // Bit manipulation extensions
-            InlineSequenceId::Bitreverse => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.bitreverse".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::Bitreverse => self.emit(MlirOp {
+                name: "llvm.intr.bitreverse".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Type conversions
-            InlineSequenceId::IntToFloat => {
-                self.emit(MlirOp {
-                    name: "arith.sitofp".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::FloatToInt => {
-                self.emit(MlirOp {
-                    name: "arith.fptosi".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Sext => {
-                self.emit(MlirOp {
-                    name: "arith.extsi".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Zext => {
-                self.emit(MlirOp {
-                    name: "arith.extui".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Fpext => {
-                self.emit(MlirOp {
-                    name: "arith.extf".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Fptrunc => {
-                self.emit(MlirOp {
-                    name: "arith.truncf".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::IntTrunc => {
-                self.emit(MlirOp {
-                    name: "arith.trunci".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Bitcast |
-            InlineSequenceId::F32ToBits |
-            InlineSequenceId::F32FromBits |
-            InlineSequenceId::F64ToBits |
-            InlineSequenceId::F64FromBits => {
-                self.emit(MlirOp {
-                    name: "arith.bitcast".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::IntToFloat => self.emit(MlirOp {
+                name: "arith.sitofp".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::FloatToInt => self.emit(MlirOp {
+                name: "arith.fptosi".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Sext => self.emit(MlirOp {
+                name: "arith.extsi".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Zext => self.emit(MlirOp {
+                name: "arith.extui".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Fpext => self.emit(MlirOp {
+                name: "arith.extf".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Fptrunc => self.emit(MlirOp {
+                name: "arith.truncf".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::IntTrunc => self.emit(MlirOp {
+                name: "arith.trunci".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Bitcast
+            | InlineSequenceId::F32ToBits
+            | InlineSequenceId::F32FromBits
+            | InlineSequenceId::F64ToBits
+            | InlineSequenceId::F64FromBits => self.emit(MlirOp {
+                name: "arith.bitcast".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Byte conversions - use type punning
-            InlineSequenceId::ToLeBytes |
-            InlineSequenceId::FromLeBytes |
-            InlineSequenceId::ToBeBytes |
-            InlineSequenceId::FromBeBytes => {
+            InlineSequenceId::ToLeBytes
+            | InlineSequenceId::FromLeBytes
+            | InlineSequenceId::ToBeBytes
+            | InlineSequenceId::FromBeBytes => {
                 // Byte reinterpretation - emit as bitcast
                 self.emit(MlirOp {
                     name: "arith.bitcast".to_string(),
@@ -1441,17 +1353,14 @@ impl IntrinsicLowering {
                 // tolower: if isupper(c) then c + 32 else c
                 self.lower_char_to_lower(operands)
             }
-            InlineSequenceId::CharEncodeUtf8 |
-            InlineSequenceId::CharEscapeDebug => {
+            InlineSequenceId::CharEncodeUtf8 | InlineSequenceId::CharEscapeDebug => {
                 // Complex char operations - use library calls
                 self.emit(MlirOp {
                     name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("verum_char_encode_utf8".to_string()),
-                        },
-                    ],
+                    attrs: vec![MlirAttr {
+                        name: "callee".to_string(),
+                        value: MlirAttrValue::String("verum_char_encode_utf8".to_string()),
+                    }],
                     result_types: vec![MlirType::I32],
                     operands: operands.to_vec(),
                     region: None,
@@ -1460,90 +1369,146 @@ impl IntrinsicLowering {
 
             // F32 basic operations - use LLVM intrinsics (no libc dependency)
             // LLVM will either inline the implementation or use hardware instructions
-            InlineSequenceId::SqrtF32 => self.lower_llvm_intrinsic("llvm.sqrt.f32", operands, MlirType::F32),
-            InlineSequenceId::FloorF32 => self.lower_llvm_intrinsic("llvm.floor.f32", operands, MlirType::F32),
-            InlineSequenceId::CeilF32 => self.lower_llvm_intrinsic("llvm.ceil.f32", operands, MlirType::F32),
-            InlineSequenceId::RoundF32 => self.lower_llvm_intrinsic("llvm.round.f32", operands, MlirType::F32),
-            InlineSequenceId::TruncF32 => self.lower_llvm_intrinsic("llvm.trunc.f32", operands, MlirType::F32),
-            InlineSequenceId::AbsF32 => self.lower_llvm_intrinsic("llvm.fabs.f32", operands, MlirType::F32),
+            InlineSequenceId::SqrtF32 => {
+                self.lower_llvm_intrinsic("llvm.sqrt.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::FloorF32 => {
+                self.lower_llvm_intrinsic("llvm.floor.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::CeilF32 => {
+                self.lower_llvm_intrinsic("llvm.ceil.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::RoundF32 => {
+                self.lower_llvm_intrinsic("llvm.round.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::TruncF32 => {
+                self.lower_llvm_intrinsic("llvm.trunc.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::AbsF32 => {
+                self.lower_llvm_intrinsic("llvm.fabs.f32", operands, MlirType::F32)
+            }
             // F32 trigonometric functions - LLVM intrinsics
-            InlineSequenceId::SinF32 => self.lower_llvm_intrinsic("llvm.sin.f32", operands, MlirType::F32),
-            InlineSequenceId::CosF32 => self.lower_llvm_intrinsic("llvm.cos.f32", operands, MlirType::F32),
-            InlineSequenceId::TanF32 => self.lower_llvm_intrinsic("llvm.tan.f32", operands, MlirType::F32),
-            InlineSequenceId::AsinF32 => self.lower_llvm_intrinsic("llvm.asin.f32", operands, MlirType::F32),
-            InlineSequenceId::AcosF32 => self.lower_llvm_intrinsic("llvm.acos.f32", operands, MlirType::F32),
-            InlineSequenceId::AtanF32 => self.lower_llvm_intrinsic("llvm.atan.f32", operands, MlirType::F32),
-            InlineSequenceId::Atan2F32 => self.lower_llvm_intrinsic("llvm.atan2.f32", operands, MlirType::F32),
+            InlineSequenceId::SinF32 => {
+                self.lower_llvm_intrinsic("llvm.sin.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::CosF32 => {
+                self.lower_llvm_intrinsic("llvm.cos.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::TanF32 => {
+                self.lower_llvm_intrinsic("llvm.tan.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::AsinF32 => {
+                self.lower_llvm_intrinsic("llvm.asin.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::AcosF32 => {
+                self.lower_llvm_intrinsic("llvm.acos.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::AtanF32 => {
+                self.lower_llvm_intrinsic("llvm.atan.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::Atan2F32 => {
+                self.lower_llvm_intrinsic("llvm.atan2.f32", operands, MlirType::F32)
+            }
             // F32 hyperbolic functions - LLVM intrinsics
-            InlineSequenceId::SinhF32 => self.lower_llvm_intrinsic("llvm.sinh.f32", operands, MlirType::F32),
-            InlineSequenceId::CoshF32 => self.lower_llvm_intrinsic("llvm.cosh.f32", operands, MlirType::F32),
-            InlineSequenceId::TanhF32 => self.lower_llvm_intrinsic("llvm.tanh.f32", operands, MlirType::F32),
-            InlineSequenceId::AsinhF32 => self.lower_llvm_intrinsic("llvm.asinh.f32", operands, MlirType::F32),
-            InlineSequenceId::AcoshF32 => self.lower_llvm_intrinsic("llvm.acosh.f32", operands, MlirType::F32),
-            InlineSequenceId::AtanhF32 => self.lower_llvm_intrinsic("llvm.atanh.f32", operands, MlirType::F32),
+            InlineSequenceId::SinhF32 => {
+                self.lower_llvm_intrinsic("llvm.sinh.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::CoshF32 => {
+                self.lower_llvm_intrinsic("llvm.cosh.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::TanhF32 => {
+                self.lower_llvm_intrinsic("llvm.tanh.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::AsinhF32 => {
+                self.lower_llvm_intrinsic("llvm.asinh.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::AcoshF32 => {
+                self.lower_llvm_intrinsic("llvm.acosh.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::AtanhF32 => {
+                self.lower_llvm_intrinsic("llvm.atanh.f32", operands, MlirType::F32)
+            }
             // F32 exponential and logarithmic functions - LLVM intrinsics
-            InlineSequenceId::ExpF32 => self.lower_llvm_intrinsic("llvm.exp.f32", operands, MlirType::F32),
-            InlineSequenceId::Exp2F32 => self.lower_llvm_intrinsic("llvm.exp2.f32", operands, MlirType::F32),
-            InlineSequenceId::Expm1F32 => self.lower_llvm_intrinsic("llvm.expm1.f32", operands, MlirType::F32),
-            InlineSequenceId::LogF32 => self.lower_llvm_intrinsic("llvm.log.f32", operands, MlirType::F32),
-            InlineSequenceId::Log2F32 => self.lower_llvm_intrinsic("llvm.log2.f32", operands, MlirType::F32),
-            InlineSequenceId::Log10F32 => self.lower_llvm_intrinsic("llvm.log10.f32", operands, MlirType::F32),
-            InlineSequenceId::Log1pF32 => self.lower_llvm_intrinsic("llvm.log1p.f32", operands, MlirType::F32),
+            InlineSequenceId::ExpF32 => {
+                self.lower_llvm_intrinsic("llvm.exp.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::Exp2F32 => {
+                self.lower_llvm_intrinsic("llvm.exp2.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::Expm1F32 => {
+                self.lower_llvm_intrinsic("llvm.expm1.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::LogF32 => {
+                self.lower_llvm_intrinsic("llvm.log.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::Log2F32 => {
+                self.lower_llvm_intrinsic("llvm.log2.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::Log10F32 => {
+                self.lower_llvm_intrinsic("llvm.log10.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::Log1pF32 => {
+                self.lower_llvm_intrinsic("llvm.log1p.f32", operands, MlirType::F32)
+            }
             // F32 power and special functions - LLVM intrinsics
-            InlineSequenceId::CbrtF32 => self.lower_llvm_intrinsic("llvm.cbrt.f32", operands, MlirType::F32),
-            InlineSequenceId::HypotF32 => self.lower_llvm_intrinsic("llvm.hypot.f32", operands, MlirType::F32),
-            InlineSequenceId::FmaF32 => self.lower_llvm_intrinsic("llvm.fma.f32", operands, MlirType::F32),
-            InlineSequenceId::CopysignF32 => self.lower_llvm_intrinsic("llvm.copysign.f32", operands, MlirType::F32),
-            InlineSequenceId::PowiF32 => self.lower_llvm_intrinsic("llvm.powi.f32.i32", operands, MlirType::F32),
-            InlineSequenceId::MinnumF32 => self.lower_llvm_intrinsic("llvm.minnum.f32", operands, MlirType::F32),
-            InlineSequenceId::MaxnumF32 => self.lower_llvm_intrinsic("llvm.maxnum.f32", operands, MlirType::F32),
+            InlineSequenceId::CbrtF32 => {
+                self.lower_llvm_intrinsic("llvm.cbrt.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::HypotF32 => {
+                self.lower_llvm_intrinsic("llvm.hypot.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::FmaF32 => {
+                self.lower_llvm_intrinsic("llvm.fma.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::CopysignF32 => {
+                self.lower_llvm_intrinsic("llvm.copysign.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::PowiF32 => {
+                self.lower_llvm_intrinsic("llvm.powi.f32.i32", operands, MlirType::F32)
+            }
+            InlineSequenceId::MinnumF32 => {
+                self.lower_llvm_intrinsic("llvm.minnum.f32", operands, MlirType::F32)
+            }
+            InlineSequenceId::MaxnumF32 => {
+                self.lower_llvm_intrinsic("llvm.maxnum.f32", operands, MlirType::F32)
+            }
 
             // Saturating arithmetic
-            InlineSequenceId::SaturatingAdd => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.sadd.sat".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::SaturatingSub => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.ssub.sat".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::SaturatingAdd => self.emit(MlirOp {
+                name: "llvm.intr.sadd.sat".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::SaturatingSub => self.emit(MlirOp {
+                name: "llvm.intr.ssub.sat".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Float special checks
-            InlineSequenceId::IsNan => {
-                self.emit(MlirOp {
-                    name: "arith.cmpf".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "predicate".to_string(),
-                            value: MlirAttrValue::String("uno".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::I1],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::IsNan => self.emit(MlirOp {
+                name: "arith.cmpf".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "predicate".to_string(),
+                    value: MlirAttrValue::String("uno".to_string()),
+                }],
+                result_types: vec![MlirType::I1],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::IsInf => {
                 // NO LIBC: Use LLVM's is.fpclass intrinsic to check for infinity
                 // fpclass mask 0x204 = negInf (0x200) | posInf (0x004)
                 self.emit(MlirOp {
                     name: "llvm.is.fpclass".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "bit".to_string(),
-                            value: MlirAttrValue::Integer(0x204), // posInf | negInf
-                        },
-                    ],
+                    attrs: vec![MlirAttr {
+                        name: "bit".to_string(),
+                        value: MlirAttrValue::Integer(0x204), // posInf | negInf
+                    }],
                     result_types: vec![MlirType::I1],
                     operands: operands.to_vec(),
                     region: None,
@@ -1556,12 +1521,10 @@ impl IntrinsicLowering {
                 // 0x100 negSubnormal | 0x040 posZero | 0x020 negZero
                 self.emit(MlirOp {
                     name: "llvm.is.fpclass".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "bit".to_string(),
-                            value: MlirAttrValue::Integer(0x1F8), // all finite classes
-                        },
-                    ],
+                    attrs: vec![MlirAttr {
+                        name: "bit".to_string(),
+                        value: MlirAttrValue::Integer(0x1F8), // all finite classes
+                    }],
                     result_types: vec![MlirType::I1],
                     operands: operands.to_vec(),
                     region: None,
@@ -1608,33 +1571,29 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
-            InlineSequenceId::SliceSubslice => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "callee".to_string(),
-                        value: MlirAttrValue::String("verum_slice_subslice".to_string()),
-                    }],
-                    result_types: vec![MlirType::Struct(vec![MlirType::Ptr, MlirType::I64])],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::SliceSplitAt => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "callee".to_string(),
-                        value: MlirAttrValue::String("verum_slice_split_at".to_string()),
-                    }],
-                    result_types: vec![MlirType::Struct(vec![
-                        MlirType::Struct(vec![MlirType::Ptr, MlirType::I64]),
-                        MlirType::Struct(vec![MlirType::Ptr, MlirType::I64]),
-                    ])],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::SliceSubslice => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("verum_slice_subslice".to_string()),
+                }],
+                result_types: vec![MlirType::Struct(vec![MlirType::Ptr, MlirType::I64])],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::SliceSplitAt => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("verum_slice_split_at".to_string()),
+                }],
+                result_types: vec![MlirType::Struct(vec![
+                    MlirType::Struct(vec![MlirType::Ptr, MlirType::I64]),
+                    MlirType::Struct(vec![MlirType::Ptr, MlirType::I64]),
+                ])],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Text operations
             InlineSequenceId::TextFromStatic => {
@@ -1709,44 +1668,38 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
-            InlineSequenceId::TextByteLen => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "callee".to_string(),
-                        value: MlirAttrValue::String("verum_text_byte_len".to_string()),
-                    }],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TextByteLen => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("verum_text_byte_len".to_string()),
+                }],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Random number generation
-            InlineSequenceId::RandomU64 => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "callee".to_string(),
-                        value: MlirAttrValue::String("__verum_random_u64".to_string()),
-                    }],
-                    result_types: vec![MlirType::I64],
-                    operands: vec![],
-                    region: None,
-                })
-            }
-            InlineSequenceId::RandomFloat => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "callee".to_string(),
-                        value: MlirAttrValue::String("__verum_random_float".to_string()),
-                    }],
-                    result_types: vec![MlirType::F64],
-                    operands: vec![],
-                    region: None,
-                })
-            }
+            InlineSequenceId::RandomU64 => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_random_u64".to_string()),
+                }],
+                result_types: vec![MlirType::I64],
+                operands: vec![],
+                region: None,
+            }),
+            InlineSequenceId::RandomFloat => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_random_float".to_string()),
+                }],
+                result_types: vec![MlirType::F64],
+                operands: vec![],
+                region: None,
+            }),
 
             // Unicode character classification
             InlineSequenceId::CharGeneralCategory => {
@@ -1798,18 +1751,16 @@ impl IntrinsicLowering {
             }
 
             // Poll pending - return false constant for Tier 0 async
-            InlineSequenceId::PollPending => {
-                self.emit(MlirOp {
-                    name: "arith.constant".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "value".to_string(),
-                        value: MlirAttrValue::Bool(false),
-                    }],
-                    result_types: vec![MlirType::I1],
-                    operands: vec![],
-                    region: None,
-                })
-            }
+            InlineSequenceId::PollPending => self.emit(MlirOp {
+                name: "arith.constant".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "value".to_string(),
+                    value: MlirAttrValue::Bool(false),
+                }],
+                result_types: vec![MlirType::I1],
+                operands: vec![],
+                region: None,
+            }),
 
             // Call second argument as closure (recovery passthrough)
             InlineSequenceId::CallSecondArg => {
@@ -1838,18 +1789,16 @@ impl IntrinsicLowering {
             }
 
             // Load unit constant (represented as i64 zero)
-            InlineSequenceId::LoadUnit => {
-                self.emit(MlirOp {
-                    name: "arith.constant".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "value".to_string(),
-                        value: MlirAttrValue::Integer(0),
-                    }],
-                    result_types: vec![MlirType::I64],
-                    operands: vec![],
-                    region: None,
-                })
-            }
+            InlineSequenceId::LoadUnit => self.emit(MlirOp {
+                name: "arith.constant".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "value".to_string(),
+                    value: MlirAttrValue::Integer(0),
+                }],
+                result_types: vec![MlirType::I64],
+                operands: vec![],
+                region: None,
+            }),
 
             // Volatile memory operations (MMIO support)
             InlineSequenceId::VolatileLoad => {
@@ -1957,7 +1906,6 @@ impl IntrinsicLowering {
             // =====================================================================
             // SIMD Vector Operations
             // =====================================================================
-
             InlineSequenceId::SimdSplat => {
                 // vector.splat: Broadcast scalar to all lanes
                 self.emit(MlirOp {
@@ -2500,332 +2448,339 @@ impl IntrinsicLowering {
             // =====================================================================
             // Tensor Operations (SSM, FFT, Linear Algebra)
             // =====================================================================
+            InlineSequenceId::SsmScan => self.emit(MlirOp {
+                name: "verum.ssm_scan".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::SsmScan => {
-                self.emit(MlirOp {
-                    name: "verum.ssm_scan".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::MatrixExp => self.emit(MlirOp {
+                name: "linalg.matrix_exp".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::MatrixExp => {
-                self.emit(MlirOp {
-                    name: "linalg.matrix_exp".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::MatrixInverse => self.emit(MlirOp {
+                name: "linalg.inv".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::MatrixInverse => {
-                self.emit(MlirOp {
-                    name: "linalg.inv".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::ComplexPow => self.emit(MlirOp {
+                name: "complex.pow".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Complex(Box::new(MlirType::F64))],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::ComplexPow => {
-                self.emit(MlirOp {
-                    name: "complex.pow".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Complex(Box::new(MlirType::F64))],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::ComplexMul => self.emit(MlirOp {
+                name: "complex.mul".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Complex(Box::new(MlirType::F64))],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::ComplexMul => {
-                self.emit(MlirOp {
-                    name: "complex.mul".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Complex(Box::new(MlirType::F64))],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::Rfft => self.emit(MlirOp {
+                name: "verum.rfft".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::Complex(Box::new(MlirType::F32))),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::Rfft => {
-                self.emit(MlirOp {
-                    name: "verum.rfft".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::Complex(Box::new(MlirType::F32))), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::Irfft => self.emit(MlirOp {
+                name: "verum.irfft".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::Irfft => {
-                self.emit(MlirOp {
-                    name: "verum.irfft".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::Uniform | InlineSequenceId::RandomFloat01 => self.emit(MlirOp {
+                name: "verum.random.uniform".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::Uniform | InlineSequenceId::RandomFloat01 => {
-                self.emit(MlirOp {
-                    name: "verum.random.uniform".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::IsTraining => self.emit(MlirOp {
+                name: "verum.is_training".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I1],
+                operands: vec![],
+                region: None,
+            }),
 
-            InlineSequenceId::IsTraining => {
-                self.emit(MlirOp {
-                    name: "verum.is_training".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I1],
-                    operands: vec![],
-                    region: None,
-                })
-            }
+            InlineSequenceId::Bincount => self.emit(MlirOp {
+                name: "verum.bincount".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::I64),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::Bincount => {
-                self.emit(MlirOp {
-                    name: "verum.bincount".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::I64), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::GatherNd => self.emit(MlirOp {
+                name: "tensor.gather".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::GatherNd => {
-                self.emit(MlirOp {
-                    name: "tensor.gather".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::ArangeUsize => self.emit(MlirOp {
+                name: "verum.arange".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::I64),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::ArangeUsize => {
-                self.emit(MlirOp {
-                    name: "verum.arange".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::I64), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorRepeat => self.emit(MlirOp {
+                name: "tensor.repeat".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorRepeat => {
-                self.emit(MlirOp {
-                    name: "tensor.repeat".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorTanh => self.emit(MlirOp {
+                name: "math.tanh".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorTanh => {
-                self.emit(MlirOp {
-                    name: "math.tanh".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorSum => self.emit(MlirOp {
+                name: "linalg.reduce".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "reduce_fn".to_string(),
+                    value: MlirAttrValue::String("add".to_string()),
+                }],
+                result_types: vec![MlirType::F32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorSum => {
-                self.emit(MlirOp {
-                    name: "linalg.reduce".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "reduce_fn".to_string(),
-                        value: MlirAttrValue::String("add".to_string()),
-                    }],
-                    result_types: vec![MlirType::F32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-
-            InlineSequenceId::TensorFromArray => {
-                self.emit(MlirOp {
-                    name: "tensor.from_elements".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorFromArray => self.emit(MlirOp {
+                name: "tensor.from_elements".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // =====================================================================
             // Additional Tensor Operations
             // =====================================================================
+            InlineSequenceId::TensorUnsqueeze => self.emit(MlirOp {
+                name: "tensor.expand_shape".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorUnsqueeze => {
-                self.emit(MlirOp {
-                    name: "tensor.expand_shape".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorMaskedSelect => self.emit(MlirOp {
+                name: "tensor.masked_select".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorMaskedSelect => {
-                self.emit(MlirOp {
-                    name: "tensor.masked_select".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorLeakyRelu => self.emit(MlirOp {
+                name: "verum.leaky_relu".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorLeakyRelu => {
-                self.emit(MlirOp {
-                    name: "verum.leaky_relu".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorDiag => self.emit(MlirOp {
+                name: "linalg.diag".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorDiag => {
-                self.emit(MlirOp {
-                    name: "linalg.diag".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorTriu => self.emit(MlirOp {
+                name: "linalg.triu".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorTriu => {
-                self.emit(MlirOp {
-                    name: "linalg.triu".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorTril => self.emit(MlirOp {
+                name: "linalg.tril".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorTril => {
-                self.emit(MlirOp {
-                    name: "linalg.tril".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorNonzero => self.emit(MlirOp {
+                name: "tensor.nonzero".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::I64),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorNonzero => {
-                self.emit(MlirOp {
-                    name: "tensor.nonzero".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::I64), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorOneHot => self.emit(MlirOp {
+                name: "verum.one_hot".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorOneHot => {
-                self.emit(MlirOp {
-                    name: "verum.one_hot".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorSplit | InlineSequenceId::TensorSplitAt => self.emit(MlirOp {
+                name: "tensor.split".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorSplit | InlineSequenceId::TensorSplitAt => {
-                self.emit(MlirOp {
-                    name: "tensor.split".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorGetScalar => self.emit(MlirOp {
+                name: "tensor.extract".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorGetScalar => {
-                self.emit(MlirOp {
-                    name: "tensor.extract".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorSetScalar => self.emit(MlirOp {
+                name: "tensor.insert".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TensorSetScalar => {
-                self.emit(MlirOp {
-                    name: "tensor.insert".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-
-            InlineSequenceId::TensorContiguous | InlineSequenceId::TensorContiguousView => {
-                self.emit(MlirOp {
+            InlineSequenceId::TensorContiguous | InlineSequenceId::TensorContiguousView => self
+                .emit(MlirOp {
                     name: "memref.copy".to_string(),
                     attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
+                    result_types: vec![MlirType::Tensor {
+                        elem: Box::new(MlirType::F32),
+                        shape: vec![],
+                    }],
                     operands: operands.to_vec(),
                     region: None,
-                })
-            }
+                }),
 
-            InlineSequenceId::TensorToDevice => {
-                self.emit(MlirOp {
-                    name: "gpu.memcpy".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TensorToDevice => self.emit(MlirOp {
+                name: "gpu.memcpy".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // =====================================================================
             // Memory Allocation Operations
             // =====================================================================
+            InlineSequenceId::MemNewId => self.emit(MlirOp {
+                name: "verum.mem.new_id".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: vec![],
+                region: None,
+            }),
 
-            InlineSequenceId::MemNewId => {
-                self.emit(MlirOp {
-                    name: "verum.mem.new_id".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: vec![],
-                    region: None,
-                })
-            }
-
-            InlineSequenceId::MemAllocTensor => {
-                self.emit(MlirOp {
-                    name: "memref.alloc".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::MemRef { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::MemAllocTensor => self.emit(MlirOp {
+                name: "memref.alloc".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::MemRef {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // =====================================================================
             // Automatic Differentiation Operations
             // =====================================================================
-
             InlineSequenceId::GradBegin => {
                 self.emit(MlirOp {
                     name: "verum.grad.begin".to_string(),
@@ -2836,179 +2791,162 @@ impl IntrinsicLowering {
                 })
             }
 
-            InlineSequenceId::GradEnd => {
-                self.emit(MlirOp {
-                    name: "verum.grad.end".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::GradEnd => self.emit(MlirOp {
+                name: "verum.grad.end".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::JvpBegin => {
-                self.emit(MlirOp {
-                    name: "verum.jvp.begin".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: vec![],
-                    region: None,
-                })
-            }
+            InlineSequenceId::JvpBegin => self.emit(MlirOp {
+                name: "verum.jvp.begin".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: vec![],
+                region: None,
+            }),
 
-            InlineSequenceId::JvpEnd => {
-                self.emit(MlirOp {
-                    name: "verum.jvp.end".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::JvpEnd => self.emit(MlirOp {
+                name: "verum.jvp.end".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::GradZeroTangent => {
-                self.emit(MlirOp {
-                    name: "verum.grad.zero_tangent".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::GradZeroTangent => self.emit(MlirOp {
+                name: "verum.grad.zero_tangent".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::GradStop => {
-                self.emit(MlirOp {
-                    name: "verum.grad.stop".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::GradStop => self.emit(MlirOp {
+                name: "verum.grad.stop".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::GradCustom => {
-                self.emit(MlirOp {
-                    name: "verum.grad.custom".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::GradCustom => self.emit(MlirOp {
+                name: "verum.grad.custom".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::GradCheckpoint => {
-                self.emit(MlirOp {
-                    name: "verum.grad.checkpoint".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::GradCheckpoint => self.emit(MlirOp {
+                name: "verum.grad.checkpoint".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::GradAccumulate => {
-                self.emit(MlirOp {
-                    name: "verum.grad.accumulate".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::GradAccumulate => self.emit(MlirOp {
+                name: "verum.grad.accumulate".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::GradRecompute => {
-                self.emit(MlirOp {
-                    name: "verum.grad.recompute".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::GradRecompute => self.emit(MlirOp {
+                name: "verum.grad.recompute".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Tensor {
+                    elem: Box::new(MlirType::F32),
+                    shape: vec![],
+                }],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::GradZero => {
-                self.emit(MlirOp {
-                    name: "verum.grad.zero".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::GradZero => self.emit(MlirOp {
+                name: "verum.grad.zero".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // =====================================================================
             // CBGR Operations
             // =====================================================================
+            InlineSequenceId::CbgrNewGeneration => self.emit(MlirOp {
+                name: "verum.cbgr.new_generation".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: vec![],
+                region: None,
+            }),
 
-            InlineSequenceId::CbgrNewGeneration => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr.new_generation".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: vec![],
-                    region: None,
-                })
-            }
+            InlineSequenceId::CbgrInvalidate => self.emit(MlirOp {
+                name: "verum.cbgr.invalidate".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::CbgrInvalidate => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr.invalidate".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::CbgrGetGeneration => self.emit(MlirOp {
+                name: "verum.cbgr.get_generation".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::CbgrGetGeneration => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr.get_generation".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::CbgrAdvanceGeneration => self.emit(MlirOp {
+                name: "verum.cbgr.advance_generation".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::CbgrAdvanceGeneration => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr.advance_generation".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::CbgrGetEpochCaps => self.emit(MlirOp {
+                name: "verum.cbgr.get_epoch_caps".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::CbgrGetEpochCaps => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr.get_epoch_caps".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::CbgrBypassBegin => self.emit(MlirOp {
+                name: "verum.cbgr.bypass_begin".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: vec![],
+                region: None,
+            }),
 
-            InlineSequenceId::CbgrBypassBegin => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr.bypass_begin".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: vec![],
-                    region: None,
-                })
-            }
-
-            InlineSequenceId::CbgrBypassEnd => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr.bypass_end".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: vec![],
-                    region: None,
-                })
-            }
+            InlineSequenceId::CbgrBypassEnd => self.emit(MlirOp {
+                name: "verum.cbgr.bypass_end".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: vec![],
+                region: None,
+            }),
 
             InlineSequenceId::CbgrGetStats => {
                 self.emit(MlirOp {
@@ -3023,175 +2961,129 @@ impl IntrinsicLowering {
             // =====================================================================
             // Logging Operations
             // =====================================================================
+            InlineSequenceId::LogInfo => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_log_info".to_string()),
+                }],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::LogInfo => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_log_info".to_string()),
-                        },
-                    ],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::LogWarning => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_log_warning".to_string()),
+                }],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::LogWarning => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_log_warning".to_string()),
-                        },
-                    ],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::LogError => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_log_error".to_string()),
+                }],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::LogError => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_log_error".to_string()),
-                        },
-                    ],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-
-            InlineSequenceId::LogDebug => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_log_debug".to_string()),
-                        },
-                    ],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::LogDebug => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_log_debug".to_string()),
+                }],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // =====================================================================
             // Regex Operations
             // =====================================================================
+            InlineSequenceId::RegexFindAll => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_regex_find_all".to_string()),
+                }],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::RegexFindAll => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_regex_find_all".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::RegexReplaceAll => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_regex_replace_all".to_string()),
+                }],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::RegexReplaceAll => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_regex_replace_all".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::RegexIsMatch => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_regex_is_match".to_string()),
+                }],
+                result_types: vec![MlirType::I1],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::RegexIsMatch => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_regex_is_match".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::I1],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::RegexSplit => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_regex_split".to_string()),
+                }],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::RegexSplit => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_regex_split".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::RegexFind => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_regex_find".to_string()),
+                }],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::RegexFind => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_regex_find".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::RegexReplace => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_regex_replace".to_string()),
+                }],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::RegexReplace => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_regex_replace".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-
-            InlineSequenceId::RegexCaptures => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String("__verum_regex_captures".to_string()),
-                        },
-                    ],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::RegexCaptures => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_regex_captures".to_string()),
+                }],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // =====================================================================
             // Permission Gating (#12 / P3.2)
@@ -3205,60 +3097,45 @@ impl IntrinsicLowering {
             // The Rust-side helper holds the warm-path cache, so
             // even AOT-compiled code hits the same ≤2ns budget on
             // repeats.
-            InlineSequenceId::PermissionCheckWire => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "callee".to_string(),
-                            value: MlirAttrValue::String(
-                                "__verum_permission_check_wire".to_string(),
-                            ),
-                        },
-                    ],
-                    result_types: vec![MlirType::I32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::PermissionCheckWire => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_permission_check_wire".to_string()),
+                }],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Permission-stats observability surfaces. Routing matches
             // PermissionCheckWire — thin extern calls into the Rust-side
             // helper which holds the actual stats counters, so Tier 0
             // (interpreter) and Tier 1 (AOT) read identical numbers.
-            InlineSequenceId::PermissionStatsRead => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "callee".to_string(),
-                        value: MlirAttrValue::String(
-                            "__verum_permission_stats_read".to_string(),
-                        ),
-                    }],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::PermissionStatsClear => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "callee".to_string(),
-                        value: MlirAttrValue::String(
-                            "__verum_permission_stats_clear".to_string(),
-                        ),
-                    }],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::PermissionStatsRead => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_permission_stats_read".to_string()),
+                }],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::PermissionStatsClear => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__verum_permission_stats_clear".to_string()),
+                }],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // =====================================================================
             // Type Introspection Operations
             // =====================================================================
-
             InlineSequenceId::SizeOf => {
                 // Compile-time evaluated - operands[0] contains type ID
                 self.emit(MlirOp {
@@ -3270,25 +3147,21 @@ impl IntrinsicLowering {
                 })
             }
 
-            InlineSequenceId::AlignOf => {
-                self.emit(MlirOp {
-                    name: "verum.align_of".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::AlignOf => self.emit(MlirOp {
+                name: "verum.align_of".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
-            InlineSequenceId::TypeId => {
-                self.emit(MlirOp {
-                    name: "verum.type_id".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::TypeId => self.emit(MlirOp {
+                name: "verum.type_id".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             InlineSequenceId::TypeName => {
                 self.emit(MlirOp {
@@ -3311,51 +3184,41 @@ impl IntrinsicLowering {
             }
 
             // Additional user-facing intrinsics
-            InlineSequenceId::PowF32 => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.pow.f32".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::F32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::CharIsAlphanumeric => {
-                self.emit(MlirOp {
-                    name: "verum.char.is_alphanumeric".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I1],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Rdtsc => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.readcyclecounter".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::CatchUnwind => {
-                self.emit(MlirOp {
-                    name: "verum.catch_unwind".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::PtrToRef => {
-                self.emit(MlirOp {
-                    name: "verum.ptr_to_ref".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::PowF32 => self.emit(MlirOp {
+                name: "llvm.intr.pow.f32".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::F32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CharIsAlphanumeric => self.emit(MlirOp {
+                name: "verum.char.is_alphanumeric".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I1],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Rdtsc => self.emit(MlirOp {
+                name: "llvm.intr.readcyclecounter".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CatchUnwind => self.emit(MlirOp {
+                name: "verum.catch_unwind".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::PtrToRef => self.emit(MlirOp {
+                name: "verum.ptr_to_ref".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Note: F32 math intrinsics are handled earlier in this match using C library calls
             // via LLVM IR (sqrtf, sinf, cosf, etc.). MLIR math dialect would be used for GPU targets
@@ -3413,176 +3276,136 @@ impl IntrinsicLowering {
                 }
             }
             // System call intrinsics -> platform syscalls
-            InlineSequenceId::SysGetpid => {
-                self.lower_time_intrinsic("sys.getpid", operands)
-            }
-            InlineSequenceId::SysGettid => {
-                self.lower_time_intrinsic("sys.gettid", operands)
-            }
-            InlineSequenceId::SysMmap => {
-                self.emit(MlirOp {
-                    name: "verum.sys.mmap".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::SysMunmap => {
-                self.emit(MlirOp {
-                    name: "verum.sys.munmap".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::SysMadvise => {
-                self.emit(MlirOp {
-                    name: "verum.sys.madvise".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::SysGetentropy => {
-                self.emit(MlirOp {
-                    name: "verum.sys.getentropy".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::SysGetpid => self.lower_time_intrinsic("sys.getpid", operands),
+            InlineSequenceId::SysGettid => self.lower_time_intrinsic("sys.gettid", operands),
+            InlineSequenceId::SysMmap => self.emit(MlirOp {
+                name: "verum.sys.mmap".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::SysMunmap => self.emit(MlirOp {
+                name: "verum.sys.munmap".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::SysMadvise => self.emit(MlirOp {
+                name: "verum.sys.madvise".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::SysGetentropy => self.emit(MlirOp {
+                name: "verum.sys.getentropy".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             // Mach kernel operations (macOS) — MLIR lowering
-            InlineSequenceId::MachVmAllocate => {
-                self.emit(MlirOp {
-                    name: "verum.mach.vm_allocate".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::MachVmDeallocate => {
-                self.emit(MlirOp {
-                    name: "verum.mach.vm_deallocate".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::MachVmProtect => {
-                self.emit(MlirOp {
-                    name: "verum.mach.vm_protect".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::MachSemCreate => {
-                self.emit(MlirOp {
-                    name: "verum.mach.sem_create".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::MachSemDestroy => {
-                self.emit(MlirOp {
-                    name: "verum.mach.sem_destroy".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::MachSemSignal => {
-                self.emit(MlirOp {
-                    name: "verum.mach.sem_signal".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::MachSemWait => {
-                self.emit(MlirOp {
-                    name: "verum.mach.sem_wait".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::MachErrorString => {
-                self.emit(MlirOp {
-                    name: "verum.mach.error_string".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::MachSleepUntil => {
-                self.emit(MlirOp {
-                    name: "verum.mach.sleep_until".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::MachVmAllocate => self.emit(MlirOp {
+                name: "verum.mach.vm_allocate".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::MachVmDeallocate => self.emit(MlirOp {
+                name: "verum.mach.vm_deallocate".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::MachVmProtect => self.emit(MlirOp {
+                name: "verum.mach.vm_protect".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::MachSemCreate => self.emit(MlirOp {
+                name: "verum.mach.sem_create".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::MachSemDestroy => self.emit(MlirOp {
+                name: "verum.mach.sem_destroy".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::MachSemSignal => self.emit(MlirOp {
+                name: "verum.mach.sem_signal".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::MachSemWait => self.emit(MlirOp {
+                name: "verum.mach.sem_wait".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::MachErrorString => self.emit(MlirOp {
+                name: "verum.mach.error_string".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::MachSleepUntil => self.emit(MlirOp {
+                name: "verum.mach.sleep_until".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             // Heap memory allocation intrinsics
-            InlineSequenceId::Alloc => {
-                self.emit(MlirOp {
-                    name: "llvm.call @malloc".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::AllocZeroed => {
-                self.emit(MlirOp {
-                    name: "llvm.call @calloc".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Dealloc => {
-                self.emit(MlirOp {
-                    name: "llvm.call @free".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Realloc => {
-                self.emit(MlirOp {
-                    name: "llvm.call @realloc".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::Swap => {
-                self.emit(MlirOp {
-                    name: "verum.swap".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::Alloc => self.emit(MlirOp {
+                name: "llvm.call @malloc".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::AllocZeroed => self.emit(MlirOp {
+                name: "llvm.call @calloc".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Dealloc => self.emit(MlirOp {
+                name: "llvm.call @free".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Realloc => self.emit(MlirOp {
+                name: "llvm.call @realloc".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Swap => self.emit(MlirOp {
+                name: "verum.swap".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::Replace => {
                 self.emit(MlirOp {
                     name: "verum.replace".to_string(),
@@ -3597,75 +3420,60 @@ impl IntrinsicLowering {
                 // Lower to llvm.getelementptr with i64 element type
                 self.emit(MlirOp {
                     name: "llvm.getelementptr".to_string(),
-                    attrs: vec![
-                        MlirAttr {
-                            name: "elem_type".to_string(),
-                            value: MlirAttrValue::Type(MlirType::I64),
-                        },
-                    ],
+                    attrs: vec![MlirAttr {
+                        name: "elem_type".to_string(),
+                        value: MlirAttrValue::Type(MlirType::I64),
+                    }],
                     result_types: vec![MlirType::Ptr],
                     operands: operands.to_vec(),
                     region: None,
                 })
             }
             // CBGR allocation intrinsics
-            InlineSequenceId::CbgrAlloc => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr_alloc".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::CbgrAllocZeroed => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr_alloc_zeroed".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::CbgrDealloc => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr_dealloc".to_string(),
-                    attrs: vec![],
-                    result_types: vec![],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::CbgrRealloc => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr_realloc".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::MemcmpBytes => {
-                self.emit(MlirOp {
-                    name: "llvm.intr.memcmp".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::GetHeaderFromPtr => {
-                self.emit(MlirOp {
-                    name: "verum.cbgr_get_header".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Ptr],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            InlineSequenceId::CbgrAlloc => self.emit(MlirOp {
+                name: "verum.cbgr_alloc".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CbgrAllocZeroed => self.emit(MlirOp {
+                name: "verum.cbgr_alloc_zeroed".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CbgrDealloc => self.emit(MlirOp {
+                name: "verum.cbgr_dealloc".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::CbgrRealloc => self.emit(MlirOp {
+                name: "verum.cbgr_realloc".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::MemcmpBytes => self.emit(MlirOp {
+                name: "llvm.intr.memcmp".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::GetHeaderFromPtr => self.emit(MlirOp {
+                name: "verum.cbgr_get_header".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::Ptr],
+                operands: operands.to_vec(),
+                region: None,
+            }),
         }
     }
-
 
     /// Lower to LLVM intrinsic (no libc dependency).
     /// LLVM will either inline the implementation or use hardware instructions.
@@ -3683,7 +3491,6 @@ impl IntrinsicLowering {
             region: None,
         })
     }
-
 
     // ============================================================================
     // NO LIBC: Inline ASCII character operations
@@ -4005,54 +3812,46 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
-            _ => {
-                self.emit(MlirOp {
-                    name: "verum.futex.wait".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            _ => self.emit(MlirOp {
+                name: "verum.futex.wait".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
         }
     }
 
     /// Lower futex_wake to platform syscall.
     fn lower_futex_wake(&mut self, operands: &[usize]) -> Option<usize> {
         match self.target.os {
-            Os::Linux => {
-                self.emit(MlirOp {
-                    name: "verum.futex.wake".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "syscall_nr".to_string(),
-                        value: MlirAttrValue::Integer(202),
-                    }],
-                    result_types: vec![MlirType::I32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            Os::MacOS => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "callee".to_string(),
-                        value: MlirAttrValue::String("__ulock_wake".to_string()),
-                    }],
-                    result_types: vec![MlirType::I32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            _ => {
-                self.emit(MlirOp {
-                    name: "verum.futex.wake".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I32],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            Os::Linux => self.emit(MlirOp {
+                name: "verum.futex.wake".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "syscall_nr".to_string(),
+                    value: MlirAttrValue::Integer(202),
+                }],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            Os::MacOS => self.emit(MlirOp {
+                name: "llvm.call".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "callee".to_string(),
+                    value: MlirAttrValue::String("__ulock_wake".to_string()),
+                }],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            _ => self.emit(MlirOp {
+                name: "verum.futex.wake".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I32],
+                operands: operands.to_vec(),
+                region: None,
+            }),
         }
     }
 
@@ -4103,7 +3902,7 @@ impl IntrinsicLowering {
                     6 => "{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9}",
                     _ => "{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9}",
                 };
-                format!("{},{}",out, inputs)
+                format!("{},{}", out, inputs)
             }
             Arch::Aarch64 => {
                 // ARM64 syscall: x8=num, x0-x5=args
@@ -4134,51 +3933,41 @@ impl IntrinsicLowering {
     ) -> Option<usize> {
         match sub_op {
             // Polymorphic arithmetic - MLIR uses arith dialect with type-specific ops
-            ArithSubOpcode::PolyAdd => {
-                self.emit(MlirOp {
-                    name: intrinsic.mlir_op.unwrap_or("arith.addi").to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            ArithSubOpcode::PolySub => {
-                self.emit(MlirOp {
-                    name: intrinsic.mlir_op.unwrap_or("arith.subi").to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            ArithSubOpcode::PolyMul => {
-                self.emit(MlirOp {
-                    name: intrinsic.mlir_op.unwrap_or("arith.muli").to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            ArithSubOpcode::PolyDiv => {
-                self.emit(MlirOp {
-                    name: intrinsic.mlir_op.unwrap_or("arith.divsi").to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            ArithSubOpcode::PolyRem => {
-                self.emit(MlirOp {
-                    name: intrinsic.mlir_op.unwrap_or("arith.remsi").to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            ArithSubOpcode::PolyAdd => self.emit(MlirOp {
+                name: intrinsic.mlir_op.unwrap_or("arith.addi").to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            ArithSubOpcode::PolySub => self.emit(MlirOp {
+                name: intrinsic.mlir_op.unwrap_or("arith.subi").to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            ArithSubOpcode::PolyMul => self.emit(MlirOp {
+                name: intrinsic.mlir_op.unwrap_or("arith.muli").to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            ArithSubOpcode::PolyDiv => self.emit(MlirOp {
+                name: intrinsic.mlir_op.unwrap_or("arith.divsi").to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            ArithSubOpcode::PolyRem => self.emit(MlirOp {
+                name: intrinsic.mlir_op.unwrap_or("arith.remsi").to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             ArithSubOpcode::PolyNeg => {
                 // Negation: 0 - x for integers
                 self.emit(MlirOp {
@@ -4193,33 +3982,27 @@ impl IntrinsicLowering {
                 })
             }
             // Checked arithmetic - emit overflow-checking ops
-            ArithSubOpcode::CheckedAddI => {
-                self.emit(MlirOp {
-                    name: "arith.addui_extended".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64, MlirType::I1],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            ArithSubOpcode::CheckedSubI => {
-                self.emit(MlirOp {
-                    name: "arith.subui_extended".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64, MlirType::I1],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            ArithSubOpcode::CheckedMulI => {
-                self.emit(MlirOp {
-                    name: "arith.mulsi_extended".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64, MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            ArithSubOpcode::CheckedAddI => self.emit(MlirOp {
+                name: "arith.addui_extended".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64, MlirType::I1],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            ArithSubOpcode::CheckedSubI => self.emit(MlirOp {
+                name: "arith.subui_extended".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64, MlirType::I1],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            ArithSubOpcode::CheckedMulI => self.emit(MlirOp {
+                name: "arith.mulsi_extended".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64, MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             ArithSubOpcode::CheckedDivI => {
                 // Division overflow check (MIN / -1)
                 self.emit(MlirOp {
@@ -4234,76 +4017,62 @@ impl IntrinsicLowering {
                 })
             }
             // Overflowing arithmetic - return (result, overflow_flag)
-            ArithSubOpcode::OverflowingAddI => {
-                self.emit(MlirOp {
-                    name: "arith.addui_extended".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64, MlirType::I1],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            ArithSubOpcode::OverflowingSubI => {
-                self.emit(MlirOp {
-                    name: "arith.subui_extended".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64, MlirType::I1],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            ArithSubOpcode::OverflowingMulI => {
-                self.emit(MlirOp {
-                    name: "arith.mulsi_extended".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64, MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            ArithSubOpcode::OverflowingAddI => self.emit(MlirOp {
+                name: "arith.addui_extended".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64, MlirType::I1],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            ArithSubOpcode::OverflowingSubI => self.emit(MlirOp {
+                name: "arith.subui_extended".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64, MlirType::I1],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            ArithSubOpcode::OverflowingMulI => self.emit(MlirOp {
+                name: "arith.mulsi_extended".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64, MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             // Polymorphic absolute value
-            ArithSubOpcode::PolyAbs => {
-                self.emit(MlirOp {
-                    name: intrinsic.mlir_op.unwrap_or("math.absf").to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            ArithSubOpcode::PolyAbs => self.emit(MlirOp {
+                name: intrinsic.mlir_op.unwrap_or("math.absf").to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             // Polymorphic signum
-            ArithSubOpcode::PolySignum => {
-                self.emit(MlirOp {
-                    name: "math.copysign".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "signum".to_string(),
-                        value: MlirAttrValue::Bool(true),
-                    }],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            ArithSubOpcode::PolySignum => self.emit(MlirOp {
+                name: "math.copysign".to_string(),
+                attrs: vec![MlirAttr {
+                    name: "signum".to_string(),
+                    value: MlirAttrValue::Bool(true),
+                }],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             // Polymorphic minimum
-            ArithSubOpcode::PolyMin => {
-                self.emit(MlirOp {
-                    name: intrinsic.mlir_op.unwrap_or("arith.minsi").to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            ArithSubOpcode::PolyMin => self.emit(MlirOp {
+                name: intrinsic.mlir_op.unwrap_or("arith.minsi").to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             // Polymorphic maximum
-            ArithSubOpcode::PolyMax => {
-                self.emit(MlirOp {
-                    name: intrinsic.mlir_op.unwrap_or("arith.maxsi").to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            ArithSubOpcode::PolyMax => self.emit(MlirOp {
+                name: intrinsic.mlir_op.unwrap_or("arith.maxsi").to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             // Polymorphic clamp
             ArithSubOpcode::PolyClamp => {
                 // Clamp is: max(min(val, hi), lo)
@@ -4388,14 +4157,20 @@ impl IntrinsicLowering {
     ) -> Option<usize> {
         // Use the llvm_intrinsic() method from MathSubOpcode for direct mapping
         let llvm_name = sub_op.llvm_intrinsic();
-        let result_type = if sub_op.is_f64() { MlirType::F64 } else { MlirType::F32 };
+        let result_type = if sub_op.is_f64() {
+            MlirType::F64
+        } else {
+            MlirType::F32
+        };
 
         // For classification operations, result is i1 (bool)
         let actual_result_type = match sub_op {
-            MathSubOpcode::IsNanF64 | MathSubOpcode::IsInfF64 | MathSubOpcode::IsFiniteF64 |
-            MathSubOpcode::IsNanF32 | MathSubOpcode::IsInfF32 | MathSubOpcode::IsFiniteF32 => {
-                MlirType::I1
-            }
+            MathSubOpcode::IsNanF64
+            | MathSubOpcode::IsInfF64
+            | MathSubOpcode::IsFiniteF64
+            | MathSubOpcode::IsNanF32
+            | MathSubOpcode::IsInfF32
+            | MathSubOpcode::IsFiniteF32 => MlirType::I1,
             _ => result_type,
         };
 
@@ -4528,7 +4303,10 @@ impl IntrinsicLowering {
         self.emit(MlirOp {
             name: op_name.to_string(),
             attrs: vec![],
-            result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
+            result_types: vec![MlirType::Tensor {
+                elem: Box::new(MlirType::F32),
+                shape: vec![],
+            }],
             operands: operands.to_vec(),
             region: None,
         })
@@ -4551,7 +4329,10 @@ impl IntrinsicLowering {
                 name: "mode".to_string(),
                 value: MlirAttrValue::Integer(mode as i64),
             }],
-            result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
+            result_types: vec![MlirType::Tensor {
+                elem: Box::new(MlirType::F32),
+                shape: vec![],
+            }],
             operands: operands.to_vec(),
             region: None,
         })
@@ -4589,7 +4370,10 @@ impl IntrinsicLowering {
         self.emit(MlirOp {
             name: op_name.to_string(),
             attrs: vec![],
-            result_types: vec![MlirType::Tensor { elem: Box::new(MlirType::F32), shape: vec![] }],
+            result_types: vec![MlirType::Tensor {
+                elem: Box::new(MlirType::F32),
+                shape: vec![],
+            }],
             operands: operands.to_vec(),
             region: None,
         })
@@ -4631,8 +4415,8 @@ impl IntrinsicLowering {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::INTRINSIC_REGISTRY;
+    use super::*;
 
     #[test]
     fn test_arithmetic_lowering() {

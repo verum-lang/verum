@@ -16,7 +16,9 @@
 use verum_ast::{FileId, expr::ExprKind};
 use verum_fast_parser::VerumParser;
 
-fn parse_test(code: &str) -> Result<verum_ast::expr::Expr, verum_common::List<verum_fast_parser::error::ParseError>> {
+fn parse_test(
+    code: &str,
+) -> Result<verum_ast::expr::Expr, verum_common::List<verum_fast_parser::error::ParseError>> {
     let parser = VerumParser::new();
     parser.parse_expr_str(code, FileId::dummy())
 }

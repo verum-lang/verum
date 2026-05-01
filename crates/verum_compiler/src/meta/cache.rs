@@ -34,8 +34,8 @@ use std::time::{Duration, Instant};
 
 use crate::hash::ContentHash;
 
-use verum_ast::expr::Expr;
 use verum_ast::MetaValue;
+use verum_ast::expr::Expr;
 use verum_common::{List, Map, Maybe, Text};
 
 // ==================== Cache Key Types ====================
@@ -276,7 +276,12 @@ fn structural_hash_expr(expr: &Expr) -> Text {
         ExprKind::Binary { op, left, right } => {
             let left_hash = structural_hash_expr(left);
             let right_hash = structural_hash_expr(right);
-            Text::from(format!("bin:{}:[{},{}]", op.as_str(), left_hash, right_hash))
+            Text::from(format!(
+                "bin:{}:[{},{}]",
+                op.as_str(),
+                left_hash,
+                right_hash
+            ))
         }
         ExprKind::Unary { op, expr: inner } => {
             Text::from(format!("un:{:?}:{}", op, structural_hash_expr(inner)))
@@ -606,12 +611,7 @@ impl MetaEvalCache {
 
     /// Only deterministic builtins should be cached. Non-deterministic
     /// builtins (e.g., current_time, random) should NOT be cached.
-    pub fn insert_builtin_call(
-        &self,
-        builtin_name: &Text,
-        args: &[MetaValue],
-        result: MetaValue,
-    ) {
+    pub fn insert_builtin_call(&self, builtin_name: &Text, args: &[MetaValue], result: MetaValue) {
         if !self.enabled {
             return;
         }

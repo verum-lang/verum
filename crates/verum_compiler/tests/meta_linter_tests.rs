@@ -30,8 +30,8 @@ use verum_ast::pattern::{Pattern, PatternKind};
 use verum_ast::stmt::{Stmt, StmtKind};
 use verum_ast::ty::{Path, PathSegment, Type};
 use verum_ast::{Attribute, Ident, Span};
-use verum_compiler::meta::linter::{LinterConfig, MetaLinter, UnsafePatternKind};
 use verum_common::{List, Maybe};
+use verum_compiler::meta::linter::{LinterConfig, MetaLinter, UnsafePatternKind};
 
 fn make_ident(name: &str) -> Ident {
     Ident::new(name, Span::default())

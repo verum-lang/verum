@@ -498,7 +498,14 @@ fn find_recover_body_references(
             }
         }
         RecoverBody::Closure { param, body, .. } => {
-            find_pattern_references(&param.pattern, symbol, uri, text, refs, ReferenceKind::Definition);
+            find_pattern_references(
+                &param.pattern,
+                symbol,
+                uri,
+                text,
+                refs,
+                ReferenceKind::Definition,
+            );
             find_expr_references(body, symbol, uri, text, refs);
         }
     }

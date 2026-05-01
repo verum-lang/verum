@@ -191,14 +191,24 @@ impl<'a> RecursiveParser<'a> {
     /// Note: `allow_guard` controls whether inline guards are parsed at the pattern level.
     /// When false (default for top-level patterns), `if` is left for match arm guard parsing.
     /// When true (inside parentheses/brackets), `if` creates a PatternKind::Guard node.
-    fn parse_pattern_internal(&mut self, allow_or: bool, allow_struct: bool, allow_guard: bool) -> ParseResult<Pattern> {
+    fn parse_pattern_internal(
+        &mut self,
+        allow_or: bool,
+        allow_struct: bool,
+        allow_guard: bool,
+    ) -> ParseResult<Pattern> {
         self.enter_recursion()?;
         let result = self.parse_pattern_internal_inner(allow_or, allow_struct, allow_guard);
         self.exit_recursion();
         result
     }
 
-    fn parse_pattern_internal_inner(&mut self, allow_or: bool, allow_struct: bool, allow_guard: bool) -> ParseResult<Pattern> {
+    fn parse_pattern_internal_inner(
+        &mut self,
+        allow_or: bool,
+        allow_struct: bool,
+        allow_guard: bool,
+    ) -> ParseResult<Pattern> {
         let start_pos = self.stream.position();
 
         // E088: Check for leading pipe at start of pattern
@@ -269,7 +279,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// The `::` operator destructures stream/cons-list types.
     /// `a :: b :: rest` is parsed as `Cons(a, Cons(b, rest))`.
-    fn parse_cons_pattern_impl(&mut self, allow_struct: bool, allow_guard: bool) -> ParseResult<Pattern> {
+    fn parse_cons_pattern_impl(
+        &mut self,
+        allow_struct: bool,
+        allow_guard: bool,
+    ) -> ParseResult<Pattern> {
         let start_pos = self.stream.position();
         let first = self.parse_guarded_pattern_impl(allow_struct, allow_guard)?;
 
@@ -327,7 +341,11 @@ impl<'a> RecursiveParser<'a> {
     /// - If guard returns false, the match continues to next alternative
     /// - Variables bound in pattern are available in guard expression
     /// - Guards in or-patterns are evaluated independently per alternative
-    fn parse_guarded_pattern_impl(&mut self, allow_struct: bool, allow_guard: bool) -> ParseResult<Pattern> {
+    fn parse_guarded_pattern_impl(
+        &mut self,
+        allow_struct: bool,
+        allow_guard: bool,
+    ) -> ParseResult<Pattern> {
         let start_pos = self.stream.position();
 
         // Parse the inner and_pattern
@@ -1065,8 +1083,12 @@ impl<'a> RecursiveParser<'a> {
             if let Some(token) = self.stream.peek() {
                 if matches!(
                     token.kind,
-                    TokenKind::Integer(_) | TokenKind::Char(_) | TokenKind::ByteChar(_)
-                        | TokenKind::Float(_) | TokenKind::True | TokenKind::False
+                    TokenKind::Integer(_)
+                        | TokenKind::Char(_)
+                        | TokenKind::ByteChar(_)
+                        | TokenKind::Float(_)
+                        | TokenKind::True
+                        | TokenKind::False
                 ) {
                     return Err(ParseError::pattern_invalid_unicode(
                         "&mut cannot be used with literal patterns; literals are immutable",
@@ -1472,7 +1494,9 @@ impl<'a> RecursiveParser<'a> {
 
         // Extract token info before any mutable operations
         let (token_kind, token_span) = {
-            let token = self.stream.peek()
+            let token = self
+                .stream
+                .peek()
                 .ok_or_else(|| ParseError::unexpected_eof(&[], self.stream.current_span()))?;
             (token.kind.clone(), token.span)
         };
@@ -1496,7 +1520,11 @@ impl<'a> RecursiveParser<'a> {
             }
             TokenKind::Minus => {
                 // Negative integer literal: -42
-                let neg_val = if let Some(Token { kind: TokenKind::Integer(val), .. }) = self.stream.peek_nth(1) {
+                let neg_val = if let Some(Token {
+                    kind: TokenKind::Integer(val),
+                    ..
+                }) = self.stream.peek_nth(1)
+                {
                     Some(-(val.as_i128().unwrap_or(0)))
                 } else {
                     None
@@ -1557,7 +1585,11 @@ impl<'a> RecursiveParser<'a> {
                     TokenKind::Minus => {
                         // Negative integer end literal: ..=-1, 0..=-5
                         let end_pos = self.stream.position();
-                        let neg_val = if let Some(Token { kind: TokenKind::Integer(val), .. }) = self.stream.peek_nth(1) {
+                        let neg_val = if let Some(Token {
+                            kind: TokenKind::Integer(val),
+                            ..
+                        }) = self.stream.peek_nth(1)
+                        {
                             Some(-(val.as_i128().unwrap_or(0)))
                         } else {
                             None
@@ -1581,8 +1613,14 @@ impl<'a> RecursiveParser<'a> {
             if let (Some(s), Some(e)) = (&start_lit, &end_lit) {
                 let start_is_int = matches!(s.kind, verum_ast::LiteralKind::Int(_));
                 let end_is_int = matches!(e.kind, verum_ast::LiteralKind::Int(_));
-                let start_is_char = matches!(s.kind, verum_ast::LiteralKind::Char(_) | verum_ast::LiteralKind::ByteChar(_));
-                let end_is_char = matches!(e.kind, verum_ast::LiteralKind::Char(_) | verum_ast::LiteralKind::ByteChar(_));
+                let start_is_char = matches!(
+                    s.kind,
+                    verum_ast::LiteralKind::Char(_) | verum_ast::LiteralKind::ByteChar(_)
+                );
+                let end_is_char = matches!(
+                    e.kind,
+                    verum_ast::LiteralKind::Char(_) | verum_ast::LiteralKind::ByteChar(_)
+                );
 
                 if (start_is_int && end_is_char) || (start_is_char && end_is_int) {
                     return Err(ParseError::pattern_invalid_and(
@@ -1646,8 +1684,12 @@ impl<'a> RecursiveParser<'a> {
             // Check for ref alone (no identifier following): ref =>
             if matches!(
                 self.stream.peek_kind(),
-                Some(TokenKind::FatArrow) | Some(TokenKind::Comma) | Some(TokenKind::RParen)
-                    | Some(TokenKind::RBrace) | Some(TokenKind::RBracket) | None
+                Some(TokenKind::FatArrow)
+                    | Some(TokenKind::Comma)
+                    | Some(TokenKind::RParen)
+                    | Some(TokenKind::RBrace)
+                    | Some(TokenKind::RBracket)
+                    | None
             ) {
                 return Err(ParseError::pattern_invalid_rest(
                     "'ref' must be followed by an identifier",
@@ -1777,7 +1819,9 @@ impl<'a> RecursiveParser<'a> {
                 || self.stream.check(&TokenKind::RBrace)
                 || self.stream.check(&TokenKind::RParen)
             {
-                return Err(ParseError::pattern_trailing_pipe(self.stream.current_span()));
+                return Err(ParseError::pattern_trailing_pipe(
+                    self.stream.current_span(),
+                ));
             }
 
             // E085: Check for double 'is' (x is is Type)
@@ -1829,7 +1873,10 @@ impl<'a> RecursiveParser<'a> {
             (path, is_qualified)
         } else if self.stream.check(&TokenKind::ColonColon) {
             // Rust-style qualified path: State::Ready, Error::NotFound
-            let mut segments = vec![PathSegment::Name(Ident::new(first_name.clone(), first_span))];
+            let mut segments = vec![PathSegment::Name(Ident::new(
+                first_name.clone(),
+                first_span,
+            ))];
             while self.stream.consume(&TokenKind::ColonColon).is_some() {
                 let seg_name = self.consume_ident_or_keyword()?;
                 let seg_span = self.stream.current_span();
@@ -1892,7 +1939,9 @@ impl<'a> RecursiveParser<'a> {
                             PathSegment::Name(ident) => Some(ident.clone()),
                             _ => None,
                         })
-                        .unwrap_or_else(|| Ident::new(Text::from("unknown"), self.stream.current_span()));
+                        .unwrap_or_else(|| {
+                            Ident::new(Text::from("unknown"), self.stream.current_span())
+                        });
 
                     // Check for trailing bindings: `Even()(bindings)` for partial patterns
                     // This distinguishes:
@@ -2029,7 +2078,9 @@ impl<'a> RecursiveParser<'a> {
                             PathSegment::Name(ident) => Some(ident.clone()),
                             _ => None,
                         })
-                        .unwrap_or_else(|| Ident::new(Text::from("unknown"), self.stream.current_span()));
+                        .unwrap_or_else(|| {
+                            Ident::new(Text::from("unknown"), self.stream.current_span())
+                        });
 
                     // Convert first set of args to expressions for params
                     // NOTE: This is a simplification - we parse as patterns but need expressions.
@@ -2040,10 +2091,8 @@ impl<'a> RecursiveParser<'a> {
                     //
 
                     // For now, we convert literal/identifier patterns to expressions.
-                    let params: List<verum_ast::Expr> = args
-                        .into_iter()
-                        .map(|p| self.pattern_to_expr(p))
-                        .collect();
+                    let params: List<verum_ast::Expr> =
+                        args.into_iter().map(|p| self.pattern_to_expr(p)).collect();
 
                     // Check if bindings parens are empty: `InRange(0, 100)()`
                     if self.stream.check(&TokenKind::RParen) {
@@ -2313,9 +2362,7 @@ impl<'a> RecursiveParser<'a> {
             let pattern = if self.stream.consume(&TokenKind::Colon).is_some() {
                 // E078: Check for missing field value after colon
                 // Pattern like `Point { x: }` or `Point { x:, y }` should produce E078
-                if self.stream.check(&TokenKind::RBrace)
-                    || self.stream.check(&TokenKind::Comma)
-                {
+                if self.stream.check(&TokenKind::RBrace) || self.stream.check(&TokenKind::Comma) {
                     return Err(ParseError::pattern_rest_position(
                         "expected pattern after ':' in field pattern",
                         self.stream.current_span(),
@@ -2563,9 +2610,16 @@ impl<'a> RecursiveParser<'a> {
                 // Look at what comes after the identifier: `,` or `:` or `}` means struct pattern
                 matches!(
                     self.stream.peek_nth(2),
-                    Some(Token { kind: TokenKind::Comma, .. })
-                        | Some(Token { kind: TokenKind::Colon, .. })
-                        | Some(Token { kind: TokenKind::RBrace, .. })
+                    Some(Token {
+                        kind: TokenKind::Comma,
+                        ..
+                    }) | Some(Token {
+                        kind: TokenKind::Colon,
+                        ..
+                    }) | Some(Token {
+                        kind: TokenKind::RBrace,
+                        ..
+                    })
                 )
             }
 
@@ -2580,7 +2634,10 @@ impl<'a> RecursiveParser<'a> {
                 // Check if closing brace is followed by `)`
                 matches!(
                     self.stream.peek_nth(2),
-                    Some(Token { kind: TokenKind::RParen, .. })
+                    Some(Token {
+                        kind: TokenKind::RParen,
+                        ..
+                    })
                 )
             }
 
@@ -3121,7 +3178,11 @@ mod tests {
         let pattern = result.unwrap();
 
         match &pattern.kind {
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 assert_eq!(name.name.as_str(), "Even");
                 assert_eq!(params.len(), 0, "Expected no pattern parameters");
                 assert_eq!(bindings.len(), 0, "Expected no bindings");
@@ -3142,7 +3203,11 @@ mod tests {
         let pattern = result.unwrap();
 
         match &pattern.kind {
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 assert_eq!(name.name.as_str(), "InRange");
                 assert_eq!(params.len(), 2, "Expected 2 pattern parameters");
                 assert_eq!(bindings.len(), 0, "Expected no bindings for total pattern");
@@ -3155,15 +3220,15 @@ mod tests {
     fn test_active_pattern_positive() {
         // Test Positive() active pattern
         let result = parse_pattern("Positive()");
-        assert!(
-            result.is_ok(),
-            "Failed to parse Positive(): {:?}",
-            result
-        );
+        assert!(result.is_ok(), "Failed to parse Positive(): {:?}", result);
         let pattern = result.unwrap();
 
         match &pattern.kind {
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 assert_eq!(name.name.as_str(), "Positive");
                 assert!(params.is_empty());
                 assert!(bindings.is_empty());
@@ -3255,7 +3320,11 @@ mod tests {
 
         match &pattern.kind {
             PatternKind::Or(or_patterns) => {
-                assert_eq!(or_patterns.len(), 2, "Expected 2 alternatives in Or pattern");
+                assert_eq!(
+                    or_patterns.len(),
+                    2,
+                    "Expected 2 alternatives in Or pattern"
+                );
                 for op in or_patterns {
                     assert!(
                         matches!(op.kind, PatternKind::And(_)),
@@ -3272,11 +3341,7 @@ mod tests {
     fn test_variant_pattern_still_works() {
         // Ensure regular variant patterns still work (not confused with active patterns)
         let result = parse_pattern("Some(x)");
-        assert!(
-            result.is_ok(),
-            "Failed to parse Some(x): {:?}",
-            result
-        );
+        assert!(result.is_ok(), "Failed to parse Some(x): {:?}", result);
         let pattern = result.unwrap();
 
         // Some(x) with non-empty parens should be Variant, not Active
@@ -3304,13 +3369,19 @@ mod tests {
         let pattern = result.unwrap();
 
         match &pattern.kind {
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 assert_eq!(name.name.as_str(), "ParseInt");
                 assert!(params.is_empty(), "Expected no params for ParseInt()(n)");
                 assert_eq!(bindings.len(), 1, "Expected 1 binding");
                 // Verify the binding is an identifier pattern 'n'
                 match &bindings[0].kind {
-                    PatternKind::Ident { name: binding_name, .. } => {
+                    PatternKind::Ident {
+                        name: binding_name, ..
+                    } => {
                         assert_eq!(binding_name.name.as_str(), "n");
                     }
                     _ => panic!("Expected Ident binding, got {:?}", bindings[0].kind),
@@ -3332,7 +3403,11 @@ mod tests {
         let pattern = result.unwrap();
 
         match &pattern.kind {
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 assert_eq!(name.name.as_str(), "HeadTail");
                 assert!(params.is_empty(), "Expected no params for HeadTail()(h, t)");
                 assert_eq!(bindings.len(), 2, "Expected 2 bindings");
@@ -3353,7 +3428,11 @@ mod tests {
         let pattern = result.unwrap();
 
         match &pattern.kind {
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 assert_eq!(name.name.as_str(), "ParseInt");
                 assert!(params.is_empty());
                 assert_eq!(bindings.len(), 1);
@@ -3379,7 +3458,11 @@ mod tests {
         let pattern = result.unwrap();
 
         match &pattern.kind {
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 assert_eq!(name.name.as_str(), "RegexMatch");
                 assert_eq!(params.len(), 1, "Expected 1 param");
                 assert_eq!(bindings.len(), 1, "Expected 1 binding");
@@ -3400,7 +3483,11 @@ mod tests {
         let pattern = result.unwrap();
 
         match &pattern.kind {
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 assert_eq!(name.name.as_str(), "SplitAt");
                 assert_eq!(params.len(), 2, "Expected 2 params");
                 assert_eq!(bindings.len(), 3, "Expected 3 bindings");
@@ -3421,7 +3508,11 @@ mod tests {
         let pattern = result.unwrap();
 
         match &pattern.kind {
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 assert_eq!(name.name.as_str(), "Even");
                 assert!(params.is_empty(), "Expected no params");
                 assert!(bindings.is_empty(), "Expected no bindings (empty is valid)");
@@ -3442,7 +3533,11 @@ mod tests {
         let pattern = result.unwrap();
 
         match &pattern.kind {
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 assert_eq!(name.name.as_str(), "Decompose");
                 assert!(params.is_empty());
                 assert_eq!(bindings.len(), 1, "Expected 1 binding (tuple pattern)");
@@ -3505,11 +3600,17 @@ mod tests {
                 pattern: inner,
             } => {
                 // View function should be a path expression "parity"
-                assert!(matches!(&view_function.kind, verum_ast::ExprKind::Path(p) if p.segments.len() == 1));
+                assert!(
+                    matches!(&view_function.kind, verum_ast::ExprKind::Path(p) if p.segments.len() == 1)
+                );
                 // Inner pattern should be an identifier "Even" (bare name, no parens)
                 assert!(
-                    matches!(&inner.kind, PatternKind::Ident { .. } | PatternKind::Variant { .. }),
-                    "Expected Ident or Variant inner pattern, got {:?}", inner.kind
+                    matches!(
+                        &inner.kind,
+                        PatternKind::Ident { .. } | PatternKind::Variant { .. }
+                    ),
+                    "Expected Ident or Variant inner pattern, got {:?}",
+                    inner.kind
                 );
             }
             _ => panic!("Expected View pattern, got {:?}", pattern.kind),
@@ -3613,9 +3714,7 @@ mod tests {
         );
         let pattern = result.unwrap();
         match &pattern.kind {
-            PatternKind::View {
-                pattern: inner, ..
-            } => {
+            PatternKind::View { pattern: inner, .. } => {
                 assert!(matches!(&inner.kind, PatternKind::Wildcard));
             }
             _ => panic!("Expected View pattern, got {:?}", pattern.kind),

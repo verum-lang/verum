@@ -170,11 +170,7 @@ impl fmt::Display for ResolverError {
                         }
                     }
                     if requirements.len() > shown {
-                        writeln!(
-                            f,
-                            "    ... ({} more not shown)",
-                            requirements.len() - shown
-                        )?;
+                        writeln!(f, "    ... ({} more not shown)", requirements.len() - shown)?;
                     }
                 }
                 write!(
@@ -254,7 +250,11 @@ impl From<ResolverError> for CliError {
                     found,
                 }
             }
-            ResolverError::NoMatchingVersion { package, requirement, available } => {
+            ResolverError::NoMatchingVersion {
+                package,
+                requirement,
+                available,
+            } => {
                 let suffix = if available.is_empty() {
                     String::new()
                 } else {
@@ -272,9 +272,9 @@ impl From<ResolverError> for CliError {
                     "no version of `{package}` matches `{requirement}`{suffix}"
                 ))
             }
-            ResolverError::InvalidRequirement { input, reason, .. } => {
-                CliError::InvalidArgument(format!("invalid version requirement `{input}`: {reason}"))
-            }
+            ResolverError::InvalidRequirement { input, reason, .. } => CliError::InvalidArgument(
+                format!("invalid version requirement `{input}`: {reason}"),
+            ),
             ResolverError::Cycle { path } => CliError::Custom(format!(
                 "dependency cycle: {}",
                 if path.is_empty() {
@@ -317,10 +317,7 @@ mod tests {
     fn version_conflict_lists_full_chain() {
         let err = ResolverError::version_conflict(
             "foo",
-            vec![
-                origin("a", "1.0.0", "^1"),
-                origin("b", "2.0.0", "^2"),
-            ],
+            vec![origin("a", "1.0.0", "^1"), origin("b", "2.0.0", "^2")],
             vec!["1.0.0".into(), "2.0.0".into()],
         );
         let s = err.to_string();
@@ -344,11 +341,8 @@ mod tests {
 
     #[test]
     fn version_conflict_root_origin_renders_specially() {
-        let err = ResolverError::version_conflict(
-            "foo",
-            vec![root_origin("^1.0")],
-            vec!["1.0.0".into()],
-        );
+        let err =
+            ResolverError::version_conflict("foo", vec![root_origin("^1.0")], vec!["1.0.0".into()]);
         let s = err.to_string();
         assert!(s.contains("<project root> requires `^1.0`"));
     }
@@ -441,7 +435,11 @@ mod tests {
         );
         let cli: CliError = err.into();
         match cli {
-            CliError::VersionConflict { package, required, found } => {
+            CliError::VersionConflict {
+                package,
+                required,
+                found,
+            } => {
                 assert_eq!(package, "foo");
                 assert_eq!(required, "^1");
                 assert_eq!(found, "1.0.0");
@@ -452,11 +450,8 @@ mod tests {
 
     #[test]
     fn into_cli_error_no_match_uses_dependency_not_found() {
-        let err = ResolverError::no_matching_version(
-            "foo",
-            "^99",
-            vec!["1.0.0".into(), "2.0.0".into()],
-        );
+        let err =
+            ResolverError::no_matching_version("foo", "^99", vec!["1.0.0".into(), "2.0.0".into()]);
         let cli: CliError = err.into();
         match cli {
             CliError::DependencyNotFound(s) => {

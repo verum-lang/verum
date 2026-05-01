@@ -33,21 +33,31 @@ impl VbcCodegen {
                 self.compile_let(pattern, ty.as_ref(), value.as_ref())
             }
 
-            StmtKind::LetElse { pattern, ty: _, value, else_block } => {
-                self.compile_let_else(pattern, value, else_block)
-            }
+            StmtKind::LetElse {
+                pattern,
+                ty: _,
+                value,
+                else_block,
+            } => self.compile_let_else(pattern, value, else_block),
 
             StmtKind::Expr { expr, has_semi } => {
                 // Emit loop optimization hints before loop expressions
                 if (loop_hints.unroll.is_some() || loop_hints.vectorize.is_some())
-                    && matches!(expr.kind, verum_ast::ExprKind::While { .. } | verum_ast::ExprKind::For { .. } | verum_ast::ExprKind::Loop { .. }) {
-                        self.ctx.emit(Instruction::LoopHint { hints: loop_hints });
-                    }
+                    && matches!(
+                        expr.kind,
+                        verum_ast::ExprKind::While { .. }
+                            | verum_ast::ExprKind::For { .. }
+                            | verum_ast::ExprKind::Loop { .. }
+                    )
+                {
+                    self.ctx.emit(Instruction::LoopHint { hints: loop_hints });
+                }
                 // Emit branch hints before if expressions
                 if let Some(likely) = branch_hint
-                    && matches!(expr.kind, verum_ast::ExprKind::If { .. }) {
-                        self.ctx.emit(Instruction::BranchHint { likely });
-                    }
+                    && matches!(expr.kind, verum_ast::ExprKind::If { .. })
+                {
+                    self.ctx.emit(Instruction::BranchHint { likely });
+                }
                 let result = self.compile_expr(expr)?;
                 if *has_semi {
                     // Statement expression - discard result
@@ -74,23 +84,28 @@ impl VbcCodegen {
                         // outer function's scope where captured variables
                         // are accessible.
                         let has_captures = if let verum_common::Maybe::Some(ref body) = func.body {
-                            let param_names: Vec<String> = func.params.iter()
+                            let param_names: Vec<String> = func
+                                .params
+                                .iter()
                                 .filter_map(|p| {
-                                    if let verum_ast::decl::FunctionParamKind::Regular { pattern, .. } = &p.kind
-                                        && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                                            return Some(name.name.to_string());
-                                        }
+                                    if let verum_ast::decl::FunctionParamKind::Regular {
+                                        pattern,
+                                        ..
+                                    } = &p.kind
+                                        && let verum_ast::PatternKind::Ident { name, .. } =
+                                            &pattern.kind
+                                    {
+                                        return Some(name.name.to_string());
+                                    }
                                     None
                                 })
                                 .collect();
                             // Wrap body in a block expression for analysis
                             let body_expr = match body {
-                                verum_ast::FunctionBody::Block(blk) => {
-                                    verum_ast::Expr::new(
-                                        verum_ast::ExprKind::Block(blk.clone()),
-                                        func.span,
-                                    )
-                                }
+                                verum_ast::FunctionBody::Block(blk) => verum_ast::Expr::new(
+                                    verum_ast::ExprKind::Block(blk.clone()),
+                                    func.span,
+                                ),
                                 verum_ast::FunctionBody::Expr(e) => e.clone(),
                             };
                             let free = self.analyze_free_variables(&body_expr, &param_names);
@@ -102,9 +117,18 @@ impl VbcCodegen {
                         if has_captures && let verum_common::Maybe::Some(ref body) = func.body {
                             {
                                 // Build closure params from function params
-                                let closure_params: verum_common::List<verum_ast::expr::ClosureParam> =
-                                    func.params.iter().filter_map(|p| {
-                                        if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &p.kind {
+                                let closure_params: verum_common::List<
+                                    verum_ast::expr::ClosureParam,
+                                > = func
+                                    .params
+                                    .iter()
+                                    .filter_map(|p| {
+                                        if let verum_ast::decl::FunctionParamKind::Regular {
+                                            pattern,
+                                            ty,
+                                            ..
+                                        } = &p.kind
+                                        {
                                             Some(verum_ast::expr::ClosureParam {
                                                 pattern: pattern.clone(),
                                                 ty: verum_common::Maybe::Some(ty.clone()),
@@ -113,15 +137,14 @@ impl VbcCodegen {
                                         } else {
                                             None
                                         }
-                                    }).collect();
+                                    })
+                                    .collect();
 
                                 let body_expr = match body {
-                                    verum_ast::FunctionBody::Block(blk) => {
-                                        verum_ast::Expr::new(
-                                            verum_ast::ExprKind::Block(blk.clone()),
-                                            func.span,
-                                        )
-                                    }
+                                    verum_ast::FunctionBody::Block(blk) => verum_ast::Expr::new(
+                                        verum_ast::ExprKind::Block(blk.clone()),
+                                        func.span,
+                                    ),
                                     verum_ast::FunctionBody::Expr(e) => e.clone(),
                                 };
 
@@ -132,11 +155,9 @@ impl VbcCodegen {
                                     };
 
                                 // Compile as closure with capture analysis
-                                if let Some(closure_reg) = self.compile_closure(
-                                    &closure_params,
-                                    &body_expr,
-                                    return_type,
-                                )? {
+                                if let Some(closure_reg) =
+                                    self.compile_closure(&closure_params, &body_expr, return_type)?
+                                {
                                     let fn_name = func.name.name.to_string();
                                     let name_reg = self.ctx.define_var(&fn_name, false);
                                     self.ctx.emit(crate::instruction::Instruction::Mov {
@@ -192,21 +213,22 @@ impl VbcCodegen {
                 Ok(None)
             }
 
-            StmtKind::Defer(expr) => {
-                self.compile_defer(expr, false)
-            }
+            StmtKind::Defer(expr) => self.compile_defer(expr, false),
 
-            StmtKind::Errdefer(expr) => {
-                self.compile_defer(expr, true)
-            }
+            StmtKind::Errdefer(expr) => self.compile_defer(expr, true),
 
-            StmtKind::Provide { context, alias: _, value } => {
-                self.compile_provide(context, value)
-            }
+            StmtKind::Provide {
+                context,
+                alias: _,
+                value,
+            } => self.compile_provide(context, value),
 
-            StmtKind::ProvideScope { context, alias: _, value, block } => {
-                self.compile_provide_scope(context, value, block)
-            }
+            StmtKind::ProvideScope {
+                context,
+                alias: _,
+                value,
+                block,
+            } => self.compile_provide_scope(context, value, block),
 
             StmtKind::Empty => {
                 // No-op
@@ -229,51 +251,54 @@ impl VbcCodegen {
             use verum_ast::ty::TypeKind;
 
             // First, check the explicit type annotation (e.g., `let x: Byte = 255`)
-            let annotation_type = ty.and_then(|t| {
-                match &t.kind {
-                    TypeKind::Path(path) => {
-                        if let Some(ident) = path.as_ident() {
-                            match ident.name.as_str() {
-                                "Byte" | "UInt8" | "u8" => Some(VarTypeKind::Byte),
-                                "Int32" | "i32" => Some(VarTypeKind::Int32),
-                                "UInt64" | "u64" => Some(VarTypeKind::UInt64),
-                                "Float" | "Float64" | "f64" | "Float32" | "f32" => Some(VarTypeKind::Float),
-                                "Int" | "Int64" | "i64" => Some(VarTypeKind::Int),
-                                "Bool" => Some(VarTypeKind::Bool),
-                                "Char" => Some(VarTypeKind::Char),
-                                "Text" => Some(VarTypeKind::Text),
-                                _ => None,
+            let annotation_type = ty.and_then(|t| match &t.kind {
+                TypeKind::Path(path) => {
+                    if let Some(ident) = path.as_ident() {
+                        match ident.name.as_str() {
+                            "Byte" | "UInt8" | "u8" => Some(VarTypeKind::Byte),
+                            "Int32" | "i32" => Some(VarTypeKind::Int32),
+                            "UInt64" | "u64" => Some(VarTypeKind::UInt64),
+                            "Float" | "Float64" | "f64" | "Float32" | "f32" => {
+                                Some(VarTypeKind::Float)
                             }
-                        } else {
-                            None
+                            "Int" | "Int64" | "i64" => Some(VarTypeKind::Int),
+                            "Bool" => Some(VarTypeKind::Bool),
+                            "Char" => Some(VarTypeKind::Char),
+                            "Text" => Some(VarTypeKind::Text),
+                            _ => None,
                         }
+                    } else {
+                        None
                     }
-                    _ => None,
                 }
+                _ => None,
             });
 
             // Then try expression inference
-            let expr_type = value.and_then(|expr| self.infer_expr_type_kind(expr)).map(|type_kind| {
-                match type_kind {
-                    TypeKind::Int => VarTypeKind::Int,
-                    TypeKind::Float => VarTypeKind::Float,
-                    TypeKind::Bool => VarTypeKind::Bool,
-                    TypeKind::Char => VarTypeKind::Char,
-                    TypeKind::Text => VarTypeKind::Text,
-                    TypeKind::Unit => VarTypeKind::Unit,
-                    _ => VarTypeKind::Unknown,
-                }
-            });
+            let expr_type =
+                value
+                    .and_then(|expr| self.infer_expr_type_kind(expr))
+                    .map(|type_kind| match type_kind {
+                        TypeKind::Int => VarTypeKind::Int,
+                        TypeKind::Float => VarTypeKind::Float,
+                        TypeKind::Bool => VarTypeKind::Bool,
+                        TypeKind::Char => VarTypeKind::Char,
+                        TypeKind::Text => VarTypeKind::Text,
+                        TypeKind::Unit => VarTypeKind::Unit,
+                        _ => VarTypeKind::Unknown,
+                    });
 
             // Annotation takes priority over expression inference
-            let var_type = annotation_type.or(expr_type).unwrap_or(VarTypeKind::Unknown);
+            let var_type = annotation_type
+                .or(expr_type)
+                .unwrap_or(VarTypeKind::Unknown);
             self.ctx.register_variable_type(&var_name, var_type);
 
             // Track type name for custom protocol dispatch (e.g., Eq, Ord).
             // Priority: explicit type annotation > expression inference.
             // For `let x: Maybe<Int> = Some(42)`, use `Maybe` not `Some`.
             let type_name_from_annotation = ty.and_then(|t| {
-                use verum_ast::ty::{TypeKind, PathSegment};
+                use verum_ast::ty::{PathSegment, TypeKind};
 
                 // Helper to extract type name from a path
                 let extract_from_path = |path: &verum_ast::ty::Path| -> Option<String> {
@@ -302,14 +327,15 @@ impl VbcCodegen {
                                     Some(base_name)
                                 } else {
                                     // Build full type string with generic arguments
-                                    let arg_strs: Vec<String> = args.iter().filter_map(|arg| {
-                                        match arg {
+                                    let arg_strs: Vec<String> = args
+                                        .iter()
+                                        .filter_map(|arg| match arg {
                                             verum_ast::ty::GenericArg::Type(ty) => {
                                                 self.extract_type_name(ty)
                                             }
                                             _ => None,
-                                        }
-                                    }).collect();
+                                        })
+                                        .collect();
                                     if arg_strs.is_empty() {
                                         Some(base_name)
                                     } else {
@@ -346,218 +372,313 @@ impl VbcCodegen {
 
             // Use annotation type name if available, otherwise infer from expression
             if let Some(type_name) = type_name_from_annotation {
-                self.ctx.variable_type_names.insert(var_name.clone(), type_name);
+                self.ctx
+                    .variable_type_names
+                    .insert(var_name.clone(), type_name);
             } else if let Some(expr) = value
-                && let Some(type_name) = self.extract_expr_type_name(expr) {
-                    self.ctx.variable_type_names.insert(var_name.clone(), type_name);
-                }
+                && let Some(type_name) = self.extract_expr_type_name(expr)
+            {
+                self.ctx
+                    .variable_type_names
+                    .insert(var_name.clone(), type_name);
+            }
         }
 
         // Check if this is a byte array type - if so, use specialized byte array allocation
         // This ensures memory intrinsics like memset/memcpy work correctly
         if let Some(byte_array_size) = self.detect_byte_array_type(ty)
-            && let Some(expr) = value {
-                // Determine the initialization value
-                let init_value = self.get_byte_array_init_value(expr);
+            && let Some(expr) = value
+        {
+            // Determine the initialization value
+            let init_value = self.get_byte_array_init_value(expr);
 
-                if let Some(init_byte) = init_value {
-                    // Allocate byte array with the determined init value
-                    let result = self.ctx.alloc_temp();
-                    let size_reg = self.ctx.alloc_temp();
-                    let init_reg = self.ctx.alloc_temp();
+            if let Some(init_byte) = init_value {
+                // Allocate byte array with the determined init value
+                let result = self.ctx.alloc_temp();
+                let size_reg = self.ctx.alloc_temp();
+                let init_reg = self.ctx.alloc_temp();
 
-                    // Load size
-                    self.ctx.emit(Instruction::LoadI { dst: size_reg, value: byte_array_size as i64 });
+                // Load size
+                self.ctx.emit(Instruction::LoadI {
+                    dst: size_reg,
+                    value: byte_array_size as i64,
+                });
 
-                    // Load init value
-                    self.ctx.emit(Instruction::LoadI { dst: init_reg, value: init_byte as i64 });
+                // Load init value
+                self.ctx.emit(Instruction::LoadI {
+                    dst: init_reg,
+                    value: init_byte as i64,
+                });
 
-                    // Emit NewByteArray instruction via FfiExtended
-                    // Format: dst:reg, size:reg, init:reg
-                    let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x49, // NewByteArray sub-opcode (FfiSubOpcode::NewByteArray)
-                        operands,
-                    });
+                // Emit NewByteArray instruction via FfiExtended
+                // Format: dst:reg, size:reg, init:reg
+                let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x49, // NewByteArray sub-opcode (FfiSubOpcode::NewByteArray)
+                    operands,
+                });
 
-                    self.ctx.free_temp(size_reg);
-                    self.ctx.free_temp(init_reg);
+                self.ctx.free_temp(size_reg);
+                self.ctx.free_temp(init_reg);
 
-                    // Bind to pattern
-                    self.compile_pattern_bind(pattern, result)?;
+                // Bind to pattern
+                self.compile_pattern_bind(pattern, result)?;
 
-                    // Mark the variable as a byte array for address computation
-                    if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                        self.ctx.mark_byte_array_var(&name.name);
-                    }
-
-                    return Ok(None);
+                // Mark the variable as a byte array for address computation
+                if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+                    self.ctx.mark_byte_array_var(&name.name);
                 }
 
-                // Check for array list initialization like [1, 2, 3, 4]
-                let list_elements = self.get_byte_array_literal_elements(expr);
-                if let Some(elements) = list_elements {
-                    // Allocate byte array with zeros, then fill with values
-                    let result = self.ctx.alloc_temp();
-                    let size_reg = self.ctx.alloc_temp();
-                    let init_reg = self.ctx.alloc_temp();
-
-                    // Load size
-                    self.ctx.emit(Instruction::LoadI { dst: size_reg, value: byte_array_size as i64 });
-
-                    // Load init value (0)
-                    self.ctx.emit(Instruction::LoadI { dst: init_reg, value: 0 });
-
-                    // Emit NewByteArray instruction
-                    let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x49, // NewByteArray sub-opcode
-                        operands,
-                    });
-
-                    self.ctx.free_temp(size_reg);
-                    self.ctx.free_temp(init_reg);
-
-                    // Fill in the values using ByteArrayStore
-                    for (idx, byte_val) in elements.into_iter().enumerate() {
-                        let idx_reg = self.ctx.alloc_temp();
-                        let val_reg = self.ctx.alloc_temp();
-
-                        self.ctx.emit(Instruction::LoadI { dst: idx_reg, value: idx as i64 });
-                        self.ctx.emit(Instruction::LoadI { dst: val_reg, value: byte_val as i64 });
-
-                        // Emit ByteArrayStore: arr[idx] = val
-                        let operands = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
-                        self.ctx.emit(Instruction::FfiExtended {
-                            sub_op: 0x4C, // ByteArrayStore sub-opcode
-                            operands,
-                        });
-
-                        self.ctx.free_temp(idx_reg);
-                        self.ctx.free_temp(val_reg);
-                    }
-
-                    // Bind to pattern
-                    self.compile_pattern_bind(pattern, result)?;
-
-                    // Mark the variable as a byte array
-                    if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                        self.ctx.mark_byte_array_var(&name.name);
-                    }
-
-                    return Ok(None);
-                }
-
-                // Check for repeat syntax with variable value like [value; N]
-                // where value is not a literal (e.g., a variable)
-                if let Some(value_expr) = self.get_byte_array_repeat_expr(expr) {
-                    // Allocate byte array with zeros first
-                    let result = self.ctx.alloc_temp();
-                    let size_reg = self.ctx.alloc_temp();
-                    let init_reg = self.ctx.alloc_temp();
-
-                    // Load size
-                    self.ctx.emit(Instruction::LoadI { dst: size_reg, value: byte_array_size as i64 });
-
-                    // Load init value (0 - will be overwritten)
-                    self.ctx.emit(Instruction::LoadI { dst: init_reg, value: 0 });
-
-                    // Emit NewByteArray instruction
-                    let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x49, // NewByteArray sub-opcode
-                        operands,
-                    });
-
-                    self.ctx.free_temp(size_reg);
-                    self.ctx.free_temp(init_reg);
-
-                    // Compile the value expression
-                    let val_reg = self.compile_expr(value_expr)?
-                        .ok_or_else(|| CodegenError::internal("byte array repeat value has no result"))?;
-
-                    // Fill all elements with the value (unrolled loop since size is known)
-                    for idx in 0..byte_array_size {
-                        let idx_reg = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::LoadI { dst: idx_reg, value: idx as i64 });
-
-                        // Emit ByteArrayStore: arr[idx] = val
-                        let operands = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
-                        self.ctx.emit(Instruction::FfiExtended {
-                            sub_op: 0x4C, // ByteArrayStore sub-opcode
-                            operands,
-                        });
-
-                        self.ctx.free_temp(idx_reg);
-                    }
-
-                    self.ctx.free_temp(val_reg);
-
-                    // Bind to pattern
-                    self.compile_pattern_bind(pattern, result)?;
-
-                    // Mark the variable as a byte array
-                    if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                        self.ctx.mark_byte_array_var(&name.name);
-                    }
-
-                    return Ok(None);
-                }
+                return Ok(None);
             }
+
+            // Check for array list initialization like [1, 2, 3, 4]
+            let list_elements = self.get_byte_array_literal_elements(expr);
+            if let Some(elements) = list_elements {
+                // Allocate byte array with zeros, then fill with values
+                let result = self.ctx.alloc_temp();
+                let size_reg = self.ctx.alloc_temp();
+                let init_reg = self.ctx.alloc_temp();
+
+                // Load size
+                self.ctx.emit(Instruction::LoadI {
+                    dst: size_reg,
+                    value: byte_array_size as i64,
+                });
+
+                // Load init value (0)
+                self.ctx.emit(Instruction::LoadI {
+                    dst: init_reg,
+                    value: 0,
+                });
+
+                // Emit NewByteArray instruction
+                let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x49, // NewByteArray sub-opcode
+                    operands,
+                });
+
+                self.ctx.free_temp(size_reg);
+                self.ctx.free_temp(init_reg);
+
+                // Fill in the values using ByteArrayStore
+                for (idx, byte_val) in elements.into_iter().enumerate() {
+                    let idx_reg = self.ctx.alloc_temp();
+                    let val_reg = self.ctx.alloc_temp();
+
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: idx_reg,
+                        value: idx as i64,
+                    });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: val_reg,
+                        value: byte_val as i64,
+                    });
+
+                    // Emit ByteArrayStore: arr[idx] = val
+                    let operands = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x4C, // ByteArrayStore sub-opcode
+                        operands,
+                    });
+
+                    self.ctx.free_temp(idx_reg);
+                    self.ctx.free_temp(val_reg);
+                }
+
+                // Bind to pattern
+                self.compile_pattern_bind(pattern, result)?;
+
+                // Mark the variable as a byte array
+                if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+                    self.ctx.mark_byte_array_var(&name.name);
+                }
+
+                return Ok(None);
+            }
+
+            // Check for repeat syntax with variable value like [value; N]
+            // where value is not a literal (e.g., a variable)
+            if let Some(value_expr) = self.get_byte_array_repeat_expr(expr) {
+                // Allocate byte array with zeros first
+                let result = self.ctx.alloc_temp();
+                let size_reg = self.ctx.alloc_temp();
+                let init_reg = self.ctx.alloc_temp();
+
+                // Load size
+                self.ctx.emit(Instruction::LoadI {
+                    dst: size_reg,
+                    value: byte_array_size as i64,
+                });
+
+                // Load init value (0 - will be overwritten)
+                self.ctx.emit(Instruction::LoadI {
+                    dst: init_reg,
+                    value: 0,
+                });
+
+                // Emit NewByteArray instruction
+                let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x49, // NewByteArray sub-opcode
+                    operands,
+                });
+
+                self.ctx.free_temp(size_reg);
+                self.ctx.free_temp(init_reg);
+
+                // Compile the value expression
+                let val_reg = self.compile_expr(value_expr)?.ok_or_else(|| {
+                    CodegenError::internal("byte array repeat value has no result")
+                })?;
+
+                // Fill all elements with the value (unrolled loop since size is known)
+                for idx in 0..byte_array_size {
+                    let idx_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: idx_reg,
+                        value: idx as i64,
+                    });
+
+                    // Emit ByteArrayStore: arr[idx] = val
+                    let operands = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x4C, // ByteArrayStore sub-opcode
+                        operands,
+                    });
+
+                    self.ctx.free_temp(idx_reg);
+                }
+
+                self.ctx.free_temp(val_reg);
+
+                // Bind to pattern
+                self.compile_pattern_bind(pattern, result)?;
+
+                // Mark the variable as a byte array
+                if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+                    self.ctx.mark_byte_array_var(&name.name);
+                }
+
+                return Ok(None);
+            }
+        }
 
         // Check if this is a typed array type (non-byte) - if so, use specialized typed array allocation
         // This enables memory intrinsics like memcpy to work correctly with [UInt64; N] arrays
         if let Some((count, elem_size)) = self.detect_typed_array_type(ty)
-            && let Some(expr) = value {
-                // Check for repeat syntax [value; N] or list syntax [a, b, c, ...]
-                let init_value = self.get_typed_array_init_value(expr);
+            && let Some(expr) = value
+        {
+            // Check for repeat syntax [value; N] or list syntax [a, b, c, ...]
+            let init_value = self.get_typed_array_init_value(expr);
 
-                // Allocate typed array
-                let result = self.ctx.alloc_temp();
-                let count_reg = self.ctx.alloc_temp();
-                let init_reg = self.ctx.alloc_temp();
+            // Allocate typed array
+            let result = self.ctx.alloc_temp();
+            let count_reg = self.ctx.alloc_temp();
+            let init_reg = self.ctx.alloc_temp();
 
-                // Load count
-                self.ctx.emit(Instruction::LoadI { dst: count_reg, value: count as i64 });
+            // Load count
+            self.ctx.emit(Instruction::LoadI {
+                dst: count_reg,
+                value: count as i64,
+            });
 
-                // Load init value (default to 0 if not provided)
-                let init_val = init_value.unwrap_or(0);
-                self.ctx.emit(Instruction::LoadI { dst: init_reg, value: init_val });
+            // Load init value (default to 0 if not provided)
+            let init_val = init_value.unwrap_or(0);
+            self.ctx.emit(Instruction::LoadI {
+                dst: init_reg,
+                value: init_val,
+            });
 
-                // Emit NewTypedArray instruction via FfiExtended
-                // Format: dst:reg, count:reg, elem_size:u8, init:reg
-                let operands = vec![result.0 as u8, count_reg.0 as u8, elem_size as u8, init_reg.0 as u8];
-                self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x4E, // NewTypedArray sub-opcode (FfiSubOpcode::NewTypedArray)
-                    operands,
-                });
+            // Emit NewTypedArray instruction via FfiExtended
+            // Format: dst:reg, count:reg, elem_size:u8, init:reg
+            let operands = vec![
+                result.0 as u8,
+                count_reg.0 as u8,
+                elem_size as u8,
+                init_reg.0 as u8,
+            ];
+            self.ctx.emit(Instruction::FfiExtended {
+                sub_op: 0x4E, // NewTypedArray sub-opcode (FfiSubOpcode::NewTypedArray)
+                operands,
+            });
 
-                self.ctx.free_temp(count_reg);
-                self.ctx.free_temp(init_reg);
+            self.ctx.free_temp(count_reg);
+            self.ctx.free_temp(init_reg);
 
-                // Check if we need to fill with list values
-                if let Some(elements) = self.get_typed_array_literal_elements(expr) {
-                    // Fill in the values using DerefMutRaw (fast path for all-literal arrays)
-                    for (idx, elem_val) in elements.into_iter().enumerate() {
-                        // Get element address
+            // Check if we need to fill with list values
+            if let Some(elements) = self.get_typed_array_literal_elements(expr) {
+                // Fill in the values using DerefMutRaw (fast path for all-literal arrays)
+                for (idx, elem_val) in elements.into_iter().enumerate() {
+                    // Get element address
+                    let idx_reg = self.ctx.alloc_temp();
+                    let addr_reg = self.ctx.alloc_temp();
+                    let val_reg = self.ctx.alloc_temp();
+
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: idx_reg,
+                        value: idx as i64,
+                    });
+
+                    // TypedArrayElementAddr: addr = &arr[idx] with elem_size
+                    let addr_operands = vec![
+                        addr_reg.0 as u8,
+                        result.0 as u8,
+                        idx_reg.0 as u8,
+                        elem_size as u8,
+                    ];
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x4D, // TypedArrayElementAddr
+                        operands: addr_operands,
+                    });
+
+                    // Load value
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: val_reg,
+                        value: elem_val,
+                    });
+
+                    // DerefMutRaw: *addr = val with elem_size
+                    let store_operands = vec![addr_reg.0 as u8, val_reg.0 as u8, elem_size as u8];
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x61, // DerefMutRaw
+                        operands: store_operands,
+                    });
+
+                    self.ctx.free_temp(idx_reg);
+                    self.ctx.free_temp(addr_reg);
+                    self.ctx.free_temp(val_reg);
+                }
+            } else if let verum_ast::ExprKind::Array(verum_ast::ArrayExpr::List(elements)) =
+                &expr.kind
+            {
+                // Slow path: compile each element expression and store at runtime
+                for (idx, elem_expr) in elements.iter().enumerate() {
+                    if let Some(val_reg) = self.compile_expr(elem_expr)? {
                         let idx_reg = self.ctx.alloc_temp();
                         let addr_reg = self.ctx.alloc_temp();
-                        let val_reg = self.ctx.alloc_temp();
 
-                        self.ctx.emit(Instruction::LoadI { dst: idx_reg, value: idx as i64 });
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: idx_reg,
+                            value: idx as i64,
+                        });
 
                         // TypedArrayElementAddr: addr = &arr[idx] with elem_size
-                        let addr_operands = vec![addr_reg.0 as u8, result.0 as u8, idx_reg.0 as u8, elem_size as u8];
+                        let addr_operands = vec![
+                            addr_reg.0 as u8,
+                            result.0 as u8,
+                            idx_reg.0 as u8,
+                            elem_size as u8,
+                        ];
                         self.ctx.emit(Instruction::FfiExtended {
                             sub_op: 0x4D, // TypedArrayElementAddr
                             operands: addr_operands,
                         });
 
-                        // Load value
-                        self.ctx.emit(Instruction::LoadI { dst: val_reg, value: elem_val });
-
                         // DerefMutRaw: *addr = val with elem_size
-                        let store_operands = vec![addr_reg.0 as u8, val_reg.0 as u8, elem_size as u8];
+                        let store_operands =
+                            vec![addr_reg.0 as u8, val_reg.0 as u8, elem_size as u8];
                         self.ctx.emit(Instruction::FfiExtended {
                             sub_op: 0x61, // DerefMutRaw
                             operands: store_operands,
@@ -567,46 +688,19 @@ impl VbcCodegen {
                         self.ctx.free_temp(addr_reg);
                         self.ctx.free_temp(val_reg);
                     }
-                } else if let verum_ast::ExprKind::Array(verum_ast::ArrayExpr::List(elements)) = &expr.kind {
-                    // Slow path: compile each element expression and store at runtime
-                    for (idx, elem_expr) in elements.iter().enumerate() {
-                        if let Some(val_reg) = self.compile_expr(elem_expr)? {
-                            let idx_reg = self.ctx.alloc_temp();
-                            let addr_reg = self.ctx.alloc_temp();
-
-                            self.ctx.emit(Instruction::LoadI { dst: idx_reg, value: idx as i64 });
-
-                            // TypedArrayElementAddr: addr = &arr[idx] with elem_size
-                            let addr_operands = vec![addr_reg.0 as u8, result.0 as u8, idx_reg.0 as u8, elem_size as u8];
-                            self.ctx.emit(Instruction::FfiExtended {
-                                sub_op: 0x4D, // TypedArrayElementAddr
-                                operands: addr_operands,
-                            });
-
-                            // DerefMutRaw: *addr = val with elem_size
-                            let store_operands = vec![addr_reg.0 as u8, val_reg.0 as u8, elem_size as u8];
-                            self.ctx.emit(Instruction::FfiExtended {
-                                sub_op: 0x61, // DerefMutRaw
-                                operands: store_operands,
-                            });
-
-                            self.ctx.free_temp(idx_reg);
-                            self.ctx.free_temp(addr_reg);
-                            self.ctx.free_temp(val_reg);
-                        }
-                    }
                 }
-
-                // Bind to pattern
-                self.compile_pattern_bind(pattern, result)?;
-
-                // Mark the variable as a typed array
-                if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                    self.ctx.mark_typed_array_var(&name.name, elem_size);
-                }
-
-                return Ok(None);
             }
+
+            // Bind to pattern
+            self.compile_pattern_bind(pattern, result)?;
+
+            // Mark the variable as a typed array
+            if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+                self.ctx.mark_typed_array_var(&name.name, elem_size);
+            }
+
+            return Ok(None);
+        }
 
         // Compile initializer if present.
         //
@@ -649,20 +743,28 @@ impl VbcCodegen {
                     // `Maybe` here — `let x: Maybe<Int> = None` must yield
                     // "Maybe" so the `None` disambiguator lands on Maybe.None.
                     let is_container = match &base.kind {
-                        TypeKind::Path(path) => {
-                            path.as_ident().map(|id| {
-                                matches!(id.name.as_str(),
-                                    "List" | "Array" | "Vec" | "Slice"
-                                    | "Set" | "HashSet" | "Heap" | "Shared"
-                                    | "Weak")
-                            }).unwrap_or(false)
-                        }
+                        TypeKind::Path(path) => path
+                            .as_ident()
+                            .map(|id| {
+                                matches!(
+                                    id.name.as_str(),
+                                    "List"
+                                        | "Array"
+                                        | "Vec"
+                                        | "Slice"
+                                        | "Set"
+                                        | "HashSet"
+                                        | "Heap"
+                                        | "Shared"
+                                        | "Weak"
+                                )
+                            })
+                            .unwrap_or(false),
                         _ => false,
                     };
-                    if is_container
-                        && let verum_ast::ty::GenericArg::Type(inner) = &args[0] {
-                            return extract_let_variant_hint(this, inner);
-                        }
+                    if is_container && let verum_ast::ty::GenericArg::Type(inner) = &args[0] {
+                        return extract_let_variant_hint(this, inner);
+                    }
                     this.extract_base_type_name(ty)
                 }
                 _ => this.extract_base_type_name(ty),
@@ -697,33 +799,36 @@ impl VbcCodegen {
         // Late initialization: mark variable as uninitialized when no initializer
         if value.is_none()
             && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
-                && let Some(info) = self.ctx.lookup_var_mut(&name.name) {
-                    info.is_initialized = false;
-                }
+            && let Some(info) = self.ctx.lookup_var_mut(&name.name)
+        {
+            info.is_initialized = false;
+        }
 
         Ok(None)
     }
 
     /// Detects if type annotation is a byte array [Byte; N] and returns the size.
     fn detect_byte_array_type(&self, ty: Option<&verum_ast::Type>) -> Option<usize> {
-        use verum_ast::ty::{TypeKind, PathSegment};
         use verum_ast::literal::LiteralKind;
+        use verum_ast::ty::{PathSegment, TypeKind};
 
         let ty = ty?;
         if let TypeKind::Array { element, size } = &ty.kind {
             // Check if element type is Byte/U8
             if let TypeKind::Path(path) = &element.kind
-                && let Some(PathSegment::Name(ident)) = path.segments.last() {
-                    let name = ident.as_str();
-                    if name == "Byte" || name == "U8" || name == "u8" {
-                        // Extract size from expression
-                        if let Some(size_expr) = size
-                            && let verum_ast::ExprKind::Literal(lit) = &size_expr.kind
-                                && let LiteralKind::Int(int_lit) = &lit.kind {
-                                    return Some(int_lit.value as usize);
-                                }
+                && let Some(PathSegment::Name(ident)) = path.segments.last()
+            {
+                let name = ident.as_str();
+                if name == "Byte" || name == "U8" || name == "u8" {
+                    // Extract size from expression
+                    if let Some(size_expr) = size
+                        && let verum_ast::ExprKind::Literal(lit) = &size_expr.kind
+                        && let LiteralKind::Int(int_lit) = &lit.kind
+                    {
+                        return Some(int_lit.value as usize);
                     }
                 }
+            }
         }
         None
     }
@@ -731,8 +836,8 @@ impl VbcCodegen {
     /// Detects if type annotation is a typed array [T; N] (non-byte).
     /// Returns (count, element_size) if detected.
     fn detect_typed_array_type(&self, ty: Option<&verum_ast::Type>) -> Option<(usize, usize)> {
-        use verum_ast::ty::{TypeKind, PathSegment};
         use verum_ast::literal::LiteralKind;
+        use verum_ast::ty::{PathSegment, TypeKind};
 
         let ty = ty?;
         if let TypeKind::Array { element, size } = &ty.kind {
@@ -758,11 +863,12 @@ impl VbcCodegen {
                             "Int16" | "I16" | "i16" | "UInt16" | "U16" | "u16" => Some(2),
 
                             // 4-byte types
-                            "Int32" | "I32" | "i32" | "UInt32" | "U32" | "u32" | "Float32" | "F32" | "f32" => Some(4),
+                            "Int32" | "I32" | "i32" | "UInt32" | "U32" | "u32" | "Float32"
+                            | "F32" | "f32" => Some(4),
 
                             // 8-byte types
-                            "Int64" | "I64" | "i64" | "UInt64" | "U64" | "u64" |
-                            "Int" | "UInt" | "Float64" | "F64" | "f64" | "Float" => Some(8),
+                            "Int64" | "I64" | "i64" | "UInt64" | "U64" | "u64" | "Int" | "UInt"
+                            | "Float64" | "F64" | "f64" | "Float" => Some(8),
 
                             // Unknown type - don't track as typed array
                             _ => None,
@@ -784,9 +890,10 @@ impl VbcCodegen {
                 // Extract count from size expression
                 if let Some(size_expr) = size
                     && let verum_ast::ExprKind::Literal(lit) = &size_expr.kind
-                        && let LiteralKind::Int(int_lit) = &lit.kind {
-                            return Some((int_lit.value as usize, elem_size));
-                        }
+                    && let LiteralKind::Int(int_lit) = &lit.kind
+                {
+                    return Some((int_lit.value as usize, elem_size));
+                }
             }
         }
         None
@@ -796,25 +903,27 @@ impl VbcCodegen {
     /// Returns Some(value) for literal integers, None otherwise.
     fn get_typed_array_init_value(&self, expr: &verum_ast::Expr) -> Option<i64> {
         use verum_ast::ExprKind;
-        use verum_ast::ty::PathSegment;
         use verum_ast::literal::LiteralKind;
+        use verum_ast::ty::PathSegment;
 
         // Check for uninit() or zeroed()
         if let ExprKind::Call { func, .. } = &expr.kind
             && let ExprKind::Path(path) = &func.kind
-                && let Some(PathSegment::Name(ident)) = path.segments.last() {
-                    let name = ident.as_str();
-                    if name == "uninit" || name == "zeroed" {
-                        return Some(0);
-                    }
-                }
+            && let Some(PathSegment::Name(ident)) = path.segments.last()
+        {
+            let name = ident.as_str();
+            if name == "uninit" || name == "zeroed" {
+                return Some(0);
+            }
+        }
 
         // Check for [value; N] repeat syntax
         if let ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, .. }) = &expr.kind
             && let ExprKind::Literal(lit) = &value.kind
-                && let LiteralKind::Int(int_lit) = &lit.kind {
-                    return Some(int_lit.value as i64);
-                }
+            && let LiteralKind::Int(int_lit) = &lit.kind
+        {
+            return Some(int_lit.value as i64);
+        }
 
         None
     }
@@ -836,7 +945,10 @@ impl VbcCodegen {
                             return None; // Non-integer literal
                         }
                     }
-                    ExprKind::Unary { op: verum_ast::UnOp::Neg, expr: inner } => {
+                    ExprKind::Unary {
+                        op: verum_ast::UnOp::Neg,
+                        expr: inner,
+                    } => {
                         // Handle negative literals: -N
                         if let ExprKind::Literal(lit) = &inner.kind {
                             if let LiteralKind::Int(int_lit) = &lit.kind {
@@ -863,27 +975,29 @@ impl VbcCodegen {
     /// - [value; N] -> value (if value is a literal integer)
     fn get_byte_array_init_value(&self, expr: &verum_ast::Expr) -> Option<u8> {
         use verum_ast::ExprKind;
-        use verum_ast::ty::PathSegment;
         use verum_ast::literal::LiteralKind;
+        use verum_ast::ty::PathSegment;
 
         // Check for uninit() or zeroed()
         if let ExprKind::Call { func, .. } = &expr.kind
             && let ExprKind::Path(path) = &func.kind
-                && let Some(PathSegment::Name(ident)) = path.segments.last() {
-                    let name = ident.as_str();
-                    if name == "uninit" || name == "zeroed" {
-                        return Some(0);
-                    }
-                }
+            && let Some(PathSegment::Name(ident)) = path.segments.last()
+        {
+            let name = ident.as_str();
+            if name == "uninit" || name == "zeroed" {
+                return Some(0);
+            }
+        }
 
         // Check for [value; N] repeat syntax
         if let ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, .. }) = &expr.kind {
             // Check if value is a literal integer
             if let ExprKind::Literal(lit) = &value.kind
-                && let LiteralKind::Int(int_lit) = &lit.kind {
-                    // Truncate to u8
-                    return Some((int_lit.value & 0xFF) as u8);
-                }
+                && let LiteralKind::Int(int_lit) = &lit.kind
+            {
+                // Truncate to u8
+                return Some((int_lit.value & 0xFF) as u8);
+            }
             // Check if value is a path to a variable (like `let value: Byte = 42; [value; 4]`)
             // For now, only support literal values
         }
@@ -901,10 +1015,11 @@ impl VbcCodegen {
             let mut bytes = Vec::new();
             for elem in elements.iter() {
                 if let ExprKind::Literal(lit) = &elem.kind
-                    && let LiteralKind::Int(int_lit) = &lit.kind {
-                        bytes.push((int_lit.value & 0xFF) as u8);
-                        continue;
-                    }
+                    && let LiteralKind::Int(int_lit) = &lit.kind
+                {
+                    bytes.push((int_lit.value & 0xFF) as u8);
+                    continue;
+                }
                 // Non-literal element, can't optimize
                 return None;
             }
@@ -916,17 +1031,21 @@ impl VbcCodegen {
 
     /// Gets the value expression from repeat syntax [value; N] when value is NOT a literal.
     /// Returns Some(expr) for variable repeat patterns, None for literals or non-repeat patterns.
-    fn get_byte_array_repeat_expr<'a>(&self, expr: &'a verum_ast::Expr) -> Option<&'a verum_ast::Expr> {
+    fn get_byte_array_repeat_expr<'a>(
+        &self,
+        expr: &'a verum_ast::Expr,
+    ) -> Option<&'a verum_ast::Expr> {
         use verum_ast::ExprKind;
         use verum_ast::literal::LiteralKind;
 
         if let ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, .. }) = &expr.kind {
             // Only return if value is NOT a literal (literals are handled elsewhere)
             if let ExprKind::Literal(lit) = &value.kind
-                && matches!(&lit.kind, LiteralKind::Int(_)) {
-                    // This is a literal - handled by get_byte_array_init_value
-                    return None;
-                }
+                && matches!(&lit.kind, LiteralKind::Int(_))
+            {
+                // This is a literal - handled by get_byte_array_init_value
+                return None;
+            }
             // Value is a variable or other expression
             return Some(value.as_ref());
         }
@@ -942,7 +1061,8 @@ impl VbcCodegen {
         else_block: &verum_ast::Block,
     ) -> CodegenResult<Option<Reg>> {
         // Compile value
-        let value_reg = self.compile_expr(value)?
+        let value_reg = self
+            .compile_expr(value)?
             .ok_or_else(|| CodegenError::internal("let-else value has no value"))?;
 
         // Test pattern match
@@ -952,9 +1072,11 @@ impl VbcCodegen {
         let bind_label = self.ctx.new_label("let_else_bind");
 
         // If matches, jump to binding
-        self.ctx.emit_forward_jump(&bind_label, |offset| {
-            Instruction::JmpIf { cond: match_reg, offset }
-        });
+        self.ctx
+            .emit_forward_jump(&bind_label, |offset| Instruction::JmpIf {
+                cond: match_reg,
+                offset,
+            });
         self.ctx.free_temp(match_reg);
 
         // Else block (must diverge)
@@ -1007,23 +1129,26 @@ impl VbcCodegen {
         // Layer provides use an empty tuple () as sentinel value expression
         if let verum_ast::ExprKind::Tuple(elems) = &value.kind
             && elems.is_empty()
-                && let Some(provides) = self.resolve_layer_provides(context) {
-                    // Expand layer into individual provides
-                    for (ctx_name, expr) in provides {
-                        let value_reg = self.compile_expr(&expr)?
-                            .ok_or_else(|| CodegenError::internal("layer provide value has no value"))?;
-                        let ctx_id = self.intern_string(&ctx_name);
-                        self.ctx.emit(Instruction::CtxProvide {
-                            ctx_type: ctx_id,
-                            value: value_reg,
-                            body_offset: 0,
-                        });
-                    }
-                    return Ok(None);
-                }
+            && let Some(provides) = self.resolve_layer_provides(context)
+        {
+            // Expand layer into individual provides
+            for (ctx_name, expr) in provides {
+                let value_reg = self
+                    .compile_expr(&expr)?
+                    .ok_or_else(|| CodegenError::internal("layer provide value has no value"))?;
+                let ctx_id = self.intern_string(&ctx_name);
+                self.ctx.emit(Instruction::CtxProvide {
+                    ctx_type: ctx_id,
+                    value: value_reg,
+                    body_offset: 0,
+                });
+            }
+            return Ok(None);
+        }
 
         // Normal provide: compile value and emit single CtxProvide
-        let value_reg = self.compile_expr(value)?
+        let value_reg = self
+            .compile_expr(value)?
             .ok_or_else(|| CodegenError::internal("provide value has no value"))?;
 
         let context_id = self.intern_string(context);
@@ -1052,7 +1177,10 @@ impl VbcCodegen {
 
     /// Resolves a layer name into its flattened list of (context_name, value_expr) pairs.
     /// Handles both inline layers and composite layers (recursively flattening).
-    fn resolve_layer_provides(&self, layer_name: &str) -> Option<Vec<(String, verum_ast::expr::Expr)>> {
+    fn resolve_layer_provides(
+        &self,
+        layer_name: &str,
+    ) -> Option<Vec<(String, verum_ast::expr::Expr)>> {
         let mut visited = std::collections::HashSet::new();
         self.resolve_layer_provides_inner(layer_name, &mut visited)
     }
@@ -1072,7 +1200,8 @@ impl VbcCodegen {
             super::ContextLayer::Composite(sub_layers) => {
                 let mut all_provides = Vec::new();
                 for sub_name in &sub_layers {
-                    if let Some(sub_provides) = self.resolve_layer_provides_inner(sub_name, visited) {
+                    if let Some(sub_provides) = self.resolve_layer_provides_inner(sub_name, visited)
+                    {
                         all_provides.extend(sub_provides);
                     }
                     // If sub-layer not found, silently skip (will be caught by type checker)
@@ -1090,7 +1219,8 @@ impl VbcCodegen {
         body: &verum_ast::Expr,
     ) -> CodegenResult<Option<Reg>> {
         // Compile value
-        let value_reg = self.compile_expr(value)?
+        let value_reg = self
+            .compile_expr(value)?
             .ok_or_else(|| CodegenError::internal("provide-scope value has no value"))?;
 
         let context_id = self.intern_string(context);
@@ -1099,7 +1229,8 @@ impl VbcCodegen {
         let end_label = self.ctx.new_label("ctx_end");
 
         // Enter context scope - we'll patch the body_offset later
-        self.ctx.emit_forward_context_provide(&end_label, context_id, value_reg);
+        self.ctx
+            .emit_forward_context_provide(&end_label, context_id, value_reg);
 
         // Compile body (can be block expression or any expression)
         self.ctx.enter_scope();
@@ -1122,7 +1253,10 @@ impl VbcCodegen {
 
     /// Extract loop optimization hints (@unroll, @vectorize, @no_unroll, @no_vectorize, @simd)
     /// from statement attributes.
-    fn extract_loop_hints_from_attrs(&self, attrs: &[verum_ast::decl::Attribute]) -> crate::module::LoopHints {
+    fn extract_loop_hints_from_attrs(
+        &self,
+        attrs: &[verum_ast::decl::Attribute],
+    ) -> crate::module::LoopHints {
         use crate::module::{LoopHints, LoopUnrollHint, VectorizeHint};
         let mut hints = LoopHints::default();
         for attr in attrs {
@@ -1136,7 +1270,8 @@ impl VbcCodegen {
                                     _ => {
                                         // Try to parse as integer
                                         if let verum_ast::ExprKind::Literal(lit) = &first.kind {
-                                            if let verum_ast::LiteralKind::Int(int_lit) = &lit.kind {
+                                            if let verum_ast::LiteralKind::Int(int_lit) = &lit.kind
+                                            {
                                                 LoopUnrollHint::Count(int_lit.value as u32)
                                             } else {
                                                 LoopUnrollHint::Full
@@ -1165,7 +1300,8 @@ impl VbcCodegen {
                                     Some("never") => VectorizeHint::Disable,
                                     _ => {
                                         if let verum_ast::ExprKind::Literal(lit) = &first.kind {
-                                            if let verum_ast::LiteralKind::Int(int_lit) = &lit.kind {
+                                            if let verum_ast::LiteralKind::Int(int_lit) = &lit.kind
+                                            {
                                                 VectorizeHint::Width(int_lit.value as u32)
                                             } else {
                                                 VectorizeHint::Enable

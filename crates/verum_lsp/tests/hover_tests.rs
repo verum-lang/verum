@@ -432,9 +432,10 @@ fn test_hover_returns_correct_range() {
 
     // If hover has a range, it should span the identifier
     if let Some(hover) = result
-        && let Some(range) = hover.range {
-            // Range should be within line 0
-            assert_eq!(range.start.line, 0);
-            assert_eq!(range.end.line, 0);
-        }
+        && let Some(range) = hover.range
+    {
+        // Range should be within line 0
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.end.line, 0);
+    }
 }

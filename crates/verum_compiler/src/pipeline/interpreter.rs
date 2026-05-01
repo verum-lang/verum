@@ -70,7 +70,11 @@ impl<'s> CompilationPipeline<'s> {
             if let Err(e) = std::fs::write(&vbc_path, &dump) {
                 warn!("Failed to write VBC dump: {}", e);
             } else {
-                info!("Wrote VBC dump: {} ({} bytes)", vbc_path.display(), dump.len());
+                info!(
+                    "Wrote VBC dump: {} ({} bytes)",
+                    vbc_path.display(),
+                    dump.len()
+                );
             }
         }
 
@@ -115,7 +119,10 @@ impl<'s> CompilationPipeline<'s> {
             return Err(anyhow::anyhow!("VBC global_ctors error: {:?}", e));
         }
 
-        info!("Executing main function via VBC interpreter (function ID: {})", main_func_id.0);
+        info!(
+            "Executing main function via VBC interpreter (function ID: {})",
+            main_func_id.0
+        );
         let result = interpreter.execute_function(main_func_id);
         self.finalize_run_result(result)
     }
@@ -161,7 +168,8 @@ impl<'s> CompilationPipeline<'s> {
             return;
         }
         if value.is_bool() {
-            self.session.record_exit_code(if value.as_bool() { 0 } else { 1 });
+            self.session
+                .record_exit_code(if value.as_bool() { 0 } else { 1 });
         }
         // Unit / Nil / Float / Object / Pointer / String — no exit-code
         // semantics. CLI defaults to 0.
@@ -197,8 +205,15 @@ impl<'s> CompilationPipeline<'s> {
     ///
 
     /// VBC-first architecture: AST → VBC Codegen → VBC Interpreter with args
-    pub(super) fn phase_interpret_with_args(&mut self, module: &Module, args: List<Text>) -> Result<()> {
-        debug!("Interpreting module with {} args via VBC-first architecture", args.len());
+    pub(super) fn phase_interpret_with_args(
+        &mut self,
+        module: &Module,
+        args: List<Text>,
+    ) -> Result<()> {
+        debug!(
+            "Interpreting module with {} args via VBC-first architecture",
+            args.len()
+        );
 
         if args.is_empty() {
             return self.phase_interpret(module);
@@ -236,7 +251,10 @@ impl<'s> CompilationPipeline<'s> {
         let main_func_id = self.find_main_function_id(&interpreter.state.module)?;
 
         // Step 4: Check if main() accepts parameters
-        let main_param_count = interpreter.state.module.get_function(main_func_id)
+        let main_param_count = interpreter
+            .state
+            .module
+            .get_function(main_func_id)
             .map(|f| f.params.len())
             .unwrap_or(0);
 
@@ -249,14 +267,17 @@ impl<'s> CompilationPipeline<'s> {
 
         // Step 5: Allocate args as List<Text> on interpreter heap and call main(args)
         let rust_args: Vec<String> = args.iter().map(|t| t.to_string()).collect();
-        let args_value = interpreter.alloc_string_list(&rust_args)
+        let args_value = interpreter
+            .alloc_string_list(&rust_args)
             .map_err(|e| anyhow::anyhow!("Failed to allocate args: {:?}", e))?;
 
-        info!("Executing main function with {} args via VBC interpreter", rust_args.len());
+        info!(
+            "Executing main function with {} args via VBC interpreter",
+            rust_args.len()
+        );
         let result = interpreter.call(main_func_id, &[args_value]);
         self.finalize_run_result(result)
     }
-
 
     /// Find the program entry function in the VBC module and return
     /// its function ID.
@@ -347,10 +368,16 @@ impl<'s> CompilationPipeline<'s> {
         // `verum run`. Previously `run_for_test` skipped safety,
         // context, send/sync, and FFI validation.
         self.validate_module(&module, false)?;
-        debug!("Phase 3+ (validate_module): {:.2}s", start.elapsed().as_secs_f64());
+        debug!(
+            "Phase 3+ (validate_module): {:.2}s",
+            start.elapsed().as_secs_f64()
+        );
 
         // Phase 5: Compile to VBC and execute with capture
-        debug!("Phase 5 starting (interpret_for_test): {:.2}s", start.elapsed().as_secs_f64());
+        debug!(
+            "Phase 5 starting (interpret_for_test): {:.2}s",
+            start.elapsed().as_secs_f64()
+        );
         let result = self.phase_interpret_for_test(&module)?;
 
         let elapsed = start.elapsed();
@@ -371,7 +398,10 @@ impl<'s> CompilationPipeline<'s> {
     /// 1. **main() mode**: If the module has a `main` function, execute it (traditional).
     /// 2. **@test mode**: If no `main` exists, discover all `@test`-annotated functions
     ///  and run them sequentially as a test suite.
-    pub(super) fn phase_interpret_for_test(&mut self, module: &Module) -> Result<(String, String, i32)> {
+    pub(super) fn phase_interpret_for_test(
+        &mut self,
+        module: &Module,
+    ) -> Result<(String, String, i32)> {
         debug!("Interpreting module for test via VBC-first architecture");
 
         // Step 0: Reset global VBC value side-tables for test isolation.
@@ -406,7 +436,10 @@ impl<'s> CompilationPipeline<'s> {
         // Step 3: Try main() first, fall back to @test function discovery
         if let Ok(main_func_id) = self.find_main_function_id(&interpreter.state.module) {
             // Traditional mode: execute main()
-            debug!("Executing main function via VBC interpreter (function ID: {})", main_func_id.0);
+            debug!(
+                "Executing main function via VBC interpreter (function ID: {})",
+                main_func_id.0
+            );
             let result = interpreter.execute_function(main_func_id);
 
             let stdout = interpreter.state.take_stdout();
@@ -439,12 +472,18 @@ impl<'s> CompilationPipeline<'s> {
 
         // @test mode: discover and run all @test-annotated functions.
         // Only user code functions have is_test=true (stdlib @test propagation is disabled).
-        let test_functions: Vec<(VbcFunctionId, String)> = interpreter.state.module.functions
+        let test_functions: Vec<(VbcFunctionId, String)> = interpreter
+            .state
+            .module
+            .functions
             .iter()
             .enumerate()
             .filter(|(_, desc)| desc.is_test)
             .map(|(idx, desc)| {
-                let name = interpreter.state.module.get_string(desc.name)
+                let name = interpreter
+                    .state
+                    .module
+                    .get_string(desc.name)
                     .unwrap_or("unknown")
                     .to_string();
                 (VbcFunctionId(idx as u32), name)
@@ -452,7 +491,9 @@ impl<'s> CompilationPipeline<'s> {
             .collect();
 
         if test_functions.is_empty() {
-            return Err(anyhow::anyhow!("No main function or @test functions found in VBC module"));
+            return Err(anyhow::anyhow!(
+                "No main function or @test functions found in VBC module"
+            ));
         }
 
         let total = test_functions.len();
@@ -468,12 +509,16 @@ impl<'s> CompilationPipeline<'s> {
             match result {
                 Ok(_) => {
                     passed += 1;
-                    interpreter.state.writeln_stdout(&format!("  PASS: {}", test_name));
+                    interpreter
+                        .state
+                        .writeln_stdout(&format!("  PASS: {}", test_name));
                 }
                 Err(e) => {
                     failed += 1;
                     let err_msg = format!("{}", e);
-                    interpreter.state.writeln_stdout(&format!("  FAIL: {} — {}", test_name, err_msg));
+                    interpreter
+                        .state
+                        .writeln_stdout(&format!("  FAIL: {} — {}", test_name, err_msg));
                     failures.push((test_name.clone(), err_msg));
                 }
             }
@@ -524,11 +569,7 @@ impl<'s> CompilationPipeline<'s> {
         let start = Instant::now();
         let _bc_native = verum_error::breadcrumb::enter(
             "compiler.run_native_compilation",
-            self.session
-                .options()
-                .input
-                .display()
-                .to_string(),
+            self.session.options().input.display().to_string(),
         );
 
         // Phase 0: Load stdlib modules (populates self.modules for type checking)
@@ -536,7 +577,8 @@ impl<'s> CompilationPipeline<'s> {
         let t0 = Instant::now();
         self.load_stdlib_modules()?;
         let stdlib_time = t0.elapsed();
-        self.session.record_phase_metrics("Stdlib Loading", stdlib_time, 0);
+        self.session
+            .record_phase_metrics("Stdlib Loading", stdlib_time, 0);
         drop(_bc_stdlib);
 
         // Phase 0.5: Load sibling project modules (enables cross-file mount imports)
@@ -544,7 +586,8 @@ impl<'s> CompilationPipeline<'s> {
         let t0 = Instant::now();
         self.load_project_modules()?;
         self.load_external_cog_modules()?;
-        self.session.record_phase_metrics("Project Modules", t0.elapsed(), 0);
+        self.session
+            .record_phase_metrics("Project Modules", t0.elapsed(), 0);
         drop(_bc_proj);
 
         // Phase 1: Load source
@@ -580,7 +623,8 @@ impl<'s> CompilationPipeline<'s> {
         let _bc_tc = verum_error::breadcrumb::enter("compiler.phase.type_check", "");
         let t0 = Instant::now();
         self.phase_type_check(&module)?;
-        self.session.record_phase_metrics("Type Checking", t0.elapsed(), 0);
+        self.session
+            .record_phase_metrics("Type Checking", t0.elapsed(), 0);
         drop(_bc_tc);
 
         // ════════════════════════════════════════════════════════════
@@ -623,8 +667,7 @@ impl<'s> CompilationPipeline<'s> {
         // Opt-out: `VERUM_NO_PARALLEL_POST_TYPECHECK=1` falls back to
         // the sequential chain for diagnostic-ordering reproducibility.
         // ════════════════════════════════════════════════════════════
-        let parallel_post_typecheck =
-            std::env::var("VERUM_NO_PARALLEL_POST_TYPECHECK").is_err();
+        let parallel_post_typecheck = std::env::var("VERUM_NO_PARALLEL_POST_TYPECHECK").is_err();
 
         // `clear_non_compilable_stdlib_modules` is a `&mut self` write
         // to `self.modules` — must run BEFORE the parallel fan-out so
@@ -665,10 +708,8 @@ impl<'s> CompilationPipeline<'s> {
 
                 if smt_enabled {
                     s.spawn(|_| {
-                        let _bc = verum_error::breadcrumb::enter(
-                            "compiler.phase.verify",
-                            "parallel",
-                        );
+                        let _bc =
+                            verum_error::breadcrumb::enter("compiler.phase.verify", "parallel");
                         let t0 = Instant::now();
                         let r = self.phase_verify(&module);
                         *verify_metrics.lock().unwrap() = t0.elapsed();
@@ -685,10 +726,8 @@ impl<'s> CompilationPipeline<'s> {
                 });
 
                 s.spawn(|_| {
-                    let _bc = verum_error::breadcrumb::enter(
-                        "compiler.phase.cbgr_analysis",
-                        "parallel",
-                    );
+                    let _bc =
+                        verum_error::breadcrumb::enter("compiler.phase.cbgr_analysis", "parallel");
                     let t0 = Instant::now();
                     let r = self.phase_cbgr_analysis(&module);
                     *cbgr_metrics.lock().unwrap() = t0.elapsed();
@@ -696,10 +735,8 @@ impl<'s> CompilationPipeline<'s> {
                 });
 
                 s.spawn(|_| {
-                    let _bc = verum_error::breadcrumb::enter(
-                        "compiler.phase.ffi_validation",
-                        "parallel",
-                    );
+                    let _bc =
+                        verum_error::breadcrumb::enter("compiler.phase.ffi_validation", "parallel");
                     *ffi_result.lock().unwrap() = self.phase_ffi_validation(&module);
                 });
             });
@@ -736,12 +773,14 @@ impl<'s> CompilationPipeline<'s> {
             // Sequential fallback — bit-identical to the pre-#104 path.
             let t0 = Instant::now();
             self.phase_dependency_analysis(&module)?;
-            self.session.record_phase_metrics("Dependency Analysis", t0.elapsed(), 0);
+            self.session
+                .record_phase_metrics("Dependency Analysis", t0.elapsed(), 0);
 
             if smt_enabled {
                 let t0 = Instant::now();
                 self.phase_verify(&module)?;
-                self.session.record_phase_metrics("Verification", t0.elapsed(), 0);
+                self.session
+                    .record_phase_metrics("Verification", t0.elapsed(), 0);
             }
 
             self.phase_context_validation(&module);
@@ -749,7 +788,8 @@ impl<'s> CompilationPipeline<'s> {
 
             let t0 = Instant::now();
             self.phase_cbgr_analysis(&module)?;
-            self.session.record_phase_metrics("CBGR Analysis", t0.elapsed(), 0);
+            self.session
+                .record_phase_metrics("CBGR Analysis", t0.elapsed(), 0);
 
             self.phase_ffi_validation(&module)?;
         }
@@ -789,15 +829,12 @@ impl<'s> CompilationPipeline<'s> {
         // reader straight at the translation unit.
         let _bc_codegen = verum_error::breadcrumb::enter(
             "compiler.phase.generate_native",
-            self.session
-                .options()
-                .input
-                .display()
-                .to_string(),
+            self.session.options().input.display().to_string(),
         );
         let t0 = Instant::now();
         let output_path = self.phase_generate_native(&module)?;
-        self.session.record_phase_metrics("Code Generation", t0.elapsed(), 0);
+        self.session
+            .record_phase_metrics("Code Generation", t0.elapsed(), 0);
         drop(_bc_codegen);
 
         // Phase 6b: GPU compilation (MLIR path) — auto-triggered by @device(gpu) detection
@@ -808,7 +845,8 @@ impl<'s> CompilationPipeline<'s> {
             match self.run_mlir_aot() {
                 Ok(gpu_binary) => {
                     info!("GPU compilation produced: {}", gpu_binary.display());
-                    self.session.record_phase_metrics("GPU Compilation", t0.elapsed(), 0);
+                    self.session
+                        .record_phase_metrics("GPU Compilation", t0.elapsed(), 0);
                 }
                 Err(e) => {
                     // GPU compilation failure is non-fatal — CPU binary is still valid

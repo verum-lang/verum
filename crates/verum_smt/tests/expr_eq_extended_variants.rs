@@ -77,10 +77,7 @@ fn array(elems: Vec<Expr>) -> Expr {
     for e in elems {
         list.push(e);
     }
-    Expr::new(
-        ExprKind::Array(ArrayExpr::List(list)),
-        Span::dummy(),
-    )
+    Expr::new(ExprKind::Array(ArrayExpr::List(list)), Span::dummy())
 }
 
 fn rewrite_once(goal_expr: Expr, hyp_eq: Expr) -> Result<Expr, String> {
@@ -131,7 +128,11 @@ fn expr_eq_recognises_call_subterms() {
     );
     let new_goal = rewrite_once(goal_expr, hyp).expect("rewrite must succeed");
     let dump = format!("{:?}", new_goal);
-    assert!(dump.contains("\"y\""), "rewritten goal must contain `y`. dump: {}", dump);
+    assert!(
+        dump.contains("\"y\""),
+        "rewritten goal must contain `y`. dump: {}",
+        dump
+    );
 }
 
 #[test]
@@ -145,7 +146,11 @@ fn expr_eq_recognises_field_subterms() {
     );
     let new_goal = rewrite_once(goal_expr, hyp).expect("field rewrite must succeed");
     let dump = format!("{:?}", new_goal);
-    assert!(dump.contains("\"z\""), "rewritten goal must contain `z`. dump: {}", dump);
+    assert!(
+        dump.contains("\"z\""),
+        "rewritten goal must contain `z`. dump: {}",
+        dump
+    );
 }
 
 #[test]
@@ -182,7 +187,11 @@ fn expr_eq_recognises_tuple_subterms() {
     });
     let new_goal = rewrite_once(goal_expr, hyp).expect("tuple rewrite must succeed");
     let dump = format!("{:?}", new_goal);
-    assert!(dump.contains("\"pair\""), "rewritten goal must contain `pair`. dump: {}", dump);
+    assert!(
+        dump.contains("\"pair\""),
+        "rewritten goal must contain `pair`. dump: {}",
+        dump
+    );
 }
 
 #[test]
@@ -200,5 +209,9 @@ fn expr_eq_recognises_array_subterms() {
     });
     let new_goal = rewrite_once(goal_expr, hyp).expect("array rewrite must succeed");
     let dump = format!("{:?}", new_goal);
-    assert!(dump.contains("\"arr\""), "rewritten goal must contain `arr`. dump: {}", dump);
+    assert!(
+        dump.contains("\"arr\""),
+        "rewritten goal must contain `arr`. dump: {}",
+        dump
+    );
 }

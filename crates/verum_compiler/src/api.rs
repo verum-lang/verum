@@ -449,17 +449,25 @@ pub struct CommonPipelineResult {
 impl CommonPipelineResult {
     /// Check if there are any errors
     pub fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(|d| d.severity() == verum_diagnostics::Severity::Error)
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity() == verum_diagnostics::Severity::Error)
     }
 
     /// Get error count
     pub fn error_count(&self) -> usize {
-        self.diagnostics.iter().filter(|d| d.severity() == verum_diagnostics::Severity::Error).count()
+        self.diagnostics
+            .iter()
+            .filter(|d| d.severity() == verum_diagnostics::Severity::Error)
+            .count()
     }
 
     /// Get warning count
     pub fn warning_count(&self) -> usize {
-        self.diagnostics.iter().filter(|d| d.severity() == verum_diagnostics::Severity::Warning).count()
+        self.diagnostics
+            .iter()
+            .filter(|d| d.severity() == verum_diagnostics::Severity::Warning)
+            .count()
     }
 }
 
@@ -580,17 +588,17 @@ impl From<String> for SourceFile {
 /// let ast = verum_compiler::api::parse("fn main() { print(\"hello\"); }")?;
 /// ```
 pub fn parse(source: &str) -> Result<Module, CompilationError> {
-    use verum_lexer::Lexer;
-    use verum_fast_parser::VerumParser;
     use verum_ast::FileId;
+    use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
 
     let file_id = FileId::new(0); // Virtual file
     let lexer = Lexer::new(source, file_id);
     let parser = VerumParser::new();
 
-    parser.parse_module(lexer, file_id).map_err(|e| {
-        CompilationError::parse_error(format!("Parse error: {:?}", e))
-    })
+    parser
+        .parse_module(lexer, file_id)
+        .map_err(|e| CompilationError::parse_error(format!("Parse error: {:?}", e)))
 }
 
 /// Parse and type check source code.
@@ -634,9 +642,11 @@ pub fn typecheck(source: &str) -> Result<HirModule, CompilationError> {
         ));
     }
 
-    result.typed_modules.first().cloned().ok_or_else(|| {
-        CompilationError::internal("No typed module produced")
-    })
+    result
+        .typed_modules
+        .first()
+        .cloned()
+        .ok_or_else(|| CompilationError::internal("No typed module produced"))
 }
 
 /// Run the common pipeline (Source → TypedAST).
@@ -686,10 +696,10 @@ pub fn run_common_pipeline(
     sources: &[SourceFile],
     config: &CommonPipelineConfig,
 ) -> Result<CommonPipelineResult, CompilationError> {
-    use std::time::Instant;
     use crate::phases::*;
-    use verum_lexer::Lexer;
+    use std::time::Instant;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
 
     let start = Instant::now();
     let user_source_count = sources.len();
@@ -763,16 +773,17 @@ pub fn run_common_pipeline(
                     // Core/stdlib parse errors are non-fatal — log and skip the module
                     tracing::debug!(
                         "Skipping core module {} ({} parse errors)",
-                        source.path, errors.len()
+                        source.path,
+                        errors.len()
                     );
                 } else {
                     // User source parse errors are fatal
                     for error in errors {
                         let diag = verum_diagnostics::DiagnosticBuilder::new(
-                            verum_diagnostics::Severity::Error
+                            verum_diagnostics::Severity::Error,
                         )
-                            .message(format!("Parse error in {}: {}", source.path, error))
-                            .build();
+                        .message(format!("Parse error in {}: {}", source.path, error))
+                        .build();
                         all_diagnostics.push(diag);
                     }
                 }
@@ -790,9 +801,11 @@ pub fn run_common_pipeline(
     }
 
     let parse_duration = parse_start.elapsed();
-    phase_metrics.push(PhaseMetrics::new("Lexical Parsing")
-        .with_duration(parse_duration)
-        .with_items_processed(ast_modules.len()));
+    phase_metrics.push(
+        PhaseMetrics::new("Lexical Parsing")
+            .with_duration(parse_duration)
+            .with_items_processed(ast_modules.len()),
+    );
 
     // Phase 2: Meta Registry (if macros enabled)
     let mut current_data = PhaseData::AstModules(ast_modules.clone());
@@ -880,7 +893,11 @@ pub fn run_common_pipeline(
         phase_metrics.push(contract_output.metrics.clone());
 
         // Extract verification results
-        if let PhaseData::AstModulesWithContracts { modules, verification_results: vr } = contract_output.data {
+        if let PhaseData::AstModulesWithContracts {
+            modules,
+            verification_results: vr,
+        } = contract_output.data
+        {
             current_data = PhaseData::AstModules(modules);
             verification_results = vr;
         } else {
@@ -981,13 +998,16 @@ pub fn run_common_pipeline(
         PhaseData::Hir(modules) => modules,
         PhaseData::AstModules(modules) => {
             // Fallback: convert AST to minimal HIR
-            modules.iter().map(|m| HirModule {
-                name: Text::from(format!("module_{}", m.file_id.raw())),
-                items: List::new(),
-                ffi_boundaries: List::new(),
-                verified_contracts: List::new(),
-                context_requirements: List::new(),
-            }).collect()
+            modules
+                .iter()
+                .map(|m| HirModule {
+                    name: Text::from(format!("module_{}", m.file_id.raw())),
+                    items: List::new(),
+                    ffi_boundaries: List::new(),
+                    verified_contracts: List::new(),
+                    context_requirements: List::new(),
+                })
+                .collect()
         }
         _ => return Err(CompilationError::internal("Unexpected semantic output")),
     };
@@ -1032,12 +1052,26 @@ pub fn run_common_pipeline(
             total_duration,
             phase_metrics,
             modules_processed: ast_modules.len(),
-            functions_processed: typed_modules.iter().map(|m| {
-                m.items.iter().filter(|item| matches!(item.kind, HirItemKind::Function(_))).count()
-            }).sum(),
-            types_processed: typed_modules.iter().map(|m| {
-                m.items.iter().filter(|item| matches!(item.kind, HirItemKind::Type(_) | HirItemKind::Protocol(_))).count()
-            }).sum(),
+            functions_processed: typed_modules
+                .iter()
+                .map(|m| {
+                    m.items
+                        .iter()
+                        .filter(|item| matches!(item.kind, HirItemKind::Function(_)))
+                        .count()
+                })
+                .sum(),
+            types_processed: typed_modules
+                .iter()
+                .map(|m| {
+                    m.items
+                        .iter()
+                        .filter(|item| {
+                            matches!(item.kind, HirItemKind::Type(_) | HirItemKind::Protocol(_))
+                        })
+                        .count()
+                })
+                .sum(),
         }
     } else {
         PipelineMetrics {
@@ -1049,7 +1083,9 @@ pub fn run_common_pipeline(
         }
     };
 
-    let has_errors = all_diagnostics.iter().any(|d| d.severity() == verum_diagnostics::Severity::Error);
+    let has_errors = all_diagnostics
+        .iter()
+        .any(|d| d.severity() == verum_diagnostics::Severity::Error);
 
     Ok(CommonPipelineResult {
         typed_modules,
@@ -1101,9 +1137,10 @@ pub fn compile_to_vbc(source: &str) -> Result<verum_vbc::VbcModule, CompilationE
     }
 
     // Get AST module for VBC codegen
-    let ast_module = result.ast_modules.first().ok_or_else(|| {
-        CompilationError::internal("No AST module produced")
-    })?;
+    let ast_module = result
+        .ast_modules
+        .first()
+        .ok_or_else(|| CompilationError::internal("No AST module produced"))?;
 
     // Run VBC codegen
     use verum_vbc::codegen::VbcCodegen;
@@ -1166,8 +1203,8 @@ pub fn compile(
     }
 
     // Run VBC backend pipeline: TypedAST → VBC bytecode
-    use verum_vbc::codegen::VbcCodegen;
     use crate::phases::VbcTierStats;
+    use verum_vbc::codegen::VbcCodegen;
 
     // Log the requested target tier + output type so callers
     // and telemetry have a record of what was asked, even when

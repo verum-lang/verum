@@ -137,9 +137,7 @@ fn per_thread_interpreter_with_distinct_configs() {
         observed.push(h.join().expect("worker thread panicked"));
     }
     observed.sort();
-    let expected: Vec<u64> = (0..THREADS)
-        .map(|tid| 1_000_000 + tid * 1000)
-        .collect();
+    let expected: Vec<u64> = (0..THREADS).map(|tid| 1_000_000 + tid * 1000).collect();
     assert_eq!(
         observed, expected,
         "per-thread configs must remain independent across {} threads",

@@ -23,8 +23,8 @@
 
 use verum_ast::decl::ProtocolItemKind;
 use verum_ast::{FileId, ItemKind, TypeKind};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 #[test]
 fn test_hkt_placeholder_in_generic_args() {

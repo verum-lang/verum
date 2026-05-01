@@ -34,9 +34,7 @@ fn fixture_repo(name: &str, file_count: usize) -> tempfile::TempDir {
     for i in 0..file_count {
         std::fs::write(
             src.join(format!("file_{i}.vr")),
-            format!(
-                "/// item {i}\npublic fn item_{i}(x: Int) -> Int {{ x + 1 }}\n"
-            ),
+            format!("/// item {i}\npublic fn item_{i}(x: Int) -> Int {{ x + 1 }}\n"),
         )
         .expect("file");
     }

@@ -152,11 +152,7 @@ fn test_cross_file_goto_definition_falls_back() {
     let workspace_index = verum_lsp::workspace_index::WorkspaceIndex::new();
 
     let uri = test_uri("main");
-    doc_store.open(
-        uri.clone(),
-        "fn main() { foo(); }".to_string(),
-        1,
-    );
+    doc_store.open(uri.clone(), "fn main() { foo(); }".to_string(), 1);
 
     // Should return None since 'foo' is not defined anywhere
     let result = verum_lsp::workspace_index::goto_definition_cross_file(
@@ -196,7 +192,10 @@ fn test_cross_file_references() {
     );
 
     // Should find at least the definition of foo
-    assert!(!refs.is_empty(), "Should find at least one reference to 'foo'");
+    assert!(
+        !refs.is_empty(),
+        "Should find at least one reference to 'foo'"
+    );
 }
 
 #[test]
@@ -239,11 +238,7 @@ fn test_rename_invalid_name_rejected() {
     let workspace_index = verum_lsp::workspace_index::WorkspaceIndex::new();
 
     let uri = test_uri("main");
-    doc_store.open(
-        uri.clone(),
-        "fn foo() { 1 }".to_string(),
-        1,
-    );
+    doc_store.open(uri.clone(), "fn foo() { 1 }".to_string(), 1);
 
     // Try renaming to a keyword
     let result = verum_lsp::workspace_index::rename_cross_file(
@@ -353,14 +348,20 @@ fn test_completion_items_carry_resolve_data() {
 
     let items = verum_lsp::completion::complete_at_position(
         &doc,
-        Position { line: 1, character: 14 },
+        Position {
+            line: 1,
+            character: 14,
+        },
     );
 
     // Find the 'helper' completion
     let helper_item = items.iter().find(|i| i.label == "helper");
     if let Some(item) = helper_item {
         // Module-level function completions should carry a data payload
-        assert!(item.data.is_some(), "function completion should carry resolve data");
+        assert!(
+            item.data.is_some(),
+            "function completion should carry resolve data"
+        );
         let data = item.data.as_ref().unwrap();
         assert_eq!(data["name"].as_str().unwrap(), "helper");
         // Documentation is deferred to resolve

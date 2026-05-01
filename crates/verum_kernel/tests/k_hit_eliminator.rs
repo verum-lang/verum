@@ -16,9 +16,8 @@
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
-    ConstructorSig, CoreTerm, InductiveRegistry, KernelError, PathCtorSig,
-    RegisteredInductive, UniverseLevel, eliminator_type,
-    point_constructor_case_type,
+    ConstructorSig, CoreTerm, InductiveRegistry, KernelError, PathCtorSig, RegisteredInductive,
+    UniverseLevel, eliminator_type, point_constructor_case_type,
 };
 
 fn nullary(name: &str) -> ConstructorSig {
@@ -53,7 +52,11 @@ fn bool_eliminator_type_has_motive_two_cases_and_scrutinee_pi() {
     };
     assert_eq!(motive_b.as_str(), "motive");
     // motive's domain: Π (_ : Bool) . Type_0
-    let CoreTerm::Pi { domain: bool_dom, codomain: type_codom, .. } = motive_dom.as_ref()
+    let CoreTerm::Pi {
+        domain: bool_dom,
+        codomain: type_codom,
+        ..
+    } = motive_dom.as_ref()
     else {
         panic!("motive domain must be a Π");
     };
@@ -94,7 +97,11 @@ fn bool_eliminator_type_has_motive_two_cases_and_scrutinee_pi() {
     assert_eq!(case_false_b.as_str(), "case_False");
 
     // Innermost: Π (x : Bool) . motive(x).
-    let CoreTerm::Pi { binder: x_b, codomain: ret, .. } = after_false.as_ref()
+    let CoreTerm::Pi {
+        binder: x_b,
+        codomain: ret,
+        ..
+    } = after_false.as_ref()
     else {
         panic!("expected scrutinee Π");
     };
@@ -115,7 +122,8 @@ fn nat_succ_case_takes_pi_argument() {
         List::from_iter(vec![
             nullary("Zero"),
             ConstructorSig {
-                name: Text::from("Succ"),                arg_types: List::from_iter(vec![CoreTerm::Inductive {
+                name: Text::from("Succ"),
+                arg_types: List::from_iter(vec![CoreTerm::Inductive {
                     path: Text::from("Nat"),
                     args: List::new(),
                 }]),
@@ -124,10 +132,18 @@ fn nat_succ_case_takes_pi_argument() {
     );
     let elim = eliminator_type(&nat_ind);
     // Skip motive + Zero case to reach the Succ case.
-    let CoreTerm::Pi { codomain: after_motive, .. } = elim else {
+    let CoreTerm::Pi {
+        codomain: after_motive,
+        ..
+    } = elim
+    else {
         panic!()
     };
-    let CoreTerm::Pi { codomain: after_zero, .. } = after_motive.as_ref() else {
+    let CoreTerm::Pi {
+        codomain: after_zero,
+        ..
+    } = after_motive.as_ref()
+    else {
         panic!()
     };
     let CoreTerm::Pi {
@@ -188,10 +204,18 @@ fn s1_eliminator_has_path_branch() {
     //  Π (motive). Π (case_Base : motive(Base)).
     //  Π (case_Loop : PathTy(motive(Base), case_Base, case_Base)).
     //  Π (x : S1). motive(x)
-    let CoreTerm::Pi { codomain: after_motive, .. } = elim else {
+    let CoreTerm::Pi {
+        codomain: after_motive,
+        ..
+    } = elim
+    else {
         panic!()
     };
-    let CoreTerm::Pi { codomain: after_base, .. } = after_motive.as_ref() else {
+    let CoreTerm::Pi {
+        codomain: after_base,
+        ..
+    } = after_motive.as_ref()
+    else {
         panic!()
     };
     let CoreTerm::Pi {
@@ -217,7 +241,9 @@ fn s1_eliminator_has_path_branch() {
     assert!(matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Base"));
     assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Base"));
     // Innermost remains Π (x : S1) . motive(x).
-    let CoreTerm::Pi { binder, .. } = after_loop.as_ref() else { panic!() };
+    let CoreTerm::Pi { binder, .. } = after_loop.as_ref() else {
+        panic!()
+    };
     assert_eq!(binder.as_str(), "x");
 }
 
@@ -237,11 +263,19 @@ fn interval_eliminator_has_two_points_and_seg_branch() {
     });
     let elim = eliminator_type(&interval);
     // Walk past motive + Zero + One.
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
     // Now the Seg branch.
-    let CoreTerm::Pi { binder, domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { binder, domain, .. } = a.as_ref() else {
+        panic!()
+    };
     assert_eq!(binder.as_str(), "case_Seg");
     // heterogeneous endpoints
     // (Zero ≠ One structurally) ⇒ branch is dependent PathOver,
@@ -281,7 +315,8 @@ fn v3_app_chain_endpoint_resolves_at_inner_ctor() {
         List::from_iter(vec![
             nullary("Nil"),
             ConstructorSig {
-                name: Text::from("Cons"),                arg_types: List::from_iter(vec![CoreTerm::Var(Text::from("Nat"))]),
+                name: Text::from("Cons"),
+                arg_types: List::from_iter(vec![CoreTerm::Var(Text::from("Nat"))]),
             },
         ]),
     )
@@ -298,10 +333,18 @@ fn v3_app_chain_endpoint_resolves_at_inner_ctor() {
     let elim = eliminator_type(&susp);
 
     // Walk past motive + case_Nil + case_Cons to find the path branch.
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { binder, domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { binder, domain, .. } = a.as_ref() else {
+        panic!()
+    };
     assert_eq!(binder.as_str(), "case_Step");
 
     // heterogeneous endpoints
@@ -340,7 +383,8 @@ fn v3_nested_app_chain_endpoint_resolves_recursively() {
         List::from_iter(vec![
             nullary("Nil"),
             ConstructorSig {
-                name: Text::from("Cons"),                arg_types: List::from_iter(vec![
+                name: Text::from("Cons"),
+                arg_types: List::from_iter(vec![
                     CoreTerm::Var(Text::from("Nat")),
                     CoreTerm::Var(Text::from("NestedList")),
                 ]),
@@ -367,10 +411,18 @@ fn v3_nested_app_chain_endpoint_resolves_recursively() {
     });
     let elim = eliminator_type(&nested);
     // Walk past motive + case_Nil + case_Cons.
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else {
+        panic!()
+    };
     // heterogeneous endpoints ⇒ PathOver.
     let CoreTerm::PathOver { rhs, .. } = domain.as_ref() else {
         panic!("Twist branch must be PathOver (heterogeneous endpoints)")
@@ -424,14 +476,22 @@ fn v3_non_ctor_app_passes_through() {
         ),
     });
     let elim = eliminator_type(&unrelated);
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else {
+        panic!()
+    };
     // heterogeneous endpoints ⇒ PathOver.
     let CoreTerm::PathOver { rhs, .. } = domain.as_ref() else {
         panic!("Wave branch must be PathOver (heterogeneous endpoints)")
     };
-    let CoreTerm::App(func, arg) = rhs.as_ref() else { panic!() };
+    let CoreTerm::App(func, arg) = rhs.as_ref() else {
+        panic!()
+    };
     assert!(matches!(func.as_ref(), CoreTerm::Var(n) if n.as_str() == "not_a_ctor"));
     assert!(matches!(arg.as_ref(), CoreTerm::Var(n) if n.as_str() == "arg"));
 }
@@ -521,13 +581,22 @@ fn binary_ctor_case_type_chains_pi() {
         args: List::new(),
     };
     let ctor = ConstructorSig {
-        name: Text::from("Pair"),        arg_types: List::from_iter(vec![int_ty.clone(), int_ty]),
+        name: Text::from("Pair"),
+        arg_types: List::from_iter(vec![int_ty.clone(), int_ty]),
     };
     let ty = point_constructor_case_type(&motive, &ctor);
     // Π (a0 : Int) . Π (a1 : Int) . motive(Pair(a0, a1))
-    let CoreTerm::Pi { binder, codomain, .. } = ty else { panic!() };
+    let CoreTerm::Pi {
+        binder, codomain, ..
+    } = ty
+    else {
+        panic!()
+    };
     assert_eq!(binder.as_str(), "a0");
-    let CoreTerm::Pi { binder, codomain, .. } = codomain.as_ref() else {
+    let CoreTerm::Pi {
+        binder, codomain, ..
+    } = codomain.as_ref()
+    else {
         panic!()
     };
     assert_eq!(binder.as_str(), "a1");
@@ -536,8 +605,12 @@ fn binary_ctor_case_type_chains_pi() {
         panic!()
     };
     assert!(matches!(motive_ref.as_ref(), CoreTerm::Var(n) if n.as_str() == "motive"));
-    let CoreTerm::App(pair_a0, a1) = pair_app.as_ref() else { panic!() };
-    let CoreTerm::App(pair, a0) = pair_a0.as_ref() else { panic!() };
+    let CoreTerm::App(pair_a0, a1) = pair_app.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::App(pair, a0) = pair_a0.as_ref() else {
+        panic!()
+    };
     assert!(matches!(pair.as_ref(), CoreTerm::Var(n) if n.as_str() == "Pair"));
     assert!(matches!(a0.as_ref(), CoreTerm::Var(n) if n.as_str() == "a0"));
     assert!(matches!(a1.as_ref(), CoreTerm::Var(n) if n.as_str() == "a1"));
@@ -569,10 +642,18 @@ fn nullary_endpoint_rewrites_to_case_binder() {
         rhs: CoreTerm::Var(Text::from("Base")),
     });
     let elim = eliminator_type(&s1);
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::PathTy { lhs, rhs, .. } = domain.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::PathTy { lhs, rhs, .. } = domain.as_ref() else {
+        panic!()
+    };
     assert!(matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Base"));
     assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_Base"));
 }
@@ -594,10 +675,18 @@ fn endpoint_not_referencing_point_ctor_falls_through_unchanged() {
         rhs: CoreTerm::Var(Text::from("External")),
     });
     let elim = eliminator_type(&hit);
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::PathTy { lhs, rhs, .. } = domain.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::PathTy { lhs, rhs, .. } = domain.as_ref() else {
+        panic!()
+    };
     // External is NOT a registered point ctor, so it stays as-is.
     assert!(matches!(lhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "External"));
     assert!(matches!(rhs.as_ref(), CoreTerm::Var(n) if n.as_str() == "External"));
@@ -623,10 +712,18 @@ fn app_chain_endpoint_falls_through_unchanged() {
         rhs: CoreTerm::Var(Text::from("South")),
     });
     let elim = eliminator_type(&hit);
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else {
+        panic!()
+    };
     // heterogeneous endpoints
     // (App(North, a0) ≠ South) ⇒ PathOver.
     let CoreTerm::PathOver { lhs, rhs, .. } = domain.as_ref() else {
@@ -657,8 +754,17 @@ fn elim_preserves_declared_universe_level() {
     .with_universe(UniverseLevel::Concrete(2));
     let elim = eliminator_type(&hit);
     // motive : T → Type_2.
-    let CoreTerm::Pi { domain: motive_dom, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: type_codom, .. } = motive_dom.as_ref() else {
+    let CoreTerm::Pi {
+        domain: motive_dom, ..
+    } = elim
+    else {
+        panic!()
+    };
+    let CoreTerm::Pi {
+        codomain: type_codom,
+        ..
+    } = motive_dom.as_ref()
+    else {
         panic!()
     };
     assert_eq!(

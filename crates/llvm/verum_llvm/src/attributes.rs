@@ -1,15 +1,15 @@
 //! `Attribute`s are optional modifiers to functions, function parameters, and return types.
 
 use verum_llvm_sys::core::{
-    LLVMGetEnumAttributeKind, LLVMGetEnumAttributeKindForName, LLVMGetEnumAttributeValue, LLVMGetLastEnumAttributeKind,
-    LLVMGetStringAttributeKind, LLVMGetStringAttributeValue, LLVMIsEnumAttribute, LLVMIsStringAttribute,
+    LLVMGetEnumAttributeKind, LLVMGetEnumAttributeKindForName, LLVMGetEnumAttributeValue,
+    LLVMGetLastEnumAttributeKind, LLVMGetStringAttributeKind, LLVMGetStringAttributeValue,
+    LLVMIsEnumAttribute, LLVMIsStringAttribute,
 };
 
 use verum_llvm_sys::core::{LLVMGetTypeAttributeValue, LLVMIsTypeAttribute};
 use verum_llvm_sys::prelude::LLVMAttributeRef;
 
 use std::ffi::CStr;
-
 
 use crate::types::AnyTypeEnum;
 
@@ -186,7 +186,9 @@ impl Attribute {
     /// assert_eq!(Attribute::get_named_enum_kind_id("builtin"), 5);
     /// ```
     pub fn get_named_enum_kind_id(name: &str) -> u32 {
-        unsafe { LLVMGetEnumAttributeKindForName(name.as_ptr() as *const ::libc::c_char, name.len()) }
+        unsafe {
+            LLVMGetEnumAttributeKindForName(name.as_ptr() as *const ::libc::c_char, name.len())
+        }
     }
 
     /// Gets the kind id associated with an enum `Attribute`.
@@ -393,7 +395,7 @@ impl AttributeLoc {
             AttributeLoc::Param(index) => {
                 assert!(index <= u32::MAX - 2, "Param index must be <= u32::MAX - 2");
                 index + 1
-            },
+            }
             AttributeLoc::Function => u32::MAX,
         }
     }

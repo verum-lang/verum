@@ -10,7 +10,6 @@
 use verum_common::{Heap, List, Maybe, Text};
 use verum_kernel::*;
 
-
 fn unit_ty() -> CoreTerm {
     CoreTerm::Inductive {
         path: Text::from("Unit"),
@@ -32,17 +31,12 @@ fn extend_then_lookup_finds_binding() {
 
 #[test]
 fn shadow_returns_innermost() {
-    let ctx = Context::new()
-        .extend(Text::from("x"), unit_ty())
-        .extend(
-            Text::from("x"),
-            CoreTerm::Universe(UniverseLevel::Concrete(0)),
-        );
+    let ctx = Context::new().extend(Text::from("x"), unit_ty()).extend(
+        Text::from("x"),
+        CoreTerm::Universe(UniverseLevel::Concrete(0)),
+    );
     match ctx.lookup("x") {
-        Maybe::Some(ty) => assert!(matches!(
-            ty,
-            CoreTerm::Universe(UniverseLevel::Concrete(0))
-        )),
+        Maybe::Some(ty) => assert!(matches!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)))),
         Maybe::None => panic!("expected shadowed binding"),
     }
 }
@@ -62,12 +56,7 @@ fn universe_checks_to_universe() {
     // over `infer`) reports the successor level, not the input.
     let ctx = Context::new();
     let ax = AxiomRegistry::new();
-    let ty = check(
-        &ctx,
-        &CoreTerm::Universe(UniverseLevel::Concrete(0)),
-        &ax,
-    )
-    .unwrap();
+    let ty = check(&ctx, &CoreTerm::Universe(UniverseLevel::Concrete(0)), &ax).unwrap();
     assert_eq!(ty, CoreType::Universe(UniverseLevel::Concrete(1)));
 }
 
@@ -244,7 +233,9 @@ fn smt_replay_refl_tag_produces_axiom_witness() {
     let ctx = Context::new();
     let term = replay_smt_cert(&ctx, &cert).unwrap();
     match term {
-        CoreTerm::Axiom { name, framework, .. } => {
+        CoreTerm::Axiom {
+            name, framework, ..
+        } => {
             assert!(name.as_str().starts_with("smt_cert:z3:refl:"));
             assert_eq!(framework.framework.as_str(), "z3:refl");
             assert_eq!(framework.citation.as_str(), "sha256:deadbeef");
@@ -466,12 +457,7 @@ fn serde_roundtrip_preserves_all_envelope_fields() {
 fn universe_inhabits_successor() {
     let ctx = Context::new();
     let ax = AxiomRegistry::new();
-    let ty = infer(
-        &ctx,
-        &CoreTerm::Universe(UniverseLevel::Concrete(0)),
-        &ax,
-    )
-    .unwrap();
+    let ty = infer(&ctx, &CoreTerm::Universe(UniverseLevel::Concrete(0)), &ax).unwrap();
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(1)));
 }
 
@@ -677,8 +663,7 @@ fn verify_full_rejects_mismatched_type() {
         body: Heap::new(CoreTerm::Var(Text::from("x"))),
     };
     let wrong = CoreTerm::Universe(UniverseLevel::Concrete(0));
-    let err =
-        verify_full(&Context::new(), &id_unit, &wrong, &ax).unwrap_err();
+    let err = verify_full(&Context::new(), &id_unit, &wrong, &ax).unwrap_err();
     assert!(matches!(err, KernelError::TypeMismatch { .. }));
 }
 
@@ -1110,11 +1095,7 @@ fn path_rejects_endpoint_type_mismatch() {
 
 /// Helper: build a parsed module with one `@framework(id, "cite")`
 /// axiom declaration.
-fn module_with_axiom(
-    framework_name: &str,
-    citation: &str,
-    axiom_name: &str,
-) -> verum_ast::Module {
+fn module_with_axiom(framework_name: &str, citation: &str, axiom_name: &str) -> verum_ast::Module {
     use verum_ast::attr::Attribute;
     use verum_ast::decl::{AxiomDecl, Visibility};
     use verum_ast::expr::Expr;
@@ -1133,8 +1114,7 @@ fn module_with_axiom(
     let mut args: List<Expr> = List::new();
     args.push(name_expr);
     args.push(cite_expr);
-    let framework_attr =
-        Attribute::new(Text::from("framework"), Maybe::Some(args), span);
+    let framework_attr = Attribute::new(Text::from("framework"), Maybe::Some(args), span);
 
     let mut attrs: List<Attribute> = List::new();
     attrs.push(framework_attr);
@@ -1142,10 +1122,7 @@ fn module_with_axiom(
     // Minimal AxiomDecl — body and clauses stay empty; the
     // loader only inspects name + attributes.
     let axiom_ident = Ident::new(Text::from(axiom_name), span);
-    let proposition = Expr::literal(Literal::new(
-        LiteralKind::Bool(true),
-        span,
-    ));
+    let proposition = Expr::literal(Literal::new(LiteralKind::Bool(true), span));
     let decl = AxiomDecl::new(axiom_ident, proposition, span);
     let mut decl = decl;
     decl.visibility = Visibility::Public;
@@ -1169,11 +1146,7 @@ fn module_with_axiom(
 
 #[test]
 fn load_framework_axioms_registers_single_marker() {
-    let module = module_with_axiom(
-        "lurie_htt",
-        "HTT 6.2.2.7",
-        "sheafification_is_topos",
-    );
+    let module = module_with_axiom("lurie_htt", "HTT 6.2.2.7", "sheafification_is_topos");
     let mut reg = AxiomRegistry::new();
     let report = load_framework_axioms(&module, &mut reg);
 
@@ -1195,11 +1168,7 @@ fn load_framework_axioms_registers_single_marker() {
 
 #[test]
 fn load_framework_axioms_detects_duplicate() {
-    let m1 = module_with_axiom(
-        "lurie_htt",
-        "HTT 6.2.2.7",
-        "sheafification_is_topos",
-    );
+    let m1 = module_with_axiom("lurie_htt", "HTT 6.2.2.7", "sheafification_is_topos");
     let m2 = module_with_axiom(
         "schreiber_dcct",
         "DCCT §3.9",
@@ -1431,11 +1400,7 @@ fn b222_strict_loader_admits_clean_axiom() {
     // Universe(Concrete(0)) — a closed type at Type_0. Both
     // subsingleton check and body-is-Prop check admit
     // it under ClosedPropositionOnly regime.
-    let module = module_with_axiom(
-        "lurie_htt",
-        "HTT 6.2.2.7",
-        "strict_witness",
-    );
+    let module = module_with_axiom("lurie_htt", "HTT 6.2.2.7", "strict_witness");
     let mut reg = AxiomRegistry::new();
     let report = load_framework_axioms_strict(&module, &mut reg);
     assert!(
@@ -1466,11 +1431,7 @@ fn b222_legacy_loader_preserves_pre_v8_behaviour() {
     // need the pre-V8.1 LegacyUnchecked shim must explicitly
     // call load_framework_axioms_legacy_unchecked.
     use verum_kernel::load_framework_axioms_legacy_unchecked;
-    let module = module_with_axiom(
-        "lurie_htt",
-        "HTT 6.2.2.7",
-        "legacy_witness",
-    );
+    let module = module_with_axiom("lurie_htt", "HTT 6.2.2.7", "legacy_witness");
     let mut reg = AxiomRegistry::new();
     let report = load_framework_axioms_legacy_unchecked(&module, &mut reg);
     assert!(report.is_clean());
@@ -1482,14 +1443,14 @@ fn b222_default_loader_is_strict_by_v8_1() {
     // production-default loader now
     // routes through ClosedPropositionOnly. Closed-Prop
     // placeholder bodies (Universe(Concrete(0))) admit cleanly.
-    let module = module_with_axiom(
-        "lurie_htt",
-        "HTT 6.2.2.7",
-        "default_strict_witness",
-    );
+    let module = module_with_axiom("lurie_htt", "HTT 6.2.2.7", "default_strict_witness");
     let mut reg = AxiomRegistry::new();
     let report = load_framework_axioms(&module, &mut reg);
-    assert!(report.is_clean(), "V8.1 default-strict admits placeholder body: {:?}", report);
+    assert!(
+        report.is_clean(),
+        "V8.1 default-strict admits placeholder body: {:?}",
+        report
+    );
     assert_eq!(report.registered.len(), 1);
     assert_eq!(report.soundness_violation_count(), 0);
 }
@@ -1498,17 +1459,10 @@ fn b222_default_loader_is_strict_by_v8_1() {
 fn b222_with_regime_uip_permitted_loader_admits() {
     // UipPermitted regime skips both subsingleton + body-is-Prop
     // checks (delegated to the imported UIP framework axiom).
-    let module = module_with_axiom(
-        "test_uip_corpus",
-        "UIP-test",
-        "uip_perm_witness",
-    );
+    let module = module_with_axiom("test_uip_corpus", "UIP-test", "uip_perm_witness");
     let mut reg = AxiomRegistry::new();
-    let report = load_framework_axioms_with_regime(
-        &module,
-        &mut reg,
-        SubsingletonRegime::UipPermitted,
-    );
+    let report =
+        load_framework_axioms_with_regime(&module, &mut reg, SubsingletonRegime::UipPermitted);
     assert!(report.is_clean());
     assert_eq!(report.registered.len(), 1);
 }
@@ -1663,10 +1617,7 @@ fn cubical_transp_does_not_reduce_when_path_uses_binder() {
     let dependent_path = CoreTerm::Lam {
         binder: Text::from("i"),
         domain: Heap::new(unit_ty()),
-        body: Heap::new(CoreTerm::App(
-            Heap::new(var("P")),
-            Heap::new(var("i")),
-        )),
+        body: Heap::new(CoreTerm::App(Heap::new(var("P")), Heap::new(var("i")))),
     };
     let tr = CoreTerm::Transp {
         path: Heap::new(dependent_path),

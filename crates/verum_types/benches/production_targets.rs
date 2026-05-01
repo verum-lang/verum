@@ -7,7 +7,7 @@
 //! Measures type checking throughput at various scales to verify
 //! the production target.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::time::Duration;
 use verum_ast::{

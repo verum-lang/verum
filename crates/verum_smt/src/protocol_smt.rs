@@ -35,9 +35,9 @@
 use std::time::{Duration, Instant};
 
 use verum_ast::ty::{GenericArg, Path, RefinementPredicate, Type};
+use verum_common::ToText;
 use verum_common::{Heap, List, Map, Maybe, Set, Text};
 use verum_protocol_types::protocol_base::{Protocol, ProtocolBound, ProtocolImpl};
-use verum_common::ToText;
 
 use z3::ast::{Bool, Dynamic};
 use z3::{Context, FuncDecl, SatResult, Solver, Sort, Symbol};
@@ -1761,10 +1761,7 @@ impl ProtocolEncoder {
         // claim and a `T.foo() -> Bool` claim were equivalent under
         // the encoding. That made signature-mismatch impossible to
         // detect via this predicate.
-        let method_key = format!(
-            "hasMethod_{:?}_{}_{:?}",
-            ty, method_name, method_signature
-        );
+        let method_key = format!("hasMethod_{:?}_{}_{:?}", ty, method_name, method_signature);
         Bool::new_const(Symbol::String(method_key))
     }
 
@@ -2062,7 +2059,6 @@ pub fn encode_hierarchy_as_chc(protocols: &[Protocol]) -> List<crate::fixedpoint
 mod tests {
     use super::*;
     use verum_ast::span::Span;
-    
 
     #[test]
     fn test_protocol_encoder_creation() {

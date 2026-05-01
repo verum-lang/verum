@@ -182,10 +182,7 @@ impl DepGraph {
 
     /// Get direct dependencies of a module
     fn dependencies_of(&self, module: &str) -> Vec<String> {
-        self.edges
-            .get(module)
-            .cloned()
-            .unwrap_or_default()
+        self.edges.get(module).cloned().unwrap_or_default()
     }
 
     /// Get transitive dependencies via BFS
@@ -305,12 +302,8 @@ impl DepGraph {
                     self.find_cycles_dfs(dep, visited, rec_stack, on_stack, cycles);
                 } else if on_stack.contains(dep.as_str()) {
                     // Found a cycle: extract from rec_stack
-                    let cycle_start = rec_stack
-                        .iter()
-                        .position(|n| n == dep)
-                        .unwrap_or(0);
-                    let mut cycle: Vec<String> =
-                        rec_stack[cycle_start..].to_vec();
+                    let cycle_start = rec_stack.iter().position(|n| n == dep).unwrap_or(0);
+                    let mut cycle: Vec<String> = rec_stack[cycle_start..].to_vec();
                     cycle.push(dep.clone());
                     cycles.push(cycle);
                 }
@@ -597,10 +590,7 @@ fn meta_dep_dependents_of(
 }
 
 /// Get maximum depth of module in dependency tree
-fn meta_dep_depth(
-    ctx: &mut MetaContext,
-    args: List<ConstValue>,
-) -> Result<ConstValue, MetaError> {
+fn meta_dep_depth(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
         return Err(MetaError::ArityMismatch {
             expected: 1,
@@ -944,8 +934,7 @@ mod tests {
     #[test]
     fn test_strongly_connected_components() {
         let mut ctx = create_test_context();
-        let result =
-            meta_dep_strongly_connected_components(&mut ctx, List::new()).unwrap();
+        let result = meta_dep_strongly_connected_components(&mut ctx, List::new()).unwrap();
         if let ConstValue::Array(sccs) = result {
             // In a DAG, each SCC has exactly one node
             assert_eq!(sccs.len(), 4);

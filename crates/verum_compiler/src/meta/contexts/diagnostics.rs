@@ -19,7 +19,7 @@
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
 //! registry, Pass 3+ performs semantic analysis. Sandboxed execution (no I/O).
 
-use verum_common::{span::LineColSpan, List, Map, Text};
+use verum_common::{List, Map, Text, span::LineColSpan};
 use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 
 /// Diagnostics collector for meta function execution
@@ -242,7 +242,8 @@ impl DiagnosticsCollector {
 
     /// Register generated to source mapping
     pub fn register_generated_span(&mut self, generated_id: Text, source_span: LineColSpan) {
-        self.generated_to_source_map.insert(generated_id, source_span);
+        self.generated_to_source_map
+            .insert(generated_id, source_span);
     }
 
     /// Get source span for generated code
@@ -300,10 +301,7 @@ mod tests {
     fn test_source_map() {
         let mut collector = DiagnosticsCollector::new();
         collector.register_source(1, Text::from("fn main() {}"));
-        assert_eq!(
-            collector.get_source(1),
-            Some(&Text::from("fn main() {}"))
-        );
+        assert_eq!(collector.get_source(1), Some(&Text::from("fn main() {}")));
         assert!(collector.get_source(2).is_none());
     }
 

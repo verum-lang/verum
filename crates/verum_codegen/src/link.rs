@@ -46,8 +46,8 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tracing::{info, warn};
 
-pub use verum_llvm_sys::lld::{LinkerFlavor, LinkerResult};
 pub use verum_llvm::lto::{LtoConfig, LtoMode, ThinLtoCache};
+pub use verum_llvm_sys::lld::{LinkerFlavor, LinkerResult};
 
 /// Link errors
 #[derive(Debug, Error)]
@@ -170,20 +170,30 @@ impl Platform {
     /// Detect platform from host.
     pub fn host() -> Self {
         #[cfg(target_os = "linux")]
-        { Platform::Linux }
+        {
+            Platform::Linux
+        }
         #[cfg(target_os = "macos")]
-        { Platform::MacOS }
+        {
+            Platform::MacOS
+        }
         #[cfg(target_os = "windows")]
-        { Platform::Windows }
+        {
+            Platform::Windows
+        }
         #[cfg(target_os = "freebsd")]
-        { Platform::FreeBSD }
+        {
+            Platform::FreeBSD
+        }
         #[cfg(not(any(
             target_os = "linux",
             target_os = "macos",
             target_os = "windows",
             target_os = "freebsd"
         )))]
-        { Platform::Linux } // Default to Linux for unknown platforms
+        {
+            Platform::Linux
+        } // Default to Linux for unknown platforms
     }
 }
 
@@ -264,8 +274,10 @@ impl NoLibcConfig {
                 // Link only with libSystem
                 "-lSystem".to_string(),
                 // Metal GPU compute framework (Apple Silicon)
-                "-framework".to_string(), "Metal".to_string(),
-                "-framework".to_string(), "Foundation".to_string(),
+                "-framework".to_string(),
+                "Metal".to_string(),
+                "-framework".to_string(),
+                "Foundation".to_string(),
                 // Objective-C runtime (for Metal bridge)
                 "-lobjc".to_string(),
             ],
@@ -578,7 +590,9 @@ impl LinkSession {
 
     /// Add object file
     pub fn add_object(mut self, path: impl AsRef<Path>) -> Self {
-        self.config.inputs.push(InputFile::Object(path.as_ref().to_path_buf()));
+        self.config
+            .inputs
+            .push(InputFile::Object(path.as_ref().to_path_buf()));
         self
     }
 
@@ -589,26 +603,34 @@ impl LinkSession {
         P: AsRef<Path>,
     {
         for path in paths {
-            self.config.inputs.push(InputFile::Object(path.as_ref().to_path_buf()));
+            self.config
+                .inputs
+                .push(InputFile::Object(path.as_ref().to_path_buf()));
         }
         self
     }
 
     /// Add static library archive
     pub fn add_archive(mut self, path: impl AsRef<Path>) -> Self {
-        self.config.inputs.push(InputFile::Archive(path.as_ref().to_path_buf()));
+        self.config
+            .inputs
+            .push(InputFile::Archive(path.as_ref().to_path_buf()));
         self
     }
 
     /// Add bitcode file for LTO
     pub fn add_bitcode(mut self, path: impl AsRef<Path>) -> Self {
-        self.config.inputs.push(InputFile::Bitcode(path.as_ref().to_path_buf()));
+        self.config
+            .inputs
+            .push(InputFile::Bitcode(path.as_ref().to_path_buf()));
         self
     }
 
     /// Add library by name
     pub fn add_library(mut self, name: impl AsRef<str>) -> Self {
-        self.config.inputs.push(InputFile::Library(name.as_ref().to_string()));
+        self.config
+            .inputs
+            .push(InputFile::Library(name.as_ref().to_string()));
         self
     }
 
@@ -619,7 +641,9 @@ impl LinkSession {
         S: AsRef<str>,
     {
         for name in names {
-            self.config.inputs.push(InputFile::Library(name.as_ref().to_string()));
+            self.config
+                .inputs
+                .push(InputFile::Library(name.as_ref().to_string()));
         }
         self
     }
@@ -876,9 +900,11 @@ impl PreparedLink {
 
     /// Perform the link
     pub fn link(self) -> LinkResult<LinkOutput> {
-        info!("Starting link: {} inputs -> {}",
-              self.config.inputs.len(),
-              self.config.output.display());
+        info!(
+            "Starting link: {} inputs -> {}",
+            self.config.inputs.len(),
+            self.config.output.display()
+        );
 
         if self.config.lto.is_some() {
             return self.link_with_lto();
@@ -1017,7 +1043,11 @@ impl PreparedLink {
 
         let lto_config = self.config.lto.clone().unwrap_or_default();
 
-        info!("Performing {:?} LTO on {} inputs", lto_config.mode, self.config.inputs.len());
+        info!(
+            "Performing {:?} LTO on {} inputs",
+            lto_config.mode,
+            self.config.inputs.len()
+        );
 
         // Collect bitcode files
         let mut bitcode_files = Vec::new();
@@ -1033,12 +1063,14 @@ impl PreparedLink {
                 InputFile::LlvmIr(path) => {
                     let ir = std::fs::read_to_string(path)?;
                     let ctx = verum_llvm::context::Context::create();
-                    let mem_buf = verum_llvm::memory_buffer::MemoryBuffer::create_from_memory_range_copy(
-                        ir.as_bytes(),
-                        path.to_string_lossy().as_ref(),
-                    );
-                    let module = ctx.create_module_from_ir(mem_buf)
-                        .map_err(|e| LinkError::Backend(format!("Failed to parse LLVM IR: {}", e.to_string())))?;
+                    let mem_buf =
+                        verum_llvm::memory_buffer::MemoryBuffer::create_from_memory_range_copy(
+                            ir.as_bytes(),
+                            path.to_string_lossy().as_ref(),
+                        );
+                    let module = ctx.create_module_from_ir(mem_buf).map_err(|e| {
+                        LinkError::Backend(format!("Failed to parse LLVM IR: {}", e.to_string()))
+                    })?;
                     let bc = module.write_bitcode_to_memory();
                     bitcode_files.push(bc.as_slice().to_vec());
                 }
@@ -1203,18 +1235,14 @@ mod tests {
 
     #[test]
     fn test_missing_inputs() {
-        let result = LinkSession::new()
-            .output("test")
-            .build();
+        let result = LinkSession::new().output("test").build();
 
         assert!(matches!(result, Err(LinkError::NoInputs)));
     }
 
     #[test]
     fn test_missing_output() {
-        let result = LinkSession::new()
-            .add_object("test.o")
-            .build();
+        let result = LinkSession::new().add_object("test.o").build();
 
         assert!(matches!(result, Err(LinkError::NoOutput)));
     }

@@ -13,9 +13,9 @@
 use crate::position_utils::verum_span_to_range;
 use tower_lsp::lsp_types::*;
 use verum_ast::FileId;
+use verum_common::List;
 use verum_diagnostics::{Diagnostic as VerumDiagnostic, Severity};
 use verum_parser::syntax_bridge::LosslessParser;
-use verum_common::List;
 use verum_syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 
 // ==================== Core Diagnostic Conversion ====================
@@ -186,7 +186,12 @@ impl IncrementalDiagnosticsProvider {
         // Compute changes
         let added: Vec<_> = new_diagnostics
             .iter()
-            .filter(|d| !self.previous_diagnostics.iter().any(|p| diagnostics_equal(p, d)))
+            .filter(|d| {
+                !self
+                    .previous_diagnostics
+                    .iter()
+                    .any(|p| diagnostics_equal(p, d))
+            })
             .cloned()
             .collect();
 
@@ -268,18 +273,41 @@ impl IncrementalDiagnosticsProvider {
         let (message, code) = if text.is_empty() {
             // Empty error node - something is missing
             match parent_kind {
-                Some(SyntaxKind::FN_DEF) => ("Expected function body or semicolon".to_string(), "E0001".to_string()),
-                Some(SyntaxKind::TYPE_DEF) => ("Expected type definition body".to_string(), "E0002".to_string()),
-                Some(SyntaxKind::BLOCK) => ("Expected expression or statement".to_string(), "E0003".to_string()),
-                Some(SyntaxKind::PARAM_LIST) => ("Expected parameter or ')'".to_string(), "E0004".to_string()),
+                Some(SyntaxKind::FN_DEF) => (
+                    "Expected function body or semicolon".to_string(),
+                    "E0001".to_string(),
+                ),
+                Some(SyntaxKind::TYPE_DEF) => (
+                    "Expected type definition body".to_string(),
+                    "E0002".to_string(),
+                ),
+                Some(SyntaxKind::BLOCK) => (
+                    "Expected expression or statement".to_string(),
+                    "E0003".to_string(),
+                ),
+                Some(SyntaxKind::PARAM_LIST) => {
+                    ("Expected parameter or ')'".to_string(), "E0004".to_string())
+                }
                 _ => ("Unexpected end of input".to_string(), "E0000".to_string()),
             }
-        } else if tokens.iter().any(|t| t.kind() == SyntaxKind::L_BRACE) && !tokens.iter().any(|t| t.kind() == SyntaxKind::R_BRACE) {
+        } else if tokens.iter().any(|t| t.kind() == SyntaxKind::L_BRACE)
+            && !tokens.iter().any(|t| t.kind() == SyntaxKind::R_BRACE)
+        {
             ("Missing closing brace '}'".to_string(), "E0010".to_string())
-        } else if tokens.iter().any(|t| t.kind() == SyntaxKind::L_PAREN) && !tokens.iter().any(|t| t.kind() == SyntaxKind::R_PAREN) {
-            ("Missing closing parenthesis ')'".to_string(), "E0011".to_string())
-        } else if tokens.iter().any(|t| t.kind() == SyntaxKind::L_BRACKET) && !tokens.iter().any(|t| t.kind() == SyntaxKind::R_BRACKET) {
-            ("Missing closing bracket ']'".to_string(), "E0012".to_string())
+        } else if tokens.iter().any(|t| t.kind() == SyntaxKind::L_PAREN)
+            && !tokens.iter().any(|t| t.kind() == SyntaxKind::R_PAREN)
+        {
+            (
+                "Missing closing parenthesis ')'".to_string(),
+                "E0011".to_string(),
+            )
+        } else if tokens.iter().any(|t| t.kind() == SyntaxKind::L_BRACKET)
+            && !tokens.iter().any(|t| t.kind() == SyntaxKind::R_BRACKET)
+        {
+            (
+                "Missing closing bracket ']'".to_string(),
+                "E0012".to_string(),
+            )
         } else if text.ends_with('{') || text.ends_with('(') || text.ends_with('[') {
             ("Unclosed delimiter".to_string(), "E0013".to_string())
         } else if !text.ends_with(';') && self.looks_like_statement(node) {
@@ -296,7 +324,10 @@ impl IncrementalDiagnosticsProvider {
             } else {
                 preview.to_string()
             };
-            (format!("Syntax error near '{}'", preview), "E0099".to_string())
+            (
+                format!("Syntax error near '{}'", preview),
+                "E0099".to_string(),
+            )
         };
 
         (message, code)
@@ -759,18 +790,36 @@ mod tests {
     #[test]
     fn test_ranges_overlap() {
         let a = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 10 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 10,
+            },
         };
         let b = Range {
-            start: Position { line: 0, character: 5 },
-            end: Position { line: 0, character: 15 },
+            start: Position {
+                line: 0,
+                character: 5,
+            },
+            end: Position {
+                line: 0,
+                character: 15,
+            },
         };
         assert!(ranges_overlap(&a, &b));
 
         let c = Range {
-            start: Position { line: 1, character: 0 },
-            end: Position { line: 1, character: 10 },
+            start: Position {
+                line: 1,
+                character: 0,
+            },
+            end: Position {
+                line: 1,
+                character: 10,
+            },
         };
         assert!(!ranges_overlap(&a, &c));
     }

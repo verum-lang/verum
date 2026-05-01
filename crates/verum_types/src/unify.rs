@@ -136,8 +136,7 @@ impl Unifier {
 
         // Tensor family: populated via register_tensor_family_type() from
         // stdlib declarations (types implementing TensorLike protocol).
-        let tensor_family_types: std::collections::HashSet<Text> =
-            std::collections::HashSet::new();
+        let tensor_family_types: std::collections::HashSet<Text> = std::collections::HashSet::new();
 
         // Named types that coerce bidirectionally with Int.
         // Only language-level primitive integer types are hardcoded here.
@@ -145,35 +144,36 @@ impl Unifier {
         // via register_int_coercible_type() during type checking.
         let int_coercible_named_types: std::collections::HashSet<Text> = [
             // Sized integer types — these are language primitives, not stdlib
-            "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "UInt128",
-            "Int8", "Int16", "Int32", "Int64", "Int128",
-            "U8", "U16", "U32", "U64", "I8", "I16", "I32", "I64",
-            "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64",
-            "Byte", "usize", "isize", "UIntSize", "USize", "IntSize", "ISize",
-        ].iter().map(|s| Text::from(*s)).collect();
+            "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "UInt128", "Int8", "Int16", "Int32",
+            "Int64", "Int128", "U8", "U16", "U32", "U64", "I8", "I16", "I32", "I64", "u8", "u16",
+            "u32", "u64", "i8", "i16", "i32", "i64", "Byte", "usize", "isize", "UIntSize", "USize",
+            "IntSize", "ISize",
+        ]
+        .iter()
+        .map(|s| Text::from(*s))
+        .collect();
 
         // Collection types that support integer indexing — populated
         // dynamically via register_indexable_type() from stdlib.
-        let indexable_collection_types: std::collections::HashSet<Text> = [
-            "List",
-        ].iter().map(|s| Text::from(*s)).collect();
+        let indexable_collection_types: std::collections::HashSet<Text> =
+            ["List"].iter().map(|s| Text::from(*s)).collect();
 
         // Range-like types — populated via register_range_like_type() from stdlib.
-        let range_like_types: std::collections::HashSet<Text> =
-            std::collections::HashSet::new();
+        let range_like_types: std::collections::HashSet<Text> = std::collections::HashSet::new();
 
         // Sized numeric types that cross-coerce with each other (Named<->Named).
         // These are arguably language-level (not stdlib), but centralized here.
         // Sized numeric types — language primitives only, no stdlib types.
         // Additional types can be registered via register_sized_numeric_type().
         let sized_numeric_types: std::collections::HashSet<Text> = [
-            "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "UInt128",
-            "Int8", "Int16", "Int32", "Int64", "Int128",
-            "U8", "U16", "U32", "U64", "I8", "I16", "I32", "I64",
-            "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64",
-            "Byte", "usize", "isize", "UIntSize", "USize", "IntSize", "ISize",
-            "Float32", "Float64", "f32", "f64",
-        ].iter().map(|s| Text::from(*s)).collect();
+            "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "UInt128", "Int8", "Int16", "Int32",
+            "Int64", "Int128", "U8", "U16", "U32", "U64", "I8", "I16", "I32", "I64", "u8", "u16",
+            "u32", "u64", "i8", "i16", "i32", "i64", "Byte", "usize", "isize", "UIntSize", "USize",
+            "IntSize", "ISize", "Float32", "Float64", "f32", "f64",
+        ]
+        .iter()
+        .map(|s| Text::from(*s))
+        .collect();
 
         Self {
             unify_count: 0,
@@ -319,7 +319,9 @@ impl Unifier {
         // Use entry().or_insert to keep FIRST registration (stdlib types registered first
         // should take precedence). This ensures deterministic variant resolution
         // regardless of module registration order.
-        self.variant_type_names.entry(signature).or_insert(type_name);
+        self.variant_type_names
+            .entry(signature)
+            .or_insert(type_name);
     }
 
     /// Register the original (unsubstituted) variant type definition.
@@ -367,7 +369,9 @@ impl Unifier {
         match ty {
             Type::Named { path, args } => {
                 let name = path.segments.last().and_then(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(ident) => Some(Text::from(ident.name.as_str())),
+                    verum_ast::ty::PathSegment::Name(ident) => {
+                        Some(Text::from(ident.name.as_str()))
+                    }
                     _ => None,
                 });
                 if let Some(n) = name {
@@ -429,11 +433,9 @@ impl Unifier {
         match ty {
             // Direct Named type alias (e.g., Byte -> UInt8)
             Type::Named { path, args } => {
-                let type_name = path.segments.last().and_then(|seg| {
-                    match seg {
-                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
-                        _ => None,
-                    }
+                let type_name = path.segments.last().and_then(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+                    _ => None,
                 });
                 if let Some(name) = type_name {
                     let key = Text::from(name);
@@ -446,9 +448,8 @@ impl Unifier {
                         // Substitute positional type arguments into the alias target.
                         if let Some(param_names) = self.type_alias_params.get(&key) {
                             if !param_names.is_empty() && args.len() <= param_names.len() {
-                                let substituted = self.substitute_alias_params(
-                                    target, param_names, args,
-                                );
+                                let substituted =
+                                    self.substitute_alias_params(target, param_names, args);
                                 return Some(substituted);
                             }
                         }
@@ -457,35 +458,46 @@ impl Unifier {
                 // Try expanding aliases in type arguments (e.g., List<Byte> -> List<UInt8>)
                 let mut changed = false;
                 let d = depth + 1;
-                let new_args: List<Type> = args.iter().map(|arg| {
-                    if let Some(expanded) = self.try_expand_alias_impl(arg, d) {
-                        changed = true;
-                        expanded
-                    } else {
-                        arg.clone()
-                    }
-                }).collect();
+                let new_args: List<Type> = args
+                    .iter()
+                    .map(|arg| {
+                        if let Some(expanded) = self.try_expand_alias_impl(arg, d) {
+                            changed = true;
+                            expanded
+                        } else {
+                            arg.clone()
+                        }
+                    })
+                    .collect();
                 if changed {
-                    Some(Type::Named { path: path.clone(), args: new_args })
+                    Some(Type::Named {
+                        path: path.clone(),
+                        args: new_args,
+                    })
                 } else {
                     None
                 }
             }
             // Expand through references: &T, &mut T, &checked T, etc.
             Type::Reference { inner, mutable } => {
-                self.try_expand_alias_impl(inner, depth + 1).map(|expanded| {
-                    Type::Reference { inner: Box::new(expanded), mutable: *mutable }
-                })
+                self.try_expand_alias_impl(inner, depth + 1)
+                    .map(|expanded| Type::Reference {
+                        inner: Box::new(expanded),
+                        mutable: *mutable,
+                    })
             }
-            Type::CheckedReference { inner, mutable } => {
-                self.try_expand_alias_impl(inner, depth + 1).map(|expanded| {
-                    Type::CheckedReference { inner: Box::new(expanded), mutable: *mutable }
-                })
-            }
+            Type::CheckedReference { inner, mutable } => self
+                .try_expand_alias_impl(inner, depth + 1)
+                .map(|expanded| Type::CheckedReference {
+                    inner: Box::new(expanded),
+                    mutable: *mutable,
+                }),
             Type::Ownership { inner, mutable } => {
-                self.try_expand_alias_impl(inner, depth + 1).map(|expanded| {
-                    Type::Ownership { inner: Box::new(expanded), mutable: *mutable }
-                })
+                self.try_expand_alias_impl(inner, depth + 1)
+                    .map(|expanded| Type::Ownership {
+                        inner: Box::new(expanded),
+                        mutable: *mutable,
+                    })
             }
             // Handle Generic type aliases (e.g., IoResult<Text> as Generic { name: "IoResult", args: [Text] })
             Type::Generic { name, args } => {
@@ -496,9 +508,8 @@ impl Unifier {
                     }
                     if let Some(param_names) = self.type_alias_params.get(&key) {
                         if !param_names.is_empty() && args.len() <= param_names.len() {
-                            let substituted = self.substitute_alias_params(
-                                target, param_names, args,
-                            );
+                            let substituted =
+                                self.substitute_alias_params(target, param_names, args);
                             return Some(substituted);
                         }
                     }
@@ -506,16 +517,22 @@ impl Unifier {
                 // Try expanding aliases in type arguments
                 let mut changed = false;
                 let d = depth + 1;
-                let new_args: List<Type> = args.iter().map(|arg| {
-                    if let Some(expanded) = self.try_expand_alias_impl(arg, d) {
-                        changed = true;
-                        expanded
-                    } else {
-                        arg.clone()
-                    }
-                }).collect();
+                let new_args: List<Type> = args
+                    .iter()
+                    .map(|arg| {
+                        if let Some(expanded) = self.try_expand_alias_impl(arg, d) {
+                            changed = true;
+                            expanded
+                        } else {
+                            arg.clone()
+                        }
+                    })
+                    .collect();
                 if changed {
-                    Some(Type::Generic { name: name.clone(), args: new_args })
+                    Some(Type::Generic {
+                        name: name.clone(),
+                        args: new_args,
+                    })
                 } else {
                     None
                 }
@@ -524,15 +541,22 @@ impl Unifier {
             Type::Tuple(elements) => {
                 let mut changed = false;
                 let d = depth + 1;
-                let new_elements: List<Type> = elements.iter().map(|el| {
-                    if let Some(expanded) = self.try_expand_alias_impl(el, d) {
-                        changed = true;
-                        expanded
-                    } else {
-                        el.clone()
-                    }
-                }).collect();
-                if changed { Some(Type::Tuple(new_elements)) } else { None }
+                let new_elements: List<Type> = elements
+                    .iter()
+                    .map(|el| {
+                        if let Some(expanded) = self.try_expand_alias_impl(el, d) {
+                            changed = true;
+                            expanded
+                        } else {
+                            el.clone()
+                        }
+                    })
+                    .collect();
+                if changed {
+                    Some(Type::Tuple(new_elements))
+                } else {
+                    None
+                }
             }
             _ => None,
         }
@@ -543,7 +567,8 @@ impl Unifier {
     /// replaces all occurrences of type variable "T" with Text in the target type.
     fn substitute_alias_params(&self, target: &Type, param_names: &[Text], args: &[Type]) -> Type {
         // Build a name->type substitution map
-        let subst_map: Map<Text, Type> = param_names.iter()
+        let subst_map: Map<Text, Type> = param_names
+            .iter()
             .zip(args.iter())
             .map(|(name, ty)| (name.clone(), ty.clone()))
             .collect();
@@ -592,10 +617,14 @@ impl Unifier {
                         return replacement.clone();
                     }
                 }
-                let new_args: List<Type> = args.iter()
+                let new_args: List<Type> = args
+                    .iter()
                     .map(|a| self.apply_alias_subst_impl(a, subst, d))
                     .collect();
-                Type::Generic { name: name.clone(), args: new_args }
+                Type::Generic {
+                    name: name.clone(),
+                    args: new_args,
+                }
             }
             // Named types: recurse into args
             Type::Named { path, args } => {
@@ -607,28 +636,41 @@ impl Unifier {
                         }
                     }
                 }
-                let new_args: List<Type> = args.iter()
+                let new_args: List<Type> = args
+                    .iter()
                     .map(|a| self.apply_alias_subst_impl(a, subst, d))
                     .collect();
-                Type::Named { path: path.clone(), args: new_args }
+                Type::Named {
+                    path: path.clone(),
+                    args: new_args,
+                }
             }
             // Variant types: recurse into payloads
             Type::Variant(variants) => {
-                let new_variants: indexmap::IndexMap<Text, Type> = variants.iter()
+                let new_variants: indexmap::IndexMap<Text, Type> = variants
+                    .iter()
                     .map(|(k, v)| (k.clone(), self.apply_alias_subst_impl(v, subst, d)))
                     .collect();
                 Type::Variant(new_variants)
             }
             // Record types: recurse into fields
             Type::Record(fields) => {
-                let new_fields: indexmap::IndexMap<Text, Type> = fields.iter()
+                let new_fields: indexmap::IndexMap<Text, Type> = fields
+                    .iter()
                     .map(|(k, v)| (k.clone(), self.apply_alias_subst_impl(v, subst, d)))
                     .collect();
                 Type::Record(new_fields)
             }
             // Function types: recurse into params and return
-            Type::Function { params, return_type, contexts, properties, type_params } => {
-                let new_params: List<Type> = params.iter()
+            Type::Function {
+                params,
+                return_type,
+                contexts,
+                properties,
+                type_params,
+            } => {
+                let new_params: List<Type> = params
+                    .iter()
                     .map(|p| self.apply_alias_subst_impl(p, subst, d))
                     .collect();
                 let new_ret = Box::new(self.apply_alias_subst_impl(return_type, subst, d));
@@ -641,44 +683,35 @@ impl Unifier {
                 }
             }
             // Reference types: recurse into inner
-            Type::Reference { inner, mutable } => {
-                Type::Reference {
-                    inner: Box::new(self.apply_alias_subst_impl(inner, subst, d)),
-                    mutable: *mutable,
-                }
-            }
-            Type::CheckedReference { inner, mutable } => {
-                Type::CheckedReference {
-                    inner: Box::new(self.apply_alias_subst_impl(inner, subst, d)),
-                    mutable: *mutable,
-                }
-            }
-            Type::Ownership { inner, mutable } => {
-                Type::Ownership {
-                    inner: Box::new(self.apply_alias_subst_impl(inner, subst, d)),
-                    mutable: *mutable,
-                }
-            }
+            Type::Reference { inner, mutable } => Type::Reference {
+                inner: Box::new(self.apply_alias_subst_impl(inner, subst, d)),
+                mutable: *mutable,
+            },
+            Type::CheckedReference { inner, mutable } => Type::CheckedReference {
+                inner: Box::new(self.apply_alias_subst_impl(inner, subst, d)),
+                mutable: *mutable,
+            },
+            Type::Ownership { inner, mutable } => Type::Ownership {
+                inner: Box::new(self.apply_alias_subst_impl(inner, subst, d)),
+                mutable: *mutable,
+            },
             // Tuple types: recurse
             Type::Tuple(elements) => {
-                let new_elements: List<Type> = elements.iter()
+                let new_elements: List<Type> = elements
+                    .iter()
                     .map(|e| self.apply_alias_subst_impl(e, subst, d))
                     .collect();
                 Type::Tuple(new_elements)
             }
             // Array types: recurse into element type
-            Type::Array { element, size } => {
-                Type::Array {
-                    element: Box::new(self.apply_alias_subst_impl(element, subst, d)),
-                    size: *size,
-                }
-            }
+            Type::Array { element, size } => Type::Array {
+                element: Box::new(self.apply_alias_subst_impl(element, subst, d)),
+                size: *size,
+            },
             // Future types: recurse into output
-            Type::Future { output } => {
-                Type::Future {
-                    output: Box::new(self.apply_alias_subst_impl(output, subst, d)),
-                }
-            }
+            Type::Future { output } => Type::Future {
+                output: Box::new(self.apply_alias_subst_impl(output, subst, d)),
+            },
             // All other types: return as-is
             _ => ty.clone(),
         }
@@ -694,11 +727,10 @@ impl Unifier {
             .iter()
             .map(|(name, payload)| {
                 let payload_name = match payload {
-                    Type::Named { path, .. } => {
-                        path.as_ident()
-                            .map(|id| id.name.as_str().to_string())
-                            .unwrap_or_default()
-                    }
+                    Type::Named { path, .. } => path
+                        .as_ident()
+                        .map(|id| id.name.as_str().to_string())
+                        .unwrap_or_default(),
                     Type::Generic { name: n, .. } => n.as_str().to_string(),
                     // Unit, primitives, and TypeVars are not distinctive for
                     // disambiguation — only Named/Generic payload types matter.
@@ -734,8 +766,22 @@ impl Unifier {
             (Type::Var(tv), concrete) => {
                 mapping.entry(*tv).or_insert_with(|| concrete.clone());
             }
-            (Type::Generic { args: orig_args, .. }, Type::Generic { args: subst_args, .. })
-            | (Type::Named { args: orig_args, .. }, Type::Named { args: subst_args, .. }) => {
+            (
+                Type::Generic {
+                    args: orig_args, ..
+                },
+                Type::Generic {
+                    args: subst_args, ..
+                },
+            )
+            | (
+                Type::Named {
+                    args: orig_args, ..
+                },
+                Type::Named {
+                    args: subst_args, ..
+                },
+            ) => {
                 for (orig_arg, subst_arg) in orig_args.iter().zip(subst_args.iter()) {
                     Self::extract_type_var_mapping_static(orig_arg, subst_arg, mapping);
                 }
@@ -753,17 +799,46 @@ impl Unifier {
                 }
             }
             (
-                Type::Function { params: orig_params, return_type: orig_ret, .. },
-                Type::Function { params: subst_params, return_type: subst_ret, .. },
+                Type::Function {
+                    params: orig_params,
+                    return_type: orig_ret,
+                    ..
+                },
+                Type::Function {
+                    params: subst_params,
+                    return_type: subst_ret,
+                    ..
+                },
             ) => {
                 for (orig_param, subst_param) in orig_params.iter().zip(subst_params.iter()) {
                     Self::extract_type_var_mapping_static(orig_param, subst_param, mapping);
                 }
                 Self::extract_type_var_mapping_static(orig_ret, subst_ret, mapping);
             }
-            (Type::Reference { inner: orig_inner, .. }, Type::Reference { inner: subst_inner, .. })
-            | (Type::CheckedReference { inner: orig_inner, .. }, Type::CheckedReference { inner: subst_inner, .. })
-            | (Type::UnsafeReference { inner: orig_inner, .. }, Type::UnsafeReference { inner: subst_inner, .. }) => {
+            (
+                Type::Reference {
+                    inner: orig_inner, ..
+                },
+                Type::Reference {
+                    inner: subst_inner, ..
+                },
+            )
+            | (
+                Type::CheckedReference {
+                    inner: orig_inner, ..
+                },
+                Type::CheckedReference {
+                    inner: subst_inner, ..
+                },
+            )
+            | (
+                Type::UnsafeReference {
+                    inner: orig_inner, ..
+                },
+                Type::UnsafeReference {
+                    inner: subst_inner, ..
+                },
+            ) => {
                 Self::extract_type_var_mapping_static(orig_inner, subst_inner, mapping);
             }
             (Type::Variant(orig_variants), Type::Variant(subst_variants)) => {
@@ -792,7 +867,7 @@ impl Unifier {
             .filter(|payload| **payload != Type::Unit)
             .collect();
 
-                // #[cfg(debug_assertions)]
+        // #[cfg(debug_assertions)]
         // eprintln!("[DEBUG unify_generic_variant_fallback] non_unit_payloads={:?}", non_unit_payloads);
 
         // Number of non-Unit payloads should match number of type args
@@ -807,11 +882,8 @@ impl Unifier {
         // Unify each type argument with corresponding payload
         let mut subst = Substitution::new();
         for (arg, payload) in args.iter().zip(non_unit_payloads.iter()) {
-            let s = self.unify_inner(
-                &arg.apply_subst(&subst),
-                &payload.apply_subst(&subst),
-                span,
-            )?;
+            let s =
+                self.unify_inner(&arg.apply_subst(&subst), &payload.apply_subst(&subst), span)?;
             subst = subst.compose(&s);
         }
         Ok(subst)
@@ -861,11 +933,14 @@ impl Unifier {
                 contexts,
                 properties,
             } => {
-                let resolved_contexts = contexts.as_ref().map(|ctx| {
-                    ctx.apply_context_subst(&self.context_bindings)
-                });
+                let resolved_contexts = contexts
+                    .as_ref()
+                    .map(|ctx| ctx.apply_context_subst(&self.context_bindings));
                 Type::Function {
-                    params: params.iter().map(|p| self.resolve_context_vars(p)).collect(),
+                    params: params
+                        .iter()
+                        .map(|p| self.resolve_context_vars(p))
+                        .collect(),
                     return_type: Box::new(self.resolve_context_vars(return_type)),
                     type_params: type_params.clone(),
                     contexts: resolved_contexts,
@@ -925,13 +1000,19 @@ impl Unifier {
                     Self::collect_type_vars_from_type(elem, vars);
                 }
             }
-            Function { params, return_type, .. } => {
+            Function {
+                params,
+                return_type,
+                ..
+            } => {
                 for param in params {
                     Self::collect_type_vars_from_type(param, vars);
                 }
                 Self::collect_type_vars_from_type(return_type, vars);
             }
-            Reference { inner, .. } | CheckedReference { inner, .. } | UnsafeReference { inner, .. } => {
+            Reference { inner, .. }
+            | CheckedReference { inner, .. }
+            | UnsafeReference { inner, .. } => {
                 Self::collect_type_vars_from_type(inner, vars);
             }
             Array { element, .. } | Slice { element } => {
@@ -964,9 +1045,7 @@ impl Unifier {
                 params,
                 return_type,
                 ..
-            } => {
-                params.iter().any(Self::has_type_vars) || Self::has_type_vars(return_type)
-            }
+            } => params.iter().any(Self::has_type_vars) || Self::has_type_vars(return_type),
             Reference { inner, .. }
             | CheckedReference { inner, .. }
             | UnsafeReference { inner, .. } => Self::has_type_vars(inner),
@@ -1017,8 +1096,8 @@ impl Unifier {
 
         match (a, b) {
             // Variable binds to concrete
-            (ContextExpr::Variable(var), concrete @ ContextExpr::Concrete(_)) |
-            (concrete @ ContextExpr::Concrete(_), ContextExpr::Variable(var)) => {
+            (ContextExpr::Variable(var), concrete @ ContextExpr::Concrete(_))
+            | (concrete @ ContextExpr::Concrete(_), ContextExpr::Variable(var)) => {
                 // Check for conflicting binding
                 if let Some(existing) = self.context_bindings.get(var) {
                     if existing != concrete {
@@ -1036,7 +1115,8 @@ impl Unifier {
             // Both variables: bind first to second (if distinct)
             (ContextExpr::Variable(v1), ContextExpr::Variable(v2)) => {
                 if v1 != v2 {
-                    self.context_bindings.insert(*v1, ContextExpr::Variable(*v2));
+                    self.context_bindings
+                        .insert(*v1, ContextExpr::Variable(*v2));
                 }
                 Ok(())
             }
@@ -1103,12 +1183,14 @@ impl Unifier {
             // None with variable: variable binds to empty (pure)
             (None, Some(ContextExpr::Variable(var))) => {
                 use crate::di::requirement::ContextRequirement;
-                self.context_bindings.insert(*var, ContextExpr::Concrete(ContextRequirement::empty()));
+                self.context_bindings
+                    .insert(*var, ContextExpr::Concrete(ContextRequirement::empty()));
                 Ok(Substitution::new())
             }
             (Some(ContextExpr::Variable(var)), None) => {
                 use crate::di::requirement::ContextRequirement;
-                self.context_bindings.insert(*var, ContextExpr::Concrete(ContextRequirement::empty()));
+                self.context_bindings
+                    .insert(*var, ContextExpr::Concrete(ContextRequirement::empty()));
                 Ok(Substitution::new())
             }
 
@@ -1145,9 +1227,10 @@ impl Unifier {
         self.unify_depth += 1;
         if self.unify_depth > 200 {
             self.unify_depth -= 1;
-            return Err(TypeError::Other(
-                verum_common::Text::from(format!("unification depth exceeded ({})", self.unify_depth)),
-            ));
+            return Err(TypeError::Other(verum_common::Text::from(format!(
+                "unification depth exceeded ({})",
+                self.unify_depth
+            ))));
         }
         let result = self.unify_impl(t1, t2, span);
         self.unify_depth -= 1;
@@ -1158,9 +1241,9 @@ impl Unifier {
         // Guard against infinite unification loops
         const MAX_UNIFY_CALLS: usize = 50_000;
         if self.unify_count > MAX_UNIFY_CALLS {
-            return Err(TypeError::Other(
-                verum_common::Text::from("type inference iteration limit exceeded (possible infinite loop)"),
-            ));
+            return Err(TypeError::Other(verum_common::Text::from(
+                "type inference iteration limit exceeded (possible infinite loop)",
+            )));
         }
 
         // Apply current substitution to both types before unifying
@@ -1209,9 +1292,9 @@ impl Unifier {
         self.unify_depth += 1;
         if self.unify_depth > self.max_unify_depth {
             self.unify_depth -= 1;
-            return Err(TypeError::Other(
-                verum_common::Text::from("type inference recursion limit exceeded"),
-            ));
+            return Err(TypeError::Other(verum_common::Text::from(
+                "type inference recursion limit exceeded",
+            )));
         }
         let result = self.unify_inner_impl(t1, t2, span);
         self.unify_depth = self.unify_depth.saturating_sub(1);
@@ -1306,10 +1389,14 @@ impl Unifier {
             // O(1) cache of the protocol-implementation discovery result —
             // the structural check happens at pipeline-load time.
             (Int, Named { path, .. }) | (Named { path, .. }, Int) => {
-                let name = path.segments.last().map(|s| match s {
-                    verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                    _ => "",
-                }).unwrap_or("");
+                let name = path
+                    .segments
+                    .last()
+                    .map(|s| match s {
+                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
+                        _ => "",
+                    })
+                    .unwrap_or("");
                 if self.is_int_coercible_named(name) {
                     Ok(Substitution::new())
                 } else {
@@ -1331,20 +1418,32 @@ impl Unifier {
             // When a function returns `()` but the declared return type is a named
             // unit type (like `Database` which is `type Database is ()`), allow the
             // coercion. This is safe because unit newtypes carry no data.
-            (Unit, Named { path, args, .. }) | (Named { path, args, .. }, Unit) if args.is_empty() => {
-                let name = path.segments.last().map(|s| match s {
-                    verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                    _ => "",
-                }).unwrap_or("");
+            (Unit, Named { path, args, .. }) | (Named { path, args, .. }, Unit)
+                if args.is_empty() =>
+            {
+                let name = path
+                    .segments
+                    .last()
+                    .map(|s| match s {
+                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
+                        _ => "",
+                    })
+                    .unwrap_or("");
                 let name_text = verum_common::Text::from(name);
                 // Check type alias registry for unit newtypes
                 if let Some(resolved) = self.type_aliases.get(&name_text) {
-                    if *resolved == Type::Unit || matches!(resolved, Type::Tuple(elems) if elems.is_empty()) {
+                    if *resolved == Type::Unit
+                        || matches!(resolved, Type::Tuple(elems) if elems.is_empty())
+                    {
                         return Ok(Substitution::new());
                     }
                 }
                 // Check variant_type_names for registered unit types
-                if self.variant_type_names.get(&verum_common::Text::from("()")).is_some() {
+                if self
+                    .variant_type_names
+                    .get(&verum_common::Text::from("()"))
+                    .is_some()
+                {
                     // If "()" is registered as a variant type name, check if it matches
                 }
                 Err(TypeError::Mismatch {
@@ -1372,10 +1471,14 @@ impl Unifier {
             // replacement for the previous hardcoded name list per CLAUDE.md.
             (Named { path, args, .. }, other) | (other, Named { path, args, .. })
                 if args.is_empty() && {
-                    let name = path.segments.last().map(|s| match s {
-                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                        _ => "",
-                    }).unwrap_or("");
+                    let name = path
+                        .segments
+                        .last()
+                        .map(|s| match s {
+                            verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
+                            _ => "",
+                        })
+                        .unwrap_or("");
                     name.len() == 1
                         && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
                         && !matches!(other, Named { .. } if {
@@ -1520,33 +1623,67 @@ impl Unifier {
             // [T; N] can unify with C<T> for any array-coercible collection type C
             // Array literal to collection coercion: [1, 2, 3] infers as List<Int>
             // Uses data-driven array_coercible_types set (defaults to {"List"})
-            (Array { element: e1, size: _ }, Generic { name, args })
-                if self.is_array_coercible(name.as_str()) && args.len() == 1 =>
-            {
+            (
+                Array {
+                    element: e1,
+                    size: _,
+                },
+                Generic { name, args },
+            ) if self.is_array_coercible(name.as_str()) && args.len() == 1 => {
                 self.unify_inner(e1, &args[0], span)
             }
-            (Generic { name, args }, Array { element: e1, size: _ })
-                if self.is_array_coercible(name.as_str()) && args.len() == 1 =>
-            {
+            (
+                Generic { name, args },
+                Array {
+                    element: e1,
+                    size: _,
+                },
+            ) if self.is_array_coercible(name.as_str()) && args.len() == 1 => {
                 self.unify_inner(e1, &args[0], span)
             }
             // Array -> Named collection coercion (when collection type is parsed as Named)
-            (Array { element: e1, size: _ }, Named { path, args })
-                if self.path_is_array_coercible(path) && args.len() == 1 =>
-            {
+            (
+                Array {
+                    element: e1,
+                    size: _,
+                },
+                Named { path, args },
+            ) if self.path_is_array_coercible(path) && args.len() == 1 => {
                 self.unify_inner(e1, &args[0], span)
             }
-            (Named { path, args }, Array { element: e1, size: _ })
-                if self.path_is_array_coercible(path) && args.len() == 1 =>
-            {
+            (
+                Named { path, args },
+                Array {
+                    element: e1,
+                    size: _,
+                },
+            ) if self.path_is_array_coercible(path) && args.len() == 1 => {
                 self.unify_inner(e1, &args[0], span)
             }
 
             // Array -> TypeApp coercion (for HKT inference)
             // [T; N] can coerce to F<T> where F is inferred as List
             // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types inference
-            (Array { element: e1, size: _ }, TypeApp { constructor, args: app_args })
-            | (TypeApp { constructor, args: app_args }, Array { element: e1, size: _ }) => {
+            (
+                Array {
+                    element: e1,
+                    size: _,
+                },
+                TypeApp {
+                    constructor,
+                    args: app_args,
+                },
+            )
+            | (
+                TypeApp {
+                    constructor,
+                    args: app_args,
+                },
+                Array {
+                    element: e1,
+                    size: _,
+                },
+            ) => {
                 if app_args.len() != 1 {
                     return Err(TypeError::Mismatch {
                         expected: t2.to_text(),
@@ -1825,11 +1962,19 @@ impl Unifier {
                                     &ty2.apply_subst(&subst),
                                     span,
                                 ) {
-                                    Ok(s) => { subst = subst.compose(&s); }
-                                    Err(_) => { all_matched = false; break; }
+                                    Ok(s) => {
+                                        subst = subst.compose(&s);
+                                    }
+                                    Err(_) => {
+                                        all_matched = false;
+                                        break;
+                                    }
                                 }
                             }
-                            None => { all_matched = false; break; }
+                            None => {
+                                all_matched = false;
+                                break;
+                            }
                         }
                     }
                     if all_matched {
@@ -1844,7 +1989,11 @@ impl Unifier {
                 if v1_is_subset || v2_is_subset {
                     let mut subst = Substitution::new();
                     // Use the smaller set for iteration
-                    let (smaller, larger) = if v1.len() <= v2.len() { (v1, v2) } else { (v2, v1) };
+                    let (smaller, larger) = if v1.len() <= v2.len() {
+                        (v1, v2)
+                    } else {
+                        (v2, v1)
+                    };
                     for (name, ty_s) in smaller.iter() {
                         if let Some(ty_l) = larger.get(name) {
                             if let Ok(s) = self.unify_inner(
@@ -1866,13 +2015,16 @@ impl Unifier {
                 // fully determined). This handles the common case where
                 // Ok(T)|Err(Var) and Ok(T)|Overflow(Unit) arise from different Result-like
                 // type definitions resolving the same constructor name.
-                let shared: Vec<&verum_common::Text> = v1.keys().filter(|k| v2.contains_key(k.as_str())).collect();
+                let shared: Vec<&verum_common::Text> =
+                    v1.keys().filter(|k| v2.contains_key(k.as_str())).collect();
                 if !shared.is_empty() {
                     // Check if non-shared variants have type variables (not yet resolved)
-                    let v1_non_shared_has_vars = v1.iter()
+                    let v1_non_shared_has_vars = v1
+                        .iter()
                         .filter(|(k, _)| !v2.contains_key(k.as_str()))
                         .any(|(_, ty)| Self::has_type_vars(ty));
-                    let v2_non_shared_has_vars = v2.iter()
+                    let v2_non_shared_has_vars = v2
+                        .iter()
                         .filter(|(k, _)| !v1.contains_key(k.as_str()))
                         .any(|(_, ty)| Self::has_type_vars(ty));
                     if v1_non_shared_has_vars || v2_non_shared_has_vars {
@@ -1972,9 +2124,7 @@ impl Unifier {
                 // Full protocol impl checking is done at the call site in infer.rs.
                 Ok(Substitution::new())
             }
-            (DynProtocol { .. }, _) => {
-                Ok(Substitution::new())
-            }
+            (DynProtocol { .. }, _) => Ok(Substitution::new()),
 
             // Reference types with coercion rules
             // Unified reference model: &T (managed CBGR ~15ns), &checked T (statically verified 0ns), &unsafe T (unchecked 0ns) — .3.3 - Three-Tier Reference Coercion
@@ -2111,9 +2261,7 @@ impl Unifier {
                     mutable: _m2,
                     inner: i2,
                 },
-            ) => {
-                self.unify_inner(i1, i2, span)
-            }
+            ) => self.unify_inner(i1, i2, span),
 
             // UPCAST: &checked T → &T (allowed)
             (
@@ -2261,9 +2409,7 @@ impl Unifier {
                     mutable: _m2,
                     inner: i2,
                 },
-            ) => {
-                self.unify_inner(i1, i2, span)
-            }
+            ) => self.unify_inner(i1, i2, span),
 
             // POINTER ↔ UNSAFE REFERENCE COERCION
             // In Verum, *const T ≡ &unsafe T and *mut T ≡ &unsafe mut T
@@ -2288,9 +2434,7 @@ impl Unifier {
                     mutable: _m2,
                     inner: i2,
                 },
-            ) => {
-                self.unify_inner(i1, i2, span)
-            }
+            ) => self.unify_inner(i1, i2, span),
 
             // VOLATILE POINTER unification
             (
@@ -2316,9 +2460,11 @@ impl Unifier {
             // POINTER ↔ INTEGER COERCION (FFI)
             // Raw pointers and UIntSize/IntSize are interchangeable in FFI contexts.
             // This enables `ptr as usize` and `usize as *mut T` patterns.
-            (Pointer { .. }, Named { path, .. })
-            | (Named { path, .. }, Pointer { .. })
-                if matches!(path.last_segment_name(), "UIntSize" | "IntSize" | "usize" | "isize") =>
+            (Pointer { .. }, Named { path, .. }) | (Named { path, .. }, Pointer { .. })
+                if matches!(
+                    path.last_segment_name(),
+                    "UIntSize" | "IntSize" | "usize" | "isize"
+                ) =>
             {
                 Ok(Substitution::new())
             }
@@ -2338,10 +2484,22 @@ impl Unifier {
             // META TYPE COERCION: TokenStream ↔ @Expr/@Ident/@Type etc.
             // Quote blocks produce TokenStream, but meta functions may return @Expr
             (Named { path: p1, .. }, Named { path: p2, .. })
-                if (matches!(p1.last_segment_name(), "TokenStream") &&
-                    matches!(p2.last_segment_name(), "@Expr" | "@Ident" | "@Type" | "@Pattern" | "@Stmt" | "@Item" | "@Block"))
-                || (matches!(p2.last_segment_name(), "TokenStream") &&
-                    matches!(p1.last_segment_name(), "@Expr" | "@Ident" | "@Type" | "@Pattern" | "@Stmt" | "@Item" | "@Block")) =>
+                if (matches!(p1.last_segment_name(), "TokenStream")
+                    && matches!(
+                        p2.last_segment_name(),
+                        "@Expr" | "@Ident" | "@Type" | "@Pattern" | "@Stmt" | "@Item" | "@Block"
+                    ))
+                    || (matches!(p2.last_segment_name(), "TokenStream")
+                        && matches!(
+                            p1.last_segment_name(),
+                            "@Expr"
+                                | "@Ident"
+                                | "@Type"
+                                | "@Pattern"
+                                | "@Stmt"
+                                | "@Item"
+                                | "@Block"
+                        )) =>
             {
                 Ok(Substitution::new())
             }
@@ -2356,7 +2514,15 @@ impl Unifier {
                 | CheckedReference { inner, .. }
                 | UnsafeReference { inner, .. },
                 other,
-            ) if !matches!(other, Reference { .. } | CheckedReference { .. } | UnsafeReference { .. } | Ownership { .. } | Pointer { .. }) => {
+            ) if !matches!(
+                other,
+                Reference { .. }
+                    | CheckedReference { .. }
+                    | UnsafeReference { .. }
+                    | Ownership { .. }
+                    | Pointer { .. }
+            ) =>
+            {
                 self.unify_inner(inner, other, span)
             }
 
@@ -2366,7 +2532,15 @@ impl Unifier {
                 Reference { inner, .. }
                 | CheckedReference { inner, .. }
                 | UnsafeReference { inner, .. },
-            ) if !matches!(other, Reference { .. } | CheckedReference { .. } | UnsafeReference { .. } | Ownership { .. } | Pointer { .. }) => {
+            ) if !matches!(
+                other,
+                Reference { .. }
+                    | CheckedReference { .. }
+                    | UnsafeReference { .. }
+                    | Ownership { .. }
+                    | Pointer { .. }
+            ) =>
+            {
                 self.unify_inner(other, inner, span)
             }
 
@@ -2381,12 +2555,19 @@ impl Unifier {
             (Named { path: p1, args: a1 }, Named { path: p2, args: a2 }) => {
                 // Sized integer cross-coercion: USize ↔ ISize, USize ↔ UInt64, etc.
                 // Uses data-driven sized_numeric_types set instead of hardcoded name list.
-                if p1.segments.len() == 1 && p2.segments.len() == 1 && a1.is_empty() && a2.is_empty() {
+                if p1.segments.len() == 1
+                    && p2.segments.len() == 1
+                    && a1.is_empty()
+                    && a2.is_empty()
+                {
                     fn extract_name(path: &verum_ast::ty::Path) -> &str {
-                        path.segments.last().map(|s| match s {
-                            verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                            _ => "",
-                        }).unwrap_or("")
+                        path.segments
+                            .last()
+                            .map(|s| match s {
+                                verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
+                                _ => "",
+                            })
+                            .unwrap_or("")
                     }
                     let n1 = extract_name(p1);
                     let n2 = extract_name(p2);
@@ -2404,10 +2585,13 @@ impl Unifier {
                     // (e.g., Tensor ↔ DynTensor, Cotangent<T> ↔ T)
                     // Uses data-driven tensor_family_types set instead of substring checks.
                     fn extract_last_name(path: &verum_ast::ty::Path) -> &str {
-                        path.segments.last().map(|s| match s {
-                            verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                            _ => "",
-                        }).unwrap_or("")
+                        path.segments
+                            .last()
+                            .map(|s| match s {
+                                verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
+                                _ => "",
+                            })
+                            .unwrap_or("")
                     }
                     let tn1 = extract_last_name(p1);
                     let tn2 = extract_last_name(p2);
@@ -2415,10 +2599,14 @@ impl Unifier {
                         return Ok(Substitution::new());
                     }
                     // Allow Byte ↔ Sockaddr for FFI
-                    if (tn1 == "Byte" || tn1 == "UInt8") && matches!(tn2, "Sockaddr" | "SocketAddr" | "SockaddrIn") {
+                    if (tn1 == "Byte" || tn1 == "UInt8")
+                        && matches!(tn2, "Sockaddr" | "SocketAddr" | "SockaddrIn")
+                    {
                         return Ok(Substitution::new());
                     }
-                    if (tn2 == "Byte" || tn2 == "UInt8") && matches!(tn1, "Sockaddr" | "SocketAddr" | "SockaddrIn") {
+                    if (tn2 == "Byte" || tn2 == "UInt8")
+                        && matches!(tn1, "Sockaddr" | "SocketAddr" | "SockaddrIn")
+                    {
                         return Ok(Substitution::new());
                     }
                     return Err(TypeError::Mismatch {
@@ -2489,16 +2677,9 @@ impl Unifier {
             // Where S.Item must unify with the actual item type from poll_next results.
 
             // Case 1: Both are projections (same associated type name)
-            (
-                Generic {
-                    name: n1,
-                    args: a1,
-                },
-                Generic {
-                    name: n2,
-                    args: a2,
-                },
-            ) if n1.as_str().starts_with("::") && n2.as_str().starts_with("::") && n1 == n2 => {
+            (Generic { name: n1, args: a1 }, Generic { name: n2, args: a2 })
+                if n1.as_str().starts_with("::") && n2.as_str().starts_with("::") && n1 == n2 =>
+            {
                 // Same projection name (e.g., both are ::Item)
                 // Unify the base types
                 if a1.len() != a2.len() {
@@ -2577,12 +2758,14 @@ impl Unifier {
             (Generic { name, args: a1 }, Named { path, args: a2 })
             | (Named { path, args: a2 }, Generic { name, args: a1 }) => {
                 // Extract the last segment from the path for comparison
-                let path_name = path.segments.last().map(|seg| {
-                    match seg {
+                let path_name = path
+                    .segments
+                    .last()
+                    .map(|seg| match seg {
                         verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
                         _ => "",
-                    }
-                }).unwrap_or("");
+                    })
+                    .unwrap_or("");
 
                 if name.as_str() != path_name || a1.len() != a2.len() {
                     return Err(TypeError::Mismatch {
@@ -2594,7 +2777,8 @@ impl Unifier {
 
                 let mut subst = Substitution::new();
                 for (ty1, ty2) in a1.iter().zip(a2.iter()) {
-                    let s = self.unify_inner(&ty1.apply_subst(&subst), &ty2.apply_subst(&subst), span)?;
+                    let s =
+                        self.unify_inner(&ty1.apply_subst(&subst), &ty2.apply_subst(&subst), span)?;
                     subst = subst.compose(&s);
                 }
                 Ok(subst)
@@ -2610,16 +2794,19 @@ impl Unifier {
                 // Generate signature from variant structure
                 let signature = Self::variant_type_signature(variants);
 
-                                // #[cfg(debug_assertions)]
+                // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG unify Generic<->Variant] name={}, args={:?}, signature={}, registry={:?}",
-                    // name, args, signature, self.variant_type_names.keys().collect::<Vec<_>>());
+                // name, args, signature, self.variant_type_names.keys().collect::<Vec<_>>());
 
                 // Look up the type name from registry (try full signature, then relaxed)
-                let registered_name_opt = self.variant_type_names.get(&signature).cloned()
-                    .or_else(|| {
-                        let relaxed = Self::variant_type_signature_relaxed(variants);
-                        self.variant_type_names.get(&relaxed).cloned()
-                    });
+                let registered_name_opt =
+                    self.variant_type_names
+                        .get(&signature)
+                        .cloned()
+                        .or_else(|| {
+                            let relaxed = Self::variant_type_signature_relaxed(variants);
+                            self.variant_type_names.get(&relaxed).cloned()
+                        });
                 if let Some(registered_name) = registered_name_opt.as_ref() {
                     if registered_name.as_str() == name.as_str() {
                         // Type names match! Now we need to extract type args from the Variant
@@ -2640,21 +2827,26 @@ impl Unifier {
                         // Try to use proper type_var_order-based extraction
                         if let (Some(type_var_order), Some(original_type)) = (
                             self.type_var_orders.get(&type_name_text),
-                            self.original_variant_types.get(&type_name_text)
+                            self.original_variant_types.get(&type_name_text),
                         ) {
                             // Extract TypeVar -> concrete type mapping by unifying original with actual
-                            let mut type_var_mapping: indexmap::IndexMap<TypeVar, Type> = indexmap::IndexMap::new();
+                            let mut type_var_mapping: indexmap::IndexMap<TypeVar, Type> =
+                                indexmap::IndexMap::new();
                             if let Type::Variant(original_variants) = original_type {
                                 for (variant_name, original_payload) in original_variants.iter() {
                                     if let Some(actual_payload) = variants.get(variant_name) {
-                                        Self::extract_type_var_mapping_static(original_payload, actual_payload, &mut type_var_mapping);
+                                        Self::extract_type_var_mapping_static(
+                                            original_payload,
+                                            actual_payload,
+                                            &mut type_var_mapping,
+                                        );
                                     }
                                 }
                             }
 
-                                                        // #[cfg(debug_assertions)]
+                            // #[cfg(debug_assertions)]
                             // eprintln!("[DEBUG unify Generic<->Variant] type_var_order={:?}, mapping={:?}",
-                                // type_var_order, type_var_mapping);
+                            // type_var_order, type_var_mapping);
 
                             // Build extracted args in declaration order
                             let mut extracted_args: List<Type> = List::new();
@@ -2664,13 +2856,15 @@ impl Unifier {
                                 } else {
                                     // TypeVar not found in mapping - this shouldn't happen for well-formed types
                                     // Fall back to old behavior
-                                                                        // #[cfg(debug_assertions)]
+                                    // #[cfg(debug_assertions)]
                                     // eprintln!("[DEBUG unify Generic<->Variant] TypeVar {:?} not in mapping, falling back", tv);
-                                    return self.unify_generic_variant_fallback(args, variants, t1, t2, span);
+                                    return self.unify_generic_variant_fallback(
+                                        args, variants, t1, t2, span,
+                                    );
                                 }
                             }
 
-                                                        // #[cfg(debug_assertions)]
+                            // #[cfg(debug_assertions)]
                             // eprintln!("[DEBUG unify Generic<->Variant] extracted_args={:?}", extracted_args);
 
                             // Verify argument count matches
@@ -2684,7 +2878,9 @@ impl Unifier {
 
                             // Unify each Generic arg with the corresponding extracted arg
                             let mut subst = Substitution::new();
-                            for (generic_arg, extracted_arg) in args.iter().zip(extracted_args.iter()) {
+                            for (generic_arg, extracted_arg) in
+                                args.iter().zip(extracted_args.iter())
+                            {
                                 let s = self.unify_inner(
                                     &generic_arg.apply_subst(&subst),
                                     &extracted_arg.apply_subst(&subst),
@@ -2696,13 +2892,13 @@ impl Unifier {
                         }
 
                         // Fallback: no type_var_order registered, use old payload-based approach
-                                                // #[cfg(debug_assertions)]
+                        // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG unify Generic<->Variant] No type_var_order for '{}', using fallback", name);
                         return self.unify_generic_variant_fallback(args, variants, t1, t2, span);
                     }
                 }
 
-                                // #[cfg(debug_assertions)]
+                // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG unify Generic<->Variant] NO MATCH - signature not in registry or name mismatch");
 
                 // No registry entry or name doesn't match - type mismatch
@@ -2721,22 +2917,27 @@ impl Unifier {
             (Named { path, args }, Variant(variants))
             | (Variant(variants), Named { path, args }) => {
                 // Extract the type name from the path
-                let type_name = path.segments.last().map(|seg| {
-                    match seg {
+                let type_name = path
+                    .segments
+                    .last()
+                    .map(|seg| match seg {
                         verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
                         _ => "",
-                    }
-                }).unwrap_or("");
+                    })
+                    .unwrap_or("");
 
                 // Generate signature from variant structure
                 let signature = Self::variant_type_signature(variants);
 
                 // Look up the type name from registry (try full signature, then relaxed)
-                let registered_name_opt = self.variant_type_names.get(&signature).cloned()
-                    .or_else(|| {
-                        let relaxed = Self::variant_type_signature_relaxed(variants);
-                        self.variant_type_names.get(&relaxed).cloned()
-                    });
+                let registered_name_opt =
+                    self.variant_type_names
+                        .get(&signature)
+                        .cloned()
+                        .or_else(|| {
+                            let relaxed = Self::variant_type_signature_relaxed(variants);
+                            self.variant_type_names.get(&relaxed).cloned()
+                        });
                 if let Some(registered_name) = registered_name_opt.as_ref() {
                     if registered_name.as_str() == type_name {
                         // Non-generic type: Named{Expr, []} == Variant{Num(Int) | Neg(Heap<Expr>)}
@@ -2751,21 +2952,26 @@ impl Unifier {
                         // Try to use proper type_var_order-based extraction
                         if let (Some(type_var_order), Some(original_type)) = (
                             self.type_var_orders.get(&type_name_text),
-                            self.original_variant_types.get(&type_name_text)
+                            self.original_variant_types.get(&type_name_text),
                         ) {
                             // Extract TypeVar -> concrete type mapping by unifying original with actual
-                            let mut type_var_mapping: indexmap::IndexMap<TypeVar, Type> = indexmap::IndexMap::new();
+                            let mut type_var_mapping: indexmap::IndexMap<TypeVar, Type> =
+                                indexmap::IndexMap::new();
                             if let Type::Variant(original_variants) = original_type {
                                 for (variant_name, original_payload) in original_variants.iter() {
                                     if let Some(actual_payload) = variants.get(variant_name) {
-                                        Self::extract_type_var_mapping_static(original_payload, actual_payload, &mut type_var_mapping);
+                                        Self::extract_type_var_mapping_static(
+                                            original_payload,
+                                            actual_payload,
+                                            &mut type_var_mapping,
+                                        );
                                     }
                                 }
                             }
 
-                                                        // #[cfg(debug_assertions)]
+                            // #[cfg(debug_assertions)]
                             // eprintln!("[DEBUG unify Named<->Variant] type_var_order={:?}, mapping={:?}",
-                                // type_var_order, type_var_mapping);
+                            // type_var_order, type_var_mapping);
 
                             // Build extracted args in declaration order
                             let mut extracted_args: List<Type> = List::new();
@@ -2774,13 +2980,15 @@ impl Unifier {
                                     extracted_args.push(concrete_ty.clone());
                                 } else {
                                     // TypeVar not found in mapping - fall back to old behavior
-                                                                        // #[cfg(debug_assertions)]
+                                    // #[cfg(debug_assertions)]
                                     // eprintln!("[DEBUG unify Named<->Variant] TypeVar {:?} not in mapping, falling back", tv);
-                                    return self.unify_generic_variant_fallback(args, variants, t1, t2, span);
+                                    return self.unify_generic_variant_fallback(
+                                        args, variants, t1, t2, span,
+                                    );
                                 }
                             }
 
-                                                        // #[cfg(debug_assertions)]
+                            // #[cfg(debug_assertions)]
                             // eprintln!("[DEBUG unify Named<->Variant] extracted_args={:?}", extracted_args);
 
                             // Verify argument count matches
@@ -2794,7 +3002,8 @@ impl Unifier {
 
                             // Unify each Named arg with the corresponding extracted arg
                             let mut subst = Substitution::new();
-                            for (named_arg, extracted_arg) in args.iter().zip(extracted_args.iter()) {
+                            for (named_arg, extracted_arg) in args.iter().zip(extracted_args.iter())
+                            {
                                 let s = self.unify_inner(
                                     &named_arg.apply_subst(&subst),
                                     &extracted_arg.apply_subst(&subst),
@@ -2806,7 +3015,7 @@ impl Unifier {
                         }
 
                         // Fallback: no type_var_order registered, use old payload-based approach
-                                                // #[cfg(debug_assertions)]
+                        // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG unify Named<->Variant] No type_var_order for '{}', using fallback", type_name);
                         return self.unify_generic_variant_fallback(args, variants, t1, t2, span);
                     }
@@ -2839,8 +3048,20 @@ impl Unifier {
             // When M<A> is unified with Maybe<Int> variant, infer M = Maybe
             // This is stdlib-agnostic: uses the variant_type_names registry.
             // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types inference
-            (TypeApp { constructor, args: app_args }, Variant(variants))
-            | (Variant(variants), TypeApp { constructor, args: app_args }) => {
+            (
+                TypeApp {
+                    constructor,
+                    args: app_args,
+                },
+                Variant(variants),
+            )
+            | (
+                Variant(variants),
+                TypeApp {
+                    constructor,
+                    args: app_args,
+                },
+            ) => {
                 // Generate signature from variant structure
                 let signature = Self::variant_type_signature(variants);
 
@@ -2909,7 +3130,10 @@ impl Unifier {
                                 // Collect and unify type arguments
                                 let mut variant_type_vars: Vec<TypeVar> = Vec::new();
                                 for (_, payload_ty) in variants.iter() {
-                                    Self::collect_type_vars_from_type(payload_ty, &mut variant_type_vars);
+                                    Self::collect_type_vars_from_type(
+                                        payload_ty,
+                                        &mut variant_type_vars,
+                                    );
                                 }
                                 variant_type_vars.sort();
                                 variant_type_vars.dedup();
@@ -3183,8 +3407,16 @@ impl Unifier {
             // mismatch path — which made the 492-line cubical normalizer in
             // `crate::cubical` dead code on the unification hot path.
             (
-                Type::PathType { space: s1, left: l1, right: r1 },
-                Type::PathType { space: s2, left: l2, right: r2 },
+                Type::PathType {
+                    space: s1,
+                    left: l1,
+                    right: r1,
+                },
+                Type::PathType {
+                    space: s2,
+                    left: l2,
+                    right: r2,
+                },
             ) => {
                 let subst = self.unify_inner(s1, s2, span)?;
 
@@ -3227,8 +3459,14 @@ impl Unifier {
             //  2. Their face constraints are definitionally equal
             //  (cubical normalization handles `(i ∨ ~i) ≡ 1`, etc.).
             (
-                Type::Partial { element_type: e1, face: f1 },
-                Type::Partial { element_type: e2, face: f2 },
+                Type::Partial {
+                    element_type: e1,
+                    face: f1,
+                },
+                Type::Partial {
+                    element_type: e2,
+                    face: f2,
+                },
             ) => {
                 let subst = self.unify_inner(e1, e2, span)?;
                 let face_eq = if self.cubical_enabled {
@@ -3538,7 +3776,16 @@ impl Unifier {
             //
 
             // Two universal types unify if their bodies unify after alpha-renaming
-            (Forall { vars: vs1, body: b1 }, Forall { vars: vs2, body: b2 }) => {
+            (
+                Forall {
+                    vars: vs1,
+                    body: b1,
+                },
+                Forall {
+                    vars: vs2,
+                    body: b2,
+                },
+            ) => {
                 // Must have same arity
                 if vs1.len() != vs2.len() {
                     return Err(TypeError::Mismatch {
@@ -3562,8 +3809,14 @@ impl Unifier {
             // TypeApp - higher-kinded type applications (e.g., F<Int> where F is a type constructor)
             // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
             (
-                Type::TypeApp { constructor: c1, args: a1 },
-                Type::TypeApp { constructor: c2, args: a2 },
+                Type::TypeApp {
+                    constructor: c1,
+                    args: a1,
+                },
+                Type::TypeApp {
+                    constructor: c2,
+                    args: a2,
+                },
             ) => {
                 // First unify the constructors
                 let mut subst = self.unify_inner(c1, c2, span)?;
@@ -3579,7 +3832,11 @@ impl Unifier {
 
                 // Unify each argument
                 for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                    let s = self.unify_inner(&arg1.apply_subst(&subst), &arg2.apply_subst(&subst), span)?;
+                    let s = self.unify_inner(
+                        &arg1.apply_subst(&subst),
+                        &arg2.apply_subst(&subst),
+                        span,
+                    )?;
                     subst = subst.compose(&s);
                 }
 
@@ -3589,8 +3846,16 @@ impl Unifier {
             // TypeConstructor unification - two type constructors unify if they have the same name and arity
             // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
             (
-                Type::TypeConstructor { name: n1, arity: a1, .. },
-                Type::TypeConstructor { name: n2, arity: a2, .. },
+                Type::TypeConstructor {
+                    name: n1,
+                    arity: a1,
+                    ..
+                },
+                Type::TypeConstructor {
+                    name: n2,
+                    arity: a2,
+                    ..
+                },
             ) => {
                 if n1 == n2 && a1 == a2 {
                     Ok(Substitution::new())
@@ -3608,11 +3873,24 @@ impl Unifier {
             // we infer F = List (TypeConstructor) and A = Int
             // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types inference
             (
-                Type::TypeApp { constructor, args: app_args },
-                Type::Generic { name, args: gen_args },
-            ) | (
-                Type::Generic { name, args: gen_args },
-                Type::TypeApp { constructor, args: app_args },
+                Type::TypeApp {
+                    constructor,
+                    args: app_args,
+                },
+                Type::Generic {
+                    name,
+                    args: gen_args,
+                },
+            )
+            | (
+                Type::Generic {
+                    name,
+                    args: gen_args,
+                },
+                Type::TypeApp {
+                    constructor,
+                    args: app_args,
+                },
             ) => {
                 // Check if constructor is a type variable (HKT inference case)
                 if let Type::Var(var) = constructor.as_ref() {
@@ -3647,7 +3925,10 @@ impl Unifier {
                     Ok(subst)
                 } else {
                     // Constructor is not a variable - check if it matches the Generic name
-                    if let Type::TypeConstructor { name: ctor_name, .. } = constructor.as_ref() {
+                    if let Type::TypeConstructor {
+                        name: ctor_name, ..
+                    } = constructor.as_ref()
+                    {
                         if ctor_name == name && app_args.len() == gen_args.len() {
                             let mut subst = Substitution::new();
                             for (app_arg, gen_arg) in app_args.iter().zip(gen_args.iter()) {
@@ -3672,11 +3953,24 @@ impl Unifier {
             // TypeApp with type variable constructor vs Named - HKT inference
             // Similar to Generic case but for Named types
             (
-                Type::TypeApp { constructor, args: app_args },
-                Type::Named { path, args: named_args },
-            ) | (
-                Type::Named { path, args: named_args },
-                Type::TypeApp { constructor, args: app_args },
+                Type::TypeApp {
+                    constructor,
+                    args: app_args,
+                },
+                Type::Named {
+                    path,
+                    args: named_args,
+                },
+            )
+            | (
+                Type::Named {
+                    path,
+                    args: named_args,
+                },
+                Type::TypeApp {
+                    constructor,
+                    args: app_args,
+                },
             ) => {
                 // Check if constructor is a type variable (HKT inference case)
                 if let Type::Var(var) = constructor.as_ref() {
@@ -3690,24 +3984,22 @@ impl Unifier {
 
                     // Extract name from path
                     // Note: use verum_common::Text explicitly to avoid conflict with Type::Text
-                    let name = path.segments.last().map(|seg| {
-                        match seg {
+                    let name = path
+                        .segments
+                        .last()
+                        .map(|seg| match seg {
                             verum_ast::ty::PathSegment::Name(ident) => {
                                 let s: verum_common::Text = ident.name.clone();
                                 s
                             }
                             _ => verum_common::Text::from(""),
-                        }
-                    }).unwrap_or_else(|| verum_common::Text::from(""));
+                        })
+                        .unwrap_or_else(|| verum_common::Text::from(""));
 
                     // Bind the type variable to a TypeConstructor
                     let arity = named_args.len();
                     let kind = Self::kind_for_arity(arity);
-                    let type_ctor = Type::TypeConstructor {
-                        name,
-                        arity,
-                        kind,
-                    };
+                    let type_ctor = Type::TypeConstructor { name, arity, kind };
                     let mut subst = self.bind_var(*var, &type_ctor, span)?;
 
                     // Unify the arguments
@@ -3785,17 +4077,14 @@ impl Unifier {
                 self.unify_inner(b1, b2, span)
             }
             // Capability-restricted type unifies with its base type (forgetful upcast)
-            (CapabilityRestricted { base, .. }, other) | (other, CapabilityRestricted { base, .. }) => {
-                self.unify_inner(base, other, span)
-            }
+            (CapabilityRestricted { base, .. }, other)
+            | (other, CapabilityRestricted { base, .. }) => self.unify_inner(base, other, span),
 
             // Placeholder types: forward-declared recursive types have placeholder inner types
             // that should unify with any concrete type until fully resolved.
             // Example: SegmentError { inner: <placeholder:SegmentError> } unifies with
             //  SegmentError { inner: MmapFailed(...) | MunmapFailed(...) | ... }
-            (Placeholder { .. }, _) | (_, Placeholder { .. }) => {
-                Ok(Substitution::new())
-            }
+            (Placeholder { .. }, _) | (_, Placeholder { .. }) => Ok(Substitution::new()),
 
             // Scalar ↔ Tensor coercion for math interoperability
             // In tensor libraries, scalar types (Float, Int, Bool) and their tensor
@@ -3808,22 +4097,22 @@ impl Unifier {
             // `scan_protocol_implementations` (see #101 step 2). The HashSet
             // here is a fast O(1) cache of the protocol-implementation
             // discovery result.
-            (Float, Generic { name, args })
-            | (Generic { name, args }, Float)
+            (Float, Generic { name, args }) | (Generic { name, args }, Float)
                 if args.len() == 1
                     && self.is_tensor_family(name.as_str())
                     && matches!(&args[0], Type::Float | Type::Var(_) | Type::Unknown) =>
             {
                 Ok(Substitution::new())
             }
-            (Float, Named { path, args })
-            | (Named { path, args }, Float)
-                if args.len() <= 1 =>
-            {
-                let pname = path.segments.last().map(|s| match s {
-                    verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                    _ => "",
-                }).unwrap_or("");
+            (Float, Named { path, args }) | (Named { path, args }, Float) if args.len() <= 1 => {
+                let pname = path
+                    .segments
+                    .last()
+                    .map(|s| match s {
+                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
+                        _ => "",
+                    })
+                    .unwrap_or("");
                 if self.is_tensor_family(pname) {
                     Ok(Substitution::new())
                 } else {
@@ -3836,8 +4125,7 @@ impl Unifier {
             }
             // Bool ↔ tensor coercion (for relu_vjp etc.)
             // Uses data-driven tensor_family_types set.
-            (Bool, Generic { name, args })
-            | (Generic { name, args }, Bool)
+            (Bool, Generic { name, args }) | (Generic { name, args }, Bool)
                 if args.len() == 1
                     && self.is_tensor_family(name.as_str())
                     && matches!(&args[0], Type::Bool | Type::Var(_)) =>
@@ -3846,10 +4134,8 @@ impl Unifier {
             }
             // Int ↔ tensor coercion (for tensor indexing/shapes)
             // Uses data-driven tensor_family_types set.
-            (Int, Generic { name, args })
-            | (Generic { name, args }, Int)
-                if args.len() == 1
-                    && self.is_tensor_family(name.as_str()) =>
+            (Int, Generic { name, args }) | (Generic { name, args }, Int)
+                if args.len() == 1 && self.is_tensor_family(name.as_str()) =>
             {
                 Ok(Substitution::new())
             }
@@ -3862,20 +4148,32 @@ impl Unifier {
             | (Named { path, args, .. }, Slice { element })
                 if args.is_empty() =>
             {
-                let pname = path.segments.last().map(|s| match s {
-                    verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                    _ => "",
-                }).unwrap_or("");
+                let pname = path
+                    .segments
+                    .last()
+                    .map(|s| match s {
+                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
+                        _ => "",
+                    })
+                    .unwrap_or("");
                 if matches!(pname, "UInt8" | "Byte" | "U8" | "u8") {
                     // [Byte] vs UInt8 - allow coercion
                     Ok(Substitution::new())
                 } else {
                     // Try to unify the element type with the named type
-                    self.unify_inner(element, &Named { path: path.clone(), args: args.clone() }, span).map_err(|_| TypeError::Mismatch {
-                            expected: t2.to_text(),
-                            actual: t1.to_text(),
-                            span,
-                        })
+                    self.unify_inner(
+                        element,
+                        &Named {
+                            path: path.clone(),
+                            args: args.clone(),
+                        },
+                        span,
+                    )
+                    .map_err(|_| TypeError::Mismatch {
+                        expected: t2.to_text(),
+                        actual: t1.to_text(),
+                        span,
+                    })
                 }
             }
 
@@ -3911,10 +4209,22 @@ impl Unifier {
             // When a Named type (like SocketAddrV4) is expected but a structural record
             // is provided, allow coercion. Named types are often aliases for records
             // and strict matching causes false positives in cross-module code.
-            (Named { path: _, args: named_args, .. }, Record(_))
-            | (Record(_), Named { path: _, args: named_args, .. }) if named_args.is_empty() => {
-                Ok(Substitution::new())
-            }
+            (
+                Named {
+                    path: _,
+                    args: named_args,
+                    ..
+                },
+                Record(_),
+            )
+            | (
+                Record(_),
+                Named {
+                    path: _,
+                    args: named_args,
+                    ..
+                },
+            ) if named_args.is_empty() => Ok(Substitution::new()),
 
             // Tuple ↔ Named type coercion for tuple-like newtypes
             (Tuple(_), Named { .. }) | (Named { .. }, Tuple(_)) => {
@@ -3946,9 +4256,7 @@ impl Unifier {
 
             // Future type unification: Future<A> ↔ Future<B>
             // Both sides are the built-in Future type variant
-            (Future { output: o1 }, Future { output: o2 }) => {
-                self.unify_inner(o1, o2, span)
-            }
+            (Future { output: o1 }, Future { output: o2 }) => self.unify_inner(o1, o2, span),
 
             // Future cross-representation: Type::Future ↔ Named/Generic { "Future" }
             // async blocks produce Type::Future { output }, while parsed types produce
@@ -3957,10 +4265,14 @@ impl Unifier {
             | (Named { path, args }, Future { output })
                 if args.len() == 1 =>
             {
-                let path_name = path.segments.last().map(|s| match s {
-                    verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                    _ => "",
-                }).unwrap_or("");
+                let path_name = path
+                    .segments
+                    .last()
+                    .map(|s| match s {
+                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
+                        _ => "",
+                    })
+                    .unwrap_or("");
                 if path_name == "Future" {
                     self.unify_inner(output, &args[0], span)
                 } else {

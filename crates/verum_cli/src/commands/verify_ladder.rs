@@ -83,10 +83,7 @@ fn requires_kernel_recheck(strategy: LadderStrategy) -> bool {
 /// Returns `None` for kinds that don't carry refinement-type
 /// leakage at this layer (definitions / functions / types are
 /// covered by other verification phases).
-fn run_kernel_recheck(
-    item_kind: &ItemKind,
-    item_name: &Text,
-) -> Option<KernelRecheckOutcome> {
+fn run_kernel_recheck(item_kind: &ItemKind, item_name: &Text) -> Option<KernelRecheckOutcome> {
     let results = match item_kind {
         ItemKind::Theorem(t) | ItemKind::Lemma(t) | ItemKind::Corollary(t) => {
             KernelRecheck::recheck_theorem(t)
@@ -208,14 +205,11 @@ pub fn run_verify_ladder(format: &str) -> Result<()> {
                 // (params + return type + body + requires + ensures).
                 // `@verify(proof)` annotations on functions now route
                 // through `recheck_function` like theorems and axioms.
-                ItemKind::Function(decl) => {
-                    ("function", decl.name.name.clone(), &decl.attributes)
-                }
+                ItemKind::Function(decl) => ("function", decl.name.name.clone(), &decl.attributes),
                 _ => continue,
             };
 
-            let Some(strategy_label) =
-                strictest_verify_strategy(&item.attributes, decl_attrs)
+            let Some(strategy_label) = strictest_verify_strategy(&item.attributes, decl_attrs)
             else {
                 continue;
             };
@@ -275,8 +269,20 @@ pub fn run_verify_ladder(format: &str) -> Result<()> {
     }
 
     match format {
-        "plain" => emit_plain(&records, &totals, vr_files.len(), parsed_files, skipped_files),
-        "json" => emit_json(&records, &totals, vr_files.len(), parsed_files, skipped_files),
+        "plain" => emit_plain(
+            &records,
+            &totals,
+            vr_files.len(),
+            parsed_files,
+            skipped_files,
+        ),
+        "json" => emit_json(
+            &records,
+            &totals,
+            vr_files.len(),
+            parsed_files,
+            skipped_files,
+        ),
         _ => unreachable!(),
     }
 
@@ -348,10 +354,7 @@ fn emit_json(
     out.push_str("  \"totals\": {\n");
     out.push_str(&format!("    \"closed\": {},\n", totals.closed));
     out.push_str(&format!("    \"open\": {},\n", totals.open));
-    out.push_str(&format!(
-        "    \"dispatch_pending\": {},\n",
-        totals.pending
-    ));
+    out.push_str(&format!("    \"dispatch_pending\": {},\n", totals.pending));
     out.push_str(&format!("    \"timeout\": {}\n", totals.timeout));
     out.push_str("  },\n");
     out.push_str("  \"files\": {\n");
@@ -391,9 +394,7 @@ fn verdict_summary(v: &LadderVerdict) -> (&'static str, String) {
         LadderVerdict::DispatchPending { note, .. } => {
             ("dispatch_pending", truncate(note.as_str(), 80))
         }
-        LadderVerdict::Timeout { budget_ms, .. } => {
-            ("timeout", format!("budget={}ms", budget_ms))
-        }
+        LadderVerdict::Timeout { budget_ms, .. } => ("timeout", format!("budget={}ms", budget_ms)),
     }
 }
 
@@ -464,7 +465,10 @@ mod tests {
         let mut t = VerdictTotals::default();
         t.closed = 100;
         t.pending = 10;
-        assert!(!t.has_hard_failure(), "Closed + Pending only → not hard failure");
+        assert!(
+            !t.has_hard_failure(),
+            "Closed + Pending only → not hard failure"
+        );
         t.open = 1;
         assert!(t.has_hard_failure(), "Open is a hard failure");
         t.open = 0;

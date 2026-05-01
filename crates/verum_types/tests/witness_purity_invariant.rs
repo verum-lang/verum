@@ -29,9 +29,7 @@
 //! refactor of `PropertySet` cannot silently break the
 //! refinement-witness purity contract.
 
-use verum_types::computational_properties::{
-    ComputationalProperty, PropertySet,
-};
+use verum_types::computational_properties::{ComputationalProperty, PropertySet};
 
 #[test]
 fn pure_constructor_is_pure() {
@@ -81,10 +79,7 @@ fn from_properties_drops_pure_when_effectful_added() {
     // This is the fundamental invariant of the property
     // algebra: Pure is the bottom element, dominated by any
     // other property.
-    let p = PropertySet::from_properties([
-        ComputationalProperty::Pure,
-        ComputationalProperty::IO,
-    ]);
+    let p = PropertySet::from_properties([ComputationalProperty::Pure, ComputationalProperty::IO]);
     assert!(!p.is_pure());
     assert!(p.has_io());
     assert!(!p.contains(&ComputationalProperty::Pure));

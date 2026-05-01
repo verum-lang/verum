@@ -17,8 +17,8 @@
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
-    check_strict_positivity, ConstructorSig, CoreTerm, InductiveRegistry, KernelError,
-    PositivityCtx, RegisteredInductive, UniverseLevel,
+    ConstructorSig, CoreTerm, InductiveRegistry, KernelError, PositivityCtx, RegisteredInductive,
+    UniverseLevel, check_strict_positivity,
 };
 
 fn ind(name: &str) -> CoreTerm {
@@ -62,17 +62,20 @@ fn nat_is_strictly_positive() {
     //  Succ(Nat) — one arg, the type's own name in a non-arrow position
     let succ_arg = ind("Nat");
     let result = check_strict_positivity("Nat", &succ_arg, &ctx("Succ", 0));
-    assert!(result.is_ok(), "Succ(Nat) is the canonical strict-positive use");
+    assert!(
+        result.is_ok(),
+        "Succ(Nat) is the canonical strict-positive use"
+    );
 }
 
 #[test]
 fn list_is_strictly_positive() {
     // type List<A> = Nil | Cons(A, List<A>)
     //  Cons — args A and List<A>
-    let cons_a   = CoreTerm::Var(Text::from("A"));
+    let cons_a = CoreTerm::Var(Text::from("A"));
     let cons_lst = ind_with("List", vec![CoreTerm::Var(Text::from("A"))]);
 
-    assert!(check_strict_positivity("List", &cons_a,   &ctx("Cons", 0)).is_ok());
+    assert!(check_strict_positivity("List", &cons_a, &ctx("Cons", 0)).is_ok());
     assert!(check_strict_positivity("List", &cons_lst, &ctx("Cons", 1)).is_ok());
 }
 
@@ -108,7 +111,10 @@ fn registry_admits_well_formed_inductive() {
         Text::from("Nat"),
         List::new(),
         List::from_iter(vec![
-            ConstructorSig { name: Text::from("Zero"), arg_types: List::new() },
+            ConstructorSig {
+                name: Text::from("Zero"),
+                arg_types: List::new(),
+            },
             ConstructorSig {
                 name: Text::from("Succ"),
                 arg_types: List::from_iter(vec![ind("Nat")]),
@@ -130,7 +136,11 @@ fn direct_non_positive_recursion_rejected() {
     //  position of an arrow. Strict positivity must reject.
     let bad_arrow = pi(ind("Bad"), CoreTerm::Var(Text::from("A")));
     match check_strict_positivity("Bad", &bad_arrow, &ctx("Wrap", 0)) {
-        Err(KernelError::PositivityViolation { type_name, constructor, position }) => {
+        Err(KernelError::PositivityViolation {
+            type_name,
+            constructor,
+            position,
+        }) => {
             assert_eq!(type_name.as_str(), "Bad");
             assert_eq!(constructor.as_str(), "Wrap");
             // Position must mention "left of an arrow" so the diagnostic
@@ -190,7 +200,11 @@ fn registry_rejects_non_positive_declaration() {
         }]),
     ));
     match result {
-        Err(KernelError::PositivityViolation { type_name, constructor, .. }) => {
+        Err(KernelError::PositivityViolation {
+            type_name,
+            constructor,
+            ..
+        }) => {
             assert_eq!(type_name.as_str(), "Bad");
             assert_eq!(constructor.as_str(), "Wrap");
         }
@@ -211,7 +225,8 @@ fn registry_rejects_duplicate_inductive_name() {
             arg_types: List::new(),
         }]),
     );
-    reg.register(nat.clone()).expect("first registration must succeed");
+    reg.register(nat.clone())
+        .expect("first registration must succeed");
     match reg.register(nat) {
         Err(KernelError::DuplicateInductive(name)) => assert_eq!(name.as_str(), "Nat"),
         other => panic!("expected DuplicateInductive, got {other:?}"),

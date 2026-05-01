@@ -151,9 +151,7 @@ fn file_display_name(path: &Path) -> Text {
 
 /// Helper to parse a single .vr file into a module AST.
 /// Returns (module, pipeline) or an error string.
-fn parse_file(
-    path: &Path,
-) -> std::result::Result<verum_ast::Module, String> {
+fn parse_file(path: &Path) -> std::result::Result<verum_ast::Module, String> {
     let mut options = CompilerOptions::default();
     options.input = path.to_path_buf();
     let mut session = Session::new(options);
@@ -297,10 +295,7 @@ fn analyze_escape(vr_files: &[PathBuf]) -> Result<()> {
         global_stats.tier1_count,
         global_stats.promotion_rate() * 100.0
     );
-    println!(
-        "    Tier 0 (~15ns):     {}",
-        global_stats.tier0_count
-    );
+    println!("    Tier 0 (~15ns):     {}", global_stats.tier0_count);
     if global_stats.tier2_count > 0 {
         println!("    Tier 2 (unsafe):    {}", global_stats.tier2_count);
     }
@@ -335,7 +330,10 @@ fn run_escape_analysis_on_file(
     path: &Path,
     config: &verum_cbgr::tier_analysis::TierAnalysisConfig,
 ) -> std::result::Result<
-    (verum_cbgr::tier_types::TierStatistics, Vec<FunctionEscapeInfo>),
+    (
+        verum_cbgr::tier_types::TierStatistics,
+        Vec<FunctionEscapeInfo>,
+    ),
     String,
 > {
     use verum_cbgr::tier_analysis::TierAnalyzer;
@@ -479,10 +477,7 @@ fn analyze_context(vr_files: &[PathBuf]) -> Result<()> {
     }
 
     if issues.is_empty() {
-        println!(
-            "  {} All context declarations are consistent",
-            "OK".green()
-        );
+        println!("  {} All context declarations are consistent", "OK".green());
         println!();
     } else {
         let missing: Vec<_> = issues
@@ -594,11 +589,8 @@ fn analyze_context_in_file(path: &Path) -> std::result::Result<FileContextResult
             }
 
             result.total_functions += 1;
-            let declared_contexts: Vec<Text> = func
-                .contexts
-                .iter()
-                .map(|c| context_req_name(c))
-                .collect();
+            let declared_contexts: Vec<Text> =
+                func.contexts.iter().map(|c| context_req_name(c)).collect();
 
             if !declared_contexts.is_empty() {
                 result.functions_with_contexts += 1;
@@ -620,7 +612,10 @@ fn analyze_context_in_file(path: &Path) -> std::result::Result<FileContextResult
 
                 // Check for missing declarations: used but not declared
                 for used in &used_contexts {
-                    if !declared_contexts.iter().any(|d| d.as_str() == used.as_str()) {
+                    if !declared_contexts
+                        .iter()
+                        .any(|d| d.as_str() == used.as_str())
+                    {
                         result.issues.push(ContextIssue {
                             function_name: func.name.name.clone(),
                             file_name: file_name.clone(),
@@ -679,7 +674,9 @@ fn walk_stmt_for_contexts(stmt: &verum_ast::stmt::Stmt, contexts: &mut Vec<Text>
                 walk_expr_for_contexts(val, contexts);
             }
         }
-        StmtKind::LetElse { value, else_block, .. } => {
+        StmtKind::LetElse {
+            value, else_block, ..
+        } => {
             walk_expr_for_contexts(value, contexts);
             walk_block_for_contexts(else_block, contexts);
         }
@@ -728,7 +725,12 @@ fn walk_expr_for_contexts(expr: &verum_ast::expr::Expr, contexts: &mut Vec<Text>
         ExprKind::Block(block) => {
             walk_block_for_contexts(block, contexts);
         }
-        ExprKind::If { condition, then_branch, else_branch, .. } => {
+        ExprKind::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
             // condition is IfCondition, walk its expr
             walk_if_condition_for_contexts(condition, contexts);
             walk_block_for_contexts(then_branch, contexts);
@@ -736,13 +738,19 @@ fn walk_expr_for_contexts(expr: &verum_ast::expr::Expr, contexts: &mut Vec<Text>
                 walk_expr_for_contexts(else_expr, contexts);
             }
         }
-        ExprKind::Match { expr: scrutinee, arms, .. } => {
+        ExprKind::Match {
+            expr: scrutinee,
+            arms,
+            ..
+        } => {
             walk_expr_for_contexts(scrutinee, contexts);
             for arm in arms.iter() {
                 walk_expr_for_contexts(&arm.body, contexts);
             }
         }
-        ExprKind::While { condition, body, .. } => {
+        ExprKind::While {
+            condition, body, ..
+        } => {
             walk_expr_for_contexts(condition, contexts);
             walk_block_for_contexts(body, contexts);
         }
@@ -769,10 +777,7 @@ fn walk_expr_for_contexts(expr: &verum_ast::expr::Expr, contexts: &mut Vec<Text>
     }
 }
 
-fn walk_if_condition_for_contexts(
-    cond: &verum_ast::expr::IfCondition,
-    contexts: &mut Vec<Text>,
-) {
+fn walk_if_condition_for_contexts(cond: &verum_ast::expr::IfCondition, contexts: &mut Vec<Text>) {
     use verum_ast::expr::ConditionKind;
     for condition in &cond.conditions {
         match condition {
@@ -961,10 +966,7 @@ fn analyze_refinement_in_file(path: &Path) -> std::result::Result<FileRefinement
                 result.total_functions += 1;
 
                 // Check for @verify attribute
-                let has_verify = func
-                    .attributes
-                    .iter()
-                    .any(|a| a.name.as_str() == "verify");
+                let has_verify = func.attributes.iter().any(|a| a.name.as_str() == "verify");
                 if has_verify {
                     result.functions_with_verify += 1;
                 }
@@ -986,12 +988,8 @@ fn analyze_refinement_in_file(path: &Path) -> std::result::Result<FileRefinement
                             if !has_verify {
                                 let param_name = extract_param_name(param);
                                 result.unverified.push(UnverifiedRefinement {
-                                    name: format!(
-                                        "{}.{}",
-                                        func.name.name.as_str(),
-                                        param_name,
-                                    )
-                                    .into(),
+                                    name: format!("{}.{}", func.name.name.as_str(), param_name,)
+                                        .into(),
                                     file_name: file_name.clone(),
                                     predicate: format_type_refinement(ty),
                                     appears_provable: is_likely_provable(ty),
@@ -1064,9 +1062,7 @@ fn has_refinement(ty: &verum_ast::Type) -> bool {
             params,
             return_type,
             ..
-        } => {
-            params.iter().any(|p| has_refinement(p)) || has_refinement(return_type)
-        }
+        } => params.iter().any(|p| has_refinement(p)) || has_refinement(return_type),
         TypeKind::Tuple(types) => types.iter().any(|t| has_refinement(t)),
         TypeKind::Array { element, .. } => has_refinement(element),
         TypeKind::Reference { inner, .. } => has_refinement(inner),
@@ -1085,9 +1081,7 @@ fn format_type_refinement(ty: &verum_ast::Type) -> Text {
                 verum_common::Maybe::Some(binder) => {
                     format!("{}: {}{{...}}", binder.name, format_type_name(base)).into()
                 }
-                verum_common::Maybe::None => {
-                    format!("{}{{...}}", format_type_name(base)).into()
-                }
+                verum_common::Maybe::None => format!("{}{{...}}", format_type_name(base)).into(),
             }
         }
         _ => "(compound type with refinement)".into(),

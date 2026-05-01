@@ -413,11 +413,7 @@ pub fn render_dependent_theorems_note(
         if deps.len() == 1 { "" } else { "s" },
         if deps.len() == 1 { "s" } else { "" },
     ));
-    let max_name_width = deps
-        .iter()
-        .map(|d| d.theorem.len())
-        .max()
-        .unwrap_or(0);
+    let max_name_width = deps.iter().map(|d| d.theorem.len()).max().unwrap_or(0);
     for dep in &deps {
         match theorem_sources.and_then(|m| m.get(&dep.theorem)) {
             Some(path) => {
@@ -451,15 +447,18 @@ pub fn render_dependent_theorems_note(
 
 /// Returns the [`LeafComposition`] — read-only summary the audit
 /// gate emits as JSON / human-readable text.
-pub fn walk_transitive(
-    graph: &ApplyGraph,
-    root: &str,
-    max_depth: usize,
-) -> LeafComposition {
+pub fn walk_transitive(graph: &ApplyGraph, root: &str, max_depth: usize) -> LeafComposition {
     let mut composition = LeafComposition::default();
     let mut visited: HashSet<String> = HashSet::new();
     let mut chain: Vec<String> = Vec::new();
-    walk_node(graph, root, &mut composition, &mut visited, &mut chain, max_depth);
+    walk_node(
+        graph,
+        root,
+        &mut composition,
+        &mut visited,
+        &mut chain,
+        max_depth,
+    );
     composition
 }
 
@@ -498,7 +497,14 @@ fn walk_node(
             // interfere with the recursive borrow of `composition`.
             let targets: Vec<String> = apply_targets.clone();
             for target in &targets {
-                walk_node(graph, target, composition, visited, chain, remaining_depth - 1);
+                walk_node(
+                    graph,
+                    target,
+                    composition,
+                    visited,
+                    chain,
+                    remaining_depth - 1,
+                );
             }
         }
         Some(entry) => {
@@ -1095,8 +1101,8 @@ mod tests {
             "msfs_lemma_3_4_outputs_in_s_s_global",
             "kernel_var_strict",
             "MaybeOk",
-            "auto_close",       // contains "auto" but isn't the tactic
-            "simplification",   // contains "simp" but isn't the tactic
+            "auto_close",     // contains "auto" but isn't the tactic
+            "simplification", // contains "simp" but isn't the tactic
         ] {
             assert!(
                 !is_builtin_tactic_name(name),
@@ -1397,10 +1403,7 @@ mod tests {
             ("axiom_x", SymbolEntry::PlaceholderAxiom),
         ]);
         let mut sources = BTreeMap::new();
-        sources.insert(
-            "thm_a".to_string(),
-            PathBuf::from("math/lemma_3_4.vr"),
-        );
+        sources.insert("thm_a".to_string(), PathBuf::from("math/lemma_3_4.vr"));
         let note = render_dependent_theorems_note(&g, "axiom_x", Some(&sources))
             .expect("note must render");
         assert!(

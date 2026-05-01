@@ -472,7 +472,12 @@ impl StageChecker {
     ///
 
     /// Call this for each meta function before checking its body.
-    pub fn register_function(&mut self, name: Text, stage: u32, span: Span) -> Result<(), StageError> {
+    pub fn register_function(
+        &mut self,
+        name: Text,
+        stage: u32,
+        span: Span,
+    ) -> Result<(), StageError> {
         // Check stage overflow
         if stage > self.config.max_stage {
             return Err(StageError::StageOverflow {
@@ -606,7 +611,11 @@ impl StageChecker {
 
         // Check for cycles
         if self.call_path.contains(callee_name) {
-            let cycle_start = self.call_path.iter().position(|n| n == callee_name).unwrap_or(0);
+            let cycle_start = self
+                .call_path
+                .iter()
+                .position(|n| n == callee_name)
+                .unwrap_or(0);
             let cycle: List<Text> = self.call_path[cycle_start..]
                 .iter()
                 .cloned()
@@ -851,12 +860,16 @@ mod tests {
     #[test]
     fn test_register_function_valid() {
         let mut checker = StageChecker::with_defaults();
-        assert!(checker
-            .register_function(Text::from("my_meta"), 1, test_span())
-            .is_ok());
-        assert!(checker
-            .register_function(Text::from("my_meta2"), 2, test_span())
-            .is_ok());
+        assert!(
+            checker
+                .register_function(Text::from("my_meta"), 1, test_span())
+                .is_ok()
+        );
+        assert!(
+            checker
+                .register_function(Text::from("my_meta2"), 2, test_span())
+                .is_ok()
+        );
     }
 
     #[test]
@@ -917,9 +930,11 @@ mod tests {
         checker.enter_function(&Text::from("caller"), 1, test_span());
 
         // Same stage call is valid
-        assert!(checker
-            .check_call(&Text::from("callee"), 1, test_span())
-            .is_ok());
+        assert!(
+            checker
+                .check_call(&Text::from("callee"), 1, test_span())
+                .is_ok()
+        );
     }
 
     #[test]
@@ -976,9 +991,11 @@ mod tests {
 
         // Don't invoke the function
         let warnings = checker.collect_warnings();
-        assert!(warnings
-            .iter()
-            .any(|w| matches!(w, StageWarning::UnusedStage { .. })));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| matches!(w, StageWarning::UnusedStage { .. }))
+        );
     }
 
     #[test]
@@ -997,9 +1014,11 @@ mod tests {
         checker.exit_function();
 
         let warnings = checker.collect_warnings();
-        assert!(warnings
-            .iter()
-            .any(|w| matches!(w, StageWarning::StageDowngrade { .. })));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| matches!(w, StageWarning::StageDowngrade { .. }))
+        );
     }
 
     #[test]

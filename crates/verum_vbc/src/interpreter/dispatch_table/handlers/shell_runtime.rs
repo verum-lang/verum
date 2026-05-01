@@ -59,13 +59,13 @@
 //! with the same `Process` scope check that `ffi_extended.rs::
 //! check_ffi_permission` applies to the libSystem fork/execve path.
 
+use super::super::super::error::InterpreterResult;
+use super::heap_helpers::{alloc_byte_list, alloc_record_n_fields, wrap_in_variant};
+use super::string_helpers::{alloc_string_value, extract_string};
 use crate::interpreter::permission::{PermissionDecision, PermissionScope};
 use crate::interpreter::state::InterpreterState;
 use crate::types::VariantKind;
 use crate::value::Value;
-use super::super::super::error::InterpreterResult;
-use super::heap_helpers::{alloc_byte_list, alloc_record_n_fields, wrap_in_variant};
-use super::string_helpers::{alloc_string_value, extract_string};
 
 /// Try to intercept a high-level shell-runtime call. Returns `Some(value)`
 /// when the interception fires (caller must store the value into the
@@ -116,9 +116,7 @@ pub(in super::super) fn try_intercept_shell_runtime(
     // Permission gate — process termination AND spawn live under
     // the same `Process` scope (matches `ffi_symbol_permission_scope`
     // mapping for `fork`/`execve`/`posix_spawn` etc.).
-    if state.check_permission(PermissionScope::Process, 0)
-        == PermissionDecision::Deny
-    {
+    if state.check_permission(PermissionScope::Process, 0) == PermissionDecision::Deny {
         // Build Err(ShellError.SpawnFailed { command, reason }) directly.
         return Ok(Some(build_err_spawn_failed(
             state,
@@ -136,11 +134,7 @@ pub(in super::super) fn try_intercept_shell_runtime(
         Vec<u8>,
         Vec<u8>,
         Option<String>,
-    ) = match StdCommand::new("/bin/sh")
-        .arg("-c")
-        .arg(&cmd_text)
-        .output()
-    {
+    ) = match StdCommand::new("/bin/sh").arg("-c").arg(&cmd_text).output() {
         Ok(out) => {
             // Pack ExitStatus into the Verum `raw: Int` shape: low
             // 8 bits = exit code (when normal exit), bit 7 set for
@@ -149,13 +143,13 @@ pub(in super::super) fn try_intercept_shell_runtime(
             // from `Output.status.code()` since `std` doesn't
             // expose the raw waitpid status portably).
             let raw = match out.status.code() {
-                Some(code) => (code as i64) << 8,    // shift to mimic WIFEXITED layout
-                None => 1,                            // signalled — non-zero raw
+                Some(code) => (code as i64) << 8, // shift to mimic WIFEXITED layout
+                None => 1,                        // signalled — non-zero raw
             };
             (raw, out.stdout, out.stderr, None)
         }
         Err(e) => (
-            127,                                       // POSIX "command not found" sentinel
+            127, // POSIX "command not found" sentinel
             Vec::new(),
             Vec::new(),
             Some(format!("spawn failed: {}", e)),

@@ -247,10 +247,7 @@ pub fn meta_quote(args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     } else {
         Err(MetaError::TypeMismatch {
             expected: "Expr or Text".to_string().into(),
-            found: args
-                .first()
-                .map(|v| v.type_name())
-                .unwrap_or("none".into()),
+            found: args.first().map(|v| v.type_name()).unwrap_or("none".into()),
         })
     }
 }
@@ -288,10 +285,7 @@ pub fn meta_unquote(args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     } else {
         Err(MetaError::TypeMismatch {
             expected: "Expr".into(),
-            found: args
-                .first()
-                .map(|v| v.type_name())
-                .unwrap_or("none".into()),
+            found: args.first().map(|v| v.type_name()).unwrap_or("none".into()),
         })
     }
 }

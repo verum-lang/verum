@@ -58,8 +58,8 @@
 
 use crate::tactics::{StrategyBuilder, TacticCombinator, TacticKind};
 use serde::{Deserialize, Serialize};
-use verum_common::{List, Map, Maybe, Set, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Set, Text};
 use z3::ast::{Ast, Dynamic};
 use z3::{Config, Goal, Solver, Tactic};
 
@@ -2530,16 +2530,12 @@ impl ProofExtractor {
     /// extended proof rules that have no direct bridge analogue are collapsed
     /// into `SmtVerified` so the certificate pipeline always produces a valid
     /// (though possibly coarse) proof object.
-    pub fn to_bridge_term(
-        proof: &ProofTerm,
-    ) -> crate::proof_extraction_bridge::ProofTerm {
+    pub fn to_bridge_term(proof: &ProofTerm) -> crate::proof_extraction_bridge::ProofTerm {
         use crate::proof_extraction_bridge::ProofTerm as B;
 
         match proof {
             // ── Base cases ────────────────────────────────────────────────
-            ProofTerm::Axiom { name, .. } => B::Assumption {
-                name: name.clone(),
-            },
+            ProofTerm::Axiom { name, .. } => B::Assumption { name: name.clone() },
             ProofTerm::Hypothesis { formula, .. } => B::Assumption {
                 name: formula.clone(),
             },
@@ -2556,7 +2552,10 @@ impl ProofExtractor {
                 right: Box::new(Self::to_bridge_term(right)),
             },
 
-            ProofTerm::ModusPonens { premise, implication } => B::ModusPonens {
+            ProofTerm::ModusPonens {
+                premise,
+                implication,
+            } => B::ModusPonens {
                 hypothesis: Box::new(Self::to_bridge_term(premise)),
                 implication: Box::new(Self::to_bridge_term(implication)),
             },
@@ -2585,22 +2584,23 @@ impl ProofExtractor {
                 }
             }
 
-            ProofTerm::QuantifierInstantiation { quantified, instantiation } => {
-                B::Application {
-                    function: Box::new(Self::to_bridge_term(quantified)),
-                    argument: verum_common::Text::from(format!(
-                        "inst({})",
-                        instantiation
-                            .keys()
-                            .cloned()
-                            .collect::<verum_common::List<_>>()
-                            .iter()
-                            .map(|k| k.as_str())
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    )),
-                }
-            }
+            ProofTerm::QuantifierInstantiation {
+                quantified,
+                instantiation,
+            } => B::Application {
+                function: Box::new(Self::to_bridge_term(quantified)),
+                argument: verum_common::Text::from(format!(
+                    "inst({})",
+                    instantiation
+                        .keys()
+                        .cloned()
+                        .collect::<verum_common::List<_>>()
+                        .iter()
+                        .map(|k| k.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )),
+            },
 
             ProofTerm::Lemma { conclusion, proof } => B::TacticProduced {
                 tactic_name: verum_common::Text::from("lemma"),

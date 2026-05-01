@@ -18,10 +18,10 @@
 // Tests the fixed-point computation engine for recursive predicates,
 // Datalog rules, and inductive properties using Z3's μZ framework.
 
+use verum_common::Text;
 use verum_smt::fixedpoint::{
     Atom, DatalogRule, PredicateBody, PredicateCase, RecursiveCall, RecursivePredicate,
 };
-use verum_common::Text;
 use z3::ast::{Bool, Int};
 
 // ==================== Datalog Rule Tests ====================

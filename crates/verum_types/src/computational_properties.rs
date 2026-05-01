@@ -97,7 +97,6 @@ pub enum ComputationalProperty {
     // back-compat — passes that don't care about the tagged distinction
     // can use either form.
     // -----------------------------------------------------------------------
-
     /// Reads a tagged resource — FileSystem path / Network host / Env name / Stdin.
     Reads(ResourceKind),
 
@@ -141,12 +140,12 @@ impl fmt::Display for ResourceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ResourceKind::FileSystem(p) => write!(f, "FileSystem({})", p),
-            ResourceKind::Network(h)    => write!(f, "Network({})", h),
-            ResourceKind::Env(n)        => write!(f, "Env({})", n),
-            ResourceKind::Stdin         => write!(f, "Stdin"),
-            ResourceKind::Stdout        => write!(f, "Stdout"),
-            ResourceKind::Stderr        => write!(f, "Stderr"),
-            ResourceKind::Custom(s)     => write!(f, "Custom({})", s),
+            ResourceKind::Network(h) => write!(f, "Network({})", h),
+            ResourceKind::Env(n) => write!(f, "Env({})", n),
+            ResourceKind::Stdin => write!(f, "Stdin"),
+            ResourceKind::Stdout => write!(f, "Stdout"),
+            ResourceKind::Stderr => write!(f, "Stderr"),
+            ResourceKind::Custom(s) => write!(f, "Custom({})", s),
         }
     }
 }
@@ -168,9 +167,9 @@ impl fmt::Display for SpawnKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SpawnKind::Process(p) => write!(f, "Process({})", p),
-            SpawnKind::Task       => write!(f, "Task"),
-            SpawnKind::Thread     => write!(f, "Thread"),
-            SpawnKind::Custom(s)  => write!(f, "Custom({})", s),
+            SpawnKind::Task => write!(f, "Task"),
+            SpawnKind::Thread => write!(f, "Thread"),
+            SpawnKind::Custom(s) => write!(f, "Custom({})", s),
         }
     }
 }
@@ -248,9 +247,7 @@ impl<'de> serde::Deserialize<'de> for PropertySet {
 /// `error_protocol = None` still returns `Some({FFI})` — the FFI
 /// tag is always added so capability audits can recognise the
 /// boundary even on otherwise-pure externs.
-pub fn lift_ffi_function_to_properties(
-    ffi: &verum_ast::ffi::FFIFunction,
-) -> Option<PropertySet> {
+pub fn lift_ffi_function_to_properties(ffi: &verum_ast::ffi::FFIFunction) -> Option<PropertySet> {
     use verum_ast::ffi::{ErrorProtocol, MemoryEffects};
 
     let mut props = Set::<ComputationalProperty>::new();
@@ -390,19 +387,24 @@ impl PropertySet {
     /// True iff this set spawns any external process.
     pub fn spawns_processes(&self) -> bool {
         self.contains(&ComputationalProperty::Spawns)
-            || self.properties.iter().any(|p| matches!(p, ComputationalProperty::SpawnsKind(SpawnKind::Process(_))))
+            || self
+                .properties
+                .iter()
+                .any(|p| matches!(p, ComputationalProperty::SpawnsKind(SpawnKind::Process(_))))
     }
 
     /// Add a `Reads(resource)` property and ensure `IO` is also present.
     pub fn add_read(&mut self, resource: ResourceKind) {
-        self.properties.insert(ComputationalProperty::Reads(resource));
+        self.properties
+            .insert(ComputationalProperty::Reads(resource));
         self.properties.insert(ComputationalProperty::IO);
         self.properties.remove(&ComputationalProperty::Pure);
     }
 
     /// Add a `Writes(resource)` property and ensure `IO` is also present.
     pub fn add_write(&mut self, resource: ResourceKind) {
-        self.properties.insert(ComputationalProperty::Writes(resource));
+        self.properties
+            .insert(ComputationalProperty::Writes(resource));
         self.properties.insert(ComputationalProperty::IO);
         self.properties.remove(&ComputationalProperty::Pure);
     }
@@ -410,7 +412,8 @@ impl PropertySet {
     /// Add a `Spawns(kind)` property and ensure both `IO` and the legacy
     /// `Spawns` are present.
     pub fn add_spawn(&mut self, kind: SpawnKind) {
-        self.properties.insert(ComputationalProperty::SpawnsKind(kind));
+        self.properties
+            .insert(ComputationalProperty::SpawnsKind(kind));
         self.properties.insert(ComputationalProperty::Spawns);
         self.properties.insert(ComputationalProperty::IO);
         self.properties.remove(&ComputationalProperty::Pure);
@@ -590,9 +593,9 @@ impl fmt::Display for ComputationalProperty {
             ComputationalProperty::WritesExternal => write!(f, "WritesExternal"),
             ComputationalProperty::FFI => write!(f, "FFI"),
             ComputationalProperty::Spawns => write!(f, "Spawns"),
-            ComputationalProperty::Reads(r)       => write!(f, "Reads({})", r),
-            ComputationalProperty::Writes(r)      => write!(f, "Writes({})", r),
-            ComputationalProperty::SpawnsKind(s)  => write!(f, "Spawns({})", s),
+            ComputationalProperty::Reads(r) => write!(f, "Reads({})", r),
+            ComputationalProperty::Writes(r) => write!(f, "Writes({})", r),
+            ComputationalProperty::SpawnsKind(s) => write!(f, "Spawns({})", s),
             ComputationalProperty::Custom(name) => write!(f, "Custom({})", name),
         }
     }
@@ -800,9 +803,8 @@ impl PropertyInferrer {
                 // Try to look up function properties if it's a simple path
                 if let ExprKind::Path(path) = &func.kind {
                     if let Some(name) = path.as_ident() {
-                        if let Some(func_props) = self
-                            .context
-                            .get_function_properties(&name.name.clone())
+                        if let Some(func_props) =
+                            self.context.get_function_properties(&name.name.clone())
                         {
                             combined = combined.union(func_props);
                         }
@@ -826,9 +828,8 @@ impl PropertyInferrer {
                 }
 
                 // Look up method properties
-                if let Some(method_props) = self
-                    .context
-                    .get_function_properties(&method.name.clone())
+                if let Some(method_props) =
+                    self.context.get_function_properties(&method.name.clone())
                 {
                     combined = combined.union(method_props);
                 }
@@ -1060,7 +1061,8 @@ impl PropertyInferrer {
 
                 // Infer properties from recover if present (adds Fallible)
                 if let Some(recover_body) = recover {
-                    combined = combined.union(&PropertySet::single(ComputationalProperty::Fallible));
+                    combined =
+                        combined.union(&PropertySet::single(ComputationalProperty::Fallible));
                     match recover_body {
                         verum_ast::expr::RecoverBody::MatchArms { arms, .. } => {
                             for arm in arms.iter() {
@@ -1522,7 +1524,9 @@ mod tests {
             verum_ast::ffi::MemoryEffects::Combined({
                 let mut xs = List::new();
                 xs.push(verum_ast::ffi::MemoryEffects::Allocates);
-                xs.push(verum_ast::ffi::MemoryEffects::Reads(verum_common::Maybe::None));
+                xs.push(verum_ast::ffi::MemoryEffects::Reads(
+                    verum_common::Maybe::None,
+                ));
                 xs
             }),
             verum_ast::ffi::ErrorProtocol::None,
@@ -2009,7 +2013,10 @@ mod computational_signature_tests {
     fn signature_with_context_is_not_pure() {
         let mut ctxs = List::new();
         ctxs.push(Text::from("Database"));
-        let sig = ComputationalSignature::new(ctxs, PropertySet::from_properties(Vec::<ComputationalProperty>::new()));
+        let sig = ComputationalSignature::new(
+            ctxs,
+            PropertySet::from_properties(Vec::<ComputationalProperty>::new()),
+        );
         assert!(sig.has_contexts());
         assert!(!sig.is_pure());
     }
@@ -2019,11 +2026,17 @@ mod computational_signature_tests {
         let mut superset_ctxs = List::new();
         superset_ctxs.push(Text::from("Database"));
         superset_ctxs.push(Text::from("Logger"));
-        let superset = ComputationalSignature::new(superset_ctxs, PropertySet::from_properties(Vec::<ComputationalProperty>::new()));
+        let superset = ComputationalSignature::new(
+            superset_ctxs,
+            PropertySet::from_properties(Vec::<ComputationalProperty>::new()),
+        );
 
         let mut subset_ctxs = List::new();
         subset_ctxs.push(Text::from("Database"));
-        let subset = ComputationalSignature::new(subset_ctxs, PropertySet::from_properties(Vec::<ComputationalProperty>::new()));
+        let subset = ComputationalSignature::new(
+            subset_ctxs,
+            PropertySet::from_properties(Vec::<ComputationalProperty>::new()),
+        );
 
         assert!(superset.subsumes(&subset));
         assert!(!subset.subsumes(&superset));
@@ -2050,17 +2063,12 @@ mod computational_signature_tests {
     fn union_merges_contexts_and_properties() {
         let mut a_ctxs = List::new();
         a_ctxs.push(Text::from("Database"));
-        let a = ComputationalSignature::new(
-            a_ctxs,
-            PropertySet::single(ComputationalProperty::IO),
-        );
+        let a = ComputationalSignature::new(a_ctxs, PropertySet::single(ComputationalProperty::IO));
 
         let mut b_ctxs = List::new();
         b_ctxs.push(Text::from("Logger"));
-        let b = ComputationalSignature::new(
-            b_ctxs,
-            PropertySet::single(ComputationalProperty::Async),
-        );
+        let b =
+            ComputationalSignature::new(b_ctxs, PropertySet::single(ComputationalProperty::Async));
 
         let merged = a.union(&b);
         assert_eq!(merged.context_count(), 2);
@@ -2074,12 +2082,18 @@ mod computational_signature_tests {
         let mut a_ctxs = List::new();
         a_ctxs.push(Text::from("Database"));
         a_ctxs.push(Text::from("Logger"));
-        let a = ComputationalSignature::new(a_ctxs, PropertySet::from_properties(Vec::<ComputationalProperty>::new()));
+        let a = ComputationalSignature::new(
+            a_ctxs,
+            PropertySet::from_properties(Vec::<ComputationalProperty>::new()),
+        );
 
         let mut b_ctxs = List::new();
         b_ctxs.push(Text::from("Database"));
         b_ctxs.push(Text::from("Telemetry"));
-        let b = ComputationalSignature::new(b_ctxs, PropertySet::from_properties(Vec::<ComputationalProperty>::new()));
+        let b = ComputationalSignature::new(
+            b_ctxs,
+            PropertySet::from_properties(Vec::<ComputationalProperty>::new()),
+        );
 
         let merged = a.union(&b);
         assert_eq!(merged.context_count(), 3, "expect dedup of Database");

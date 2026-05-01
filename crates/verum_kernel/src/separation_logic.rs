@@ -601,10 +601,7 @@ pub fn dispatch_separation_goal(goal: &SeparationGoal) -> SeparationVerdict {
     }
 
     // Rule 2: trivial frame — { emp } _ { emp } with empty frame.
-    if goal.triple.pre.is_emp()
-        && goal.triple.post.is_emp()
-        && goal.frame_invariant.is_emp()
-    {
+    if goal.triple.pre.is_emp() && goal.triple.post.is_emp() && goal.frame_invariant.is_emp() {
         return SeparationVerdict::Discharged;
     }
 
@@ -632,9 +629,7 @@ pub fn dispatch_separation_goal(goal: &SeparationGoal) -> SeparationVerdict {
     }
 
     // Rule 6: default — admit with IOU.
-    SeparationVerdict::AdmittedWithIou(
-        "no rule matches \u{2014} frame inference V1".to_string(),
-    )
+    SeparationVerdict::AdmittedWithIou("no rule matches \u{2014} frame inference V1".to_string())
 }
 
 /// Per-verdict counters for audit-gate aggregation. The dispatcher
@@ -674,12 +669,8 @@ impl SeparationDispatcherStats {
             SeparationVerdict::AdmittedWithIou(_) => self.admitted_with_iou += 1,
             SeparationVerdict::RejectIllFormed(_) => self.reject_ill_formed += 1,
             SeparationVerdict::RoutedToFrameRule => self.routed_to_frame_rule += 1,
-            SeparationVerdict::RoutedToHoareSequencing => {
-                self.routed_to_hoare_sequencing += 1
-            }
-            SeparationVerdict::RoutedToConsequenceRule => {
-                self.routed_to_consequence_rule += 1
-            }
+            SeparationVerdict::RoutedToHoareSequencing => self.routed_to_hoare_sequencing += 1,
+            SeparationVerdict::RoutedToConsequenceRule => self.routed_to_consequence_rule += 1,
         }
     }
 
@@ -747,10 +738,7 @@ mod tests {
 
     #[test]
     fn sep_of_pure_is_pure() {
-        let p = HeapPredicate::sep(
-            HeapPredicate::pure(Term::Universe(0)),
-            HeapPredicate::emp(),
-        );
+        let p = HeapPredicate::sep(HeapPredicate::pure(Term::Universe(0)), HeapPredicate::emp());
         assert!(p.is_pure());
     }
 
@@ -826,7 +814,10 @@ mod tests {
             },
         );
         let m = goal.audit_metadata();
-        assert_eq!(m.get("kind").map(String::as_str), Some("stateful_fn_contract"));
+        assert_eq!(
+            m.get("kind").map(String::as_str),
+            Some("stateful_fn_contract")
+        );
         assert_eq!(m.get("capability").map(String::as_str), Some("write"));
         assert!(m.contains_key("is_pure"));
     }

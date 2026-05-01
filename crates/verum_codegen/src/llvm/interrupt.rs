@@ -50,13 +50,13 @@
 //! only). InterruptCell<T> provides interrupt-safe shared data via CriticalSection
 //! guards that disable/restore interrupts with RAII semantics.
 
+use verum_llvm::InlineAsmDialect;
 use verum_llvm::attributes::{Attribute, AttributeLoc};
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::intrinsics::Intrinsic;
 use verum_llvm::types::FunctionType;
 use verum_llvm::values::{FunctionValue, PointerValue};
-use verum_llvm::InlineAsmDialect;
 
 use super::error::{LlvmLoweringError, Result};
 use super::types::TypeLowering;
@@ -194,9 +194,7 @@ impl InterruptStats {
 
     /// Get total operations count.
     pub fn total(&self) -> usize {
-        self.handlers_configured
-            + self.critical_section_entries
-            + self.critical_section_exits
+        self.handlers_configured + self.critical_section_entries + self.critical_section_exits
     }
 }
 
@@ -292,9 +290,9 @@ impl<'ctx> InterruptLowering<'ctx> {
 
         // For ARM/AArch64, add the interrupt type as a string attribute
         if matches!(self.arch, TargetArch::ARM | TargetArch::AArch64) {
-            let interrupt_attr =
-                self.context
-                    .create_string_attribute("interrupt", kind.arm_interrupt_type());
+            let interrupt_attr = self
+                .context
+                .create_string_attribute("interrupt", kind.arm_interrupt_type());
             func.add_attribute(AttributeLoc::Function, interrupt_attr);
         }
 
@@ -458,14 +456,8 @@ impl<'ctx> InterruptLowering<'ctx> {
         if let Some(priority) = priority_mask {
             // Use BASEPRI for priority-based masking
             // mrs r0, basepri; str r0, [saved]; mov r0, #priority; msr basepri, r0
-            let asm_fn = self
-                .context
-                .void_type()
-                .fn_type(&[i32_type.into()], false);
-            let asm_str = format!(
-                "mrs $0, basepri; msr basepri, {}",
-                priority
-            );
+            let asm_fn = self.context.void_type().fn_type(&[i32_type.into()], false);
+            let asm_str = format!("mrs $0, basepri; msr basepri, {}", priority);
             let asm = self.context.create_inline_asm(
                 asm_fn,
                 asm_str,
@@ -482,10 +474,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         } else {
             // Disable all interrupts: cpsid i
             // mrs r0, primask; cpsid i
-            let asm_fn = self
-                .context
-                .void_type()
-                .fn_type(&[i32_type.into()], false);
+            let asm_fn = self.context.void_type().fn_type(&[i32_type.into()], false);
             let asm = self.context.create_inline_asm(
                 asm_fn,
                 "mrs $0, primask; cpsid i".to_string(),
@@ -544,10 +533,7 @@ impl<'ctx> InterruptLowering<'ctx> {
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
         // mrs x0, daif; msr daifset, #0xf
-        let asm_fn = self
-            .context
-            .void_type()
-            .fn_type(&[i64_type.into()], false);
+        let asm_fn = self.context.void_type().fn_type(&[i64_type.into()], false);
         let asm = self.context.create_inline_asm(
             asm_fn,
             "mrs $0, daif; msr daifset, #0xf".to_string(),
@@ -610,10 +596,7 @@ impl<'ctx> InterruptLowering<'ctx> {
 
         // csrrc mstatus, mie (clear MIE bit, return old value)
         // Note: Using csrrci for immediate would be: csrrci zero, mstatus, 8
-        let asm_fn = self
-            .context
-            .void_type()
-            .fn_type(&[int_type.into()], false);
+        let asm_fn = self.context.void_type().fn_type(&[int_type.into()], false);
         let asm = self.context.create_inline_asm(
             asm_fn,
             "csrrc $0, mstatus, 8".to_string(), // 8 = MIE bit
@@ -758,6 +741,9 @@ mod tests {
     fn test_arm_interrupt_type() {
         assert_eq!(InterruptHandlerKind::Regular.arm_interrupt_type(), "IRQ");
         assert_eq!(InterruptHandlerKind::Fast.arm_interrupt_type(), "FIQ");
-        assert_eq!(InterruptHandlerKind::Exception.arm_interrupt_type(), "ABORT");
+        assert_eq!(
+            InterruptHandlerKind::Exception.arm_interrupt_type(),
+            "ABORT"
+        );
     }
 }

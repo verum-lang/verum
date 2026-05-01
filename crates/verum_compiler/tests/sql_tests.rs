@@ -18,8 +18,8 @@
 use verum_ast::Span;
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::literal::{IntLit, Literal, LiteralKind};
-use verum_compiler::interpolation::SqlInterpolationHandler;
 use verum_common::Text;
+use verum_compiler::interpolation::SqlInterpolationHandler;
 
 fn make_dummy_expr() -> Expr {
     Expr::new(

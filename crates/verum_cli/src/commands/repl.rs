@@ -22,8 +22,8 @@ use crate::ui;
 
 use std::sync::Arc;
 use verum_ast::FileId;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::interpreter::Interpreter;
 
@@ -225,11 +225,20 @@ fn print_help() {
     println!("  {}        Show this help", ":help, :h".cyan());
     println!("  {}       Clear screen", ":clear".cyan());
     println!("  {} <expr>     Show AST of expression", ":ast".cyan());
-    println!("  {} <path>     Load a .vr file into the session", ":load, :l".cyan());
-    println!("  {} <expr>     Time evaluation of an expression", ":time, :t".cyan());
+    println!(
+        "  {} <path>     Load a .vr file into the session",
+        ":load, :l".cyan()
+    );
+    println!(
+        "  {} <expr>     Time evaluation of an expression",
+        ":time, :t".cyan()
+    );
     println!("  {}    Show all bindings", ":bindings".cyan());
     println!("  {}     Show command history", ":history".cyan());
-    println!("  {}      Show accumulated session source", ":source".cyan());
+    println!(
+        "  {}      Show accumulated session source",
+        ":source".cyan()
+    );
     println!("  {}       Reset environment", ":reset".cyan());
     println!();
     println!("{}", "Examples:".bold());
@@ -252,7 +261,9 @@ fn process_input(input: &str, state: &mut ReplState) {
         };
         if try_compile_with_appended(state, &stmt).is_ok() {
             state.session_source.push_str(&stmt);
-            state.bindings.insert(Text::from(name), Text::from("static"));
+            state
+                .bindings
+                .insert(Text::from(name), Text::from("static"));
             println!(
                 "{} {} bound {}",
                 format!("[{}]", state.line_number).dimmed(),
@@ -276,7 +287,9 @@ fn process_input(input: &str, state: &mut ReplState) {
         state.session_source.push_str(&appended);
         let (kind, name) = item_kind_and_name(&item);
         if let Some(n) = name {
-            state.bindings.insert(Text::from(n.clone()), Text::from(kind));
+            state
+                .bindings
+                .insert(Text::from(n.clone()), Text::from(kind));
             println!(
                 "{} {} {} {}",
                 format!("[{}]", state.line_number).dimmed(),
@@ -306,11 +319,7 @@ fn process_input(input: &str, state: &mut ReplState) {
         match compile_and_run(state, &wrapper, &func_name) {
             Ok(stdout) => {
                 if !stdout.is_empty() {
-                    print!(
-                        "{} {}",
-                        format!("[{}]", state.line_number).dimmed(),
-                        stdout
-                    );
+                    print!("{} {}", format!("[{}]", state.line_number).dimmed(), stdout);
                     if !stdout.ends_with('\n') {
                         println!();
                     }
@@ -430,12 +439,14 @@ fn compile_module(source: &str) -> std::result::Result<verum_vbc::VbcModule, Str
     let file_id = FileId::new(0);
     let lexer = Lexer::new(source, file_id);
     let parser = VerumParser::new();
-    let module = parser
-        .parse_module(lexer, file_id)
-        .map_err(|errs| {
-            let first = errs.iter().next().map(|e| format!("{:?}", e)).unwrap_or_default();
-            format!("parse error: {}", first)
-        })?;
+    let module = parser.parse_module(lexer, file_id).map_err(|errs| {
+        let first = errs
+            .iter()
+            .next()
+            .map(|e| format!("{:?}", e))
+            .unwrap_or_default();
+        format!("parse error: {}", first)
+    })?;
 
     let config = CodegenConfig::new("repl");
     let mut codegen = VbcCodegen::with_config(config);

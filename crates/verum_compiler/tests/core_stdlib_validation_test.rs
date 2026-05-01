@@ -92,7 +92,8 @@ fn test_count_stdlib_internal_type_errors() {
             let mut session = Session::new(options);
             let mut pipeline = CompilationPipeline::new(&mut session);
 
-            let (type_err, func_err, proto_err, impl_err, details) = pipeline.count_stdlib_type_errors();
+            let (type_err, func_err, proto_err, impl_err, details) =
+                pipeline.count_stdlib_type_errors();
             let total = type_err + func_err + proto_err + impl_err;
 
             eprintln!("=== Stdlib Internal Type Error Report ===");
@@ -203,9 +204,10 @@ fn test_count_stdlib_body_errors() {
                 }
                 // Print summary line (always last)
                 if let Some(summary) = details.last()
-                    && summary.starts_with("[SUMMARY]") {
-                        eprintln!("  {}", summary);
-                    }
+                    && summary.starts_with("[SUMMARY]")
+                {
+                    eprintln!("  {}", summary);
+                }
             }
             eprintln!("=====================================");
         })

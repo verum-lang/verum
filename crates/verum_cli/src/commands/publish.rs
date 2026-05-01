@@ -3,9 +3,7 @@
 
 use crate::config::Manifest;
 use crate::error::{CliError, Result};
-use crate::registry::{
-    CogMetadata, CogSignature, CogSigner, RegistryClient, TierArtifacts,
-};
+use crate::registry::{CogMetadata, CogSignature, CogSigner, RegistryClient, TierArtifacts};
 use crate::ui;
 use colored::Colorize;
 use std::path::Path;
@@ -70,7 +68,8 @@ pub fn publish(options: PublishOptions) -> Result<()> {
     // it — `verum publish --verify-proofs` would happily upload a
     // package whose proof bundle contained `ProofStatus::Failed`
     // entries, defeating the documented enforcement contract.
-    if let Some(reason) = check_verify_proofs_gate(options.verify_proofs, metadata.proofs.as_ref()) {
+    if let Some(reason) = check_verify_proofs_gate(options.verify_proofs, metadata.proofs.as_ref())
+    {
         return Err(crate::error::CliError::Custom(reason));
     }
 
@@ -183,8 +182,8 @@ fn build_artifacts(manifest_dir: &Path, options: &PublishOptions) -> Result<Tier
 fn build_tier0(manifest_dir: &Path, output_path: &Path) -> Result<bool> {
     use sha2::{Digest, Sha256};
     use verum_ast::FileId;
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
 
     let src_dir = manifest_dir.join("src");
     if !src_dir.exists() {
@@ -247,8 +246,8 @@ fn build_tier0(manifest_dir: &Path, output_path: &Path) -> Result<bool> {
 fn build_tier1(manifest_dir: &Path, output_path: &Path) -> Result<bool> {
     use sha2::{Digest, Sha256};
     use verum_ast::FileId;
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
 
     let src_dir = manifest_dir.join("src");
     if !src_dir.exists() {
@@ -682,10 +681,7 @@ fn check_verify_proofs_gate(
     let failed: Vec<&str> = proofs
         .proofs
         .iter()
-        .filter(|p| matches!(
-            p.status,
-            crate::registry::types::ProofStatus::Failed
-        ))
+        .filter(|p| matches!(p.status, crate::registry::types::ProofStatus::Failed))
         .map(|p| p.function.as_str())
         .collect();
     if failed.is_empty() {
@@ -706,8 +702,8 @@ fn generate_verification_proofs(
 ) -> Result<Option<crate::registry::types::VerificationProofs>> {
     use crate::registry::types::{ProofInfo, ProofStatus, VerificationLevel, VerificationProofs};
     use verum_ast::{FileId, ItemKind};
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
 
     let src_dir = manifest_dir.join("src");
     if !src_dir.exists() {
@@ -795,8 +791,8 @@ fn generate_cbgr_profiles(
 ) -> Result<Option<crate::registry::types::CbgrProfiles>> {
     use crate::registry::types::{CbgrProfile, CbgrProfiles};
     use verum_ast::{FileId, ItemKind, decl::FunctionParamKind};
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
 
     let src_dir = manifest_dir.join("src");
     if !src_dir.exists() {
@@ -1537,8 +1533,8 @@ pub fn validate_cog(manifest_dir: &Path) -> Result<ValidationReport> {
         let path = entry.path();
         if path.is_file() && path.extension().is_some_and(|ext| ext == "vr") {
             use verum_ast::FileId;
-            use verum_lexer::Lexer;
             use verum_fast_parser::VerumParser;
+            use verum_lexer::Lexer;
 
             let source = std::fs::read_to_string(path)?;
             let file_id = FileId::new(0);
@@ -1625,9 +1621,7 @@ impl ValidationReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::types::{
-        ProofInfo, ProofStatus, VerificationLevel, VerificationProofs,
-    };
+    use crate::registry::types::{ProofInfo, ProofStatus, VerificationLevel, VerificationProofs};
 
     fn proofs_with(statuses: Vec<(&str, ProofStatus)>) -> VerificationProofs {
         let mut list = List::new();

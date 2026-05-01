@@ -18,10 +18,10 @@
 //!  `BuildRightOfLeft` produce the same adjunction modulo
 //!  naming convention.
 
+use verum_common::Text;
 use verum_kernel::adjoint_functor::{
-    AdjunctionDirection, SaftPreconditions, build_adjunction,
-    compose_adjunctions, left_adjoint_exists, right_adjoint_exists,
-    triangle_identities_witness,
+    AdjunctionDirection, SaftPreconditions, build_adjunction, compose_adjunctions,
+    left_adjoint_exists, right_adjoint_exists, triangle_identities_witness,
 };
 use verum_kernel::cartesian_fibration::{
     CartesianFibration, CartesianMorphism, build_straightening_equivalence,
@@ -31,10 +31,9 @@ use verum_kernel::grothendieck::{SIndexedDiagram, preserves_accessibility};
 use verum_kernel::infinity_category::InfinityCategory;
 use verum_kernel::ordinal::Ordinal;
 use verum_kernel::yoneda::{
-    Presheaf, build_kan_extension, kan_extension_unit_witness,
-    presheaf_category, yoneda_embedding, yoneda_lemma,
+    Presheaf, build_kan_extension, kan_extension_unit_witness, presheaf_category, yoneda_embedding,
+    yoneda_lemma,
 };
-use verum_common::Text;
 
 // =============================================================================
 // A. Precondition bypass attacks
@@ -84,8 +83,10 @@ fn a03_build_kan_extension_rejects_each_missing_precondition() {
 #[test]
 fn a04_unstraighten_propagates_empty_diagram_failure() {
     let diagram = SIndexedDiagram::finite("D", "B", vec![], Ordinal::Kappa(1));
-    assert!(unstraighten_to_grothendieck(&diagram).is_none(),
-        "Un must propagate Grothendieck's empty-diagram rejection");
+    assert!(
+        unstraighten_to_grothendieck(&diagram).is_none(),
+        "Un must propagate Grothendieck's empty-diagram rejection"
+    );
 }
 
 #[test]
@@ -93,15 +94,9 @@ fn a05_fibration_is_unstraightened_demands_both_witnesses() {
     let c = InfinityCategory::at_canonical_universe("C", Ordinal::Finite(1));
     let e = InfinityCategory::at_canonical_universe("E", Ordinal::Finite(1));
     // Only one of the two witness flags is enough to defeat the predicate.
-    let p_no_cart = CartesianFibration::new(
-        "p", e.clone(), c.clone(), false, true,
-    );
-    let p_no_cocart = CartesianFibration::new(
-        "p", e.clone(), c.clone(), true, false,
-    );
-    let p_full = CartesianFibration::new(
-        "p", e, c, true, true,
-    );
+    let p_no_cart = CartesianFibration::new("p", e.clone(), c.clone(), false, true);
+    let p_no_cocart = CartesianFibration::new("p", e.clone(), c.clone(), true, false);
+    let p_full = CartesianFibration::new("p", e, c, true, true);
     assert!(!fibration_is_unstraightened(&p_no_cart));
     assert!(!fibration_is_unstraightened(&p_no_cocart));
     assert!(fibration_is_unstraightened(&p_full));
@@ -120,8 +115,10 @@ fn b01_compose_adjunctions_preserves_coherence() {
     let cd = build_adjunction("L_CD", &c, &d, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
     let de = build_adjunction("L_DE", &d, &e, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
     let ce = compose_adjunctions(&cd, &de).unwrap();
-    assert!(ce.is_coherent(),
-        "Adjunction composition must preserve unit + counit + triangle identities");
+    assert!(
+        ce.is_coherent(),
+        "Adjunction composition must preserve unit + counit + triangle identities"
+    );
 }
 
 #[test]
@@ -139,10 +136,14 @@ fn b02_compose_adjunctions_associates() {
     let lhs = compose_adjunctions(&compose_adjunctions(&cd, &de).unwrap(), &ef).unwrap();
     let rhs = compose_adjunctions(&cd, &compose_adjunctions(&de, &ef).unwrap()).unwrap();
 
-    assert_eq!(lhs.source_category, rhs.source_category,
-        "Adjunction composition source must be associative");
-    assert_eq!(lhs.target_category, rhs.target_category,
-        "Adjunction composition target must be associative");
+    assert_eq!(
+        lhs.source_category, rhs.source_category,
+        "Adjunction composition source must be associative"
+    );
+    assert_eq!(
+        lhs.target_category, rhs.target_category,
+        "Adjunction composition target must be associative"
+    );
     assert!(lhs.is_coherent());
     assert!(rhs.is_coherent());
 }
@@ -163,15 +164,19 @@ fn b04_yoneda_embedding_target_is_presheaf_category() {
     let c = InfinityCategory::at_canonical_universe("Set", Ordinal::Finite(1));
     let y = yoneda_embedding(&c);
     let psh = presheaf_category(&c);
-    assert_eq!(y.target_category, psh,
-        "Yoneda embedding's target must literally equal PSh(C)");
+    assert_eq!(
+        y.target_category, psh,
+        "Yoneda embedding's target must literally equal PSh(C)"
+    );
 }
 
 #[test]
 fn b05_kan_extension_unit_witness_holds_on_built_extensions() {
     let ext = build_kan_extension("f", "p", "C", "D", "E", true, true).unwrap();
-    assert!(kan_extension_unit_witness(&ext),
-        "Kan extension's unit must be witnessed when build succeeded");
+    assert!(
+        kan_extension_unit_witness(&ext),
+        "Kan extension's unit must be witnessed when build succeeded"
+    );
 }
 
 // =============================================================================
@@ -188,10 +193,16 @@ fn c01_presheaf_category_strict_universe_ascent_for_kappa() {
             universe: Ordinal::Kappa(n),
         };
         let psh = presheaf_category(&c);
-        assert!(c.universe.lt(&psh.universe),
-            "PSh(C) at κ_{} must live strictly above C", n);
-        assert_eq!(psh.universe, Ordinal::Kappa(n + 1),
-            "Ascent on κ_n must produce κ_{{n+1}}");
+        assert!(
+            c.universe.lt(&psh.universe),
+            "PSh(C) at κ_{} must live strictly above C",
+            n
+        );
+        assert_eq!(
+            psh.universe,
+            Ordinal::Kappa(n + 1),
+            "Ascent on κ_n must produce κ_{{n+1}}"
+        );
     }
 }
 
@@ -204,8 +215,11 @@ fn c02_presheaf_category_below_kappa_jumps_to_kappa_0() {
         universe: Ordinal::Omega,
     };
     let psh = presheaf_category(&c);
-    assert_eq!(psh.universe, Ordinal::Kappa(0),
-        "Sub-κ ascent must land at κ_0 (the first inaccessible)");
+    assert_eq!(
+        psh.universe,
+        Ordinal::Kappa(0),
+        "Sub-κ ascent must land at κ_0 (the first inaccessible)"
+    );
 }
 
 #[test]
@@ -219,8 +233,7 @@ fn c03_presheaf_category_preserves_level() {
             universe: Ordinal::Kappa(1),
         };
         let psh = presheaf_category(&c);
-        assert_eq!(psh.level, level,
-            "PSh(C) must share C's cell-level");
+        assert_eq!(psh.level, level, "PSh(C) must share C's cell-level");
     }
 }
 
@@ -243,8 +256,11 @@ fn d01_unstraightening_preserves_kappa_accessibility() {
             Ordinal::Kappa(k),
         );
         let g = unstraighten_to_grothendieck(&diagram).unwrap();
-        assert!(preserves_accessibility(&diagram, &g),
-            "Un must inherit κ_{}-accessibility", k);
+        assert!(
+            preserves_accessibility(&diagram, &g),
+            "Un must inherit κ_{}-accessibility",
+            k
+        );
     }
 }
 
@@ -258,12 +274,16 @@ fn d02_compose_adjunctions_takes_min_level() {
     let e = InfinityCategory::at_canonical_universe("E", Ordinal::Finite(1));
 
     let cd = build_adjunction("L_CD", &c, &d, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
-    let mut de = build_adjunction("L_DE", &d, &e, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
+    let mut de =
+        build_adjunction("L_DE", &d, &e, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
     de.adjunction_level = Ordinal::Finite(0);
 
     let ce = compose_adjunctions(&cd, &de).unwrap();
-    assert_eq!(ce.adjunction_level, Ordinal::Finite(0),
-        "Composition level must be ≤ min(operand levels)");
+    assert_eq!(
+        ce.adjunction_level,
+        Ordinal::Finite(0),
+        "Composition level must be ≤ min(operand levels)"
+    );
 }
 
 #[test]
@@ -281,8 +301,10 @@ fn d04_compose_adjunctions_rejects_mismatched_categories() {
     let cd = build_adjunction("L_CD", &c, &d, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
     let ec = build_adjunction("L_EC", &e, &c, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
     // cd has target=D; ec has source=E. Composition cd ∘ ec fails.
-    assert!(compose_adjunctions(&cd, &ec).is_none(),
-        "Adjunction composition must reject D ≠ E mismatch");
+    assert!(
+        compose_adjunctions(&cd, &ec).is_none(),
+        "Adjunction composition must reject D ≠ E mismatch"
+    );
 }
 
 // =============================================================================
@@ -296,12 +318,10 @@ fn e01_adjunction_directions_swap_left_right() {
     let c = InfinityCategory::at_canonical_universe("C", Ordinal::Finite(1));
     let d = InfinityCategory::at_canonical_universe("D", Ordinal::Finite(1));
 
-    let right_of_left = build_adjunction(
-        "F", &c, &d, &pre, AdjunctionDirection::BuildRightOfLeft,
-    ).unwrap();
-    let left_of_right = build_adjunction(
-        "F", &c, &d, &pre, AdjunctionDirection::BuildLeftOfRight,
-    ).unwrap();
+    let right_of_left =
+        build_adjunction("F", &c, &d, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
+    let left_of_right =
+        build_adjunction("F", &c, &d, &pre, AdjunctionDirection::BuildLeftOfRight).unwrap();
 
     // Same given functor name appears in opposite slots.
     assert_eq!(right_of_left.left_functor.as_str(), "F");
@@ -320,8 +340,10 @@ fn e02_yoneda_embedding_is_idempotent_under_repeated_construction() {
     let c = InfinityCategory::at_canonical_universe("C", Ordinal::Finite(1));
     let y1 = yoneda_embedding(&c);
     let y2 = yoneda_embedding(&c);
-    assert_eq!(y1, y2,
-        "Yoneda embedding must be a deterministic function of C");
+    assert_eq!(
+        y1, y2,
+        "Yoneda embedding must be a deterministic function of C"
+    );
 }
 
 #[test]
@@ -338,7 +360,8 @@ fn e04_is_cartesian_decision_matches_witness_flag() {
         "p",
         InfinityCategory::at_canonical_universe("E", Ordinal::Finite(1)),
         InfinityCategory::at_canonical_universe("C", Ordinal::Finite(1)),
-        true, true,
+        true,
+        true,
     );
     for flag in [true, false] {
         let f = CartesianMorphism {
@@ -348,8 +371,11 @@ fn e04_is_cartesian_decision_matches_witness_flag() {
             target: Text::from("e"),
             is_p_cartesian: flag,
         };
-        assert_eq!(is_cartesian(&p, &f), flag,
-            "is_cartesian must agree with the morphism's witness flag");
+        assert_eq!(
+            is_cartesian(&p, &f),
+            flag,
+            "is_cartesian must agree with the morphism's witness flag"
+        );
     }
 }
 
@@ -363,10 +389,13 @@ fn e05_triangle_identities_propagate_through_composition() {
     let e = InfinityCategory::at_canonical_universe("E", Ordinal::Finite(1));
 
     let cd = build_adjunction("L_CD", &c, &d, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
-    let mut de = build_adjunction("L_DE", &d, &e, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
+    let mut de =
+        build_adjunction("L_DE", &d, &e, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
     de.triangle_identities_hold = false;
 
     let ce = compose_adjunctions(&cd, &de).unwrap();
-    assert!(!triangle_identities_witness(&ce),
-        "Triangle-identity failure must propagate through composition");
+    assert!(
+        !triangle_identities_witness(&ce),
+        "Triangle-identity failure must propagate through composition"
+    );
 }

@@ -29,8 +29,8 @@ use verum_ast::{
     literal::{IntLit, Literal, LiteralKind},
     span::Span,
 };
-use verum_smt::proof_term_unified::{ProofError, ProofTerm};
 use verum_common::{Heap, List, Map, Text};
+use verum_smt::proof_term_unified::{ProofError, ProofTerm};
 
 // ==================== Helper Functions ====================
 

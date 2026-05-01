@@ -1,9 +1,9 @@
 //! Test for parameter extraction and VBC codegen.
 
-use ::verum_ast::pattern::{Pattern, PatternKind};
+use crate::codegen::{CodegenConfig, VbcCodegen};
 use ::verum_ast::decl::{FunctionParam, FunctionParamKind};
+use ::verum_ast::pattern::{Pattern, PatternKind};
 use ::verum_fast_parser::Parser;
-use crate::codegen::{VbcCodegen, CodegenConfig};
 
 fn extract_pattern_name(pattern: &Pattern) -> Option<String> {
     match &pattern.kind {
@@ -15,17 +15,18 @@ fn extract_pattern_name(pattern: &Pattern) -> Option<String> {
 
 fn extract_param_name(param: &FunctionParam) -> Option<String> {
     match &param.kind {
-        FunctionParamKind::Regular { pattern, .. } => {
-            extract_pattern_name(pattern)
-        }
+        FunctionParamKind::Regular { pattern, .. } => extract_pattern_name(pattern),
         // All self parameter variants
-        FunctionParamKind::SelfValue | FunctionParamKind::SelfValueMut |
-        FunctionParamKind::SelfRef | FunctionParamKind::SelfRefMut |
-        FunctionParamKind::SelfOwn | FunctionParamKind::SelfOwnMut |
-        FunctionParamKind::SelfRefChecked | FunctionParamKind::SelfRefCheckedMut |
-        FunctionParamKind::SelfRefUnsafe | FunctionParamKind::SelfRefUnsafeMut => {
-            Some("self".to_string())
-        }
+        FunctionParamKind::SelfValue
+        | FunctionParamKind::SelfValueMut
+        | FunctionParamKind::SelfRef
+        | FunctionParamKind::SelfRefMut
+        | FunctionParamKind::SelfOwn
+        | FunctionParamKind::SelfOwnMut
+        | FunctionParamKind::SelfRefChecked
+        | FunctionParamKind::SelfRefCheckedMut
+        | FunctionParamKind::SelfRefUnsafe
+        | FunctionParamKind::SelfRefUnsafeMut => Some("self".to_string()),
     }
 }
 
@@ -40,10 +41,7 @@ fn test_simple_param_extraction() {
         _ => panic!("Expected function"),
     };
 
-    let param_names: Vec<String> = func.params
-        .iter()
-        .filter_map(extract_param_name)
-        .collect();
+    let param_names: Vec<String> = func.params.iter().filter_map(extract_param_name).collect();
 
     println!("Param names: {:?}", param_names);
     assert_eq!(param_names, vec!["a".to_string(), "b".to_string()]);
@@ -74,10 +72,7 @@ fn map<U, F: fn(T) -> U>(self, f: F) -> Maybe<U> {
         println!("Param {}: extracted name={:?}", i, name);
     }
 
-    let param_names: Vec<String> = func.params
-        .iter()
-        .filter_map(extract_param_name)
-        .collect();
+    let param_names: Vec<String> = func.params.iter().filter_map(extract_param_name).collect();
 
     println!("Final param names: {:?}", param_names);
     assert_eq!(param_names, vec!["self".to_string(), "f".to_string()]);
@@ -107,10 +102,7 @@ fn filter<P: fn(&T) -> Bool>(self, predicate: P) -> Maybe<T> {
         println!("Param {}: name={:?}", i, name);
     }
 
-    let param_names: Vec<String> = func.params
-        .iter()
-        .filter_map(extract_param_name)
-        .collect();
+    let param_names: Vec<String> = func.params.iter().filter_map(extract_param_name).collect();
 
     println!("Final param names: {:?}", param_names);
     assert!(param_names.contains(&"self".to_string()));
@@ -276,17 +268,19 @@ fn main() {
 /// register_stdlib_constants() and register_stdlib_intrinsics().
 #[cfg(test)]
 fn compile_stdlib_file(path: &str) -> Result<(), String> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read {}: {}", path, e))?;
+    let source =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
 
     let mut parser = Parser::new(&source);
-    let module = parser.parse_module()
+    let module = parser
+        .parse_module()
         .map_err(|e| format!("Parse error in {}: {:?}", path, e))?;
 
     let config = CodegenConfig::new(path).with_validation();
     let mut codegen = VbcCodegen::with_config(config);
 
-    codegen.compile_module(&module)
+    codegen
+        .compile_module(&module)
         .map_err(|e| format!("Codegen error in {}: {}", path, e))?;
 
     Ok(())
@@ -302,11 +296,12 @@ fn compile_stdlib_file(path: &str) -> Result<(), String> {
 /// cheaper `compile_stdlib_file` helper.
 #[cfg(test)]
 fn compile_stdlib_file_with_mounts(path: &str, core_root: &str) -> Result<(), String> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read {}: {}", path, e))?;
+    let source =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
 
     let mut parser = Parser::new(&source);
-    let module = parser.parse_module()
+    let module = parser
+        .parse_module()
         .map_err(|e| format!("Parse error in {}: {:?}", path, e))?;
 
     let config = CodegenConfig::new(path).with_validation();
@@ -362,11 +357,13 @@ fn test_compile_stdlib_iterator() {
 /// codegen bug.
 #[test]
 fn test_compile_stdlib_list() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/list.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/collections/list.vr"
+    );
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file_with_mounts(path, core_root)
-            .expect("Failed to compile list.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile list.vr");
     } else {
         println!("Skipping test: {} not found", path);
     }
@@ -409,8 +406,7 @@ fn test_compile_stdlib_text() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/text/text.vr");
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file_with_mounts(path, core_root)
-            .expect("Failed to compile text.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile text.vr");
     }
 }
 
@@ -425,8 +421,7 @@ fn test_compile_stdlib_map() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/map.vr");
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file_with_mounts(path, core_root)
-            .expect("Failed to compile map.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile map.vr");
     }
 }
 
@@ -440,8 +435,7 @@ fn test_compile_stdlib_set() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/set.vr");
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file_with_mounts(path, core_root)
-            .expect("Failed to compile set.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile set.vr");
     }
 }
 
@@ -540,18 +534,23 @@ fn test_compile_stdlib_memory() {
 /// `test_compile_stdlib_list`).
 #[test]
 fn test_compile_stdlib_deque() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/deque.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/collections/deque.vr"
+    );
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file_with_mounts(path, core_root)
-            .expect("Failed to compile deque.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile deque.vr");
     }
 }
 
 /// Tests compilation of core/collections/heap.vr
 #[test]
 fn test_compile_stdlib_heap_collection() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/heap.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/collections/heap.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile heap.vr");
     }
@@ -560,7 +559,10 @@ fn test_compile_stdlib_heap_collection() {
 /// Tests compilation of core/collections/btree.vr
 #[test]
 fn test_compile_stdlib_btree() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/btree.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/collections/btree.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile btree.vr");
     }
@@ -569,7 +571,10 @@ fn test_compile_stdlib_btree() {
 /// Tests compilation of core/collections/slice.vr
 #[test]
 fn test_compile_stdlib_slice() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/collections/slice.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/collections/slice.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile slice.vr");
     }
@@ -641,7 +646,10 @@ fn test_compile_stdlib_instant() {
 /// Tests compilation of core/time/system_time.vr
 #[test]
 fn test_compile_stdlib_system_time() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/time/system_time.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/time/system_time.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile system_time.vr");
     }
@@ -686,10 +694,10 @@ fn test_compile_stdlib_log() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/base/log.vr");
     if std::path::Path::new(path).exists() {
         match compile_stdlib_file(path) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(e) if e.contains("Parse error") => {
                 println!("Known parse limitation in log.vr: context keyword syntax");
-            },
+            }
             Err(e) => panic!("Failed to compile log.vr: {}", e),
         }
     }
@@ -703,10 +711,10 @@ fn test_compile_stdlib_serde() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/base/serde.vr");
     if std::path::Path::new(path).exists() {
         match compile_stdlib_file(path) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(e) if e.contains("Parse error") => {
                 println!("Known parse limitation in serde.vr: associated type syntax");
-            },
+            }
             Err(e) => panic!("Failed to compile serde.vr: {}", e),
         }
     }
@@ -841,7 +849,10 @@ fn test_compile_stdlib_math_constants() {
 /// Tests compilation of core/context/provider.vr
 #[test]
 fn test_compile_stdlib_context_provider() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/context/provider.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/context/provider.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile provider.vr");
     }
@@ -911,8 +922,7 @@ fn test_compile_stdlib_io_fs() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/io/fs.vr");
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file_with_mounts(path, core_root)
-            .expect("Failed to compile io/fs.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile io/fs.vr");
     }
 }
 
@@ -934,7 +944,10 @@ fn test_compile_stdlib_io_process() {
 /// Tests compilation of core/io/async_protocols.vr
 #[test]
 fn test_compile_stdlib_io_async_protocols() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/io/async_protocols.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/io/async_protocols.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile io/async_protocols.vr");
     }
@@ -971,8 +984,7 @@ fn test_compile_stdlib_net_udp() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/net/udp.vr");
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file_with_mounts(path, core_root)
-            .expect("Failed to compile net/udp.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile net/udp.vr");
     }
 }
 
@@ -1016,8 +1028,7 @@ fn test_compile_stdlib_mem_header() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/mem/header.vr");
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file_with_mounts(path, core_root)
-            .expect("Failed to compile mem/header.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile mem/header.vr");
     }
 }
 
@@ -1035,8 +1046,7 @@ fn test_compile_stdlib_mem_heap() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/mem/heap.vr");
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file_with_mounts(path, core_root)
-            .expect("Failed to compile mem/heap.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile mem/heap.vr");
     }
 }
 
@@ -1066,8 +1076,7 @@ fn test_compile_stdlib_mem_fat_ref() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/mem/fat_ref.vr");
     let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file_with_mounts(path, core_root)
-            .expect("Failed to compile mem/fat_ref.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile mem/fat_ref.vr");
     }
 }
 
@@ -1191,7 +1200,10 @@ fn test_compile_stdlib_async_nursery() {
 /// Tests compilation of core/async/spawn_config.vr
 #[test]
 fn test_compile_stdlib_async_spawn_config() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/async/spawn_config.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/async/spawn_config.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile async/spawn_config.vr");
     }
@@ -1200,7 +1212,10 @@ fn test_compile_stdlib_async_spawn_config() {
 /// Tests compilation of core/async/spawn_with.vr
 #[test]
 fn test_compile_stdlib_async_spawn_with() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/async/spawn_with.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/async/spawn_with.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile async/spawn_with.vr");
     }
@@ -1227,7 +1242,10 @@ fn test_compile_stdlib_async_parallel() {
 /// Tests compilation of core/async/intrinsics.vr
 #[test]
 fn test_compile_stdlib_async_intrinsics() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/async/intrinsics.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/async/intrinsics.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile async/intrinsics.vr");
     }
@@ -1353,7 +1371,10 @@ fn test_compile_stdlib_math_logic() {
 /// Tests compilation of core/math/number_theory.vr
 #[test]
 fn test_compile_stdlib_math_number_theory() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/math/number_theory.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/math/number_theory.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile math/number_theory.vr");
     }
@@ -1431,7 +1452,10 @@ fn test_compile_stdlib_math_libm() {
 /// Tests compilation of core/text/tagged_literals.vr
 #[test]
 fn test_compile_stdlib_text_tagged_literals() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/text/tagged_literals.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/text/tagged_literals.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile text/tagged_literals.vr");
     }
@@ -1496,7 +1520,10 @@ fn test_compile_stdlib_meta_contexts() {
 /// Tests compilation of core/intrinsics/arithmetic.vr
 #[test]
 fn test_compile_stdlib_intrinsics_arithmetic() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/intrinsics/arithmetic.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/intrinsics/arithmetic.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile intrinsics/arithmetic.vr");
     }
@@ -1505,7 +1532,10 @@ fn test_compile_stdlib_intrinsics_arithmetic() {
 /// Tests compilation of core/intrinsics/bitwise.vr
 #[test]
 fn test_compile_stdlib_intrinsics_bitwise() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/intrinsics/bitwise.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/intrinsics/bitwise.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile intrinsics/bitwise.vr");
     }
@@ -1514,7 +1544,10 @@ fn test_compile_stdlib_intrinsics_bitwise() {
 /// Tests compilation of core/intrinsics/conversion.vr
 #[test]
 fn test_compile_stdlib_intrinsics_conversion() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/intrinsics/conversion.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/intrinsics/conversion.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile intrinsics/conversion.vr");
     }
@@ -1523,7 +1556,10 @@ fn test_compile_stdlib_intrinsics_conversion() {
 /// Tests compilation of core/intrinsics/float.vr
 #[test]
 fn test_compile_stdlib_intrinsics_float() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/intrinsics/float.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/intrinsics/float.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile intrinsics/float.vr");
     }
@@ -1532,7 +1568,10 @@ fn test_compile_stdlib_intrinsics_float() {
 /// Tests compilation of core/intrinsics/memory.vr
 #[test]
 fn test_compile_stdlib_intrinsics_memory() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/intrinsics/memory.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/intrinsics/memory.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile intrinsics/memory.vr");
     }
@@ -1541,7 +1580,10 @@ fn test_compile_stdlib_intrinsics_memory() {
 /// Tests compilation of core/intrinsics/platform.vr
 #[test]
 fn test_compile_stdlib_intrinsics_platform() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/intrinsics/platform.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/intrinsics/platform.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile intrinsics/platform.vr");
     }
@@ -1550,7 +1592,10 @@ fn test_compile_stdlib_intrinsics_platform() {
 /// Tests compilation of core/intrinsics/control.vr
 #[test]
 fn test_compile_stdlib_intrinsics_control() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/intrinsics/control.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/intrinsics/control.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile intrinsics/control.vr");
     }
@@ -1559,7 +1604,10 @@ fn test_compile_stdlib_intrinsics_control() {
 /// Tests compilation of core/intrinsics/atomic.vr
 #[test]
 fn test_compile_stdlib_intrinsics_atomic() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/intrinsics/atomic.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/intrinsics/atomic.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile intrinsics/atomic.vr");
     }
@@ -1577,7 +1625,10 @@ fn test_compile_stdlib_intrinsics_simd() {
 /// Tests compilation of core/intrinsics/type_info.vr
 #[test]
 fn test_compile_stdlib_intrinsics_type_info() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/intrinsics/type_info.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/intrinsics/type_info.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile intrinsics/type_info.vr");
     }
@@ -1586,7 +1637,10 @@ fn test_compile_stdlib_intrinsics_type_info() {
 /// Tests compilation of core/intrinsics/tensor.vr
 #[test]
 fn test_compile_stdlib_intrinsics_tensor() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/intrinsics/tensor.vr");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../core/intrinsics/tensor.vr"
+    );
     if std::path::Path::new(path).exists() {
         compile_stdlib_file(path).expect("Failed to compile intrinsics/tensor.vr");
     }
@@ -1651,7 +1705,10 @@ fn test_compile_stdlib_coverage_report() {
     println!("Compiled OK: {}", passed);
     println!("Codegen failures: {}", failed);
     println!("Parse errors (skipped): {}", skipped);
-    println!("Coverage: {:.1}%", (passed as f64 / files.len() as f64) * 100.0);
+    println!(
+        "Coverage: {:.1}%",
+        (passed as f64 / files.len() as f64) * 100.0
+    );
 
     if !failures.is_empty() {
         println!("\nCodegen failures:");

@@ -25,17 +25,18 @@ fn parse_module(source: &str) -> verum_ast::Module {
 fn first_type_variants(module: &verum_ast::Module, type_name: &str) -> Vec<Variant> {
     for item in module.items.iter() {
         if let ItemKind::Type(decl) = &item.kind
-            && decl.name.name.as_str() == type_name {
-                match &decl.body {
-                    TypeDeclBody::Variant(variants) | TypeDeclBody::Inductive(variants) => {
-                        return variants.iter().cloned().collect();
-                    }
-                    other => panic!(
-                        "type `{}` body is not Variant/Inductive: {:?}",
-                        type_name, other
-                    ),
+            && decl.name.name.as_str() == type_name
+        {
+            match &decl.body {
+                TypeDeclBody::Variant(variants) | TypeDeclBody::Inductive(variants) => {
+                    return variants.iter().cloned().collect();
                 }
+                other => panic!(
+                    "type `{}` body is not Variant/Inductive: {:?}",
+                    type_name, other
+                ),
             }
+        }
     }
     panic!(
         "type `{}` not found in module (items: {})",

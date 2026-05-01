@@ -19,8 +19,8 @@
 
 use verum_ast::ffi::{CallingConvention, Ownership};
 use verum_ast::{FileId, ItemKind};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 #[test]
 fn test_extern_c_calling_convention() {

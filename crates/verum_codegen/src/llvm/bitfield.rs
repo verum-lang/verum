@@ -56,11 +56,11 @@
 //! - Total bits must align to byte boundaries (or require explicit padding)
 //! - Non-bitfield fields in a `@bitfield` type allow pointer access
 
-use verum_llvm::values::{BasicValueEnum, IntValue, PointerValue};
-use verum_llvm::types::IntType;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
+use verum_llvm::types::IntType;
+use verum_llvm::values::{BasicValueEnum, IntValue, PointerValue};
 
 use verum_ast::bitfield::{ByteOrder, ResolvedBitField, ResolvedBitLayout};
 
@@ -260,17 +260,18 @@ impl<'ctx> BitfieldLowering<'ctx> {
         let value_mask = container_type.const_int(mask_value, false);
 
         // Extend new_value to container type if needed
-        let extended_value = if new_value.get_type().get_bit_width() < container_type.get_bit_width() {
-            self.builder
-                .build_int_z_extend(new_value, container_type, &format!("{}_zext", name))
-                .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
-        } else if new_value.get_type().get_bit_width() > container_type.get_bit_width() {
-            self.builder
-                .build_int_truncate(new_value, container_type, &format!("{}_trunc", name))
-                .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
-        } else {
-            new_value
-        };
+        let extended_value =
+            if new_value.get_type().get_bit_width() < container_type.get_bit_width() {
+                self.builder
+                    .build_int_z_extend(new_value, container_type, &format!("{}_zext", name))
+                    .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
+            } else if new_value.get_type().get_bit_width() > container_type.get_bit_width() {
+                self.builder
+                    .build_int_truncate(new_value, container_type, &format!("{}_trunc", name))
+                    .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
+            } else {
+                new_value
+            };
 
         let masked_value = self
             .builder
@@ -343,11 +344,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
     // =========================================================================
 
     /// Build a byte swap operation using LLVM intrinsic.
-    fn build_byte_swap(
-        &self,
-        value: IntValue<'ctx>,
-        name: &str,
-    ) -> Result<IntValue<'ctx>> {
+    fn build_byte_swap(&self, value: IntValue<'ctx>, name: &str) -> Result<IntValue<'ctx>> {
         let bit_width = value.get_type().get_bit_width();
 
         // bswap only works for 16, 32, 64, 128 bit values
@@ -364,15 +361,16 @@ impl<'ctx> BitfieldLowering<'ctx> {
             _ => {
                 return Err(LlvmLoweringError::InvalidType(
                     format!("Cannot byte-swap {}-bit value", bit_width).into(),
-                ))
+                ));
             }
         };
 
         // Get or declare the intrinsic
         let fn_type = value.get_type().fn_type(&[value.get_type().into()], false);
-        let intrinsic = self.module.get_function(intrinsic_name).unwrap_or_else(|| {
-            self.module.add_function(intrinsic_name, fn_type, None)
-        });
+        let intrinsic = self
+            .module
+            .get_function(intrinsic_name)
+            .unwrap_or_else(|| self.module.add_function(intrinsic_name, fn_type, None));
 
         let result = self
             .builder
@@ -380,9 +378,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
             .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| {
-                LlvmLoweringError::InvalidType("bswap should return a value".into())
-            })?
+            .ok_or_else(|| LlvmLoweringError::InvalidType("bswap should return a value".into()))?
             .into_int_value();
 
         Ok(result)

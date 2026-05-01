@@ -172,7 +172,10 @@ fn meta_bench_start(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -195,7 +198,10 @@ fn meta_bench_now_ns(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     Ok(ConstValue::Int(monotonic_nanos()))
 }
@@ -206,7 +212,10 @@ fn meta_bench_report(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 2 {
-        return Err(MetaError::ArityMismatch { expected: 2, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 2,
+            got: args.len(),
+        });
     }
 
     let name = match &args[0] {
@@ -254,7 +263,10 @@ fn meta_bench_memory_usage(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
 
     // Try to get a rough estimate from the allocator if the tracked value is 0
@@ -277,7 +289,10 @@ fn meta_bench_peak_memory(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
 
     // Update peak if current exceeds it
@@ -298,7 +313,10 @@ fn meta_bench_count(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -320,7 +338,10 @@ fn meta_bench_count_by(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 2 {
-        return Err(MetaError::ArityMismatch { expected: 2, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 2,
+            got: args.len(),
+        });
     }
 
     let name = match &args[0] {
@@ -356,7 +377,10 @@ fn meta_bench_get_count(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -381,7 +405,10 @@ fn meta_bench_all_results(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
 
     let results: List<ConstValue> = ctx
@@ -392,9 +419,9 @@ fn meta_bench_all_results(
                 .iter()
                 .map(|br| {
                     let context_val = match &br.context {
-                        Some(c) => ConstValue::Maybe(Maybe::Some(Heap::new(
-                            ConstValue::Text(c.clone()),
-                        ))),
+                        Some(c) => {
+                            ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Text(c.clone()))))
+                        }
                         None => ConstValue::Maybe(Maybe::None),
                     };
                     ConstValue::Tuple(List::from(vec![
@@ -496,10 +523,7 @@ mod tests {
         meta_bench_count(&mut ctx, args).unwrap();
 
         // Count by 5
-        let args = List::from(vec![
-            ConstValue::Text(name.clone()),
-            ConstValue::Int(5i128),
-        ]);
+        let args = List::from(vec![ConstValue::Text(name.clone()), ConstValue::Int(5i128)]);
         meta_bench_count_by(&mut ctx, args).unwrap();
 
         // Get count (should be 6)

@@ -100,12 +100,16 @@ impl ProtocolInfo {
 
     /// Get all methods (required + provided)
     pub fn all_methods(&self) -> impl Iterator<Item = &FunctionInfo> {
-        self.required_methods.iter().chain(self.provided_methods.iter())
+        self.required_methods
+            .iter()
+            .chain(self.provided_methods.iter())
     }
 
     /// Check if protocol has associated type
     pub fn has_associated_type(&self, name: &str) -> bool {
-        self.associated_types.iter().any(|at| at.name.as_str() == name)
+        self.associated_types
+            .iter()
+            .any(|at| at.name.as_str() == name)
     }
 
     /// Get associated type by name

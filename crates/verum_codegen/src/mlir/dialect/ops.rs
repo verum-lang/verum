@@ -28,17 +28,17 @@
 //! - `AwaitOp`: Await future completion
 //! - `SelectOp`: Select on multiple futures
 
+use crate::mlir::dialect::{attr_names, op_names, types::RefTier};
+use crate::mlir::error::{MlirError, Result};
+use verum_common::Text;
 use verum_mlir::{
     Context,
     ir::{
         Block, Location, Module, Operation, OperationRef, Region, Type, Value,
-        attribute::{IntegerAttribute, StringAttribute, TypeAttribute, Attribute},
+        attribute::{Attribute, IntegerAttribute, StringAttribute, TypeAttribute},
         operation::OperationBuilder,
     },
 };
-use verum_common::Text;
-use crate::mlir::error::{MlirError, Result};
-use crate::mlir::dialect::{op_names, attr_names, types::RefTier};
 
 /// CBGR allocation operation.
 ///

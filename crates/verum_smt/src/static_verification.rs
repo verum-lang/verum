@@ -64,8 +64,8 @@ use z3::{
     ast::{Ast, Bool, Dynamic, Int},
 };
 
-use verum_common::{List, Map, Maybe, Set, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Set, Text};
 
 #[allow(unused_imports)]
 use crate::counterexample::{

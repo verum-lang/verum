@@ -305,16 +305,19 @@ impl SbglDiagnostic {
     #[must_use]
     pub fn warning_message(&self) -> Option<Text> {
         if !self.sbgl_applicable() && self.category != EscapeCategory::Unknown {
-            Some(format!(
-                "⚠️ WARNING: SBGL optimization disabled for reference {:?}\n\
+            Some(
+                format!(
+                    "⚠️ WARNING: SBGL optimization disabled for reference {:?}\n\
                  Category: {}\n\
                  Reason: {}\n\
                  Impact: CBGR cost ~{}ns per access",
-                self.reference,
-                self.category.name(),
-                self.reason,
-                self.decision.expected_cost_ns()
-            ).into())
+                    self.reference,
+                    self.category.name(),
+                    self.reason,
+                    self.decision.expected_cost_ns()
+                )
+                .into(),
+            )
         } else {
             None
         }
@@ -341,41 +344,36 @@ impl EscapePatternDetector {
     #[must_use]
     pub fn optimization_tips(category: EscapeCategory) -> List<&'static str> {
         match category {
-            EscapeCategory::NoEscape => {
-                vec![
-                    "✅ Perfect! Reference is optimally used",
-                    "✅ SBGL optimization eliminates CBGR overhead",
-                    "✅ Zero-cost abstraction achieved",
-                ].into()
-            }
-            EscapeCategory::LocalEscape => {
-                vec![
-                    "Consider returning owned values instead of references",
-                    "Use &checked T if lifetime can be statically proven",
-                    "Profile to verify ~15ns overhead is acceptable",
-                ].into()
-            }
-            EscapeCategory::HeapEscape => {
-                vec![
-                    "Consider stack allocation if possible",
-                    "Use arena allocators for temporary heap data",
-                    "Batch allocations to amortize CBGR cost",
-                ].into()
-            }
-            EscapeCategory::ThreadEscape => {
-                vec![
-                    "Consider message passing instead of shared state",
-                    "Use Arc for shared ownership across threads",
-                    "Minimize cross-thread reference sharing",
-                ].into()
-            }
-            EscapeCategory::Unknown => {
-                vec![
-                    "Improve type annotations for better analysis",
-                    "Avoid opaque function calls in hot paths",
-                    "Consider explicit &checked T for zero-cost access",
-                ].into()
-            }
+            EscapeCategory::NoEscape => vec![
+                "✅ Perfect! Reference is optimally used",
+                "✅ SBGL optimization eliminates CBGR overhead",
+                "✅ Zero-cost abstraction achieved",
+            ]
+            .into(),
+            EscapeCategory::LocalEscape => vec![
+                "Consider returning owned values instead of references",
+                "Use &checked T if lifetime can be statically proven",
+                "Profile to verify ~15ns overhead is acceptable",
+            ]
+            .into(),
+            EscapeCategory::HeapEscape => vec![
+                "Consider stack allocation if possible",
+                "Use arena allocators for temporary heap data",
+                "Batch allocations to amortize CBGR cost",
+            ]
+            .into(),
+            EscapeCategory::ThreadEscape => vec![
+                "Consider message passing instead of shared state",
+                "Use Arc for shared ownership across threads",
+                "Minimize cross-thread reference sharing",
+            ]
+            .into(),
+            EscapeCategory::Unknown => vec![
+                "Improve type annotations for better analysis",
+                "Avoid opaque function calls in hot paths",
+                "Consider explicit &checked T for zero-cost access",
+            ]
+            .into(),
         }
     }
 }

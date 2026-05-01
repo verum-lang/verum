@@ -62,22 +62,22 @@ pub mod ast_format; // Shared AST formatting utilities
 pub mod backend;
 pub mod backend_incremental;
 pub mod cbgr_hints;
+pub mod cli_format;
 pub mod code_actions;
 pub mod completion;
 pub mod debouncer;
-pub mod cli_format;
 pub mod diagnostics;
-pub mod lint_diagnostics;
 pub mod document;
-pub mod exhaustiveness; // Exhaustiveness checking integration
 pub mod document_cache;
+pub mod exhaustiveness; // Exhaustiveness checking integration
 pub mod formatting;
 pub mod goto_definition;
 pub mod hover;
 pub mod incremental;
+pub mod inline_values;
+pub mod lint_diagnostics;
 pub mod lsp_config;
 pub mod position_utils;
-pub mod smt_worker;
 pub mod quick_fixes; // Comprehensive refinement violation quick fixes
 pub mod references;
 pub mod refinement_validation;
@@ -85,8 +85,8 @@ pub mod rename;
 pub mod script; // Script/REPL parsing with incremental caching
 pub mod selection_range;
 pub mod semantic_tokens;
+pub mod smt_worker;
 pub mod type_hierarchy;
-pub mod inline_values;
 pub mod workspace_index;
 
 // Re-export key types for convenience
@@ -96,6 +96,11 @@ pub use cbgr_hints::CbgrHintProvider;
 pub use diagnostics::IncrementalDiagnosticsProvider;
 pub use document::{DocumentState, DocumentStore};
 pub use document_cache::{DocumentCache, ParsedDocument};
+pub use exhaustiveness::{
+    ExhaustivenessDiagnostic, ExhaustivenessLspConfig, ExhaustivenessProvider, MatchCoverageInfo,
+    create_add_patterns_fix, create_add_wildcard_fix, create_redundant_pattern_diagnostic,
+    create_remove_redundant_fix,
+};
 pub use formatting::TriviaPreservingFormatter;
 pub use goto_definition::SyntaxTreeDefinitionProvider;
 pub use incremental::IncrementalState;
@@ -105,13 +110,9 @@ pub use refinement_validation::{
 };
 pub use rename::SyntaxTreeRenameProvider;
 pub use script::{
+    CachedLine, DependencyGraph, IncrementalScriptParser, IncrementalStats, ParseMode,
+    RecoveryResult, ScriptContext, ScriptParseResult, ScriptParser, ScriptRecovery,
     detect_dependencies, explain_error, needs_continuation, suggest_autocompletion,
-    suggest_completion, CachedLine, DependencyGraph, IncrementalScriptParser, IncrementalStats,
-    ParseMode, RecoveryResult, ScriptContext, ScriptParseResult, ScriptParser, ScriptRecovery,
+    suggest_completion,
 };
 pub use semantic_tokens::SemanticTokenProvider;
-pub use exhaustiveness::{
-    ExhaustivenessDiagnostic, ExhaustivenessLspConfig, ExhaustivenessProvider, MatchCoverageInfo,
-    create_add_patterns_fix, create_add_wildcard_fix, create_redundant_pattern_diagnostic,
-    create_remove_redundant_fix,
-};

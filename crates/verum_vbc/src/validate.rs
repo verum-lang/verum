@@ -17,7 +17,7 @@
 
 use crate::bytecode::decode_instruction;
 use crate::error::{VbcError, VbcResult};
-use crate::format::{VbcHeader, HEADER_SIZE, MAGIC, VERSION_MAJOR, VERSION_MINOR};
+use crate::format::{HEADER_SIZE, MAGIC, VERSION_MAJOR, VERSION_MINOR, VbcHeader};
 use crate::instruction::{Instruction, Reg, RegRange};
 use crate::module::{Constant, FunctionDescriptor, VbcModule};
 use crate::types::{TypeDescriptor, TypeId, TypeRef};
@@ -231,8 +231,7 @@ impl<'a> Validator<'a> {
 
         match type_ref {
             TypeRef::Concrete(id) => {
-                if !id.is_builtin() && !id.is_semantic_type()
-                    && self.module.get_type(*id).is_none()
+                if !id.is_builtin() && !id.is_semantic_type() && self.module.get_type(*id).is_none()
                 {
                     self.errors.push(VbcError::InvalidTypeId(id.0));
                 }
@@ -241,7 +240,8 @@ impl<'a> Validator<'a> {
                 // Generic type params are validated in context
             }
             TypeRef::Instantiated { base, args } => {
-                if !base.is_builtin() && !base.is_semantic_type()
+                if !base.is_builtin()
+                    && !base.is_semantic_type()
                     && self.module.get_type(*base).is_none()
                 {
                     self.errors.push(VbcError::InvalidTypeId(base.0));
@@ -307,7 +307,8 @@ impl<'a> Validator<'a> {
         // to live in the per-module TypeDescriptor table — only user-
         // defined types must be in the table.
         if let Some(parent) = desc.parent_type
-            && !parent.is_builtin() && !parent.is_semantic_type()
+            && !parent.is_builtin()
+            && !parent.is_semantic_type()
             && self.module.get_type(parent).is_none()
         {
             self.errors.push(VbcError::InvalidTypeId(parent.0));
@@ -348,17 +349,15 @@ impl<'a> Validator<'a> {
     /// Validates a single constant.
     fn validate_constant(&mut self, constant: &Constant) {
         match constant {
-            Constant::String(id)
-                if self.module.get_string(*id).is_none() => {
-                    self.errors.push(VbcError::InvalidStringId(id.0));
-                }
+            Constant::String(id) if self.module.get_string(*id).is_none() => {
+                self.errors.push(VbcError::InvalidStringId(id.0));
+            }
             Constant::Type(type_ref) => {
                 self.validate_type_ref(type_ref, 0);
             }
-            Constant::Function(id)
-                if self.module.get_function(*id).is_none() => {
-                    self.errors.push(VbcError::InvalidFunctionId(id.0));
-                }
+            Constant::Function(id) if self.module.get_function(*id).is_none() => {
+                self.errors.push(VbcError::InvalidFunctionId(id.0));
+            }
             Constant::Array(items) => {
                 for item in items {
                     if self.module.get_constant(*item).is_none() {
@@ -448,8 +447,7 @@ impl<'a> Validator<'a> {
         // Worst-case capacity is the function's bytecode-byte count
         // (one-byte instructions); typical instructions average ~4-6
         // bytes so this comfortably over-allocates.
-        let mut instr_starts: std::collections::BTreeSet<u32> =
-            std::collections::BTreeSet::new();
+        let mut instr_starts: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
         // Pending jump targets we couldn't validate during the walk
         // (forward jumps to instructions not yet decoded).
         let mut pending_jumps: Vec<(u32, u32)> = Vec::new();
@@ -543,10 +541,7 @@ impl<'a> Validator<'a> {
         pending_jumps: &mut Vec<(u32, u32)>,
     ) {
         // Helper closures to keep the per-variant arms tidy.
-        let func_name = format!(
-            "fn#{}@0x{:x}",
-            func.id.0, instr_start
-        );
+        let func_name = format!("fn#{}@0x{:x}", func.id.0, instr_start);
 
         match instr {
             // -----------------------------------------------------------
@@ -566,7 +561,12 @@ impl<'a> Validator<'a> {
                 self.check_reg(*dst, max_reg, &func_name);
                 self.check_reg_range(*args, max_reg, &func_name);
             }
-            Instruction::CallG { dst, func_id, type_args, args } => {
+            Instruction::CallG {
+                dst,
+                func_id,
+                type_args,
+                args,
+            } => {
                 if *func_id >= function_count {
                     self.errors.push(VbcError::InvalidFunctionId(*func_id));
                 } else {
@@ -588,13 +588,22 @@ impl<'a> Validator<'a> {
             }
             // CallC: `cache_id` is an inline-cache slot, not a
             // function-table index — only validate registers.
-            Instruction::CallC { dst, cache_id: _, args } => {
+            Instruction::CallC {
+                dst,
+                cache_id: _,
+                args,
+            } => {
                 self.check_reg(*dst, max_reg, &func_name);
                 self.check_reg_range(*args, max_reg, &func_name);
             }
             // CallM uses method_id which is a string-id (the bare
             // method name); validate as such.
-            Instruction::CallM { dst, receiver, method_id, args } => {
+            Instruction::CallM {
+                dst,
+                receiver,
+                method_id,
+                args,
+            } => {
                 if *method_id >= string_count {
                     self.errors.push(VbcError::InvalidStringId(*method_id));
                 }
@@ -602,7 +611,12 @@ impl<'a> Validator<'a> {
                 self.check_reg(*receiver, max_reg, &func_name);
                 self.check_reg_range(*args, max_reg, &func_name);
             }
-            Instruction::CallV { dst, vtable_slot: _, receiver, args } => {
+            Instruction::CallV {
+                dst,
+                vtable_slot: _,
+                receiver,
+                args,
+            } => {
                 self.check_reg(*dst, max_reg, &func_name);
                 self.check_reg(*receiver, max_reg, &func_name);
                 self.check_reg_range(*args, max_reg, &func_name);
@@ -647,7 +661,12 @@ impl<'a> Validator<'a> {
                 let target = (next_offset as i64 + *offset as i64) as u32;
                 pending_jumps.push((instr_start as u32, target));
             }
-            Instruction::JmpCmp { op: _, a, b, offset } => {
+            Instruction::JmpCmp {
+                op: _,
+                a,
+                b,
+                offset,
+            } => {
                 self.check_reg(*a, max_reg, &func_name);
                 self.check_reg(*b, max_reg, &func_name);
                 let target = (next_offset as i64 + *offset as i64) as u32;
@@ -659,7 +678,11 @@ impl<'a> Validator<'a> {
             // Every offset must land on a known instruction-start
             // boundary inside the function's bytecode region.
             // -----------------------------------------------------------
-            Instruction::Switch { value, default_offset, cases } => {
+            Instruction::Switch {
+                value,
+                default_offset,
+                cases,
+            } => {
                 self.check_reg(*value, max_reg, &func_name);
                 let default_target = (next_offset as i64 + *default_offset as i64) as u32;
                 pending_jumps.push((instr_start as u32, default_target));
@@ -685,7 +708,11 @@ impl<'a> Validator<'a> {
             // table. Every captured-value register must also be in
             // bounds.
             // -----------------------------------------------------------
-            Instruction::NewClosure { dst, func_id, captures } => {
+            Instruction::NewClosure {
+                dst,
+                func_id,
+                captures,
+            } => {
                 if *func_id >= function_count {
                     self.errors.push(VbcError::InvalidFunctionId(*func_id));
                 }
@@ -698,10 +725,9 @@ impl<'a> Validator<'a> {
             // -----------------------------------------------------------
             // Panic — message_id references the string table.
             // -----------------------------------------------------------
-            Instruction::Panic { message_id }
-                if *message_id >= string_count => {
-                    self.errors.push(VbcError::InvalidStringId(*message_id));
-                }
+            Instruction::Panic { message_id } if *message_id >= string_count => {
+                self.errors.push(VbcError::InvalidStringId(*message_id));
+            }
 
             // -----------------------------------------------------------
             // Type-table cross-references — `New` / `NewG` allocate
@@ -717,18 +743,28 @@ impl<'a> Validator<'a> {
             // a non-existent user type would otherwise surface only
             // when the runtime tried to consult the type's layout.
             // -----------------------------------------------------------
-            Instruction::New { dst, type_id, field_count: _ } => {
+            Instruction::New {
+                dst,
+                type_id,
+                field_count: _,
+            } => {
                 let tid = TypeId(*type_id);
-                if !tid.is_builtin() && !tid.is_semantic_type()
+                if !tid.is_builtin()
+                    && !tid.is_semantic_type()
                     && self.module.get_type(tid).is_none()
                 {
                     self.errors.push(VbcError::InvalidTypeId(*type_id));
                 }
                 self.check_reg(*dst, max_reg, &func_name);
             }
-            Instruction::NewG { dst, type_id, type_args } => {
+            Instruction::NewG {
+                dst,
+                type_id,
+                type_args,
+            } => {
                 let tid = TypeId(*type_id);
-                if !tid.is_builtin() && !tid.is_semantic_type()
+                if !tid.is_builtin()
+                    && !tid.is_semantic_type()
                     && self.module.get_type(tid).is_none()
                 {
                     self.errors.push(VbcError::InvalidTypeId(*type_id));
@@ -775,12 +811,7 @@ impl<'a> Validator<'a> {
     /// callee locals, missing args reading uninitialised slots).
     /// The codegen layer enforced arity, but only for compiler-
     /// emitted bytecode; this check covers any-source bytecode.
-    fn check_call_arity(
-        &mut self,
-        func_id: u32,
-        arg_count: u32,
-        context: &str,
-    ) {
+    fn check_call_arity(&mut self, func_id: u32, arg_count: u32, context: &str) {
         if let Some(target) = self.module.get_function(crate::FunctionId(func_id)) {
             let expected = target.params.len() as u32;
             if expected != arg_count {
@@ -822,7 +853,8 @@ impl<'a> Validator<'a> {
         // Validate specialization entries
         for spec in &self.module.specializations {
             if self.module.get_function(spec.generic_fn).is_none() {
-                self.errors.push(VbcError::InvalidFunctionId(spec.generic_fn.0));
+                self.errors
+                    .push(VbcError::InvalidFunctionId(spec.generic_fn.0));
             }
             for type_arg in &spec.type_args {
                 self.validate_type_ref(type_arg, 0);
@@ -922,11 +954,11 @@ mod tests {
     // adversarial instruction and asserts the validator rejects it
     // with the expected typed error variant.
 
+    use crate::FunctionId;
     use crate::bytecode::encode_instruction;
     use crate::instruction::{Instruction, Reg, RegRange};
     use crate::module::FunctionDescriptor;
     use crate::types::StringId;
-    use crate::FunctionId;
 
     /// Build a one-function module whose body is the supplied instruction
     /// followed by a Ret-Unit terminator. `register_count` configures
@@ -978,15 +1010,19 @@ mod tests {
         let oor_call = Instruction::Call {
             dst: Reg(0),
             func_id: 99,
-            args: RegRange { start: Reg(0), count: 0 },
+            args: RegRange {
+                start: Reg(0),
+                count: 0,
+            },
         };
         let module = build_module_with_instr(oor_call, 4, 1);
         let err = validate_module(&module).expect_err("must reject");
         match err {
             VbcError::InvalidFunctionId(99) => {}
-            VbcError::MultipleErrors(errs) if errs.iter().any(|e|
-                matches!(e, VbcError::InvalidFunctionId(99))
-            ) => {}
+            VbcError::MultipleErrors(errs)
+                if errs
+                    .iter()
+                    .any(|e| matches!(e, VbcError::InvalidFunctionId(99))) => {}
             other => panic!("expected InvalidFunctionId(99), got: {:?}", other),
         }
     }
@@ -997,18 +1033,34 @@ mod tests {
         let bad_call = Instruction::Call {
             dst: Reg(10),
             func_id: 0,
-            args: RegRange { start: Reg(0), count: 0 },
+            args: RegRange {
+                start: Reg(0),
+                count: 0,
+            },
         };
         let module = build_module_with_instr(bad_call, 4, 1);
         let err = validate_module(&module).expect_err("must reject");
         let has_oob = match &err {
-            VbcError::RegisterOutOfBounds { reg: 10, max: 4, .. } => true,
-            VbcError::MultipleErrors(errs) => errs.iter().any(|e|
-                matches!(e, VbcError::RegisterOutOfBounds { reg: 10, max: 4, .. })
-            ),
+            VbcError::RegisterOutOfBounds {
+                reg: 10, max: 4, ..
+            } => true,
+            VbcError::MultipleErrors(errs) => errs.iter().any(|e| {
+                matches!(
+                    e,
+                    VbcError::RegisterOutOfBounds {
+                        reg: 10,
+                        max: 4,
+                        ..
+                    }
+                )
+            }),
             _ => false,
         };
-        assert!(has_oob, "expected RegisterOutOfBounds {{reg:10, max:4}}, got: {:?}", err);
+        assert!(
+            has_oob,
+            "expected RegisterOutOfBounds {{reg:10, max:4}}, got: {:?}",
+            err
+        );
     }
 
     #[test]
@@ -1017,14 +1069,16 @@ mod tests {
         // relative to the PC after reading the opcode + operand.
         // A target of u32::MAX bytes past EOF is comfortably out of
         // range for any reasonable module.
-        let bad_jmp = Instruction::Jmp { offset: 0x7FFF_FFFF };
+        let bad_jmp = Instruction::Jmp {
+            offset: 0x7FFF_FFFF,
+        };
         let module = build_module_with_instr(bad_jmp, 4, 1);
         let err = validate_module(&module).expect_err("must reject");
         let has_oob = match &err {
             VbcError::JumpOutOfBounds { .. } => true,
-            VbcError::MultipleErrors(errs) => errs.iter().any(|e|
-                matches!(e, VbcError::JumpOutOfBounds { .. })
-            ),
+            VbcError::MultipleErrors(errs) => errs
+                .iter()
+                .any(|e| matches!(e, VbcError::JumpOutOfBounds { .. })),
             _ => false,
         };
         assert!(has_oob, "expected JumpOutOfBounds, got: {:?}", err);
@@ -1042,9 +1096,9 @@ mod tests {
         let err = validate_module(&module).expect_err("must reject");
         let has_const = match &err {
             VbcError::InvalidConstId(5) => true,
-            VbcError::MultipleErrors(errs) => errs.iter().any(|e|
-                matches!(e, VbcError::InvalidConstId(5))
-            ),
+            VbcError::MultipleErrors(errs) => errs
+                .iter()
+                .any(|e| matches!(e, VbcError::InvalidConstId(5))),
             _ => false,
         };
         assert!(has_const, "expected InvalidConstId(5), got: {:?}", err);
@@ -1054,7 +1108,10 @@ mod tests {
     fn validator_accepts_well_formed_module() {
         // Sanity check: a module whose only instruction is `Mov r0, r1`
         // (both regs in-bounds, no func/const references) must pass.
-        let good_mov = Instruction::Mov { dst: Reg(0), src: Reg(1) };
+        let good_mov = Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(1),
+        };
         let module = build_module_with_instr(good_mov, 4, 1);
         validate_module(&module).expect("well-formed module must validate");
     }
@@ -1066,7 +1123,10 @@ mod tests {
         let oor_call = Instruction::Call {
             dst: Reg(0),
             func_id: 99,
-            args: RegRange { start: Reg(0), count: 0 },
+            args: RegRange {
+                start: Reg(0),
+                count: 0,
+            },
         };
         let module = build_module_with_instr(oor_call, 4, 1);
         let opts = ValidationOptions {
@@ -1125,14 +1185,20 @@ mod tests {
         };
         let module = build_module_with_instr(bad_try, 4, 1);
         let err = validate_module(&module).expect_err("must reject");
-        let any_acceptable = |e: &VbcError| matches!(
-            e,
-            VbcError::JumpOutOfBounds { .. } | VbcError::InvalidInstructionEncoding { .. }
-        );
+        let any_acceptable = |e: &VbcError| {
+            matches!(
+                e,
+                VbcError::JumpOutOfBounds { .. } | VbcError::InvalidInstructionEncoding { .. }
+            )
+        };
         let has_err = any_acceptable(&err)
             || matches!(&err, VbcError::MultipleErrors(errs)
                 if errs.iter().any(any_acceptable));
-        assert!(has_err, "expected JumpOutOfBounds or InvalidInstructionEncoding for TryBegin, got: {:?}", err);
+        assert!(
+            has_err,
+            "expected JumpOutOfBounds or InvalidInstructionEncoding for TryBegin, got: {:?}",
+            err
+        );
     }
 
     #[test]
@@ -1150,7 +1216,11 @@ mod tests {
         let has_err = matches!(&err, VbcError::JumpOutOfBounds { .. })
             || matches!(&err, VbcError::MultipleErrors(errs)
                 if errs.iter().any(|e| matches!(e, VbcError::JumpOutOfBounds { .. })));
-        assert!(has_err, "expected JumpOutOfBounds for Switch case, got: {:?}", err);
+        assert!(
+            has_err,
+            "expected JumpOutOfBounds for Switch case, got: {:?}",
+            err
+        );
     }
 
     #[test]
@@ -1185,8 +1255,7 @@ mod tests {
             field_count: 0,
         };
         let module = build_module_with_instr(good_new, 4, 1);
-        validate_module(&module)
-            .expect("New with builtin TypeId must validate cleanly");
+        validate_module(&module).expect("New with builtin TypeId must validate cleanly");
     }
 
     #[test]
@@ -1200,15 +1269,20 @@ mod tests {
         let mismatch_call = Instruction::Call {
             dst: Reg(0),
             func_id: 0,
-            args: RegRange { start: Reg(0), count: 3 },
+            args: RegRange {
+                start: Reg(0),
+                count: 3,
+            },
         };
         let module = build_module_with_instr(mismatch_call, 4, 1);
         let err = validate_module(&module).expect_err("must reject arity mismatch");
-        let any_err = |e: &VbcError| matches!(
-            e,
-            VbcError::InvalidInstructionEncoding { reason, .. }
-                if reason.contains("call-arity mismatch")
-        );
+        let any_err = |e: &VbcError| {
+            matches!(
+                e,
+                VbcError::InvalidInstructionEncoding { reason, .. }
+                    if reason.contains("call-arity mismatch")
+            )
+        };
         let has_err = any_err(&err)
             || matches!(&err, VbcError::MultipleErrors(errs)
                 if errs.iter().any(any_err));
@@ -1245,10 +1319,18 @@ mod tests {
 #[derive(Debug, Clone)]
 pub enum VariantLayoutError {
     /// type_id has no descriptor in the module's type table.
-    UnknownTypeId { type_id: TypeId, tag: u32, got_field_count: u32 },
+    UnknownTypeId {
+        type_id: TypeId,
+        tag: u32,
+        got_field_count: u32,
+    },
     /// type_id is registered but its descriptor has no variant
     /// matching `tag`.
-    UnknownTag { type_id: TypeId, tag: u32, got_field_count: u32 },
+    UnknownTag {
+        type_id: TypeId,
+        tag: u32,
+        got_field_count: u32,
+    },
     /// `(type_id, tag)` resolves to a variant descriptor whose
     /// arity disagrees with the bytecode-encoded `field_count`.
     /// `expected` is the variant's declared arity; `got` is what
@@ -1264,21 +1346,34 @@ pub enum VariantLayoutError {
 impl std::fmt::Display for VariantLayoutError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VariantLayoutError::UnknownTypeId { type_id, tag, got_field_count } => write!(
+            VariantLayoutError::UnknownTypeId {
+                type_id,
+                tag,
+                got_field_count,
+            } => write!(
                 f,
                 "MakeVariantTyped: type_id={:?} has no descriptor in the type \
                  table (tag={}, field_count={}). Codegen emitted a typed-variant \
                  instruction for a type the module doesn't declare.",
                 type_id, tag, got_field_count,
             ),
-            VariantLayoutError::UnknownTag { type_id, tag, got_field_count } => write!(
+            VariantLayoutError::UnknownTag {
+                type_id,
+                tag,
+                got_field_count,
+            } => write!(
                 f,
                 "MakeVariantTyped: tag={} is not a declared variant of type_id={:?} \
                  (field_count={}). Codegen emitted a tag the type's variant list \
                  doesn't include.",
                 tag, type_id, got_field_count,
             ),
-            VariantLayoutError::FieldCountMismatch { type_id, tag, expected, got } => write!(
+            VariantLayoutError::FieldCountMismatch {
+                type_id,
+                tag,
+                expected,
+                got,
+            } => write!(
                 f,
                 "MakeVariantTyped: variant tag={} of type_id={:?} expects \
                  field_count={}, codegen tried to emit field_count={}.",
@@ -1298,9 +1393,7 @@ impl std::error::Error for VariantLayoutError {}
 /// Kept in sync with that function — they MUST agree on every
 /// VariantKind so Tier 0 dispatch validation and Tier 1 codegen
 /// validation reject the same tuples.
-fn variant_expected_field_count(
-    variant: &crate::types::VariantDescriptor,
-) -> u32 {
+fn variant_expected_field_count(variant: &crate::types::VariantDescriptor) -> u32 {
     use crate::types::VariantKind;
     match variant.kind {
         VariantKind::Unit => 0,
@@ -1365,9 +1458,7 @@ pub fn validate_variant_layout(
 #[cfg(test)]
 mod variant_layout_tests {
     use super::*;
-    use crate::types::{
-        StringId, TypeDescriptor, TypeKind, VariantDescriptor, VariantKind,
-    };
+    use crate::types::{StringId, TypeDescriptor, TypeKind, VariantDescriptor, VariantKind};
     use smallvec::SmallVec;
 
     fn mk_module_with_user_type() -> VbcModule {
@@ -1426,10 +1517,7 @@ mod variant_layout_tests {
         let module = mk_module_with_user_type();
         // The Maybe-type has tags 0 and 1; tag 99 is invalid.
         let result = validate_variant_layout(&module, TypeId(0x100), 99, 0);
-        assert!(matches!(
-            result,
-            Err(VariantLayoutError::UnknownTag { .. })
-        ));
+        assert!(matches!(result, Err(VariantLayoutError::UnknownTag { .. })));
     }
 
     #[test]

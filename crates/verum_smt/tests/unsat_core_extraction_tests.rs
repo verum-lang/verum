@@ -18,12 +18,12 @@
 //! Per CLAUDE.md standards: Tests in tests/ directory
 
 use verum_common::Maybe;
+use verum_common::{List, Text};
 use verum_smt::context::Context;
 use verum_smt::unsat_core::{
     AssertionCategory, TrackedAssertion, UnsatCore, UnsatCoreAnalyzer, UnsatCoreConfig,
     UnsatCoreExtractor,
 };
-use verum_common::{List, Text};
 use z3::ast::{Bool, Int};
 use z3::{SatResult, Solver};
 

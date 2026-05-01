@@ -1,35 +1,39 @@
 use verum_llvm_sys::target::{
-    LLVMABIAlignmentOfType, LLVMABISizeOfType, LLVMByteOrder, LLVMByteOrdering, LLVMCallFrameAlignmentOfType,
-    LLVMCopyStringRepOfTargetData, LLVMCreateTargetData, LLVMDisposeTargetData, LLVMElementAtOffset,
-    LLVMIntPtrTypeForASInContext, LLVMIntPtrTypeInContext, LLVMOffsetOfElement, LLVMPointerSize, LLVMPointerSizeForAS,
-    LLVMPreferredAlignmentOfGlobal, LLVMPreferredAlignmentOfType, LLVMSizeOfTypeInBits, LLVMStoreSizeOfType,
-    LLVMTargetDataRef,
+    LLVMABIAlignmentOfType, LLVMABISizeOfType, LLVMByteOrder, LLVMByteOrdering,
+    LLVMCallFrameAlignmentOfType, LLVMCopyStringRepOfTargetData, LLVMCreateTargetData,
+    LLVMDisposeTargetData, LLVMElementAtOffset, LLVMIntPtrTypeForASInContext,
+    LLVMIntPtrTypeInContext, LLVMOffsetOfElement, LLVMPointerSize, LLVMPointerSizeForAS,
+    LLVMPreferredAlignmentOfGlobal, LLVMPreferredAlignmentOfType, LLVMSizeOfTypeInBits,
+    LLVMStoreSizeOfType, LLVMTargetDataRef,
 };
 use verum_llvm_sys::target_machine::LLVMCreateTargetDataLayout;
 use verum_llvm_sys::target_machine::{
-    LLVMAddAnalysisPasses, LLVMCodeGenFileType, LLVMCodeModel, LLVMCreateTargetMachine, LLVMDisposeTargetMachine,
-    LLVMGetDefaultTargetTriple, LLVMGetFirstTarget, LLVMGetNextTarget, LLVMGetTargetDescription, LLVMGetTargetFromName,
-    LLVMGetTargetFromTriple, LLVMGetTargetMachineCPU, LLVMGetTargetMachineFeatureString, LLVMGetTargetMachineTarget,
+    LLVMAddAnalysisPasses, LLVMCodeGenFileType, LLVMCodeModel, LLVMCreateTargetMachine,
+    LLVMDisposeTargetMachine, LLVMGetDefaultTargetTriple, LLVMGetFirstTarget, LLVMGetNextTarget,
+    LLVMGetTargetDescription, LLVMGetTargetFromName, LLVMGetTargetFromTriple,
+    LLVMGetTargetMachineCPU, LLVMGetTargetMachineFeatureString, LLVMGetTargetMachineTarget,
     LLVMGetTargetMachineTriple, LLVMGetTargetName, LLVMRelocMode, LLVMSetTargetMachineAsmVerbosity,
-    LLVMTargetHasAsmBackend, LLVMTargetHasJIT, LLVMTargetHasTargetMachine, LLVMTargetMachineEmitToFile,
-    LLVMTargetMachineEmitToMemoryBuffer, LLVMTargetMachineRef, LLVMTargetRef,
+    LLVMTargetHasAsmBackend, LLVMTargetHasJIT, LLVMTargetHasTargetMachine,
+    LLVMTargetMachineEmitToFile, LLVMTargetMachineEmitToMemoryBuffer, LLVMTargetMachineRef,
+    LLVMTargetRef,
 };
 
-use verum_llvm_sys::target_machine::{
-    LLVMCreateTargetMachineOptions, LLVMCreateTargetMachineWithOptions, LLVMDisposeTargetMachineOptions,
-    LLVMTargetMachineOptionsRef, LLVMTargetMachineOptionsSetABI, LLVMTargetMachineOptionsSetCPU,
-    LLVMTargetMachineOptionsSetCodeGenOptLevel, LLVMTargetMachineOptionsSetCodeModel,
-    LLVMTargetMachineOptionsSetFeatures, LLVMTargetMachineOptionsSetRelocMode,
-};
 use once_cell::sync::Lazy;
 use std::sync::RwLock;
+use verum_llvm_sys::target_machine::{
+    LLVMCreateTargetMachineOptions, LLVMCreateTargetMachineWithOptions,
+    LLVMDisposeTargetMachineOptions, LLVMTargetMachineOptionsRef, LLVMTargetMachineOptionsSetABI,
+    LLVMTargetMachineOptionsSetCPU, LLVMTargetMachineOptionsSetCodeGenOptLevel,
+    LLVMTargetMachineOptionsSetCodeModel, LLVMTargetMachineOptionsSetFeatures,
+    LLVMTargetMachineOptionsSetRelocMode,
+};
 
 use crate::context::AsContextRef;
 use crate::data_layout::DataLayout;
 use crate::memory_buffer::MemoryBuffer;
 use crate::module::Module;
 use crate::passes::PassManager;
-use crate::support::{to_c_str, LLVMString};
+use crate::support::{LLVMString, to_c_str};
 use crate::types::{AnyType, AsTypeRef, IntType, StructType};
 use crate::values::{AsValueRef, GlobalValue};
 use crate::{AddressSpace, OptimizationLevel};
@@ -270,8 +274,9 @@ impl Target {
     #[cfg(feature = "target-aarch64")]
     pub fn initialize_aarch64(config: &InitializationConfig) {
         use verum_llvm_sys::target::{
-            LLVMInitializeAArch64AsmParser, LLVMInitializeAArch64AsmPrinter, LLVMInitializeAArch64Disassembler,
-            LLVMInitializeAArch64Target, LLVMInitializeAArch64TargetInfo, LLVMInitializeAArch64TargetMC,
+            LLVMInitializeAArch64AsmParser, LLVMInitializeAArch64AsmPrinter,
+            LLVMInitializeAArch64Disassembler, LLVMInitializeAArch64Target,
+            LLVMInitializeAArch64TargetInfo, LLVMInitializeAArch64TargetMC,
         };
 
         if config.base {
@@ -347,8 +352,9 @@ impl Target {
     #[cfg(feature = "target-riscv")]
     pub fn initialize_riscv(config: &InitializationConfig) {
         use verum_llvm_sys::target::{
-            LLVMInitializeRISCVAsmParser, LLVMInitializeRISCVAsmPrinter, LLVMInitializeRISCVDisassembler,
-            LLVMInitializeRISCVTarget, LLVMInitializeRISCVTargetInfo, LLVMInitializeRISCVTargetMC,
+            LLVMInitializeRISCVAsmParser, LLVMInitializeRISCVAsmPrinter,
+            LLVMInitializeRISCVDisassembler, LLVMInitializeRISCVTarget,
+            LLVMInitializeRISCVTargetInfo, LLVMInitializeRISCVTargetMC,
         };
 
         if config.base {
@@ -384,8 +390,8 @@ impl Target {
 
     pub fn initialize_native(config: &InitializationConfig) -> Result<(), String> {
         use verum_llvm_sys::target::{
-            LLVM_InitializeNativeAsmParser, LLVM_InitializeNativeAsmPrinter, LLVM_InitializeNativeDisassembler,
-            LLVM_InitializeNativeTarget,
+            LLVM_InitializeNativeAsmParser, LLVM_InitializeNativeAsmPrinter,
+            LLVM_InitializeNativeDisassembler, LLVM_InitializeNativeTarget,
         };
 
         if config.base {
@@ -430,8 +436,9 @@ impl Target {
 
     pub fn initialize_all(config: &InitializationConfig) {
         use verum_llvm_sys::target::{
-            LLVM_InitializeAllAsmParsers, LLVM_InitializeAllAsmPrinters, LLVM_InitializeAllDisassemblers,
-            LLVM_InitializeAllTargetInfos, LLVM_InitializeAllTargetMCs, LLVM_InitializeAllTargets,
+            LLVM_InitializeAllAsmParsers, LLVM_InitializeAllAsmPrinters,
+            LLVM_InitializeAllDisassemblers, LLVM_InitializeAllTargetInfos,
+            LLVM_InitializeAllTargetMCs, LLVM_InitializeAllTargets,
         };
 
         if config.base {
@@ -583,7 +590,9 @@ impl Target {
 
         let code = {
             let _guard = TARGET_LOCK.read().unwrap_or_else(|e| e.into_inner());
-            unsafe { LLVMGetTargetFromTriple(triple.as_ptr(), &mut target, err_string.as_mut_ptr()) }
+            unsafe {
+                LLVMGetTargetFromTriple(triple.as_ptr(), &mut target, err_string.as_mut_ptr())
+            }
         };
 
         if code == 1 {
@@ -755,7 +764,11 @@ impl TargetMachine {
 
     /// let buffer = target_machine.write_to_memory_buffer(&module, FileType::Assembly).unwrap();
     /// ```
-    pub fn write_to_memory_buffer(&self, module: &Module, file_type: FileType) -> Result<MemoryBuffer, LLVMString> {
+    pub fn write_to_memory_buffer(
+        &self,
+        module: &Module,
+        file_type: FileType,
+    ) -> Result<MemoryBuffer, LLVMString> {
         let mut memory_buffer = ptr::null_mut();
         let mut err_string = MaybeUninit::uninit();
         let return_code = unsafe {
@@ -826,8 +839,15 @@ impl TargetMachine {
 
     /// assert!(target_machine.write_to_file(&module, FileType::Object, &path).is_ok());
     /// ```
-    pub fn write_to_file(&self, module: &Module, file_type: FileType, path: &Path) -> Result<(), LLVMString> {
-        let path = path.to_str().expect("Did not find a valid Unicode path string");
+    pub fn write_to_file(
+        &self,
+        module: &Module,
+        file_type: FileType,
+        path: &Path,
+    ) -> Result<(), LLVMString> {
+        let path = path
+            .to_str()
+            .expect("Did not find a valid Unicode path string");
         let path_c_string = to_c_str(path);
         let mut err_string = MaybeUninit::uninit();
         let return_code = unsafe {
@@ -905,7 +925,9 @@ impl TargetData {
     /// let target_data = execution_engine.get_target_data();
     /// let int_type = target_data.ptr_sized_int_type_in_context(&context, None);
     /// ```
-    #[deprecated(note = "This method will be removed in the future. Please use Context::ptr_sized_int_type instead.")]
+    #[deprecated(
+        note = "This method will be removed in the future. Please use Context::ptr_sized_int_type instead."
+    )]
     pub fn ptr_sized_int_type_in_context<'ctx>(
         &self,
         context: impl AsContextRef<'ctx>,
@@ -913,7 +935,11 @@ impl TargetData {
     ) -> IntType<'ctx> {
         let int_type_ptr = match address_space {
             Some(address_space) => unsafe {
-                LLVMIntPtrTypeForASInContext(context.as_ctx_ref(), self.target_data, address_space.0)
+                LLVMIntPtrTypeForASInContext(
+                    context.as_ctx_ref(),
+                    self.target_data,
+                    address_space.0,
+                )
             },
             None => unsafe { LLVMIntPtrTypeInContext(context.as_ctx_ref(), self.target_data) },
         };
@@ -949,7 +975,9 @@ impl TargetData {
 
     pub fn get_pointer_byte_size(&self, address_space: Option<AddressSpace>) -> u32 {
         match address_space {
-            Some(address_space) => unsafe { LLVMPointerSizeForAS(self.target_data, address_space.0) },
+            Some(address_space) => unsafe {
+                LLVMPointerSizeForAS(self.target_data, address_space.0)
+            },
             None => unsafe { LLVMPointerSize(self.target_data) },
         }
     }
@@ -1013,7 +1041,6 @@ impl Drop for TargetData {
 #[derive(Default, Debug)]
 pub struct TargetMachineOptions(Option<LLVMTargetMachineOptionsRef>);
 
-
 impl TargetMachineOptions {
     pub fn new() -> Self {
         Default::default()
@@ -1058,8 +1085,13 @@ impl TargetMachineOptions {
         self
     }
 
-    fn into_target_machine(mut self, target: LLVMTargetRef, triple: &TargetTriple) -> Option<TargetMachine> {
-        let target_machine = unsafe { LLVMCreateTargetMachineWithOptions(target, triple.as_ptr(), self.inner()) };
+    fn into_target_machine(
+        mut self,
+        target: LLVMTargetRef,
+        triple: &TargetTriple,
+    ) -> Option<TargetMachine> {
+        let target_machine =
+            unsafe { LLVMCreateTargetMachineWithOptions(target, triple.as_ptr(), self.inner()) };
 
         if target_machine.is_null() {
             return None;
@@ -1074,10 +1106,11 @@ impl TargetMachineOptions {
     /// - The only way to access it is via this private method.
     /// - Disposal is taken care of automatically in `Drop::drop`.
     unsafe fn inner(&mut self) -> LLVMTargetMachineOptionsRef {
-        *self.0.get_or_insert_with(|| LLVMCreateTargetMachineOptions())
+        *self
+            .0
+            .get_or_insert_with(|| LLVMCreateTargetMachineOptions())
     }
 }
-
 
 impl Drop for TargetMachineOptions {
     fn drop(&mut self) {

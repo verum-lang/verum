@@ -164,13 +164,15 @@ impl TestFilter {
 
     /// Add tags to include.
     pub fn with_tags(mut self, tags: &[&str]) -> Self {
-        self.include_tags.extend(tags.iter().map(|s| s.to_string().into()));
+        self.include_tags
+            .extend(tags.iter().map(|s| s.to_string().into()));
         self
     }
 
     /// Add tags to exclude.
     pub fn with_exclude_tags(mut self, tags: &[&str]) -> Self {
-        self.exclude_tags.extend(tags.iter().map(|s| s.to_string().into()));
+        self.exclude_tags
+            .extend(tags.iter().map(|s| s.to_string().into()));
         self
     }
 

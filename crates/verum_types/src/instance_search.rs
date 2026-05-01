@@ -83,10 +83,7 @@ impl InstanceRegistry {
     /// Register a new protocol implementation.
     pub fn register(&mut self, candidate: InstanceCandidate) {
         let key = (candidate.protocol.clone(), candidate.target_type.clone());
-        self.by_key
-            .entry(key)
-            .or_default()
-            .push(candidate);
+        self.by_key.entry(key).or_default().push(candidate);
     }
 
     /// Count registered implementations.
@@ -160,9 +157,7 @@ impl InstanceRegistry {
 
         // Multiple candidates — apply resolution strategy.
         match resolution_strategy {
-            "first_declared" => {
-                SearchResult::Unique(filtered.into_iter().next().unwrap())
-            }
+            "first_declared" => SearchResult::Unique(filtered.into_iter().next().unwrap()),
             "error" => SearchResult::Ambiguous(filtered),
             // "most_specific" (default) — for now, report ambiguity.
             // A full "most specific" ordering requires subtype
@@ -371,10 +366,7 @@ impl InstanceResolver {
 
 /// Connects to `crates/verum_smt/src/protocol_smt.rs` for encoding
 /// and `specialization_coherence.rs` for specialization ordering.
-pub fn smt_check_coherence(
-    registry: &InstanceRegistry,
-    smt_available: bool,
-) -> CoherenceReport {
+pub fn smt_check_coherence(registry: &InstanceRegistry, smt_available: bool) -> CoherenceReport {
     // Phase 1: Run basic structural coherence check
     let mut report = registry.check_coherence();
 

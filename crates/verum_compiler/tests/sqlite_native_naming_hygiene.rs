@@ -42,8 +42,7 @@ const ROOT: &str = "core/database/sqlite/native";
 ///  coverage is left to the stricter checker that walks
 ///  `type X is | Ok | Err | …` patterns.
 const RESERVED_TYPE_NAMES: &[&str] = &[
-    "Result", "Maybe", "List", "Map", "Set", "Bytes", "Iterator",
-    "Ok", "Err", "Some", "None",
+    "Result", "Maybe", "List", "Map", "Set", "Bytes", "Iterator", "Ok", "Err", "Some", "None",
     // `Slot<K, V>` lives in core/collections/map.vr. Catalogues that
     // declared `public type Slot is { … }` (bind_parameter_index_api,
     // bind_parameter_name_api) tripped type inference with

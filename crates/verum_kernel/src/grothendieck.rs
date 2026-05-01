@@ -186,9 +186,7 @@ impl GrothendieckConstruction {
 
 /// **Soundness**: matches HTT 5.1.4's structural construction
 /// modulo V1's ∞-categorical higher-cell content.
-pub fn build_grothendieck(
-    diagram: &SIndexedDiagram,
-) -> Option<GrothendieckConstruction> {
+pub fn build_grothendieck(diagram: &SIndexedDiagram) -> Option<GrothendieckConstruction> {
     if !diagram.fibres_uniformly_accessible() {
         return None;
     }
@@ -258,14 +256,11 @@ mod tests {
 
     #[test]
     fn build_returns_none_on_empty_fibres() {
-        let d = SIndexedDiagram::finite(
-            "D_empty",
-            "B",
-            vec![],
-            Ordinal::Kappa(1),
+        let d = SIndexedDiagram::finite("D_empty", "B", vec![], Ordinal::Kappa(1));
+        assert!(
+            build_grothendieck(&d).is_none(),
+            "empty-fibre diagram must fail preconditions"
         );
-        assert!(build_grothendieck(&d).is_none(),
-            "empty-fibre diagram must fail preconditions");
     }
 
     #[test]
@@ -287,8 +282,10 @@ mod tests {
     fn preserves_accessibility_ar_1_26() {
         let d = sample_diagram();
         let g = build_grothendieck(&d).unwrap();
-        assert!(preserves_accessibility(&d, &g),
-            "Grothendieck preserves accessibility per AR 1.26");
+        assert!(
+            preserves_accessibility(&d, &g),
+            "Grothendieck preserves accessibility per AR 1.26"
+        );
     }
 
     #[test]
@@ -327,8 +324,11 @@ mod tests {
         // (S_S^global membership), the construction is also at κ_1.
         let d = sample_diagram();
         let g = build_grothendieck(&d).unwrap();
-        assert_eq!(g.accessibility_level, Ordinal::Kappa(1),
-            "S-indexed diagram at κ_1 → construction at κ_1 (Lemma 3.4 contract)");
+        assert_eq!(
+            g.accessibility_level,
+            Ordinal::Kappa(1),
+            "S-indexed diagram at κ_1 → construction at κ_1 (Lemma 3.4 contract)"
+        );
     }
 
     #[test]
@@ -342,7 +342,9 @@ mod tests {
             accessibility_level: Ordinal::Kappa(1),
             cartesian_lift_count: 0,
         };
-        assert!(g.is_cartesian_fibration(),
-            "vacuously a Cartesian fibration when no objects");
+        assert!(
+            g.is_cartesian_fibration(),
+            "vacuously a Cartesian fibration when no objects"
+        );
     }
 }

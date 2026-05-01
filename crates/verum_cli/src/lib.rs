@@ -9,15 +9,15 @@ pub mod cache;
 pub mod commands;
 // NOTE: Old compiler module removed - now using verum_compiler crate
 // pub mod compiler;
+pub mod cog;
+pub mod cog_manager;
 pub mod config;
 pub mod error;
 pub mod feature_overrides;
-pub mod script;
-pub mod tier;
-pub mod cog;
-pub mod cog_manager;
 pub mod registry;
+pub mod script;
 pub mod templates;
+pub mod tier;
 pub mod ui;
 
 // Re-export commonly used types
@@ -27,7 +27,7 @@ pub use error::{CliError, Result};
 pub use verum_common::{List, Map, Text};
 
 // Re-export registry types for tests
-pub use registry::types::{DependencySpec, CogMetadata, CogSource, TierArtifacts};
+pub use registry::types::{CogMetadata, CogSource, DependencySpec, TierArtifacts};
 
 // Re-export command modules for backward compatibility with tests
 pub use commands::add;
@@ -58,4 +58,3 @@ pub use registry::enterprise::{
 
 // Re-export security types for tests
 pub use registry::security::{LicenseIssueType, RiskLevel, SecurityReport, SecurityScanner};
-

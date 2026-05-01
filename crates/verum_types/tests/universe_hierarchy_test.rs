@@ -484,10 +484,7 @@ fn test_multi_arity_function_type_universe() {
     let mut ctx = TypeContext::new();
 
     // (Int, Bool, Float) -> Text : should solve without errors
-    let fn_ty = Type::function(
-        vec![Type::Int, Type::Bool, Type::Float].into(),
-        Type::Text,
-    );
+    let fn_ty = Type::function(vec![Type::Int, Type::Bool, Type::Float].into(), Type::Text);
 
     let _level = ctx.universe_of(&fn_ty).unwrap();
     ctx.solve_universe_constraints().unwrap();
@@ -510,16 +507,8 @@ fn test_deep_tuple_universe() {
     let mut ctx = TypeContext::new();
 
     // (Int, Bool, Float, Char, Text) must solve
-    let tuple = Type::Tuple(
-        vec![
-            Type::Int,
-            Type::Bool,
-            Type::Float,
-            Type::Char,
-            Type::Text,
-        ]
-        .into(),
-    );
+    let tuple =
+        Type::Tuple(vec![Type::Int, Type::Bool, Type::Float, Type::Char, Type::Text].into());
 
     let _level = ctx.universe_of(&tuple).unwrap();
     ctx.solve_universe_constraints().unwrap();

@@ -53,7 +53,10 @@ impl OptimizationConfig {
     /// Validate the optimization configuration
     pub fn validate(&self) -> std::result::Result<(), String> {
         if self.level > 3 {
-            return Err(format!("Optimization level must be 0-3, got {}", self.level));
+            return Err(format!(
+                "Optimization level must be 0-3, got {}",
+                self.level
+            ));
         }
         Ok(())
     }
@@ -85,7 +88,12 @@ impl LtoConfig {
         if let Some(mode) = &self.mode {
             match mode.as_str() {
                 "thin" | "full" => {}
-                _ => return Err(format!("Invalid LTO mode: {}, must be 'thin' or 'full'", mode)),
+                _ => {
+                    return Err(format!(
+                        "Invalid LTO mode: {}, must be 'thin' or 'full'",
+                        mode
+                    ));
+                }
             }
         }
         Ok(())
@@ -188,7 +196,6 @@ pub struct Manifest {
     // Language Feature Configuration
     // Each section controls an orthogonal subsystem of the language.
     // ========================================================================
-
     /// Type system features (dependent, cubical, HKT, universe polymorphism, …)
     #[serde(default)]
     pub types: TypesConfig,
@@ -713,10 +720,18 @@ impl Default for RuntimeConfig {
     }
 }
 
-fn default_cbgr_mode() -> Text { Text::from("mixed") }
-fn default_async_scheduler() -> Text { Text::from("work_stealing") }
-fn default_heap_policy() -> Text { Text::from("adaptive") }
-fn default_panic_strategy() -> Text { Text::from("unwind") }
+fn default_cbgr_mode() -> Text {
+    Text::from("mixed")
+}
+fn default_async_scheduler() -> Text {
+    Text::from("work_stealing")
+}
+fn default_heap_policy() -> Text {
+    Text::from("adaptive")
+}
+fn default_panic_strategy() -> Text {
+    Text::from("unwind")
+}
 
 // ============================================================================
 // Codegen Configuration
@@ -781,10 +796,18 @@ impl Default for CodegenConfig {
     }
 }
 
-fn default_tier() -> Text { Text::from("aot") }
-fn default_gpu_backend() -> Text { Text::from("auto") }
-fn default_debug_info() -> Text { Text::from("line") }
-fn default_inline_depth() -> u32 { 3 }
+fn default_tier() -> Text {
+    Text::from("aot")
+}
+fn default_gpu_backend() -> Text {
+    Text::from("auto")
+}
+fn default_debug_info() -> Text {
+    Text::from("line")
+}
+fn default_inline_depth() -> u32 {
+    3
+}
 
 // ============================================================================
 // Metaprogramming Configuration
@@ -831,8 +854,12 @@ impl Default for MetaConfig {
     }
 }
 
-fn default_macro_depth() -> u32 { 128 }
-fn default_stage_limit() -> u32 { 2 }
+fn default_macro_depth() -> u32 {
+    128
+}
+fn default_stage_limit() -> u32 {
+    2
+}
 
 // ============================================================================
 // Protocol / Trait Configuration
@@ -885,8 +912,12 @@ impl Default for ProtocolsConfig {
     }
 }
 
-fn default_coherence() -> Text { Text::from("strict") }
-fn default_resolution() -> Text { Text::from("most_specific") }
+fn default_coherence() -> Text {
+    Text::from("strict")
+}
+fn default_resolution() -> Text {
+    Text::from("most_specific")
+}
 
 // ============================================================================
 // Context System Configuration
@@ -923,8 +954,12 @@ impl Default for ContextConfig {
     }
 }
 
-fn default_context_strictness() -> Text { Text::from("error") }
-fn default_ctx_depth() -> u32 { 32 }
+fn default_context_strictness() -> Text {
+    Text::from("error")
+}
+fn default_ctx_depth() -> u32 {
+    32
+}
 
 // ============================================================================
 // Safety Configuration
@@ -973,8 +1008,12 @@ impl Default for SafetyConfig {
     }
 }
 
-fn default_ffi_strictness() -> Text { Text::from("strict") }
-fn default_mls_level() -> Text { Text::from("public") }
+fn default_ffi_strictness() -> Text {
+    Text::from("strict")
+}
+fn default_mls_level() -> Text {
+    Text::from("public")
+}
 
 // ============================================================================
 // Testing Configuration
@@ -1031,8 +1070,12 @@ impl Default for TestConfig {
     }
 }
 
-fn default_proptest_cases() -> u32 { 256 }
-fn default_test_timeout() -> u64 { 60 }
+fn default_proptest_cases() -> u32 {
+    256
+}
+fn default_test_timeout() -> u64 {
+    60
+}
 
 // ============================================================================
 // Debug / DAP Configuration
@@ -1074,9 +1117,15 @@ impl Default for DebugConfig {
     }
 }
 
-fn default_step_granularity() -> Text { Text::from("statement") }
-fn default_inspect_depth() -> u32 { 8 }
-fn default_dap_port() -> u16 { 0 }
+fn default_step_granularity() -> Text {
+    Text::from("statement")
+}
+fn default_inspect_depth() -> u32 {
+    8
+}
+fn default_dap_port() -> u16 {
+    0
+}
 
 // (default_true helper is defined earlier in this file)
 
@@ -1698,10 +1747,7 @@ impl Manifest {
         // so embedders see when their `[optimization]` /
         // `[lto]` / `[pgo]` settings are observed-but-unused
         // rather than silently no-op'd.
-        if self.optimization.level != 0
-            || self.optimization.size_opt
-            || self.optimization.inline
-        {
+        if self.optimization.level != 0 || self.optimization.size_opt || self.optimization.inline {
             tracing::debug!(
                 "manifest [optimization] section observed (level={}, size_opt={}, inline={}) \
                  — these fields are forward-looking; the active codegen optimization knob is \
@@ -1901,20 +1947,20 @@ pub fn create_default_manifest(
             // (cross-format certificate export). Other profiles stay
             // at runtime — research is opt-in via the [language]
             // profile selection.
-            let (dev_verify, release_verify, test_verify) =
-                if profile == LanguageProfile::Research {
-                    (
-                        VerificationLevel::Formal,
-                        VerificationLevel::Certified,
-                        VerificationLevel::Formal,
-                    )
-                } else {
-                    (
-                        VerificationLevel::Runtime,
-                        VerificationLevel::Runtime,
-                        VerificationLevel::Runtime,
-                    )
-                };
+            let (dev_verify, release_verify, test_verify) = if profile == LanguageProfile::Research
+            {
+                (
+                    VerificationLevel::Formal,
+                    VerificationLevel::Certified,
+                    VerificationLevel::Formal,
+                )
+            } else {
+                (
+                    VerificationLevel::Runtime,
+                    VerificationLevel::Runtime,
+                    VerificationLevel::Runtime,
+                )
+            };
             ProfileConfig {
                 dev: Profile {
                     tier: CompilationTier::Interpreter,
@@ -2048,14 +2094,8 @@ mod verify_profile_tests {
         "#;
         let cfg: VerifyConfig = toml::from_str(toml).unwrap();
         let merged = cfg.with_profile("release").unwrap();
-        assert_eq!(
-            merged.total_budget.as_ref().unwrap().as_str(),
-            "30m"
-        );
+        assert_eq!(merged.total_budget.as_ref().unwrap().as_str(), "30m");
         // cache_dir inherited unchanged.
-        assert_eq!(
-            merged.cache_dir.as_ref().unwrap().as_str(),
-            ".verum/cache"
-        );
+        assert_eq!(merged.cache_dir.as_ref().unwrap().as_str(), ".verum/cache");
     }
 }

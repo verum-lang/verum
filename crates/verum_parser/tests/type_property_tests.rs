@@ -169,7 +169,10 @@ fn test_parse_qualified_type_alignment() {
             // At parse time, this is a chain of field accesses
             assert_eq!(field.name.as_str(), "alignment");
         }
-        _ => panic!("Expected Field expression for lowercase-starting path, got {:?}", expr.kind),
+        _ => panic!(
+            "Expected Field expression for lowercase-starting path, got {:?}",
+            expr.kind
+        ),
     }
 }
 

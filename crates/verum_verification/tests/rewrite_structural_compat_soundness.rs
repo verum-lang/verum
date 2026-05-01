@@ -20,11 +20,11 @@
 //! This test pins the cross-kind rejection for OTHER pairs (Path
 //! ↔ Binary) that have no semantic story for direct rewriting.
 
+use verum_ast::LiteralKind;
 use verum_ast::expr::{BinOp, Expr, ExprKind};
 use verum_ast::literal::Literal;
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path};
-use verum_ast::LiteralKind;
 use verum_common::{Heap, List};
 
 use verum_smt::proof_term_unified::ProofTerm;

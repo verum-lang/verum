@@ -24,8 +24,8 @@
 // Five Binding Rules: (1) inline {pred}, (2) declarative `where pred`, (3) sigma `n: T where f(n)`
 
 use verum_ast::{FileId, Span, Type, TypeKind};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper function to parse a type from a string.
 fn parse_type(source: &str) -> Result<Type, String> {

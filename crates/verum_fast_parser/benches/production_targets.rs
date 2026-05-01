@@ -7,7 +7,7 @@
 //! This benchmark generates realistic Verum source at various scales
 //! and measures parse throughput in LOC/sec.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::time::Duration;
 use verum_ast::span::FileId;
@@ -189,23 +189,20 @@ fn validate_50k_loc_sec(c: &mut Criterion) {
     let source = generate_realistic_module(1000);
     let loc = count_loc(&source);
 
-    group.bench_function(
-        format!("{loc}_loc_target_under_200ms"),
-        |b| {
-            b.iter_custom(|iters| {
-                let mut total = Duration::ZERO;
-                let file_id = FileId::new(0);
-                for _ in 0..iters {
-                    let start = std::time::Instant::now();
-                    let lexer = Lexer::new(black_box(&source), file_id);
-                    let result = parser.parse_module(lexer, file_id);
-                    let _ = black_box(result);
-                    total += start.elapsed();
-                }
-                total
-            });
-        },
-    );
+    group.bench_function(format!("{loc}_loc_target_under_200ms"), |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+            let file_id = FileId::new(0);
+            for _ in 0..iters {
+                let start = std::time::Instant::now();
+                let lexer = Lexer::new(black_box(&source), file_id);
+                let result = parser.parse_module(lexer, file_id);
+                let _ = black_box(result);
+                total += start.elapsed();
+            }
+            total
+        });
+    });
 
     group.finish();
 }

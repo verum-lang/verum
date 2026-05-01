@@ -170,8 +170,7 @@ pub struct Session {
     /// `None` until the first compile-and-run succeeds; `Some` after.
     /// `Arc` so callers receive a cheap clone of the same module the
     /// interpreter just executed — no double-allocation, no re-encode.
-    last_compiled_vbc:
-        Shared<RwLock<Option<std::sync::Arc<verum_vbc::module::VbcModule>>>>,
+    last_compiled_vbc: Shared<RwLock<Option<std::sync::Arc<verum_vbc::module::VbcModule>>>>,
 
     /// Script-mode permission policy installed by the CLI runner.
     ///
@@ -226,8 +225,7 @@ pub struct Session {
     /// `None` is the trusted-application path — the AOT lowerer
     /// elides every `PermissionAssert` site (matching the
     /// interpreter's allow-all default when no policy is wired).
-    aot_permission_policy:
-        Shared<RwLock<Option<verum_codegen::llvm::AotPermissionPolicy>>>,
+    aot_permission_policy: Shared<RwLock<Option<verum_codegen::llvm::AotPermissionPolicy>>>,
 }
 
 impl Session {
@@ -272,10 +270,7 @@ impl Session {
     /// Called by the pipeline immediately after `compile_ast_to_vbc`
     /// succeeds. Overwrites any prior recording — the slot reflects
     /// the latest run.
-    pub fn record_compiled_vbc(
-        &self,
-        module: std::sync::Arc<verum_vbc::module::VbcModule>,
-    ) {
+    pub fn record_compiled_vbc(&self, module: std::sync::Arc<verum_vbc::module::VbcModule>) {
         *self.last_compiled_vbc.write() = Some(module);
     }
 
@@ -284,9 +279,7 @@ impl Session {
     /// `run_interpreter` to serialise the result into the persistent
     /// script cache. Returns `None` if no compilation captured a VBC
     /// module — e.g., a `--check` run that never reached codegen.
-    pub fn take_compiled_vbc(
-        &self,
-    ) -> Option<std::sync::Arc<verum_vbc::module::VbcModule>> {
+    pub fn take_compiled_vbc(&self) -> Option<std::sync::Arc<verum_vbc::module::VbcModule>> {
         self.last_compiled_vbc.write().take()
     }
 
@@ -339,19 +332,14 @@ impl Session {
     /// `None` (the default) is the trusted-application path —
     /// `PermissionAssert` opcodes lower to no-ops, matching the
     /// allow-all interpreter default for plain applications.
-    pub fn set_aot_permission_policy(
-        &self,
-        policy: verum_codegen::llvm::AotPermissionPolicy,
-    ) {
+    pub fn set_aot_permission_policy(&self, policy: verum_codegen::llvm::AotPermissionPolicy) {
         *self.aot_permission_policy.write() = Some(policy);
     }
 
     /// Borrow the AOT permission policy for the current run, if one
     /// is installed. Cloned out so the caller doesn't hold the lock
     /// while constructing the lowering config.
-    pub fn aot_permission_policy(
-        &self,
-    ) -> Option<verum_codegen::llvm::AotPermissionPolicy> {
+    pub fn aot_permission_policy(&self) -> Option<verum_codegen::llvm::AotPermissionPolicy> {
         self.aot_permission_policy.read().clone()
     }
 
@@ -376,9 +364,7 @@ impl Session {
     /// Equivalent to `self.options().language_features`, but callers that
     /// only need to query features shouldn't have to drag in the full
     /// `CompilerOptions` import.
-    pub fn language_features(
-        &self,
-    ) -> &crate::language_features::LanguageFeatures {
+    pub fn language_features(&self) -> &crate::language_features::LanguageFeatures {
         &self.options.language_features
     }
 
@@ -395,9 +381,7 @@ impl Session {
     ///  becomes moot but is otherwise harmless (no action).
     fn reconcile_language_features(opts: &mut CompilerOptions) {
         // 1. Refinement off → no SMT solver needed.
-        if !opts.language_features.refinement_typing_on()
-            && opts.verify_mode.use_smt()
-        {
+        if !opts.language_features.refinement_typing_on() && opts.verify_mode.use_smt() {
             opts.verify_mode = crate::options::VerifyMode::Runtime;
         }
         // 2. [codegen].debug_info → CompilerOptions.debug_info boolean.
@@ -783,7 +767,9 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     /// Each entry is (name, version, root_path). This is a convenience method
     /// so CLI code doesn't need to depend on verum_modules directly.
     pub fn register_cog_dependencies(&mut self, deps: Vec<(String, String, std::path::PathBuf)>) {
-        if deps.is_empty() { return; }
+        if deps.is_empty() {
+            return;
+        }
         let mut resolver = verum_modules::cog_resolver::CogResolver::new();
         for (name, version, root_path) in deps {
             resolver.register_cog(name, version, root_path);
@@ -940,7 +926,11 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         let source_file = SourceFile::from_path(file_id, path.to_path_buf())?;
 
         // Register with global registry for error diagnostics
-        verum_common::register_source_file(file_id, path.display().to_string(), source_file.source.as_str());
+        verum_common::register_source_file(
+            file_id,
+            path.display().to_string(),
+            source_file.source.as_str(),
+        );
 
         // Store it
         self.source_files
@@ -964,7 +954,11 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         source_file.path = Some(virtual_path.clone());
 
         // Register with global registry for error diagnostics
-        verum_common::register_source_file(file_id, virtual_path.display().to_string(), source_code);
+        verum_common::register_source_file(
+            file_id,
+            virtual_path.display().to_string(),
+            source_code,
+        );
 
         // Store it
         self.source_files
@@ -1011,12 +1005,8 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
             kind,
         };
         let name_str = name.into();
-        let source_file = SourceFile::synthetic(
-            file_id,
-            name_str.clone(),
-            source_code.to_string(),
-            origin,
-        );
+        let source_file =
+            SourceFile::synthetic(file_id, name_str.clone(), source_code.to_string(), origin);
 
         // Register with global registry too — diagnostic renderers
         // that walk through verum_common::global_get_filename see
@@ -1041,10 +1031,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     /// span back to its user-source ancestor. Returns `None` for
     /// user-loaded files and unknown IDs — the resolver treats
     /// `None` as "this is the user span; stop walking".
-    pub fn synthetic_origin(
-        &self,
-        file_id: FileId,
-    ) -> Option<verum_common::span::SyntheticOrigin> {
+    pub fn synthetic_origin(&self, file_id: FileId) -> Option<verum_common::span::SyntheticOrigin> {
         self.source_files
             .read()
             .get(&file_id)
@@ -1238,11 +1225,10 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
                 // before returning Err, so this is typically additive
                 // context (the error message) rather than the only
                 // record of the failure.
-                let diag = verum_diagnostics::DiagnosticBuilder::new(
-                    verum_diagnostics::Severity::Error,
-                )
-                .message(format!("{}: {}", phase_name, e))
-                .build();
+                let diag =
+                    verum_diagnostics::DiagnosticBuilder::new(verum_diagnostics::Severity::Error)
+                        .message(format!("{}: {}", phase_name, e))
+                        .build();
                 self.emit_diagnostic(diag);
             }
             Ok(())
@@ -1305,9 +1291,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         // allocators. Without this, each loader owns its own counters
         // and IDs from independent loaders collide.
         loader.set_file_id_allocator(self.next_file_id.clone());
-        loader.set_module_id_allocator(
-            self.module_registry.read().id_allocator(),
-        );
+        loader.set_module_id_allocator(self.module_registry.read().id_allocator());
         // Attach cross-cog resolver if available (from Verum.lock)
         if let Some(ref resolver) = self.cog_resolver {
             loader.set_cog_resolver(resolver.clone());
@@ -1612,12 +1596,17 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         // Extract phase-specific durations
         for phase in &metrics.phase_metrics {
             let name = phase.phase_name.as_str().to_lowercase();
-            if name.contains("pars") || name.contains("lex") || name.contains("stdlib")
-                || name.contains("project module") || name.contains("dependency")
+            if name.contains("pars")
+                || name.contains("lex")
+                || name.contains("stdlib")
+                || name.contains("project module")
+                || name.contains("dependency")
             {
                 parse_time += phase.duration;
-            } else if name.contains("type") || name.contains("semantic")
-                || name.contains("cbgr") || name.contains("verif")
+            } else if name.contains("type")
+                || name.contains("semantic")
+                || name.contains("cbgr")
+                || name.contains("verif")
             {
                 typecheck_time += phase.duration;
             } else if name.contains("codegen") || name.contains("code gen") {
@@ -1772,7 +1761,8 @@ impl SessionStats {
         format!(
             "Session: {} files, {} modules, {} errors, {} warnings",
             self.num_files, self.num_modules, self.num_errors, self.num_warnings
-        ).into()
+        )
+        .into()
     }
 }
 
@@ -1855,13 +1845,17 @@ mod continue_on_error_tests {
         // result propagates unchanged. The pipeline retains its
         // short-circuit semantics.
         let opts = CompilerOptions::default();
-        assert!(!opts.continue_on_error,
-            "default continue_on_error must be false");
+        assert!(
+            !opts.continue_on_error,
+            "default continue_on_error must be false"
+        );
         let session = Session::new(opts);
         let phase_err: Result<()> = Err(anyhow::anyhow!("phase failed"));
         let result = session.collect_phase_error("test_phase", phase_err);
-        assert!(result.is_err(),
-            "with continue_on_error=false, Err must propagate");
+        assert!(
+            result.is_err(),
+            "with continue_on_error=false, Err must propagate"
+        );
     }
 
     #[test]
@@ -1884,14 +1878,16 @@ mod continue_on_error_tests {
         let session = Session::new(opts);
 
         let pre_count = session.error_count();
-        let phase_err: Result<()> = Err(anyhow::anyhow!(
-            "type error: cannot unify Int with Text"));
+        let phase_err: Result<()> = Err(anyhow::anyhow!("type error: cannot unify Int with Text"));
         let result = session.collect_phase_error("type_check", phase_err);
-        assert!(result.is_ok(),
-            "with continue_on_error=true, Err must be swallowed");
+        assert!(
+            result.is_ok(),
+            "with continue_on_error=true, Err must be swallowed"
+        );
         let post_count = session.error_count();
         assert_eq!(
-            post_count, pre_count + 1,
+            post_count,
+            pre_count + 1,
             "exactly one error diagnostic must be added"
         );
     }
@@ -1908,7 +1904,8 @@ mod continue_on_error_tests {
         let phase_ok: Result<()> = Ok(());
         assert!(session.collect_phase_error("test_phase", phase_ok).is_ok());
         assert_eq!(
-            session.error_count(), pre_count,
+            session.error_count(),
+            pre_count,
             "Ok result must not emit any diagnostic"
         );
     }
@@ -1923,12 +1920,9 @@ mod continue_on_error_tests {
         opts.continue_on_error = true;
         let session = Session::new(opts);
 
-        let _ = session.collect_phase_error(
-            "phase1", Err(anyhow::anyhow!("error A")));
-        let _ = session.collect_phase_error(
-            "phase2", Err(anyhow::anyhow!("error B")));
-        let _ = session.collect_phase_error(
-            "phase3", Err(anyhow::anyhow!("error C")));
+        let _ = session.collect_phase_error("phase1", Err(anyhow::anyhow!("error A")));
+        let _ = session.collect_phase_error("phase2", Err(anyhow::anyhow!("error B")));
+        let _ = session.collect_phase_error("phase3", Err(anyhow::anyhow!("error C")));
 
         assert!(
             session.error_count() >= 3,
@@ -1957,15 +1951,18 @@ mod synthetic_source_tests {
             .unwrap();
         let call_site = Span::new(0, 12, parent_id);
 
-        let synth_id = session.load_synthetic_source(
-            "<derive:Eq for User>",
-            "fn eq(...) { ... }",
-            parent_id,
-            call_site,
-            SyntheticKind::DeriveExpansion,
-        ).unwrap();
+        let synth_id = session
+            .load_synthetic_source(
+                "<derive:Eq for User>",
+                "fn eq(...) { ... }",
+                parent_id,
+                call_site,
+                SyntheticKind::DeriveExpansion,
+            )
+            .unwrap();
 
-        let origin = session.synthetic_origin(synth_id)
+        let origin = session
+            .synthetic_origin(synth_id)
             .expect("synthetic origin must be present");
         assert_eq!(origin.parent_file, parent_id);
         assert_eq!(origin.call_site_span, call_site);
@@ -2008,34 +2005,41 @@ mod synthetic_source_tests {
             .unwrap();
         let user_span = Span::new(100, 150, user_id);
 
-        let macro_id = session.load_synthetic_source(
-            "<macro:my_macro>",
-            "expanded body",
-            user_id,
-            user_span,
-            SyntheticKind::MacroExpansion,
-        ).unwrap();
+        let macro_id = session
+            .load_synthetic_source(
+                "<macro:my_macro>",
+                "expanded body",
+                user_id,
+                user_span,
+                SyntheticKind::MacroExpansion,
+            )
+            .unwrap();
         let macro_span = Span::new(0, 20, macro_id);
 
-        let derive_id = session.load_synthetic_source(
-            "<derive:inside_macro>",
-            "fn eq() {}",
-            macro_id,
-            macro_span,
-            SyntheticKind::DeriveExpansion,
-        ).unwrap();
+        let derive_id = session
+            .load_synthetic_source(
+                "<derive:inside_macro>",
+                "fn eq() {}",
+                macro_id,
+                macro_span,
+                SyntheticKind::DeriveExpansion,
+            )
+            .unwrap();
 
         // Span inside the deepest synthetic file:
         let leaf = Span::new(0, 10, derive_id);
-        let resolved = leaf.resolve_to_user_source(
-            |fid| session.synthetic_origin(fid),
-        );
+        let resolved = leaf.resolve_to_user_source(|fid| session.synthetic_origin(fid));
 
-        assert_eq!(resolved.user_span, user_span,
-            "resolve must walk both layers back to user source");
+        assert_eq!(
+            resolved.user_span, user_span,
+            "resolve must walk both layers back to user source"
+        );
         assert_eq!(
             resolved.expansion_chain,
-            vec![SyntheticKind::DeriveExpansion, SyntheticKind::MacroExpansion],
+            vec![
+                SyntheticKind::DeriveExpansion,
+                SyntheticKind::MacroExpansion
+            ],
             "chain must be ordered leaf-to-root"
         );
     }
@@ -2050,14 +2054,18 @@ mod synthetic_source_tests {
         let parent_id = session
             .load_source_string("fn main() {}", "/tmp/main.vr".into())
             .unwrap();
-        let synth_id = session.load_synthetic_source(
-            "<synthetic>",
-            "// synthesized",
-            parent_id,
-            Span::new(0, 0, parent_id),
-            SyntheticKind::Other,
-        ).unwrap();
-        assert_ne!(synth_id, parent_id,
-            "synthetic FileId must be distinct from parent");
+        let synth_id = session
+            .load_synthetic_source(
+                "<synthetic>",
+                "// synthesized",
+                parent_id,
+                Span::new(0, 0, parent_id),
+                SyntheticKind::Other,
+            )
+            .unwrap();
+        assert_ne!(
+            synth_id, parent_id,
+            "synthetic FileId must be distinct from parent"
+        );
     }
 }

@@ -36,21 +36,21 @@
 //! - `context_require`: Assert context availability
 //! - `context_with`: Transform context value
 
+use crate::mlir::dialect::{attr_names, op_names};
+use crate::mlir::error::{MlirError, Result};
+use verum_common::Text;
 use verum_mlir::{
     Context,
     ir::{
         Attribute, Block, Identifier, Location, Module, Operation, Region, Type, Value,
         attribute::{
-            ArrayAttribute, DenseI32ArrayAttribute, DenseI64ArrayAttribute,
-            IntegerAttribute, StringAttribute, TypeAttribute,
+            ArrayAttribute, DenseI32ArrayAttribute, DenseI64ArrayAttribute, IntegerAttribute,
+            StringAttribute, TypeAttribute,
         },
         operation::{OperationBuilder, OperationLike},
         r#type::IntegerType,
     },
 };
-use verum_common::Text;
-use crate::mlir::error::{MlirError, Result};
-use crate::mlir::dialect::{op_names, attr_names};
 
 // ============================================================================
 // Context Type System
@@ -303,7 +303,14 @@ impl ContextProvideOp {
         context_name: &str,
         value: Value<'c, '_>,
     ) -> Result<Operation<'c>> {
-        Self::build(context, location, context_name, value, ContextLifetime::Scoped, true)
+        Self::build(
+            context,
+            location,
+            context_name,
+            value,
+            ContextLifetime::Scoped,
+            true,
+        )
     }
 }
 
@@ -621,10 +628,7 @@ impl ContextMonoOp {
 // ============================================================================
 
 /// Creates the required contexts attribute for a function.
-pub fn create_required_contexts_attr<'c>(
-    context: &'c Context,
-    contexts: &[&str],
-) -> Attribute<'c> {
+pub fn create_required_contexts_attr<'c>(context: &'c Context, contexts: &[&str]) -> Attribute<'c> {
     let attrs: Vec<Attribute<'c>> = contexts
         .iter()
         .map(|c| StringAttribute::new(context, c).into())
@@ -633,10 +637,7 @@ pub fn create_required_contexts_attr<'c>(
 }
 
 /// Creates the provided contexts attribute for a function.
-pub fn create_provided_contexts_attr<'c>(
-    context: &'c Context,
-    contexts: &[&str],
-) -> Attribute<'c> {
+pub fn create_provided_contexts_attr<'c>(context: &'c Context, contexts: &[&str]) -> Attribute<'c> {
     let attrs: Vec<Attribute<'c>> = contexts
         .iter()
         .map(|c| StringAttribute::new(context, c).into())

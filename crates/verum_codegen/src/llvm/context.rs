@@ -26,7 +26,7 @@ pub struct ExceptionHandler<'ctx> {
 
 use super::cbgr::CbgrLowering;
 use super::error::{LlvmLoweringError, Result};
-use super::register_types::{RegisterType, RegisterTypeMap, MethodDispatchTable};
+use super::register_types::{MethodDispatchTable, RegisterType, RegisterTypeMap};
 use super::types::{RefTier, TypeLowering};
 use std::sync::Arc;
 
@@ -72,7 +72,10 @@ impl FuncNameIndex {
             // Index by method suffix (part after last '.')
             if let Some(dot_pos) = fname.rfind('.') {
                 let suffix = &fname[dot_pos..]; // e.g., ".push"
-                by_suffix.entry(suffix.to_string()).or_default().push(entry.clone());
+                by_suffix
+                    .entry(suffix.to_string())
+                    .or_default()
+                    .push(entry.clone());
             }
             // Also index by bare name for exact matches
             by_suffix.entry(fname.to_string()).or_default().push(entry);
@@ -83,7 +86,10 @@ impl FuncNameIndex {
 
     /// Find functions matching a method suffix (e.g., ".push").
     pub fn find_by_suffix(&self, suffix: &str) -> &[FuncIndexEntry] {
-        self.by_suffix.get(suffix).map(|v| v.as_slice()).unwrap_or(&[])
+        self.by_suffix
+            .get(suffix)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Find a function by exact name.
@@ -607,7 +613,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             bool_registers: std::collections::HashSet::new(),
             float_registers: std::collections::HashSet::new(),
 
-
             variant_float_fields: std::collections::HashSet::new(),
             list_registers: std::collections::HashSet::new(),
 
@@ -632,15 +637,9 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
             custom_iter_type_names: HashMap::new(),
 
-
-
-
-
             heap_alloc_registers: std::collections::HashSet::new(),
 
             struct_register_sizes: HashMap::new(),
-
-
 
             element_stride_registers: HashMap::new(),
             ctx_provide_depth: 0,
@@ -649,8 +648,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             obj_register_types: HashMap::new(),
             maybe_inner_types: HashMap::new(),
             variant_registers: std::collections::HashSet::new(),
-
-
 
             closure_return_types: HashMap::new(),
             reg_types: RegisterTypeMap::new(),
@@ -715,7 +712,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             bool_registers: std::collections::HashSet::new(),
             float_registers: std::collections::HashSet::new(),
 
-
             variant_float_fields: std::collections::HashSet::new(),
             list_registers: std::collections::HashSet::new(),
 
@@ -740,15 +736,9 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
             custom_iter_type_names: HashMap::new(),
 
-
-
-
-
             heap_alloc_registers: std::collections::HashSet::new(),
 
             struct_register_sizes: HashMap::new(),
-
-
 
             element_stride_registers: HashMap::new(),
             ctx_provide_depth: 0,
@@ -757,8 +747,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             obj_register_types: HashMap::new(),
             maybe_inner_types: HashMap::new(),
             variant_registers: std::collections::HashSet::new(),
-
-
 
             closure_return_types: HashMap::new(),
             reg_types: RegisterTypeMap::new(),
@@ -781,20 +769,22 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Emit a structured warning diagnostic.
     pub fn emit_warning(&mut self, category: impl Into<Text>, message: impl Into<Text>) {
-        self.diagnostics.push(super::error::LoweringDiagnostic::warning(
-            category,
-            message,
-            self.function_name.clone(),
-        ));
+        self.diagnostics
+            .push(super::error::LoweringDiagnostic::warning(
+                category,
+                message,
+                self.function_name.clone(),
+            ));
     }
 
     /// Emit a warning for an unimplemented sub-opcode.
     pub fn emit_unimplemented_sub_op(&mut self, category: impl Into<Text>, sub_op: u8) {
-        self.diagnostics.push(super::error::LoweringDiagnostic::unimplemented_sub_op(
-            category,
-            sub_op,
-            self.function_name.clone(),
-        ));
+        self.diagnostics
+            .push(super::error::LoweringDiagnostic::unimplemented_sub_op(
+                category,
+                sub_op,
+                self.function_name.clone(),
+            ));
     }
 
     /// Take all collected diagnostics, draining the internal list.
@@ -835,7 +825,9 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Resolve a VBC function ID to its LLVM function value.
     /// This is the authoritative lookup that handles name collisions correctly.
     pub fn resolve_func_id(&self, func_id: u32) -> Option<FunctionValue<'ctx>> {
-        self.func_id_map.as_ref().and_then(|m| m.get(&func_id).copied())
+        self.func_id_map
+            .as_ref()
+            .and_then(|m| m.get(&func_id).copied())
     }
 
     /// Install the AOT permission policy for this function. Called by
@@ -1015,7 +1007,13 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     pub fn mark_string_register(&mut self, reg: u16) {
         self.string_registers.insert(reg);
         self.text_registers.remove(&reg);
-        self.reg_types.set(reg, RegisterType::Text { owned: false, compiled_layout: false });
+        self.reg_types.set(
+            reg,
+            RegisterType::Text {
+                owned: false,
+                compiled_layout: false,
+            },
+        );
     }
 
     /// Check if a register holds a C runtime string pointer.
@@ -1028,7 +1026,13 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     pub fn mark_text_register(&mut self, reg: u16) {
         self.text_registers.insert(reg);
         self.string_registers.remove(&reg);
-        self.reg_types.set(reg, RegisterType::Text { owned: false, compiled_layout: true });
+        self.reg_types.set(
+            reg,
+            RegisterType::Text {
+                owned: false,
+                compiled_layout: true,
+            },
+        );
     }
 
     /// Check if a register holds a compiled text.vr Text* pointer.
@@ -1093,7 +1097,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Used by Ref/RefMut to pass through variant pointers instead of taking alloca addresses.
     pub fn mark_variant_register(&mut self, reg: u16) {
         self.variant_registers.insert(reg);
-        self.reg_types.set(reg, RegisterType::Variant { type_name: None });
+        self.reg_types
+            .set(reg, RegisterType::Variant { type_name: None });
     }
 
     /// Check if a register holds a variant value.
@@ -1169,7 +1174,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Store generic type args for a register holding a generic struct instance.
     /// E.g., for `Pair<List<Int>, Text>`, stores [Instantiated{LIST,[INT]}, Concrete(TEXT)].
     pub fn set_generic_type_args(&mut self, reg: u16, args: Vec<verum_vbc::types::TypeRef>) {
-        use verum_vbc::types::{TypeRef, TypeId};
+        use verum_vbc::types::{TypeId, TypeRef};
         // Skip type args containing unresolved generic params or type-erased PTR.
         // Compiled stdlib functions use Generic(K/V) or Concrete(PTR) for all params,
         // which carry no useful type info and would shadow the legacy register tracking
@@ -1266,12 +1271,15 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Check if a variant register field contains a float value.
     pub fn is_variant_float_field(&self, variant_reg: u16, field_idx: u32) -> bool {
-        self.variant_float_fields.contains(&(variant_reg, field_idx))
+        self.variant_float_fields
+            .contains(&(variant_reg, field_idx))
     }
 
     /// Copy variant float field tracking from one register to another.
     pub fn copy_variant_float_fields(&mut self, from: u16, to: u16) {
-        let fields: Vec<u32> = self.variant_float_fields.iter()
+        let fields: Vec<u32> = self
+            .variant_float_fields
+            .iter()
             .filter(|(r, _)| *r == from)
             .map(|(_, f)| *f)
             .collect();
@@ -1283,7 +1291,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Mark a register as holding a list header pointer.
     pub fn mark_list_register(&mut self, reg: u16) {
         self.list_registers.insert(reg);
-        self.reg_types.set(reg, RegisterType::List { element: None });
+        self.reg_types
+            .set(reg, RegisterType::List { element: None });
     }
 
     /// Check if a register holds a list header pointer.
@@ -1335,7 +1344,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Mark a register as holding a channel pointer.
     pub fn mark_chan_register(&mut self, reg: u16) {
         self.chan_registers.insert(reg);
-        self.reg_types.set(reg, RegisterType::Channel { element: None });
+        self.reg_types
+            .set(reg, RegisterType::Channel { element: None });
     }
 
     /// Check if a register holds a channel pointer.
@@ -1379,7 +1389,13 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Mark a register as holding a map header pointer.
     pub fn mark_map_register(&mut self, reg: u16) {
         self.map_registers.insert(reg);
-        self.reg_types.set(reg, RegisterType::Map { key: None, value: None });
+        self.reg_types.set(
+            reg,
+            RegisterType::Map {
+                key: None,
+                value: None,
+            },
+        );
     }
 
     /// Check if a register holds a map header pointer.
@@ -1400,10 +1416,14 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Check if a map register (or any register in its Mov chain) has list values.
     pub fn is_map_list_value_chain(&self, reg: u16) -> bool {
-        if self.map_list_value_registers.contains(&reg) { return true; }
+        if self.map_list_value_registers.contains(&reg) {
+            return true;
+        }
         let mut current = reg;
         while let Some(src) = self.map_copy_source.get(&current).copied() {
-            if self.map_list_value_registers.contains(&src) { return true; }
+            if self.map_list_value_registers.contains(&src) {
+                return true;
+            }
             current = src;
         }
         false
@@ -1422,10 +1442,14 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Check if a map register (or any register in its Mov chain) has string values.
     pub fn is_map_string_value_chain(&self, reg: u16) -> bool {
-        if self.map_string_value_registers.contains(&reg) { return true; }
+        if self.map_string_value_registers.contains(&reg) {
+            return true;
+        }
         let mut current = reg;
         while let Some(src) = self.map_copy_source.get(&current).copied() {
-            if self.map_string_value_registers.contains(&src) { return true; }
+            if self.map_string_value_registers.contains(&src) {
+                return true;
+            }
             current = src;
         }
         false
@@ -1484,7 +1508,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Mark a register as holding a deque pointer.
     pub fn mark_deque_register(&mut self, reg: u16) {
         self.deque_registers.insert(reg);
-        self.reg_types.set(reg, RegisterType::Deque { element: None });
+        self.reg_types
+            .set(reg, RegisterType::Deque { element: None });
     }
 
     /// Check if a register holds a deque pointer.
@@ -1495,7 +1520,13 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Mark a register as holding a BTreeMap pointer.
     pub fn mark_btreemap_register(&mut self, reg: u16) {
         self.btreemap_registers.insert(reg);
-        self.reg_types.set(reg, RegisterType::BTreeMap { key: None, value: None });
+        self.reg_types.set(
+            reg,
+            RegisterType::BTreeMap {
+                key: None,
+                value: None,
+            },
+        );
     }
 
     /// Check if a register holds a BTreeMap pointer.
@@ -1506,7 +1537,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Mark a register as holding a BTreeSet pointer.
     pub fn mark_btreeset_register(&mut self, reg: u16) {
         self.btreeset_registers.insert(reg);
-        self.reg_types.set(reg, RegisterType::BTreeSet { element: None });
+        self.reg_types
+            .set(reg, RegisterType::BTreeSet { element: None });
     }
 
     /// Check if a register holds a BTreeSet pointer.
@@ -1517,7 +1549,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Mark a register as holding a BinaryHeap pointer.
     pub fn mark_binaryheap_register(&mut self, reg: u16) {
         self.binaryheap_registers.insert(reg);
-        self.reg_types.set(reg, RegisterType::BinaryHeap { element: None });
+        self.reg_types
+            .set(reg, RegisterType::BinaryHeap { element: None });
     }
 
     /// Check if a register holds a BinaryHeap pointer.
@@ -1539,7 +1572,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Mark a register as holding a slice pointer ({ptr, len} from Pack).
     pub fn mark_slice_register(&mut self, reg: u16) {
         self.slice_registers.insert(reg);
-        self.reg_types.set(reg, RegisterType::Slice { element: None });
+        self.reg_types
+            .set(reg, RegisterType::Slice { element: None });
     }
 
     /// Check if a register holds a slice pointer.
@@ -1571,7 +1605,12 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Mark a register as holding a custom iterator (user-defined type with has_next/next).
     pub fn mark_custom_iter_register(&mut self, reg: u16, type_name: String) {
-        self.reg_types.set(reg, RegisterType::CustomIterator { type_name: type_name.clone() });
+        self.reg_types.set(
+            reg,
+            RegisterType::CustomIterator {
+                type_name: type_name.clone(),
+            },
+        );
         self.custom_iter_type_names.insert(reg, type_name);
     }
 
@@ -1588,7 +1627,13 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Mark a register as holding a struct pointer (stack-spilled).
     pub fn mark_struct_register(&mut self, reg: u16, field_count: u32) {
         self.struct_register_sizes.insert(reg, field_count);
-        self.reg_types.set(reg, RegisterType::Struct { type_name: "unknown".to_string(), size: field_count });
+        self.reg_types.set(
+            reg,
+            RegisterType::Struct {
+                type_name: "unknown".to_string(),
+                size: field_count,
+            },
+        );
     }
 
     /// Check if a register holds a struct pointer.
@@ -1610,7 +1655,10 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Check if a struct field is known to contain a list value.
     /// Called from GetF to propagate list_register tracking.
     pub fn is_struct_list_field(&self, obj_reg: u16, field_idx: u32) -> bool {
-        self.struct_list_fields.get(&(obj_reg, field_idx)).copied().unwrap_or(false)
+        self.struct_list_fields
+            .get(&(obj_reg, field_idx))
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Mark a struct field as containing a string value.
@@ -1620,13 +1668,22 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Check if a struct field is known to contain a string value.
     pub fn is_struct_string_field(&self, obj_reg: u16, field_idx: u32) -> bool {
-        self.struct_string_fields.get(&(obj_reg, field_idx)).copied().unwrap_or(false)
+        self.struct_string_fields
+            .get(&(obj_reg, field_idx))
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Mark a register as holding a pointer to an inline struct (no object header).
     /// Set by offset() when the element type is a struct within an array.
     pub fn mark_inline_struct_register(&mut self, reg: u16) {
-        self.reg_types.set(reg, RegisterType::InlineStruct { type_name: "unknown".to_string(), size: 0 });
+        self.reg_types.set(
+            reg,
+            RegisterType::InlineStruct {
+                type_name: "unknown".to_string(),
+                size: 0,
+            },
+        );
     }
 
     /// Check if a register holds an inline struct pointer (no header).
@@ -1642,7 +1699,10 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the element stride for a pointer register (default: 8 bytes).
     pub fn get_element_stride(&self, reg: u16) -> u64 {
-        self.element_stride_registers.get(&reg).copied().unwrap_or(8)
+        self.element_stride_registers
+            .get(&reg)
+            .copied()
+            .unwrap_or(8)
     }
 
     /// Set the object type name for a register.
@@ -1781,7 +1841,9 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             if let Some(&alloca_ptr) = self.alloca_registers.get(&reg) {
                 // Load with the correct type based on the alloca type.
                 // Typed allocas (alloca double, alloca ptr) preserve LLVM type info.
-                let load_type = self.alloca_register_types.get(&reg)
+                let load_type = self
+                    .alloca_register_types
+                    .get(&reg)
                     .copied()
                     .unwrap_or(BasicTypeEnum::IntType(self.types.i64_type()));
                 self.builder
@@ -1859,7 +1921,9 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                     if let Some(&existing_ptr) = self.alloca_registers.get(&reg) {
                         let _ = self.builder.build_store(existing_ptr, v);
                     } else {
-                        let entry = self.function.get_first_basic_block()
+                        let entry = self
+                            .function
+                            .get_first_basic_block()
                             .expect("function must have entry block");
                         let saved_block = self.builder.get_insert_block();
                         if let Some(first_instr) = entry.get_first_instruction() {
@@ -1867,8 +1931,12 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                         } else {
                             self.builder.position_at_end(entry);
                         }
-                        let alloca = self.builder
-                            .build_alloca(BasicTypeEnum::PointerType(ptr_type), &format!("r{}_ptr", reg))
+                        let alloca = self
+                            .builder
+                            .build_alloca(
+                                BasicTypeEnum::PointerType(ptr_type),
+                                &format!("r{}_ptr", reg),
+                            )
                             .expect("alloca should not fail");
                         if let Some(block) = saved_block {
                             self.builder.position_at_end(block);
@@ -1877,7 +1945,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                         self.alloca_register_types.insert(reg, ptr_type.into());
                         let _ = self.builder.build_store(alloca, v);
                     }
-                    self.alloca_register_types.insert(reg, BasicTypeEnum::PointerType(ptr_type));
+                    self.alloca_register_types
+                        .insert(reg, BasicTypeEnum::PointerType(ptr_type));
                     return;
                 }
                 BasicValueEnum::FloatValue(v) => {
@@ -1889,7 +1958,9 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                         let _ = self.builder.build_store(existing_ptr, v);
                     } else {
                         // First use — create typed f64 alloca
-                        let entry = self.function.get_first_basic_block()
+                        let entry = self
+                            .function
+                            .get_first_basic_block()
                             .expect("function must have entry block");
                         let saved_block = self.builder.get_insert_block();
                         if let Some(first_instr) = entry.get_first_instruction() {
@@ -1897,8 +1968,12 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                         } else {
                             self.builder.position_at_end(entry);
                         }
-                        let alloca = self.builder
-                            .build_alloca(BasicTypeEnum::FloatType(f64_type), &format!("r{}_f64", reg))
+                        let alloca = self
+                            .builder
+                            .build_alloca(
+                                BasicTypeEnum::FloatType(f64_type),
+                                &format!("r{}_f64", reg),
+                            )
                             .expect("alloca should not fail");
                         if let Some(block) = saved_block {
                             self.builder.position_at_end(block);
@@ -1908,7 +1983,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                         let _ = self.builder.build_store(alloca, v);
                     }
                     // Mark this register as currently holding a float value
-                    self.alloca_register_types.insert(reg, BasicTypeEnum::FloatType(f64_type));
+                    self.alloca_register_types
+                        .insert(reg, BasicTypeEnum::FloatType(f64_type));
                     return;
                 }
                 BasicValueEnum::StructValue(sv) => {
@@ -1924,10 +2000,17 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                     } else {
                         // Spill struct to stack, store pointer as i64.
                         // Mark as struct register so ListPush can heap-copy.
-                        self.reg_types.set(reg, RegisterType::Struct { type_name: "unknown".to_string(), size: field_count });
+                        self.reg_types.set(
+                            reg,
+                            RegisterType::Struct {
+                                type_name: "unknown".to_string(),
+                                size: field_count,
+                            },
+                        );
                         self.struct_register_sizes.insert(reg, field_count);
                         let struct_ty: BasicTypeEnum = sv.get_type().into();
-                        let struct_alloca = self.builder
+                        let struct_alloca = self
+                            .builder
                             .build_alloca(struct_ty, &format!("r{}_struct_spill", reg))
                             .expect("struct alloca should not fail");
                         let _ = self.builder.build_store(struct_alloca, sv);
@@ -1951,7 +2034,9 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                 self.alloca_register_types.insert(reg, i64_ty.into());
             } else {
                 // First use of this register — create i64 alloca in entry block
-                let entry = self.function.get_first_basic_block()
+                let entry = self
+                    .function
+                    .get_first_basic_block()
                     .expect("function must have entry block");
                 let saved_block = self.builder.get_insert_block();
 
@@ -1961,7 +2046,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                     self.builder.position_at_end(entry);
                 }
 
-                let alloca = self.builder
+                let alloca = self
+                    .builder
                     .build_alloca(BasicTypeEnum::IntType(i64_ty), &format!("r{}_slot", reg))
                     .expect("alloca should not fail");
 
@@ -2114,7 +2200,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         }
 
         // Allocate in entry block for proper dominance
-        let entry = self.entry_block()
+        let entry = self
+            .entry_block()
             .ok_or_else(|| LlvmLoweringError::internal("No entry block for exception slot"))?;
 
         // Save current position
@@ -2129,7 +2216,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
         // Allocate i64 slot for exception value (alloca mode uses i64 for all values)
         let i64_type = self.types.i64_type();
-        let slot = self.builder
+        let slot = self
+            .builder
             .build_alloca(i64_type, "exception_value")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 

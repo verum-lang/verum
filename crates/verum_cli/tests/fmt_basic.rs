@@ -34,7 +34,10 @@ fn formats_empty_module() {
     let out = fmt("");
     // Empty input is valid — the output may be empty or just a
     // trailing newline; parsing must succeed either way.
-    assert!(parses(&out), "empty input should produce parseable output, got: {out:?}");
+    assert!(
+        parses(&out),
+        "empty input should produce parseable output, got: {out:?}"
+    );
 }
 
 #[test]
@@ -71,7 +74,8 @@ fn formats_mount_statement() {
 
 #[test]
 fn formats_match_expression() {
-    let src = "fn classify(x: Int) -> Int {\n    match x {\n        0 => 0,\n        _ => 1,\n    }\n}\n";
+    let src =
+        "fn classify(x: Int) -> Int {\n    match x {\n        0 => 0,\n        _ => 1,\n    }\n}\n";
     let out = fmt(src);
     assert!(out.contains("match"));
     assert!(parses(&out));
@@ -103,7 +107,8 @@ fn formats_protocol_definition() {
 
 #[test]
 fn formats_implement_block() {
-    let src = "type Point is { x: Int };\n\nimplement Point {\n    fn x(self) -> Int { self.x }\n}\n";
+    let src =
+        "type Point is { x: Int };\n\nimplement Point {\n    fn x(self) -> Int { self.x }\n}\n";
     let out = fmt(src);
     assert!(out.contains("implement"));
     assert!(parses(&out));
@@ -118,7 +123,10 @@ fn already_formatted_output_is_unchanged() {
     // A canonical short program should pass through fmt unchanged.
     let canonical = fmt("fn main() {}\n");
     let twice = fmt(&canonical);
-    assert_eq!(canonical, twice, "fmt must be a fixed point on its own output");
+    assert_eq!(
+        canonical, twice,
+        "fmt must be a fixed point on its own output"
+    );
 }
 
 #[test]

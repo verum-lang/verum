@@ -11,8 +11,8 @@
 
 use verum_ast::FileId;
 use verum_common::List;
-use verum_lexer::{Lexer, Token};
 use verum_fast_parser::RecursiveParser;
+use verum_lexer::{Lexer, Token};
 
 fn parse_expr_with_warnings(source: &str) -> (bool, Vec<String>) {
     let file_id = FileId::new(0);
@@ -39,133 +39,190 @@ fn parse_expr_with_warnings(source: &str) -> (bool, Vec<String>) {
 fn test_known_meta_function_file() {
     let (ok, warnings) = parse_expr_with_warnings("@file");
     assert!(ok, "Should parse @file");
-    assert!(warnings.is_empty(), "Known meta-function @file should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @file should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_line() {
     let (ok, warnings) = parse_expr_with_warnings("@line");
     assert!(ok, "Should parse @line");
-    assert!(warnings.is_empty(), "Known meta-function @line should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @line should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_column() {
     let (ok, warnings) = parse_expr_with_warnings("@column");
     assert!(ok, "Should parse @column");
-    assert!(warnings.is_empty(), "Known meta-function @column should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @column should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_module() {
     let (ok, warnings) = parse_expr_with_warnings("@module");
     assert!(ok, "Should parse @module");
-    assert!(warnings.is_empty(), "Known meta-function @module should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @module should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_function() {
     let (ok, warnings) = parse_expr_with_warnings("@fn");
     assert!(ok, "Should parse @fn (function)");
-    assert!(warnings.is_empty(), "Known meta-function @function should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @function should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_const() {
     let (ok, warnings) = parse_expr_with_warnings("@const 42");
     assert!(ok, "Should parse @const expr");
-    assert!(warnings.is_empty(), "Known meta-function @const should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @const should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_cfg() {
     let (ok, warnings) = parse_expr_with_warnings("@cfg(target_os)");
     assert!(ok, "Should parse @cfg(condition)");
-    assert!(warnings.is_empty(), "Known meta-function @cfg should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @cfg should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_error() {
     let (ok, warnings) = parse_expr_with_warnings("@error(\"message\")");
     assert!(ok, "Should parse @error(msg)");
-    assert!(warnings.is_empty(), "Known meta-function @error should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @error should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_warning() {
     let (ok, warnings) = parse_expr_with_warnings("@warning(\"message\")");
     assert!(ok, "Should parse @warning(msg)");
-    assert!(warnings.is_empty(), "Known meta-function @warning should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @warning should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_stringify() {
     let (ok, warnings) = parse_expr_with_warnings("@stringify(x)");
     assert!(ok, "Should parse @stringify(tokens)");
-    assert!(warnings.is_empty(), "Known meta-function @stringify should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @stringify should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_concat() {
     let (ok, warnings) = parse_expr_with_warnings("@concat(a, b)");
     assert!(ok, "Should parse @concat(a, b)");
-    assert!(warnings.is_empty(), "Known meta-function @concat should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @concat should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_type_name() {
     let (ok, warnings) = parse_expr_with_warnings("@type_name(T)");
     assert!(ok, "Should parse @type_name(T)");
-    assert!(warnings.is_empty(), "Known meta-function @type_name should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @type_name should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_type_of() {
     let (ok, warnings) = parse_expr_with_warnings("@type_of(x)");
     assert!(ok, "Should parse @type_of(x)");
-    assert!(warnings.is_empty(), "Known meta-function @type_of should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @type_of should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_fields_of() {
     let (ok, warnings) = parse_expr_with_warnings("@fields_of(T)");
     assert!(ok, "Should parse @fields_of(T)");
-    assert!(warnings.is_empty(), "Known meta-function @fields_of should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @fields_of should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_variants_of() {
     let (ok, warnings) = parse_expr_with_warnings("@variants_of(T)");
     assert!(ok, "Should parse @variants_of(T)");
-    assert!(warnings.is_empty(), "Known meta-function @variants_of should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @variants_of should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_is_struct() {
     let (ok, warnings) = parse_expr_with_warnings("@is_struct(T)");
     assert!(ok, "Should parse @is_struct(T)");
-    assert!(warnings.is_empty(), "Known meta-function @is_struct should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @is_struct should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_is_enum() {
     let (ok, warnings) = parse_expr_with_warnings("@is_enum(T)");
     assert!(ok, "Should parse @is_enum(T)");
-    assert!(warnings.is_empty(), "Known meta-function @is_enum should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @is_enum should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_is_tuple() {
     let (ok, warnings) = parse_expr_with_warnings("@is_tuple(T)");
     assert!(ok, "Should parse @is_tuple(T)");
-    assert!(warnings.is_empty(), "Known meta-function @is_tuple should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @is_tuple should not produce warnings"
+    );
 }
 
 #[test]
 fn test_known_meta_function_implements() {
     let (ok, warnings) = parse_expr_with_warnings("@implements(T, Protocol)");
     assert!(ok, "Should parse @implements(T, Protocol)");
-    assert!(warnings.is_empty(), "Known meta-function @implements should not produce warnings");
+    assert!(
+        warnings.is_empty(),
+        "Known meta-function @implements should not produce warnings"
+    );
 }
 
 // =============================================================================
@@ -177,7 +234,10 @@ fn test_declaration_attribute_intrinsic_parses() {
     // @intrinsic is a declaration attribute; the parser accepts it in
     // expression context (semantic validation happens later in the pipeline)
     let (ok, _warnings) = parse_expr_with_warnings("@intrinsic(\"foo\")");
-    assert!(ok, "@intrinsic should be parseable as an expression (rejected later by semantic analysis)");
+    assert!(
+        ok,
+        "@intrinsic should be parseable as an expression (rejected later by semantic analysis)"
+    );
 }
 
 #[test]
@@ -185,7 +245,10 @@ fn test_declaration_attribute_intrinsic_call_parses() {
     // @intrinsic("name", arg) is accepted by the parser
     // Semantic analysis rejects it in non-declaration contexts
     let (ok, _warnings) = parse_expr_with_warnings("@intrinsic(\"slice_len\", self)");
-    assert!(ok, "@intrinsic call should be parseable (rejected later by semantic analysis)");
+    assert!(
+        ok,
+        "@intrinsic call should be parseable (rejected later by semantic analysis)"
+    );
 }
 
 #[test]

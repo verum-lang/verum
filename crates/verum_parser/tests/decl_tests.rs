@@ -183,11 +183,17 @@ fn test_fn_with_where_meta_clause() {
 #[test]
 fn test_type_with_where_meta_clause() {
     // Type definition with where meta constraint before 'is'
-    assert_parses("type FixedBuffer<const SIZE: Int> where meta SIZE > 0 is { data: [Byte; SIZE] };");
+    assert_parses(
+        "type FixedBuffer<const SIZE: Int> where meta SIZE > 0 is { data: [Byte; SIZE] };",
+    );
     // Multiple meta constraints
-    assert_parses("type Matrix<const R: Int, const C: Int> where meta R > 0, meta C > 0 is { data: [[Float; C]; R] };");
+    assert_parses(
+        "type Matrix<const R: Int, const C: Int> where meta R > 0, meta C > 0 is { data: [[Float; C]; R] };",
+    );
     // Combined type and meta constraints
-    assert_parses("type Container<T, const N: Int> where T: Clone, meta N > 0 is { items: [T; N] };");
+    assert_parses(
+        "type Container<T, const N: Int> where T: Clone, meta N > 0 is { items: [T; N] };",
+    );
 }
 
 #[test]
@@ -1681,10 +1687,16 @@ fn test_context_group_alias_vs_traditional() {
             assert_eq!(cg1.name.name.as_str(), cg2.name.name.as_str());
             assert_eq!(cg1.contexts.len(), cg2.contexts.len());
             // Compare context paths
-            if let (Some(seg1), Some(seg2)) = (cg1.contexts[0].path.as_ident(), cg2.contexts[0].path.as_ident()) {
+            if let (Some(seg1), Some(seg2)) = (
+                cg1.contexts[0].path.as_ident(),
+                cg2.contexts[0].path.as_ident(),
+            ) {
                 assert_eq!(seg1.name.as_str(), seg2.name.as_str());
             }
-            if let (Some(seg1), Some(seg2)) = (cg1.contexts[1].path.as_ident(), cg2.contexts[1].path.as_ident()) {
+            if let (Some(seg1), Some(seg2)) = (
+                cg1.contexts[1].path.as_ident(),
+                cg2.contexts[1].path.as_ident(),
+            ) {
                 assert_eq!(seg1.name.as_str(), seg2.name.as_str());
             }
         }

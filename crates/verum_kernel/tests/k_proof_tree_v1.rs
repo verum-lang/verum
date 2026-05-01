@@ -8,8 +8,8 @@
 
 use verum_common::{Heap, List, Maybe, Text};
 use verum_kernel::{
-    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelProofNode, KernelRule,
-    UniverseLevel, record_inference,
+    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelProofNode, KernelRule, UniverseLevel,
+    record_inference,
 };
 
 fn empty() -> (Context, AxiomRegistry) {
@@ -75,7 +75,10 @@ fn leaf_universe_node_records_k_univ() {
     let node = record_inference(&ctx, &term, &reg).expect("infer ok");
     assert_eq!(node.rule, KernelRule::KUniv);
     assert_eq!(node.conclusion, term);
-    assert_eq!(node.inferred_ty, CoreTerm::Universe(UniverseLevel::Concrete(1)));
+    assert_eq!(
+        node.inferred_ty,
+        CoreTerm::Universe(UniverseLevel::Concrete(1))
+    );
     assert!(node.premises.is_empty());
     assert!(matches!(node.citation, Maybe::None));
 }
@@ -141,7 +144,10 @@ fn lam_node_has_two_premises() {
         "at least the domain premise: {}",
         node.premises.len()
     );
-    assert_eq!(node.premises.iter().next().unwrap().rule, KernelRule::KInductive);
+    assert_eq!(
+        node.premises.iter().next().unwrap().rule,
+        KernelRule::KInductive
+    );
 }
 
 #[test]
@@ -181,7 +187,10 @@ fn refl_node_has_one_premise() {
     let node = record_inference(&ctx, &refl, &reg).expect("infer ok");
     assert_eq!(node.rule, KernelRule::KReflIntro);
     assert_eq!(node.premises.len(), 1);
-    assert_eq!(node.premises.iter().next().unwrap().rule, KernelRule::KInductive);
+    assert_eq!(
+        node.premises.iter().next().unwrap().rule,
+        KernelRule::KInductive
+    );
 }
 
 #[test]
@@ -195,7 +204,8 @@ fn axiom_node_carries_citation() {
         framework: Text::from("test_corpus"),
         citation: Text::from("test cite"),
     };
-    reg.register(Text::from("zero"), nat.clone(), fw.clone()).expect("register");
+    reg.register(Text::from("zero"), nat.clone(), fw.clone())
+        .expect("register");
     let term = CoreTerm::Axiom {
         name: Text::from("zero"),
         ty: Heap::new(nat),
@@ -261,11 +271,7 @@ fn rules_used_returns_distinct_rule_set() {
 fn leaf_constructor_creates_premise_free_node() {
     let conclusion = CoreTerm::Var(Text::from("x"));
     let inferred_ty = CoreTerm::Universe(UniverseLevel::Concrete(0));
-    let node = KernelProofNode::leaf(
-        KernelRule::KVar,
-        conclusion.clone(),
-        inferred_ty.clone(),
-    );
+    let node = KernelProofNode::leaf(KernelRule::KVar, conclusion.clone(), inferred_ty.clone());
     assert_eq!(node.rule, KernelRule::KVar);
     assert_eq!(node.conclusion, conclusion);
     assert_eq!(node.inferred_ty, inferred_ty);

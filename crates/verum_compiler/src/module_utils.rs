@@ -170,7 +170,7 @@ pub fn check_module_cfg_from_content(content: &str, target: &TargetConfig) -> bo
         // Check for @cfg attribute
         if trimmed.starts_with("@cfg(") && trimmed.ends_with(')') {
             // Extract the predicate
-            let predicate_str = &trimmed[5..trimmed.len()-1];
+            let predicate_str = &trimmed[5..trimmed.len() - 1];
 
             // Parse and evaluate common predicates
             return evaluate_cfg_string(predicate_str, target);
@@ -267,8 +267,8 @@ pub fn filter_type_decl_for_target(
     type_decl: &verum_ast::TypeDecl,
     target: &TargetConfig,
 ) -> verum_ast::TypeDecl {
-    use verum_ast::decl::TypeDeclBody;
     use verum_ast::cfg::parse_cfg_predicate;
+    use verum_ast::decl::TypeDeclBody;
     use verum_common::Maybe;
 
     let cfg_evaluator = CfgEvaluator::with_config(target.clone());
@@ -391,10 +391,7 @@ pub fn fs_path_to_module(fs_path: &str) -> String {
 /// // "core/base/mod.vr" with module_name "core" -> "core"
 /// ```
 pub fn derive_submodule_path(module_name: &str, file_path: &Path) -> String {
-    let file_name = file_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let file_name = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
 
     if file_name == "mod" {
         // mod.vr exports at the module level
@@ -442,16 +439,37 @@ mod tests {
 
         // Linux target
         assert!(should_compile_module_for_target("sys.linux", &linux_target));
-        assert!(should_compile_module_for_target("sys.linux.syscall", &linux_target));
-        assert!(!should_compile_module_for_target("sys.darwin", &linux_target));
-        assert!(!should_compile_module_for_target("sys.windows", &linux_target));
+        assert!(should_compile_module_for_target(
+            "sys.linux.syscall",
+            &linux_target
+        ));
+        assert!(!should_compile_module_for_target(
+            "sys.darwin",
+            &linux_target
+        ));
+        assert!(!should_compile_module_for_target(
+            "sys.windows",
+            &linux_target
+        ));
         assert!(should_compile_module_for_target("core", &linux_target));
 
         // macOS target
-        assert!(!should_compile_module_for_target("sys.linux", &macos_target));
-        assert!(should_compile_module_for_target("sys.darwin", &macos_target));
-        assert!(should_compile_module_for_target("sys.darwin.libsystem", &macos_target));
-        assert!(!should_compile_module_for_target("sys.windows", &macos_target));
+        assert!(!should_compile_module_for_target(
+            "sys.linux",
+            &macos_target
+        ));
+        assert!(should_compile_module_for_target(
+            "sys.darwin",
+            &macos_target
+        ));
+        assert!(should_compile_module_for_target(
+            "sys.darwin.libsystem",
+            &macos_target
+        ));
+        assert!(!should_compile_module_for_target(
+            "sys.windows",
+            &macos_target
+        ));
         assert!(should_compile_module_for_target("core", &macos_target));
     }
 
@@ -473,7 +491,10 @@ mod tests {
 
         assert!(evaluate_cfg_string("target_os = \"linux\"", &linux_target));
         assert!(!evaluate_cfg_string("target_os = \"macos\"", &linux_target));
-        assert!(evaluate_cfg_string("target_arch = \"x86_64\"", &linux_target));
+        assert!(evaluate_cfg_string(
+            "target_arch = \"x86_64\"",
+            &linux_target
+        ));
         assert!(evaluate_cfg_string("unix", &linux_target));
         assert!(!evaluate_cfg_string("windows", &linux_target));
         assert!(evaluate_cfg_string("linux", &linux_target));
@@ -483,7 +504,10 @@ mod tests {
     fn test_module_path_conversion() {
         assert_eq!(module_path_to_fs("sys.linux"), "sys/linux");
         assert_eq!(module_path_to_fs("core"), "core");
-        assert_eq!(module_path_to_fs("sys.darwin.libsystem"), "sys/darwin/libsystem");
+        assert_eq!(
+            module_path_to_fs("sys.darwin.libsystem"),
+            "sys/darwin/libsystem"
+        );
 
         assert_eq!(fs_path_to_module("sys/linux"), "sys.linux");
         assert_eq!(fs_path_to_module("core/memory.vr"), "core.memory");

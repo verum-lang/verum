@@ -1,10 +1,10 @@
 //! Bytecode reading helpers for VBC interpreter dispatch.
 
-use crate::instruction::{Reg, RegRange};
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
-use crate::value::Value;
+use crate::instruction::{Reg, RegRange};
 use crate::types::TypeId;
+use crate::value::Value;
 
 // ============================================================================
 // Bytecode Reading Helpers (inlined for performance)
@@ -27,10 +27,12 @@ pub(super) fn read_reg(state: &mut InterpreterState) -> InterpreterResult<Reg> {
 #[inline(always)]
 pub(super) fn read_u8(state: &mut InterpreterState) -> InterpreterResult<u8> {
     let pc = state.pc();
-    let byte = state.read_byte(pc).ok_or_else(|| InterpreterError::InvalidBytecode {
-        pc: pc as usize,
-        message: "unexpected end of bytecode".to_string(),
-    })?;
+    let byte = state
+        .read_byte(pc)
+        .ok_or_else(|| InterpreterError::InvalidBytecode {
+            pc: pc as usize,
+            message: "unexpected end of bytecode".to_string(),
+        })?;
     state.advance_pc(1);
     Ok(byte)
 }
@@ -119,7 +121,10 @@ pub(super) fn read_reg_range(state: &mut InterpreterState) -> InterpreterResult<
 
 /// Extracts a shape (Vec<usize>) from a register value.
 /// The register may contain a List of integers or a single integer (1D shape).
-pub(super) fn extract_shape_from_register(state: &InterpreterState, reg: Reg) -> InterpreterResult<Vec<usize>> {
+pub(super) fn extract_shape_from_register(
+    state: &InterpreterState,
+    reg: Reg,
+) -> InterpreterResult<Vec<usize>> {
     let val = state.get_reg(reg);
 
     // Single integer → 1D shape
@@ -135,13 +140,13 @@ pub(super) fn extract_shape_from_register(state: &InterpreterState, reg: Reg) ->
         }
         let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
         if header.type_id == TypeId::LIST {
-            let data_ptr = unsafe {
-                ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
-            };
+            let data_ptr =
+                unsafe { ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value };
             let len = unsafe { (*data_ptr).as_i64() } as usize;
             let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
             if !backing_ptr.is_null() {
-                let backing_header = unsafe { &*(backing_ptr as *const crate::interpreter::heap::ObjectHeader) };
+                let backing_header =
+                    unsafe { &*(backing_ptr as *const crate::interpreter::heap::ObjectHeader) };
                 let elem_ptr = unsafe {
                     backing_ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
                 };
@@ -161,7 +166,10 @@ pub(super) fn extract_shape_from_register(state: &InterpreterState, reg: Reg) ->
 
 /// Extracts a list of f64 values from a register.
 /// If the register contains an integer, returns a single-element list.
-pub(super) fn extract_f64_list_from_register(state: &InterpreterState, reg: Reg) -> InterpreterResult<Vec<f64>> {
+pub(super) fn extract_f64_list_from_register(
+    state: &InterpreterState,
+    reg: Reg,
+) -> InterpreterResult<Vec<f64>> {
     let val = state.get_reg(reg);
 
     if val.is_int() {
@@ -178,13 +186,13 @@ pub(super) fn extract_f64_list_from_register(state: &InterpreterState, reg: Reg)
         }
         let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
         if header.type_id == TypeId::LIST {
-            let data_ptr = unsafe {
-                ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
-            };
+            let data_ptr =
+                unsafe { ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value };
             let len = unsafe { (*data_ptr).as_i64() } as usize;
             let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
             if !backing_ptr.is_null() {
-                let backing_header = unsafe { &*(backing_ptr as *const crate::interpreter::heap::ObjectHeader) };
+                let backing_header =
+                    unsafe { &*(backing_ptr as *const crate::interpreter::heap::ObjectHeader) };
                 let elem_ptr = unsafe {
                     backing_ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
                 };

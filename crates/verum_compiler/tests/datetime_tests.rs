@@ -16,9 +16,9 @@
 // Migrated from src/datetime.rs per CLAUDE.md standards
 
 use verum_ast::{FileId, Span};
+use verum_common::Text;
 use verum_compiler::literal_parsers::datetime::parse_datetime;
 use verum_compiler::literal_registry::ParsedLiteral;
-use verum_common::Text;
 
 fn test_span() -> Span {
     Span::new(0, 10, FileId::new(0))

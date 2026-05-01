@@ -15,8 +15,10 @@ use crate::{
     context::{Context, ContextRef},
     string_ref::StringRef,
 };
-use verum_mlir_sys::{MlirDialect, mlirDialectEqual, mlirDialectGetContext, mlirDialectGetNamespace};
 use std::{marker::PhantomData, str::Utf8Error};
+use verum_mlir_sys::{
+    MlirDialect, mlirDialectEqual, mlirDialectGetContext, mlirDialectGetNamespace,
+};
 
 #[cfg(feature = "ods-dialects")]
 pub mod ods;

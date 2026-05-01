@@ -16,8 +16,8 @@
 // Per CLAUDE.md standards - tests in tests/ directory
 
 use verum_ast::{FileId, Span};
-use verum_compiler::literal_parsers::email::parse_email;
 use verum_common::Text;
+use verum_compiler::literal_parsers::email::parse_email;
 
 fn test_span() -> Span {
     Span::new(0, 10, FileId::new(0))

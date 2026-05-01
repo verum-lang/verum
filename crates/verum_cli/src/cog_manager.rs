@@ -4,8 +4,8 @@
 
 use crate::config::Manifest;
 use crate::error::{CliError, Result};
-use crate::registry::*;
 use crate::registry::enterprise::AuditLevel;
+use crate::registry::*;
 use crate::ui;
 use colored::Colorize;
 use semver::{Version, VersionReq};
@@ -133,11 +133,7 @@ impl CogManager {
     pub(crate) fn flush_audit_log(&self) {
         if let Some(ref path) = self.audit_log_file {
             if let Err(e) = self.security.save_audit_log(path) {
-                tracing::warn!(
-                    "audit log flush failed at {}: {}",
-                    path.display(),
-                    e
-                );
+                tracing::warn!("audit log flush failed at {}: {}", path.display(), e);
             }
         }
     }
@@ -525,10 +521,7 @@ impl CogManager {
 
             for result in &results {
                 if !result.vulnerabilities.is_empty() {
-                    println!(
-                        "{}",
-                        result.vulnerabilities[0].cog.as_str().cyan().bold()
-                    );
+                    println!("{}", result.vulnerabilities[0].cog.as_str().cyan().bold());
 
                     for vuln in &result.vulnerabilities {
                         println!(
@@ -692,11 +685,7 @@ impl CogManager {
     }
 
     /// Create lockfile from resolved dependencies
-    fn create_lockfile(
-        &self,
-        root_name: &str,
-        resolved: &[ResolvedCogInfo],
-    ) -> Result<Lockfile> {
+    fn create_lockfile(&self, root_name: &str, resolved: &[ResolvedCogInfo]) -> Result<Lockfile> {
         let mut lockfile = Lockfile::new(root_name.into());
 
         for dep in resolved {

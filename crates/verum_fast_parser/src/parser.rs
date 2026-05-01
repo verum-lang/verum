@@ -160,7 +160,10 @@ impl<'a> TokenStream<'a> {
             let span = found.map(|t| t.span).unwrap_or_else(|| self.last_span());
 
             if let Some(token) = found {
-                Err(ParseError::unexpected(std::slice::from_ref(&kind), token.clone()))
+                Err(ParseError::unexpected(
+                    std::slice::from_ref(&kind),
+                    token.clone(),
+                ))
             } else {
                 Err(ParseError::unexpected_eof(&[kind], span))
             }

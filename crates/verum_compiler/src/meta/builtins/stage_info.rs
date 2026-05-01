@@ -97,11 +97,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("stage_max"),
-        BuiltinInfo::stage_info(
-            meta_stage_max,
-            "Get the maximum stage level",
-            "() -> Int",
-        ),
+        BuiltinInfo::stage_info(meta_stage_max, "Get the maximum stage level", "() -> Int"),
     );
     map.insert(
         Text::from("stage_is_runtime"),
@@ -271,7 +267,10 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
 // ============================================================================
 
 /// Get the current compilation stage level
-fn meta_stage_current(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_current(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Int(ctx.current_stage as i128))
 }
 
@@ -281,17 +280,26 @@ fn meta_stage_max(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<Cons
 }
 
 /// Check if currently at runtime stage (stage 0)
-fn meta_stage_is_runtime(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_is_runtime(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Bool(ctx.current_stage == 0))
 }
 
 /// Check if currently at compile-time (stage >= 1)
-fn meta_stage_is_compile_time(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_is_compile_time(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Bool(ctx.current_stage >= 1))
 }
 
 /// Check if at the maximum allowed stage
-fn meta_stage_is_max_stage(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_is_max_stage(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Bool(ctx.current_stage == ctx.max_stage))
 }
 
@@ -300,9 +308,15 @@ fn meta_stage_is_max_stage(ctx: &mut MetaContext, _args: List<ConstValue>) -> Re
 // ============================================================================
 
 /// Validate that a stage level is within [0, max_stage]
-fn meta_stage_is_valid(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_is_valid(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -322,19 +336,21 @@ fn meta_stage_is_valid(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<
 
 /// A transition is valid when to == from - 1 (quote lowers by exactly 1)
 /// and both stages are within valid range.
-fn meta_stage_is_valid_transition(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_is_valid_transition(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 2 {
-        return Err(MetaError::ArityMismatch { expected: 2, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 2,
+            got: args.len(),
+        });
     }
 
     match (&args[0], &args[1]) {
         (ConstValue::Int(from), ConstValue::Int(to)) => {
             let max = ctx.max_stage as i128;
-            let valid = *from >= 0
-                && *from <= max
-                && *to >= 0
-                && *to <= max
-                && *to == *from - 1;
+            let valid = *from >= 0 && *from <= max && *to >= 0 && *to <= max && *to == *from - 1;
             Ok(ConstValue::Bool(valid))
         }
         _ => Err(MetaError::TypeMismatch {
@@ -348,7 +364,10 @@ fn meta_stage_is_valid_transition(ctx: &mut MetaContext, args: List<ConstValue>)
 ///
 
 /// Returns current_stage - 1, or 0 if already at stage 0.
-fn meta_stage_quote_target(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_quote_target(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     let target = if ctx.current_stage > 0 {
         ctx.current_stage - 1
     } else {
@@ -361,19 +380,21 @@ fn meta_stage_quote_target(ctx: &mut MetaContext, _args: List<ConstValue>) -> Re
 ///
 
 /// Returns true if from_stage > to_stage and both are valid.
-fn meta_stage_can_generate(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_can_generate(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 2 {
-        return Err(MetaError::ArityMismatch { expected: 2, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 2,
+            got: args.len(),
+        });
     }
 
     match (&args[0], &args[1]) {
         (ConstValue::Int(from), ConstValue::Int(to)) => {
             let max = ctx.max_stage as i128;
-            let valid = *from >= 0
-                && *from <= max
-                && *to >= 0
-                && *to <= max
-                && *from > *to;
+            let valid = *from >= 0 && *from <= max && *to >= 0 && *to <= max && *from > *to;
             Ok(ConstValue::Bool(valid))
         }
         _ => Err(MetaError::TypeMismatch {
@@ -388,9 +409,15 @@ fn meta_stage_can_generate(ctx: &mut MetaContext, args: List<ConstValue>) -> Res
 // ============================================================================
 
 /// Generate a unique identifier scoped to the current stage
-fn meta_stage_unique_ident(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_unique_ident(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -408,7 +435,10 @@ fn meta_stage_unique_ident(ctx: &mut MetaContext, args: List<ConstValue>) -> Res
 }
 
 /// Get the current quote nesting depth
-fn meta_stage_quote_depth(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_quote_depth(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Int(ctx.quote_depth as i128))
 }
 
@@ -420,9 +450,15 @@ fn meta_stage_quote_depth(ctx: &mut MetaContext, _args: List<ConstValue>) -> Res
 ///
 
 /// Returns the stage level, or -1 if the function is not found.
-fn meta_stage_function_stage(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_function_stage(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -443,9 +479,15 @@ fn meta_stage_function_stage(ctx: &mut MetaContext, args: List<ConstValue>) -> R
 }
 
 /// Get all functions declared at a specific stage level
-fn meta_stage_functions_at(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_functions_at(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -471,22 +513,34 @@ fn meta_stage_functions_at(ctx: &mut MetaContext, args: List<ConstValue>) -> Res
 // ============================================================================
 
 /// Check if staged compilation is enabled
-fn meta_stage_is_enabled(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_is_enabled(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Bool(ctx.staged_enabled))
 }
 
 /// Get stage-specific iteration limit
-fn meta_stage_iteration_limit(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_iteration_limit(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Int(ctx.iteration_limit as i128))
 }
 
 /// Get stage-specific recursion limit
-fn meta_stage_recursion_limit(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_recursion_limit(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Int(ctx.recursion_limit as i128))
 }
 
 /// Get stage-specific memory limit in bytes
-fn meta_stage_memory_limit(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_memory_limit(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Int(ctx.memory_limit as i128))
 }
 
@@ -498,17 +552,17 @@ fn meta_stage_memory_limit(ctx: &mut MetaContext, _args: List<ConstValue>) -> Re
 ///
 
 /// Returns a list of maps, each with keys: "stage", "function", "span".
-fn meta_stage_generation_chain(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_generation_chain(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     let chain: Vec<ConstValue> = ctx
         .generation_chain
         .iter()
         .map(|record| {
             // Represent each StageRecord as a map
             let mut fields = OrderedMap::new();
-            fields.insert(
-                Text::from("stage"),
-                ConstValue::Int(record.stage as i128),
-            );
+            fields.insert(Text::from("stage"), ConstValue::Int(record.stage as i128));
             fields.insert(
                 Text::from("function"),
                 ConstValue::Text(record.function.clone()),
@@ -524,9 +578,15 @@ fn meta_stage_generation_chain(ctx: &mut MetaContext, _args: List<ConstValue>) -
 
 /// Trace markers are collected by the compiler and can be displayed
 /// with the `--trace-stages` CLI flag.
-fn meta_stage_trace_marker(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_stage_trace_marker(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 2 {
-        return Err(MetaError::ArityMismatch { expected: 2, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 2,
+            got: args.len(),
+        });
     }
 
     match (&args[0], &args[1]) {
@@ -769,20 +829,14 @@ mod tests {
 
     #[test]
     fn test_stage_generation_chain() {
-        use verum_ast::Span;
         use crate::meta::StageRecord;
+        use verum_ast::Span;
 
         let mut ctx = MetaContext::new();
-        ctx.generation_chain.push(StageRecord::new(
-            2,
-            Text::from("outer_gen"),
-            Span::dummy(),
-        ));
-        ctx.generation_chain.push(StageRecord::new(
-            1,
-            Text::from("inner_gen"),
-            Span::dummy(),
-        ));
+        ctx.generation_chain
+            .push(StageRecord::new(2, Text::from("outer_gen"), Span::dummy()));
+        ctx.generation_chain
+            .push(StageRecord::new(1, Text::from("inner_gen"), Span::dummy()));
 
         let result = meta_stage_generation_chain(&mut ctx, List::new()).unwrap();
         if let ConstValue::Array(chain) = result {

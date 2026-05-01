@@ -72,11 +72,7 @@ pub fn eq_to_cubical(term: &EqTerm) -> CubicalTerm {
                 ProjComponent::Fst => "fst",
                 ProjComponent::Snd => "snd",
             };
-            CubicalTerm::Value(Text::from(format!(
-                "{}({})",
-                label,
-                format_eq_term(pair)
-            )))
+            CubicalTerm::Value(Text::from(format!("{}({})", label, format_eq_term(pair))))
         }
 
         EqTerm::J {
@@ -309,10 +305,7 @@ mod tests {
         // Unknown function applications still unify when identical.
         let lhs = EqTerm::App {
             func: Box::new(EqTerm::Var(Text::from("f"))),
-            args: List::from_iter([
-                EqTerm::Var(Text::from("x")),
-                EqTerm::Var(Text::from("y")),
-            ]),
+            args: List::from_iter([EqTerm::Var(Text::from("x")), EqTerm::Var(Text::from("y"))]),
         };
         let rhs = lhs.clone();
         assert!(definitionally_equal_cubical(&lhs, &rhs));

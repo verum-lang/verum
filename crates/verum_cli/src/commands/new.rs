@@ -195,25 +195,31 @@ Thumbs.db
 
 fn create_readme(dir: &Path, name: &str, template: &str, profile: LanguageProfile) -> Result<()> {
     let profile_section = match profile {
-        LanguageProfile::Application => "\
+        LanguageProfile::Application => {
+            "\
 ## Language Profile: Application
 
 Safe by default. No `@unsafe` blocks allowed. Refinement types provide
 compile-time guarantees via SMT verification. All references use CBGR
 managed checks (~15ns per dereference) unless the compiler proves safety
-via escape analysis (promoted to zero-cost `&checked` references).",
-        LanguageProfile::Systems => "\
+via escape analysis (promoted to zero-cost `&checked` references)."
+        }
+        LanguageProfile::Systems => {
+            "\
 ## Language Profile: Systems
 
 Full language access including `@unsafe` blocks for manual memory control.
 Three-tier reference model: `&T` (managed, ~15ns), `&checked T` (compiler-proven, 0ns),
-`&unsafe T` (manual proof, 0ns). Suitable for OS kernels, drivers, embedded systems.",
-        LanguageProfile::Research => "\
+`&unsafe T` (manual proof, 0ns). Suitable for OS kernels, drivers, embedded systems."
+        }
+        LanguageProfile::Research => {
+            "\
 ## Language Profile: Research
 
 Dependent types and formal verification enabled. Write machine-checked proofs
 with `theorem`, `lemma`, and `proof` blocks. SMT solver (Z3) verifies
-refinement predicates at compile time. Experimental features available.",
+refinement predicates at compile time. Experimental features available."
+        }
     };
 
     let content = format!(

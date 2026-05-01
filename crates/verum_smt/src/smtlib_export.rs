@@ -20,8 +20,8 @@ use verum_ast::expr::ExprKind;
 use verum_ast::literal::LiteralKind;
 use verum_ast::ty::TypeKind;
 use verum_ast::{BinOp, Expr, Type, UnOp};
-use verum_common::{List, Map, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Text};
 
 // ==================== SMT-LIB2 Exporter ====================
 
@@ -124,7 +124,9 @@ impl SmtLibExporter {
 
         // Check command
         match self.check_mode {
-            CheckMode::CheckSat => { let _ = writeln!(&mut output, "(check-sat)"); }
+            CheckMode::CheckSat => {
+                let _ = writeln!(&mut output, "(check-sat)");
+            }
             CheckMode::GetModel => {
                 let _ = writeln!(&mut output, "(check-sat)");
                 let _ = writeln!(&mut output, "(get-model)");

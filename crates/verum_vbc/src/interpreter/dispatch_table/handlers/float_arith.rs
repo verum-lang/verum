@@ -1,16 +1,18 @@
 //! Float arithmetic handlers for VBC interpreter dispatch.
 
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::value::Value;
 
 // ============================================================================
 // Handler Implementations - Float Arithmetic
 // ============================================================================
 
-pub(in super::super) fn handle_addf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_addf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -19,7 +21,9 @@ pub(in super::super) fn handle_addf(state: &mut InterpreterState) -> Interpreter
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_subf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_subf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -28,7 +32,9 @@ pub(in super::super) fn handle_subf(state: &mut InterpreterState) -> Interpreter
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_mulf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_mulf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -37,7 +43,9 @@ pub(in super::super) fn handle_mulf(state: &mut InterpreterState) -> Interpreter
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_divf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_divf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -90,7 +98,9 @@ pub(in super::super) fn handle_divf(state: &mut InterpreterState) -> Interpreter
 /// - 27: Trunc - Truncate toward zero
 /// - 28: Fract - Fractional part
 /// - 29: Recip - Reciprocal (1/x)
-pub(in super::super) fn handle_negf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_negf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     // Read sub-opcode byte for the specific unary float operation
     let sub_op = read_u8(state)?;
     let dst = read_reg(state)?;
@@ -100,46 +110,46 @@ pub(in super::super) fn handle_negf(state: &mut InterpreterState) -> Interpreter
 
     let result = match sub_op {
         // Basic operations (0-10)
-        0 => -x,                    // Neg
-        1 => x.abs(),               // Abs
-        2 => x.sqrt(),              // Sqrt
-        3 => x.exp(),               // Exp (e^x)
-        4 => x.ln(),                // Log (natural log)
-        5 => x.sin(),               // Sin
-        6 => x.cos(),               // Cos
-        7 => x.tan(),               // Tan
-        8 => x.floor(),             // Floor
-        9 => x.ceil(),              // Ceil
-        10 => x.round(),            // Round
+        0 => -x,         // Neg
+        1 => x.abs(),    // Abs
+        2 => x.sqrt(),   // Sqrt
+        3 => x.exp(),    // Exp (e^x)
+        4 => x.ln(),     // Log (natural log)
+        5 => x.sin(),    // Sin
+        6 => x.cos(),    // Cos
+        7 => x.tan(),    // Tan
+        8 => x.floor(),  // Floor
+        9 => x.ceil(),   // Ceil
+        10 => x.round(), // Round
 
         // Inverse trigonometric (11-13)
-        11 => x.asin(),             // Asin
-        12 => x.acos(),             // Acos
-        13 => x.atan(),             // Atan
+        11 => x.asin(), // Asin
+        12 => x.acos(), // Acos
+        13 => x.atan(), // Atan
 
         // Hyperbolic (14-16)
-        14 => x.sinh(),             // Sinh
-        15 => x.cosh(),             // Cosh
-        16 => x.tanh(),             // Tanh
+        14 => x.sinh(), // Sinh
+        15 => x.cosh(), // Cosh
+        16 => x.tanh(), // Tanh
 
         // Inverse hyperbolic (17-19)
-        17 => x.asinh(),            // Asinh
-        18 => x.acosh(),            // Acosh
-        19 => x.atanh(),            // Atanh
+        17 => x.asinh(), // Asinh
+        18 => x.acosh(), // Acosh
+        19 => x.atanh(), // Atanh
 
         // Logarithms and exponentials (20-22)
-        20 => x.log10(),            // Log10
-        21 => x.log2(),             // Log2
-        22 => x.exp2(),             // Exp2 (2^x)
+        20 => x.log10(), // Log10
+        21 => x.log2(),  // Log2
+        22 => x.exp2(),  // Exp2 (2^x)
 
         // Special functions (23-29)
-        23 => x.cbrt(),             // Cbrt (cube root)
-        24 => x.exp_m1(),           // Expm1 (exp(x) - 1)
-        25 => x.ln_1p(),            // Ln1p (ln(1 + x))
-        26 => x.signum(),           // Signum
-        27 => x.trunc(),            // Trunc
-        28 => x.fract(),            // Fract
-        29 => x.recip(),            // Recip (1/x)
+        23 => x.cbrt(),   // Cbrt (cube root)
+        24 => x.exp_m1(), // Expm1 (exp(x) - 1)
+        25 => x.ln_1p(),  // Ln1p (ln(1 + x))
+        26 => x.signum(), // Signum
+        27 => x.trunc(),  // Trunc
+        28 => x.fract(),  // Fract
+        29 => x.recip(),  // Recip (1/x)
 
         _ => {
             return Err(InterpreterError::InvalidSubOpcode {
@@ -158,17 +168,24 @@ pub(in super::super) fn handle_negf(state: &mut InterpreterState) -> Interpreter
 // ============================================================================
 
 /// Float power: `dst = a ** b`
-pub(in super::super) fn handle_powf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_powf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let base = read_reg(state)?;
     let exp = read_reg(state)?;
-    let result = state.get_reg(base).as_f64().powf(state.get_reg(exp).as_f64());
+    let result = state
+        .get_reg(base)
+        .as_f64()
+        .powf(state.get_reg(exp).as_f64());
     state.set_reg(dst, Value::from_f64(result));
     Ok(DispatchResult::Continue)
 }
 
 /// Float modulo: `dst = a % b`
-pub(in super::super) fn handle_modf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_modf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -178,7 +195,9 @@ pub(in super::super) fn handle_modf(state: &mut InterpreterState) -> Interpreter
 }
 
 /// Float absolute value: `dst = |src|`
-pub(in super::super) fn handle_absf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_absf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let result = state.get_reg(src).as_f64().abs();

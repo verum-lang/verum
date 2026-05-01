@@ -99,9 +99,10 @@ impl ModuleTree {
 
         // Check if this is a root module
         if (!path.contains('.') || path.starts_with("core.") && path.matches('.').count() == 1)
-            && !self.roots.contains(&path) {
-                self.roots.push(path.clone());
-            }
+            && !self.roots.contains(&path)
+        {
+            self.roots.push(path.clone());
+        }
 
         self.modules.insert(path, module);
     }
@@ -232,12 +233,7 @@ impl DiscoveryIndex {
     pub fn methods_for(&self, type_name: &str) -> Vec<&DocEntry> {
         self.method_index
             .get(type_name)
-            .map(|methods| {
-                methods
-                    .iter()
-                    .filter_map(|m| self.docs.get(m))
-                    .collect()
-            })
+            .map(|methods| methods.iter().filter_map(|m| self.docs.get(m)).collect())
             .unwrap_or_default()
     }
 
@@ -554,12 +550,10 @@ mod tests {
     fn test_module_tree() {
         let mut tree = ModuleTree::new();
         tree.add_module(
-            ModuleInfo::new("collections", "core.collections")
-                .with_description("Collection types"),
+            ModuleInfo::new("collections", "core.collections").with_description("Collection types"),
         );
         tree.add_module(
-            ModuleInfo::new("list", "core.collections.list")
-                .with_description("List type"),
+            ModuleInfo::new("list", "core.collections.list").with_description("List type"),
         );
 
         assert!(tree.get("core.collections").is_some());

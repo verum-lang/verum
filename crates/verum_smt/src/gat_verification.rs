@@ -37,14 +37,13 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use verum_ast::ty::{GenericArg, Path, Type, TypeBound, TypeBoundKind, TypeKind};
+use verum_common::ToText;
 use verum_common::{List, Map, Maybe, Set, Text};
 use verum_protocol_types::gat_types::{AssociatedTypeGAT, GATTypeParam, GATWhereClause, Variance};
 use verum_protocol_types::protocol_base::ProtocolBound;
-use verum_common::ToText;
 
 use z3::ast::{Bool, Dynamic, Int, forall_const};
 use z3::{FuncDecl, Pattern, SatResult, Solver, Sort, Symbol};
-
 
 // ==================== Protocol Table for Type Checking ====================
 
@@ -2185,7 +2184,6 @@ impl GATVerifier {
         }
     }
 
-
     /// Clear verification cache
     pub fn clear_cache(&mut self) {
         self.cache.clear();
@@ -2390,7 +2388,6 @@ pub fn suggest_fixes(error: &GATError) -> List<Text> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_simple_gat_verification() {

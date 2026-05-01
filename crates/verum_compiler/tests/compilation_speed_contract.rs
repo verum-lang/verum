@@ -26,9 +26,9 @@
 
 use std::time::Instant;
 
+use verum_ast::span::FileId;
 use verum_fast_parser::Parser;
 use verum_lexer::Lexer;
-use verum_ast::span::FileId;
 
 // ============================================================================
 // Published throughput floors (LOC/sec).

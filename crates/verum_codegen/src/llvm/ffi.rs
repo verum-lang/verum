@@ -49,7 +49,9 @@ use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::{BasicTypeEnum, FunctionType};
-use verum_llvm::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
+use verum_llvm::values::{
+    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue,
+};
 use verum_llvm::{AddressSpace, IntPredicate};
 use verum_vbc::instruction::FfiSubOpcode;
 
@@ -414,7 +416,7 @@ impl<'ctx> FfiLowering<'ctx> {
                 return Err(LlvmLoweringError::internal(format!(
                     "Invalid deref size: {}",
                     size_bytes
-                )))
+                )));
             }
         };
 
@@ -446,7 +448,7 @@ impl<'ctx> FfiLowering<'ctx> {
                 return Err(LlvmLoweringError::internal(format!(
                     "Invalid store size: {}",
                     size_bytes
-                )))
+                )));
             }
         };
 
@@ -570,10 +572,7 @@ impl<'ctx> FfiLowering<'ctx> {
     ) -> Result<IntValue<'ctx>> {
         self.stats.raw_ptr_ops += 1;
 
-        let null_ptr = self
-            .context
-            .ptr_type(AddressSpace::default())
-            .const_null();
+        let null_ptr = self.context.ptr_type(AddressSpace::default()).const_null();
 
         let result = builder
             .build_int_compare(IntPredicate::EQ, ptr, null_ptr, "is_null")
@@ -612,7 +611,8 @@ impl<'ctx> FfiLowering<'ctx> {
         func.set_call_conventions(calling_convention);
 
         // Convert args to BasicMetadataValueEnum
-        let meta_args: Vec<BasicMetadataValueEnum<'ctx>> = args.iter().map(|a| (*a).into()).collect();
+        let meta_args: Vec<BasicMetadataValueEnum<'ctx>> =
+            args.iter().map(|a| (*a).into()).collect();
 
         // Build the call
         let call_site = builder
@@ -639,7 +639,8 @@ impl<'ctx> FfiLowering<'ctx> {
         self.stats.indirect_calls += 1;
 
         // Convert args to BasicMetadataValueEnum
-        let meta_args: Vec<BasicMetadataValueEnum<'ctx>> = args.iter().map(|a| (*a).into()).collect();
+        let meta_args: Vec<BasicMetadataValueEnum<'ctx>> =
+            args.iter().map(|a| (*a).into()).collect();
 
         let call_site = builder
             .build_indirect_call(fn_type, fn_ptr, &meta_args, "indirect_call")
@@ -756,8 +757,15 @@ impl<'ctx> FfiLowering<'ctx> {
         let i64_type = self.context.i64_type();
         let bool_type = self.context.bool_type();
 
-        let fn_type =
-            void_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into(), bool_type.into()], false);
+        let fn_type = void_type.fn_type(
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                bool_type.into(),
+            ],
+            false,
+        );
 
         Ok(module.add_function(name, fn_type, None))
     }
@@ -773,8 +781,15 @@ impl<'ctx> FfiLowering<'ctx> {
         let i64_type = self.context.i64_type();
         let bool_type = self.context.bool_type();
 
-        let fn_type =
-            void_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into(), bool_type.into()], false);
+        let fn_type = void_type.fn_type(
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                bool_type.into(),
+            ],
+            false,
+        );
 
         Ok(module.add_function(name, fn_type, None))
     }
@@ -791,8 +806,15 @@ impl<'ctx> FfiLowering<'ctx> {
         let i64_type = self.context.i64_type();
         let bool_type = self.context.bool_type();
 
-        let fn_type =
-            void_type.fn_type(&[ptr_type.into(), i8_type.into(), i64_type.into(), bool_type.into()], false);
+        let fn_type = void_type.fn_type(
+            &[
+                ptr_type.into(),
+                i8_type.into(),
+                i64_type.into(),
+                bool_type.into(),
+            ],
+            false,
+        );
 
         Ok(module.add_function(name, fn_type, None))
     }
@@ -927,7 +949,9 @@ impl<'ctx> FfiLowering<'ctx> {
 
         let new_size = wrapper
             .get_nth_param(1)
-            .ok_or_else(|| LlvmLoweringError::internal("realloc wrapper missing param 1".to_string()))?
+            .ok_or_else(|| {
+                LlvmLoweringError::internal("realloc wrapper missing param 1".to_string())
+            })?
             .into_int_value();
         let new_ptr = builder
             .build_call(os_alloc, &[new_size.into()], "new_ptr")

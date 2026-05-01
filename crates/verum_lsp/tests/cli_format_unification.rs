@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use verum_lsp::cli_format::{format_via_cli, FmtSettings};
+use verum_lsp::cli_format::{FmtSettings, format_via_cli};
 
 fn binary_path() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -52,10 +52,7 @@ async fn cli_and_lsp_routes_produce_identical_output() {
             "type and impl",
             "type Point is { x: Int, y: Int };\n\nimplement Point {\n    fn x(self) -> Int { self.x }\n}\n",
         ),
-        (
-            "blank-line normalisation",
-            "fn a() {}\n\n\n\n\nfn b() {}\n",
-        ),
+        ("blank-line normalisation", "fn a() {}\n\n\n\n\nfn b() {}\n"),
     ];
 
     let settings = FmtSettings {
@@ -83,5 +80,8 @@ async fn fmt_disabled_via_settings_returns_none() {
         binary: Some(binary_path()),
     };
     let result = format_via_cli("fn main() {}\n", &settings, None).await;
-    assert!(result.is_none(), "disabled settings should bypass the formatter");
+    assert!(
+        result.is_none(),
+        "disabled settings should bypass the formatter"
+    );
 }

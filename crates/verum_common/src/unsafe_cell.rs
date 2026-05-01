@@ -83,7 +83,7 @@ impl<T> UnsafeCell<T> {
     ///
 
     /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
-/// Provides raw pointer access to inner value for interior mutability patterns.
+    /// Provides raw pointer access to inner value for interior mutability patterns.
     #[inline]
     pub const fn new(value: T) -> UnsafeCell<T> {
         UnsafeCell {
@@ -108,7 +108,7 @@ impl<T> UnsafeCell<T> {
     ///
 
     /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
-/// Provides raw pointer access to inner value for interior mutability patterns.
+    /// Provides raw pointer access to inner value for interior mutability patterns.
     #[inline]
     pub fn into_inner(self) -> T {
         self.value.into_inner()
@@ -152,7 +152,7 @@ impl<T: ?Sized> UnsafeCell<T> {
     ///
 
     /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
-/// Provides raw pointer access to inner value for interior mutability patterns.
+    /// Provides raw pointer access to inner value for interior mutability patterns.
     #[inline]
     pub const fn get(&self) -> *mut T {
         self.value.get()
@@ -179,7 +179,7 @@ impl<T: ?Sized> UnsafeCell<T> {
     ///
 
     /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
-/// Provides raw pointer access to inner value for interior mutability patterns.
+    /// Provides raw pointer access to inner value for interior mutability patterns.
     #[inline]
     pub fn get_mut(&mut self) -> &mut T {
         self.value.get_mut()
@@ -198,7 +198,7 @@ impl<T: ?Sized> UnsafeCell<T> {
     ///
 
     /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
-/// Provides raw pointer access to inner value for interior mutability patterns.
+    /// Provides raw pointer access to inner value for interior mutability patterns.
     #[inline]
     pub const fn raw_get(this: *const Self) -> *mut T {
         // SAFETY: Forwarding to std::cell::UnsafeCell implementation

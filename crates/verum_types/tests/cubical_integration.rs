@@ -158,10 +158,7 @@ fn not_definitionally_equal_different_values() {
 #[test]
 fn subst_dim_identity_var() {
     let t = dim("i");
-    assert_eq!(
-        t.subst_dim(&DimVar::new("i"), IntervalEndpoint::I0),
-        i0()
-    );
+    assert_eq!(t.subst_dim(&DimVar::new("i"), IntervalEndpoint::I0), i0());
 }
 
 #[test]

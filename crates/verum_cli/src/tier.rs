@@ -65,10 +65,16 @@ pub fn resolve(
     default: Tier,
 ) -> Result<ResolvedTier> {
     if explicit_interp {
-        return Ok(ResolvedTier { tier: Tier::Interpret, explicit: true });
+        return Ok(ResolvedTier {
+            tier: Tier::Interpret,
+            explicit: true,
+        });
     }
     if explicit_aot {
-        return Ok(ResolvedTier { tier: Tier::Aot, explicit: true });
+        return Ok(ResolvedTier {
+            tier: Tier::Aot,
+            explicit: true,
+        });
     }
     if let Some(name) = tier_override {
         let tier = match name.as_str() {
@@ -86,9 +92,15 @@ pub fn resolve(
                 )));
             }
         };
-        return Ok(ResolvedTier { tier, explicit: true });
+        return Ok(ResolvedTier {
+            tier,
+            explicit: true,
+        });
     }
-    Ok(ResolvedTier { tier: default, explicit: false })
+    Ok(ResolvedTier {
+        tier: default,
+        explicit: false,
+    })
 }
 
 #[cfg(test)]

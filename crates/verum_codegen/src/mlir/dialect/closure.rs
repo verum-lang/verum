@@ -37,21 +37,21 @@
 //! | ByRef | `&` | Capture reference to value |
 //! | ByMove | `move` | Move value into closure |
 
+use crate::mlir::dialect::types::VerumType;
+use crate::mlir::error::{MlirError, Result};
+use verum_common::{List, Text};
 use verum_mlir::{
     Context,
     ir::{
         Attribute, Block, Identifier, Location, Operation, Region, Type, Value,
         attribute::{
-            ArrayAttribute, DenseI32ArrayAttribute, IntegerAttribute,
-            StringAttribute, TypeAttribute,
+            ArrayAttribute, DenseI32ArrayAttribute, IntegerAttribute, StringAttribute,
+            TypeAttribute,
         },
         operation::{OperationBuilder, OperationLike},
         r#type::{FunctionType, IntegerType},
     },
 };
-use verum_common::{List, Text};
-use crate::mlir::error::{MlirError, Result};
-use crate::mlir::dialect::types::VerumType;
 
 // ============================================================================
 // Capture Analysis
@@ -242,7 +242,15 @@ impl ClosureCreateOp {
         result_type: Type<'c>,
     ) -> Result<Operation<'c>> {
         let modes: Vec<CaptureMode> = captures.iter().map(|_| CaptureMode::ByValue).collect();
-        Self::build(context, location, fn_name, captures, &modes, fn_type, result_type)
+        Self::build(
+            context,
+            location,
+            fn_name,
+            captures,
+            &modes,
+            fn_type,
+            result_type,
+        )
     }
 }
 

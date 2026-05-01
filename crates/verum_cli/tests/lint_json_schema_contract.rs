@@ -105,10 +105,7 @@ fn every_required_field_is_present_and_well_typed() {
     for v in parsed_lines(&out) {
         // Strings.
         for f in &["rule", "level", "file", "message"] {
-            assert!(
-                v[*f].is_string(),
-                "field `{f}` must be a string in: {v}"
-            );
+            assert!(v[*f].is_string(), "field `{f}` must be a string in: {v}");
         }
         // Integers.
         for f in &["line", "column"] {
@@ -146,10 +143,7 @@ fn suggestion_present_iff_fixable() {
         let fixable = v["fixable"].as_bool().expect("fixable is bool");
         let has_suggestion = v.get("suggestion").is_some();
         if fixable {
-            assert!(
-                has_suggestion,
-                "fixable issue must include suggestion: {v}"
-            );
+            assert!(has_suggestion, "fixable issue must include suggestion: {v}");
         }
         // The reverse direction (`suggestion implies fixable`) is
         // not strictly required — a suggestion can be a hint that
@@ -181,9 +175,7 @@ fn make_multifile_fixture() -> TempDir {
     for i in 0..6 {
         std::fs::write(
             root.join("src").join(format!("a{i}.vr")),
-            format!(
-                "fn entry_{i}() {{ let _x = Box::new({i}); }}\n// TODO: clean\n"
-            ),
+            format!("fn entry_{i}() {{ let _x = Box::new({i}); }}\n// TODO: clean\n"),
         )
         .expect("write fixture");
     }

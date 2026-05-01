@@ -10,17 +10,16 @@
 
 #![cfg(feature = "aot-llvm")]
 
-use crate::mlir::error::{MlirError, Result};
 use super::{AotConfig, CompilationResult, OutputFormat};
+use crate::mlir::error::{MlirError, Result};
 
-use verum_mlir::ir::Module;
 use std::path::Path;
 use tracing::{debug, info, warn};
+use verum_mlir::ir::Module;
 
 use verum_llvm::{
-    LlvmContext, Codegen, CodegenConfig,
-    TargetConfig, FileType, RelocMode, CodeGenOptLevel,
-    OptimizationConfig, LtoConfig, LtoMode, Triple,
+    CodeGenOptLevel, Codegen, CodegenConfig, FileType, LlvmContext, LtoConfig, LtoMode,
+    OptimizationConfig, RelocMode, TargetConfig, Triple,
 };
 
 /// LLVM-based AOT backend.
@@ -144,17 +143,22 @@ impl LlvmBackend {
         output_path: &Path,
     ) -> Result<CompilationResult> {
         if self.verbose {
-            info!("LLVM backend: Compiling to object file: {}", output_path.display());
+            info!(
+                "LLVM backend: Compiling to object file: {}",
+                output_path.display()
+            );
         }
 
         // Extract LLVM IR from MLIR
         let ir_text = self.extract_llvm_ir(module)?;
 
         // Parse LLVM IR
-        let llvm_module = self.llvm_ctx.parse_ir(&ir_text)
-            .map_err(|e| MlirError::CodegenFailed {
-                message: format!("Failed to parse LLVM IR: {}", e),
-            })?;
+        let llvm_module =
+            self.llvm_ctx
+                .parse_ir(&ir_text)
+                .map_err(|e| MlirError::CodegenFailed {
+                    message: format!("Failed to parse LLVM IR: {}", e),
+                })?;
 
         // Create codegen configuration
         let codegen_config = CodegenConfig {
@@ -165,13 +169,15 @@ impl LlvmBackend {
         };
 
         // Create codegen instance
-        let codegen = Codegen::from_module(llvm_module, codegen_config)
-            .map_err(|e| MlirError::CodegenFailed {
+        let codegen = Codegen::from_module(llvm_module, codegen_config).map_err(|e| {
+            MlirError::CodegenFailed {
                 message: format!("Failed to create codegen: {}", e),
-            })?;
+            }
+        })?;
 
         // Compile and emit
-        codegen.compile_to_file(output_path)
+        codegen
+            .compile_to_file(output_path)
             .map_err(|e| MlirError::CodegenFailed {
                 message: format!("Failed to emit object file: {}", e),
             })?;
@@ -190,17 +196,22 @@ impl LlvmBackend {
         output_path: &Path,
     ) -> Result<CompilationResult> {
         if self.verbose {
-            info!("LLVM backend: Compiling to assembly: {}", output_path.display());
+            info!(
+                "LLVM backend: Compiling to assembly: {}",
+                output_path.display()
+            );
         }
 
         // Extract LLVM IR from MLIR
         let ir_text = self.extract_llvm_ir(module)?;
 
         // Parse LLVM IR
-        let llvm_module = self.llvm_ctx.parse_ir(&ir_text)
-            .map_err(|e| MlirError::CodegenFailed {
-                message: format!("Failed to parse LLVM IR: {}", e),
-            })?;
+        let llvm_module =
+            self.llvm_ctx
+                .parse_ir(&ir_text)
+                .map_err(|e| MlirError::CodegenFailed {
+                    message: format!("Failed to parse LLVM IR: {}", e),
+                })?;
 
         // Create codegen configuration
         let codegen_config = CodegenConfig {
@@ -211,13 +222,15 @@ impl LlvmBackend {
         };
 
         // Create codegen instance
-        let codegen = Codegen::from_module(llvm_module, codegen_config)
-            .map_err(|e| MlirError::CodegenFailed {
+        let codegen = Codegen::from_module(llvm_module, codegen_config).map_err(|e| {
+            MlirError::CodegenFailed {
                 message: format!("Failed to create codegen: {}", e),
-            })?;
+            }
+        })?;
 
         // Emit assembly
-        codegen.emit_assembly_to_file(output_path)
+        codegen
+            .emit_assembly_to_file(output_path)
             .map_err(|e| MlirError::CodegenFailed {
                 message: format!("Failed to emit assembly: {}", e),
             })?;
@@ -236,17 +249,22 @@ impl LlvmBackend {
         output_path: &Path,
     ) -> Result<CompilationResult> {
         if self.verbose {
-            info!("LLVM backend: Compiling to bitcode: {}", output_path.display());
+            info!(
+                "LLVM backend: Compiling to bitcode: {}",
+                output_path.display()
+            );
         }
 
         // Extract LLVM IR from MLIR
         let ir_text = self.extract_llvm_ir(module)?;
 
         // Parse LLVM IR
-        let llvm_module = self.llvm_ctx.parse_ir(&ir_text)
-            .map_err(|e| MlirError::CodegenFailed {
-                message: format!("Failed to parse LLVM IR: {}", e),
-            })?;
+        let llvm_module =
+            self.llvm_ctx
+                .parse_ir(&ir_text)
+                .map_err(|e| MlirError::CodegenFailed {
+                    message: format!("Failed to parse LLVM IR: {}", e),
+                })?;
 
         // Create codegen configuration
         let codegen_config = CodegenConfig {
@@ -257,13 +275,15 @@ impl LlvmBackend {
         };
 
         // Create codegen instance
-        let codegen = Codegen::from_module(llvm_module, codegen_config)
-            .map_err(|e| MlirError::CodegenFailed {
+        let codegen = Codegen::from_module(llvm_module, codegen_config).map_err(|e| {
+            MlirError::CodegenFailed {
                 message: format!("Failed to create codegen: {}", e),
-            })?;
+            }
+        })?;
 
         // Emit bitcode
-        codegen.emit_bitcode_to_file(output_path)
+        codegen
+            .emit_bitcode_to_file(output_path)
             .map_err(|e| MlirError::CodegenFailed {
                 message: format!("Failed to emit bitcode: {}", e),
             })?;
@@ -282,17 +302,22 @@ impl LlvmBackend {
         output_path: &Path,
     ) -> Result<CompilationResult> {
         if self.verbose {
-            info!("LLVM backend: Compiling to LLVM IR: {}", output_path.display());
+            info!(
+                "LLVM backend: Compiling to LLVM IR: {}",
+                output_path.display()
+            );
         }
 
         // Extract LLVM IR from MLIR
         let ir_text = self.extract_llvm_ir(module)?;
 
         // Parse and optimize
-        let llvm_module = self.llvm_ctx.parse_ir(&ir_text)
-            .map_err(|e| MlirError::CodegenFailed {
-                message: format!("Failed to parse LLVM IR: {}", e),
-            })?;
+        let llvm_module =
+            self.llvm_ctx
+                .parse_ir(&ir_text)
+                .map_err(|e| MlirError::CodegenFailed {
+                    message: format!("Failed to parse LLVM IR: {}", e),
+                })?;
 
         // Create codegen configuration
         let codegen_config = CodegenConfig {
@@ -303,13 +328,15 @@ impl LlvmBackend {
         };
 
         // Create codegen instance
-        let codegen = Codegen::from_module(llvm_module, codegen_config)
-            .map_err(|e| MlirError::CodegenFailed {
+        let codegen = Codegen::from_module(llvm_module, codegen_config).map_err(|e| {
+            MlirError::CodegenFailed {
                 message: format!("Failed to create codegen: {}", e),
-            })?;
+            }
+        })?;
 
         // Emit LLVM IR
-        codegen.emit_ir_to_file(output_path)
+        codegen
+            .emit_ir_to_file(output_path)
             .map_err(|e| MlirError::CodegenFailed {
                 message: format!("Failed to emit LLVM IR: {}", e),
             })?;
@@ -349,30 +376,26 @@ pub fn lto_compile(
     // Read all bitcode files
     let mut bitcode_data = Vec::new();
     for path in bitcode_paths {
-        let data = std::fs::read(path)
-            .map_err(|e| MlirError::IoError(e))?;
+        let data = std::fs::read(path).map_err(|e| MlirError::IoError(e))?;
         bitcode_data.push(data);
     }
 
     let bc_refs: Vec<&[u8]> = bitcode_data.iter().map(|v| v.as_slice()).collect();
 
     // Perform LTO
-    let lto_objects = llvm_lto_compile(&bc_refs, config)
-        .map_err(|e| MlirError::CodegenFailed {
-            message: format!("LTO failed: {}", e),
-        })?;
+    let lto_objects = llvm_lto_compile(&bc_refs, config).map_err(|e| MlirError::CodegenFailed {
+        message: format!("LTO failed: {}", e),
+    })?;
 
     // Write LTO result
     // For full LTO, we get a single object; for ThinLTO, we get multiple
     if lto_objects.len() == 1 {
-        std::fs::write(output_path, &lto_objects[0])
-            .map_err(|e| MlirError::IoError(e))?;
+        std::fs::write(output_path, &lto_objects[0]).map_err(|e| MlirError::IoError(e))?;
     } else {
         // Write multiple objects to temp dir and return first
         // (caller should use link step)
         if !lto_objects.is_empty() {
-            std::fs::write(output_path, &lto_objects[0])
-                .map_err(|e| MlirError::IoError(e))?;
+            std::fs::write(output_path, &lto_objects[0]).map_err(|e| MlirError::IoError(e))?;
         }
     }
 

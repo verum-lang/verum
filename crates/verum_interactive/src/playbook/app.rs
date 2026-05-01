@@ -14,15 +14,14 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
+use super::keybindings::{KeyAction, KeybindingMode, Keybindings};
 use super::session::{Cell, CellKind, CellOutput, SessionState};
 use super::ui::{
-    CellWidget, EditorWidget, EditorState, LayoutConfig, PlaybookLayout,
-    SidebarWidget, SidebarTab, VarInfo, FuncInfo, OutlineEntry, ExecStats,
-    cell_height,
+    CellWidget, EditorState, EditorWidget, ExecStats, FuncInfo, LayoutConfig, OutlineEntry,
+    PlaybookLayout, SidebarTab, SidebarWidget, VarInfo, cell_height,
 };
-use super::keybindings::{KeyAction, Keybindings, KeybindingMode};
-use crate::execution::value_format::{format_value, ValueDisplayOptions};
 use crate::discovery::tutorials::{Tutorial, builtin_tutorials};
+use crate::execution::value_format::{ValueDisplayOptions, format_value};
 
 /// Visual theme for the playbook UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,7 +162,13 @@ impl PlaybookApp {
         };
 
         match rx.try_recv() {
-            Ok(AsyncExecMsg::Done { output, context, instructions, peak_stack, time_ms }) => {
+            Ok(AsyncExecMsg::Done {
+                output,
+                context,
+                instructions,
+                peak_stack,
+                time_ms,
+            }) => {
                 let cell_idx = self.pending_cell_idx.unwrap_or(0);
                 self.session.execution_context = context;
                 self.session.execution_count += 1;
@@ -195,10 +200,15 @@ impl PlaybookApp {
                 self.pending_spinner += 1;
                 let spinners = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
                 let ch = spinners[self.pending_spinner % spinners.len()];
-                let elapsed = self.pending_started.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
+                let elapsed = self
+                    .pending_started
+                    .map(|s| s.elapsed().as_secs_f64())
+                    .unwrap_or(0.0);
                 self.status_message = Some(format!(
                     "{} Running cell {}... ({:.1}s) [Ctrl+C to cancel]",
-                    ch, self.pending_cell_idx.unwrap_or(0) + 1, elapsed,
+                    ch,
+                    self.pending_cell_idx.unwrap_or(0) + 1,
+                    elapsed,
                 ));
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -257,15 +267,17 @@ impl PlaybookApp {
         self.status_message = None;
 
         // Global: Ctrl+C cancels running execution
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) && self.is_executing() {
+        if key.code == KeyCode::Char('c')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && self.is_executing()
+        {
             self.cancel_execution();
             return;
         }
 
         // Global: F11 / Ctrl+F fullscreen
         let is_fullscreen_toggle = key.code == KeyCode::F(11)
-            || (key.code == KeyCode::Char('f')
-                && key.modifiers.contains(KeyModifiers::CONTROL));
+            || (key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL));
         if is_fullscreen_toggle {
             self.layout_config.toggle_fullscreen();
             self.editor.fullscreen = self.layout_config.editor_fullscreen;
@@ -305,19 +317,32 @@ impl PlaybookApp {
         match action {
             KeyAction::Quit => self.should_quit = true,
             KeyAction::ForceQuit => self.should_quit = true,
-            KeyAction::CellDown => { self.session.select_next(); self.sync_editor_from_cell(); }
-            KeyAction::CellUp => { self.session.select_prev(); self.sync_editor_from_cell(); }
-            KeyAction::CellFirst => { self.session.selected_cell = 0; self.sync_editor_from_cell(); }
+            KeyAction::CellDown => {
+                self.session.select_next();
+                self.sync_editor_from_cell();
+            }
+            KeyAction::CellUp => {
+                self.session.select_prev();
+                self.sync_editor_from_cell();
+            }
+            KeyAction::CellFirst => {
+                self.session.selected_cell = 0;
+                self.sync_editor_from_cell();
+            }
             KeyAction::CellLast => {
                 self.session.selected_cell = self.session.cells.len().saturating_sub(1);
                 self.sync_editor_from_cell();
             }
             KeyAction::PageDown => {
-                for _ in 0..5 { self.session.select_next(); }
+                for _ in 0..5 {
+                    self.session.select_next();
+                }
                 self.sync_editor_from_cell();
             }
             KeyAction::PageUp => {
-                for _ in 0..5 { self.session.select_prev(); }
+                for _ in 0..5 {
+                    self.session.select_prev();
+                }
                 self.sync_editor_from_cell();
             }
             KeyAction::EnterEdit => self.enter_edit_mode(),
@@ -348,11 +373,19 @@ impl PlaybookApp {
                 self.session.delete_current_cell();
                 self.sync_editor_from_cell();
             }
-            KeyAction::MoveCellUp => { self.session.move_cell_up(); self.sync_editor_from_cell(); }
-            KeyAction::MoveCellDown => { self.session.move_cell_down(); self.sync_editor_from_cell(); }
+            KeyAction::MoveCellUp => {
+                self.session.move_cell_up();
+                self.sync_editor_from_cell();
+            }
+            KeyAction::MoveCellDown => {
+                self.session.move_cell_down();
+                self.sync_editor_from_cell();
+            }
             KeyAction::ToggleCollapse => {
                 let id = self.session.current_cell().id;
-                if !self.collapsed_cells.remove(&id) { self.collapsed_cells.insert(id); }
+                if !self.collapsed_cells.remove(&id) {
+                    self.collapsed_cells.insert(id);
+                }
             }
             KeyAction::ToggleCellType => {
                 self.session.toggle_cell_type();
@@ -377,12 +410,16 @@ impl PlaybookApp {
             KeyAction::Undo => {
                 if !self.session.undo() {
                     self.status_message = Some("Nothing to undo".to_string());
-                } else { self.sync_editor_from_cell(); }
+                } else {
+                    self.sync_editor_from_cell();
+                }
             }
             KeyAction::Redo => {
                 if !self.session.redo() {
                     self.status_message = Some("Nothing to redo".to_string());
-                } else { self.sync_editor_from_cell(); }
+                } else {
+                    self.sync_editor_from_cell();
+                }
             }
             KeyAction::ClearOutputs => {
                 self.session.clear_all_outputs();
@@ -399,10 +436,12 @@ impl PlaybookApp {
             }
             KeyAction::ShowHelp => {
                 let help = match self.keybindings.mode() {
-                    KeybindingMode::Vim =>
-                        "j/k:nav i:edit x:run X:all o:new D:del K/J:move Tab:sidebar-tab Ctrl+B:sidebar /:search :cmd q:quit",
-                    KeybindingMode::Standard =>
-                        "Arrows:nav Enter:edit F5:run F9:all Ins:new Del:del Tab/Shift+Tab:sidebar-tab Ctrl+B:sidebar Ctrl+S:save Ctrl+F:fs",
+                    KeybindingMode::Vim => {
+                        "j/k:nav i:edit x:run X:all o:new D:del K/J:move Tab:sidebar-tab Ctrl+B:sidebar /:search :cmd q:quit"
+                    }
+                    KeybindingMode::Standard => {
+                        "Arrows:nav Enter:edit F5:run F9:all Ins:new Del:del Tab/Shift+Tab:sidebar-tab Ctrl+B:sidebar Ctrl+S:save Ctrl+F:fs"
+                    }
                 };
                 self.status_message = Some(help.to_string());
             }
@@ -420,7 +459,10 @@ impl PlaybookApp {
         match action {
             KeyAction::ExitEdit => self.exit_edit_mode(),
             KeyAction::ExecuteCell => self.execute_current_cell(),
-            KeyAction::Save => { self.commit_edit(); self.save(); }
+            KeyAction::Save => {
+                self.commit_edit();
+                self.save();
+            }
             KeyAction::ToggleFullscreen => {
                 self.layout_config.toggle_fullscreen();
                 self.editor.fullscreen = self.layout_config.editor_fullscreen;
@@ -447,11 +489,20 @@ impl PlaybookApp {
                         // Try inline completion if cursor is after a partial word
                         let (row, col) = self.editor.cursor;
                         let line = self.editor.lines.get(row).cloned().unwrap_or_default();
-                        let before_cursor = if col <= line.len() { &line[..col] } else { &line };
+                        let before_cursor = if col <= line.len() {
+                            &line[..col]
+                        } else {
+                            &line
+                        };
                         // Extract partial word: sequence of alphanumeric/_ chars before cursor
-                        let partial: String = before_cursor.chars().rev()
+                        let partial: String = before_cursor
+                            .chars()
+                            .rev()
                             .take_while(|c| c.is_alphanumeric() || *c == '_')
-                            .collect::<Vec<_>>().into_iter().rev().collect();
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .collect();
 
                         if partial.is_empty() {
                             // No partial word — just insert tab as spaces
@@ -475,11 +526,33 @@ impl PlaybookApp {
                             }
                         } else {
                             // Compute completions
-                            let keywords = ["fn", "let", "if", "else", "match", "for", "while",
-                                "type", "true", "false", "println", "print", "return", "mut",
-                                "implement", "mount", "module", "pub", "async", "await", "spawn"];
-                            let builtin_types = ["Int", "Float", "Bool", "Text", "List", "Map",
-                                "Set", "Maybe", "Heap", "Shared", "Channel", "Mutex", "Task"];
+                            let keywords = [
+                                "fn",
+                                "let",
+                                "if",
+                                "else",
+                                "match",
+                                "for",
+                                "while",
+                                "type",
+                                "true",
+                                "false",
+                                "println",
+                                "print",
+                                "return",
+                                "mut",
+                                "implement",
+                                "mount",
+                                "module",
+                                "pub",
+                                "async",
+                                "await",
+                                "spawn",
+                            ];
+                            let builtin_types = [
+                                "Int", "Float", "Bool", "Text", "List", "Map", "Set", "Maybe",
+                                "Heap", "Shared", "Channel", "Mutex", "Task",
+                            ];
 
                             let mut candidates: Vec<String> = Vec::new();
                             // From execution context bindings
@@ -527,11 +600,21 @@ impl PlaybookApp {
                         }
                     }
                     KeyCode::Char('a') if ctrl => self.editor.select_all(),
-                    KeyCode::Char('c') if ctrl => { self.editor.copy(); self.status_message = Some("Copied".to_string()); }
-                    KeyCode::Char('x') if ctrl => { self.editor.cut(); self.status_message = Some("Cut".to_string()); }
+                    KeyCode::Char('c') if ctrl => {
+                        self.editor.copy();
+                        self.status_message = Some("Copied".to_string());
+                    }
+                    KeyCode::Char('x') if ctrl => {
+                        self.editor.cut();
+                        self.status_message = Some("Cut".to_string());
+                    }
                     KeyCode::Char('v') if ctrl => self.editor.paste(),
-                    KeyCode::Char('z') if ctrl && shift => { self.editor.redo(); }
-                    KeyCode::Char('z') if ctrl => { self.editor.undo(); }
+                    KeyCode::Char('z') if ctrl && shift => {
+                        self.editor.redo();
+                    }
+                    KeyCode::Char('z') if ctrl => {
+                        self.editor.undo();
+                    }
                     KeyCode::Char(c) => {
                         self.completions.clear();
                         self.completion_index = None;
@@ -544,7 +627,11 @@ impl PlaybookApp {
                 }
             }
         }
-        let visible = if self.layout_config.editor_fullscreen { 20 } else { 8 };
+        let visible = if self.layout_config.editor_fullscreen {
+            20
+        } else {
+            8
+        };
         self.editor.ensure_cursor_visible(visible);
     }
 
@@ -565,7 +652,9 @@ impl PlaybookApp {
                 }
                 self.input_buffer.clear();
             }
-            KeyCode::Backspace => { self.input_buffer.pop(); }
+            KeyCode::Backspace => {
+                self.input_buffer.pop();
+            }
             KeyCode::Char(c) => {
                 self.input_buffer.push(c);
                 // Live search preview
@@ -591,7 +680,8 @@ impl PlaybookApp {
         let cell_idx = self.session.selected_cell;
         let cell_id = self.session.current_cell().id;
         let source = self.session.current_cell().source.clone();
-        self.previous_cell_sources.insert(cell_id, source.to_string());
+        self.previous_cell_sources
+            .insert(cell_id, source.to_string());
 
         // Clone state for the worker thread
         let context = self.session.execution_context.clone();
@@ -611,7 +701,10 @@ impl PlaybookApp {
             // Compile
             let compiled = match pipeline.compile(source.as_str(), line_number) {
                 Ok(c) => c,
-                Err(e) => { let _ = tx.send(AsyncExecMsg::Error(e.to_string())); return; }
+                Err(e) => {
+                    let _ = tx.send(AsyncExecMsg::Error(e.to_string()));
+                    return;
+                }
             };
 
             // Set cancel flag on the interpreter (via pipeline.execute)
@@ -623,7 +716,10 @@ impl PlaybookApp {
                 // To pass cancel_flag, we need pipeline.execute to accept it.
                 // Simpler: use compile_and_execute_for_cell which calls execute internally.
                 pipeline.compile_and_execute_for_cell(
-                    source.as_str(), line_number, &mut ctx, cell_id,
+                    source.as_str(),
+                    line_number,
+                    &mut ctx,
+                    cell_id,
                 )
             };
 
@@ -636,18 +732,23 @@ impl PlaybookApp {
                     let mut outputs = Vec::new();
                     if !output.stdout.is_empty() || !output.stderr.is_empty() {
                         outputs.push(CellOutput::stream_with_stderr(
-                            output.stdout.clone(), output.stderr.clone(),
+                            output.stdout.clone(),
+                            output.stderr.clone(),
                         ));
                     }
                     if let Some(value) = output.value {
                         outputs.push(CellOutput::value_with_raw(
-                            output.display.clone(), output.type_info.clone(), value,
+                            output.display.clone(),
+                            output.type_info.clone(),
+                            value,
                         ));
                     } else if !output.display.is_empty()
                         && output.display.as_str() != "()"
-                        && output.type_info.as_str() != "()" {
+                        && output.type_info.as_str() != "()"
+                    {
                         outputs.push(CellOutput::value(
-                            output.display.clone(), output.type_info.clone(),
+                            output.display.clone(),
+                            output.type_info.clone(),
                         ));
                     }
 
@@ -665,7 +766,9 @@ impl PlaybookApp {
                         time_ms: elapsed_ms,
                     });
                 }
-                Err(e) => { let _ = tx.send(AsyncExecMsg::Error(e.to_string())); }
+                Err(e) => {
+                    let _ = tx.send(AsyncExecMsg::Error(e.to_string()));
+                }
             }
         });
 
@@ -682,7 +785,10 @@ impl PlaybookApp {
     fn mark_dependents_dirty(&mut self) {
         let cell_id = self.session.current_cell().id;
         // Collect binding names defined by the current cell
-        let defined: Vec<verum_common::Text> = self.session.execution_context.bindings
+        let defined: Vec<verum_common::Text> = self
+            .session
+            .execution_context
+            .bindings
             .iter()
             .filter(|(_, info)| info.defined_in == cell_id)
             .map(|(name, _)| name.clone())
@@ -690,12 +796,23 @@ impl PlaybookApp {
 
         // Find all cells that use those bindings and mark them dirty
         for binding_name in &defined {
-            let dependents = self.session.execution_context.dependencies.dependents(binding_name).to_vec();
+            let dependents = self
+                .session
+                .execution_context
+                .dependencies
+                .dependents(binding_name)
+                .to_vec();
             for dep_id in dependents {
                 if dep_id != cell_id
-                    && let Some((_, cell)) = self.session.cells.iter_mut().enumerate().find(|(_, c)| c.id == dep_id) {
-                        cell.dirty = true;
-                    }
+                    && let Some((_, cell)) = self
+                        .session
+                        .cells
+                        .iter_mut()
+                        .enumerate()
+                        .find(|(_, c)| c.id == dep_id)
+                {
+                    cell.dirty = true;
+                }
             }
         }
     }
@@ -710,7 +827,10 @@ impl PlaybookApp {
                 self.save();
             }
             Some("q") | Some("quit") => self.should_quit = true,
-            Some("wq") => { self.save(); self.should_quit = true; }
+            Some("wq") => {
+                self.save();
+                self.should_quit = true;
+            }
             Some("e") => {
                 if let Some(path) = parts.get(1) {
                     match self.export_to_script(Path::new(path)) {
@@ -767,7 +887,9 @@ impl PlaybookApp {
                         _ => self.status_message = Some(format!("Unknown setting: {}", setting)),
                     }
                 } else {
-                    self.status_message = Some("Usage: :set <autosave|vim|standard|sidebar|nosidebar|timeout>".to_string());
+                    self.status_message = Some(
+                        "Usage: :set <autosave|vim|standard|sidebar|nosidebar|timeout>".to_string(),
+                    );
                 }
             }
             Some("split") => {
@@ -784,7 +906,10 @@ impl PlaybookApp {
             }
             Some("deps") => {
                 let cell_id = self.session.current_cell().id;
-                let defined: Vec<String> = self.session.execution_context.bindings
+                let defined: Vec<String> = self
+                    .session
+                    .execution_context
+                    .bindings
                     .iter()
                     .filter(|(_, info)| info.defined_in == cell_id)
                     .map(|(name, _)| name.to_string())
@@ -803,7 +928,10 @@ impl PlaybookApp {
                         // Search by name
                         let query = parts[1..].join(" ").to_lowercase();
                         let tutorials = builtin_tutorials();
-                        if let Some(tutorial) = tutorials.into_iter().find(|t| t.title.to_lowercase().contains(&query)) {
+                        if let Some(tutorial) = tutorials
+                            .into_iter()
+                            .find(|t| t.title.to_lowercase().contains(&query))
+                        {
                             self.start_tutorial_from(tutorial);
                         } else {
                             self.status_message = Some(format!("No tutorial matching: {}", query));
@@ -811,12 +939,15 @@ impl PlaybookApp {
                     }
                 } else {
                     self.start_tutorial();
-                    self.status_message = Some("Tutorial loaded. Press x to run code cells.".to_string());
+                    self.status_message =
+                        Some("Tutorial loaded. Press x to run code cells.".to_string());
                 }
             }
             Some("tutorials") => {
                 let tutorials = builtin_tutorials();
-                let list: Vec<String> = tutorials.iter().enumerate()
+                let list: Vec<String> = tutorials
+                    .iter()
+                    .enumerate()
                     .map(|(i, t)| format!("{}: {}", i, t.title))
                     .collect();
                 self.status_message = Some(format!("Tutorials: {}", list.join(", ")));
@@ -852,16 +983,26 @@ impl PlaybookApp {
             Some("info") | Some("i") => {
                 let cell = self.session.current_cell();
                 let lines = cell.source.as_str().lines().count();
-                let kind = match cell.kind { CellKind::Code => "code", CellKind::Markdown => "markdown" };
-                let exec = cell.execution_count.map(|n| format!("#{}", n)).unwrap_or_else(|| "not run".to_string());
-                let out_type = cell.output.as_ref().map(|o| match o {
-                    CellOutput::Value { .. } => "value",
-                    CellOutput::Stream { .. } => "stream",
-                    CellOutput::Error { .. } => "error",
-                    CellOutput::Multi { .. } => "multi",
-                    CellOutput::Empty => "empty",
-                    _ => "other",
-                }).unwrap_or("none");
+                let kind = match cell.kind {
+                    CellKind::Code => "code",
+                    CellKind::Markdown => "markdown",
+                };
+                let exec = cell
+                    .execution_count
+                    .map(|n| format!("#{}", n))
+                    .unwrap_or_else(|| "not run".to_string());
+                let out_type = cell
+                    .output
+                    .as_ref()
+                    .map(|o| match o {
+                        CellOutput::Value { .. } => "value",
+                        CellOutput::Stream { .. } => "stream",
+                        CellOutput::Error { .. } => "error",
+                        CellOutput::Multi { .. } => "multi",
+                        CellOutput::Empty => "empty",
+                        _ => "other",
+                    })
+                    .unwrap_or("none");
                 self.status_message = Some(format!(
                     "Cell {} | {} | {} lines | exec {} | output: {}",
                     self.session.selected_cell + 1,
@@ -884,7 +1025,11 @@ impl PlaybookApp {
             }
             Some("toggleoutput") => {
                 self.session.current_cell_mut().toggle_output_collapse();
-                let state = if self.session.current_cell().output_collapsed { "collapsed" } else { "expanded" };
+                let state = if self.session.current_cell().output_collapsed {
+                    "collapsed"
+                } else {
+                    "expanded"
+                };
                 self.status_message = Some(format!("Output {}", state));
             }
             Some("export") => {
@@ -895,25 +1040,41 @@ impl PlaybookApp {
                         "vr" => {
                             let content = super::persistence::export_to_verum(&self.session.cells);
                             match std::fs::write(path, content) {
-                                Ok(()) => self.status_message = Some(format!("Exported to {}", path)),
-                                Err(e) => self.status_message = Some(format!("Export failed: {}", e)),
+                                Ok(()) => {
+                                    self.status_message = Some(format!("Exported to {}", path))
+                                }
+                                Err(e) => {
+                                    self.status_message = Some(format!("Export failed: {}", e))
+                                }
                             }
                         }
                         "md" | "markdown" => {
-                            let content = super::persistence::export_to_markdown(&self.session.cells);
+                            let content =
+                                super::persistence::export_to_markdown(&self.session.cells);
                             match std::fs::write(path, content) {
-                                Ok(()) => self.status_message = Some(format!("Exported to {}", path)),
-                                Err(e) => self.status_message = Some(format!("Export failed: {}", e)),
+                                Ok(()) => {
+                                    self.status_message = Some(format!("Exported to {}", path))
+                                }
+                                Err(e) => {
+                                    self.status_message = Some(format!("Export failed: {}", e))
+                                }
                             }
                         }
                         "html" => {
                             let content = super::persistence::export_to_html(&self.session.cells);
                             match std::fs::write(path, content) {
-                                Ok(()) => self.status_message = Some(format!("Exported to {}", path)),
-                                Err(e) => self.status_message = Some(format!("Export failed: {}", e)),
+                                Ok(()) => {
+                                    self.status_message = Some(format!("Exported to {}", path))
+                                }
+                                Err(e) => {
+                                    self.status_message = Some(format!("Export failed: {}", e))
+                                }
                             }
                         }
-                        _ => self.status_message = Some("Usage: :export <vr|md|html> <path>".to_string()),
+                        _ => {
+                            self.status_message =
+                                Some("Usage: :export <vr|md|html> <path>".to_string())
+                        }
                     }
                 } else {
                     self.status_message = Some("Usage: :export <vr|md|html> <path>".to_string());
@@ -934,8 +1095,12 @@ impl PlaybookApp {
                             let p = prev_lines.get(i).copied().unwrap_or("");
                             let c = curr_lines.get(i).copied().unwrap_or("");
                             if p != c {
-                                if !p.is_empty() { diffs.push(format!("-{}: {}", i + 1, p)); }
-                                if !c.is_empty() { diffs.push(format!("+{}: {}", i + 1, c)); }
+                                if !p.is_empty() {
+                                    diffs.push(format!("-{}: {}", i + 1, p));
+                                }
+                                if !c.is_empty() {
+                                    diffs.push(format!("+{}: {}", i + 1, c));
+                                }
                             }
                         }
                         self.status_message = Some(if diffs.len() > 3 {
@@ -945,16 +1110,29 @@ impl PlaybookApp {
                         });
                     }
                 } else {
-                    self.status_message = Some("No previous version (cell not yet executed)".to_string());
+                    self.status_message =
+                        Some("No previous version (cell not yet executed)".to_string());
                 }
             }
             Some("theme") => {
                 if let Some(name) = parts.get(1) {
                     match *name {
-                        "cyberpunk" => { self.theme = Theme::Cyberpunk; self.status_message = Some("Theme: Cyberpunk".to_string()); }
-                        "dark" => { self.theme = Theme::Dark; self.status_message = Some("Theme: Dark".to_string()); }
-                        "light" => { self.theme = Theme::Light; self.status_message = Some("Theme: Light".to_string()); }
-                        _ => self.status_message = Some("Usage: :theme <cyberpunk|dark|light>".to_string()),
+                        "cyberpunk" => {
+                            self.theme = Theme::Cyberpunk;
+                            self.status_message = Some("Theme: Cyberpunk".to_string());
+                        }
+                        "dark" => {
+                            self.theme = Theme::Dark;
+                            self.status_message = Some("Theme: Dark".to_string());
+                        }
+                        "light" => {
+                            self.theme = Theme::Light;
+                            self.status_message = Some("Theme: Light".to_string());
+                        }
+                        _ => {
+                            self.status_message =
+                                Some("Usage: :theme <cyberpunk|dark|light>".to_string())
+                        }
                     }
                 } else {
                     self.status_message = Some("Usage: :theme <cyberpunk|dark|light>".to_string());
@@ -973,7 +1151,11 @@ impl PlaybookApp {
                 let settings = format!(
                     "mode:{} | sidebar:{} | autosave:{}s | timeout:{}ms | theme:{}",
                     mode,
-                    if self.layout_config.show_sidebar { "on" } else { "off" },
+                    if self.layout_config.show_sidebar {
+                        "on"
+                    } else {
+                        "off"
+                    },
                     self.auto_save_interval_secs,
                     self.session.execution_timeout_ms,
                     theme_str,
@@ -985,7 +1167,9 @@ impl PlaybookApp {
                     "w/save q/quit wq e export<vr|md|html> clear clearc/cc run goto/g info/i set split merge deps expand collapse toggleoutput diff theme settings/config tutorial tutorials".to_string()
                 );
             }
-            Some(c) => self.status_message = Some(format!("Unknown command: {}. Type :help for list.", c)),
+            Some(c) => {
+                self.status_message = Some(format!("Unknown command: {}. Type :help for list.", c))
+            }
             None => {}
         }
     }
@@ -994,7 +1178,9 @@ impl PlaybookApp {
     fn perform_search(&mut self, query: &str) {
         self.search_results.clear();
         self.search_cursor = 0;
-        if query.is_empty() { return; }
+        if query.is_empty() {
+            return;
+        }
 
         let query_lower = query.to_lowercase();
         for (ci, cell) in self.session.cells.iter().enumerate() {
@@ -1091,8 +1277,12 @@ impl PlaybookApp {
                     self.save();
                 }
             }
-            KeyCode::Backspace => { self.input_buffer.pop(); }
-            KeyCode::Char(c) => { self.input_buffer.push(c); }
+            KeyCode::Backspace => {
+                self.input_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                self.input_buffer.push(c);
+            }
             _ => {}
         }
     }
@@ -1101,9 +1291,9 @@ impl PlaybookApp {
         if self.auto_save_interval_secs == 0 || !self.session.dirty || self.file_path.is_none() {
             return;
         }
-        let should_save = self.last_save.is_none_or(|t| {
-            t.elapsed().as_secs() >= self.auto_save_interval_secs
-        });
+        let should_save = self
+            .last_save
+            .is_none_or(|t| t.elapsed().as_secs() >= self.auto_save_interval_secs);
         if should_save {
             self.save();
         }
@@ -1142,11 +1332,16 @@ impl PlaybookApp {
 
         let inner = cells_block.inner(area);
         frame.render_widget(cells_block, area);
-        if inner.height == 0 { return; }
+        if inner.height == 0 {
+            return;
+        }
 
-        let cell_heights: Vec<u16> = self.session.cells.iter().map(|cell| {
-            cell_height(cell, self.collapsed_cells.contains(&cell.id))
-        }).collect();
+        let cell_heights: Vec<u16> = self
+            .session
+            .cells
+            .iter()
+            .map(|cell| cell_height(cell, self.collapsed_cells.contains(&cell.id)))
+            .collect();
 
         let selected = self.session.selected_cell;
         let height_before: u16 = cell_heights[..selected].iter().sum();
@@ -1166,11 +1361,17 @@ impl PlaybookApp {
 
         for (idx, cell) in self.session.cells.iter().enumerate() {
             let h = cell_heights[idx];
-            if cum + h <= scroll { cum += h; continue; }
-            if y >= inner.y + inner.height { break; }
+            if cum + h <= scroll {
+                cum += h;
+                continue;
+            }
+            if y >= inner.y + inner.height {
+                break;
+            }
 
             let cell_area = Rect {
-                x: inner.x, y,
+                x: inner.x,
+                y,
                 width: inner.width,
                 height: h.min(inner.y + inner.height - y),
             };
@@ -1188,42 +1389,82 @@ impl PlaybookApp {
 
     fn render_sidebar(&self, frame: &mut Frame, area: Rect) {
         // Build variable info using proper value formatter
-        let vars: Vec<VarInfo> = self.session.execution_context.bindings.iter().map(|(name, info)| {
-            let preview = format_value(&info.value, &self.display_options).to_string();
-            VarInfo {
-                name: name.to_string(),
-                type_info: info.type_info.to_string(),
-                value_preview: preview,
-                is_mutable: info.is_mutable,
-            }
-        }).collect();
+        let vars: Vec<VarInfo> = self
+            .session
+            .execution_context
+            .bindings
+            .iter()
+            .map(|(name, info)| {
+                let preview = format_value(&info.value, &self.display_options).to_string();
+                VarInfo {
+                    name: name.to_string(),
+                    type_info: info.type_info.to_string(),
+                    value_preview: preview,
+                    is_mutable: info.is_mutable,
+                }
+            })
+            .collect();
 
-        let funcs: Vec<FuncInfo> = self.session.execution_context.functions.iter().map(|(name, info)| {
-            FuncInfo {
+        let funcs: Vec<FuncInfo> = self
+            .session
+            .execution_context
+            .functions
+            .iter()
+            .map(|(name, info)| FuncInfo {
                 name: name.to_string(),
-                signature: format!("({}) -> {}",
-                    info.params.iter().map(|(n, t)| format!("{}: {}", n, t)).collect::<Vec<_>>().join(", "),
+                signature: format!(
+                    "({}) -> {}",
+                    info.params
+                        .iter()
+                        .map(|(n, t)| format!("{}: {}", n, t))
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     info.return_type,
                 ),
-            }
-        }).collect();
+            })
+            .collect();
 
-        let outline: Vec<OutlineEntry> = self.session.cells.iter().enumerate().map(|(i, cell)| {
-            OutlineEntry {
+        let outline: Vec<OutlineEntry> = self
+            .session
+            .cells
+            .iter()
+            .enumerate()
+            .map(|(i, cell)| OutlineEntry {
                 index: i,
                 kind: cell.kind,
                 exec_number: cell.execution_count,
-                first_line: cell.source.as_str().lines().next().unwrap_or("").to_string(),
+                first_line: cell
+                    .source
+                    .as_str()
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
                 has_error: cell.output.as_ref().is_some_and(|o| o.is_error()),
                 is_dirty: cell.dirty,
                 is_selected: i == self.session.selected_cell,
-            }
-        }).collect();
+            })
+            .collect();
 
         let code_count = self.session.cells.iter().filter(|c| c.is_code()).count();
-        let md_count = self.session.cells.iter().filter(|c| c.is_markdown()).count();
-        let exec_count = self.session.cells.iter().filter(|c| c.execution_count.is_some()).count();
-        let err_count = self.session.cells.iter().filter(|c| c.output.as_ref().is_some_and(|o| o.is_error())).count();
+        let md_count = self
+            .session
+            .cells
+            .iter()
+            .filter(|c| c.is_markdown())
+            .count();
+        let exec_count = self
+            .session
+            .cells
+            .iter()
+            .filter(|c| c.execution_count.is_some())
+            .count();
+        let err_count = self
+            .session
+            .cells
+            .iter()
+            .filter(|c| c.output.as_ref().is_some_and(|o| o.is_error()))
+            .count();
 
         let stats = ExecStats {
             total_cells: self.session.cells.len(),
@@ -1233,7 +1474,15 @@ impl PlaybookApp {
             error_count: err_count,
             binding_count: self.session.execution_context.bindings.len(),
             function_count: self.session.execution_context.functions.len(),
-            last_cell_source: self.session.current_cell().source.as_str().lines().next().unwrap_or("").to_string(),
+            last_cell_source: self
+                .session
+                .current_cell()
+                .source
+                .as_str()
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string(),
             last_exec_time_ms: self.last_exec_time_ms,
             last_instructions: self.last_instructions,
             last_peak_stack: self.last_peak_stack,
@@ -1277,7 +1526,11 @@ impl PlaybookApp {
                 AppMode::SavePrompt => "SAV",
             };
             let dirty = if self.session.dirty { " [+]" } else { "" };
-            let cell_info = format!("{}/{}", self.session.selected_cell + 1, self.session.cell_count());
+            let cell_info = format!(
+                "{}/{}",
+                self.session.selected_cell + 1,
+                self.session.cell_count()
+            );
             let kb_mode = match self.keybindings.mode() {
                 KeybindingMode::Vim => " VIM",
                 KeybindingMode::Standard => "",
@@ -1287,8 +1540,21 @@ impl PlaybookApp {
             } else {
                 String::new()
             };
-            let auto_save = if self.auto_save_interval_secs > 0 { " [AS]" } else { "" };
-            format!(" {} {} {}{}{}{}{}", mode_str, self.file_name(), cell_info, dirty, kb_mode, time, auto_save)
+            let auto_save = if self.auto_save_interval_secs > 0 {
+                " [AS]"
+            } else {
+                ""
+            };
+            format!(
+                " {} {} {}{}{}{}{}",
+                mode_str,
+                self.file_name(),
+                cell_info,
+                dirty,
+                kb_mode,
+                time,
+                auto_save
+            )
         };
 
         let style = match self.mode {
@@ -1304,22 +1570,24 @@ impl PlaybookApp {
 
     fn render_help(&self, frame: &mut Frame, area: Rect) {
         let help = match self.mode {
-            AppMode::Normal => {
-                match self.keybindings.mode() {
-                    KeybindingMode::Vim =>
-                        " j/k:nav i:edit x:run X:all o:new D:del K/J:move Tab:sidebar-tab Ctrl+B:sidebar /:search :cmd q:quit",
-                    KeybindingMode::Standard =>
-                        " Arrows:nav Enter:edit F5:run F9:all Ins:new Del:del Tab:sidebar-tab Ctrl+B:sidebar Ctrl+S:save Ctrl+F:fs",
+            AppMode::Normal => match self.keybindings.mode() {
+                KeybindingMode::Vim => {
+                    " j/k:nav i:edit x:run X:all o:new D:del K/J:move Tab:sidebar-tab Ctrl+B:sidebar /:search :cmd q:quit"
                 }
+                KeybindingMode::Standard => {
+                    " Arrows:nav Enter:edit F5:run F9:all Ins:new Del:del Tab:sidebar-tab Ctrl+B:sidebar Ctrl+S:save Ctrl+F:fs"
+                }
+            },
+            AppMode::Edit => {
+                " Esc:exit  F5/Ctrl+R:run  Ctrl+c/x/v  Ctrl+z:undo  Ctrl+s:save  Tab:indent"
             }
-            AppMode::Edit =>
-                " Esc:exit  F5/Ctrl+R:run  Ctrl+c/x/v  Ctrl+z:undo  Ctrl+s:save  Tab:indent",
-            AppMode::Command =>
-                " Esc:cancel  Enter:exec  Commands: w q wq e clear run set split merge help",
-            AppMode::Search =>
-                " Esc:cancel  Enter:confirm  Type to search across all cells",
-            AppMode::SavePrompt =>
-                " Esc:cancel  Enter:save  Type filename (.vrbook appended if no extension)",
+            AppMode::Command => {
+                " Esc:cancel  Enter:exec  Commands: w q wq e clear run set split merge help"
+            }
+            AppMode::Search => " Esc:cancel  Enter:confirm  Type to search across all cells",
+            AppMode::SavePrompt => {
+                " Esc:cancel  Enter:save  Type filename (.vrbook appended if no extension)"
+            }
         };
         frame.render_widget(
             Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
@@ -1332,7 +1600,8 @@ impl PlaybookApp {
     }
 
     fn file_name(&self) -> String {
-        self.file_path.as_ref()
+        self.file_path
+            .as_ref()
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
             .unwrap_or("untitled.vrbook")
@@ -1342,7 +1611,11 @@ impl PlaybookApp {
     // ── Public API ──────────────────────────────────────────────────────
 
     pub fn set_vim_mode(&mut self, enabled: bool) {
-        self.keybindings.set_mode(if enabled { KeybindingMode::Vim } else { KeybindingMode::Standard });
+        self.keybindings.set_mode(if enabled {
+            KeybindingMode::Vim
+        } else {
+            KeybindingMode::Standard
+        });
     }
 
     pub fn set_profiling(&mut self, _enabled: bool) {
@@ -1362,7 +1635,10 @@ impl PlaybookApp {
     }
 
     pub fn export_to_script(&self, path: &Path) -> io::Result<()> {
-        std::fs::write(path, super::persistence::export_to_verum(&self.session.cells))
+        std::fs::write(
+            path,
+            super::persistence::export_to_verum(&self.session.cells),
+        )
     }
 
     pub fn export_to_script_with_outputs(&self, path: &Path) -> io::Result<()> {
@@ -1371,7 +1647,10 @@ impl PlaybookApp {
             Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
         );
         if let Some(fp) = &self.file_path {
-            script.insert_str(script.find('\n').unwrap_or(0) + 1, &format!("// Source: {}\n", fp.display()));
+            script.insert_str(
+                script.find('\n').unwrap_or(0) + 1,
+                &format!("// Source: {}\n", fp.display()),
+            );
         }
         for cell in &self.session.cells {
             match cell.kind {
@@ -1411,18 +1690,32 @@ impl PlaybookApp {
         let mut app = Self::new();
         for (i, chunk) in source.split("\n\n").enumerate() {
             let trimmed = chunk.trim();
-            if trimmed.is_empty() { continue; }
-            let is_md = trimmed.lines().all(|l| l.trim().is_empty() || l.trim().starts_with("//"));
+            if trimmed.is_empty() {
+                continue;
+            }
+            let is_md = trimmed
+                .lines()
+                .all(|l| l.trim().is_empty() || l.trim().starts_with("//"));
             let (kind, content) = if is_md {
-                let md = trimmed.lines()
-                    .map(|l| l.trim().strip_prefix("//").map_or(l.trim(), |s| s.trim_start()))
-                    .collect::<Vec<_>>().join("\n");
+                let md = trimmed
+                    .lines()
+                    .map(|l| {
+                        l.trim()
+                            .strip_prefix("//")
+                            .map_or(l.trim(), |s| s.trim_start())
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 (CellKind::Markdown, md)
             } else {
                 (CellKind::Code, trimmed.to_string())
             };
-            if i == 0 { app.session.update_current_source(content); }
-            else { app.session.insert_cell_after(kind); app.session.update_current_source(content); }
+            if i == 0 {
+                app.session.update_current_source(content);
+            } else {
+                app.session.insert_cell_after(kind);
+                app.session.update_current_source(content);
+            }
         }
         app.session.selected_cell = 0;
         app.sync_editor_from_cell();
@@ -1435,8 +1728,21 @@ impl PlaybookApp {
             .map_err(|e| io::Error::other(e.to_string()))
     }
 
-    pub fn add_diagnostic(&mut self, line: usize, col_start: usize, col_end: usize, message: String, severity: super::ui::DiagnosticSeverity) {
-        self.diagnostics.push(super::ui::EditorDiagnostic { line, col_start, col_end, message, severity });
+    pub fn add_diagnostic(
+        &mut self,
+        line: usize,
+        col_start: usize,
+        col_end: usize,
+        message: String,
+        severity: super::ui::DiagnosticSeverity,
+    ) {
+        self.diagnostics.push(super::ui::EditorDiagnostic {
+            line,
+            col_start,
+            col_end,
+            message,
+            severity,
+        });
     }
 
     pub fn clear_diagnostics(&mut self) {
@@ -1481,7 +1787,10 @@ impl PlaybookApp {
             CellKind::Markdown,
             format!(
                 "# {}\n\n{}\n\nDifficulty: {}/5 | Estimated time: {} min",
-                tutorial.title, tutorial.description, tutorial.difficulty, tutorial.estimated_minutes,
+                tutorial.title,
+                tutorial.description,
+                tutorial.difficulty,
+                tutorial.estimated_minutes,
             ),
         ));
 
@@ -1523,91 +1832,129 @@ impl PlaybookApp {
     fn intro_tutorial_cells() -> Vec<(CellKind, String)> {
         vec![
             // ── Welcome ─────────────────────────────────────────────
-            (CellKind::Markdown, "\
+            (
+                CellKind::Markdown,
+                "\
 # Welcome to Verum
 
 Verum is a modern language built for safety, performance, and clarity.
 This tutorial walks you through the fundamentals interactively.
 
 Press **x** (or **F5**) on any code cell to execute it.
-Press **j/k** (or **Up/Down**) to navigate between cells.".to_string()),
-
+Press **j/k** (or **Up/Down**) to navigate between cells."
+                    .to_string(),
+            ),
             // ── Basic expressions ───────────────────────────────────
-            (CellKind::Markdown, "\
+            (
+                CellKind::Markdown,
+                "\
 ## Basic Expressions
 
 Verum evaluates expressions and prints results with `print(...)`.
-Format strings use the `f\"...\"` syntax with `{expr}` interpolation.".to_string()),
-
-            (CellKind::Code, "\
+Format strings use the `f\"...\"` syntax with `{expr}` interpolation."
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 let x = 42
 let pi = 3.14159
-print(f\"x = {x}, pi = {pi}\")".to_string()),
-
+print(f\"x = {x}, pi = {pi}\")"
+                    .to_string(),
+            ),
             // ── Let bindings ────────────────────────────────────────
-            (CellKind::Markdown, "\
+            (
+                CellKind::Markdown,
+                "\
 ## Let Bindings
 
 Use `let` to bind values. Types are inferred automatically.
-Use `let mut` for mutable bindings.".to_string()),
-
-            (CellKind::Code, "\
+Use `let mut` for mutable bindings."
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 let name = \"Verum\"
 let mut counter = 0
 counter = counter + 1
 counter = counter + 1
-print(f\"name = {name}, counter = {counter}\")".to_string()),
-
-            (CellKind::Code, "\
+print(f\"name = {name}, counter = {counter}\")"
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 // Explicit type annotations
 let x: Int = 100
 let y: Float = 2.718
 let flag: Bool = true
 let message: Text = \"Hello!\"
-print(f\"{x} {y} {flag} {message}\")".to_string()),
-
+print(f\"{x} {y} {flag} {message}\")"
+                    .to_string(),
+            ),
             // ── Functions ───────────────────────────────────────────
-            (CellKind::Markdown, "\
+            (
+                CellKind::Markdown,
+                "\
 ## Functions
 
 Define functions with `fn`. The last expression is the return value.
-Anonymous functions use `fn(args) expr`.".to_string()),
-
-            (CellKind::Code, "\
+Anonymous functions use `fn(args) expr`."
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 fn double(n: Int) -> Int {
     n * 2
 }
 
-print(f\"double(21) = {double(21)}\")".to_string()),
-
-            (CellKind::Code, "\
+print(f\"double(21) = {double(21)}\")"
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 fn greet(name: Text) -> Text {
     f\"Hello, {name}!\"
 }
 
-print(greet(\"World\"))".to_string()),
-
-            (CellKind::Code, "\
+print(greet(\"World\"))"
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 // Anonymous functions (closures)
 let square = fn(x: Int) x * x
-print(f\"square(7) = {square(7)}\")".to_string()),
-
+print(f\"square(7) = {square(7)}\")"
+                    .to_string(),
+            ),
             // ── Types ───────────────────────────────────────────────
-            (CellKind::Markdown, "\
+            (
+                CellKind::Markdown,
+                "\
 ## Types
 
 Verum defines types with `type Name is ...;` (not `struct`/`enum`).
 Record types have named fields. Sum types use `|` for variants.
-Implement methods with `implement Name { ... }`.".to_string()),
-
-            (CellKind::Code, "\
+Implement methods with `implement Name { ... }`."
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 // Record type (like a struct)
 type Point is { x: Float, y: Float };
 
 let p = Point { x: 3.0, y: 4.0 }
-print(f\"Point: ({p.x}, {p.y})\")".to_string()),
-
-            (CellKind::Code, "\
+print(f\"Point: ({p.x}, {p.y})\")"
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 // Sum type (like an enum)
 type Shape is
     | Circle(Float)
@@ -1615,9 +1962,12 @@ type Shape is
 
 let s = Circle(5.0)
 let r = Rectangle { width: 4.0, height: 3.0 }
-print(f\"shapes created\")".to_string()),
-
-            (CellKind::Code, "\
+print(f\"shapes created\")"
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 // Methods via implement blocks
 type Counter is { value: Int };
 
@@ -1638,16 +1988,22 @@ implement Counter {
 let mut c = Counter::new()
 c.increment()
 c.increment()
-print(f\"Counter: {c.get()}\")".to_string()),
-
+print(f\"Counter: {c.get()}\")"
+                    .to_string(),
+            ),
             // ── Pattern matching ────────────────────────────────────
-            (CellKind::Markdown, "\
+            (
+                CellKind::Markdown,
+                "\
 ## Pattern Matching
 
 The `match` expression provides exhaustive pattern matching.
-It works with literal values, sum types, and guards.".to_string()),
-
-            (CellKind::Code, "\
+It works with literal values, sum types, and guards."
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 fn describe(n: Int) -> Text {
     match n {
         0 => \"zero\",
@@ -1660,9 +2016,12 @@ fn describe(n: Int) -> Text {
 print(describe(0))
 print(describe(1))
 print(describe(-5))
-print(describe(42))".to_string()),
-
-            (CellKind::Code, "\
+print(describe(42))"
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 // Matching sum types
 type Color is Red | Green | Blue;
 
@@ -1675,23 +2034,32 @@ fn color_name(c: Color) -> Text {
 }
 
 print(color_name(Red))
-print(color_name(Blue))".to_string()),
-
+print(color_name(Blue))"
+                    .to_string(),
+            ),
             // ── Lists ───────────────────────────────────────────────
-            (CellKind::Markdown, "\
+            (
+                CellKind::Markdown,
+                "\
 ## Lists
 
 `List<T>` is Verum's dynamic array (not `Vec`).
-Lists support `push`, `len`, `map`, `filter`, and more.".to_string()),
-
-            (CellKind::Code, "\
+Lists support `push`, `len`, `map`, `filter`, and more."
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 let mut nums = List::from([1, 2, 3, 4, 5])
 print(f\"Length: {nums.len()}\")
 
 nums.push(6)
-print(f\"After push: length = {nums.len()}\")".to_string()),
-
-            (CellKind::Code, "\
+print(f\"After push: length = {nums.len()}\")"
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 // Functional operations on lists
 let nums = List::from([1, 2, 3, 4, 5])
 
@@ -1702,16 +2070,22 @@ let evens = nums.filter(fn(x) x % 2 == 0)
 print(f\"Evens: {evens}\")
 
 let sum = nums.reduce(0, fn(acc, x) acc + x)
-print(f\"Sum: {sum}\")".to_string()),
-
+print(f\"Sum: {sum}\")"
+                    .to_string(),
+            ),
             // ── Maps ────────────────────────────────────────────────
-            (CellKind::Markdown, "\
+            (
+                CellKind::Markdown,
+                "\
 ## Maps
 
 `Map<K, V>` provides key-value storage (not `HashMap`).
-Use `insert`, `get`, `contains_key`, and `len`.".to_string()),
-
-            (CellKind::Code, "\
+Use `insert`, `get`, `contains_key`, and `len`."
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 let mut scores = Map::new()
 scores.insert(\"Alice\", 95)
 scores.insert(\"Bob\", 87)
@@ -1719,16 +2093,22 @@ scores.insert(\"Charlie\", 92)
 
 print(f\"Alice: {scores.get(\"Alice\")}\")
 print(f\"Size: {scores.len()}\")
-print(f\"Has Bob: {scores.contains_key(\"Bob\")}\")".to_string()),
-
+print(f\"Has Bob: {scores.contains_key(\"Bob\")}\")"
+                    .to_string(),
+            ),
             // ── Maybe type ──────────────────────────────────────────
-            (CellKind::Markdown, "\
+            (
+                CellKind::Markdown,
+                "\
 ## The Maybe Type
 
 `Maybe<T>` represents an optional value (not `Option`).
-Its variants are `Some(value)` and `None`.".to_string()),
-
-            (CellKind::Code, "\
+Its variants are `Some(value)` and `None`."
+                    .to_string(),
+            ),
+            (
+                CellKind::Code,
+                "\
 fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
     if b == 0 {
         None
@@ -1745,10 +2125,13 @@ match safe_divide(10, 3) {
 match safe_divide(10, 0) {
     Some(result) => print(f\"Result: {result}\"),
     None => print(\"Cannot divide by zero\"),
-}".to_string()),
-
+}"
+                .to_string(),
+            ),
             // ── Wrap up ─────────────────────────────────────────────
-            (CellKind::Markdown, "\
+            (
+                CellKind::Markdown,
+                "\
 ## Next Steps
 
 You have covered the fundamentals of Verum:
@@ -1761,7 +2144,9 @@ You have covered the fundamentals of Verum:
 - `Maybe<T>` for optional values
 
 Explore the other built-in tutorials for generators, async, error handling,
-and tensor operations. Use `:help` to see all available commands.".to_string()),
+and tensor operations. Use `:help` to see all available commands."
+                    .to_string(),
+            ),
         ]
     }
 
@@ -1784,5 +2169,7 @@ and tensor operations. Use `:help` to see all available commands.".to_string()),
 }
 
 impl Default for PlaybookApp {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

@@ -86,7 +86,11 @@ pub(super) fn lower_expr(expr: &Expr) -> Option<String> {
             }
         }
         ExprKind::Block(b) => Some(format!("({})", lower_block(b)?)),
-        ExprKind::If { condition, then_branch, else_branch } => {
+        ExprKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             let c = lower_if_condition(condition)?;
             let t = lower_block(then_branch)?;
             let e = match else_branch {
@@ -99,7 +103,10 @@ pub(super) fn lower_expr(expr: &Expr) -> Option<String> {
             // Coq pattern-match on Some / None.
             let l = lower_expr(left)?;
             let r = lower_expr(right)?;
-            Some(format!("(match {} with | Some v => v | None => {} end)", l, r))
+            Some(format!(
+                "(match {} with | Some v => v | None => {} end)",
+                l, r
+            ))
         }
         // Index is intentionally not lowered: Coq's `List.nth_default`
         // requires an explicit default value the lowerer cannot
@@ -130,7 +137,14 @@ pub(super) fn lower_expr(expr: &Expr) -> Option<String> {
             let r = lower_expr(right)?;
             Some(format!("({} {})", r, l))
         }
-        ExprKind::Closure { async_, move_, params, contexts, return_type: _, body } => {
+        ExprKind::Closure {
+            async_,
+            move_,
+            params,
+            contexts,
+            return_type: _,
+            body,
+        } => {
             if *async_ || *move_ || contexts.iter().count() > 0 {
                 return None;
             }
@@ -145,7 +159,12 @@ pub(super) fn lower_expr(expr: &Expr) -> Option<String> {
             let b = lower_expr(body)?;
             Some(format!("(fun {} => {})", names.join(" "), b))
         }
-        ExprKind::MethodCall { receiver, method, type_args, args } => {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            type_args,
+            args,
+        } => {
             // Coq has no method-dot syntax for plain values; the
             // canonical lowering is the free-function form
             // `(method recv args)`. Type-arguments would need `@`-
@@ -182,7 +201,11 @@ pub(super) fn lower_expr(expr: &Expr) -> Option<String> {
                 arm_strs.push(format!("| {} => {}", pat, body));
             }
             // Coq match: `match x with | pat => body | ... end`.
-            Some(format!("(match {} with {} end)", scrutinee, arm_strs.join(" ")))
+            Some(format!(
+                "(match {} with {} end)",
+                scrutinee,
+                arm_strs.join(" ")
+            ))
         }
         _ => None,
     }
@@ -192,17 +215,24 @@ fn lower_pattern(pat: &verum_ast::pattern::Pattern) -> Option<String> {
     use verum_ast::pattern::{PatternKind, VariantPatternData};
     match &pat.kind {
         PatternKind::Wildcard => Some("_".to_string()),
-        PatternKind::Ident { name, subpattern, .. } => match subpattern {
+        PatternKind::Ident {
+            name, subpattern, ..
+        } => match subpattern {
             Maybe::None => Some(name.name.as_str().to_string()),
             // Coq has no @-pattern; bail.
             Maybe::Some(_) => None,
         },
         PatternKind::Literal(lit) => match &lit.kind {
-            LiteralKind::Bool(b) => Some(if *b { "true".to_string() } else { "false".to_string() }),
+            LiteralKind::Bool(b) => Some(if *b {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }),
             LiteralKind::Int(i) => Some(format!("{}", i.value)),
             // Coq Char is `Ascii.ascii` — emit a `"x"%char` literal.
             LiteralKind::Char(c) => Some(format!("\"{}\"%char", c)),
-            LiteralKind::Text(StringLit::Regular(s)) | LiteralKind::Text(StringLit::MultiLine(s)) => {
+            LiteralKind::Text(StringLit::Regular(s))
+            | LiteralKind::Text(StringLit::MultiLine(s)) => {
                 Some(format!("\"{}\"", escape_coq_string(s.as_str())))
             }
             _ => None,
@@ -246,7 +276,11 @@ fn lower_if_condition(cond: &IfCondition) -> Option<String> {
 
 fn lower_literal(lit: &verum_ast::literal::Literal) -> Option<String> {
     match &lit.kind {
-        LiteralKind::Bool(b) => Some(if *b { "true".to_string() } else { "false".to_string() }),
+        LiteralKind::Bool(b) => Some(if *b {
+            "true".to_string()
+        } else {
+            "false".to_string()
+        }),
         LiteralKind::Int(i) => Some(format!("{}", i.value)),
         LiteralKind::Float(f) => Some(format!("{}", f.value)),
         LiteralKind::Text(StringLit::Regular(s)) | LiteralKind::Text(StringLit::MultiLine(s)) => {
@@ -532,10 +566,7 @@ mod tests {
     fn coq_match_lowers_variant_arms_with_end_keyword() {
         let mut arms = verum_common::List::new();
         arms.push(arm(variant_pat("None", vec![]), int_lit(0)));
-        arms.push(arm(
-            variant_pat("Some", vec![ident_pat("v")]),
-            var("v"),
-        ));
+        arms.push(arm(variant_pat("Some", vec![ident_pat("v")]), var("v")));
         let e = Expr::new(
             ExprKind::Match {
                 expr: Heap::new(var("opt")),
@@ -582,7 +613,11 @@ mod tests {
     fn closure(param_names: &[&str], body: Expr) -> Expr {
         let mut params = verum_common::List::new();
         for n in param_names {
-            params.push(ClosureParam::new(ident_pat(n), verum_common::Maybe::None, span()));
+            params.push(ClosureParam::new(
+                ident_pat(n),
+                verum_common::Maybe::None,
+                span(),
+            ));
         }
         Expr::new(
             ExprKind::Closure {
@@ -637,7 +672,10 @@ mod tests {
     #[test]
     fn coq_tuple_index_uses_fst_function() {
         let e = Expr::new(
-            ExprKind::TupleIndex { expr: Heap::new(var("p")), index: 0 },
+            ExprKind::TupleIndex {
+                expr: Heap::new(var("p")),
+                index: 0,
+            },
             span(),
         );
         assert_eq!(lower_expr(&e).as_deref(), Some("(fst p)"));

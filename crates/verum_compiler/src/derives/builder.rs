@@ -48,6 +48,7 @@
 
 use super::common::{DeriveContext, DeriveError, FieldInfo, TypeInfo};
 use super::{DeriveMacro, DeriveResult, ident_expr, method_call, string_lit};
+use verum_ast::Span;
 use verum_ast::decl::{
     FunctionBody, FunctionDecl, FunctionParam, FunctionParamKind, ImplDecl, ImplItem, ImplItemKind,
     ImplKind, Item, ItemKind, RecordField, TypeDecl, TypeDeclBody, Visibility,
@@ -56,7 +57,6 @@ use verum_ast::expr::{BinOp, Block, Expr, ExprKind, FieldInit};
 use verum_ast::pattern::{MatchArm, Pattern, PatternKind};
 use verum_ast::stmt::Stmt;
 use verum_ast::ty::{Ident, Path, PathSegment, Type, TypeKind};
-use verum_ast::Span;
 use verum_common::well_known_types::{type_names, variant_tags};
 use verum_common::{Heap, List, Maybe, Text};
 
@@ -143,12 +143,7 @@ impl DeriveMacro for DeriveBuilder {
         // The builder type and its impl need to be emitted through another mechanism
         // For now, we'll generate a compound structure that the compiler can unpack
 
-        Ok(self.generate_compound_item(
-            builder_type_decl,
-            builder_impl,
-            origin_impl,
-            span,
-        ))
+        Ok(self.generate_compound_item(builder_type_decl, builder_impl, origin_impl, span))
     }
 
     fn can_derive(&self, ctx: &DeriveContext) -> Result<(), DeriveError> {
@@ -518,7 +513,8 @@ impl DeriveBuilder {
                     },
                     span,
                 );
-                let let_stmt = Stmt::let_stmt(let_pattern, Maybe::None, Maybe::Some(match_expr), span);
+                let let_stmt =
+                    Stmt::let_stmt(let_pattern, Maybe::None, Maybe::Some(match_expr), span);
                 stmts.push(let_stmt);
             } else {
                 // Optional field: use directly (has default or was set)
@@ -543,7 +539,8 @@ impl DeriveBuilder {
                     },
                     span,
                 );
-                let let_stmt = Stmt::let_stmt(let_pattern, Maybe::None, Maybe::Some(self_field), span);
+                let let_stmt =
+                    Stmt::let_stmt(let_pattern, Maybe::None, Maybe::Some(self_field), span);
                 stmts.push(let_stmt);
             }
 
@@ -826,7 +823,10 @@ mod tests {
             RecordField {
                 visibility: Visibility::Public,
                 name: Ident::new("method", span),
-                ty: Type::new(TypeKind::Path(Path::single(Ident::new("HttpMethod", span))), span),
+                ty: Type::new(
+                    TypeKind::Path(Path::single(Ident::new("HttpMethod", span))),
+                    span,
+                ),
                 attributes: List::new(),
                 default_value: Maybe::None, // Required
                 bit_spec: Maybe::None,

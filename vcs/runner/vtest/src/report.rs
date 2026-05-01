@@ -275,25 +275,26 @@ impl Reporter {
 
             // Track level stats
             let level_key = result.directives.level.to_string();
-            let level_summary = summary
-                .by_level
-                .entry(level_key.clone().into())
-                .or_insert(LevelSummary {
-                    total: 0,
-                    passed: 0,
-                    failed: 0,
-                    pass_rate: 0.0,
-                });
+            let level_summary =
+                summary
+                    .by_level
+                    .entry(level_key.clone().into())
+                    .or_insert(LevelSummary {
+                        total: 0,
+                        passed: 0,
+                        failed: 0,
+                        pass_rate: 0.0,
+                    });
             level_summary.total += 1;
 
             let mut test_passed = true;
-            let mut test_skipped = true;  // Track if ALL outcomes were skipped
+            let mut test_skipped = true; // Track if ALL outcomes were skipped
             let mut test_errored = false;
 
             for outcome in &result.outcomes {
                 let (status, reason, expected, actual) = match outcome {
                     TestOutcome::Pass { .. } => {
-                        test_skipped = false;  // At least one non-skip outcome
+                        test_skipped = false; // At least one non-skip outcome
                         ("pass".to_string(), None, None, None)
                     }
                     TestOutcome::Fail {
@@ -331,12 +332,15 @@ impl Reporter {
 
                 // Track tier stats
                 let tier_key = format!("tier{}", tier);
-                let tier_summary = summary.by_tier.entry(tier_key.into()).or_insert(TierSummary {
-                    total: 0,
-                    passed: 0,
-                    failed: 0,
-                    avg_duration_ms: 0,
-                });
+                let tier_summary = summary
+                    .by_tier
+                    .entry(tier_key.into())
+                    .or_insert(TierSummary {
+                        total: 0,
+                        passed: 0,
+                        failed: 0,
+                        avg_duration_ms: 0,
+                    });
                 tier_summary.total += 1;
                 if outcome.is_pass() {
                     tier_summary.passed += 1;
@@ -461,7 +465,10 @@ impl Reporter {
             for result_data in &report.results {
                 if result_data.level == *level {
                     let all_skip = result_data.outcomes.iter().all(|o| o.status == "skip");
-                    let any_fail = result_data.outcomes.iter().any(|o| o.status == "fail" || o.status == "error");
+                    let any_fail = result_data
+                        .outcomes
+                        .iter()
+                        .any(|o| o.status == "fail" || o.status == "error");
 
                     let status_icon = if all_skip {
                         "  SKIP  ".on_yellow().black()

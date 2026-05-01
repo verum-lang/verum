@@ -120,11 +120,7 @@ pub fn truncate_to_level(
             object_text.as_str()
         )),
         level,
-        apex_name: Text::from(format!(
-            "τ_{{≤{}}}({})_apex",
-            "n",
-            object_text.as_str()
-        )),
+        apex_name: Text::from(format!("τ_{{≤{}}}({})_apex", "n", object_text.as_str())),
         source_name: object_text,
         source_category: c.clone(),
         has_universal_property: true,
@@ -192,14 +188,10 @@ pub fn compose_truncations(outer: &Truncation, inner: &Truncation) -> Option<Tru
             inner.source_name.as_str()
         )),
         level: min_level,
-        apex_name: Text::from(format!(
-            "τ_{{≤min}}({})_apex",
-            inner.source_name.as_str()
-        )),
+        apex_name: Text::from(format!("τ_{{≤min}}({})_apex", inner.source_name.as_str())),
         source_name: inner.source_name.clone(),
         source_category: inner.source_category.clone(),
-        has_universal_property: outer.has_universal_property
-            && inner.has_universal_property,
+        has_universal_property: outer.has_universal_property && inner.has_universal_property,
     })
 }
 
@@ -252,24 +244,30 @@ mod tests {
     fn truncation_unit_witness_holds() {
         let c = sample_c();
         let t = truncate_to_level("X", &c, Ordinal::Finite(1));
-        assert!(truncation_unit_witness(&t),
-            "η : X → τ_{{≤1}}(X) must witness universal property");
+        assert!(
+            truncation_unit_witness(&t),
+            "η : X → τ_{{≤1}}(X) must witness universal property"
+        );
     }
 
     #[test]
     fn truncation_is_localisation_witness() {
         let c = sample_c();
         let t = truncate_to_level("X", &c, Ordinal::Finite(1));
-        assert!(truncation_is_localisation(&t),
-            "τ_{{≤n}} is a localisation per HTT 5.5.6.18");
+        assert!(
+            truncation_is_localisation(&t),
+            "τ_{{≤n}} is a localisation per HTT 5.5.6.18"
+        );
     }
 
     #[test]
     fn truncation_left_adjoint_witness() {
         let c = sample_c();
         let t = truncate_to_level("X", &c, Ordinal::Finite(2));
-        assert!(truncation_left_adjoint_to_inclusion(&t),
-            "τ_{{≤n}} ⊣ ι per HTT 5.5.6.21");
+        assert!(
+            truncation_left_adjoint_to_inclusion(&t),
+            "τ_{{≤n}} ⊣ ι per HTT 5.5.6.21"
+        );
     }
 
     #[test]
@@ -287,8 +285,11 @@ mod tests {
         let t_outer = truncate_to_level("X", &c, Ordinal::Finite(3));
         let t_inner = truncate_to_level("X", &c, Ordinal::Finite(1));
         let composed = compose_truncations(&t_outer, &t_inner).unwrap();
-        assert_eq!(composed.level, Ordinal::Finite(1),
-            "Composition must collapse to min(m, n)");
+        assert_eq!(
+            composed.level,
+            Ordinal::Finite(1),
+            "Composition must collapse to min(m, n)"
+        );
     }
 
     #[test]
@@ -297,8 +298,10 @@ mod tests {
         let c2 = InfinityCategory::at_canonical_universe("C2", Ordinal::Finite(3));
         let t1 = truncate_to_level("X", &c1, Ordinal::Finite(2));
         let t2 = truncate_to_level("X", &c2, Ordinal::Finite(1));
-        assert!(compose_truncations(&t1, &t2).is_none(),
-            "Truncations from different categories don't compose");
+        assert!(
+            compose_truncations(&t1, &t2).is_none(),
+            "Truncations from different categories don't compose"
+        );
     }
 
     #[test]
@@ -317,8 +320,10 @@ mod tests {
         let mut t_inner = truncate_to_level("X", &c, Ordinal::Finite(1));
         t_inner.has_universal_property = false;
         let composed = compose_truncations(&t_outer, &t_inner).unwrap();
-        assert!(!composed.has_universal_property,
-            "Pathological inner must defeat composed witness");
+        assert!(
+            !composed.has_universal_property,
+            "Pathological inner must defeat composed witness"
+        );
     }
 
     // ----- MSFS level-descent integration -----
@@ -330,8 +335,11 @@ mod tests {
         let c = sample_c();
         for n in 0..4_u32 {
             let t = truncate_to_level("id_X", &c, Ordinal::Finite(n));
-            assert!(t.has_universal_property,
-                "τ_{{≤{}}}(id_X) must witness universal property", n);
+            assert!(
+                t.has_universal_property,
+                "τ_{{≤{}}}(id_X) must witness universal property",
+                n
+            );
         }
     }
 }

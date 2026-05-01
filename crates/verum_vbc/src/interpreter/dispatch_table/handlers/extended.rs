@@ -11,12 +11,12 @@
 //! that doesn't fit an existing extension namespace) wires its
 //! handler here.
 
-use crate::instruction::{ExtendedSubOpcode, Opcode};
-use crate::types::{VariantDescriptor, VariantKind};
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::instruction::{ExtendedSubOpcode, Opcode};
+use crate::types::{VariantDescriptor, VariantKind};
 
 /// Compute the expected payload-field count for a declared variant.
 ///
@@ -209,16 +209,12 @@ pub(in super::super) fn handle_extended(
             let code_reg = super::bytecode_io::read_reg(state)?;
             let code = state.get_reg(code_reg).as_integer_compatible() as i32;
             use crate::interpreter::permission::{PermissionDecision, PermissionScope};
-            if state.check_permission(PermissionScope::Process, 0)
-                == PermissionDecision::Deny
-            {
+            if state.check_permission(PermissionScope::Process, 0) == PermissionDecision::Deny {
                 use std::io::Write;
                 let _ = std::io::stdout().flush();
                 let _ = std::io::stderr().flush();
                 return Err(InterpreterError::Panic {
-                    message: format!(
-                        "permission denied: exit({code}) requires Process grant"
-                    ),
+                    message: format!("permission denied: exit({code}) requires Process grant"),
                 });
             }
             Err(InterpreterError::ProcessExit(code))

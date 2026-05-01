@@ -133,7 +133,12 @@ pub fn suggest_next_tactics(goal: &Goal, exhausted: &[&str]) -> Vec<TacticSugges
     }
 
     // -- Rule 2: syntactically-identical equality --------------------
-    if let ExprKind::Binary { op: BinOp::Eq, left, right } = &prop.kind {
+    if let ExprKind::Binary {
+        op: BinOp::Eq,
+        left,
+        right,
+    } = &prop.kind
+    {
         if expr_structurally_eq(left, right) {
             out.push(TacticSuggestion::high(
                 "refl",
@@ -189,7 +194,13 @@ pub fn suggest_next_tactics(goal: &Goal, exhausted: &[&str]) -> Vec<TacticSugges
     }
 
     // -- Rule 6: implication goal (P -> Q) ---------------------------
-    if matches!(&prop.kind, ExprKind::Binary { op: BinOp::Imply, .. }) {
+    if matches!(
+        &prop.kind,
+        ExprKind::Binary {
+            op: BinOp::Imply,
+            ..
+        }
+    ) {
         out.push(TacticSuggestion::high(
             "intro",
             "goal is an implication — introduce the hypothesis",
@@ -237,8 +248,7 @@ pub fn suggest_next_tactics(goal: &Goal, exhausted: &[&str]) -> Vec<TacticSugges
     ));
 
     // Filter out exhausted tactics, preserving suggestion order.
-    let exhausted_set: std::collections::HashSet<&str> =
-        exhausted.iter().copied().collect();
+    let exhausted_set: std::collections::HashSet<&str> = exhausted.iter().copied().collect();
     out.retain(|s| !exhausted_set.contains(s.tactic.as_str()));
 
     // Sort by confidence (High > Medium > Low). Stable sort preserves
@@ -271,8 +281,7 @@ fn is_arithmetic(e: &Expr) -> bool {
         ExprKind::Literal(lit) => {
             matches!(
                 &lit.kind,
-                verum_ast::literal::LiteralKind::Int(_)
-                    | verum_ast::literal::LiteralKind::Float(_)
+                verum_ast::literal::LiteralKind::Int(_) | verum_ast::literal::LiteralKind::Float(_)
             )
         }
         ExprKind::Binary { op, left, right } => {
@@ -282,7 +291,10 @@ fn is_arithmetic(e: &Expr) -> bool {
             ) && is_arithmetic(left)
                 && is_arithmetic(right)
         }
-        ExprKind::Unary { op: verum_ast::expr::UnOp::Neg, expr } => is_arithmetic(expr),
+        ExprKind::Unary {
+            op: verum_ast::expr::UnOp::Neg,
+            expr,
+        } => is_arithmetic(expr),
         ExprKind::Path(_) => true, // a bare variable could be Int/Real
         _ => false,
     }
@@ -297,24 +309,30 @@ fn expr_structurally_eq(a: &Expr, b: &Expr) -> bool {
         (ExprKind::Literal(la), ExprKind::Literal(lb)) => la.kind == lb.kind,
         (ExprKind::Path(pa), ExprKind::Path(pb)) => {
             pa.segments.len() == pb.segments.len()
-                && pa.segments.iter().zip(pb.segments.iter()).all(|(s1, s2)| {
-                    match (s1, s2) {
+                && pa
+                    .segments
+                    .iter()
+                    .zip(pb.segments.iter())
+                    .all(|(s1, s2)| match (s1, s2) {
                         (
                             verum_ast::ty::PathSegment::Name(i1),
                             verum_ast::ty::PathSegment::Name(i2),
                         ) => i1.name == i2.name,
                         _ => false,
-                    }
-                })
+                    })
         }
         (
-            ExprKind::Binary { op: o1, left: l1, right: r1 },
-            ExprKind::Binary { op: o2, left: l2, right: r2 },
-        ) => {
-            o1 == o2
-                && expr_structurally_eq(l1, l2)
-                && expr_structurally_eq(r1, r2)
-        }
+            ExprKind::Binary {
+                op: o1,
+                left: l1,
+                right: r1,
+            },
+            ExprKind::Binary {
+                op: o2,
+                left: l2,
+                right: r2,
+            },
+        ) => o1 == o2 && expr_structurally_eq(l1, l2) && expr_structurally_eq(r1, r2),
         _ => false,
     }
 }
@@ -406,10 +424,7 @@ impl HeuristicRegistry {
 
     /// Register a rule. Returns `Err` if a rule with the same name
     /// is already registered.
-    pub fn register(
-        &mut self,
-        rule: Box<dyn HeuristicRule>,
-    ) -> Result<(), Text> {
+    pub fn register(&mut self, rule: Box<dyn HeuristicRule>) -> Result<(), Text> {
         let name = rule.name();
         if self.rules.iter().any(|r| r.name() == name) {
             return Err(Text::from(format!(
@@ -440,9 +455,9 @@ impl HeuristicRegistry {
 mod tests {
     use super::*;
     use crate::tactic_evaluation::{Goal, Hypothesis};
+    use verum_ast::Span;
     use verum_ast::expr::{BinOp, Expr, ExprKind};
     use verum_ast::literal::{Literal, LiteralKind};
-    use verum_ast::Span;
     use verum_common::Heap;
 
     fn int_lit(n: i64) -> Expr {
@@ -476,8 +491,14 @@ mod tests {
         let sug = suggest_next_tactics(&g, &[]);
         assert!(sug.iter().any(|s| s.tactic.as_str() == "refl"));
         // Refl should outrank generic fallbacks.
-        let refl_pos = sug.iter().position(|s| s.tactic.as_str() == "refl").unwrap();
-        let auto_pos = sug.iter().position(|s| s.tactic.as_str() == "auto").unwrap();
+        let refl_pos = sug
+            .iter()
+            .position(|s| s.tactic.as_str() == "refl")
+            .unwrap();
+        let auto_pos = sug
+            .iter()
+            .position(|s| s.tactic.as_str() == "auto")
+            .unwrap();
         assert!(refl_pos < auto_pos);
     }
 
@@ -486,11 +507,12 @@ mod tests {
         let eq = binop(BinOp::Eq, int_lit(42), int_lit(42));
         let g = Goal::new(0, eq);
         let sug = suggest_next_tactics(&g, &[]);
-        assert!(sug
-            .iter()
-            .find(|s| s.tactic.as_str() == "refl")
-            .map(|s| s.confidence == Confidence::High)
-            .unwrap_or(false));
+        assert!(
+            sug.iter()
+                .find(|s| s.tactic.as_str() == "refl")
+                .map(|s| s.confidence == Confidence::High)
+                .unwrap_or(false)
+        );
     }
 
     #[test]
@@ -508,11 +530,12 @@ mod tests {
         let conj = binop(BinOp::And, bool_lit(true), bool_lit(true));
         let g = Goal::new(0, conj);
         let sug = suggest_next_tactics(&g, &[]);
-        assert!(sug
-            .iter()
-            .find(|s| s.tactic.as_str() == "split")
-            .map(|s| s.confidence == Confidence::High)
-            .unwrap_or(false));
+        assert!(
+            sug.iter()
+                .find(|s| s.tactic.as_str() == "split")
+                .map(|s| s.confidence == Confidence::High)
+                .unwrap_or(false)
+        );
     }
 
     #[test]
@@ -520,8 +543,7 @@ mod tests {
         let disj = binop(BinOp::Or, bool_lit(true), bool_lit(false));
         let g = Goal::new(0, disj);
         let sug = suggest_next_tactics(&g, &[]);
-        let tactics: Vec<&str> =
-            sug.iter().map(|s| s.tactic.as_str()).collect();
+        let tactics: Vec<&str> = sug.iter().map(|s| s.tactic.as_str()).collect();
         assert!(tactics.contains(&"left"));
         assert!(tactics.contains(&"right"));
     }
@@ -531,11 +553,12 @@ mod tests {
         let imp = binop(BinOp::Imply, bool_lit(true), bool_lit(true));
         let g = Goal::new(0, imp);
         let sug = suggest_next_tactics(&g, &[]);
-        assert!(sug
-            .iter()
-            .find(|s| s.tactic.as_str() == "intro")
-            .map(|s| s.confidence == Confidence::High)
-            .unwrap_or(false));
+        assert!(
+            sug.iter()
+                .find(|s| s.tactic.as_str() == "intro")
+                .map(|s| s.confidence == Confidence::High)
+                .unwrap_or(false)
+        );
     }
 
     #[test]
@@ -550,10 +573,7 @@ mod tests {
     #[test]
     fn assumption_suggested_when_hypothesis_matches() {
         let prop = bool_lit(true);
-        let h = Hypothesis::new(
-            verum_common::Text::from("h"),
-            prop.clone(),
-        );
+        let h = Hypothesis::new(verum_common::Text::from("h"), prop.clone());
         let mut g = Goal::new(0, prop);
         g.add_hypothesis(h);
         let sug = suggest_next_tactics(&g, &[]);
@@ -610,4 +630,3 @@ mod tests {
         }
     }
 }
-

@@ -98,12 +98,12 @@ pub use subsystems::{
 pub use context::{ConstValue, MetaContext};
 
 // Re-export sub-context types for advanced usage
+pub use contexts::execution_state::CallFrame;
+pub use contexts::security::ResourceLimits;
+pub use contexts::type_introspection::TypeAttribute;
 pub use contexts::{
     BuildConfiguration, DiagnosticsCollector, ExecutionState, SecurityContext, TypeIntrospection,
 };
-pub use contexts::execution_state::CallFrame;
-pub use contexts::type_introspection::TypeAttribute;
-pub use contexts::security::ResourceLimits;
 
 // Re-export TypeProperty from verum_ast for convenience
 pub use verum_ast::expr::TypeProperty;
@@ -112,7 +112,9 @@ pub use verum_ast::expr::TypeProperty;
 pub use builtins::BuiltinMetaFn;
 
 // Re-export metrics types
-pub use metrics::{BuiltinStats, BuiltinTimingGuard, MetaEvalMetrics, MetricsSummary, RecursionGuard};
+pub use metrics::{
+    BuiltinStats, BuiltinTimingGuard, MetaEvalMetrics, MetricsSummary, RecursionGuard,
+};
 
 // Re-export async executor types
 pub use async_executor::{MetaAsyncExecutor, ParallelTaskBuilder, TaskDependencyGraph};

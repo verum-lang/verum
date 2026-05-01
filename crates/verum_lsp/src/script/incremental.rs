@@ -457,8 +457,8 @@ fn contains_identifier(line: &str, ident: &str) -> bool {
         let not_ident = |c: char| !is_ident_char(c);
         let before_ok = verum_common::text_utf8::char_before_satisfies(line, abs_pos, not_ident)
             .unwrap_or(true);
-        let after_ok = verum_common::text_utf8::char_at_satisfies(line, after_pos, not_ident)
-            .unwrap_or(true);
+        let after_ok =
+            verum_common::text_utf8::char_at_satisfies(line, after_pos, not_ident).unwrap_or(true);
 
         if before_ok && after_ok {
             return true;

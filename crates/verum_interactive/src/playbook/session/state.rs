@@ -7,12 +7,12 @@
 //! - Cross-cell state preservation via ExecutionContext
 //! - Undo/redo history
 
-use verum_common::Text;
 use verum_ast::FileId;
+use verum_common::Text;
 
 use super::cell::{Cell, CellId, CellKind, CellOutput, TensorStats};
-use crate::execution::{ExecutionContext, ExecutionError, ExecutionPipeline};
 use crate::IncrementalScriptParser;
+use crate::execution::{ExecutionContext, ExecutionError, ExecutionPipeline};
 
 /// Session state for a playbook
 ///
@@ -192,7 +192,9 @@ impl SessionState {
     pub fn split_cell(&mut self, at_line: usize) {
         let source = self.current_cell().source.clone();
         let lines: Vec<&str> = source.as_str().lines().collect();
-        if at_line == 0 || at_line >= lines.len() { return; }
+        if at_line == 0 || at_line >= lines.len() {
+            return;
+        }
         self.save_undo_state();
         let first: String = lines[..at_line].join("\n");
         let second: String = lines[at_line..].join("\n");
@@ -345,56 +347,59 @@ impl SessionState {
         match error {
             ExecutionError::Parse(errors) => {
                 // Try to extract line:col from error messages for better display
-                let formatted: Vec<String> = errors.iter().map(|e| {
-                    // Match patterns like "line 5" or "5:10" or "at line 5, column 10"
-                    let s = e.as_str();
-                    // Already has line info — pass through
-                    if s.starts_with("[line") {
-                        return s.to_string();
-                    }
-                    // Try "line N" pattern
-                    if let Some(pos) = s.find("line ") {
-                        let after = &s[pos + 5..];
-                        if after.starts_with(|c: char| c.is_ascii_digit()) {
-                            let num: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-                            return format!("[line {}] {}", num, s);
+                let formatted: Vec<String> = errors
+                    .iter()
+                    .map(|e| {
+                        // Match patterns like "line 5" or "5:10" or "at line 5, column 10"
+                        let s = e.as_str();
+                        // Already has line info — pass through
+                        if s.starts_with("[line") {
+                            return s.to_string();
                         }
-                    }
-                    // Try "N:M" pattern at start (e.g. "3:10: unexpected token")
-                    let trimmed = s.trim_start();
-                    if let Some(colon_pos) = trimmed.find(':') {
-                        let before = &trimmed[..colon_pos];
-                        if !before.is_empty() && before.chars().all(|c| c.is_ascii_digit()) {
-                            let line_num = before;
-                            // Check for col after first colon
-                            let rest = &trimmed[colon_pos + 1..];
-                            if let Some(colon2) = rest.find(':') {
-                                let col_part = &rest[..colon2];
-                                if !col_part.is_empty() && col_part.chars().all(|c| c.is_ascii_digit()) {
-                                    return format!("[line {}:{}] {}", line_num, col_part, rest[colon2 + 1..].trim_start());
-                                }
+                        // Try "line N" pattern
+                        if let Some(pos) = s.find("line ") {
+                            let after = &s[pos + 5..];
+                            if after.starts_with(|c: char| c.is_ascii_digit()) {
+                                let num: String =
+                                    after.chars().take_while(|c| c.is_ascii_digit()).collect();
+                                return format!("[line {}] {}", num, s);
                             }
-                            return format!("[line {}] {}", line_num, rest.trim_start());
                         }
-                    }
-                    s.to_string()
-                }).collect();
+                        // Try "N:M" pattern at start (e.g. "3:10: unexpected token")
+                        let trimmed = s.trim_start();
+                        if let Some(colon_pos) = trimmed.find(':') {
+                            let before = &trimmed[..colon_pos];
+                            if !before.is_empty() && before.chars().all(|c| c.is_ascii_digit()) {
+                                let line_num = before;
+                                // Check for col after first colon
+                                let rest = &trimmed[colon_pos + 1..];
+                                if let Some(colon2) = rest.find(':') {
+                                    let col_part = &rest[..colon2];
+                                    if !col_part.is_empty()
+                                        && col_part.chars().all(|c| c.is_ascii_digit())
+                                    {
+                                        return format!(
+                                            "[line {}:{}] {}",
+                                            line_num,
+                                            col_part,
+                                            rest[colon2 + 1..].trim_start()
+                                        );
+                                    }
+                                }
+                                return format!("[line {}] {}", line_num, rest.trim_start());
+                            }
+                        }
+                        s.to_string()
+                    })
+                    .collect();
                 let message = formatted.join("\n");
-                CellOutput::error_with_suggestions(
-                    message,
-                    None,
-                    Vec::new(),
-                )
+                CellOutput::error_with_suggestions(message, None, Vec::new())
             }
             ExecutionError::Codegen(msg) => {
                 CellOutput::error(format!("Compilation error: {}", msg))
             }
-            ExecutionError::Runtime(msg) => {
-                CellOutput::error(format!("Runtime error: {}", msg))
-            }
-            ExecutionError::Type(msg) => {
-                CellOutput::error(format!("Type error: {}", msg))
-            }
+            ExecutionError::Runtime(msg) => CellOutput::error(format!("Runtime error: {}", msg)),
+            ExecutionError::Type(msg) => CellOutput::error(format!("Type error: {}", msg)),
             ExecutionError::InvalidState(msg) => {
                 CellOutput::error(format!("Invalid state: {}", msg))
             }
@@ -548,10 +553,7 @@ impl SessionState {
 
     /// Get all code cells
     pub fn code_cells(&self) -> impl Iterator<Item = (usize, &Cell)> {
-        self.cells
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.is_code())
+        self.cells.iter().enumerate().filter(|(_, c)| c.is_code())
     }
 
     /// Get cell count
@@ -566,10 +568,7 @@ impl SessionState {
 
     /// Find cell by ID
     pub fn find_cell(&self, id: CellId) -> Option<(usize, &Cell)> {
-        self.cells
-            .iter()
-            .enumerate()
-            .find(|(_, c)| c.id == id)
+        self.cells.iter().enumerate().find(|(_, c)| c.id == id)
     }
 }
 

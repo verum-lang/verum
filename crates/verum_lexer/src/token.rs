@@ -331,7 +331,7 @@ impl Token {
                     | TokenKind::Exists   // quantifier expression
                     | TokenKind::Typeof   // typeof expression
                     | TokenKind::QuoteKeyword // quote expression
-                    | TokenKind::Lift     // lift expression
+                    | TokenKind::Lift // lift expression
             )
     }
 }
@@ -1186,7 +1186,11 @@ pub enum TokenKind {
 
     /// Byte string literal: b"hello", b"\n", b"\x41\x42"
     /// Spec: grammar/verum.ebnf - byte_string_lit
-    #[regex(r#"b"([^"\\]|\\[nrt0abfv\\'"]|\\x[0-9a-fA-F]{2})*""#, parse_byte_string, priority = 120)]
+    #[regex(
+        r#"b"([^"\\]|\\[nrt0abfv\\'"]|\\x[0-9a-fA-F]{2})*""#,
+        parse_byte_string,
+        priority = 120
+    )]
     ByteString(Vec<u8>),
 
     // ===== Operators =====
@@ -1947,7 +1951,9 @@ fn parse_hexfloat_with_suffix(lex: &mut logos::Lexer<TokenKind>) -> Option<Float
 
     // Remove underscores and prefix
     let clean = num_part.replace('_', "");
-    let hex_part = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X"))?;
+    let hex_part = clean
+        .strip_prefix("0x")
+        .or_else(|| clean.strip_prefix("0X"))?;
 
     // Split mantissa and exponent at 'p' or 'P'
     let p_pos = hex_part.find(['p', 'P'])?;
@@ -2016,7 +2022,14 @@ fn split_hexfloat_suffix(s: &str) -> (&str, Maybe<Text>) {
                 // Found a letter after digits - check if preceded by underscore
                 if i > 0 && after_sign.as_bytes()[i - 1] == b'_' {
                     // This is a suffix: everything before the underscore is the number
-                    let underscore_pos = exp_start + (if after_exp.starts_with('+') || after_exp.starts_with('-') { 1 } else { 0 }) + i - 1;
+                    let underscore_pos = exp_start
+                        + (if after_exp.starts_with('+') || after_exp.starts_with('-') {
+                            1
+                        } else {
+                            0
+                        })
+                        + i
+                        - 1;
                     let num_part = &s[..underscore_pos];
                     let suffix = Text::from(&s[underscore_pos + 1..]);
                     return (num_part, Some(suffix));
@@ -2081,8 +2094,7 @@ fn parse_hex_fraction(s: &str) -> Option<f64> {
 
 /// Known type suffixes for numeric literals
 const INT_SUFFIXES: &[&str] = &[
-    "i128", "i64", "i32", "i16", "i8", "isize",
-    "u128", "u64", "u32", "u16", "u8", "usize",
+    "i128", "i64", "i32", "i16", "i8", "isize", "u128", "u64", "u32", "u16", "u8", "usize",
 ];
 const FLOAT_SUFFIXES: &[&str] = &["f64", "f32"];
 
@@ -2122,7 +2134,9 @@ fn split_numeric_suffix(s: &str) -> (&str, Maybe<Text>) {
         for suffix in INT_SUFFIXES.iter().chain(FLOAT_SUFFIXES.iter()) {
             if let Some(num_part) = s.strip_suffix(suffix) {
                 // Ensure we have at least one digit before the suffix
-                if !num_part.is_empty() && num_part.chars().last().is_some_and(|c| c.is_ascii_digit()) {
+                if !num_part.is_empty()
+                    && num_part.chars().last().is_some_and(|c| c.is_ascii_digit())
+                {
                     return (num_part, Some(Text::from(*suffix)));
                 }
             }
@@ -2200,7 +2214,8 @@ fn parse_string(lex: &mut logos::Lexer<TokenKind>) -> Option<Text> {
                         i += 1; // Skip '}'
                     }
                     // Valid simple escape sequences: \n, \r, \t, \0, \a, \b, \f, \v, \\, \", \'
-                    b'n' | b'r' | b't' | b'0' | b'a' | b'b' | b'f' | b'v' | b'\\' | b'"' | b'\'' => {
+                    b'n' | b'r' | b't' | b'0' | b'a' | b'b' | b'f' | b'v' | b'\\' | b'"'
+                    | b'\'' => {
                         i += 1;
                     }
                     // Line continuation: `\<newline>` (LF) or
@@ -2305,7 +2320,7 @@ fn parse_raw_string(lex: &mut logos::Lexer<TokenKind>) -> Option<Text> {
     // Count the # chars (between 'r' and '"')
     let hash_count = matched.len() - 2; // subtract 'r' and '"'
     let remainder = lex.remainder();
-    let closing = format!("\"{}",  "#".repeat(hash_count));
+    let closing = format!("\"{}", "#".repeat(hash_count));
 
     if let Some(pos) = remainder.find(&closing) {
         let content = &remainder[..pos];
@@ -3416,35 +3431,55 @@ mod tests {
 
         // 0x1p0 = 1.0 × 2^0 = 1.0
         if let TokenKind::Float(lit) = &tokens[0] {
-            assert!((lit.value - 1.0).abs() < 1e-10, "0x1p0 should be 1.0, got {}", lit.value);
+            assert!(
+                (lit.value - 1.0).abs() < 1e-10,
+                "0x1p0 should be 1.0, got {}",
+                lit.value
+            );
         } else {
             panic!("Token 0 should be Float, got {:?}", tokens[0]);
         }
 
         // 0x1p1 = 1.0 × 2^1 = 2.0
         if let TokenKind::Float(lit) = &tokens[1] {
-            assert!((lit.value - 2.0).abs() < 1e-10, "0x1p1 should be 2.0, got {}", lit.value);
+            assert!(
+                (lit.value - 2.0).abs() < 1e-10,
+                "0x1p1 should be 2.0, got {}",
+                lit.value
+            );
         } else {
             panic!("Token 1 should be Float, got {:?}", tokens[1]);
         }
 
         // 0x1p2 = 1.0 × 2^2 = 4.0
         if let TokenKind::Float(lit) = &tokens[2] {
-            assert!((lit.value - 4.0).abs() < 1e-10, "0x1p2 should be 4.0, got {}", lit.value);
+            assert!(
+                (lit.value - 4.0).abs() < 1e-10,
+                "0x1p2 should be 4.0, got {}",
+                lit.value
+            );
         } else {
             panic!("Token 2 should be Float, got {:?}", tokens[2]);
         }
 
         // 0x1p-1 = 1.0 × 2^-1 = 0.5
         if let TokenKind::Float(lit) = &tokens[3] {
-            assert!((lit.value - 0.5).abs() < 1e-10, "0x1p-1 should be 0.5, got {}", lit.value);
+            assert!(
+                (lit.value - 0.5).abs() < 1e-10,
+                "0x1p-1 should be 0.5, got {}",
+                lit.value
+            );
         } else {
             panic!("Token 3 should be Float, got {:?}", tokens[3]);
         }
 
         // 0x1p-2 = 1.0 × 2^-2 = 0.25
         if let TokenKind::Float(lit) = &tokens[4] {
-            assert!((lit.value - 0.25).abs() < 1e-10, "0x1p-2 should be 0.25, got {}", lit.value);
+            assert!(
+                (lit.value - 0.25).abs() < 1e-10,
+                "0x1p-2 should be 0.25, got {}",
+                lit.value
+            );
         } else {
             panic!("Token 4 should be Float, got {:?}", tokens[4]);
         }
@@ -3463,21 +3498,33 @@ mod tests {
 
         // 0x1.0p0 = 1.0 × 2^0 = 1.0
         if let TokenKind::Float(lit) = &tokens[0] {
-            assert!((lit.value - 1.0).abs() < 1e-10, "0x1.0p0 should be 1.0, got {}", lit.value);
+            assert!(
+                (lit.value - 1.0).abs() < 1e-10,
+                "0x1.0p0 should be 1.0, got {}",
+                lit.value
+            );
         } else {
             panic!("Token 0 should be Float");
         }
 
         // 0x1.8p0 = 1.5 × 2^0 = 1.5 (0x1.8 = 1 + 8/16 = 1.5)
         if let TokenKind::Float(lit) = &tokens[1] {
-            assert!((lit.value - 1.5).abs() < 1e-10, "0x1.8p0 should be 1.5, got {}", lit.value);
+            assert!(
+                (lit.value - 1.5).abs() < 1e-10,
+                "0x1.8p0 should be 1.5, got {}",
+                lit.value
+            );
         } else {
             panic!("Token 1 should be Float");
         }
 
         // 0x1.Cp0 = 1.75 × 2^0 = 1.75 (0x1.C = 1 + 12/16 = 1.75)
         if let TokenKind::Float(lit) = &tokens[2] {
-            assert!((lit.value - 1.75).abs() < 1e-10, "0x1.Cp0 should be 1.75, got {}", lit.value);
+            assert!(
+                (lit.value - 1.75).abs() < 1e-10,
+                "0x1.Cp0 should be 1.75, got {}",
+                lit.value
+            );
         } else {
             panic!("Token 2 should be Float");
         }
@@ -3503,7 +3550,11 @@ mod tests {
 
         // 0x1P+10 = 1024.0
         if let TokenKind::Float(lit) = &tokens[1] {
-            assert!((lit.value - 1024.0).abs() < 1e-10, "0x1P+10 should be 1024.0, got {}", lit.value);
+            assert!(
+                (lit.value - 1024.0).abs() < 1e-10,
+                "0x1P+10 should be 1024.0, got {}",
+                lit.value
+            );
         } else {
             panic!("Token 1 should be Float");
         }
@@ -3541,7 +3592,11 @@ mod tests {
 
         if let TokenKind::Float(lit) = &tokens[0] {
             let pi = std::f64::consts::PI;
-            assert!((lit.value - pi).abs() < 1e-14, "Should be approximately π, got {}", lit.value);
+            assert!(
+                (lit.value - pi).abs() < 1e-14,
+                "Should be approximately π, got {}",
+                lit.value
+            );
         } else {
             panic!("Token should be Float");
         }
@@ -3560,7 +3615,11 @@ mod tests {
 
         // 0x10p0 = 16.0
         if let TokenKind::Float(lit) = &tokens[0] {
-            assert!((lit.value - 16.0).abs() < 1e-10, "0x1_0p0 should be 16.0, got {}", lit.value);
+            assert!(
+                (lit.value - 16.0).abs() < 1e-10,
+                "0x1_0p0 should be 16.0, got {}",
+                lit.value
+            );
         } else {
             panic!("Token 0 should be Float");
         }
@@ -3579,12 +3638,21 @@ mod tests {
 
         // All should be Float tokens
         for (i, tok) in tokens.iter().enumerate() {
-            assert!(matches!(tok, TokenKind::Float(_)), "Token {} should be Float, got {:?}", i, tok);
+            assert!(
+                matches!(tok, TokenKind::Float(_)),
+                "Token {} should be Float, got {:?}",
+                i,
+                tok
+            );
         }
 
         // 0x1.fp0 = 1 + 15/16 = 1.9375
         if let TokenKind::Float(lit) = &tokens[5] {
-            assert!((lit.value - 1.9375).abs() < 1e-10, "0x1.fp0 should be 1.9375, got {}", lit.value);
+            assert!(
+                (lit.value - 1.9375).abs() < 1e-10,
+                "0x1.fp0 should be 1.9375, got {}",
+                lit.value
+            );
         }
     }
 
@@ -3600,10 +3668,18 @@ mod tests {
         assert_eq!(tokens.len(), 2, "Should have 2 tokens");
 
         // First should be integer
-        assert!(matches!(tokens[0], TokenKind::Integer(_)), "0xFF should be Integer, got {:?}", tokens[0]);
+        assert!(
+            matches!(tokens[0], TokenKind::Integer(_)),
+            "0xFF should be Integer, got {:?}",
+            tokens[0]
+        );
 
         // Second should be float
-        assert!(matches!(tokens[1], TokenKind::Float(_)), "0x1p0 should be Float, got {:?}", tokens[1]);
+        assert!(
+            matches!(tokens[1], TokenKind::Float(_)),
+            "0x1p0 should be Float, got {:?}",
+            tokens[1]
+        );
     }
 
     #[test]
@@ -3639,8 +3715,12 @@ mod tests {
         let mut lex = TokenKind::lexer(input3);
         eprintln!("Debugging {}", input3);
         while let Some(result) = lex.next() {
-            eprintln!("  Token: {:?}, slice: '{}', remainder: '{}'",
-                     result, lex.slice(), lex.remainder());
+            eprintln!(
+                "  Token: {:?}, slice: '{}', remainder: '{}'",
+                result,
+                lex.slice(),
+                lex.remainder()
+            );
         }
 
         // Edge cases from VCS test file - test each individually for debugging
@@ -3691,11 +3771,27 @@ mod tests {
 
         for (input, expected_val, expected_suffix) in cases {
             let tokens: Vec<_> = TokenKind::lexer(input).filter_map(|r| r.ok()).collect();
-            assert_eq!(tokens.len(), 1, "Input '{}' should produce 1 token, got {:?}", input, tokens);
+            assert_eq!(
+                tokens.len(),
+                1,
+                "Input '{}' should produce 1 token, got {:?}",
+                input,
+                tokens
+            );
 
             if let TokenKind::Integer(lit) = &tokens[0] {
-                assert_eq!(lit.as_i128(), Some(expected_val), "Value mismatch for '{}'", input);
-                assert_eq!(lit.suffix, Some(Text::from(expected_suffix)), "Suffix mismatch for '{}'", input);
+                assert_eq!(
+                    lit.as_i128(),
+                    Some(expected_val),
+                    "Value mismatch for '{}'",
+                    input
+                );
+                assert_eq!(
+                    lit.suffix,
+                    Some(Text::from(expected_suffix)),
+                    "Suffix mismatch for '{}'",
+                    input
+                );
             } else {
                 panic!("'{}' should be Integer, got {:?}", input, tokens[0]);
             }
@@ -3714,11 +3810,27 @@ mod tests {
 
         for (input, expected_val, expected_suffix) in cases {
             let tokens: Vec<_> = TokenKind::lexer(input).filter_map(|r| r.ok()).collect();
-            assert_eq!(tokens.len(), 1, "Input '{}' should produce 1 token, got {:?}", input, tokens);
+            assert_eq!(
+                tokens.len(),
+                1,
+                "Input '{}' should produce 1 token, got {:?}",
+                input,
+                tokens
+            );
 
             if let TokenKind::Integer(lit) = &tokens[0] {
-                assert_eq!(lit.as_i128(), Some(expected_val), "Value mismatch for '{}'", input);
-                assert_eq!(lit.suffix, Some(Text::from(expected_suffix)), "Suffix mismatch for '{}'", input);
+                assert_eq!(
+                    lit.as_i128(),
+                    Some(expected_val),
+                    "Value mismatch for '{}'",
+                    input
+                );
+                assert_eq!(
+                    lit.suffix,
+                    Some(Text::from(expected_suffix)),
+                    "Suffix mismatch for '{}'",
+                    input
+                );
             } else {
                 panic!("'{}' should be Integer, got {:?}", input, tokens[0]);
             }
@@ -3736,11 +3848,27 @@ mod tests {
 
         for (input, expected_val, expected_suffix) in cases {
             let tokens: Vec<_> = TokenKind::lexer(input).filter_map(|r| r.ok()).collect();
-            assert_eq!(tokens.len(), 1, "Input '{}' should produce 1 token, got {:?}", input, tokens);
+            assert_eq!(
+                tokens.len(),
+                1,
+                "Input '{}' should produce 1 token, got {:?}",
+                input,
+                tokens
+            );
 
             if let TokenKind::Integer(lit) = &tokens[0] {
-                assert_eq!(lit.as_i128(), Some(expected_val), "Value mismatch for '{}'", input);
-                assert_eq!(lit.suffix, Some(Text::from(expected_suffix)), "Suffix mismatch for '{}'", input);
+                assert_eq!(
+                    lit.as_i128(),
+                    Some(expected_val),
+                    "Value mismatch for '{}'",
+                    input
+                );
+                assert_eq!(
+                    lit.suffix,
+                    Some(Text::from(expected_suffix)),
+                    "Suffix mismatch for '{}'",
+                    input
+                );
             } else {
                 panic!("'{}' should be Integer, got {:?}", input, tokens[0]);
             }
@@ -3757,11 +3885,27 @@ mod tests {
 
         for (input, expected_val, expected_suffix) in cases {
             let tokens: Vec<_> = TokenKind::lexer(input).filter_map(|r| r.ok()).collect();
-            assert_eq!(tokens.len(), 1, "Input '{}' should produce 1 token, got {:?}", input, tokens);
+            assert_eq!(
+                tokens.len(),
+                1,
+                "Input '{}' should produce 1 token, got {:?}",
+                input,
+                tokens
+            );
 
             if let TokenKind::Integer(lit) = &tokens[0] {
-                assert_eq!(lit.as_i128(), Some(expected_val), "Value mismatch for '{}'", input);
-                assert_eq!(lit.suffix, Some(Text::from(expected_suffix)), "Suffix mismatch for '{}'", input);
+                assert_eq!(
+                    lit.as_i128(),
+                    Some(expected_val),
+                    "Value mismatch for '{}'",
+                    input
+                );
+                assert_eq!(
+                    lit.suffix,
+                    Some(Text::from(expected_suffix)),
+                    "Suffix mismatch for '{}'",
+                    input
+                );
                 assert_eq!(lit.base, 2, "Base should be 2 for '{}'", input);
             } else {
                 panic!("'{}' should be Integer, got {:?}", input, tokens[0]);
@@ -3779,11 +3923,27 @@ mod tests {
 
         for (input, expected_val, expected_suffix) in cases {
             let tokens: Vec<_> = TokenKind::lexer(input).filter_map(|r| r.ok()).collect();
-            assert_eq!(tokens.len(), 1, "Input '{}' should produce 1 token, got {:?}", input, tokens);
+            assert_eq!(
+                tokens.len(),
+                1,
+                "Input '{}' should produce 1 token, got {:?}",
+                input,
+                tokens
+            );
 
             if let TokenKind::Integer(lit) = &tokens[0] {
-                assert_eq!(lit.as_i128(), Some(expected_val), "Value mismatch for '{}'", input);
-                assert_eq!(lit.suffix, Some(Text::from(expected_suffix)), "Suffix mismatch for '{}'", input);
+                assert_eq!(
+                    lit.as_i128(),
+                    Some(expected_val),
+                    "Value mismatch for '{}'",
+                    input
+                );
+                assert_eq!(
+                    lit.suffix,
+                    Some(Text::from(expected_suffix)),
+                    "Suffix mismatch for '{}'",
+                    input
+                );
                 assert_eq!(lit.base, 8, "Base should be 8 for '{}'", input);
             } else {
                 panic!("'{}' should be Integer, got {:?}", input, tokens[0]);
@@ -3819,8 +3979,18 @@ mod tests {
             assert_eq!(tokens.len(), 1, "Input '{}' should produce 1 token", input);
 
             if let TokenKind::Integer(lit) = &tokens[0] {
-                assert_eq!(lit.as_i128(), Some(expected_val), "Value mismatch for '{}'", input);
-                assert_eq!(lit.suffix, Some(Text::from(expected_suffix)), "Suffix mismatch for '{}'", input);
+                assert_eq!(
+                    lit.as_i128(),
+                    Some(expected_val),
+                    "Value mismatch for '{}'",
+                    input
+                );
+                assert_eq!(
+                    lit.suffix,
+                    Some(Text::from(expected_suffix)),
+                    "Suffix mismatch for '{}'",
+                    input
+                );
                 assert_eq!(lit.base, 16, "Base should be 16 for '{}'", input);
             } else {
                 panic!("'{}' should be Integer", input);
@@ -3843,8 +4013,18 @@ mod tests {
             assert_eq!(tokens.len(), 1, "Input '{}' should produce 1 token", input);
 
             if let TokenKind::Integer(lit) = &tokens[0] {
-                assert_eq!(lit.as_i128(), Some(expected_val), "Value mismatch for '{}'", input);
-                assert_eq!(lit.suffix, Some(Text::from(expected_suffix)), "Suffix mismatch for '{}'", input);
+                assert_eq!(
+                    lit.as_i128(),
+                    Some(expected_val),
+                    "Value mismatch for '{}'",
+                    input
+                );
+                assert_eq!(
+                    lit.suffix,
+                    Some(Text::from(expected_suffix)),
+                    "Suffix mismatch for '{}'",
+                    input
+                );
             } else {
                 panic!("'{}' should be Integer", input);
             }
@@ -3868,8 +4048,18 @@ mod tests {
             assert_eq!(tokens.len(), 1, "Input '{}' should produce 1 token", input);
 
             if let TokenKind::Integer(lit) = &tokens[0] {
-                assert_eq!(lit.as_i128(), Some(expected_val), "Value mismatch for '{}'", input);
-                assert_eq!(lit.suffix, Some(Text::from(expected_suffix)), "Suffix mismatch for '{}'", input);
+                assert_eq!(
+                    lit.as_i128(),
+                    Some(expected_val),
+                    "Value mismatch for '{}'",
+                    input
+                );
+                assert_eq!(
+                    lit.suffix,
+                    Some(Text::from(expected_suffix)),
+                    "Suffix mismatch for '{}'",
+                    input
+                );
             } else {
                 panic!("'{}' should be Integer", input);
             }
@@ -3893,8 +4083,18 @@ mod tests {
             assert_eq!(tokens.len(), 1, "Input '{}' should produce 1 token", input);
 
             if let TokenKind::Integer(lit) = &tokens[0] {
-                assert_eq!(lit.as_i128(), Some(expected_val), "Value mismatch for '{}'", input);
-                assert_eq!(lit.suffix, expected_suffix.map(Text::from), "Suffix mismatch for '{}'", input);
+                assert_eq!(
+                    lit.as_i128(),
+                    Some(expected_val),
+                    "Value mismatch for '{}'",
+                    input
+                );
+                assert_eq!(
+                    lit.suffix,
+                    expected_suffix.map(Text::from),
+                    "Suffix mismatch for '{}'",
+                    input
+                );
             } else {
                 panic!("'{}' should be Integer", input);
             }
@@ -3913,11 +4113,26 @@ mod tests {
 
         for (input, expected_val, expected_suffix) in cases {
             let tokens: Vec<_> = TokenKind::lexer(input).filter_map(|r| r.ok()).collect();
-            assert_eq!(tokens.len(), 1, "Input '{}' should produce 1 token, got {:?}", input, tokens);
+            assert_eq!(
+                tokens.len(),
+                1,
+                "Input '{}' should produce 1 token, got {:?}",
+                input,
+                tokens
+            );
 
             if let TokenKind::Float(lit) = &tokens[0] {
-                assert!((lit.value - expected_val).abs() < 1e-10, "Value mismatch for '{}'", input);
-                assert_eq!(lit.suffix, Some(Text::from(expected_suffix)), "Suffix mismatch for '{}'", input);
+                assert!(
+                    (lit.value - expected_val).abs() < 1e-10,
+                    "Value mismatch for '{}'",
+                    input
+                );
+                assert_eq!(
+                    lit.suffix,
+                    Some(Text::from(expected_suffix)),
+                    "Suffix mismatch for '{}'",
+                    input
+                );
             } else {
                 panic!("'{}' should be Float, got {:?}", input, tokens[0]);
             }

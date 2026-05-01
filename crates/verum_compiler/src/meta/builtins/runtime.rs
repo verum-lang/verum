@@ -81,27 +81,15 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
 
     map.insert(
         Text::from("target_os"),
-        BuiltinInfo::meta_runtime(
-            meta_target_os,
-            "Get target operating system",
-            "() -> Text",
-        ),
+        BuiltinInfo::meta_runtime(meta_target_os, "Get target operating system", "() -> Text"),
     );
     map.insert(
         Text::from("target_arch"),
-        BuiltinInfo::meta_runtime(
-            meta_target_arch,
-            "Get target architecture",
-            "() -> Text",
-        ),
+        BuiltinInfo::meta_runtime(meta_target_arch, "Get target architecture", "() -> Text"),
     );
     map.insert(
         Text::from("target_triple"),
-        BuiltinInfo::meta_runtime(
-            meta_target_triple,
-            "Get full target triple",
-            "() -> Text",
-        ),
+        BuiltinInfo::meta_runtime(meta_target_triple, "Get full target triple", "() -> Text"),
     );
     map.insert(
         Text::from("target_pointer_width"),
@@ -113,11 +101,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("target_endian"),
-        BuiltinInfo::meta_runtime(
-            meta_target_endian,
-            "Get target endianness",
-            "() -> Text",
-        ),
+        BuiltinInfo::meta_runtime(meta_target_endian, "Get target endianness", "() -> Text"),
     );
     map.insert(
         Text::from("target_has_feature"),
@@ -134,11 +118,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
 
     map.insert(
         Text::from("crate_name"),
-        BuiltinInfo::meta_runtime(
-            meta_crate_name,
-            "Get current crate/cog name",
-            "() -> Text",
-        ),
+        BuiltinInfo::meta_runtime(meta_crate_name, "Get current crate/cog name", "() -> Text"),
     );
     map.insert(
         Text::from("cog_name"),
@@ -150,11 +130,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("module_path"),
-        BuiltinInfo::meta_runtime(
-            meta_module_path,
-            "Get current module path",
-            "() -> Text",
-        ),
+        BuiltinInfo::meta_runtime(meta_module_path, "Get current module path", "() -> Text"),
     );
     map.insert(
         Text::from("crate_version"),
@@ -190,11 +166,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("opt_level"),
-        BuiltinInfo::meta_runtime(
-            meta_opt_level,
-            "Get optimization level (0-3)",
-            "() -> Int",
-        ),
+        BuiltinInfo::meta_runtime(meta_opt_level, "Get optimization level (0-3)", "() -> Int"),
     );
     map.insert(
         Text::from("compiler_version"),
@@ -330,7 +302,10 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
 // ============================================================================
 
 /// Get target operating system
-fn meta_target_os(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_target_os(
+    _ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     // Use compile-time cfg to determine OS
     #[cfg(target_os = "linux")]
     let os = "linux";
@@ -344,7 +319,10 @@ fn meta_target_os(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<Con
 }
 
 /// Get target architecture
-fn meta_target_arch(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_target_arch(
+    _ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     #[cfg(target_arch = "x86_64")]
     let arch = "x86_64";
     #[cfg(target_arch = "aarch64")]
@@ -353,13 +331,21 @@ fn meta_target_arch(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<C
     let arch = "x86";
     #[cfg(target_arch = "arm")]
     let arch = "arm";
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "x86", target_arch = "arm")))]
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "x86",
+        target_arch = "arm"
+    )))]
     let arch = "unknown";
     Ok(ConstValue::Text(Text::from(arch)))
 }
 
 /// Get full target triple
-fn meta_target_triple(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_target_triple(
+    _ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     // Construct a triple from available info
     let triple = format!(
         "{}-{}-{}",
@@ -371,12 +357,18 @@ fn meta_target_triple(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result
 }
 
 /// Get pointer width in bits
-fn meta_target_pointer_width(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_target_pointer_width(
+    _ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Int((std::mem::size_of::<usize>() * 8) as i128))
 }
 
 /// Get target endianness
-fn meta_target_endian(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_target_endian(
+    _ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     #[cfg(target_endian = "little")]
     let endian = "little";
     #[cfg(target_endian = "big")]
@@ -385,9 +377,15 @@ fn meta_target_endian(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result
 }
 
 /// Check if target has a specific feature
-fn meta_target_has_feature(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_target_has_feature(
+    _ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -472,7 +470,10 @@ fn detect_target_feature(feature: &str) -> bool {
 // ============================================================================
 
 /// Get current crate/cog name
-fn meta_crate_name(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_crate_name(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     match &ctx.runtime_info.crate_name {
         Some(name) => Ok(ConstValue::Text(name.clone())),
         None => Ok(ConstValue::Text(Text::from("unknown"))),
@@ -480,7 +481,10 @@ fn meta_crate_name(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<Con
 }
 
 /// Get current module path
-fn meta_module_path(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_module_path(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     match &ctx.runtime_info.module_path {
         Some(path) => Ok(ConstValue::Text(path.clone())),
         None => Ok(ConstValue::Text(Text::from(""))),
@@ -488,11 +492,15 @@ fn meta_module_path(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<Co
 }
 
 /// Get crate/cog version
-fn meta_crate_version(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_crate_version(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     match ctx.runtime_info.crate_version {
-        Some((major, minor, patch)) => {
-            Ok(ConstValue::Text(Text::from(format!("{}.{}.{}", major, minor, patch))))
-        }
+        Some((major, minor, patch)) => Ok(ConstValue::Text(Text::from(format!(
+            "{}.{}.{}",
+            major, minor, patch
+        )))),
         None => Ok(ConstValue::Text(Text::from("0.0.0"))),
     }
 }
@@ -503,7 +511,10 @@ fn meta_is_debug(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<Const
 }
 
 /// Check if release build
-fn meta_is_release(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_is_release(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Bool(!ctx.runtime_info.is_debug))
 }
 
@@ -513,7 +524,10 @@ fn meta_opt_level(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<Cons
 }
 
 /// Get compiler version
-fn meta_compiler_version(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_compiler_version(
+    _ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Text(Text::from(env!("CARGO_PKG_VERSION"))))
 }
 
@@ -522,14 +536,24 @@ fn meta_compiler_version(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Res
 // ============================================================================
 
 /// Check if a feature is enabled
-fn meta_has_feature(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_has_feature(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
         ConstValue::Text(feature) => {
-            let has = ctx.runtime_info.enabled_features.iter().any(|f| f == feature);
+            let has = ctx
+                .runtime_info
+                .enabled_features
+                .iter()
+                .any(|f| f == feature);
             Ok(ConstValue::Bool(has))
         }
         _ => Err(MetaError::TypeMismatch {
@@ -540,7 +564,10 @@ fn meta_has_feature(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Con
 }
 
 /// Get list of enabled features
-fn meta_enabled_features(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_enabled_features(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     let features: Vec<ConstValue> = ctx
         .runtime_info
         .enabled_features
@@ -557,18 +584,19 @@ fn meta_enabled_features(ctx: &mut MetaContext, _args: List<ConstValue>) -> Resu
 /// Get environment variable
 fn meta_env(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
-        ConstValue::Text(name) => {
-            match std::env::var(name.as_str()) {
-                Ok(value) => Ok(ConstValue::Maybe(Maybe::Some(verum_common::Heap::new(
-                    ConstValue::Text(Text::from(value)),
-                )))),
-                Err(_) => Ok(ConstValue::Maybe(Maybe::None)),
-            }
-        }
+        ConstValue::Text(name) => match std::env::var(name.as_str()) {
+            Ok(value) => Ok(ConstValue::Maybe(Maybe::Some(verum_common::Heap::new(
+                ConstValue::Text(Text::from(value)),
+            )))),
+            Err(_) => Ok(ConstValue::Maybe(Maybe::None)),
+        },
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Text"),
             found: args[0].type_name(),
@@ -590,7 +618,10 @@ fn meta_is_ci(_ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstVa
 // ============================================================================
 
 /// Get runtime configuration name
-fn meta_runtime_config(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_runtime_config(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     match &ctx.runtime_info.runtime_config {
         Some(config) => Ok(ConstValue::Text(config.clone())),
         None => Ok(ConstValue::Text(Text::from("full"))),
@@ -598,40 +629,53 @@ fn meta_runtime_config(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result
 }
 
 /// Get recursion limit
-fn meta_recursion_limit(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_recursion_limit(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Int(ctx.runtime_info.recursion_limit as i128))
 }
 
 /// Get iteration limit
-fn meta_iteration_limit(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_iteration_limit(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Int(ctx.runtime_info.iteration_limit as i128))
 }
 
 /// Get memory limit
-fn meta_memory_limit(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_memory_limit(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Int(ctx.runtime_info.memory_limit as i128))
 }
 
 /// Get timeout in milliseconds
-fn meta_timeout_ms(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_timeout_ms(
+    ctx: &mut MetaContext,
+    _args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     Ok(ConstValue::Int(ctx.runtime_info.timeout_ms as i128))
 }
 
 /// Get config value by key
 fn meta_config_get(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
-        ConstValue::Text(key) => {
-            match ctx.runtime_info.config.get(key) {
-                Some(value) => Ok(ConstValue::Maybe(Maybe::Some(verum_common::Heap::new(
-                    ConstValue::Text(value.clone()),
-                )))),
-                None => Ok(ConstValue::Maybe(Maybe::None)),
-            }
-        }
+        ConstValue::Text(key) => match ctx.runtime_info.config.get(key) {
+            Some(value) => Ok(ConstValue::Maybe(Maybe::Some(verum_common::Heap::new(
+                ConstValue::Text(value.clone()),
+            )))),
+            None => Ok(ConstValue::Maybe(Maybe::None)),
+        },
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Text"),
             found: args[0].type_name(),
@@ -640,25 +684,27 @@ fn meta_config_get(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Cons
 }
 
 /// Get config value as integer
-fn meta_config_get_int(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_config_get_int(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
-        ConstValue::Text(key) => {
-            match ctx.runtime_info.config.get(key) {
-                Some(value) => {
-                    match value.parse::<i128>() {
-                        Ok(i) => Ok(ConstValue::Maybe(Maybe::Some(verum_common::Heap::new(
-                            ConstValue::Int(i),
-                        )))),
-                        Err(_) => Ok(ConstValue::Maybe(Maybe::None)),
-                    }
-                }
-                None => Ok(ConstValue::Maybe(Maybe::None)),
-            }
-        }
+        ConstValue::Text(key) => match ctx.runtime_info.config.get(key) {
+            Some(value) => match value.parse::<i128>() {
+                Ok(i) => Ok(ConstValue::Maybe(Maybe::Some(verum_common::Heap::new(
+                    ConstValue::Int(i),
+                )))),
+                Err(_) => Ok(ConstValue::Maybe(Maybe::None)),
+            },
+            None => Ok(ConstValue::Maybe(Maybe::None)),
+        },
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Text"),
             found: args[0].type_name(),
@@ -667,23 +713,27 @@ fn meta_config_get_int(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<
 }
 
 /// Get config value as boolean
-fn meta_config_get_bool(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_config_get_bool(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
-        ConstValue::Text(key) => {
-            match ctx.runtime_info.config.get(key) {
-                Some(value) => {
-                    let b = value.as_str() == "true" || value.as_str() == "1";
-                    Ok(ConstValue::Maybe(Maybe::Some(verum_common::Heap::new(
-                        ConstValue::Bool(b),
-                    ))))
-                }
-                None => Ok(ConstValue::Maybe(Maybe::None)),
+        ConstValue::Text(key) => match ctx.runtime_info.config.get(key) {
+            Some(value) => {
+                let b = value.as_str() == "true" || value.as_str() == "1";
+                Ok(ConstValue::Maybe(Maybe::Some(verum_common::Heap::new(
+                    ConstValue::Bool(b),
+                ))))
             }
-        }
+            None => Ok(ConstValue::Maybe(Maybe::None)),
+        },
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Text"),
             found: args[0].type_name(),
@@ -692,26 +742,28 @@ fn meta_config_get_bool(ctx: &mut MetaContext, args: List<ConstValue>) -> Result
 }
 
 /// Get config array by key
-fn meta_config_get_array(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_config_get_array(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
-        ConstValue::Text(key) => {
-            match ctx.runtime_info.config_arrays.get(key) {
-                Some(arr) => {
-                    let items: Vec<ConstValue> = arr
-                        .iter()
-                        .map(|s| ConstValue::Text(s.clone()))
-                        .collect();
-                    Ok(ConstValue::Maybe(Maybe::Some(verum_common::Heap::new(
-                        ConstValue::Array(List::from(items)),
-                    ))))
-                }
-                None => Ok(ConstValue::Maybe(Maybe::None)),
+        ConstValue::Text(key) => match ctx.runtime_info.config_arrays.get(key) {
+            Some(arr) => {
+                let items: Vec<ConstValue> =
+                    arr.iter().map(|s| ConstValue::Text(s.clone())).collect();
+                Ok(ConstValue::Maybe(Maybe::Some(verum_common::Heap::new(
+                    ConstValue::Array(List::from(items)),
+                ))))
             }
-        }
+            None => Ok(ConstValue::Maybe(Maybe::None)),
+        },
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Text"),
             found: args[0].type_name(),
@@ -789,7 +841,9 @@ mod tests {
     #[test]
     fn test_has_feature() {
         let mut ctx = MetaContext::new();
-        ctx.runtime_info.enabled_features.push(Text::from("test_feature"));
+        ctx.runtime_info
+            .enabled_features
+            .push(Text::from("test_feature"));
 
         let args = List::from(vec![ConstValue::Text(Text::from("test_feature"))]);
         let result = meta_has_feature(&mut ctx, args).unwrap();
@@ -814,7 +868,9 @@ mod tests {
     #[test]
     fn test_config_get() {
         let mut ctx = MetaContext::new();
-        ctx.runtime_info.config.insert(Text::from("test_key"), Text::from("test_value"));
+        ctx.runtime_info
+            .config
+            .insert(Text::from("test_key"), Text::from("test_value"));
 
         let args = List::from(vec![ConstValue::Text(Text::from("test_key"))]);
         let result = meta_config_get(&mut ctx, args).unwrap();
@@ -837,8 +893,9 @@ mod tests {
         // (every input → false); the test ensures unknown names
         // remain conservatively false post-fix.
         let mut ctx = MetaContext::new();
-        let args =
-            List::from(vec![ConstValue::Text(Text::from("nonexistent_feature_xyz"))]);
+        let args = List::from(vec![ConstValue::Text(Text::from(
+            "nonexistent_feature_xyz",
+        ))]);
         let result = meta_target_has_feature(&mut ctx, args).unwrap();
         assert_eq!(result, ConstValue::Bool(false));
     }

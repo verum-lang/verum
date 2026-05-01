@@ -299,9 +299,7 @@ impl VerifyStrategy {
             "certified" | "cross_validate" | "cross-validate" | "crossvalidate" => {
                 Some(Self::Certified)
             }
-            "coherent_static" | "coherent-static" | "coherentstatic" => {
-                Some(Self::CoherentStatic)
-            }
+            "coherent_static" | "coherent-static" | "coherentstatic" => Some(Self::CoherentStatic),
             "coherent_runtime" | "coherent-runtime" | "coherentruntime" => {
                 Some(Self::CoherentRuntime)
             }
@@ -334,19 +332,19 @@ impl VerifyStrategy {
     /// Strictly monotone in `<` — every strategy gets a distinct ordinal.
     pub fn nu_ordinal(&self) -> NuOrdinal {
         match self {
-            Self::Runtime         => NuOrdinal::Zero,
-            Self::Static          => NuOrdinal::FiniteOne,
-            Self::Fast            => NuOrdinal::FiniteTwo,
+            Self::Runtime => NuOrdinal::Zero,
+            Self::Static => NuOrdinal::FiniteOne,
+            Self::Fast => NuOrdinal::FiniteTwo,
             Self::ComplexityTyped => NuOrdinal::FiniteThree,
-            Self::Formal          => NuOrdinal::Omega,
-            Self::Proof           => NuOrdinal::OmegaPlusOne,
-            Self::Thorough        => NuOrdinal::OmegaTwice,
-            Self::Reliable        => NuOrdinal::OmegaTwicePlusOne,
-            Self::Certified       => NuOrdinal::OmegaTwicePlusTwo,
-            Self::CoherentStatic  => NuOrdinal::OmegaTwicePlusThree,
+            Self::Formal => NuOrdinal::Omega,
+            Self::Proof => NuOrdinal::OmegaPlusOne,
+            Self::Thorough => NuOrdinal::OmegaTwice,
+            Self::Reliable => NuOrdinal::OmegaTwicePlusOne,
+            Self::Certified => NuOrdinal::OmegaTwicePlusTwo,
+            Self::CoherentStatic => NuOrdinal::OmegaTwicePlusThree,
             Self::CoherentRuntime => NuOrdinal::OmegaTwicePlusFour,
-            Self::Coherent        => NuOrdinal::OmegaTwicePlusFive,
-            Self::Synthesize      => NuOrdinal::OmegaThricePlusOne,
+            Self::Coherent => NuOrdinal::OmegaTwicePlusFive,
+            Self::Synthesize => NuOrdinal::OmegaThricePlusOne,
         }
     }
 
@@ -444,10 +442,7 @@ impl VerifyStrategy {
     pub fn requires_certificate(&self) -> bool {
         matches!(
             self,
-            Self::Certified
-                | Self::CoherentStatic
-                | Self::CoherentRuntime
-                | Self::Coherent
+            Self::Certified | Self::CoherentStatic | Self::CoherentRuntime | Self::Coherent
         )
     }
 
@@ -529,16 +524,16 @@ impl VerifyStrategy {
     pub fn timeout_multiplier(&self) -> f64 {
         match self {
             Self::Runtime | Self::Static | Self::Proof => 0.0, // no SMT timeout
-            Self::Fast => 0.3,             // 30% of base (≤100ms)
-            Self::ComplexityTyped => 6.0,  // Bounded-arithmetic CI budget ≤ 30 s
-            Self::Formal => 1.0,           // base (5 s)
-            Self::Thorough => 2.0,         // 2× formal
-            Self::Reliable => 3.0,         // two solvers, agreement required
-            Self::Certified => 3.0,        // reliable + cert materialisation
-            Self::CoherentStatic => 12.0,  // Coherent verification weak — CI budget ≤ 60 s
+            Self::Fast => 0.3,                                 // 30% of base (≤100ms)
+            Self::ComplexityTyped => 6.0, // Bounded-arithmetic CI budget ≤ 30 s
+            Self::Formal => 1.0,          // base (5 s)
+            Self::Thorough => 2.0,        // 2× formal
+            Self::Reliable => 3.0,        // two solvers, agreement required
+            Self::Certified => 3.0,       // reliable + cert materialisation
+            Self::CoherentStatic => 12.0, // Coherent verification weak — CI budget ≤ 60 s
             Self::CoherentRuntime => 60.0, // Coherent verification hybrid — CI budget ≤ 5 min
-            Self::Coherent => 360.0,       // Coherent verification strict — CI budget ≤ 30 min
-            Self::Synthesize => 5.0,       // synthesis is hard
+            Self::Coherent => 360.0,      // Coherent verification strict — CI budget ≤ 30 min
+            Self::Synthesize => 5.0,      // synthesis is hard
         }
     }
 
@@ -676,8 +671,8 @@ pub fn extract_from_attributes(
 /// - `ExprKind::Path` with a single identifier: `@verify(formal)`, `@verify(z3)`, etc.
 /// - `ExprKind::Literal(Text(...))` for quoted forms: `@verify("portfolio")`.
 fn strategy_from_expr(expr: &verum_ast::Expr) -> Option<VerifyStrategy> {
-    use verum_ast::{ExprKind, LiteralKind};
     use verum_ast::ty::PathSegment;
+    use verum_ast::{ExprKind, LiteralKind};
 
     match &expr.kind {
         ExprKind::Path(path) => {
@@ -701,8 +696,7 @@ impl std::str::FromStr for VerifyStrategy {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_attribute_value(s)
-            .ok_or_else(|| format!("unknown verify strategy: {}", s))
+        Self::from_attribute_value(s).ok_or_else(|| format!("unknown verify strategy: {}", s))
     }
 }
 
@@ -851,10 +845,21 @@ mod tests {
     #[test]
     fn timeout_multipliers_monotonic() {
         // Fast < Formal < Thorough < Certified < Synthesize
-        assert!(VerifyStrategy::Fast.timeout_multiplier() < VerifyStrategy::Formal.timeout_multiplier());
-        assert!(VerifyStrategy::Formal.timeout_multiplier() < VerifyStrategy::Thorough.timeout_multiplier());
-        assert!(VerifyStrategy::Thorough.timeout_multiplier() < VerifyStrategy::Certified.timeout_multiplier());
-        assert!(VerifyStrategy::Certified.timeout_multiplier() < VerifyStrategy::Synthesize.timeout_multiplier());
+        assert!(
+            VerifyStrategy::Fast.timeout_multiplier() < VerifyStrategy::Formal.timeout_multiplier()
+        );
+        assert!(
+            VerifyStrategy::Formal.timeout_multiplier()
+                < VerifyStrategy::Thorough.timeout_multiplier()
+        );
+        assert!(
+            VerifyStrategy::Thorough.timeout_multiplier()
+                < VerifyStrategy::Certified.timeout_multiplier()
+        );
+        assert!(
+            VerifyStrategy::Certified.timeout_multiplier()
+                < VerifyStrategy::Synthesize.timeout_multiplier()
+        );
         // Runtime/Static have no timeout.
         assert_eq!(VerifyStrategy::Runtime.timeout_multiplier(), 0.0);
     }
@@ -917,8 +922,16 @@ mod tests {
             assert!(s.is_coherent(), "is_coherent({:?})", s);
             assert!(s.requires_smt(), "requires_smt({:?})", s);
             assert!(s.requires_certificate(), "requires_certificate({:?})", s);
-            assert!(s.requires_cross_validation(), "requires_cross_validation({:?})", s);
-            assert!(s.requires_explicit_specs(), "requires_explicit_specs({:?})", s);
+            assert!(
+                s.requires_cross_validation(),
+                "requires_cross_validation({:?})",
+                s
+            );
+            assert!(
+                s.requires_explicit_specs(),
+                "requires_explicit_specs({:?})",
+                s
+            );
             assert!(s.prefers_thoroughness(), "prefers_thoroughness({:?})", s);
             assert!(!s.is_synthesis(), "is_synthesis({:?})", s);
         }
@@ -937,8 +950,10 @@ mod tests {
         // Per Coherent verification + Bounded-arithmetic : the 13-strategy LADDER must keep its
         // strict-monotone ν-invariant. For each adjacent pair, rank is
         // strictly increasing.
-        let ranks: Vec<u8> =
-            VerifyStrategy::LADDER.iter().map(|s| s.nu_ordinal().rank()).collect();
+        let ranks: Vec<u8> = VerifyStrategy::LADDER
+            .iter()
+            .map(|s| s.nu_ordinal().rank())
+            .collect();
         for window in ranks.windows(2) {
             assert!(
                 window[0] < window[1],
@@ -958,7 +973,11 @@ mod tests {
         let cr = VerifyStrategy::CoherentRuntime.timeout_multiplier() * base_seconds;
         let cc = VerifyStrategy::Coherent.timeout_multiplier() * base_seconds;
         assert!(cs <= 60.0, "CoherentStatic budget exceeds 60 s: {}", cs);
-        assert!(cr <= 5.0 * 60.0, "CoherentRuntime budget exceeds 5 min: {}", cr);
+        assert!(
+            cr <= 5.0 * 60.0,
+            "CoherentRuntime budget exceeds 5 min: {}",
+            cr
+        );
         assert!(cc <= 30.0 * 60.0, "Coherent budget exceeds 30 min: {}", cc);
         // Strict order weak < hybrid < strict.
         assert!(cs < cr);
@@ -1002,10 +1021,10 @@ mod tests {
     // Tests for attribute extraction from AST
     // ========================================================================
 
-    use verum_ast::{Expr, ExprKind, Literal, LiteralKind, Span};
+    use verum_ast::attr::Attribute;
     use verum_ast::literal::StringLit;
     use verum_ast::ty::{Path, PathSegment};
-    use verum_ast::attr::Attribute;
+    use verum_ast::{Expr, ExprKind, Literal, LiteralKind, Span};
     use verum_common::{List, Text};
 
     fn make_path_expr(name: &str) -> Expr {
@@ -1013,10 +1032,7 @@ mod tests {
             name: Text::from(name),
             span: Span::default(),
         };
-        let path = Path::new(
-            List::from(vec![PathSegment::Name(ident)]),
-            Span::default(),
-        );
+        let path = Path::new(List::from(vec![PathSegment::Name(ident)]), Span::default());
         Expr::new(ExprKind::Path(path), Span::default())
     }
 
@@ -1043,7 +1059,10 @@ mod tests {
     fn extract_from_path_identifier() {
         let attr = make_attr("verify", make_path_expr("formal"));
         let attrs = List::from(vec![attr]);
-        assert_eq!(extract_from_attributes(&attrs), Some(VerifyStrategy::Formal));
+        assert_eq!(
+            extract_from_attributes(&attrs),
+            Some(VerifyStrategy::Formal)
+        );
     }
 
     #[test]

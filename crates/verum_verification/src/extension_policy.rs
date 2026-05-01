@@ -187,16 +187,14 @@ impl EnabledExtensions {
     fn absorb_attrs(&mut self, attrs: &verum_common::List<Attribute>) {
         for attr in attrs.iter() {
             match ExtensionRequirementAttr::from_attribute(attr) {
-                Maybe::Some(parsed) => {
-                    match parsed.kind {
-                        ExtensionToggleKind::Require => {
-                            self.explicitly_required.insert(parsed.extension);
-                        }
-                        ExtensionToggleKind::Disable => {
-                            self.explicitly_disabled.insert(parsed.extension);
-                        }
+                Maybe::Some(parsed) => match parsed.kind {
+                    ExtensionToggleKind::Require => {
+                        self.explicitly_required.insert(parsed.extension);
                     }
-                }
+                    ExtensionToggleKind::Disable => {
+                        self.explicitly_disabled.insert(parsed.extension);
+                    }
+                },
                 Maybe::None => {}
             }
         }
@@ -211,9 +209,7 @@ fn item_attrs(item: &Item) -> Option<&verum_common::List<Attribute>> {
     match &item.kind {
         ItemKind::Function(f) => Some(&f.attributes),
         ItemKind::Type(t) => Some(&t.attributes),
-        ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => {
-            Some(&d.attributes)
-        }
+        ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => Some(&d.attributes),
         ItemKind::Axiom(a) => Some(&a.attributes),
         _ => None,
     }
@@ -222,15 +218,20 @@ fn item_attrs(item: &Item) -> Option<&verum_common::List<Attribute>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_ast::{Ident, Span};
     use verum_ast::expr::{Expr, ExprKind};
     use verum_ast::ty::PathSegment;
+    use verum_ast::{Ident, Span};
     use verum_common::List;
 
-    fn span() -> Span { Span::default() }
+    fn span() -> Span {
+        Span::default()
+    }
 
     fn ident(name: &str) -> Ident {
-        Ident { name: Text::from(name), span: span() }
+        Ident {
+            name: Text::from(name),
+            span: span(),
+        }
     }
 
     fn path_arg(name: &str) -> Expr {

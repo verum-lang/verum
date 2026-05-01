@@ -7,10 +7,10 @@ use crate::support::LLVMString;
 use crate::types::enums::BasicMetadataTypeEnum;
 use crate::types::traits::AsTypeRef;
 
+use crate::AddressSpace;
 use crate::types::ScalableVectorType;
 use crate::types::{ArrayType, FunctionType, PointerType, Type, VectorType};
 use crate::values::{ArrayValue, FloatValue, GenericValue, IntValue};
-use crate::AddressSpace;
 
 use std::fmt::{self, Display};
 
@@ -48,7 +48,11 @@ impl<'ctx> FloatType<'ctx> {
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[], false);
     /// ```
-    pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type(
+        self,
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+        is_var_args: bool,
+    ) -> FunctionType<'ctx> {
         self.float_type.fn_type(param_types, is_var_args)
     }
 
@@ -267,7 +271,9 @@ impl<'ctx> FloatType<'ctx> {
 
     /// assert_eq!(f32_ptr_type.get_element_type().into_float_type(), f32_type);
     /// ```
-    #[deprecated(note = "Starting from version 15.0, LLVM doesn't differentiate between pointer types. Use Context::ptr_type instead.")]
+    #[deprecated(
+        note = "Starting from version 15.0, LLVM doesn't differentiate between pointer types. Use Context::ptr_type instead."
+    )]
     pub fn ptr_type(self, address_space: AddressSpace) -> PointerType<'ctx> {
         self.float_type.ptr_type(address_space)
     }
@@ -295,7 +301,8 @@ impl<'ctx> FloatType<'ctx> {
             verum_llvm_sys::LLVMTypeKind::LLVMFloatTypeKind => 32,
             verum_llvm_sys::LLVMTypeKind::LLVMDoubleTypeKind => 64,
             verum_llvm_sys::LLVMTypeKind::LLVMX86_FP80TypeKind => 80,
-            verum_llvm_sys::LLVMTypeKind::LLVMFP128TypeKind | verum_llvm_sys::LLVMTypeKind::LLVMPPC_FP128TypeKind => 128,
+            verum_llvm_sys::LLVMTypeKind::LLVMFP128TypeKind
+            | verum_llvm_sys::LLVMTypeKind::LLVMPPC_FP128TypeKind => 128,
             _ => unreachable!(),
         }
     }

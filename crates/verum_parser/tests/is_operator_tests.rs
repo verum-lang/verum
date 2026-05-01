@@ -18,7 +18,7 @@
 //! The `is` operator is used for pattern testing in Verum.
 //! Tests for is operator: pattern testing via x is Pattern syntax
 
-use verum_ast::{FileId, Module, Expr, ExprKind};
+use verum_ast::{Expr, ExprKind, FileId, Module};
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 
@@ -38,7 +38,9 @@ fn parse_module(source: &str) -> Result<Module, String> {
 fn parse_expr(source: &str) -> Result<Expr, String> {
     let file_id = FileId::new(0);
     let parser = VerumParser::new();
-    parser.parse_expr_str(source, file_id).map_err(|e| format!("{:?}", e))
+    parser
+        .parse_expr_str(source, file_id)
+        .map_err(|e| format!("{:?}", e))
 }
 
 fn assert_parses(source: &str) {
@@ -47,65 +49,76 @@ fn assert_parses(source: &str) {
 
 #[test]
 fn test_basic_is_expression() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn test() {
     let x = Some(1);
     let b = x is Some(_);
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_is_in_if_condition_no_parens() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn test() {
     let value = Some(42);
     if value is Some(x) {
         x + 1
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_is_in_if_condition_with_parens() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn test() {
     let value = Some(42);
     if (value is Some(x)) {
         x + 1
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_is_in_while_condition_no_parens() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn test() {
     let mut result = Some(10);
     while result is Some(n) {
         result = None;
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_is_in_while_condition_with_parens() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn test() {
     let mut result = Some(10);
     while (result is Some(n)) {
         result = None;
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_is_with_qualified_path_if() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
 type Maybe<T> is None | Some(T);
 fn test() {
     let value: Maybe<Int> = Maybe.Some(42);
@@ -113,12 +126,14 @@ fn test() {
         x
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_is_with_qualified_path_while() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
 type Maybe<T> is None | Some(T);
 fn test() {
     let mut result: Maybe<Int> = Maybe.Some(10);
@@ -130,7 +145,8 @@ fn test() {
         }
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
@@ -152,60 +168,71 @@ fn test_is_not_expression_only() {
 #[test]
 fn test_is_not_some_in_if() {
     // Minimal test case with Some instead of None
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn test() {
     if value is not Some(_) { }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_is_none_in_if_without_not() {
     // Test is None without negation
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn test() {
     if value is None { }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_is_not_in_simple_if() {
     // Minimal test case
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn test() {
     if value is not None { }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_is_not_in_if_with_parens() {
     // This should work with parentheses
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn test() {
     if (value is not None) { }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_is_not_pattern() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
 fn test() {
     let value = Some(42);
     if value is not None {
         42
     }
 }
-"#);
+"#,
+    );
 }
 
 /// Test the complete VCS is_operator.vr spec file
 #[test]
 fn test_vcs_is_operator_spec() {
     // This mirrors the content of vcs/specs/L0-critical/builtin-syntax/is_operator.vr
-    assert_parses(r#"
+    assert_parses(
+        r#"
 type Maybe<T> is None | Some(T);
 type Result<T, E> is Ok(T) | Err(E);
 
@@ -247,5 +274,6 @@ fn test_is_operator() -> Int {
 fn main() -> Int {
     test_is_operator()
 }
-"#);
+"#,
+    );
 }

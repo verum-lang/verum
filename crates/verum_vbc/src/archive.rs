@@ -43,15 +43,15 @@
 //! ```
 
 use std::collections::HashMap;
-use std::io::{self, Read, Write, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::deserialize::{deserialize_module, deserialize_module_validated};
 use crate::error::{VbcError, VbcResult};
 use crate::module::VbcModule;
 use crate::serialize::serialize_module;
-use crate::deserialize::{deserialize_module, deserialize_module_validated};
 
 // ============================================================================
 // Compression Support (VBC Optimization Audit Phase 3)
@@ -274,7 +274,12 @@ pub fn strip_module_metadata(module: &mut VbcModule, flags: ArchiveFlags) {
     let strip_constraints = flags.contains(ArchiveFlags::STRIP_CONSTRAINTS);
 
     for type_desc in &mut module.types {
-        strip_type_metadata(type_desc, strip_field_names, strip_variant_names, strip_constraints);
+        strip_type_metadata(
+            type_desc,
+            strip_field_names,
+            strip_variant_names,
+            strip_constraints,
+        );
     }
 
     // Also strip source map if not needed for debugging
@@ -487,10 +492,12 @@ impl VbcArchive {
 
     /// If the archive is compressed, the module data is automatically decompressed.
     pub fn load_module(&self, name: &str) -> VbcResult<VbcModule> {
-        let entry_idx = self.get_entry_index(name)
+        let entry_idx = self
+            .get_entry_index(name)
             .ok_or_else(|| VbcError::ArchiveError(format!("Module not found: {}", name)))?;
 
-        let data = self.get_module_data(entry_idx)
+        let data = self
+            .get_module_data(entry_idx)
             .ok_or_else(|| VbcError::ArchiveError(format!("Module data not found: {}", name)))?;
 
         // Decompress if archive is compressed
@@ -519,10 +526,12 @@ impl VbcArchive {
     /// invariants checked. Cost is O(N) in total instruction count
     /// across all functions in the module.
     pub fn load_module_validated(&self, name: &str) -> VbcResult<VbcModule> {
-        let entry_idx = self.get_entry_index(name)
+        let entry_idx = self
+            .get_entry_index(name)
             .ok_or_else(|| VbcError::ArchiveError(format!("Module not found: {}", name)))?;
 
-        let data = self.get_module_data(entry_idx)
+        let data = self
+            .get_module_data(entry_idx)
             .ok_or_else(|| VbcError::ArchiveError(format!("Module data not found: {}", name)))?;
 
         let decompressed = if self.header.flags.contains(ArchiveFlags::COMPRESSED) {
@@ -651,7 +660,8 @@ impl ArchiveBuilder {
         // Check for duplicate
         if self.name_to_index.contains_key(name) {
             return Err(VbcError::ArchiveError(format!(
-                "Duplicate module: {}", name
+                "Duplicate module: {}",
+                name
             )));
         }
 
@@ -662,9 +672,12 @@ impl ArchiveBuilder {
                 self.name_to_index
                     .get(*dep_name)
                     .map(|&idx| idx as u32)
-                    .ok_or_else(|| VbcError::ArchiveError(format!(
-                        "Unknown dependency: {} (required by {})", dep_name, name
-                    )))
+                    .ok_or_else(|| {
+                        VbcError::ArchiveError(format!(
+                            "Unknown dependency: {} (required by {})",
+                            dep_name, name
+                        ))
+                    })
             })
             .collect::<VbcResult<Vec<_>>>()?;
 
@@ -712,9 +725,9 @@ impl ArchiveBuilder {
         let flags = self.archive.header.flags;
         let has_strip_flags = flags.intersects(
             ArchiveFlags::STRIP_FIELD_NAMES
-            | ArchiveFlags::STRIP_VARIANT_NAMES
-            | ArchiveFlags::STRIP_CONSTRAINTS
-            | ArchiveFlags::STRIP_PROTOCOL_DETAILS
+                | ArchiveFlags::STRIP_VARIANT_NAMES
+                | ArchiveFlags::STRIP_CONSTRAINTS
+                | ArchiveFlags::STRIP_PROTOCOL_DETAILS,
         );
 
         if has_strip_flags {
@@ -757,9 +770,9 @@ impl ArchiveBuilder {
     ) -> VbcResult<usize> {
         let has_strip_flags = strip_flags.intersects(
             ArchiveFlags::STRIP_FIELD_NAMES
-            | ArchiveFlags::STRIP_VARIANT_NAMES
-            | ArchiveFlags::STRIP_CONSTRAINTS
-            | ArchiveFlags::STRIP_PROTOCOL_DETAILS
+                | ArchiveFlags::STRIP_VARIANT_NAMES
+                | ArchiveFlags::STRIP_CONSTRAINTS
+                | ArchiveFlags::STRIP_PROTOCOL_DETAILS,
         );
 
         if has_strip_flags {
@@ -851,10 +864,10 @@ pub fn write_archive<W: Write>(archive: &VbcArchive, mut writer: W) -> io::Resul
 /// These bounds reflect "no real-world Verum archive ever
 /// approaches this" — any input that exceeds them is rejected as
 /// malformed before any allocation is performed.
-const MAX_MODULES_PER_ARCHIVE: u32 = 1 << 16;       // 65 536
-const MAX_MODULE_NAME_BYTES: u32 = 1 << 14;         // 16 KB
-const MAX_DEPS_PER_MODULE: u32 = 1 << 12;           // 4 096
-const MAX_MODULE_DATA_BYTES: u64 = 1 << 30;         // 1 GB
+const MAX_MODULES_PER_ARCHIVE: u32 = 1 << 16; // 65 536
+const MAX_MODULE_NAME_BYTES: u32 = 1 << 14; // 16 KB
+const MAX_DEPS_PER_MODULE: u32 = 1 << 12; // 4 096
+const MAX_MODULE_DATA_BYTES: u64 = 1 << 30; // 1 GB
 
 /// Read a VBC archive from `reader` and validate its header,
 /// magic bytes, and per-section bounds. Hostile archives that
@@ -866,7 +879,10 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
     let mut magic = [0u8; 4];
     reader.read_exact(&mut magic)?;
     if magic != ARCHIVE_MAGIC {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid archive magic"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid archive magic",
+        ));
     }
 
     let mut buf2 = [0u8; 2];
@@ -1176,7 +1192,9 @@ mod tests {
         let module2 = VbcModule::new("collections".to_string());
 
         builder.add_module("core", &module1, &[]).unwrap();
-        builder.add_module("collections", &module2, &["core"]).unwrap();
+        builder
+            .add_module("collections", &module2, &["core"])
+            .unwrap();
 
         let archive = builder.finish();
 
@@ -1207,7 +1225,9 @@ mod tests {
         // Add in non-dependency order
         builder.add_module("core", &module1, &[]).unwrap();
         builder.add_module("text", &module2, &["core"]).unwrap();
-        builder.add_module("collections", &module3, &["core", "text"]).unwrap();
+        builder
+            .add_module("collections", &module3, &["core", "text"])
+            .unwrap();
 
         let archive = builder.finish();
 
@@ -1250,7 +1270,9 @@ mod tests {
 
     #[test]
     fn test_strip_field_names() {
-        use crate::types::{FieldDescriptor, TypeDescriptor, TypeId, TypeKind, TypeRef, Visibility};
+        use crate::types::{
+            FieldDescriptor, TypeDescriptor, TypeId, TypeKind, TypeRef, Visibility,
+        };
 
         let mut module = VbcModule::new("test".to_string());
 
@@ -1293,7 +1315,9 @@ mod tests {
 
     #[test]
     fn test_strip_variant_names() {
-        use crate::types::{TypeDescriptor, TypeId, TypeKind, TypeRef, VariantDescriptor, VariantKind};
+        use crate::types::{
+            TypeDescriptor, TypeId, TypeKind, TypeRef, VariantDescriptor, VariantKind,
+        };
 
         let mut module = VbcModule::new("test".to_string());
 
@@ -1351,7 +1375,9 @@ mod tests {
 
     #[test]
     fn test_archive_builder_applies_stripping() {
-        use crate::types::{FieldDescriptor, TypeDescriptor, TypeId, TypeKind, TypeRef, Visibility};
+        use crate::types::{
+            FieldDescriptor, TypeDescriptor, TypeId, TypeKind, TypeRef, Visibility,
+        };
 
         let mut module = VbcModule::new("test".to_string());
 
@@ -1372,21 +1398,23 @@ mod tests {
         module.types.push(type_desc);
 
         // Create archive builder with strip flag
-        let mut builder = ArchiveBuilder::new()
-            .with_flags(ArchiveFlags::STRIP_FIELD_NAMES);
+        let mut builder = ArchiveBuilder::new().with_flags(ArchiveFlags::STRIP_FIELD_NAMES);
 
         builder.add_module("test", &module, &[]).unwrap();
 
         let archive = builder.finish();
 
         // Deserialize the module and verify field name is stripped
-        let loaded_module = crate::deserialize::deserialize_module(&archive.module_data[0]).unwrap();
+        let loaded_module =
+            crate::deserialize::deserialize_module(&archive.module_data[0]).unwrap();
         assert_eq!(loaded_module.types[0].fields[0].name, StringId::EMPTY);
     }
 
     #[test]
     fn test_estimate_stripping_savings() {
-        use crate::types::{FieldDescriptor, TypeDescriptor, TypeId, TypeKind, TypeRef, Visibility};
+        use crate::types::{
+            FieldDescriptor, TypeDescriptor, TypeId, TypeKind, TypeRef, Visibility,
+        };
 
         let mut module = VbcModule::new("test".to_string());
 
@@ -1412,10 +1440,8 @@ mod tests {
         }
 
         // Estimate savings
-        let (original, stripped) = super::estimate_stripping_savings(
-            &module,
-            ArchiveFlags::STRIP_FIELD_NAMES
-        );
+        let (original, stripped) =
+            super::estimate_stripping_savings(&module, ArchiveFlags::STRIP_FIELD_NAMES);
 
         // With 10 types × 5 fields × 8 bytes/field = 400 bytes expected savings
         assert!(original > stripped);
@@ -1429,13 +1455,16 @@ mod tests {
     #[test]
     fn test_compress_decompress_roundtrip() {
         // Create test data with some repetition (compresses well)
-        let original: Vec<u8> = (0..1000).flat_map(|i| {
-            vec![
-                (i % 256) as u8,
-                ((i / 256) % 256) as u8,
-                0xAA, 0xBB, // Repeated pattern
-            ]
-        }).collect();
+        let original: Vec<u8> = (0..1000)
+            .flat_map(|i| {
+                vec![
+                    (i % 256) as u8,
+                    ((i / 256) % 256) as u8,
+                    0xAA,
+                    0xBB, // Repeated pattern
+                ]
+            })
+            .collect();
 
         let compressed = super::compress_data(&original, 3).unwrap();
         let decompressed = super::decompress_data(&compressed).unwrap();
@@ -1446,10 +1475,12 @@ mod tests {
     #[test]
     fn test_compress_handles_incompressible_data() {
         // Create random-like data that doesn't compress well
-        let original: Vec<u8> = (0..100).map(|i| {
-            // Simple PRNG-like sequence
-            ((i * 31 + 17) % 256) as u8
-        }).collect();
+        let original: Vec<u8> = (0..100)
+            .map(|i| {
+                // Simple PRNG-like sequence
+                ((i * 31 + 17) % 256) as u8
+            })
+            .collect();
 
         let compressed = super::compress_data(&original, 3).unwrap();
         let decompressed = super::decompress_data(&compressed).unwrap();
@@ -1459,8 +1490,7 @@ mod tests {
 
     #[test]
     fn test_compressed_archive_roundtrip() {
-        let mut builder = ArchiveBuilder::new()
-            .with_compression();
+        let mut builder = ArchiveBuilder::new().with_compression();
 
         // Add test modules with some data
         let mut module1 = VbcModule::new("core".to_string());
@@ -1471,7 +1501,9 @@ mod tests {
         module2.bytecode = vec![0x10, 0x20, 0x30, 0x40, 0x50];
 
         builder.add_module("core", &module1, &[]).unwrap();
-        builder.add_module("collections", &module2, &["core"]).unwrap();
+        builder
+            .add_module("collections", &module2, &["core"])
+            .unwrap();
 
         let archive = builder.finish();
 
@@ -1506,15 +1538,16 @@ mod tests {
 
         // Build uncompressed archive
         let mut uncompressed_builder = ArchiveBuilder::new();
-        uncompressed_builder.add_module("test", &module, &[]).unwrap();
+        uncompressed_builder
+            .add_module("test", &module, &[])
+            .unwrap();
         let uncompressed_archive = uncompressed_builder.finish();
 
         let mut uncompressed_bytes = Vec::new();
         write_archive(&uncompressed_archive, &mut uncompressed_bytes).unwrap();
 
         // Build compressed archive
-        let mut compressed_builder = ArchiveBuilder::new()
-            .with_compression();
+        let mut compressed_builder = ArchiveBuilder::new().with_compression();
         compressed_builder.add_module("test", &module, &[]).unwrap();
         let compressed_archive = compressed_builder.finish();
 

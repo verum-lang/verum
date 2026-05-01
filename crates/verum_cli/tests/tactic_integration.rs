@@ -167,9 +167,8 @@ fn tactic_explain_resolves_every_canonical_combinator() {
             name,
             String::from_utf8_lossy(&out.stderr)
         );
-        let parsed: serde_json::Value =
-            serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
-                .unwrap_or_else(|e| panic!("explain {}: invalid JSON: {e}", name));
+        let parsed: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
+            .unwrap_or_else(|e| panic!("explain {}: invalid JSON: {e}", name));
         assert_eq!(parsed["name"], name);
         assert!(parsed["signature"].is_string());
         assert!(parsed["semantics"].is_string());
@@ -306,10 +305,9 @@ fn list_and_explain_agree_on_signatures() {
     // Pin the contract that `list --format json` and `explain --format json`
     // produce identical signature / semantics strings for every combinator.
     let list_out = run(&["tactic", "list", "--format", "json"]);
-    let list = serde_json::from_str::<serde_json::Value>(
-        &String::from_utf8_lossy(&list_out.stdout),
-    )
-    .unwrap();
+    let list =
+        serde_json::from_str::<serde_json::Value>(&String::from_utf8_lossy(&list_out.stdout))
+            .unwrap();
     let entries = list["entries"].as_array().unwrap();
 
     for e in entries {

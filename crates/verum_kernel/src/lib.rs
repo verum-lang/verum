@@ -120,9 +120,8 @@ pub mod proof_checker;
 /// docs for the split and the structural-sketch contract.
 pub mod reflection;
 pub use reflection::{
-    KERNEL_RULE_NAMES, ReflectedJudgment, ReflectedKernelRule,
-    ReflectedTerm, ReflectionError, is_reflected_well_formed,
-    reflect_kernel_rule,
+    KERNEL_RULE_NAMES, ReflectedJudgment, ReflectedKernelRule, ReflectedTerm, ReflectionError,
+    is_reflected_well_formed, reflect_kernel_rule,
 };
 
 /// Interactive proof-state explorer — current surface (#319 / #189).
@@ -136,8 +135,8 @@ pub use reflection::{
 /// the same surface.
 pub mod proof_view;
 pub use proof_view::{
-    ContextSnapshot, NamedHypothesis, ProofGoal, ProofState,
-    ProofStepSnapshot, opaque_placeholder, snapshot_proof_state,
+    ContextSnapshot, NamedHypothesis, ProofGoal, ProofState, ProofStepSnapshot, opaque_placeholder,
+    snapshot_proof_state,
 };
 
 pub mod tactic_elaborator;
@@ -207,9 +206,8 @@ pub use errors::KernelError;
 /// UIP-shape detection helpers used by AxiomRegistry.
 pub mod inductive;
 pub use inductive::{
-    ConstructorSig, InductiveRegistry, PathCtorSig, PositivityCtx,
-    RegisteredInductive, check_strict_positivity, eliminator_type,
-    point_constructor_case_type,
+    ConstructorSig, InductiveRegistry, PathCtorSig, PositivityCtx, RegisteredInductive,
+    check_strict_positivity, eliminator_type, point_constructor_case_type,
 };
 
 /// Depth functions for kernel rules — split . Hosts
@@ -293,8 +291,8 @@ pub use ordinal::Ordinal;
 /// Future-work promotion paths documented in module-level docs.
 pub mod infinity_category;
 pub use infinity_category::{
-    CellLevel, InfinityCategory, InfinityEquivalence, InfinityMorphism,
-    compose, compose_is_associative, identity_is_equivalence, is_equivalence_at,
+    CellLevel, InfinityCategory, InfinityEquivalence, InfinityMorphism, compose,
+    compose_is_associative, identity_is_equivalence, is_equivalence_at,
 };
 
 /// HTT 5.1.4 ∞-Grothendieck construction — algorithmic kernel rule.
@@ -310,9 +308,7 @@ pub use infinity_category::{
 /// Future work: full ∞-categorical higher-cell content (associator
 /// 2-cells, pentagonal coherence) — gates Theorem 9.3 Step 1.
 pub mod grothendieck;
-pub use grothendieck::{
-    GrothendieckConstruction, SIndexedDiagram, build_grothendieck,
-};
+pub use grothendieck::{GrothendieckConstruction, SIndexedDiagram, build_grothendieck};
 
 /// Adámek-Rosický 1.26 — λ-filtered colimit closure of κ-accessible
 /// categories. algorithmic kernel rule. Discharges the
@@ -322,8 +318,8 @@ pub use grothendieck::{
 /// ships the constructive closure operation itself.
 pub mod accessibility;
 pub use accessibility::{
-    FilteredColimit, KappaAccessibleCategory, LambdaFilteredDiagram,
-    build_filtered_colimit, cofinality_bound_holds,
+    FilteredColimit, KappaAccessibleCategory, LambdaFilteredDiagram, build_filtered_colimit,
+    cofinality_bound_holds,
 };
 
 /// Yoneda embedding (HTT 1.2.1) + ∞-Kan extensions (HTT 4.3.3.7) —
@@ -352,9 +348,8 @@ pub use accessibility::{
 /// coherence cells).
 pub mod yoneda;
 pub use yoneda::{
-    KanExtension, Presheaf, YonedaEmbedding, YonedaLemma,
-    build_kan_extension, kan_extension_unit_witness,
-    presheaf_category, yoneda_embedding, yoneda_lemma,
+    KanExtension, Presheaf, YonedaEmbedding, YonedaLemma, build_kan_extension,
+    kan_extension_unit_witness, presheaf_category, yoneda_embedding, yoneda_lemma,
 };
 
 /// Cartesian fibrations (HTT 3.1) + Straightening/Unstraightening
@@ -382,8 +377,8 @@ pub use yoneda::{
 pub mod cartesian_fibration;
 pub use cartesian_fibration::{
     CartesianFibration, CartesianMorphism, StraighteningEquivalence,
-    build_straightening_equivalence, fibration_is_unstraightened,
-    is_cartesian, unstraighten_to_grothendieck,
+    build_straightening_equivalence, fibration_is_unstraightened, is_cartesian,
+    unstraighten_to_grothendieck,
 };
 
 /// Adjoint Functor Theorem (HTT 5.5.2.9 / Special AFT) — V0
@@ -408,9 +403,8 @@ pub use cartesian_fibration::{
 /// with full pentagonal coherence between composition and identity.
 pub mod adjoint_functor;
 pub use adjoint_functor::{
-    Adjunction, AdjunctionDirection, SaftPreconditions,
-    build_adjunction, compose_adjunctions, left_adjoint_exists,
-    right_adjoint_exists, triangle_identities_witness,
+    Adjunction, AdjunctionDirection, SaftPreconditions, build_adjunction, compose_adjunctions,
+    left_adjoint_exists, right_adjoint_exists, triangle_identities_witness,
 };
 
 /// Whitehead criterion for (∞, n)-equivalence (HTT 1.2.4.3
@@ -437,9 +431,8 @@ pub use adjoint_functor::{
 /// of trust-then-verify on the witness flag.
 pub mod whitehead;
 pub use whitehead::{
-    KanComplexLift, PiLevelIso, WhiteheadCriterion,
-    is_equivalence_via_whitehead, weak_equivalence_lifts_in_kan_complex,
-    whitehead_promote,
+    KanComplexLift, PiLevelIso, WhiteheadCriterion, is_equivalence_via_whitehead,
+    weak_equivalence_lifts_in_kan_complex, whitehead_promote,
 };
 
 /// Reflective subcategories (HTT 5.2.7) — algorithmic kernel rule.
@@ -463,8 +456,8 @@ pub use whitehead::{
 /// cells with full pentagonal coherence.
 pub mod reflective_subcategory;
 pub use reflective_subcategory::{
-    ReflectiveSubcategory, build_reflective_subcategory,
-    idempotency_witness, is_reflective, reflector_unit_is_localisation,
+    ReflectiveSubcategory, build_reflective_subcategory, idempotency_witness, is_reflective,
+    reflector_unit_is_localisation,
 };
 
 /// Limits and colimits in (∞,1)-categories — algorithmic kernel
@@ -494,12 +487,10 @@ pub use reflective_subcategory::{
 /// with full pentagonal coherence cells.
 pub mod limits_colimits;
 pub use limits_colimits::{
-    Colimit, ColimitDiagram, Limit, LimitDiagram, LimitShape,
-    build_coequaliser, build_equaliser, build_initial, build_pullback,
-    build_pushout, build_terminal, colimit_universal_property,
-    compute_colimit_in_psh, compute_limit_in_psh,
-    limit_universal_property, presheaf_admits_colimits,
-    presheaf_admits_limits, presheaf_is_bicomplete,
+    Colimit, ColimitDiagram, Limit, LimitDiagram, LimitShape, build_coequaliser, build_equaliser,
+    build_initial, build_pullback, build_pushout, build_terminal, colimit_universal_property,
+    compute_colimit_in_psh, compute_limit_in_psh, limit_universal_property,
+    presheaf_admits_colimits, presheaf_admits_limits, presheaf_is_bicomplete,
     promote_limit_to_level,
 };
 
@@ -527,9 +518,8 @@ pub use limits_colimits::{
 /// level-descent traces.
 pub mod truncation;
 pub use truncation::{
-    Truncation, compose_truncations, is_n_truncated,
-    n_truncated_objects_closed_under_limits, truncate_to_level,
-    truncation_is_localisation, truncation_left_adjoint_to_inclusion,
+    Truncation, compose_truncations, is_n_truncated, n_truncated_objects_closed_under_limits,
+    truncate_to_level, truncation_is_localisation, truncation_left_adjoint_to_inclusion,
     truncation_unit_witness,
 };
 
@@ -561,9 +551,8 @@ pub use truncation::{
 pub mod factorisation;
 pub use factorisation::{
     Factorisation, FactorisationSystem, build_epi_mono_factorisation,
-    build_localisation_factorisation, build_n_truncation_factorisation,
-    closure_under_composition, factorisation_uniqueness, factorise,
-    is_orthogonal,
+    build_localisation_factorisation, build_n_truncation_factorisation, closure_under_composition,
+    factorisation_uniqueness, factorise, is_orthogonal,
 };
 
 /// Pronk's bicategory of fractions — algorithmic kernel rule
@@ -589,8 +578,8 @@ pub use factorisation::{
 /// composition + full bicategorical 2-cell content.
 pub mod pronk_fractions;
 pub use pronk_fractions::{
-    BicatOfFractions, PronkAxioms, Span, build_bicat_of_fractions,
-    compose_spans, universal_2_functor,
+    BicatOfFractions, PronkAxioms, Span, build_bicat_of_fractions, compose_spans,
+    universal_2_functor,
 };
 
 /// (∞,1)-topos infrastructure — algorithmic kernel rule
@@ -623,9 +612,8 @@ pub use pronk_fractions::{
 /// universal-colimit content (the current surface trusts the witness flags).
 pub mod infinity_topos;
 pub use infinity_topos::{
-    GiraudAxioms, InfinityTopos, build_infinity_topos,
-    is_infinity_topos, left_exact_localisation_witness,
-    presheaf_category_is_topos,
+    GiraudAxioms, InfinityTopos, build_infinity_topos, is_infinity_topos,
+    left_exact_localisation_witness, presheaf_category_is_topos,
 };
 
 /// Kernel self-recognition vs. ZFC + 2 inaccessibles — V0
@@ -651,9 +639,8 @@ pub use infinity_topos::{
 /// surface.
 pub mod zfc_self_recognition;
 pub use zfc_self_recognition::{
-    InaccessibleLevel, KernelRuleId, MetaTheoryRequirements,
-    SelfRecognitionAudit, ZfcAxiom, is_zfc_plus_2_inacc_provable,
-    required_meta_theory,
+    InaccessibleLevel, KernelRuleId, MetaTheoryRequirements, SelfRecognitionAudit, ZfcAxiom,
+    is_zfc_plus_2_inacc_provable, required_meta_theory,
 };
 
 /// Recursive functions + Gödel coding — algorithmic kernel rule.
@@ -678,9 +665,8 @@ pub use zfc_self_recognition::{
 /// [`decode_term`] (ships symbol-level cells).
 pub mod godel_coding;
 pub use godel_coding::{
-    GodelEncoding, MuRecursive, PrimitiveRecursive,
-    cantor_pair, cantor_unpair, decode_list, encode_list,
-    is_mu_recursive, is_primitive_recursive, representable_in_pa,
+    GodelEncoding, MuRecursive, PrimitiveRecursive, cantor_pair, cantor_unpair, decode_list,
+    encode_list, is_mu_recursive, is_primitive_recursive, representable_in_pa,
 };
 
 /// Industrial-grade tactic infrastructure — algorithmic kernel
@@ -703,10 +689,8 @@ pub use godel_coding::{
 /// time relative to its size.
 pub mod tactics_industrial;
 pub use tactics_industrial::{
-    BoolFormula, CongruenceEquation, EautoHint, InductionSplit,
-    LinearConstraint, LinearRelation, TacticOutcome,
-    tactic_congruence, tactic_decide, tactic_eauto, tactic_induction,
-    tactic_lia,
+    BoolFormula, CongruenceEquation, EautoHint, InductionSplit, LinearConstraint, LinearRelation,
+    TacticOutcome, tactic_congruence, tactic_decide, tactic_eauto, tactic_induction, tactic_lia,
 };
 
 /// Cross-format CI hard gate — algorithmic kernel rule. Decides
@@ -715,8 +699,8 @@ pub use tactics_industrial::{
 /// Isabelle/HOL, Dedukti). Used by `verum audit --cross-format`.
 pub mod cross_format_gate;
 pub use cross_format_gate::{
-    CrossFormatReport, ExportFormat, FormatStatus,
-    evaluate_gate, format_replay_command, required_formats_for_msfs,
+    CrossFormatReport, ExportFormat, FormatStatus, evaluate_gate, format_replay_command,
+    required_formats_for_msfs,
 };
 
 /// Mechanisation roadmap — algorithmic kernel surface enumerating
@@ -726,8 +710,7 @@ pub use cross_format_gate::{
 /// queries comparable across releases.
 pub mod mechanisation_roadmap;
 pub use mechanisation_roadmap::{
-    CoverageReport, MechanisationStatus, RoadmapEntry,
-    adamek_rosicky_roadmap, htt_roadmap,
+    CoverageReport, MechanisationStatus, RoadmapEntry, adamek_rosicky_roadmap, htt_roadmap,
     msfs_self_contained, msfs_unmechanised_dependencies,
 };
 
@@ -739,8 +722,8 @@ pub use mechanisation_roadmap::{
 /// caller's invocation convention.
 pub mod intrinsic_dispatch;
 pub use intrinsic_dispatch::{
-    IntrinsicValue, available_intrinsics, dispatch_intrinsic,
-    is_known_intrinsic, missing_dispatchers,
+    IntrinsicValue, available_intrinsics, dispatch_intrinsic, is_known_intrinsic,
+    missing_dispatchers,
 };
 
 /// Meta-circular kernel soundness export — the cross-tool
@@ -751,9 +734,8 @@ pub use intrinsic_dispatch::{
 /// architectural rationale (one trait, multiple instances).
 pub mod soundness;
 pub use soundness::{
-    EXPECTED_KERNEL_RULE_COUNT, LemmaStatus, RuleCategory, RuleSpec,
-    SoundnessBackend, SoundnessExporter, canonical_rules,
-    coq::CoqBackend, lean::LeanBackend,
+    EXPECTED_KERNEL_RULE_COUNT, LemmaStatus, RuleCategory, RuleSpec, SoundnessBackend,
+    SoundnessExporter, canonical_rules, coq::CoqBackend, lean::LeanBackend,
 };
 
 /// Differential-kernel testing harness (#159) — Rust ↔ Verum kernel
@@ -766,9 +748,8 @@ pub use soundness::{
 /// online.
 pub mod differential;
 pub use differential::{
-    DifferentialAgreement, DifferentialOutcome, DifferentialReport,
-    KernelVerdict, differential_test_rule, run_differential_test,
-    run_differential_test_with_verum,
+    DifferentialAgreement, DifferentialOutcome, DifferentialReport, KernelVerdict,
+    differential_test_rule, run_differential_test, run_differential_test_with_verum,
 };
 
 /// Supporting kernel operations — `shape_of`, `substitute`,
@@ -779,8 +760,8 @@ pub use differential::{
 pub mod support;
 pub use support::{
     EpsInvariant, NORMALIZE_STEP_LIMIT, convert_eps_to_md_omega, definitional_eq,
-    definitional_eq_with_axioms, free_vars, is_face_bot, is_face_top, is_interval_one,
-    normalize, normalize_with_axioms, normalize_with_inductives, replay_smt_cert,
+    definitional_eq_with_axioms, free_vars, is_face_bot, is_face_top, is_interval_one, normalize,
+    normalize_with_axioms, normalize_with_inductives, replay_smt_cert,
     replay_smt_cert_with_obligation, shape_of, structural_eq, substitute,
 };
 
@@ -788,9 +769,7 @@ pub use support::{
 /// results keyed on a stable structural hash of the input term.
 /// Mirror of `verum_smt::tactics::TacticCache` for the kernel side.
 pub mod normalize_cache;
-pub use normalize_cache::{
-    AxiomAwareKey, NormalizeCache, NormalizeCacheStats, StructuralHash,
-};
+pub use normalize_cache::{AxiomAwareKey, NormalizeCache, NormalizeCacheStats, StructuralHash};
 
 /// Axiom registry + AST loader — split . Hosts
 /// `AxiomRegistry`, `RegisteredAxiom`, `LoadAxiomsReport`, and
@@ -798,9 +777,9 @@ pub use normalize_cache::{
 /// rejected to preserve cubical-univalence soundness.
 pub mod axiom;
 pub use axiom::{
-    AxiomRegistry, LoadAxiomsReport, RegisteredAxiom, SubsingletonRegime,
-    load_framework_axioms, load_framework_axioms_legacy_unchecked,
-    load_framework_axioms_strict, load_framework_axioms_with_regime,
+    AxiomRegistry, LoadAxiomsReport, RegisteredAxiom, SubsingletonRegime, load_framework_axioms,
+    load_framework_axioms_legacy_unchecked, load_framework_axioms_strict,
+    load_framework_axioms_with_regime,
 };
 
 /// Kernel typing judgment — split . Hosts the core LCF
@@ -826,9 +805,9 @@ pub use term::{CoreTerm, CoreType, UniverseLevel};
 pub mod codegen_attestation;
 pub use codegen_attestation::{
     AttestationStatus, CODEGEN_PASS_COUNT, CodegenPassId, PassAttestation,
-    admitted_count as codegen_admitted_count,
-    attested_count as codegen_attested_count, manifest as codegen_manifest,
-    pass_count as codegen_pass_count, pending_count as codegen_pending_count,
+    admitted_count as codegen_admitted_count, attested_count as codegen_attested_count,
+    manifest as codegen_manifest, pass_count as codegen_pass_count,
+    pending_count as codegen_pending_count,
 };
 
 /// SMT certificate envelope — `SmtCertificate` +
@@ -840,4 +819,3 @@ pub use cert::{CERTIFICATE_SCHEMA_VERSION, SmtCertificate};
 /// `FrameworkId`. Split V7.
 pub mod ctx;
 pub use ctx::{Context, FrameworkId, KernelCoord, check_coord_cite};
-

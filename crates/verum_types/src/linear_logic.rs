@@ -447,10 +447,7 @@ mod tests {
         let nnf = f.negation_normal_form();
         assert_eq!(
             nnf,
-            LinForm::why_not(LinForm::par(
-                LinForm::dual_of(a()),
-                LinForm::dual_of(b())
-            ))
+            LinForm::why_not(LinForm::par(LinForm::dual_of(a()), LinForm::dual_of(b())))
         );
     }
 }

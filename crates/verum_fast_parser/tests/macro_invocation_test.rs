@@ -25,8 +25,8 @@
 //! rejected with helpful error messages suggesting the Verum equivalents.
 
 use verum_ast::{Expr, ExprKind, FileId};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse_expr(input: &str) -> Expr {
     let file_id = FileId::new(0);

@@ -37,7 +37,6 @@ use verum_ast::{
     ty::Path,
 };
 
-
 // ==================== Benchmark Infrastructure ====================
 
 /// Helper to create integer literal
@@ -281,9 +280,11 @@ fn bench_trivial_queries(c: &mut Criterion) {
     // Simple bound: x > 0
     let simple_bound = binop(BinOp::Gt, var("x"), int_lit(0));
 
-    let queries = [("tautology", tautology),
+    let queries = [
+        ("tautology", tautology),
         ("contradiction", contradiction),
-        ("simple_bound", simple_bound)];
+        ("simple_bound", simple_bound),
+    ];
 
     for (name, expr) in queries.iter() {
         group.bench_function(format!("z3_{}", name), |b| {
@@ -325,8 +326,10 @@ fn bench_moderate_queries(c: &mut Criterion) {
         binop(BinOp::And, binop(BinOp::And, c1, c2), c3)
     };
 
-    let queries = [("three_var_system", three_var_system),
-        ("nested_constraints", nested)];
+    let queries = [
+        ("three_var_system", three_var_system),
+        ("nested_constraints", nested),
+    ];
 
     for (name, expr) in queries.iter() {
         group.bench_function(format!("z3_{}", name), |b| {

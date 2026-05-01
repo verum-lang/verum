@@ -33,10 +33,7 @@ pub enum MarshalError {
         to: CTypeRuntime,
     },
     /// Value out of range for target type.
-    ValueOutOfRange {
-        value: String,
-        target: CTypeRuntime,
-    },
+    ValueOutOfRange { value: String, target: CTypeRuntime },
     /// Invalid string (contains null bytes).
     InvalidString(String),
     /// Invalid pointer.
@@ -195,14 +192,14 @@ impl Marshaller {
 
                     // Determine element size in C buffer
                     let c_elem_size = match info.element_type {
-                        0x01 => 1,  // i8
-                        0x02 => 2,  // i16
-                        0x03 => 4,  // i32
-                        0x04 => 8,  // i64
-                        0x05 => 4,  // f32
-                        0x06 => 8,  // f64
-                        0x07 => 8,  // ptr
-                        _ => 8,     // default to i64 size
+                        0x01 => 1, // i8
+                        0x02 => 2, // i16
+                        0x03 => 4, // i32
+                        0x04 => 8, // i64
+                        0x05 => 4, // f32
+                        0x06 => 8, // f64
+                        0x07 => 8, // ptr
+                        _ => 8,    // default to i64 size
                     };
 
                     // Convert each C element back to a Value
@@ -250,7 +247,10 @@ impl Marshaller {
         write_back_reg: Option<u16>,
     ) -> Result<u64, MarshalError> {
         // For pointer types, allocate temporary storage for non-pointer values
-        if matches!(target, CTypeRuntime::Ptr | CTypeRuntime::StructPtr(_) | CTypeRuntime::ArrayPtr) {
+        if matches!(
+            target,
+            CTypeRuntime::Ptr | CTypeRuntime::StructPtr(_) | CTypeRuntime::ArrayPtr
+        ) {
             // If it's already a pointer, just pass it through
             if value.is_ptr() {
                 return Ok(value.as_ptr::<u8>() as u64);
@@ -458,9 +458,8 @@ impl Marshaller {
             return match target {
                 CTypeRuntime::CStr => {
                     // Null-terminated C string
-                    let cstring = CString::new(s.as_str()).map_err(|_| {
-                        MarshalError::InvalidString(s.as_str().to_string())
-                    })?;
+                    let cstring = CString::new(s.as_str())
+                        .map_err(|_| MarshalError::InvalidString(s.as_str().to_string()))?;
                     let ptr = cstring.as_ptr() as u64;
                     self.string_cache.push(cstring);
                     Ok(ptr)
@@ -469,9 +468,8 @@ impl Marshaller {
                     // Raw byte pointer (for write() etc.)
                     // String data is NOT null-terminated in this case
                     // We use CString internally to ensure stable memory
-                    let cstring = CString::new(s.as_str()).map_err(|_| {
-                        MarshalError::InvalidString(s.as_str().to_string())
-                    })?;
+                    let cstring = CString::new(s.as_str())
+                        .map_err(|_| MarshalError::InvalidString(s.as_str().to_string()))?;
                     let ptr = cstring.as_ptr() as u64;
                     self.string_cache.push(cstring);
                     Ok(ptr)
@@ -520,9 +518,10 @@ impl Marshaller {
             CTypeRuntime::Bool => Ok(Value::from_bool(raw != 0)),
 
             // Pointers
-            CTypeRuntime::Ptr | CTypeRuntime::StructPtr(_) | CTypeRuntime::ArrayPtr | CTypeRuntime::FnPtr => {
-                Ok(Value::from_ptr(raw as *mut u8))
-            }
+            CTypeRuntime::Ptr
+            | CTypeRuntime::StructPtr(_)
+            | CTypeRuntime::ArrayPtr
+            | CTypeRuntime::FnPtr => Ok(Value::from_ptr(raw as *mut u8)),
 
             // C string - return as pointer, caller can convert to string
             CTypeRuntime::CStr => {
@@ -544,7 +543,6 @@ impl Marshaller {
             }
         }
     }
-
 }
 
 impl Default for Marshaller {
@@ -589,15 +587,21 @@ mod tests {
         let mut marshaller = Marshaller::new();
 
         // i32 conversion
-        let raw = marshaller.value_to_c(Value::from_i64(42), CTypeRuntime::I32).unwrap();
+        let raw = marshaller
+            .value_to_c(Value::from_i64(42), CTypeRuntime::I32)
+            .unwrap();
         assert_eq!(raw as i32, 42);
 
         // Negative i32
-        let raw = marshaller.value_to_c(Value::from_i64(-42), CTypeRuntime::I32).unwrap();
+        let raw = marshaller
+            .value_to_c(Value::from_i64(-42), CTypeRuntime::I32)
+            .unwrap();
         assert_eq!(raw as i32, -42);
 
         // u32 conversion
-        let raw = marshaller.value_to_c(Value::from_i64(42), CTypeRuntime::U32).unwrap();
+        let raw = marshaller
+            .value_to_c(Value::from_i64(42), CTypeRuntime::U32)
+            .unwrap();
         assert_eq!(raw as u32, 42);
 
         // u32 overflow check
@@ -610,11 +614,15 @@ mod tests {
         let mut marshaller = Marshaller::new();
 
         // f64 conversion
-        let raw = marshaller.value_to_c(Value::from_f64(3.14), CTypeRuntime::F64).unwrap();
+        let raw = marshaller
+            .value_to_c(Value::from_f64(3.14), CTypeRuntime::F64)
+            .unwrap();
         assert_eq!(f64::from_bits(raw), 3.14);
 
         // f32 conversion (with precision loss)
-        let raw = marshaller.value_to_c(Value::from_f64(3.14), CTypeRuntime::F32).unwrap();
+        let raw = marshaller
+            .value_to_c(Value::from_f64(3.14), CTypeRuntime::F32)
+            .unwrap();
         let result = f32::from_bits(raw as u32);
         assert!((result - 3.14_f32).abs() < 0.0001);
     }
@@ -629,7 +637,9 @@ mod tests {
         assert_eq!(value.as_i64(), 42);
 
         // Negative i32 to Value
-        let value = marshaller.c_to_value((-42i32) as u64, CTypeRuntime::I32).unwrap();
+        let value = marshaller
+            .c_to_value((-42i32) as u64, CTypeRuntime::I32)
+            .unwrap();
         assert!(value.is_int());
         assert_eq!(value.as_i64(), -42);
 
@@ -670,11 +680,15 @@ mod tests {
         let mut marshaller = Marshaller::new();
 
         // Nil to pointer
-        let raw = marshaller.value_to_c(Value::nil(), CTypeRuntime::Ptr).unwrap();
+        let raw = marshaller
+            .value_to_c(Value::nil(), CTypeRuntime::Ptr)
+            .unwrap();
         assert_eq!(raw, 0);
 
         // Unit to void
-        let raw = marshaller.value_to_c(Value::unit(), CTypeRuntime::Void).unwrap();
+        let raw = marshaller
+            .value_to_c(Value::unit(), CTypeRuntime::Void)
+            .unwrap();
         assert_eq!(raw, 0);
     }
 }

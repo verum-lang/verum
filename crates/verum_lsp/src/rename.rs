@@ -629,12 +629,7 @@ impl SyntaxTreeRenameProvider {
     }
 
     /// Find all occurrences of a symbol using the syntax tree.
-    pub fn find_occurrences(
-        &self,
-        source: &str,
-        file_id: FileId,
-        symbol_name: &str,
-    ) -> Vec<Range> {
+    pub fn find_occurrences(&self, source: &str, file_id: FileId, symbol_name: &str) -> Vec<Range> {
         let result = self.parser.parse(source, file_id);
         let root = result.syntax();
 

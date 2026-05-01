@@ -61,7 +61,10 @@ fn encode_instructions(instructions: &[Instruction]) -> Vec<u8> {
 #[test]
 fn test_generator_creation() {
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
 
@@ -76,7 +79,10 @@ fn test_generator_creation() {
 #[test]
 fn test_generator_creation_invalid_function() {
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
 
@@ -85,10 +91,7 @@ fn test_generator_creation_invalid_function() {
 
     // Try to create generator from non-existent function
     let result = interp.create_generator(FunctionId(999));
-    assert!(matches!(
-        result,
-        Err(InterpreterError::FunctionNotFound(_))
-    ));
+    assert!(matches!(result, Err(InterpreterError::FunctionNotFound(_))));
 }
 
 #[test]
@@ -112,9 +115,15 @@ fn test_generator_resume_invalid_id() {
 #[test]
 fn test_single_yield() {
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
         Instruction::Yield { value: Reg(0) },
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
 
@@ -135,13 +144,25 @@ fn test_single_yield() {
 #[test]
 fn test_multiple_yields() {
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        },
         Instruction::Yield { value: Reg(0) },
-        Instruction::LoadSmallI { dst: Reg(0), value: 2 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 2,
+        },
         Instruction::Yield { value: Reg(0) },
-        Instruction::LoadSmallI { dst: Reg(0), value: 3 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 3,
+        },
         Instruction::Yield { value: Reg(0) },
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
 
@@ -169,7 +190,10 @@ fn test_multiple_yields() {
 #[test]
 fn test_immediate_return() {
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 99 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 99,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
 
@@ -191,8 +215,14 @@ fn test_immediate_return() {
 fn test_register_preservation() {
     // Generator that accumulates: r0 = 0; r0 += 10; yield; r0 += 20; yield
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 10 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 10,
+        },
         Instruction::BinaryI {
             op: BinaryIntOp::Add,
             dst: Reg(0),
@@ -200,7 +230,10 @@ fn test_register_preservation() {
             b: Reg(1),
         },
         Instruction::Yield { value: Reg(0) }, // yields 10
-        Instruction::LoadSmallI { dst: Reg(1), value: 20 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 20,
+        },
         Instruction::BinaryI {
             op: BinaryIntOp::Add,
             dst: Reg(0),
@@ -236,11 +269,19 @@ fn test_register_preservation() {
 fn test_multiple_registers() {
     // Use multiple registers and verify they're all preserved
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 2 },
-        Instruction::LoadSmallI { dst: Reg(2), value: 3 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 2,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 3,
+        },
         Instruction::Yield { value: Reg(0) }, // yields 1
-
         // All registers should still have their values
         Instruction::BinaryI {
             op: BinaryIntOp::Add,
@@ -254,7 +295,7 @@ fn test_multiple_registers() {
             a: Reg(3),
             b: Reg(2),
         }, // r3 = 3 + 3 = 6
-        Instruction::Yield { value: Reg(3) },  // yields 6
+        Instruction::Yield { value: Reg(3) }, // yields 6
         Instruction::Ret { value: Reg(3) },
     ]);
 
@@ -280,9 +321,15 @@ fn test_multiple_registers() {
 #[test]
 fn test_independent_generators() {
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        },
         Instruction::Yield { value: Reg(0) },
-        Instruction::LoadSmallI { dst: Reg(0), value: 2 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 2,
+        },
         Instruction::Yield { value: Reg(0) },
         Instruction::Ret { value: Reg(0) },
     ]);
@@ -318,7 +365,10 @@ fn test_independent_generators() {
 #[test]
 fn test_many_generators() {
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 100 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 100,
+        },
         Instruction::Yield { value: Reg(0) },
         Instruction::Ret { value: Reg(0) },
     ]);
@@ -351,7 +401,10 @@ fn test_many_generators() {
 #[test]
 fn test_generator_stats() {
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        },
         Instruction::Yield { value: Reg(0) },
         Instruction::Ret { value: Reg(0) },
     ]);
@@ -383,7 +436,10 @@ fn test_generator_stats() {
 #[test]
 fn test_generator_has_next() {
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        },
         Instruction::Yield { value: Reg(0) },
         Instruction::Ret { value: Reg(0) },
     ]);
@@ -412,7 +468,10 @@ fn test_generator_has_next() {
 #[test]
 fn test_resume_completed_generator() {
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
 
@@ -438,10 +497,16 @@ fn test_many_yields() {
     // Generator with 20 yields
     let mut instructions = Vec::new();
     for i in 0..20i8 {
-        instructions.push(Instruction::LoadSmallI { dst: Reg(0), value: i });
+        instructions.push(Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: i,
+        });
         instructions.push(Instruction::Yield { value: Reg(0) });
     }
-    instructions.push(Instruction::LoadSmallI { dst: Reg(0), value: 0 });
+    instructions.push(Instruction::LoadSmallI {
+        dst: Reg(0),
+        value: 0,
+    });
     instructions.push(Instruction::Ret { value: Reg(0) });
 
     let bytecode = encode_instructions(&instructions);
@@ -470,10 +535,16 @@ fn test_fibonacci_generator() {
     // Fibonacci: yield 0, 1, 1, 2, 3
     let bytecode = encode_instructions(&[
         // yield 0
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
         Instruction::Yield { value: Reg(0) },
         // r1 = 1
-        Instruction::LoadSmallI { dst: Reg(1), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 1,
+        },
         Instruction::Yield { value: Reg(1) }, // yield 1
         // r2 = r0 + r1 = 1
         Instruction::BinaryI {
@@ -484,8 +555,14 @@ fn test_fibonacci_generator() {
         },
         Instruction::Yield { value: Reg(2) },
         // r0 = r1, r1 = r2
-        Instruction::Mov { dst: Reg(0), src: Reg(1) },
-        Instruction::Mov { dst: Reg(1), src: Reg(2) },
+        Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        },
         // r2 = r0 + r1 = 2
         Instruction::BinaryI {
             op: BinaryIntOp::Add,
@@ -494,8 +571,14 @@ fn test_fibonacci_generator() {
             b: Reg(1),
         },
         Instruction::Yield { value: Reg(2) },
-        Instruction::Mov { dst: Reg(0), src: Reg(1) },
-        Instruction::Mov { dst: Reg(1), src: Reg(2) },
+        Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        },
         // r2 = r0 + r1 = 3
         Instruction::BinaryI {
             op: BinaryIntOp::Add,
@@ -505,7 +588,10 @@ fn test_fibonacci_generator() {
         },
         Instruction::Yield { value: Reg(2) },
         // return
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
 
@@ -548,14 +634,27 @@ fn test_gen_create_opcode() {
     //  yield 42
     //  ret 0
     let main_bytecode = encode_instructions(&[
-        Instruction::GenCreate { dst: Reg(0), func_id: 1, args: RegRange { start: Reg(0), count: 0 } },
+        Instruction::GenCreate {
+            dst: Reg(0),
+            func_id: 1,
+            args: RegRange {
+                start: Reg(0),
+                count: 0,
+            },
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
 
     let gen_bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
         Instruction::Yield { value: Reg(0) },
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
 
@@ -586,7 +685,11 @@ fn test_gen_create_opcode() {
     let result = interp.execute_function(FunctionId(0)).unwrap();
 
     // Result should be a generator value
-    assert!(result.is_generator(), "Expected generator value, got {:?}", result);
+    assert!(
+        result.is_generator(),
+        "Expected generator value, got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -599,15 +702,31 @@ fn test_gen_has_next_opcode() {
     //  r1 = gen_has_next(r0) // Should be true (Created)
     //  ret r1
     let main_bytecode = encode_instructions(&[
-        Instruction::GenCreate { dst: Reg(0), func_id: 1, args: RegRange { start: Reg(0), count: 0 } },
-        Instruction::GenHasNext { dst: Reg(1), generator: Reg(0) },
+        Instruction::GenCreate {
+            dst: Reg(0),
+            func_id: 1,
+            args: RegRange {
+                start: Reg(0),
+                count: 0,
+            },
+        },
+        Instruction::GenHasNext {
+            dst: Reg(1),
+            generator: Reg(0),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
 
     let gen_bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
         Instruction::Yield { value: Reg(0) },
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
 
@@ -649,8 +768,14 @@ fn test_gen_has_next_type_error() {
     //  r1 = gen_has_next(r0) // Should fail
     //  ret r1
     let bytecode = encode_instructions(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::GenHasNext { dst: Reg(1), generator: Reg(0) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::GenHasNext {
+            dst: Reg(1),
+            generator: Reg(0),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
 
@@ -659,16 +784,20 @@ fn test_gen_has_next_type_error() {
     let result = interp.execute_function(FunctionId(0));
 
     // Should return a type mismatch error
-    assert!(matches!(
-        result,
-        Err(InterpreterError::TypeMismatch { .. })
-    ));
+    assert!(matches!(result, Err(InterpreterError::TypeMismatch { .. })));
 }
 
 #[test]
 fn test_bytecode_roundtrip_gen_create() {
     // Verify GenCreate bytecode encode/decode roundtrip
-    let original = Instruction::GenCreate { dst: Reg(5), func_id: 42, args: RegRange { start: Reg(0), count: 2 } };
+    let original = Instruction::GenCreate {
+        dst: Reg(5),
+        func_id: 42,
+        args: RegRange {
+            start: Reg(0),
+            count: 2,
+        },
+    };
     let mut encoded = Vec::new();
     bytecode::encode_instruction(&original, &mut encoded);
 
@@ -677,14 +806,24 @@ fn test_bytecode_roundtrip_gen_create() {
 
     assert!(matches!(
         decoded,
-        Instruction::GenCreate { dst: Reg(5), func_id: 42, args: RegRange { start: Reg(0), count: 2 } }
+        Instruction::GenCreate {
+            dst: Reg(5),
+            func_id: 42,
+            args: RegRange {
+                start: Reg(0),
+                count: 2
+            }
+        }
     ));
 }
 
 #[test]
 fn test_bytecode_roundtrip_gen_next() {
     // Verify GenNext bytecode encode/decode roundtrip
-    let original = Instruction::GenNext { dst: Reg(3), generator: Reg(7) };
+    let original = Instruction::GenNext {
+        dst: Reg(3),
+        generator: Reg(7),
+    };
     let mut encoded = Vec::new();
     bytecode::encode_instruction(&original, &mut encoded);
 
@@ -693,14 +832,20 @@ fn test_bytecode_roundtrip_gen_next() {
 
     assert!(matches!(
         decoded,
-        Instruction::GenNext { dst: Reg(3), generator: Reg(7) }
+        Instruction::GenNext {
+            dst: Reg(3),
+            generator: Reg(7)
+        }
     ));
 }
 
 #[test]
 fn test_bytecode_roundtrip_gen_has_next() {
     // Verify GenHasNext bytecode encode/decode roundtrip
-    let original = Instruction::GenHasNext { dst: Reg(0), generator: Reg(1) };
+    let original = Instruction::GenHasNext {
+        dst: Reg(0),
+        generator: Reg(1),
+    };
     let mut encoded = Vec::new();
     bytecode::encode_instruction(&original, &mut encoded);
 
@@ -709,7 +854,10 @@ fn test_bytecode_roundtrip_gen_has_next() {
 
     assert!(matches!(
         decoded,
-        Instruction::GenHasNext { dst: Reg(0), generator: Reg(1) }
+        Instruction::GenHasNext {
+            dst: Reg(0),
+            generator: Reg(1)
+        }
     ));
 }
 

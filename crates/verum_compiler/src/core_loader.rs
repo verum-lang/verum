@@ -21,14 +21,16 @@ use std::io::Read;
 use std::path::Path;
 use verum_common::{List, Maybe, OrderedMap, Text};
 use verum_types::core_metadata::{
-    AssociatedTypeDescriptor, FieldDescriptor, FunctionDescriptor, GenericParam,
+    AssociatedTypeDescriptor, CoreMetadata, FieldDescriptor, FunctionDescriptor, GenericParam,
     ImplementationDescriptor, MethodSignature, ParamDescriptor, ProtocolDescriptor, ReceiverKind,
-    CoreMetadata, TypeDescriptor, TypeDescriptorKind, VariantCase, VariantPayload,
+    TypeDescriptor, TypeDescriptorKind, VariantCase, VariantPayload,
 };
 use verum_vbc::{
     archive::VbcArchive,
     module::{StringTable, VbcModule},
-    types::{PropertySet, TypeDescriptor as VbcTypeDescriptor, TypeKind, TypeRef, VariantDescriptor},
+    types::{
+        PropertySet, TypeDescriptor as VbcTypeDescriptor, TypeKind, TypeRef, VariantDescriptor,
+    },
 };
 
 /// Helper to safely get a string from the string table with a fallback.
@@ -100,8 +102,7 @@ pub fn load_archive(path: impl AsRef<Path>) -> Result<VbcArchive, CoreLoadError>
 pub fn load_archive_from_bytes(bytes: &[u8]) -> Result<VbcArchive, CoreLoadError> {
     // Wrap in Cursor for Seek support
     let cursor = std::io::Cursor::new(bytes);
-    verum_vbc::read_archive(cursor)
-        .map_err(|e| CoreLoadError::ArchiveError(format!("{:?}", e)))
+    verum_vbc::read_archive(cursor).map_err(|e| CoreLoadError::ArchiveError(format!("{:?}", e)))
 }
 
 /// Convert a VBC archive to CoreMetadata.
@@ -109,14 +110,12 @@ pub fn load_archive_from_bytes(bytes: &[u8]) -> Result<VbcArchive, CoreLoadError
 
 /// This is the main conversion function that extracts type information
 /// from VBC format and converts it to the format expected by TypeChecker.
-pub fn convert_archive_to_metadata(
-    archive: &VbcArchive,
-) -> Result<CoreMetadata, CoreLoadError> {
+pub fn convert_archive_to_metadata(archive: &VbcArchive) -> Result<CoreMetadata, CoreLoadError> {
     let mut metadata = CoreMetadata::default();
 
     // Set version from archive header (combine major.minor into u32)
-    metadata.version = ((archive.header.version_major as u32) << 16)
-        | (archive.header.version_minor as u32);
+    metadata.version =
+        ((archive.header.version_major as u32) << 16) | (archive.header.version_minor as u32);
 
     // Process each module in the archive
     for entry in &archive.index {
@@ -164,10 +163,18 @@ fn extract_module_metadata(
         }
         if use_qualified {
             let qualified_name: Text = format!("{}.{}", module_path, type_name).into();
-            if metadata.types.insert(qualified_name.clone(), descriptor).is_none() {
+            if metadata
+                .types
+                .insert(qualified_name.clone(), descriptor)
+                .is_none()
+            {
                 metadata.type_declaration_order.push(qualified_name);
             }
-        } else if metadata.types.insert(type_name.clone(), descriptor).is_none() {
+        } else if metadata
+            .types
+            .insert(type_name.clone(), descriptor)
+            .is_none()
+        {
             metadata.type_declaration_order.push(type_name);
         }
     }
@@ -221,7 +228,11 @@ fn convert_type_descriptor(
                     }
                 })
                 .collect(),
-            default: tp.default.as_ref().map(|d| type_ref_to_text(d, module)).into(),
+            default: tp
+                .default
+                .as_ref()
+                .map(|d| type_ref_to_text(d, module))
+                .into(),
         })
         .collect();
 
@@ -265,9 +276,11 @@ fn convert_type_descriptor(
                 TypeDescriptorKind::Opaque
             }
         }
-        TypeKind::Primitive | TypeKind::Unit | TypeKind::Tuple | TypeKind::Array | TypeKind::Tensor => {
-            TypeDescriptorKind::Opaque
-        }
+        TypeKind::Primitive
+        | TypeKind::Unit
+        | TypeKind::Tuple
+        | TypeKind::Array
+        | TypeKind::Tensor => TypeDescriptorKind::Opaque,
     };
 
     Ok(TypeDescriptor {
@@ -324,7 +337,11 @@ fn convert_to_protocol_descriptor(
                     }
                 })
                 .collect(),
-            default: tp.default.as_ref().map(|d| type_ref_to_text(d, module)).into(),
+            default: tp
+                .default
+                .as_ref()
+                .map(|d| type_ref_to_text(d, module))
+                .into(),
         })
         .collect();
 
@@ -339,14 +356,18 @@ fn convert_to_protocol_descriptor(
         // Check if this is a method (has function type payload)
         if let Some(payload_type) = &variant.payload {
             // If the payload is a function type, extract method signature
-            if let Some(method_sig) = extract_method_signature_from_type(&method_name, payload_type, module) {
+            if let Some(method_sig) =
+                extract_method_signature_from_type(&method_name, payload_type, module)
+            {
                 required_methods.push(method_sig);
             }
         }
     }
 
     // Super protocols from the protocols[] field on Protocol-kind TypeDescriptors
-    let super_protocols: List<Text> = vbc_type.protocols.iter()
+    let super_protocols: List<Text> = vbc_type
+        .protocols
+        .iter()
         .filter_map(|proto_impl| {
             // For protocol types, protocols[] stores super-protocol references
             let proto_type_id = proto_impl.protocol.0 as usize;
@@ -381,7 +402,11 @@ fn extract_method_signature_from_type(
     module: &VbcModule,
 ) -> Option<MethodSignature> {
     match type_ref {
-        TypeRef::Function { params, return_type, .. } => {
+        TypeRef::Function {
+            params,
+            return_type,
+            ..
+        } => {
             let ret_type = type_ref_to_text(return_type, module);
 
             // Determine receiver kind based on first parameter
@@ -435,9 +460,8 @@ fn convert_variant_case(variant: &VariantDescriptor, module: &VbcModule) -> Vari
         match type_ref {
             TypeRef::Tuple(elems) => {
                 // Tuple variant: extract element types
-                let type_names: List<Text> = elems.iter()
-                    .map(|t| type_ref_to_text(t, module))
-                    .collect();
+                let type_names: List<Text> =
+                    elems.iter().map(|t| type_ref_to_text(t, module)).collect();
                 VariantPayload::Tuple(type_names)
             }
             _ => {
@@ -478,7 +502,11 @@ fn convert_function_descriptor(
                     }
                 })
                 .collect(),
-            default: tp.default.as_ref().map(|d| type_ref_to_text(d, module)).into(),
+            default: tp
+                .default
+                .as_ref()
+                .map(|d| type_ref_to_text(d, module))
+                .into(),
         })
         .collect();
 
@@ -533,9 +561,13 @@ fn convert_protocol_impl(
     };
 
     // Extract method names from function IDs
-    let methods: List<Text> = proto_impl.methods.iter()
+    let methods: List<Text> = proto_impl
+        .methods
+        .iter()
         .filter_map(|&func_id| {
-            module.functions.get(func_id as usize)
+            module
+                .functions
+                .get(func_id as usize)
                 .map(|func| get_string(&module.strings, func.name))
         })
         .collect();
@@ -585,7 +617,10 @@ fn type_ref_to_text(type_ref: &TypeRef, module: &VbcModule) -> Text {
             } else {
                 return format!("Type{}", base.0).into();
             };
-            let args_str: Vec<String> = args.iter().map(|a| type_ref_to_text(a, module).into()).collect();
+            let args_str: Vec<String> = args
+                .iter()
+                .map(|a| type_ref_to_text(a, module).into())
+                .collect();
             format!("{}<{}>", base_name, args_str.join(", ")).into()
         }
         TypeRef::Function {
@@ -593,29 +628,46 @@ fn type_ref_to_text(type_ref: &TypeRef, module: &VbcModule) -> Text {
             return_type,
             ..
         } => {
-            let params_str: Vec<String> = params.iter().map(|p| type_ref_to_text(p, module).into()).collect();
+            let params_str: Vec<String> = params
+                .iter()
+                .map(|p| type_ref_to_text(p, module).into())
+                .collect();
             let ret_str: String = type_ref_to_text(return_type, module).into();
             format!("fn({}) -> {}", params_str.join(", "), ret_str).into()
         }
-        TypeRef::Rank2Function { type_param_count, params, return_type, .. } => {
-            let type_params: Vec<String> = (0..*type_param_count).map(|i| format!("R{}", i)).collect();
-            let params_str: Vec<String> = params.iter().map(|p| type_ref_to_text(p, module).into()).collect();
+        TypeRef::Rank2Function {
+            type_param_count,
+            params,
+            return_type,
+            ..
+        } => {
+            let type_params: Vec<String> =
+                (0..*type_param_count).map(|i| format!("R{}", i)).collect();
+            let params_str: Vec<String> = params
+                .iter()
+                .map(|p| type_ref_to_text(p, module).into())
+                .collect();
             let ret_str: String = type_ref_to_text(return_type, module).into();
-            format!("fn<{}>({}) -> {}", type_params.join(", "), params_str.join(", "), ret_str).into()
+            format!(
+                "fn<{}>({}) -> {}",
+                type_params.join(", "),
+                params_str.join(", "),
+                ret_str
+            )
+            .into()
         }
-        TypeRef::Reference { inner, .. } => {
-            format!("&{}", type_ref_to_text(inner, module)).into()
-        }
+        TypeRef::Reference { inner, .. } => format!("&{}", type_ref_to_text(inner, module)).into(),
         TypeRef::Tuple(elems) => {
-            let elems_str: Vec<String> = elems.iter().map(|e| type_ref_to_text(e, module).into()).collect();
+            let elems_str: Vec<String> = elems
+                .iter()
+                .map(|e| type_ref_to_text(e, module).into())
+                .collect();
             format!("({})", elems_str.join(", ")).into()
         }
         TypeRef::Array { element, length } => {
             format!("[{}; {}]", type_ref_to_text(element, module), length).into()
         }
-        TypeRef::Slice(inner) => {
-            format!("[{}]", type_ref_to_text(inner, module)).into()
-        }
+        TypeRef::Slice(inner) => format!("[{}]", type_ref_to_text(inner, module)).into(),
     }
 }
 

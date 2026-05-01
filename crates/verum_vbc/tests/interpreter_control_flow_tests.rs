@@ -621,8 +621,14 @@ fn test_exec_cvt_negative_float_to_int_truncate() {
 fn test_exec_bitwise_and_integers() {
     // 0xFF & 0x0F = 0x0F = 15
     let result = run(&[
-        Instruction::LoadI { dst: Reg(0), value: 0xFF },
-        Instruction::LoadI { dst: Reg(1), value: 0x0F },
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: 0xFF,
+        },
+        Instruction::LoadI {
+            dst: Reg(1),
+            value: 0x0F,
+        },
         Instruction::Bitwise {
             op: BitwiseOp::And,
             dst: Reg(2),
@@ -638,8 +644,14 @@ fn test_exec_bitwise_and_integers() {
 fn test_exec_bitwise_or_integers() {
     // 0xF0 | 0x0F = 0xFF = 255
     let result = run(&[
-        Instruction::LoadI { dst: Reg(0), value: 0xF0 },
-        Instruction::LoadI { dst: Reg(1), value: 0x0F },
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: 0xF0,
+        },
+        Instruction::LoadI {
+            dst: Reg(1),
+            value: 0x0F,
+        },
         Instruction::Bitwise {
             op: BitwiseOp::Or,
             dst: Reg(2),
@@ -655,8 +667,14 @@ fn test_exec_bitwise_or_integers() {
 fn test_exec_bitwise_xor_integers() {
     // 0xFF ^ 0xFF = 0
     let result = run(&[
-        Instruction::LoadI { dst: Reg(0), value: 0xFF },
-        Instruction::LoadI { dst: Reg(1), value: 0xFF },
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: 0xFF,
+        },
+        Instruction::LoadI {
+            dst: Reg(1),
+            value: 0xFF,
+        },
         Instruction::Bitwise {
             op: BitwiseOp::Xor,
             dst: Reg(2),
@@ -672,8 +690,14 @@ fn test_exec_bitwise_xor_integers() {
 fn test_exec_bitwise_xor_different() {
     // 0xAA ^ 0x55 = 0xFF
     let result = run(&[
-        Instruction::LoadI { dst: Reg(0), value: 0xAA },
-        Instruction::LoadI { dst: Reg(1), value: 0x55 },
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: 0xAA,
+        },
+        Instruction::LoadI {
+            dst: Reg(1),
+            value: 0x55,
+        },
         Instruction::Bitwise {
             op: BitwiseOp::Xor,
             dst: Reg(2),
@@ -970,22 +994,45 @@ fn test_factorial_5_unrolled() {
 fn test_chained_comparisons() {
     // Test: (5 > 3) => true, then use result as branch condition
     let false_path = [
-        Instruction::LoadSmallI { dst: Reg(5), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(5) },
     ];
     let skip = encode(&false_path).len() as i32;
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 5 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 3 },
-        Instruction::CmpI { op: CompareOp::Gt, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 5,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 3,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Gt,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         // If 5 > 3, skip the false path
-        Instruction::JmpIf { cond: Reg(2), offset: skip },
+        Instruction::JmpIf {
+            cond: Reg(2),
+            offset: skip,
+        },
         // False path:
-        Instruction::LoadSmallI { dst: Reg(5), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(5) },
         // True path:
-        Instruction::LoadSmallI { dst: Reg(5), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 1,
+        },
         Instruction::Ret { value: Reg(5) },
     ]);
     assert_eq!(result.as_i64(), 1);
@@ -1013,8 +1060,14 @@ fn test_fibonacci_iterative() {
             a: Reg(1),
             b: Reg(2),
         },
-        Instruction::Mov { dst: Reg(1), src: Reg(2) },
-        Instruction::Mov { dst: Reg(2), src: Reg(3) },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        },
+        Instruction::Mov {
+            dst: Reg(2),
+            src: Reg(3),
+        },
         Instruction::BinaryI {
             op: BinaryIntOp::Sub,
             dst: Reg(0),
@@ -1038,11 +1091,26 @@ fn test_fibonacci_iterative() {
     let backward_offset = -((loop_body_bytes.len() + jmp_if_bytes.len()) as i32);
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 10 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 0 },
-        Instruction::LoadSmallI { dst: Reg(2), value: 1 },
-        Instruction::LoadSmallI { dst: Reg(4), value: 1 },
-        Instruction::LoadSmallI { dst: Reg(5), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 10,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 0,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 1,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(4),
+            value: 1,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 1,
+        },
         // Loop body:
         Instruction::BinaryI {
             op: BinaryIntOp::Add,
@@ -1050,8 +1118,14 @@ fn test_fibonacci_iterative() {
             a: Reg(1),
             b: Reg(2),
         },
-        Instruction::Mov { dst: Reg(1), src: Reg(2) },
-        Instruction::Mov { dst: Reg(2), src: Reg(3) },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        },
+        Instruction::Mov {
+            dst: Reg(2),
+            src: Reg(3),
+        },
         Instruction::BinaryI {
             op: BinaryIntOp::Sub,
             dst: Reg(0),
@@ -1102,13 +1176,25 @@ fn test_factorial_loop() {
         },
     ];
     let loop_bytes = encode(&loop_body);
-    let jmp_bytes = encode(&[Instruction::JmpIf { cond: Reg(3), offset: 0 }]);
+    let jmp_bytes = encode(&[Instruction::JmpIf {
+        cond: Reg(3),
+        offset: 0,
+    }]);
     let back = -((loop_bytes.len() + jmp_bytes.len()) as i32);
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 5 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 1 },
-        Instruction::LoadSmallI { dst: Reg(2), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 5,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 1,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 1,
+        },
         // Loop:
         Instruction::BinaryI {
             op: BinaryIntOp::Mul,
@@ -1166,9 +1252,18 @@ fn test_function_call_three_args() {
     ];
 
     let main_instrs: &[Instruction] = &[
-        Instruction::LoadSmallI { dst: Reg(1), value: 10 },
-        Instruction::LoadSmallI { dst: Reg(2), value: 20 },
-        Instruction::LoadSmallI { dst: Reg(3), value: 30 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 10,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 20,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 30,
+        },
         Instruction::Call {
             dst: Reg(0),
             func_id: 1,
@@ -1179,7 +1274,9 @@ fn test_function_call_three_args() {
 
     let module = create_multi_fn_module(&[(main_instrs, 16), (add_three_instrs, 16)]);
     let mut interp = Interpreter::new(module);
-    let result = interp.execute_function(FunctionId(0)).expect("Execution failed");
+    let result = interp
+        .execute_function(FunctionId(0))
+        .expect("Execution failed");
     assert_eq!(result.as_i64(), 60);
 }
 
@@ -1197,8 +1294,14 @@ fn test_nested_function_calls() {
     ];
 
     let double_instrs: &[Instruction] = &[
-        Instruction::Mov { dst: Reg(1), src: Reg(0) },
-        Instruction::Mov { dst: Reg(2), src: Reg(0) },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(0),
+        },
+        Instruction::Mov {
+            dst: Reg(2),
+            src: Reg(0),
+        },
         Instruction::Call {
             dst: Reg(3),
             func_id: 2,
@@ -1208,7 +1311,10 @@ fn test_nested_function_calls() {
     ];
 
     let main_instrs: &[Instruction] = &[
-        Instruction::LoadSmallI { dst: Reg(1), value: 21 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 21,
+        },
         Instruction::Call {
             dst: Reg(0),
             func_id: 1,
@@ -1217,13 +1323,12 @@ fn test_nested_function_calls() {
         Instruction::Ret { value: Reg(0) },
     ];
 
-    let module = create_multi_fn_module(&[
-        (main_instrs, 16),
-        (double_instrs, 16),
-        (add_instrs, 16),
-    ]);
+    let module =
+        create_multi_fn_module(&[(main_instrs, 16), (double_instrs, 16), (add_instrs, 16)]);
     let mut interp = Interpreter::new(module);
-    let result = interp.execute_function(FunctionId(0)).expect("Execution failed");
+    let result = interp
+        .execute_function(FunctionId(0))
+        .expect("Execution failed");
     assert_eq!(result.as_i64(), 42);
 }
 
@@ -1232,33 +1337,84 @@ fn test_nested_function_calls() {
 #[test]
 fn test_pattern_match_execution() {
     let matched_return = [
-        Instruction::LoadI { dst: Reg(3), value: 0 },
+        Instruction::LoadI {
+            dst: Reg(3),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(3) },
     ];
     let skip_match = encode(&matched_return).len() as i32;
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 2 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 2,
+        },
         // Case 1: x == 1 ?
-        Instruction::LoadSmallI { dst: Reg(1), value: 1 },
-        Instruction::CmpI { op: CompareOp::Eq, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::JmpNot { cond: Reg(2), offset: skip_match },
-        Instruction::LoadI { dst: Reg(3), value: 100 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 1,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Eq,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::JmpNot {
+            cond: Reg(2),
+            offset: skip_match,
+        },
+        Instruction::LoadI {
+            dst: Reg(3),
+            value: 100,
+        },
         Instruction::Ret { value: Reg(3) },
         // Case 2: x == 2 ?
-        Instruction::LoadSmallI { dst: Reg(1), value: 2 },
-        Instruction::CmpI { op: CompareOp::Eq, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::JmpNot { cond: Reg(2), offset: skip_match },
-        Instruction::LoadI { dst: Reg(3), value: 200 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 2,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Eq,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::JmpNot {
+            cond: Reg(2),
+            offset: skip_match,
+        },
+        Instruction::LoadI {
+            dst: Reg(3),
+            value: 200,
+        },
         Instruction::Ret { value: Reg(3) },
         // Case 3: x == 3 ?
-        Instruction::LoadSmallI { dst: Reg(1), value: 3 },
-        Instruction::CmpI { op: CompareOp::Eq, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::JmpNot { cond: Reg(2), offset: skip_match },
-        Instruction::LoadI { dst: Reg(3), value: 300 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 3,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Eq,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::JmpNot {
+            cond: Reg(2),
+            offset: skip_match,
+        },
+        Instruction::LoadI {
+            dst: Reg(3),
+            value: 300,
+        },
         Instruction::Ret { value: Reg(3) },
         // Default case
-        Instruction::LoadSmallI { dst: Reg(3), value: -1 },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: -1,
+        },
         Instruction::Ret { value: Reg(3) },
     ]);
     assert_eq!(result.as_i64(), 200);
@@ -1282,13 +1438,25 @@ fn test_while_loop_count_up() {
         },
     ];
     let loop_bytes = encode(&loop_body);
-    let jmp_bytes = encode(&[Instruction::JmpIf { cond: Reg(3), offset: 0 }]);
+    let jmp_bytes = encode(&[Instruction::JmpIf {
+        cond: Reg(3),
+        offset: 0,
+    }]);
     let back = -((loop_bytes.len() + jmp_bytes.len()) as i32);
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 10 },
-        Instruction::LoadSmallI { dst: Reg(2), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 10,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 1,
+        },
         // Loop body:
         Instruction::BinaryI {
             op: BinaryIntOp::Add,
@@ -1335,14 +1503,29 @@ fn test_for_loop_sum_1_to_100() {
         },
     ];
     let loop_bytes = encode(&loop_body);
-    let jmp_bytes = encode(&[Instruction::JmpIf { cond: Reg(4), offset: 0 }]);
+    let jmp_bytes = encode(&[Instruction::JmpIf {
+        cond: Reg(4),
+        offset: 0,
+    }]);
     let back = -((loop_bytes.len() + jmp_bytes.len()) as i32);
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 0 },
-        Instruction::LoadI { dst: Reg(2), value: 100 },
-        Instruction::LoadSmallI { dst: Reg(3), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 0,
+        },
+        Instruction::LoadI {
+            dst: Reg(2),
+            value: 100,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 1,
+        },
         // Loop body:
         Instruction::BinaryI {
             op: BinaryIntOp::Add,
@@ -1374,21 +1557,33 @@ fn test_for_loop_sum_1_to_100() {
 /// Test: function conditional return (max)
 #[test]
 fn test_function_conditional_return() {
-    let false_path = [
-        Instruction::Ret { value: Reg(1) },
-    ];
+    let false_path = [Instruction::Ret { value: Reg(1) }];
     let skip = encode(&false_path).len() as i32;
 
     let max_instrs: &[Instruction] = &[
-        Instruction::CmpI { op: CompareOp::Gt, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::JmpIf { cond: Reg(2), offset: skip },
+        Instruction::CmpI {
+            op: CompareOp::Gt,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::JmpIf {
+            cond: Reg(2),
+            offset: skip,
+        },
         Instruction::Ret { value: Reg(1) },
         Instruction::Ret { value: Reg(0) },
     ];
 
     let main_instrs: &[Instruction] = &[
-        Instruction::LoadSmallI { dst: Reg(1), value: 15 },
-        Instruction::LoadSmallI { dst: Reg(2), value: 42 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 15,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 42,
+        },
         Instruction::Call {
             dst: Reg(0),
             func_id: 1,
@@ -1399,7 +1594,9 @@ fn test_function_conditional_return() {
 
     let module = create_multi_fn_module(&[(main_instrs, 16), (max_instrs, 16)]);
     let mut interp = Interpreter::new(module);
-    let result = interp.execute_function(FunctionId(0)).expect("Execution failed");
+    let result = interp
+        .execute_function(FunctionId(0))
+        .expect("Execution failed");
     assert_eq!(result.as_i64(), 42);
 }
 
@@ -1413,8 +1610,14 @@ fn test_gcd_euclidean() {
             a: Reg(0),
             b: Reg(1),
         },
-        Instruction::Mov { dst: Reg(0), src: Reg(1) },
-        Instruction::Mov { dst: Reg(1), src: Reg(2) },
+        Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        },
         Instruction::CmpI {
             op: CompareOp::Ne,
             dst: Reg(4),
@@ -1423,13 +1626,25 @@ fn test_gcd_euclidean() {
         },
     ];
     let loop_bytes = encode(&loop_body);
-    let jmp_bytes = encode(&[Instruction::JmpIf { cond: Reg(4), offset: 0 }]);
+    let jmp_bytes = encode(&[Instruction::JmpIf {
+        cond: Reg(4),
+        offset: 0,
+    }]);
     let back = -((loop_bytes.len() + jmp_bytes.len()) as i32);
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 48 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 18 },
-        Instruction::LoadSmallI { dst: Reg(3), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 48,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 18,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 0,
+        },
         // Loop:
         Instruction::BinaryI {
             op: BinaryIntOp::Mod,
@@ -1437,8 +1652,14 @@ fn test_gcd_euclidean() {
             a: Reg(0),
             b: Reg(1),
         },
-        Instruction::Mov { dst: Reg(0), src: Reg(1) },
-        Instruction::Mov { dst: Reg(1), src: Reg(2) },
+        Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(1),
+        },
+        Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        },
         Instruction::CmpI {
             op: CompareOp::Ne,
             dst: Reg(4),
@@ -1478,15 +1699,33 @@ fn test_power_loop() {
         },
     ];
     let loop_bytes = encode(&loop_body);
-    let jmp_bytes = encode(&[Instruction::JmpIf { cond: Reg(5), offset: 0 }]);
+    let jmp_bytes = encode(&[Instruction::JmpIf {
+        cond: Reg(5),
+        offset: 0,
+    }]);
     let back = -((loop_bytes.len() + jmp_bytes.len()) as i32);
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 2 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 10 },
-        Instruction::LoadSmallI { dst: Reg(2), value: 1 },
-        Instruction::LoadSmallI { dst: Reg(3), value: 1 },
-        Instruction::LoadSmallI { dst: Reg(4), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 2,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 10,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 1,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 1,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(4),
+            value: 0,
+        },
         // Loop:
         Instruction::BinaryI {
             op: BinaryIntOp::Mul,
@@ -1519,8 +1758,14 @@ fn test_power_loop() {
 #[test]
 fn test_float_area_computation() {
     let result = run(&[
-        Instruction::LoadF { dst: Reg(0), value: 3.14159265358979 },
-        Instruction::LoadF { dst: Reg(1), value: 5.0 },
+        Instruction::LoadF {
+            dst: Reg(0),
+            value: 3.14159265358979,
+        },
+        Instruction::LoadF {
+            dst: Reg(1),
+            value: 5.0,
+        },
         Instruction::BinaryF {
             op: BinaryFloatOp::Mul,
             dst: Reg(2),
@@ -1536,16 +1781,29 @@ fn test_float_area_computation() {
         Instruction::Ret { value: Reg(3) },
     ]);
     let area = result.as_f64();
-    assert!((area - 78.5398).abs() < 0.01, "Expected ~78.54, got {}", area);
+    assert!(
+        (area - 78.5398).abs() < 0.01,
+        "Expected ~78.54, got {}",
+        area
+    );
 }
 
 /// Test: int-float conversion roundtrip
 #[test]
 fn test_int_float_conversion_roundtrip() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::CvtIF { dst: Reg(1), src: Reg(0) },
-        Instruction::LoadF { dst: Reg(2), value: 0.5 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::CvtIF {
+            dst: Reg(1),
+            src: Reg(0),
+        },
+        Instruction::LoadF {
+            dst: Reg(2),
+            value: 0.5,
+        },
         Instruction::BinaryF {
             op: BinaryFloatOp::Add,
             dst: Reg(3),
@@ -1575,38 +1833,85 @@ fn test_recursive_fibonacci() {
     //  if n <= 1 => return n
     //  else => return fib(n-1) + fib(n-2)
 
-    let ret_n = [
-        Instruction::Ret { value: Reg(0) },
-    ];
+    let ret_n = [Instruction::Ret { value: Reg(0) }];
     let skip_base = encode(&ret_n).len() as i32;
 
     let fib_instrs: &[Instruction] = &[
         // Check base case: n <= 1
-        Instruction::LoadSmallI { dst: Reg(1), value: 1 },
-        Instruction::CmpI { op: CompareOp::Gt, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::JmpIf { cond: Reg(2), offset: skip_base },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 1,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Gt,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::JmpIf {
+            cond: Reg(2),
+            offset: skip_base,
+        },
         // Base case: return n
         Instruction::Ret { value: Reg(0) },
         // Recursive case
-        Instruction::LoadSmallI { dst: Reg(3), value: 1 },
-        Instruction::BinaryI { op: BinaryIntOp::Sub, dst: Reg(4), a: Reg(0), b: Reg(3) },
-        Instruction::Call { dst: Reg(5), func_id: 1, args: RegRange::new(Reg(4), 1) },
-        Instruction::LoadSmallI { dst: Reg(6), value: 2 },
-        Instruction::BinaryI { op: BinaryIntOp::Sub, dst: Reg(7), a: Reg(0), b: Reg(6) },
-        Instruction::Call { dst: Reg(8), func_id: 1, args: RegRange::new(Reg(7), 1) },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(9), a: Reg(5), b: Reg(8) },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 1,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Sub,
+            dst: Reg(4),
+            a: Reg(0),
+            b: Reg(3),
+        },
+        Instruction::Call {
+            dst: Reg(5),
+            func_id: 1,
+            args: RegRange::new(Reg(4), 1),
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(6),
+            value: 2,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Sub,
+            dst: Reg(7),
+            a: Reg(0),
+            b: Reg(6),
+        },
+        Instruction::Call {
+            dst: Reg(8),
+            func_id: 1,
+            args: RegRange::new(Reg(7), 1),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(9),
+            a: Reg(5),
+            b: Reg(8),
+        },
         Instruction::Ret { value: Reg(9) },
     ];
 
     let main_instrs: &[Instruction] = &[
-        Instruction::LoadSmallI { dst: Reg(1), value: 10 },
-        Instruction::Call { dst: Reg(0), func_id: 1, args: RegRange::new(Reg(1), 1) },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 10,
+        },
+        Instruction::Call {
+            dst: Reg(0),
+            func_id: 1,
+            args: RegRange::new(Reg(1), 1),
+        },
         Instruction::Ret { value: Reg(0) },
     ];
 
     let module = create_multi_fn_module(&[(main_instrs, 16), (fib_instrs, 16)]);
     let mut interp = Interpreter::new(module);
-    let result = interp.execute_function(FunctionId(0)).expect("Execution failed");
+    let result = interp
+        .execute_function(FunctionId(0))
+        .expect("Execution failed");
     assert_eq!(result.as_i64(), 55);
 }
 
@@ -1615,35 +1920,78 @@ fn test_recursive_fibonacci() {
 fn test_recursive_factorial() {
     // fact(n): if n <= 1 return 1; else return n * fact(n-1)
     let ret_one = [
-        Instruction::LoadSmallI { dst: Reg(5), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 1,
+        },
         Instruction::Ret { value: Reg(5) },
     ];
     let skip_base = encode(&ret_one).len() as i32;
 
     let fact_instrs: &[Instruction] = &[
-        Instruction::LoadSmallI { dst: Reg(1), value: 1 },
-        Instruction::CmpI { op: CompareOp::Gt, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::JmpIf { cond: Reg(2), offset: skip_base },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 1,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Gt,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::JmpIf {
+            cond: Reg(2),
+            offset: skip_base,
+        },
         // Base case: return 1
-        Instruction::LoadSmallI { dst: Reg(5), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 1,
+        },
         Instruction::Ret { value: Reg(5) },
         // Recursive case: n * fact(n-1)
-        Instruction::LoadSmallI { dst: Reg(3), value: 1 },
-        Instruction::BinaryI { op: BinaryIntOp::Sub, dst: Reg(4), a: Reg(0), b: Reg(3) },
-        Instruction::Call { dst: Reg(5), func_id: 1, args: RegRange::new(Reg(4), 1) },
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(6), a: Reg(0), b: Reg(5) },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 1,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Sub,
+            dst: Reg(4),
+            a: Reg(0),
+            b: Reg(3),
+        },
+        Instruction::Call {
+            dst: Reg(5),
+            func_id: 1,
+            args: RegRange::new(Reg(4), 1),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(6),
+            a: Reg(0),
+            b: Reg(5),
+        },
         Instruction::Ret { value: Reg(6) },
     ];
 
     let main_instrs: &[Instruction] = &[
-        Instruction::LoadSmallI { dst: Reg(1), value: 5 },
-        Instruction::Call { dst: Reg(0), func_id: 1, args: RegRange::new(Reg(1), 1) },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 5,
+        },
+        Instruction::Call {
+            dst: Reg(0),
+            func_id: 1,
+            args: RegRange::new(Reg(1), 1),
+        },
         Instruction::Ret { value: Reg(0) },
     ];
 
     let module = create_multi_fn_module(&[(main_instrs, 16), (fact_instrs, 16)]);
     let mut interp = Interpreter::new(module);
-    let result = interp.execute_function(FunctionId(0)).expect("Execution failed");
+    let result = interp
+        .execute_function(FunctionId(0))
+        .expect("Execution failed");
     assert_eq!(result.as_i64(), 120);
 }
 
@@ -1652,35 +2000,91 @@ fn test_recursive_factorial() {
 #[test]
 fn test_pattern_match_with_default_computation() {
     let matched_return = [
-        Instruction::LoadSmallI { dst: Reg(5), value: 0 },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 0,
+        },
         Instruction::Ret { value: Reg(5) },
     ];
     let skip = encode(&matched_return).len() as i32;
 
     // Test x=3 => should hit default case and compute 6 (1+2+3)
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 3 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 3,
+        },
         // Case 0: x == 0 => return 10
-        Instruction::LoadSmallI { dst: Reg(1), value: 0 },
-        Instruction::CmpI { op: CompareOp::Eq, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::JmpNot { cond: Reg(2), offset: skip },
-        Instruction::LoadSmallI { dst: Reg(5), value: 10 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 0,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Eq,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::JmpNot {
+            cond: Reg(2),
+            offset: skip,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 10,
+        },
         Instruction::Ret { value: Reg(5) },
         // Case 1: x == 1 => return 20
-        Instruction::LoadSmallI { dst: Reg(1), value: 1 },
-        Instruction::CmpI { op: CompareOp::Eq, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::JmpNot { cond: Reg(2), offset: skip },
-        Instruction::LoadSmallI { dst: Reg(5), value: 20 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 1,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Eq,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::JmpNot {
+            cond: Reg(2),
+            offset: skip,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 20,
+        },
         Instruction::Ret { value: Reg(5) },
         // Case 2: x == 2 => return 30
-        Instruction::LoadSmallI { dst: Reg(1), value: 2 },
-        Instruction::CmpI { op: CompareOp::Eq, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::JmpNot { cond: Reg(2), offset: skip },
-        Instruction::LoadSmallI { dst: Reg(5), value: 30 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 2,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Eq,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::JmpNot {
+            cond: Reg(2),
+            offset: skip,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 30,
+        },
         Instruction::Ret { value: Reg(5) },
         // Default: return x * 100
-        Instruction::LoadI { dst: Reg(3), value: 100 },
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(5), a: Reg(0), b: Reg(3) },
+        Instruction::LoadI {
+            dst: Reg(3),
+            value: 100,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(5),
+            a: Reg(0),
+            b: Reg(3),
+        },
         Instruction::Ret { value: Reg(5) },
     ]);
     assert_eq!(result.as_i64(), 300);
@@ -1691,43 +2095,100 @@ fn test_pattern_match_with_default_computation() {
 #[test]
 fn test_nested_if_else() {
     let inner_false = [
-        Instruction::LoadSmallI { dst: Reg(5), value: 2 },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 2,
+        },
         Instruction::Ret { value: Reg(5) },
     ];
     let skip_inner_false = encode(&inner_false).len() as i32;
 
     let outer_true_block = [
-        Instruction::LoadSmallI { dst: Reg(3), value: 20 },
-        Instruction::CmpI { op: CompareOp::Gt, dst: Reg(4), a: Reg(0), b: Reg(3) },
-        Instruction::JmpIf { cond: Reg(4), offset: skip_inner_false },
-        Instruction::LoadSmallI { dst: Reg(5), value: 2 },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 20,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Gt,
+            dst: Reg(4),
+            a: Reg(0),
+            b: Reg(3),
+        },
+        Instruction::JmpIf {
+            cond: Reg(4),
+            offset: skip_inner_false,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 2,
+        },
         Instruction::Ret { value: Reg(5) },
-        Instruction::LoadSmallI { dst: Reg(5), value: 3 },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 3,
+        },
         Instruction::Ret { value: Reg(5) },
     ];
     let skip_outer_true = encode(&outer_true_block).len() as i32;
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 25 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 10 },
-        Instruction::CmpI { op: CompareOp::Gt, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::JmpIf { cond: Reg(2), offset: {
-            let else_block = [
-                Instruction::LoadSmallI { dst: Reg(5), value: 1 },
-                Instruction::Ret { value: Reg(5) },
-            ];
-            encode(&else_block).len() as i32
-        }},
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 25,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 10,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Gt,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::JmpIf {
+            cond: Reg(2),
+            offset: {
+                let else_block = [
+                    Instruction::LoadSmallI {
+                        dst: Reg(5),
+                        value: 1,
+                    },
+                    Instruction::Ret { value: Reg(5) },
+                ];
+                encode(&else_block).len() as i32
+            },
+        },
         // else: return 1
-        Instruction::LoadSmallI { dst: Reg(5), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 1,
+        },
         Instruction::Ret { value: Reg(5) },
         // if x > 20: return 3, else: return 2
-        Instruction::LoadSmallI { dst: Reg(3), value: 20 },
-        Instruction::CmpI { op: CompareOp::Gt, dst: Reg(4), a: Reg(0), b: Reg(3) },
-        Instruction::JmpIf { cond: Reg(4), offset: skip_inner_false },
-        Instruction::LoadSmallI { dst: Reg(5), value: 2 },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 20,
+        },
+        Instruction::CmpI {
+            op: CompareOp::Gt,
+            dst: Reg(4),
+            a: Reg(0),
+            b: Reg(3),
+        },
+        Instruction::JmpIf {
+            cond: Reg(4),
+            offset: skip_inner_false,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 2,
+        },
         Instruction::Ret { value: Reg(5) },
-        Instruction::LoadSmallI { dst: Reg(5), value: 3 },
+        Instruction::LoadSmallI {
+            dst: Reg(5),
+            value: 3,
+        },
         Instruction::Ret { value: Reg(5) },
     ]);
     assert_eq!(result.as_i64(), 3);
@@ -1743,23 +2204,68 @@ fn test_while_loop_with_early_break() {
     // r3 = 1 (increment)
     // r4 = condition (i*i <= 50)
     let loop_body = [
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(0), a: Reg(0), b: Reg(3) },
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(1), a: Reg(0), b: Reg(0) },
-        Instruction::CmpI { op: CompareOp::Le, dst: Reg(4), a: Reg(1), b: Reg(2) },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(0),
+            a: Reg(0),
+            b: Reg(3),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(1),
+            a: Reg(0),
+            b: Reg(0),
+        },
+        Instruction::CmpI {
+            op: CompareOp::Le,
+            dst: Reg(4),
+            a: Reg(1),
+            b: Reg(2),
+        },
     ];
     let loop_bytes = encode(&loop_body);
-    let jmp_bytes = encode(&[Instruction::JmpIf { cond: Reg(4), offset: 0 }]);
+    let jmp_bytes = encode(&[Instruction::JmpIf {
+        cond: Reg(4),
+        offset: 0,
+    }]);
     let back = -((loop_bytes.len() + jmp_bytes.len()) as i32);
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 0 },
-        Instruction::LoadSmallI { dst: Reg(2), value: 50 },
-        Instruction::LoadSmallI { dst: Reg(3), value: 1 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 0,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 50,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 1,
+        },
         // Loop body:
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(0), a: Reg(0), b: Reg(3) },
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(1), a: Reg(0), b: Reg(0) },
-        Instruction::CmpI { op: CompareOp::Le, dst: Reg(4), a: Reg(1), b: Reg(2) },
-        Instruction::JmpIf { cond: Reg(4), offset: back },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(0),
+            a: Reg(0),
+            b: Reg(3),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(1),
+            a: Reg(0),
+            b: Reg(0),
+        },
+        Instruction::CmpI {
+            op: CompareOp::Le,
+            dst: Reg(4),
+            a: Reg(1),
+            b: Reg(2),
+        },
+        Instruction::JmpIf {
+            cond: Reg(4),
+            offset: back,
+        },
         Instruction::Ret { value: Reg(0) },
     ]);
     // First i where i*i > 50: i=8 (64 > 50)
@@ -1771,26 +2277,84 @@ fn test_while_loop_with_early_break() {
 fn test_for_loop_sum_of_squares() {
     // Sum of squares 1^2 + 2^2 + ... + 5^2 = 55
     let loop_body = [
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(4), a: Reg(0), b: Reg(0) },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(1), a: Reg(1), b: Reg(4) },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(0), a: Reg(0), b: Reg(3) },
-        Instruction::CmpI { op: CompareOp::Le, dst: Reg(5), a: Reg(0), b: Reg(2) },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(4),
+            a: Reg(0),
+            b: Reg(0),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(1),
+            a: Reg(1),
+            b: Reg(4),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(0),
+            a: Reg(0),
+            b: Reg(3),
+        },
+        Instruction::CmpI {
+            op: CompareOp::Le,
+            dst: Reg(5),
+            a: Reg(0),
+            b: Reg(2),
+        },
     ];
     let loop_bytes = encode(&loop_body);
-    let jmp_bytes = encode(&[Instruction::JmpIf { cond: Reg(5), offset: 0 }]);
+    let jmp_bytes = encode(&[Instruction::JmpIf {
+        cond: Reg(5),
+        offset: 0,
+    }]);
     let back = -((loop_bytes.len() + jmp_bytes.len()) as i32);
 
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },   // i = 1
-        Instruction::LoadSmallI { dst: Reg(1), value: 0 },   // sum = 0
-        Instruction::LoadSmallI { dst: Reg(2), value: 5 },   // n = 5
-        Instruction::LoadSmallI { dst: Reg(3), value: 1 },   // step = 1
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        }, // i = 1
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 0,
+        }, // sum = 0
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 5,
+        }, // n = 5
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 1,
+        }, // step = 1
         // Loop body:
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(4), a: Reg(0), b: Reg(0) },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(1), a: Reg(1), b: Reg(4) },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(0), a: Reg(0), b: Reg(3) },
-        Instruction::CmpI { op: CompareOp::Le, dst: Reg(5), a: Reg(0), b: Reg(2) },
-        Instruction::JmpIf { cond: Reg(5), offset: back },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(4),
+            a: Reg(0),
+            b: Reg(0),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(1),
+            a: Reg(1),
+            b: Reg(4),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(0),
+            a: Reg(0),
+            b: Reg(3),
+        },
+        Instruction::CmpI {
+            op: CompareOp::Le,
+            dst: Reg(5),
+            a: Reg(0),
+            b: Reg(2),
+        },
+        Instruction::JmpIf {
+            cond: Reg(5),
+            offset: back,
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
     assert_eq!(result.as_i64(), 55);
@@ -1801,22 +2365,49 @@ fn test_for_loop_sum_of_squares() {
 #[test]
 fn test_chained_function_calls() {
     let add_one_instrs: &[Instruction] = &[
-        Instruction::LoadSmallI { dst: Reg(1), value: 1 },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 1,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
         Instruction::Ret { value: Reg(2) },
     ];
 
     let triple_add_instrs: &[Instruction] = &[
         // g(x) = f(f(f(x)))
-        Instruction::Call { dst: Reg(1), func_id: 2, args: RegRange::new(Reg(0), 1) },
-        Instruction::Call { dst: Reg(2), func_id: 2, args: RegRange::new(Reg(1), 1) },
-        Instruction::Call { dst: Reg(3), func_id: 2, args: RegRange::new(Reg(2), 1) },
+        Instruction::Call {
+            dst: Reg(1),
+            func_id: 2,
+            args: RegRange::new(Reg(0), 1),
+        },
+        Instruction::Call {
+            dst: Reg(2),
+            func_id: 2,
+            args: RegRange::new(Reg(1), 1),
+        },
+        Instruction::Call {
+            dst: Reg(3),
+            func_id: 2,
+            args: RegRange::new(Reg(2), 1),
+        },
         Instruction::Ret { value: Reg(3) },
     ];
 
     let main_instrs: &[Instruction] = &[
-        Instruction::LoadSmallI { dst: Reg(1), value: 10 },
-        Instruction::Call { dst: Reg(0), func_id: 1, args: RegRange::new(Reg(1), 1) },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 10,
+        },
+        Instruction::Call {
+            dst: Reg(0),
+            func_id: 1,
+            args: RegRange::new(Reg(1), 1),
+        },
         Instruction::Ret { value: Reg(0) },
     ];
 
@@ -1826,7 +2417,9 @@ fn test_chained_function_calls() {
         (add_one_instrs, 16),
     ]);
     let mut interp = Interpreter::new(module);
-    let result = interp.execute_function(FunctionId(0)).expect("Execution failed");
+    let result = interp
+        .execute_function(FunctionId(0))
+        .expect("Execution failed");
     assert_eq!(result.as_i64(), 13);
 }
 
@@ -1834,12 +2427,22 @@ fn test_chained_function_calls() {
 #[test]
 fn test_to_string_conversion() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 42 },
-        Instruction::ToString { dst: Reg(1), src: Reg(0) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::ToString {
+            dst: Reg(1),
+            src: Reg(0),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
     // ToString should produce a small string "42"
-    assert!(result.is_small_string(), "Expected small string from ToString, got tag {:?}", result);
+    assert!(
+        result.is_small_string(),
+        "Expected small string from ToString, got tag {:?}",
+        result
+    );
     let ss = result.as_small_string();
     assert_eq!(ss.as_str(), "42");
 }
@@ -1853,11 +2456,25 @@ fn test_string_concat() {
 
     // Load values as immediates, concat, return
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 1 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 2 },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 1,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 2,
+        },
         // Simple arithmetic that we know works:
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::ToString { dst: Reg(3), src: Reg(2) },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::ToString {
+            dst: Reg(3),
+            src: Reg(2),
+        },
         Instruction::Ret { value: Reg(3) },
     ]);
     assert!(result.is_small_string());
@@ -1869,14 +2486,35 @@ fn test_string_concat() {
 fn test_list_push_pop() {
     let result = run(&[
         Instruction::NewList { dst: Reg(0) },
-        Instruction::LoadSmallI { dst: Reg(1), value: 10 },
-        Instruction::ListPush { list: Reg(0), val: Reg(1) },
-        Instruction::LoadSmallI { dst: Reg(1), value: 20 },
-        Instruction::ListPush { list: Reg(0), val: Reg(1) },
-        Instruction::LoadSmallI { dst: Reg(1), value: 30 },
-        Instruction::ListPush { list: Reg(0), val: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 10,
+        },
+        Instruction::ListPush {
+            list: Reg(0),
+            val: Reg(1),
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 20,
+        },
+        Instruction::ListPush {
+            list: Reg(0),
+            val: Reg(1),
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 30,
+        },
+        Instruction::ListPush {
+            list: Reg(0),
+            val: Reg(1),
+        },
         // Pop the last element (30)
-        Instruction::ListPop { dst: Reg(2), list: Reg(0) },
+        Instruction::ListPop {
+            dst: Reg(2),
+            list: Reg(0),
+        },
         Instruction::Ret { value: Reg(2) },
     ]);
     assert_eq!(result.as_i64(), 30);
@@ -1887,17 +2525,46 @@ fn test_list_push_pop() {
 fn test_list_lifo_order() {
     let result = run(&[
         Instruction::NewList { dst: Reg(0) },
-        Instruction::LoadSmallI { dst: Reg(1), value: 1 },
-        Instruction::ListPush { list: Reg(0), val: Reg(1) },
-        Instruction::LoadSmallI { dst: Reg(1), value: 2 },
-        Instruction::ListPush { list: Reg(0), val: Reg(1) },
-        Instruction::LoadSmallI { dst: Reg(1), value: 3 },
-        Instruction::ListPush { list: Reg(0), val: Reg(1) },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 1,
+        },
+        Instruction::ListPush {
+            list: Reg(0),
+            val: Reg(1),
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 2,
+        },
+        Instruction::ListPush {
+            list: Reg(0),
+            val: Reg(1),
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 3,
+        },
+        Instruction::ListPush {
+            list: Reg(0),
+            val: Reg(1),
+        },
         // Pop: 3, then 2
-        Instruction::ListPop { dst: Reg(2), list: Reg(0) },
-        Instruction::ListPop { dst: Reg(3), list: Reg(0) },
+        Instruction::ListPop {
+            dst: Reg(2),
+            list: Reg(0),
+        },
+        Instruction::ListPop {
+            dst: Reg(3),
+            list: Reg(0),
+        },
         // Return 3 + 2 = 5 (verifying order)
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(4), a: Reg(2), b: Reg(3) },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(4),
+            a: Reg(2),
+            b: Reg(3),
+        },
         Instruction::Ret { value: Reg(4) },
     ]);
     assert_eq!(result.as_i64(), 5); // 3 + 2
@@ -1908,7 +2575,10 @@ fn test_list_lifo_order() {
 fn test_boolean_not_logic() {
     let result = run(&[
         Instruction::LoadTrue { dst: Reg(0) },
-        Instruction::Not { dst: Reg(1), src: Reg(0) },
+        Instruction::Not {
+            dst: Reg(1),
+            src: Reg(0),
+        },
         Instruction::Ret { value: Reg(1) },
     ]);
     assert!(!result.as_bool());
@@ -1919,15 +2589,45 @@ fn test_boolean_not_logic() {
 #[test]
 fn test_mixed_int_float_computation() {
     let result = run(&[
-        Instruction::LoadSmallI { dst: Reg(0), value: 3 },
-        Instruction::LoadSmallI { dst: Reg(1), value: 4 },
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(2), a: Reg(0), b: Reg(1) },
-        Instruction::LoadSmallI { dst: Reg(3), value: 2 },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(4), a: Reg(2), b: Reg(3) },
+        Instruction::LoadSmallI {
+            dst: Reg(0),
+            value: 3,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 4,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(1),
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(3),
+            value: 2,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(4),
+            a: Reg(2),
+            b: Reg(3),
+        },
         // 14 as float
-        Instruction::CvtIF { dst: Reg(5), src: Reg(4) },
-        Instruction::LoadF { dst: Reg(6), value: 2.0 },
-        Instruction::BinaryF { op: BinaryFloatOp::Div, dst: Reg(7), a: Reg(5), b: Reg(6) },
+        Instruction::CvtIF {
+            dst: Reg(5),
+            src: Reg(4),
+        },
+        Instruction::LoadF {
+            dst: Reg(6),
+            value: 2.0,
+        },
+        Instruction::BinaryF {
+            op: BinaryFloatOp::Div,
+            dst: Reg(7),
+            a: Reg(5),
+            b: Reg(6),
+        },
         Instruction::Ret { value: Reg(7) },
     ]);
     assert_eq!(result.as_f64(), 7.0);
@@ -1947,13 +2647,19 @@ fn test_multiple_function_calls() {
     ];
 
     let main_instrs: &[Instruction] = &[
-        Instruction::LoadSmallI { dst: Reg(1), value: 3 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 3,
+        },
         Instruction::Call {
             dst: Reg(2),
             func_id: 1,
             args: RegRange::new(Reg(1), 1),
         },
-        Instruction::LoadSmallI { dst: Reg(1), value: 4 },
+        Instruction::LoadSmallI {
+            dst: Reg(1),
+            value: 4,
+        },
         Instruction::Call {
             dst: Reg(3),
             func_id: 1,
@@ -1970,6 +2676,8 @@ fn test_multiple_function_calls() {
 
     let module = create_multi_fn_module(&[(main_instrs, 16), (square_instrs, 16)]);
     let mut interp = Interpreter::new(module);
-    let result = interp.execute_function(FunctionId(0)).expect("Execution failed");
+    let result = interp
+        .execute_function(FunctionId(0))
+        .expect("Execution failed");
     assert_eq!(result.as_i64(), 25);
 }

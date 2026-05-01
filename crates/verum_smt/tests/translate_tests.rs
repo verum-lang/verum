@@ -261,8 +261,8 @@ fn test_translate_complex_expr() {
 // Sigma type verification: `(x: A, B(x))` — second component depends on first,
 //  translated to Z3 exists_const() for existential quantification.
 
-use verum_smt::dependent::TranslatorExt;
 use verum_common::Text;
+use verum_smt::dependent::TranslatorExt;
 
 #[test]
 fn test_clone_for_scope_empty() {
@@ -540,7 +540,10 @@ use z3::SatResult;
 fn test_translation_config_default() {
     let config = TranslationConfig::default();
     assert!(!config.precise_floats);
-    assert_eq!(config.default_rounding_mode, FloatRoundingMode::NearestTiesToEven);
+    assert_eq!(
+        config.default_rounding_mode,
+        FloatRoundingMode::NearestTiesToEven
+    );
     assert_eq!(config.float_precision, FloatPrecision::Float64);
 }
 
@@ -548,7 +551,10 @@ fn test_translation_config_default() {
 fn test_translation_config_precise_floats() {
     let config = TranslationConfig::with_precise_floats();
     assert!(config.precise_floats);
-    assert_eq!(config.default_rounding_mode, FloatRoundingMode::NearestTiesToEven);
+    assert_eq!(
+        config.default_rounding_mode,
+        FloatRoundingMode::NearestTiesToEven
+    );
     assert_eq!(config.float_precision, FloatPrecision::Float64);
 }
 
@@ -661,7 +667,12 @@ fn test_float_binary_operations_precise() {
         // In precise mode, result should be FPA
         let z3_expr = result.unwrap();
         let sort = z3_expr.get_sort();
-        assert_eq!(sort.kind(), z3::SortKind::FloatingPoint, "Wrong sort for operation: {:?}", op);
+        assert_eq!(
+            sort.kind(),
+            z3::SortKind::FloatingPoint,
+            "Wrong sort for operation: {:?}",
+            op
+        );
     }
 }
 
@@ -676,7 +687,14 @@ fn test_float_comparison_operations_precise() {
     let right = Heap::new(Expr::literal(Literal::float(2.5, span)));
 
     // Test all comparison operations
-    for op in [BinOp::Lt, BinOp::Le, BinOp::Gt, BinOp::Ge, BinOp::Eq, BinOp::Ne] {
+    for op in [
+        BinOp::Lt,
+        BinOp::Le,
+        BinOp::Gt,
+        BinOp::Ge,
+        BinOp::Eq,
+        BinOp::Ne,
+    ] {
         let expr = Expr::new(
             ExprKind::Binary {
                 op,
@@ -691,7 +709,11 @@ fn test_float_comparison_operations_precise() {
 
         // Comparisons always return Bool
         let z3_expr = result.unwrap();
-        assert!(z3_expr.as_bool().is_some(), "Comparison should return Bool for: {:?}", op);
+        assert!(
+            z3_expr.as_bool().is_some(),
+            "Comparison should return Bool for: {:?}",
+            op
+        );
     }
 }
 
@@ -769,16 +791,14 @@ fn test_float_infinity_creation() {
 #[test]
 fn test_float_precision_settings() {
     // Test Float32 precision
-    let config32 = TranslationConfig::with_precise_floats()
-        .with_precision(FloatPrecision::Float32);
+    let config32 = TranslationConfig::with_precise_floats().with_precision(FloatPrecision::Float32);
 
     let (ebits, sbits) = config32.float_precision.bit_widths();
     assert_eq!(ebits, 8);
     assert_eq!(sbits, 24);
 
     // Test Float64 precision
-    let config64 = TranslationConfig::with_precise_floats()
-        .with_precision(FloatPrecision::Float64);
+    let config64 = TranslationConfig::with_precise_floats().with_precision(FloatPrecision::Float64);
 
     let (ebits, sbits) = config64.float_precision.bit_widths();
     assert_eq!(ebits, 11);
@@ -811,8 +831,8 @@ fn test_rounding_mode_conversion() {
 // These patterns guide Z3's MBQI (Model-Based Quantifier Instantiation) to
 // find relevant ground instances of quantified formulas.
 
-use verum_smt::translate::{PatternGenConfig, PatternTrigger};
 use verum_ast::ty::{Ident, Path, PathSegment};
+use verum_smt::translate::{PatternGenConfig, PatternTrigger};
 
 /// Helper to create a variable reference expression
 fn make_var_expr(name: &str) -> Expr {
@@ -935,9 +955,9 @@ fn test_extract_index_access_pattern() {
     let triggers = translator.extract_pattern_triggers(&body, &bound_vars);
 
     // Should find the index access trigger
-    let has_index_trigger = triggers.iter().any(|t| {
-        matches!(t, PatternTrigger::IndexAccess { .. })
-    });
+    let has_index_trigger = triggers
+        .iter()
+        .any(|t| matches!(t, PatternTrigger::IndexAccess { .. }));
     assert!(has_index_trigger, "Should extract IndexAccess trigger");
 }
 
@@ -958,10 +978,13 @@ fn test_extract_method_call_pattern() {
     let triggers = translator.extract_pattern_triggers(&body, &bound_vars);
 
     // Should find the method call trigger
-    let has_method_trigger = triggers.iter().any(|t| {
-        matches!(t, PatternTrigger::MethodCall { method, .. } if method.as_str() == "len")
-    });
-    assert!(has_method_trigger, "Should extract MethodCall trigger for len");
+    let has_method_trigger = triggers.iter().any(
+        |t| matches!(t, PatternTrigger::MethodCall { method, .. } if method.as_str() == "len"),
+    );
+    assert!(
+        has_method_trigger,
+        "Should extract MethodCall trigger for len"
+    );
 }
 
 #[test]
@@ -981,10 +1004,13 @@ fn test_extract_field_access_pattern() {
     let triggers = translator.extract_pattern_triggers(&body, &bound_vars);
 
     // Should find the field access trigger
-    let has_field_trigger = triggers.iter().any(|t| {
-        matches!(t, PatternTrigger::FieldAccess { field, .. } if field.as_str() == "x")
-    });
-    assert!(has_field_trigger, "Should extract FieldAccess trigger for field x");
+    let has_field_trigger = triggers
+        .iter()
+        .any(|t| matches!(t, PatternTrigger::FieldAccess { field, .. } if field.as_str() == "x"));
+    assert!(
+        has_field_trigger,
+        "Should extract FieldAccess trigger for field x"
+    );
 }
 
 #[test]
@@ -1009,7 +1035,8 @@ fn test_extract_multiple_patterns() {
     let triggers = translator.extract_pattern_triggers(&body, &bound_vars);
 
     // Should find both function applications
-    let func_names: Vec<_> = triggers.iter()
+    let func_names: Vec<_> = triggers
+        .iter()
         .filter_map(|t| match t {
             PatternTrigger::FunctionApp { func_name, .. } => Some(func_name.as_str()),
             _ => None,
@@ -1081,7 +1108,10 @@ fn test_no_pattern_for_unbound_variables() {
     let triggers = translator.extract_pattern_triggers(&body, &bound_vars);
 
     // Should not find any triggers (y is not bound)
-    assert!(triggers.is_empty(), "Should not extract triggers for unbound variables");
+    assert!(
+        triggers.is_empty(),
+        "Should not extract triggers for unbound variables"
+    );
 }
 
 #[test]
@@ -1144,10 +1174,14 @@ fn test_group_triggers_by_shared_vars() {
     let triggers = translator.extract_pattern_triggers(&body, &bound_vars);
 
     // Verify we extracted at least 3 function call triggers
-    let func_triggers: Vec<_> = triggers.iter()
+    let func_triggers: Vec<_> = triggers
+        .iter()
         .filter(|t| matches!(t, PatternTrigger::FunctionApp { .. }))
         .collect();
-    assert!(func_triggers.len() >= 3, "Should extract at least 3 function triggers");
+    assert!(
+        func_triggers.len() >= 3,
+        "Should extract at least 3 function triggers"
+    );
 
     // Now group them
     let groups = translator.group_triggers(&triggers);
@@ -1157,7 +1191,11 @@ fn test_group_triggers_by_shared_vars() {
 
     // Verify the total number of triggers across all groups matches
     let total_in_groups: usize = groups.iter().map(|g| g.len()).sum();
-    assert_eq!(total_in_groups, triggers.len(), "All triggers should be in groups");
+    assert_eq!(
+        total_in_groups,
+        triggers.len(),
+        "All triggers should be in groups"
+    );
 
     // Check that x-related triggers (f and g) are grouped together
     // Find the group containing "f"
@@ -1173,7 +1211,10 @@ fn test_group_triggers_by_shared_vars() {
         let has_g = group.iter().any(|t| {
             matches!(t, PatternTrigger::FunctionApp { func_name, .. } if func_name.as_str() == "g")
         });
-        assert!(has_g, "f and g should be in the same group (both reference x)");
+        assert!(
+            has_g,
+            "f and g should be in the same group (both reference x)"
+        );
     }
 }
 
@@ -1206,7 +1247,10 @@ fn test_triggers_to_z3_patterns() {
     let patterns = patterns.unwrap();
 
     // Should generate at least one pattern
-    assert!(!patterns.is_empty(), "Should generate at least one Z3 pattern");
+    assert!(
+        !patterns.is_empty(),
+        "Should generate at least one Z3 pattern"
+    );
 }
 
 #[test]
@@ -1261,7 +1305,10 @@ fn test_generate_multi_var_patterns() {
 
     let patterns = translator.generate_multi_var_patterns(&var_names, &bound_vars, &body);
 
-    assert!(patterns.is_ok(), "Multi-var pattern generation should succeed");
+    assert!(
+        patterns.is_ok(),
+        "Multi-var pattern generation should succeed"
+    );
 }
 
 #[test]
@@ -1347,7 +1394,10 @@ fn test_pattern_config_min_priority() {
     let patterns = patterns.unwrap();
 
     // Should filter out the binary op trigger
-    assert!(patterns.is_empty(), "Should filter out low-priority triggers");
+    assert!(
+        patterns.is_empty(),
+        "Should filter out low-priority triggers"
+    );
 }
 
 #[test]

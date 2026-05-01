@@ -1,13 +1,13 @@
 //! Arithmetic extended opcode handler for VBC interpreter dispatch.
 
-use crate::instruction::ArithSubOpcode;
-use crate::types::TypeId;
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
-use super::bytecode_io::*;
 use super::arith_helpers::*;
+use super::bytecode_io::*;
+use crate::instruction::ArithSubOpcode;
+use crate::types::TypeId;
+use crate::value::Value;
 
 /// ArithExtended (0xBD) - Extended arithmetic operations.
 ///
@@ -16,7 +16,9 @@ use super::arith_helpers::*;
 /// - 0x00-0x03: Checked arithmetic (returns Maybe<Int>)
 /// - 0x10-0x12: Overflowing arithmetic (returns (result, overflowed))
 /// - 0x20-0x25: Polymorphic arithmetic (type-dispatched)
-pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_arith_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
     let sub_op = ArithSubOpcode::from_byte(sub_op_byte);
 
@@ -48,8 +50,11 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                     )?;
                     state.record_allocation();
                     let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr = unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe { *field_ptr = Value::from_i64(result); }
+                    let field_ptr =
+                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
+                    unsafe {
+                        *field_ptr = Value::from_i64(result);
+                    }
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
                 None => {
@@ -57,7 +62,7 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                     // data_size must match MakeVariant(tag=1, field_count=0) for deep_value_eq
                     let obj = state.heap.alloc_with_init(
                         TypeId(0x8001), // Maybe.None variant (tag=1)
-                        8, // tag + field_count only, no payload
+                        8,              // tag + field_count only, no payload
                         |data| {
                             let tag_ptr = data.as_mut_ptr() as *mut u32;
                             unsafe {
@@ -96,22 +101,21 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                     )?;
                     state.record_allocation();
                     let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr = unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe { *field_ptr = Value::from_i64(result); }
+                    let field_ptr =
+                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
+                    unsafe {
+                        *field_ptr = Value::from_i64(result);
+                    }
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
                 None => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8001),
-                        8,
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 1;
-                                *tag_ptr.add(1) = 0;
-                            }
-                        },
-                    )?;
+                    let obj = state.heap.alloc_with_init(TypeId(0x8001), 8, |data| {
+                        let tag_ptr = data.as_mut_ptr() as *mut u32;
+                        unsafe {
+                            *tag_ptr = 1;
+                            *tag_ptr.add(1) = 0;
+                        }
+                    })?;
                     state.record_allocation();
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
@@ -142,22 +146,21 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                     )?;
                     state.record_allocation();
                     let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr = unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe { *field_ptr = Value::from_i64(result); }
+                    let field_ptr =
+                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
+                    unsafe {
+                        *field_ptr = Value::from_i64(result);
+                    }
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
                 None => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8001),
-                        8,
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 1;
-                                *tag_ptr.add(1) = 0;
-                            }
-                        },
-                    )?;
+                    let obj = state.heap.alloc_with_init(TypeId(0x8001), 8, |data| {
+                        let tag_ptr = data.as_mut_ptr() as *mut u32;
+                        unsafe {
+                            *tag_ptr = 1;
+                            *tag_ptr.add(1) = 0;
+                        }
+                    })?;
                     state.record_allocation();
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
@@ -188,22 +191,21 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                     )?;
                     state.record_allocation();
                     let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr = unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe { *field_ptr = Value::from_i64(result); }
+                    let field_ptr =
+                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
+                    unsafe {
+                        *field_ptr = Value::from_i64(result);
+                    }
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
                 None => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8001),
-                        8,
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 1;
-                                *tag_ptr.add(1) = 0;
-                            }
-                        },
-                    )?;
+                    let obj = state.heap.alloc_with_init(TypeId(0x8001), 8, |data| {
+                        let tag_ptr = data.as_mut_ptr() as *mut u32;
+                        unsafe {
+                            *tag_ptr = 1;
+                            *tag_ptr.add(1) = 0;
+                        }
+                    })?;
                     state.record_allocation();
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
@@ -237,8 +239,11 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                     )?;
                     state.record_allocation();
                     let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr = unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe { *field_ptr = Value::from_i64(result as i64); }
+                    let field_ptr =
+                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
+                    unsafe {
+                        *field_ptr = Value::from_i64(result as i64);
+                    }
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
                 None => {
@@ -283,22 +288,21 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                     )?;
                     state.record_allocation();
                     let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr = unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe { *field_ptr = Value::from_i64(result as i64); }
+                    let field_ptr =
+                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
+                    unsafe {
+                        *field_ptr = Value::from_i64(result as i64);
+                    }
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
                 None => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8001),
-                        8,
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 1;
-                                *tag_ptr.add(1) = 0;
-                            }
-                        },
-                    )?;
+                    let obj = state.heap.alloc_with_init(TypeId(0x8001), 8, |data| {
+                        let tag_ptr = data.as_mut_ptr() as *mut u32;
+                        unsafe {
+                            *tag_ptr = 1;
+                            *tag_ptr.add(1) = 0;
+                        }
+                    })?;
                     state.record_allocation();
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
@@ -329,22 +333,21 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                     )?;
                     state.record_allocation();
                     let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr = unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe { *field_ptr = Value::from_i64(result as i64); }
+                    let field_ptr =
+                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
+                    unsafe {
+                        *field_ptr = Value::from_i64(result as i64);
+                    }
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
                 None => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8001),
-                        8,
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 1;
-                                *tag_ptr.add(1) = 0;
-                            }
-                        },
-                    )?;
+                    let obj = state.heap.alloc_with_init(TypeId(0x8001), 8, |data| {
+                        let tag_ptr = data.as_mut_ptr() as *mut u32;
+                        unsafe {
+                            *tag_ptr = 1;
+                            *tag_ptr.add(1) = 0;
+                        }
+                    })?;
                     state.record_allocation();
                     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
                 }
@@ -397,7 +400,9 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
             let (result, overflowed) = a.overflowing_add(b);
 
             // Allocate tuple (Int, Bool)
-            let obj = state.heap.alloc(TypeId::UNIT, 2 * std::mem::size_of::<Value>())?;
+            let obj = state
+                .heap
+                .alloc(TypeId::UNIT, 2 * std::mem::size_of::<Value>())?;
             state.record_allocation();
             let base_ptr = obj.as_ptr() as *mut u8;
             let field0_offset = super::super::super::heap::OBJECT_HEADER_SIZE;
@@ -419,7 +424,9 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
             let b = state.get_reg(b_reg).as_i64();
             let (result, overflowed) = a.overflowing_sub(b);
 
-            let obj = state.heap.alloc(TypeId::UNIT, 2 * std::mem::size_of::<Value>())?;
+            let obj = state
+                .heap
+                .alloc(TypeId::UNIT, 2 * std::mem::size_of::<Value>())?;
             state.record_allocation();
             let base_ptr = obj.as_ptr() as *mut u8;
             let field0_offset = super::super::super::heap::OBJECT_HEADER_SIZE;
@@ -441,7 +448,9 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
             let b = state.get_reg(b_reg).as_i64();
             let (result, overflowed) = a.overflowing_mul(b);
 
-            let obj = state.heap.alloc(TypeId::UNIT, 2 * std::mem::size_of::<Value>())?;
+            let obj = state
+                .heap
+                .alloc(TypeId::UNIT, 2 * std::mem::size_of::<Value>())?;
             state.record_allocation();
             let base_ptr = obj.as_ptr() as *mut u8;
             let field0_offset = super::super::super::heap::OBJECT_HEADER_SIZE;
@@ -575,19 +584,32 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
             // previously polluted every program's stderr on every abs().)
             let trace = std::env::var_os("VBC_POLY_TRACE").is_some();
             if trace {
-                eprintln!("[DEBUG PolyAbs] dst={:?} src_reg={:?} is_float={} is_int={}",
-                    dst, src_reg, src.is_float(), src.is_int());
+                eprintln!(
+                    "[DEBUG PolyAbs] dst={:?} src_reg={:?} is_float={} is_int={}",
+                    dst,
+                    src_reg,
+                    src.is_float(),
+                    src.is_int()
+                );
             }
 
             let result = if src.is_float() {
                 if trace {
-                    eprintln!("[DEBUG PolyAbs] Float path: {} -> {}", src.as_f64(), src.as_f64().abs());
+                    eprintln!(
+                        "[DEBUG PolyAbs] Float path: {} -> {}",
+                        src.as_f64(),
+                        src.as_f64().abs()
+                    );
                 }
                 Value::from_f64(src.as_f64().abs())
             } else {
                 // Use wrapping_abs to handle MIN value correctly
                 if trace {
-                    eprintln!("[DEBUG PolyAbs] Int path: {} -> {}", src.as_i64(), src.as_i64().wrapping_abs());
+                    eprintln!(
+                        "[DEBUG PolyAbs] Int path: {} -> {}",
+                        src.as_i64(),
+                        src.as_i64().wrapping_abs()
+                    );
                 }
                 Value::from_i64(src.as_i64().wrapping_abs())
             };
@@ -854,7 +876,6 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
         // ================================================================
         // Bit Counting Operations (0x50-0x5F)
         // ================================================================
-
         Some(ArithSubOpcode::Clz) => {
             // Count leading zeros (64-bit)
             let dst = read_reg(state)?;
@@ -1183,12 +1204,10 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
             Ok(DispatchResult::Continue)
         }
 
-        None => {
-            Err(InterpreterError::NotImplemented {
-                feature: "unknown arithmetic sub-opcode",
-                opcode: None,
-            })
-        }
+        None => Err(InterpreterError::NotImplemented {
+            feature: "unknown arithmetic sub-opcode",
+            opcode: None,
+        }),
     }
 }
 
@@ -1227,7 +1246,9 @@ fn emit_maybe_int(
         state.record_allocation();
         let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
         let field_ptr = unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-        unsafe { *field_ptr = Value::from_i64(value); }
+        unsafe {
+            *field_ptr = Value::from_i64(value);
+        }
         state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
     } else {
         let obj = state.heap.alloc_with_init(

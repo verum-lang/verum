@@ -57,19 +57,25 @@ pub struct CogResolver {
 impl CogResolver {
     /// Create an empty resolver (no external cogs).
     pub fn new() -> Self {
-        Self {
-            cogs: Map::new(),
-        }
+        Self { cogs: Map::new() }
     }
 
     /// Register an external cog with its filesystem root.
-    pub fn register_cog(&mut self, name: impl Into<Text>, version: impl Into<Text>, root_path: PathBuf) {
+    pub fn register_cog(
+        &mut self,
+        name: impl Into<Text>,
+        version: impl Into<Text>,
+        root_path: PathBuf,
+    ) {
         let name = name.into();
-        self.cogs.insert(name.clone(), CogLocation {
-            name,
-            version: version.into(),
-            root_path,
-        });
+        self.cogs.insert(
+            name.clone(),
+            CogLocation {
+                name,
+                version: version.into(),
+                root_path,
+            },
+        );
     }
 
     /// Check if a name refers to a registered external cog.
@@ -114,12 +120,17 @@ impl CogResolver {
                 CogSourceKind::Registry => {
                     cache_dir.join(format!("{}-{}", name, version)).join("src")
                 }
-                CogSourceKind::Path(path) => {
-                    path.clone()
-                }
+                CogSourceKind::Path(path) => path.clone(),
                 CogSourceKind::Git { rev } => {
-                    let short_rev = if rev.len() > 8 { &rev[..8] } else { rev.as_str() };
-                    cache_dir.join("git").join(format!("{}-{}", name, short_rev)).join("src")
+                    let short_rev = if rev.len() > 8 {
+                        &rev[..8]
+                    } else {
+                        rev.as_str()
+                    };
+                    cache_dir
+                        .join("git")
+                        .join(format!("{}-{}", name, short_rev))
+                        .join("src")
                 }
                 CogSourceKind::Ipfs { hash } => {
                     cache_dir.join("ipfs").join(hash.as_str()).join("src")
@@ -187,8 +198,16 @@ mod tests {
     #[test]
     fn test_from_locked_cogs() {
         let locked = vec![
-            (Text::from("http"), Text::from("1.2.3"), CogSourceKind::Registry),
-            (Text::from("local_lib"), Text::from("0.1.0"), CogSourceKind::Path(PathBuf::from("../local_lib/src"))),
+            (
+                Text::from("http"),
+                Text::from("1.2.3"),
+                CogSourceKind::Registry,
+            ),
+            (
+                Text::from("local_lib"),
+                Text::from("0.1.0"),
+                CogSourceKind::Path(PathBuf::from("../local_lib/src")),
+            ),
         ];
         let resolver = CogResolver::from_locked_cogs(&locked);
 

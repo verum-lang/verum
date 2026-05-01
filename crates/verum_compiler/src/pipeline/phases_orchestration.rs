@@ -64,19 +64,15 @@ impl<'s> CompilationPipeline<'s> {
         // Fast path: when every relevant [safety] flag is permissive,
         // skip the walker entirely — zero cost on the default
         // configuration.
-        if features.unsafe_allowed() && features.safety.ffi
+        if features.unsafe_allowed()
+            && features.safety.ffi
             && !features.safety.capability_required
             && !features.safety.forbid_stdlib_extern
         {
             return Ok(());
         }
-        let policy = crate::phases::safety_gate::SafetyPolicy::from_features(
-            &features.safety,
-        );
-        let diags = crate::phases::safety_gate::check_safety(
-            std::slice::from_ref(module),
-            policy,
-        );
+        let policy = crate::phases::safety_gate::SafetyPolicy::from_features(&features.safety);
+        let diags = crate::phases::safety_gate::check_safety(std::slice::from_ref(module), policy);
         if !diags.is_empty() {
             let n = diags.len();
             for d in diags.iter() {
@@ -101,20 +97,13 @@ impl<'s> CompilationPipeline<'s> {
     /// teams that want stricter enforcement set `-Dmap_get_hazard`
     /// in their lint configuration.
     pub(super) fn phase_stdlib_lints(&self, module: &Module) {
-        use crate::lint::{
-            walk_module_for_stdlib_hazards, StdlibLintFinding,
-        };
-        let findings: Vec<StdlibLintFinding> =
-            walk_module_for_stdlib_hazards(module);
+        use crate::lint::{StdlibLintFinding, walk_module_for_stdlib_hazards};
+        let findings: Vec<StdlibLintFinding> = walk_module_for_stdlib_hazards(module);
         for finding in findings {
             let summary_text = finding.lint.summary();
             let diag = verum_diagnostics::DiagnosticBuilder::warning()
                 .code(finding.lint.warning_code())
-                .message(format!(
-                    "{} (`{}`)",
-                    summary_text,
-                    finding.lint.name()
-                ))
+                .message(format!("{} (`{}`)", summary_text, finding.lint.name()))
                 .span(crate::phases::ast_span_to_diagnostic_span(
                     finding.span,
                     None,
@@ -189,7 +178,10 @@ impl<'s> CompilationPipeline<'s> {
         // this flag can be true only when [types].higher_kinded
         // is also true.
         checker.set_higher_kinded_protocols_enabled(
-            self.session.language_features().protocols.higher_kinded_protocols,
+            self.session
+                .language_features()
+                .protocols
+                .higher_kinded_protocols,
         );
 
         // Apply `[protocols].generic_associated_types` from manifest.
@@ -199,7 +191,10 @@ impl<'s> CompilationPipeline<'s> {
         // enforces that this flag can be true only when
         // [protocols].associated_types is also true.
         checker.set_generic_associated_types_enabled(
-            self.session.language_features().protocols.generic_associated_types,
+            self.session
+                .language_features()
+                .protocols
+                .generic_associated_types,
         );
 
         // Post-cycle-break (2026-04-24): `RefinementChecker` no longer
@@ -333,7 +328,8 @@ impl<'s> CompilationPipeline<'s> {
         // embedded stdlib source archive. This scans for
         // `public context Name {` patterns in .vr files.
         {
-            let has_metadata_contexts = self.stdlib_metadata
+            let has_metadata_contexts = self
+                .stdlib_metadata
                 .as_ref()
                 .map(|m| !m.context_declarations.is_empty())
                 .unwrap_or(false);
@@ -394,9 +390,8 @@ impl<'s> CompilationPipeline<'s> {
                             for item in &module.items {
                                 if let verum_ast::ItemKind::Context(ctx_decl) = &item.kind {
                                     if ctx_decl.visibility == verum_ast::decl::Visibility::Public {
-                                        let ctx_name = verum_common::Text::from(
-                                            ctx_decl.name.name.as_str(),
-                                        );
+                                        let ctx_name =
+                                            verum_common::Text::from(ctx_decl.name.name.as_str());
                                         // Register with FULL method signatures in
                                         // both resolver and checker. We do NOT skip
                                         // on `collected_contexts.contains(&ctx_name)`
@@ -593,13 +588,17 @@ impl<'s> CompilationPipeline<'s> {
 
         // Shallower (fewer-dot) module keys are prioritized so top-level stdlib functions
         // beat nested-module helpers when short names collide.
-        let mut stdlib_entries: Vec<_> = self.modules.iter()
+        let mut stdlib_entries: Vec<_> = self
+            .modules
+            .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         stdlib_entries.sort_by(|(a, _), (b, _)| {
             let depth_a = a.as_str().matches('.').count();
             let depth_b = b.as_str().matches('.').count();
-            depth_a.cmp(&depth_b).then_with(|| a.as_str().cmp(b.as_str()))
+            depth_a
+                .cmp(&depth_b)
+                .then_with(|| a.as_str().cmp(b.as_str()))
         });
 
         // Preserve the user-file module path so we can restore it after
@@ -608,7 +607,10 @@ impl<'s> CompilationPipeline<'s> {
 
         if !stdlib_entries.is_empty() {
             if self.stdlib_metadata.is_none() {
-                debug!("Registering {} stdlib modules into type checker (bootstrap mode)", stdlib_entries.len());
+                debug!(
+                    "Registering {} stdlib modules into type checker (bootstrap mode)",
+                    stdlib_entries.len()
+                );
 
                 // Pass S0a: Register all stdlib type names (module-scoped).
                 for (module_path, stdlib_mod) in &stdlib_entries {
@@ -622,7 +624,9 @@ impl<'s> CompilationPipeline<'s> {
                     checker.set_current_module_path(module_path.clone());
                     for item in &stdlib_mod.items {
                         if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-                            if let Err(e) = checker.resolve_type_definition(type_decl, &mut resolution_stack) {
+                            if let Err(e) =
+                                checker.resolve_type_definition(type_decl, &mut resolution_stack)
+                            {
                                 debug!("Stdlib type resolution error: {:?}", e);
                             }
                         }
@@ -653,7 +657,10 @@ impl<'s> CompilationPipeline<'s> {
             }
 
             // Pass S3: ALWAYS register stdlib impl blocks (module-scoped).
-            debug!("Registering stdlib impl blocks ({} modules)", stdlib_entries.len());
+            debug!(
+                "Registering stdlib impl blocks ({} modules)",
+                stdlib_entries.len()
+            );
             for (module_path, stdlib_mod) in &stdlib_entries {
                 checker.set_current_module_path(module_path.clone());
                 for item in &stdlib_mod.items {
@@ -682,7 +689,8 @@ impl<'s> CompilationPipeline<'s> {
         checker.set_user_code_phase();
 
         // Collect pre-existing placeholder names (from stdlib) to exclude from user verification
-        let pre_existing_placeholders: std::collections::HashSet<String> = checker.verify_no_placeholders()
+        let pre_existing_placeholders: std::collections::HashSet<String> = checker
+            .verify_no_placeholders()
             .iter()
             .filter_map(|e| {
                 if let verum_types::TypeError::UnresolvedPlaceholder { name, .. } = e {
@@ -720,11 +728,12 @@ impl<'s> CompilationPipeline<'s> {
         // Verify no placeholder types remain (indicates unresolved forward references)
         // Skip placeholders that were already unresolved from stdlib pre-registration
         for error in checker.verify_no_placeholders() {
-            let is_stdlib_placeholder = if let verum_types::TypeError::UnresolvedPlaceholder { name, .. } = &error {
-                pre_existing_placeholders.contains(name.as_str())
-            } else {
-                false
-            };
+            let is_stdlib_placeholder =
+                if let verum_types::TypeError::UnresolvedPlaceholder { name, .. } = &error {
+                    pre_existing_placeholders.contains(name.as_str())
+                } else {
+                    false
+                };
             if !is_stdlib_placeholder {
                 let diag = type_error_to_diagnostic(&error, Some(self.session));
                 self.session.emit_diagnostic(diag);
@@ -815,18 +824,22 @@ impl<'s> CompilationPipeline<'s> {
         // Detection: Check source for `// @test:` comment header (VCS convention)
         // or `@test` AST attribute on any item.
         let has_test_annotation = {
-            let has_ast_attr = module.items.iter().any(|item| {
-                item.attributes.iter().any(|attr| attr.is_named("test"))
-            });
-            let has_comment_annotation = module.items.first().and_then(|item| {
-                self.session.get_source(item.span.file_id)
-            }).map(|sf| {
-                // Check if the first few lines contain `// @test:` header
-                sf.source.as_str().lines().take(10).any(|line| {
-                    let trimmed = line.trim();
-                    trimmed.starts_with("// @test:") || trimmed.starts_with("// @test ")
+            let has_ast_attr = module
+                .items
+                .iter()
+                .any(|item| item.attributes.iter().any(|attr| attr.is_named("test")));
+            let has_comment_annotation = module
+                .items
+                .first()
+                .and_then(|item| self.session.get_source(item.span.file_id))
+                .map(|sf| {
+                    // Check if the first few lines contain `// @test:` header
+                    sf.source.as_str().lines().take(10).any(|line| {
+                        let trimmed = line.trim();
+                        trimmed.starts_with("// @test:") || trimmed.starts_with("// @test ")
+                    })
                 })
-            }).unwrap_or(false);
+                .unwrap_or(false);
             has_ast_attr || has_comment_annotation
         };
         if has_test_annotation {
@@ -838,11 +851,16 @@ impl<'s> CompilationPipeline<'s> {
         // may not be fully loaded in single-file check mode. Lenient
         // mode defers method-level validation to the call site where
         // the context is `provide`d with a concrete implementation.
-        let is_stdlib_file = self.session.options().input
+        let is_stdlib_file = self
+            .session
+            .options()
+            .input
             .to_str()
             .map(|p| {
-                p.contains("/core/") || p.contains("\\core\\")
-                    || p.starts_with("core/") || p.starts_with("core\\")
+                p.contains("/core/")
+                    || p.contains("\\core\\")
+                    || p.starts_with("core/")
+                    || p.starts_with("core\\")
             })
             .unwrap_or(false);
         if is_stdlib_file {
@@ -906,7 +924,10 @@ impl<'s> CompilationPipeline<'s> {
             let inherent = checker.get_inherent_methods();
             let methods_guard = inherent.read();
             let mut exporter = verum_types::type_exporter::TypeExporter::new(&methods_guard);
-            let module_path = self.session.options().input
+            let module_path = self
+                .session
+                .options()
+                .input
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "module".to_string());
@@ -917,7 +938,11 @@ impl<'s> CompilationPipeline<'s> {
                 if let Err(e) = std::fs::write(&vtyp_path, &data) {
                     debug!("Failed to write type metadata: {}", e);
                 } else {
-                    info!("Exported type metadata: {} ({} bytes)", vtyp_path.display(), data.len());
+                    info!(
+                        "Exported type metadata: {} ({} bytes)",
+                        vtyp_path.display(),
+                        data.len()
+                    );
                 }
             }
             drop(methods_guard);
@@ -931,10 +956,7 @@ impl<'s> CompilationPipeline<'s> {
         // manifest field by making lenient mode observable.
         for warning in checker.drain_protocol_coherence_warnings() {
             let diag = DiagnosticBuilder::new(Severity::Warning)
-                .message(format!(
-                    "[protocols].coherence=lenient: {}",
-                    warning
-                ))
+                .message(format!("[protocols].coherence=lenient: {}", warning))
                 .build();
             self.session.emit_diagnostic(diag);
         }
@@ -968,7 +990,12 @@ impl<'s> CompilationPipeline<'s> {
         let profile = self.session.options().to_target_profile();
 
         // Skip analysis if no constraints are active
-        if !profile.no_alloc && !profile.no_std && !profile.embedded && !profile.cbgr_static_only && !profile.no_gpu {
+        if !profile.no_alloc
+            && !profile.no_std
+            && !profile.embedded
+            && !profile.cbgr_static_only
+            && !profile.no_gpu
+        {
             debug!("Dependency analysis skipped: no target constraints active");
             return Ok(());
         }
@@ -1043,12 +1070,15 @@ impl<'s> CompilationPipeline<'s> {
             let _ = hygiene_pass.run(module, &mut ctx);
             for d in hygiene_pass.diagnostics() {
                 let builder = match d.severity {
-                    verum_verification::HygieneSeverity::Error =>
-                        verum_diagnostics::DiagnosticBuilder::error(),
-                    verum_verification::HygieneSeverity::Warning =>
-                        verum_diagnostics::DiagnosticBuilder::warning(),
-                    verum_verification::HygieneSeverity::Info =>
-                        verum_diagnostics::DiagnosticBuilder::warning(),
+                    verum_verification::HygieneSeverity::Error => {
+                        verum_diagnostics::DiagnosticBuilder::error()
+                    }
+                    verum_verification::HygieneSeverity::Warning => {
+                        verum_diagnostics::DiagnosticBuilder::warning()
+                    }
+                    verum_verification::HygieneSeverity::Info => {
+                        verum_diagnostics::DiagnosticBuilder::warning()
+                    }
                 };
                 let diag = builder
                     .message(format!(
@@ -1156,8 +1186,7 @@ impl<'s> CompilationPipeline<'s> {
             // are hard formation errors per the trusted-base contract;
             // short-circuiting saves the SMT round and surfaces a
             // sharper diagnostic.
-            let kernel_outcomes =
-                verum_verification::KernelRecheck::recheck_function(func);
+            let kernel_outcomes = verum_verification::KernelRecheck::recheck_function(func);
             let mut kernel_failure: Option<(verum_common::Text, String)> = None;
             for (label, outcome) in kernel_outcomes.iter() {
                 if let Err(err) = outcome {
@@ -1183,8 +1212,7 @@ impl<'s> CompilationPipeline<'s> {
             // Perform actual SMT-based refinement verification.
             let verification_result = self.verify_function_refinements(func, timeout_ms);
             let verify_elapsed = verify_start.elapsed();
-            let func_name_text: verum_common::Text =
-                func.name.as_str().to_string().into();
+            let func_name_text: verum_common::Text = func.name.as_str().to_string().into();
 
             match verification_result {
                 Ok(true) => {
@@ -1266,8 +1294,7 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        let (num_verified, num_failed, num_timeout, cost_tracker) =
-            aggregate.into_inner().unwrap();
+        let (num_verified, num_failed, num_timeout, cost_tracker) = aggregate.into_inner().unwrap();
 
         // Phase 4b: Verify theorem/lemma/axiom proofs via SMT
         self.verify_theorem_proofs(module)?;
@@ -1382,8 +1409,7 @@ impl<'s> CompilationPipeline<'s> {
                 _ => continue,
             };
             let name: verum_common::Text = thm.name.name.clone();
-            let statement: verum_common::Text =
-                format!("{:?}", thm.proposition).into();
+            let statement: verum_common::Text = format!("{:?}", thm.proposition).into();
             let theorem = Theorem::new(name.clone(), statement);
             match generator.generate_stub(theorem) {
                 Ok(cert) => {
@@ -1425,7 +1451,6 @@ impl<'s> CompilationPipeline<'s> {
         }
         Ok(())
     }
-
 
     // verify_impl_axioms_for_module + find_protocol_decl extracted to
     // crate::pipeline::impl_axioms (#106 Phase 3 — pipeline.rs split).
@@ -1529,8 +1554,11 @@ impl<'s> CompilationPipeline<'s> {
             Ok(warnings) => {
                 let elapsed = t0.elapsed();
                 if !warnings.is_empty() && policy != "allow" {
-                    info!("Context validation: {} warnings ({:.2}ms)",
-                        warnings.len(), elapsed.as_secs_f64() * 1000.0);
+                    info!(
+                        "Context validation: {} warnings ({:.2}ms)",
+                        warnings.len(),
+                        elapsed.as_secs_f64() * 1000.0
+                    );
                     for w in warnings.iter() {
                         warn!("Context: {}", w.message());
                     }
@@ -1586,16 +1614,27 @@ impl<'s> CompilationPipeline<'s> {
         let result = validate_module_ffi(module, false);
         let elapsed = t0.elapsed();
         if result.functions_validated > 0 {
-            info!("FFI validation: {} extern blocks, {} ffi boundaries, {} functions ({:.2}ms, {} diagnostics)",
-                result.extern_blocks_validated, result.ffi_boundaries_validated,
-                result.functions_validated, elapsed.as_secs_f64() * 1000.0, result.diagnostics.len());
+            info!(
+                "FFI validation: {} extern blocks, {} ffi boundaries, {} functions ({:.2}ms, {} diagnostics)",
+                result.extern_blocks_validated,
+                result.ffi_boundaries_validated,
+                result.functions_validated,
+                elapsed.as_secs_f64() * 1000.0,
+                result.diagnostics.len()
+            );
         }
         // Warnings (from extern blocks)
-        for diag in result.diagnostics.iter().filter(|d| d.severity() != Severity::Error) {
+        for diag in result
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity() != Severity::Error)
+        {
             warn!("FFI: {}", diag.message());
         }
         // Errors (from ffi blocks) — fail compilation
-        let errors: Vec<_> = result.diagnostics.iter()
+        let errors: Vec<_> = result
+            .diagnostics
+            .iter()
             .filter(|d| d.severity() == Severity::Error)
             .collect();
         if !errors.is_empty() {
@@ -1607,5 +1646,4 @@ impl<'s> CompilationPipeline<'s> {
         }
         Ok(())
     }
-
 }

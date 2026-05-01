@@ -91,7 +91,7 @@ impl ItemRequirements {
     /// Create requirements for OS-dependent items (Layer 3)
     pub const fn os() -> Self {
         Self {
-            needs_alloc: true,  // OS features typically need allocation
+            needs_alloc: true, // OS features typically need allocation
             needs_os: true,
             needs_runtime: false,
             needs_cbgr_runtime: false,
@@ -265,16 +265,10 @@ pub enum TargetError {
     },
 
     /// Item requires OS but target is no_std
-    RequiresOs {
-        item: Text,
-        span: Span,
-    },
+    RequiresOs { item: Text, span: Span },
 
     /// Item requires async runtime but not available
-    RequiresRuntime {
-        item: Text,
-        span: Span,
-    },
+    RequiresRuntime { item: Text, span: Span },
 
     /// Item uses Tier 0 CBGR but target requires static-only
     CbgrTierViolation {
@@ -284,19 +278,23 @@ pub enum TargetError {
     },
 
     /// Item requires GPU but target doesn't support it
-    RequiresGpu {
-        item: Text,
-        span: Span,
-    },
+    RequiresGpu { item: Text, span: Span },
 }
 
 impl TargetError {
     /// Convert to diagnostic
     pub fn to_diagnostic(&self, span_converter: impl Fn(Span) -> DiagSpan) -> Diagnostic {
         match self {
-            TargetError::RequiresAllocator { item, span, suggestion } => {
+            TargetError::RequiresAllocator {
+                item,
+                span,
+                suggestion,
+            } => {
                 let mut builder = DiagnosticBuilder::error()
-                    .message(format!("Cannot use `{}` - requires allocator", item.as_str()))
+                    .message(format!(
+                        "Cannot use `{}` - requires allocator",
+                        item.as_str()
+                    ))
                     .span_label(span_converter(*span), "requires allocator");
 
                 if let Some(sug) = suggestion {
@@ -304,32 +302,41 @@ impl TargetError {
                 }
                 builder.build()
             }
-            TargetError::RequiresOs { item, span } => {
-                DiagnosticBuilder::error()
-                    .message(format!("Cannot use `{}` - requires operating system", item.as_str()))
-                    .span_label(span_converter(*span), "requires OS")
-                    .build()
-            }
-            TargetError::RequiresRuntime { item, span } => {
-                DiagnosticBuilder::error()
-                    .message(format!("Cannot use `{}` - requires async runtime", item.as_str()))
-                    .span_label(span_converter(*span), "requires runtime")
-                    .add_note("Use synchronous version or provide custom runtime")
-                    .build()
-            }
-            TargetError::CbgrTierViolation { item, span, message } => {
-                DiagnosticBuilder::error()
-                    .message(format!("CBGR tier violation for `{}`: {}", item.as_str(), message.as_str()))
-                    .span_label(span_converter(*span), "tier violation")
-                    .add_note("Embedded targets require Tier 1 or Tier 2 references only")
-                    .build()
-            }
-            TargetError::RequiresGpu { item, span } => {
-                DiagnosticBuilder::error()
-                    .message(format!("Cannot use `{}` - requires GPU backend", item.as_str()))
-                    .span_label(span_converter(*span), "requires GPU")
-                    .build()
-            }
+            TargetError::RequiresOs { item, span } => DiagnosticBuilder::error()
+                .message(format!(
+                    "Cannot use `{}` - requires operating system",
+                    item.as_str()
+                ))
+                .span_label(span_converter(*span), "requires OS")
+                .build(),
+            TargetError::RequiresRuntime { item, span } => DiagnosticBuilder::error()
+                .message(format!(
+                    "Cannot use `{}` - requires async runtime",
+                    item.as_str()
+                ))
+                .span_label(span_converter(*span), "requires runtime")
+                .add_note("Use synchronous version or provide custom runtime")
+                .build(),
+            TargetError::CbgrTierViolation {
+                item,
+                span,
+                message,
+            } => DiagnosticBuilder::error()
+                .message(format!(
+                    "CBGR tier violation for `{}`: {}",
+                    item.as_str(),
+                    message.as_str()
+                ))
+                .span_label(span_converter(*span), "tier violation")
+                .add_note("Embedded targets require Tier 1 or Tier 2 references only")
+                .build(),
+            TargetError::RequiresGpu { item, span } => DiagnosticBuilder::error()
+                .message(format!(
+                    "Cannot use `{}` - requires GPU backend",
+                    item.as_str()
+                ))
+                .span_label(span_converter(*span), "requires GPU")
+                .build(),
         }
     }
 }
@@ -365,46 +372,78 @@ impl DependencyAnalyzer {
     /// Initialize requirements for built-in types
     fn init_builtin_requirements(&mut self) {
         // Layer 1: Core types (no requirements)
-        self.builtin_requirements.insert("Bool", ItemRequirements::none());
-        self.builtin_requirements.insert("Int", ItemRequirements::none());
-        self.builtin_requirements.insert("Float", ItemRequirements::none());
-        self.builtin_requirements.insert("Char", ItemRequirements::none());
-        self.builtin_requirements.insert("Unit", ItemRequirements::none());
-        self.builtin_requirements.insert("Never", ItemRequirements::none());
-        self.builtin_requirements.insert("Array", ItemRequirements::none());
-        self.builtin_requirements.insert("Maybe", ItemRequirements::none());
-        self.builtin_requirements.insert("Result", ItemRequirements::none());
-        self.builtin_requirements.insert("Ordering", ItemRequirements::none());
+        self.builtin_requirements
+            .insert("Bool", ItemRequirements::none());
+        self.builtin_requirements
+            .insert("Int", ItemRequirements::none());
+        self.builtin_requirements
+            .insert("Float", ItemRequirements::none());
+        self.builtin_requirements
+            .insert("Char", ItemRequirements::none());
+        self.builtin_requirements
+            .insert("Unit", ItemRequirements::none());
+        self.builtin_requirements
+            .insert("Never", ItemRequirements::none());
+        self.builtin_requirements
+            .insert("Array", ItemRequirements::none());
+        self.builtin_requirements
+            .insert("Maybe", ItemRequirements::none());
+        self.builtin_requirements
+            .insert("Result", ItemRequirements::none());
+        self.builtin_requirements
+            .insert("Ordering", ItemRequirements::none());
 
         // Layer 2: Allocation-dependent types
-        self.builtin_requirements.insert("Heap", ItemRequirements::alloc());
-        self.builtin_requirements.insert("List", ItemRequirements::alloc());
-        self.builtin_requirements.insert("Text", ItemRequirements::alloc());
-        self.builtin_requirements.insert("Map", ItemRequirements::alloc());
-        self.builtin_requirements.insert("Set", ItemRequirements::alloc());
-        self.builtin_requirements.insert("Vec", ItemRequirements::alloc());
-        self.builtin_requirements.insert("String", ItemRequirements::alloc());
-        self.builtin_requirements.insert("HashMap", ItemRequirements::alloc());
-        self.builtin_requirements.insert("HashSet", ItemRequirements::alloc());
+        self.builtin_requirements
+            .insert("Heap", ItemRequirements::alloc());
+        self.builtin_requirements
+            .insert("List", ItemRequirements::alloc());
+        self.builtin_requirements
+            .insert("Text", ItemRequirements::alloc());
+        self.builtin_requirements
+            .insert("Map", ItemRequirements::alloc());
+        self.builtin_requirements
+            .insert("Set", ItemRequirements::alloc());
+        self.builtin_requirements
+            .insert("Vec", ItemRequirements::alloc());
+        self.builtin_requirements
+            .insert("String", ItemRequirements::alloc());
+        self.builtin_requirements
+            .insert("HashMap", ItemRequirements::alloc());
+        self.builtin_requirements
+            .insert("HashSet", ItemRequirements::alloc());
 
         // Layer 3: OS-dependent types
-        self.builtin_requirements.insert("File", ItemRequirements::os());
-        self.builtin_requirements.insert("Path", ItemRequirements::os());
-        self.builtin_requirements.insert("TcpStream", ItemRequirements::os());
-        self.builtin_requirements.insert("TcpListener", ItemRequirements::os());
-        self.builtin_requirements.insert("UdpSocket", ItemRequirements::os());
-        self.builtin_requirements.insert("Thread", ItemRequirements::os());
-        self.builtin_requirements.insert("Process", ItemRequirements::os());
+        self.builtin_requirements
+            .insert("File", ItemRequirements::os());
+        self.builtin_requirements
+            .insert("Path", ItemRequirements::os());
+        self.builtin_requirements
+            .insert("TcpStream", ItemRequirements::os());
+        self.builtin_requirements
+            .insert("TcpListener", ItemRequirements::os());
+        self.builtin_requirements
+            .insert("UdpSocket", ItemRequirements::os());
+        self.builtin_requirements
+            .insert("Thread", ItemRequirements::os());
+        self.builtin_requirements
+            .insert("Process", ItemRequirements::os());
 
         // Runtime-dependent types
-        self.builtin_requirements.insert("Future", ItemRequirements::runtime());
-        self.builtin_requirements.insert("Task", ItemRequirements::runtime());
-        self.builtin_requirements.insert("Channel", ItemRequirements::runtime());
+        self.builtin_requirements
+            .insert("Future", ItemRequirements::runtime());
+        self.builtin_requirements
+            .insert("Task", ItemRequirements::runtime());
+        self.builtin_requirements
+            .insert("Channel", ItemRequirements::runtime());
 
         // GPU types
-        self.builtin_requirements.insert("GpuBuffer", ItemRequirements::gpu());
-        self.builtin_requirements.insert("GpuKernel", ItemRequirements::gpu());
-        self.builtin_requirements.insert("Tensor", ItemRequirements::gpu());
+        self.builtin_requirements
+            .insert("GpuBuffer", ItemRequirements::gpu());
+        self.builtin_requirements
+            .insert("GpuKernel", ItemRequirements::gpu());
+        self.builtin_requirements
+            .insert("Tensor", ItemRequirements::gpu());
     }
 
     /// Get requirements for a built-in type
@@ -452,7 +491,11 @@ impl DependencyAnalyzer {
                     reqs.merge(&elem_reqs);
                 }
             }
-            TypeKind::Function { params, return_type, .. } => {
+            TypeKind::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 for param in params {
                     let param_reqs = self.analyze_type(param);
                     reqs.merge(&param_reqs);
@@ -502,7 +545,11 @@ impl DependencyAnalyzer {
                 let inner_reqs = self.analyze_expr(inner);
                 reqs.merge(&inner_reqs);
             }
-            ExprKind::If { condition, then_branch, else_branch } => {
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 let cond_reqs = self.analyze_if_condition(condition);
                 reqs.merge(&cond_reqs);
                 let then_reqs = self.analyze_block(then_branch);
@@ -534,7 +581,10 @@ impl DependencyAnalyzer {
     }
 
     /// Analyze requirements for an if condition
-    fn analyze_if_condition(&mut self, condition: &verum_ast::expr::IfCondition) -> ItemRequirements {
+    fn analyze_if_condition(
+        &mut self,
+        condition: &verum_ast::expr::IfCondition,
+    ) -> ItemRequirements {
         use verum_ast::expr::ConditionKind;
         let mut reqs = ItemRequirements::none();
 

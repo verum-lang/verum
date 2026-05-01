@@ -4,12 +4,15 @@ use crate::deserialize::deserialize_module;
 use crate::encoding::*;
 use crate::format::VbcFlags;
 use crate::instruction::{Opcode, Reg, RegRange};
-use crate::module::{CallingConvention, Constant, ConstId, FunctionDescriptor, FunctionId, OptimizationHints, ParamDescriptor, VbcModule};
+use crate::module::{
+    CallingConvention, ConstId, Constant, FunctionDescriptor, FunctionId, OptimizationHints,
+    ParamDescriptor, VbcModule,
+};
 use crate::serialize::serialize_module;
 use crate::types::{
-    CbgrTier, ContextRef, FieldDescriptor, Mutability, PropertySet, ProtocolId,
-    TypeDescriptor, TypeId, TypeKind, TypeParamDescriptor, TypeParamId, TypeRef, VariantDescriptor,
-    VariantKind, Variance, Visibility,
+    CbgrTier, ContextRef, FieldDescriptor, Mutability, PropertySet, ProtocolId, TypeDescriptor,
+    TypeId, TypeKind, TypeParamDescriptor, TypeParamId, TypeRef, Variance, VariantDescriptor,
+    VariantKind, Visibility,
 };
 use crate::validate::validate_module;
 use crate::value::Value;
@@ -390,12 +393,12 @@ fn test_value_special_floats() {
 fn test_varint_boundary_values() {
     let values = [
         0u64,
-        0x7F,                   // 1 byte max
-        0x80,                   // 2 bytes min
-        0x3FFF,                 // 2 bytes max
-        0x4000,                 // 3 bytes min
-        0x1FFFFF,               // 3 bytes max
-        u64::MAX >> 1,          // Large value
+        0x7F,          // 1 byte max
+        0x80,          // 2 bytes min
+        0x3FFF,        // 2 bytes max
+        0x4000,        // 3 bytes min
+        0x1FFFFF,      // 3 bytes max
+        u64::MAX >> 1, // Large value
     ];
 
     for &val in &values {
@@ -412,13 +415,7 @@ fn test_varint_boundary_values() {
 
 #[test]
 fn test_signed_varint_boundary_values() {
-    let values = [
-        i64::MIN >> 1,
-        -1i64,
-        0i64,
-        1i64,
-        i64::MAX >> 1,
-    ];
+    let values = [i64::MIN >> 1, -1i64, 0i64, 1i64, i64::MAX >> 1];
 
     for &val in &values {
         let mut buf = Vec::new();
@@ -653,11 +650,7 @@ fn test_roundtrip_all_type_kinds() {
 fn test_roundtrip_all_visibility_levels() {
     let mut module = VbcModule::new("visibility".to_string());
 
-    let visibilities = [
-        Visibility::Public,
-        Visibility::Private,
-        Visibility::Cog,
-    ];
+    let visibilities = [Visibility::Public, Visibility::Private, Visibility::Cog];
 
     for (i, vis) in visibilities.iter().enumerate() {
         let name = module.intern_string(&format!("Type{}", i));
@@ -790,7 +783,11 @@ fn test_roundtrip_property_sets() {
     let loaded = deserialize_module(&bytes).unwrap();
 
     for (i, props) in properties.iter().enumerate() {
-        assert_eq!(loaded.functions[i].properties, *props, "Property mismatch at {}", i);
+        assert_eq!(
+            loaded.functions[i].properties, *props,
+            "Property mismatch at {}",
+            i
+        );
     }
 }
 
@@ -937,9 +934,27 @@ fn test_bytecode_bounds_checking() {
     // cannot decode — for the bounds-checking invariant the test
     // intends to pin, the body must be well-formed.
     let mut bc = Vec::new();
-    encode_instruction(&Instruction::Mov { dst: Reg(0), src: Reg(0) }, &mut bc);
-    encode_instruction(&Instruction::Mov { dst: Reg(0), src: Reg(0) }, &mut bc);
-    encode_instruction(&Instruction::Mov { dst: Reg(0), src: Reg(0) }, &mut bc);
+    encode_instruction(
+        &Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(0),
+        },
+        &mut bc,
+    );
+    encode_instruction(
+        &Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(0),
+        },
+        &mut bc,
+    );
+    encode_instruction(
+        &Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(0),
+        },
+        &mut bc,
+    );
     encode_instruction(&Instruction::Ret { value: Reg(0) }, &mut bc);
     let real_len = bc.len() as u32;
 

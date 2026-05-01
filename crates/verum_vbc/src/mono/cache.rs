@@ -44,7 +44,9 @@ impl MonomorphizationCache {
                 .ok()
                 .or_else(|| {
                     std::env::var("HOMEDRIVE").ok().and_then(|d| {
-                        std::env::var("HOMEPATH").ok().map(|p| format!("{}{}", d, p))
+                        std::env::var("HOMEPATH")
+                            .ok()
+                            .map(|p| format!("{}{}", d, p))
                     })
                 })
                 .map(PathBuf::from)
@@ -70,10 +72,11 @@ impl MonomorphizationCache {
         // Try to load from disk
         let path = self.cache_dir.join(format!("{:016x}.vbc", hash));
         if path.exists()
-            && let Ok(data) = std::fs::read(&path) {
-                self.loaded.insert(hash, data);
-                return self.loaded.get(&hash);
-            }
+            && let Ok(data) = std::fs::read(&path)
+        {
+            self.loaded.insert(hash, data);
+            return self.loaded.get(&hash);
+        }
 
         None
     }
@@ -152,10 +155,14 @@ impl MonomorphizationCache {
                 let metadata = entry.metadata()?;
 
                 if let Ok(modified) = metadata.modified()
-                    && now.duration_since(modified).unwrap_or(std::time::Duration::ZERO) > max_age {
-                        std::fs::remove_file(entry.path())?;
-                        removed += 1;
-                    }
+                    && now
+                        .duration_since(modified)
+                        .unwrap_or(std::time::Duration::ZERO)
+                        > max_age
+                {
+                    std::fs::remove_file(entry.path())?;
+                    removed += 1;
+                }
             }
         }
 

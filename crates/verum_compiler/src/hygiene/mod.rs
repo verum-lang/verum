@@ -71,9 +71,7 @@ pub use expander::{
 pub use gensym::{GensymGenerator, SuffixHygieneGenerator};
 pub use marks::{ExpansionInfo, MarkKind, MarkStack, ScopeMark};
 pub use resolver::{Resolution, ResolvedBinding, ScopeResolver};
-pub use scope::{
-    BindingInfo, BindingKind, HygienicIdent, Scope, ScopeId, ScopeKind, ScopeSet,
-};
+pub use scope::{BindingInfo, BindingKind, HygienicIdent, Scope, ScopeId, ScopeKind, ScopeSet};
 pub use syntax_context::{
     Mark, MarkSet, SyntaxContext, SyntaxContextId, SyntaxContextRegistry, Transparency,
 };
@@ -234,7 +232,8 @@ impl HygieneContext {
 
     /// Generate a hygienic identifier with current scopes
     pub fn gensym_hygienic(&self, base: &str, span: Span) -> HygienicIdent {
-        self.gensym.gensym_hygienic(base, self.current_scopes(), span)
+        self.gensym
+            .gensym_hygienic(base, self.current_scopes(), span)
     }
 
     /// Generate a temporary variable name

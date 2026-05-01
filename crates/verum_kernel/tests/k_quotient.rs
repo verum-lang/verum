@@ -15,8 +15,8 @@
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
-    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelError, UniverseLevel,
-    definitional_eq, infer, normalize,
+    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelError, UniverseLevel, definitional_eq,
+    infer, normalize,
 };
 
 fn empty() -> (Context, AxiomRegistry) {
@@ -97,7 +97,8 @@ fn quot_intro_lifts_value_to_quotient() {
         framework: Text::from("test"),
         citation: Text::from("test"),
     };
-    reg.register(Text::from("zero"), nat_ty(), fw.clone()).expect("zero axiom");
+    reg.register(Text::from("zero"), nat_ty(), fw.clone())
+        .expect("zero axiom");
     let zero = CoreTerm::Axiom {
         name: Text::from("zero"),
         ty: Heap::new(nat_ty()),
@@ -127,7 +128,8 @@ fn quot_intro_rejects_value_at_wrong_type() {
         path: Text::from("Bool"),
         args: List::new(),
     };
-    reg.register(Text::from("tt"), bool_ty.clone(), fw.clone()).expect("tt");
+    reg.register(Text::from("tt"), bool_ty.clone(), fw.clone())
+        .expect("tt");
     // Value at Bool, base says Nat — must reject.
     let intro = CoreTerm::QuotIntro {
         value: Heap::new(CoreTerm::Axiom {
@@ -153,7 +155,8 @@ fn quot_elim_typed_as_motive_applied_to_scrutinee() {
         framework: Text::from("test"),
         citation: Text::from("test"),
     };
-    reg.register(Text::from("zero"), nat_ty(), fw.clone()).expect("zero");
+    reg.register(Text::from("zero"), nat_ty(), fw.clone())
+        .expect("zero");
     let zero = CoreTerm::Axiom {
         name: Text::from("zero"),
         ty: Heap::new(nat_ty()),
@@ -194,7 +197,8 @@ fn quot_elim_rejects_non_quotient_scrutinee() {
         framework: Text::from("test"),
         citation: Text::from("test"),
     };
-    reg.register(Text::from("zero"), nat_ty(), fw.clone()).expect("zero");
+    reg.register(Text::from("zero"), nat_ty(), fw.clone())
+        .expect("zero");
     let zero = CoreTerm::Axiom {
         name: Text::from("zero"),
         ty: Heap::new(nat_ty()),

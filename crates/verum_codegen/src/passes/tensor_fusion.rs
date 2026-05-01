@@ -183,7 +183,11 @@ impl FusionPlan {
             }
         }
 
-        FusionPlan { fused_indices, anchor_to_chain, chains }
+        FusionPlan {
+            fused_indices,
+            anchor_to_chain,
+            chains,
+        }
     }
 
     /// True if the lowering should skip the per-op handler at this
@@ -295,7 +299,11 @@ pub fn analyze_instructions(instructions: &[Instruction]) -> Vec<TensorChain> {
         }
 
         let output = chain_ops.last().unwrap().dst;
-        chains.push(TensorChain { inputs, ops: chain_ops, output });
+        chains.push(TensorChain {
+            inputs,
+            ops: chain_ops,
+            output,
+        });
     }
 
     chains
@@ -364,15 +372,31 @@ fn classify(instr: &Instruction) -> Option<ChainOp> {
             srcs: vec![*src],
             dst: *dst,
         }),
-        Instruction::TensorRmsNorm { dst, input, gamma, .. } => {
+        Instruction::TensorRmsNorm {
+            dst, input, gamma, ..
+        } => {
             let mut srcs = vec![*input];
-            if let Some(g) = gamma { srcs.push(*g); }
-            Some(ChainOp { kind: TensorOpKind::RmsNorm, srcs, dst: *dst })
+            if let Some(g) = gamma {
+                srcs.push(*g);
+            }
+            Some(ChainOp {
+                kind: TensorOpKind::RmsNorm,
+                srcs,
+                dst: *dst,
+            })
         }
-        Instruction::TensorFlashAttention { dst, q, k, v, mask, .. } => {
+        Instruction::TensorFlashAttention {
+            dst, q, k, v, mask, ..
+        } => {
             let mut srcs = vec![*q, *k, *v];
-            if let Some(m) = mask { srcs.push(*m); }
-            Some(ChainOp { kind: TensorOpKind::FlashAttention, srcs, dst: *dst })
+            if let Some(m) = mask {
+                srcs.push(*m);
+            }
+            Some(ChainOp {
+                kind: TensorOpKind::FlashAttention,
+                srcs,
+                dst: *dst,
+            })
         }
         // LayerNorm / Softmax don't currently exist as standalone
         // VBC instructions in the bytecode encoder — they're emitted
@@ -396,12 +420,16 @@ fn instruction_reads(instr: &Instruction) -> Vec<Reg> {
         Instruction::TensorReduce { src, .. } => vec![*src],
         Instruction::TensorRmsNorm { input, gamma, .. } => {
             let mut v = vec![*input];
-            if let Some(g) = gamma { v.push(*g); }
+            if let Some(g) = gamma {
+                v.push(*g);
+            }
             v
         }
         Instruction::TensorFlashAttention { q, k, v, mask, .. } => {
             let mut out = vec![*q, *k, *v];
-            if let Some(m) = mask { out.push(*m); }
+            if let Some(m) = mask {
+                out.push(*m);
+            }
             out
         }
         Instruction::TensorReshape { src, .. } => vec![*src],
@@ -431,7 +459,11 @@ mod tests {
     }
 
     fn matmul(dst: u16, a: u16, b: u16) -> Instruction {
-        Instruction::TensorMatmul { dst: Reg(dst), a: Reg(a), b: Reg(b) }
+        Instruction::TensorMatmul {
+            dst: Reg(dst),
+            a: Reg(a),
+            b: Reg(b),
+        }
     }
 
     /// Use-count harness: feeds an instruction stream through
@@ -527,14 +559,14 @@ mod tests {
     #[test]
     fn fusion_plan_anchors_last_op() {
         let stream = vec![
-            matmul(10, 1, 2),                       // chain 1 op 0 (pc 0)
-            binop(TensorBinaryOp::Add, 12, 10, 3),  // chain 1 op 1 — anchor (pc 1)
+            matmul(10, 1, 2),                      // chain 1 op 0 (pc 0)
+            binop(TensorBinaryOp::Add, 12, 10, 3), // chain 1 op 1 — anchor (pc 1)
             // intervening non-tensor instr breaks chain bookkeeping
             // — but does not break the chain itself since the
             // analyzer only cares about tensor-op data dependencies.
             // (Here we omit it; pc 2 is the next chain anchor.)
-            matmul(20, 4, 5),                       // chain 2 op 0 (pc 2)
-            binop(TensorBinaryOp::Sub, 22, 20, 6),  // chain 2 op 1 — anchor (pc 3)
+            matmul(20, 4, 5),                      // chain 2 op 0 (pc 2)
+            binop(TensorBinaryOp::Sub, 22, 20, 6), // chain 2 op 1 — anchor (pc 3)
         ];
         let plan = FusionPlan::build(&stream);
         // 4 instructions, all fused
@@ -544,10 +576,10 @@ mod tests {
         assert!(plan.anchor_to_chain.contains_key(&1));
         assert!(plan.anchor_to_chain.contains_key(&3));
         // Skip predicates
-        assert!(plan.skip_at(0));        // chain 1 op 0 — skipped
-        assert!(!plan.skip_at(1));       // anchor — NOT skipped
-        assert!(plan.skip_at(2));        // chain 2 op 0 — skipped
-        assert!(!plan.skip_at(3));       // anchor — NOT skipped
+        assert!(plan.skip_at(0)); // chain 1 op 0 — skipped
+        assert!(!plan.skip_at(1)); // anchor — NOT skipped
+        assert!(plan.skip_at(2)); // chain 2 op 0 — skipped
+        assert!(!plan.skip_at(3)); // anchor — NOT skipped
         // anchor_at maps anchors to chain indices
         assert_eq!(plan.anchor_at(1), Some(0));
         assert_eq!(plan.anchor_at(3), Some(1));

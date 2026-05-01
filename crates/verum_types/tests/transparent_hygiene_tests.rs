@@ -24,7 +24,7 @@
 use verum_ast::decl::{FunctionBody, FunctionDecl, Visibility};
 use verum_ast::expr::{Expr, ExprKind, MacroDelimiter, TokenTree, TokenTreeKind, TokenTreeToken};
 use verum_ast::span::Span;
-use verum_ast::ty::{Ident, Type, TypeKind, Path};
+use verum_ast::ty::{Ident, Path, Type, TypeKind};
 use verum_common::{List, Maybe, Text};
 
 /// Helper to create a token for testing
@@ -68,7 +68,7 @@ fn make_meta_function(name: &str, is_transparent: bool, body: Expr) -> FunctionD
     FunctionDecl {
         visibility: Visibility::Private,
         is_async: false,
-        is_meta: true,  // This is a meta function
+        is_meta: true, // This is a meta function
         stage_level: 0,
         is_pure: false,
         is_generator: false,
@@ -117,14 +117,20 @@ fn make_quote_expr(tokens: List<TokenTree>) -> Expr {
 fn test_function_decl_transparent_default() {
     // By default, is_transparent should be false
     let func = make_meta_function("test_macro", false, make_quote_expr(List::new()));
-    assert!(!func.is_transparent, "Default should be non-transparent (hygienic)");
+    assert!(
+        !func.is_transparent,
+        "Default should be non-transparent (hygienic)"
+    );
 }
 
 #[test]
 fn test_function_decl_transparent_true() {
     // When @transparent attribute is present, is_transparent should be true
     let func = make_meta_function("transparent_macro", true, make_quote_expr(List::new()));
-    assert!(func.is_transparent, "@transparent should set is_transparent to true");
+    assert!(
+        func.is_transparent,
+        "@transparent should set is_transparent to true"
+    );
 }
 
 // =============================================================================
@@ -139,13 +145,13 @@ fn test_non_meta_function_ignores_transparent() {
     let func = FunctionDecl {
         visibility: Visibility::Private,
         is_async: false,
-        is_meta: false,  // NOT a meta function
+        is_meta: false, // NOT a meta function
         stage_level: 0,
         is_pure: false,
         is_generator: false,
         is_cofix: false,
         is_unsafe: false,
-        is_transparent: true,  // Has @transparent
+        is_transparent: true, // Has @transparent
         is_variadic: false,
         extern_abi: Maybe::None,
         name: Ident::new("regular_func", span),
@@ -189,7 +195,9 @@ fn test_quote_with_local_binding() {
         int_literal_token("1", span),
         punct_token(";", span),
         ident_token("x", span),
-    ].into_iter().collect();
+    ]
+    .into_iter()
+    .collect();
 
     let quote_expr = make_quote_expr(tokens);
 
@@ -207,7 +215,9 @@ fn test_quote_with_splice() {
         ident_token("binding", span),
         punct_token("+", span),
         int_literal_token("1", span),
-    ].into_iter().collect();
+    ]
+    .into_iter()
+    .collect();
 
     let quote_expr = make_quote_expr(tokens);
 
@@ -224,7 +234,9 @@ fn test_quote_with_bare_identifier() {
         ident_token("x", span),
         punct_token("+", span),
         int_literal_token("1", span),
-    ].into_iter().collect();
+    ]
+    .into_iter()
+    .collect();
 
     let quote_expr = make_quote_expr(tokens);
 
@@ -243,7 +255,9 @@ fn test_quote_with_function_call() {
         punct_token("(", span),
         string_literal_token("\"hello\"", span),
         punct_token(")", span),
-    ].into_iter().collect();
+    ]
+    .into_iter()
+    .collect();
 
     let quote_expr = make_quote_expr(tokens);
 
@@ -260,7 +274,9 @@ fn test_quote_with_builtin_literals() {
         ident_token("true", span),
         punct_token("&&", span),
         ident_token("false", span),
-    ].into_iter().collect();
+    ]
+    .into_iter()
+    .collect();
 
     let quote_expr = make_quote_expr(tokens);
 
@@ -281,7 +297,9 @@ fn test_transparent_vs_hygienic_function() {
         ident_token("x", span),
         punct_token("+", span),
         int_literal_token("1", span),
-    ].into_iter().collect();
+    ]
+    .into_iter()
+    .collect();
 
     // Hygienic version - 'x' will be gensym'd, no M402
     let hygienic_func = make_meta_function(
@@ -335,7 +353,8 @@ fn test_is_transparent_in_struct_debug() {
 fn test_m402_error_code_exists() {
     // M402 is the error code for accidental capture
     // This test just documents the error code
-    let m402_description = "M402: accidental variable capture - bare identifier in transparent macro";
+    let m402_description =
+        "M402: accidental variable capture - bare identifier in transparent macro";
     assert!(m402_description.contains("M402"));
     assert!(m402_description.contains("capture"));
     assert!(m402_description.contains("transparent"));

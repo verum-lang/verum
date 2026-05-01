@@ -3,17 +3,13 @@
 
 //! Compiles MLIR modules to object files and executables.
 
-use crate::mlir::error::{MlirError, Result};
-use crate::mlir::passes::{PassPipeline, PassConfig};
 use crate::mlir::context::MlirContext;
+use crate::mlir::error::{MlirError, Result};
+use crate::mlir::passes::{PassConfig, PassPipeline};
 
-use verum_mlir::{
-    ir::Module,
-    ExecutionEngine,
-    pass::PassManager,
-};
-use verum_common::{List, Text};
 use std::path::Path;
+use verum_common::{List, Text};
+use verum_mlir::{ExecutionEngine, ir::Module, pass::PassManager};
 
 /// AOT compilation configuration.
 #[derive(Debug, Clone)]
@@ -295,8 +291,7 @@ impl<'c> AotCompiler<'c> {
         let ir = format!("{}", module.as_operation());
 
         // Write to file
-        std::fs::write(output_path, ir)
-            .map_err(|e| MlirError::IoError(e))?;
+        std::fs::write(output_path, ir).map_err(|e| MlirError::IoError(e))?;
 
         Ok(CompilationResult {
             output_path: output_path.to_path_buf(),
@@ -316,7 +311,9 @@ impl<'c> AotCompiler<'c> {
             return backend.compile_to_assembly(module, output_path);
         }
 
-        Err(MlirError::not_implemented("Assembly output requires aot-llvm feature"))
+        Err(MlirError::not_implemented(
+            "Assembly output requires aot-llvm feature",
+        ))
     }
 
     /// Compile a module to LLVM bitcode.
@@ -330,15 +327,13 @@ impl<'c> AotCompiler<'c> {
             return backend.compile_to_bitcode(module, output_path);
         }
 
-        Err(MlirError::not_implemented("Bitcode output requires aot-llvm feature"))
+        Err(MlirError::not_implemented(
+            "Bitcode output requires aot-llvm feature",
+        ))
     }
 
     /// Compile based on configuration.
-    pub fn compile(
-        &self,
-        module: &Module<'c>,
-        output_path: &Path,
-    ) -> Result<CompilationResult> {
+    pub fn compile(&self, module: &Module<'c>, output_path: &Path) -> Result<CompilationResult> {
         match self.config.output_format {
             OutputFormat::Object => self.compile_to_object(module, output_path),
             OutputFormat::LlvmIr => self.compile_to_llvm_ir(module, output_path),
@@ -407,7 +402,10 @@ mod tests {
             .with_optimization_level(3)
             .with_lto(true);
 
-        assert_eq!(config.target_triple.as_ref().unwrap().as_str(), "x86_64-unknown-linux-gnu");
+        assert_eq!(
+            config.target_triple.as_ref().unwrap().as_str(),
+            "x86_64-unknown-linux-gnu"
+        );
         assert_eq!(config.cpu.as_str(), "native");
         assert_eq!(config.optimization_level, 3);
         assert!(config.enable_lto);

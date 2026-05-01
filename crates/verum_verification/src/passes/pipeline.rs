@@ -68,9 +68,7 @@ impl PipelineMode {
             return false;
         }
         match self {
-            PipelineMode::Default => {
-                classification == PassClassification::SoundnessCritical
-            }
+            PipelineMode::Default => classification == PassClassification::SoundnessCritical,
             PipelineMode::StrictFailFast => true,
             PipelineMode::Aggregate => false,
         }
@@ -265,8 +263,7 @@ impl VerificationPipeline {
     pub fn full_verification_pipeline_with_kernel_policy(
         kernel_policy: crate::extension_policy::ExtensionPolicy,
     ) -> Self {
-        let mut pipeline =
-            Self::static_analysis_pipeline_with_kernel_policy(kernel_policy);
+        let mut pipeline = Self::static_analysis_pipeline_with_kernel_policy(kernel_policy);
         pipeline.add_pass(Box::new(SmtVerificationPass::new()));
         pipeline
     }

@@ -154,12 +154,20 @@ impl EnvSnapshot {
         Self {
             app_name: config.app_name.clone(),
             verum_version: config.app_version.clone(),
-            build_profile: option_env!("VERUM_BUILD_PROFILE").unwrap_or("unknown").into(),
-            build_target: option_env!("VERUM_BUILD_TARGET").unwrap_or("unknown").into(),
+            build_profile: option_env!("VERUM_BUILD_PROFILE")
+                .unwrap_or("unknown")
+                .into(),
+            build_target: option_env!("VERUM_BUILD_TARGET")
+                .unwrap_or("unknown")
+                .into(),
             build_host: option_env!("VERUM_BUILD_HOST").unwrap_or("unknown").into(),
             build_rustc: option_env!("VERUM_BUILD_RUSTC").unwrap_or("unknown").into(),
-            build_git_sha: option_env!("VERUM_BUILD_GIT_SHA").unwrap_or("unknown").into(),
-            build_git_dirty: option_env!("VERUM_BUILD_GIT_DIRTY").unwrap_or("unknown").into(),
+            build_git_sha: option_env!("VERUM_BUILD_GIT_SHA")
+                .unwrap_or("unknown")
+                .into(),
+            build_git_dirty: option_env!("VERUM_BUILD_GIT_DIRTY")
+                .unwrap_or("unknown")
+                .into(),
             build_timestamp: option_env!("VERUM_BUILD_TIMESTAMP").unwrap_or("0").into(),
             os: std::env::consts::OS.into(),
             arch: std::env::consts::ARCH.into(),
@@ -179,8 +187,17 @@ impl EnvSnapshot {
 fn is_sensitive(key: &str) -> bool {
     let k = key.to_ascii_uppercase();
     const NEEDLES: &[&str] = &[
-        "PASSWORD", "SECRET", "TOKEN", "APIKEY", "API_KEY", "PRIVATE", "SESSION", "COOKIE",
-        "CREDENTIAL", "AUTH", "PASSPHRASE",
+        "PASSWORD",
+        "SECRET",
+        "TOKEN",
+        "APIKEY",
+        "API_KEY",
+        "PRIVATE",
+        "SESSION",
+        "COOKIE",
+        "CREDENTIAL",
+        "AUTH",
+        "PASSPHRASE",
     ];
     NEEDLES.iter().any(|n| k.contains(n))
 }
@@ -213,9 +230,23 @@ fn should_keep_env(key: &str, redact: bool) -> bool {
         return true;
     }
     const KEEP: &[&str] = &[
-        "HOME", "USER", "LANG", "LC_ALL", "TERM", "SHELL", "PWD", "OLDPWD", "LLVM_SYS_PREFIX",
-        "LLVM_CONFIG_PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH",
-        "TMPDIR", "OSTYPE", "HOSTTYPE", "MACHTYPE",
+        "HOME",
+        "USER",
+        "LANG",
+        "LC_ALL",
+        "TERM",
+        "SHELL",
+        "PWD",
+        "OLDPWD",
+        "LLVM_SYS_PREFIX",
+        "LLVM_CONFIG_PATH",
+        "LD_LIBRARY_PATH",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FALLBACK_LIBRARY_PATH",
+        "TMPDIR",
+        "OSTYPE",
+        "HOSTTYPE",
+        "MACHTYPE",
     ];
     if KEEP.contains(&k.as_str()) {
         return true;
@@ -403,11 +434,7 @@ impl CrashReport {
             self.app_name_titlecased()
         );
         let _ = writeln!(out, "Report ID:   {}", self.report_id);
-        let _ = writeln!(
-            out,
-            "Timestamp:   {} (unix-ms)",
-            self.timestamp_ms
-        );
+        let _ = writeln!(out, "Timestamp:   {} (unix-ms)", self.timestamp_ms);
         match &self.kind {
             CrashKind::Panic => {
                 let _ = writeln!(out, "Kind:        panic");
@@ -617,10 +644,7 @@ pub fn install(config: CrashReporterConfig) {
         }
     }
 
-    let report_dir = config
-        .report_dir
-        .clone()
-        .unwrap_or_else(default_report_dir);
+    let report_dir = config.report_dir.clone().unwrap_or_else(default_report_dir);
     let _ = fs::create_dir_all(&report_dir);
 
     let env = EnvSnapshot::capture(&config);
@@ -820,11 +844,7 @@ fn write_and_notify(report: &CrashReport) {
             let _ = writeln!(stderr, "       (panic: {})", report.message);
         }
         CrashKind::Signal { name, .. } => {
-            let _ = writeln!(
-                stderr,
-                "       (fatal signal {}: {})",
-                name, report.message
-            );
+            let _ = writeln!(stderr, "       (fatal signal {}: {})", name, report.message);
         }
     }
     if let Some(p) = &log_path {
@@ -911,10 +931,7 @@ fn format_timestamp(ms: u64) -> String {
     let hh = tod / 3600;
     let mm = (tod % 3600) / 60;
     let ss = tod % 60;
-    format!(
-        "{:04}-{:02}-{:02}T{:02}-{:02}-{:02}",
-        y, mo, d, hh, mm, ss
-    )
+    format!("{:04}-{:02}-{:02}T{:02}-{:02}-{:02}", y, mo, d, hh, mm, ss)
 }
 
 fn civil_from_days(mut z: i64) -> (i32, u32, u32) {
@@ -1005,7 +1022,10 @@ fn remember_prev(signo: i32, prev: LibcSigaction) {
 #[cfg(unix)]
 fn prev_for(signo: i32) -> Option<LibcSigaction> {
     let cell = PREV_ACTIONS.get()?;
-    cell.lock().iter().find(|(s, _)| *s == signo).map(|(_, a)| *a)
+    cell.lock()
+        .iter()
+        .find(|(s, _)| *s == signo)
+        .map(|(_, a)| *a)
 }
 
 #[cfg(unix)]

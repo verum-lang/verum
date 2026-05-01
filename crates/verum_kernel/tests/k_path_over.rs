@@ -19,9 +19,10 @@
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
-    AxiomRegistry, ConstructorSig, Context, CoreTerm, InductiveRegistry,
-    PathCtorSig, RegisteredInductive, UniverseLevel, eliminator_type, infer,
-    normalize, normalize_with_inductives, support::{free_vars, substitute},
+    AxiomRegistry, ConstructorSig, Context, CoreTerm, InductiveRegistry, PathCtorSig,
+    RegisteredInductive, UniverseLevel, eliminator_type, infer, normalize,
+    normalize_with_inductives,
+    support::{free_vars, substitute},
 };
 
 fn var(name: &str) -> CoreTerm {
@@ -62,15 +63,20 @@ fn pathover_typing_admits_well_formed() {
     inds.register(RegisteredInductive::new(
         Text::from("Nat"),
         List::new(),
-        List::from_iter(vec![
-            ConstructorSig { name: Text::from("Zero"), arg_types: List::new() },
-        ]),
-    )).unwrap();
+        List::from_iter(vec![ConstructorSig {
+            name: Text::from("Zero"),
+            arg_types: List::new(),
+        }]),
+    ))
+    .unwrap();
     // Need Zero as a variable in context (we don't model ctor as
     // first-class Var typing; tests use a ctx with Zero : Nat).
     let ctx = Context::new().extend(
         Text::from("Zero"),
-        CoreTerm::Inductive { path: Text::from("Nat"), args: List::new() },
+        CoreTerm::Inductive {
+            path: Text::from("Nat"),
+            args: List::new(),
+        },
     );
     let axioms = AxiomRegistry::new();
     let ty = infer(&ctx, &term, &axioms).expect("PathOver must type-check");
@@ -158,7 +164,10 @@ fn pathover_normalize_collapses_closed_loop_to_pathty() {
     };
     let normal = normalize(&term);
     let CoreTerm::PathTy { carrier, lhs, rhs } = &normal else {
-        panic!("closed-loop PathOver must collapse to PathTy; got {:?}", normal);
+        panic!(
+            "closed-loop PathOver must collapse to PathTy; got {:?}",
+            normal
+        );
     };
     // carrier = M(base)
     let CoreTerm::App(f, a) = carrier.as_ref() else {
@@ -234,7 +243,10 @@ fn pathover_substitute_walks_all_components() {
     let CoreTerm::PathOver { path, lhs, rhs, .. } = &subbed else {
         panic!("substitution must preserve PathOver shape");
     };
-    let CoreTerm::PathTy { lhs: pl, rhs: pr, .. } = path.as_ref() else {
+    let CoreTerm::PathTy {
+        lhs: pl, rhs: pr, ..
+    } = path.as_ref()
+    else {
         panic!()
     };
     assert!(matches!(pl.as_ref(), CoreTerm::Var(n) if n.as_str() == "y"));
@@ -291,9 +303,15 @@ fn s1_eliminator_uses_pathty_for_closed_loop() {
         rhs: var("Base"),
     });
     let elim = eliminator_type(&s1);
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else {
+        panic!()
+    };
     assert!(
         matches!(domain.as_ref(), CoreTerm::PathTy { .. }),
         "S¹ closed-loop branch must use homogeneous PathTy, not PathOver; got {:?}",
@@ -317,10 +335,18 @@ fn interval_eliminator_uses_pathover_for_distinct_endpoints() {
     });
     let elim = eliminator_type(&interval);
     // Walk past motive + Zero + One.
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else {
+        panic!()
+    };
     assert!(
         matches!(domain.as_ref(), CoreTerm::PathOver { .. }),
         "Interval Seg branch must use dependent PathOver, not homogeneous PathTy; got {:?}",
@@ -344,17 +370,36 @@ fn pathover_branch_carries_motive_and_constructor_path() {
         rhs: var("One"),
     });
     let elim = eliminator_type(&interval);
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::PathOver { motive, path, lhs, rhs } = domain.as_ref() else {
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::PathOver {
+        motive,
+        path,
+        lhs,
+        rhs,
+    } = domain.as_ref()
+    else {
         panic!("expected PathOver branch")
     };
     // motive is the bound `motive` Var.
     assert!(matches!(motive.as_ref(), CoreTerm::Var(n) if n.as_str() == "motive"));
     // path is PathTy(Inductive(Interval), Zero, One).
-    let CoreTerm::PathTy { carrier, lhs: pl, rhs: pr } = path.as_ref() else {
+    let CoreTerm::PathTy {
+        carrier,
+        lhs: pl,
+        rhs: pr,
+    } = path.as_ref()
+    else {
         panic!("constructor-path must be reified as PathTy")
     };
     assert!(matches!(

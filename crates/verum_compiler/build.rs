@@ -31,7 +31,10 @@ fn main() {
         // No core/ directory — skip embedding (for CI or minimal builds)
         let archive_path = Path::new(&out_dir).join("stdlib_archive.bin");
         fs::write(&archive_path, &[] as &[u8]).unwrap();
-        println!("cargo:rustc-env=STDLIB_ARCHIVE_PATH={}", archive_path.display());
+        println!(
+            "cargo:rustc-env=STDLIB_ARCHIVE_PATH={}",
+            archive_path.display()
+        );
         println!("cargo:warning=core/ directory not found — embedded stdlib disabled");
         return;
     }
@@ -51,7 +54,10 @@ fn main() {
     let archive_path = Path::new(&out_dir).join("stdlib_archive.zst");
     fs::write(&archive_path, &compressed).unwrap();
 
-    println!("cargo:rustc-env=STDLIB_ARCHIVE_PATH={}", archive_path.display());
+    println!(
+        "cargo:rustc-env=STDLIB_ARCHIVE_PATH={}",
+        archive_path.display()
+    );
     println!(
         "cargo:warning=Embedded stdlib: {} files, {:.1}KB compressed (from {:.1}KB)",
         files.len(),
@@ -80,7 +86,10 @@ fn main() {
     let dep_compressed = zstd::encode_all(dep_archive.as_slice(), 19).unwrap();
     let dep_path = Path::new(&out_dir).join("stdlib_dep_graph.zst");
     fs::write(&dep_path, &dep_compressed).unwrap();
-    println!("cargo:rustc-env=STDLIB_DEP_GRAPH_PATH={}", dep_path.display());
+    println!(
+        "cargo:rustc-env=STDLIB_DEP_GRAPH_PATH={}",
+        dep_path.display()
+    );
     println!(
         "cargo:warning=Stdlib mount graph: {} edges, {:.1}KB compressed (from {:.1}KB)",
         dep_edge_count(&files),
@@ -106,7 +115,10 @@ fn main() {
     let manifest_compressed = zstd::encode_all(manifest_archive.as_slice(), 19).unwrap();
     let manifest_path = Path::new(&out_dir).join("stdlib_symbol_manifest.zst");
     fs::write(&manifest_path, &manifest_compressed).unwrap();
-    println!("cargo:rustc-env=STDLIB_SYMBOL_MANIFEST_PATH={}", manifest_path.display());
+    println!(
+        "cargo:rustc-env=STDLIB_SYMBOL_MANIFEST_PATH={}",
+        manifest_path.display()
+    );
     println!(
         "cargo:warning=Stdlib symbol manifest: {} symbols, {:.1}KB compressed (from {:.1}KB)",
         symbol_count(&files),
@@ -150,12 +162,17 @@ fn file_to_module(rel: &str) -> String {
     let normalised = rel.replace('\\', "/");
     let mut parts: Vec<&str> = vec!["core"];
     for component in normalised.split('/') {
-        if component.is_empty() { continue; }
+        if component.is_empty() {
+            continue;
+        }
         let trimmed = component.strip_suffix(".vr").unwrap_or(component);
         parts.push(trimmed);
     }
     let joined = parts.join(".");
-    joined.strip_suffix(".mod").map(str::to_string).unwrap_or(joined)
+    joined
+        .strip_suffix(".mod")
+        .map(str::to_string)
+        .unwrap_or(joined)
 }
 
 /// Strip line and block comments so a `mount` token inside a comment
@@ -171,7 +188,10 @@ fn strip_comments(src: &str) -> String {
     while i < bytes.len() {
         let c = bytes[i];
         if in_line {
-            if c == b'\n' { in_line = false; out.push('\n'); }
+            if c == b'\n' {
+                in_line = false;
+                out.push('\n');
+            }
             i += 1;
             continue;
         }
@@ -181,22 +201,41 @@ fn strip_comments(src: &str) -> String {
                 i += 2;
                 continue;
             }
-            if c == b'\n' { out.push('\n'); }
+            if c == b'\n' {
+                out.push('\n');
+            }
             i += 1;
             continue;
         }
         if in_string {
-            if c == b'\\' && i + 1 < bytes.len() { out.push(c as char); out.push(bytes[i + 1] as char); i += 2; continue; }
-            if c == b'"' { in_string = false; }
+            if c == b'\\' && i + 1 < bytes.len() {
+                out.push(c as char);
+                out.push(bytes[i + 1] as char);
+                i += 2;
+                continue;
+            }
+            if c == b'"' {
+                in_string = false;
+            }
             out.push(c as char);
             i += 1;
             continue;
         }
         if c == b'/' && i + 1 < bytes.len() {
-            if bytes[i + 1] == b'/' { in_line = true; i += 2; continue; }
-            if bytes[i + 1] == b'*' { in_block = true; i += 2; continue; }
+            if bytes[i + 1] == b'/' {
+                in_line = true;
+                i += 2;
+                continue;
+            }
+            if bytes[i + 1] == b'*' {
+                in_block = true;
+                i += 2;
+                continue;
+            }
         }
-        if c == b'"' { in_string = true; }
+        if c == b'"' {
+            in_string = true;
+        }
         out.push(c as char);
         i += 1;
     }
@@ -231,7 +270,11 @@ struct Edges {
 /// (e.g. resolving a stray `super` reference inside a stdlib module).
 fn extract_mounts(src: &str, current_module: &str) -> Edges {
     let stripped = strip_comments(src);
-    let mut edges = Edges { path: Vec::new(), glob: Vec::new(), nested: Vec::new() };
+    let mut edges = Edges {
+        path: Vec::new(),
+        glob: Vec::new(),
+        nested: Vec::new(),
+    };
 
     let bytes = stripped.as_bytes();
     let mut i = 0;
@@ -241,7 +284,10 @@ fn extract_mounts(src: &str, current_module: &str) -> Edges {
             let preceded_ok = i == 0 || matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r');
             let followed_ok = matches!(bytes.get(i + 5), Some(b' ' | b'\t' | b'\n'));
             if preceded_ok && followed_ok {
-                let stmt_end = stripped[i..].find(';').map(|p| i + p).unwrap_or(stripped.len());
+                let stmt_end = stripped[i..]
+                    .find(';')
+                    .map(|p| i + p)
+                    .unwrap_or(stripped.len());
                 let body = &stripped[i + 5..stmt_end];
                 parse_mount_body(body.trim(), current_module, &mut edges);
                 i = stmt_end + 1;
@@ -266,7 +312,8 @@ fn parse_mount_body(body: &str, current_module: &str, edges: &mut Edges) {
     let body = match body.find(" as ") {
         Some(p) => &body[..p],
         None => body,
-    }.trim();
+    }
+    .trim();
 
     if body.starts_with("./") || body.starts_with("../") {
         // Relative file mount — not a stdlib dependency.
@@ -282,7 +329,9 @@ fn parse_mount_body(body: &str, current_module: &str, edges: &mut Edges) {
         let leaves = &inner[..close];
         for leaf in split_top_level_commas(leaves) {
             let leaf = leaf.trim();
-            if leaf.is_empty() { continue; }
+            if leaf.is_empty() {
+                continue;
+            }
             // The leaf may itself be a nested expression — strip aliases
             // and brace groups.
             let leaf_head = leaf.split_whitespace().next().unwrap_or("");
@@ -382,7 +431,9 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
             _ => {}
         }
     }
-    if start < s.len() { out.push(&s[start..]); }
+    if start < s.len() {
+        out.push(&s[start..]);
+    }
     out
 }
 
@@ -421,9 +472,18 @@ fn build_dep_graph(files: &[(String, Vec<u8>)]) -> Vec<u8> {
         // u16 should suffice — clamp defensively
         let total: u16 = total.try_into().expect("module has too many mount edges");
         out.extend_from_slice(&total.to_le_bytes());
-        for p in &edges.path  { out.push(EDGE_PATH);   write_str(&mut out, p); }
-        for p in &edges.glob  { out.push(EDGE_GLOB);   write_str(&mut out, p); }
-        for p in &edges.nested{ out.push(EDGE_NESTED); write_str(&mut out, p); }
+        for p in &edges.path {
+            out.push(EDGE_PATH);
+            write_str(&mut out, p);
+        }
+        for p in &edges.glob {
+            out.push(EDGE_GLOB);
+            write_str(&mut out, p);
+        }
+        for p in &edges.nested {
+            out.push(EDGE_NESTED);
+            write_str(&mut out, p);
+        }
     }
     out
 }
@@ -452,7 +512,11 @@ fn collect_vr_files(dir: &Path, root: &Path, files: &mut Vec<(String, Vec<u8>)>)
             if path.is_dir() {
                 collect_vr_files(&path, root, files);
             } else if path.extension().is_some_and(|e| e == "vr") {
-                let relative = path.strip_prefix(root).unwrap().to_string_lossy().to_string();
+                let relative = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
                 // Normalize to forward slashes for cross-platform consistency
                 let relative = relative.replace('\\', "/");
                 if let Ok(content) = fs::read(&path) {
@@ -465,7 +529,9 @@ fn collect_vr_files(dir: &Path, root: &Path, files: &mut Vec<(String, Vec<u8>)>)
 
 fn build_archive(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     let mut archive = Vec::new();
-    let file_count: u32 = files.len().try_into()
+    let file_count: u32 = files
+        .len()
+        .try_into()
         .expect("too many stdlib files to fit in u32");
 
     // Header: file count
@@ -475,16 +541,21 @@ fn build_archive(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     // path.len() is cast safely via try_into, and the sum uses checked_add.
     let mut index_size = 0u32;
     for (path, _) in files {
-        let path_len: u32 = path.len().try_into()
+        let path_len: u32 = path
+            .len()
+            .try_into()
             .unwrap_or_else(|_| panic!("stdlib path too long: {}", path));
         // 2 (path_len field) + path bytes + 4 (offset) + 4 (content_len)
-        let entry_size = 2u32.checked_add(path_len)
+        let entry_size = 2u32
+            .checked_add(path_len)
             .and_then(|s| s.checked_add(4 + 4))
             .expect("stdlib archive index entry too large");
-        index_size = index_size.checked_add(entry_size)
+        index_size = index_size
+            .checked_add(entry_size)
             .expect("stdlib archive index too large");
     }
-    let data_offset = 4u32.checked_add(index_size)
+    let data_offset = 4u32
+        .checked_add(index_size)
         .expect("stdlib archive header + index too large"); // after header + index
 
     // Build index and data
@@ -493,11 +564,16 @@ fn build_archive(files: &[(String, Vec<u8>)]) -> Vec<u8> {
 
     for (path, content) in files {
         let path_bytes = path.as_bytes();
-        let data_section_len: u32 = data_section.len().try_into()
+        let data_section_len: u32 = data_section
+            .len()
+            .try_into()
             .expect("stdlib archive data section too large");
-        let content_offset = data_offset.checked_add(data_section_len)
+        let content_offset = data_offset
+            .checked_add(data_section_len)
             .expect("stdlib archive content offset overflow");
-        let content_len: u32 = content.len().try_into()
+        let content_len: u32 = content
+            .len()
+            .try_into()
             .expect("stdlib file content too large");
 
         // Index entry
@@ -570,7 +646,9 @@ fn extract_symbols(src: &str) -> Vec<Symbol> {
     let mut out = Vec::new();
     for line in stripped.lines() {
         let trimmed = line.trim_start();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
 
         let (rest, vis) = if let Some(r) = trimmed.strip_prefix("public ") {
             (r.trim_start(), VIS_PUBLIC)
@@ -582,7 +660,11 @@ fn extract_symbols(src: &str) -> Vec<Symbol> {
         // `theorem` and `type` start with `t` — we match the longer
         // keyword first.
         if let Some(name) = parse_decl_head(rest, "protocol") {
-            out.push(Symbol { kind: SYM_PROTOCOL, visibility: vis, name });
+            out.push(Symbol {
+                kind: SYM_PROTOCOL,
+                visibility: vis,
+                name,
+            });
         } else if let Some(name) = parse_type_decl_head(rest) {
             // `type X is protocol { ... }` is the canonical Verum
             // protocol-declaration shape (the bare `protocol X` form is
@@ -593,9 +675,8 @@ fn extract_symbols(src: &str) -> Vec<Symbol> {
             let is_protocol = rest
                 .strip_prefix("type ")
                 .map(|tail| {
-                    let after_name = tail.trim_start_matches(|c: char| {
-                        c.is_alphanumeric() || c == '_'
-                    });
+                    let after_name =
+                        tail.trim_start_matches(|c: char| c.is_alphanumeric() || c == '_');
                     after_name
                         .trim_start()
                         .strip_prefix("is")
@@ -604,21 +685,53 @@ fn extract_symbols(src: &str) -> Vec<Symbol> {
                 })
                 .unwrap_or(false);
             if is_protocol {
-                out.push(Symbol { kind: SYM_PROTOCOL, visibility: vis, name: name.clone() });
+                out.push(Symbol {
+                    kind: SYM_PROTOCOL,
+                    visibility: vis,
+                    name: name.clone(),
+                });
             }
-            out.push(Symbol { kind: SYM_TYPE, visibility: vis, name });
+            out.push(Symbol {
+                kind: SYM_TYPE,
+                visibility: vis,
+                name,
+            });
         } else if let Some(name) = parse_decl_head(rest, "theorem") {
-            out.push(Symbol { kind: SYM_THEOREM, visibility: vis, name });
+            out.push(Symbol {
+                kind: SYM_THEOREM,
+                visibility: vis,
+                name,
+            });
         } else if let Some(name) = parse_decl_head(rest, "axiom") {
-            out.push(Symbol { kind: SYM_AXIOM, visibility: vis, name });
+            out.push(Symbol {
+                kind: SYM_AXIOM,
+                visibility: vis,
+                name,
+            });
         } else if let Some(name) = parse_decl_head(rest, "lemma") {
-            out.push(Symbol { kind: SYM_LEMMA, visibility: vis, name });
+            out.push(Symbol {
+                kind: SYM_LEMMA,
+                visibility: vis,
+                name,
+            });
         } else if let Some(name) = parse_decl_head(rest, "fn") {
-            out.push(Symbol { kind: SYM_FN, visibility: vis, name });
+            out.push(Symbol {
+                kind: SYM_FN,
+                visibility: vis,
+                name,
+            });
         } else if let Some(name) = parse_decl_head(rest, "async fn") {
-            out.push(Symbol { kind: SYM_FN, visibility: vis, name });
+            out.push(Symbol {
+                kind: SYM_FN,
+                visibility: vis,
+                name,
+            });
         } else if let Some(name) = parse_decl_head(rest, "const") {
-            out.push(Symbol { kind: SYM_CONST, visibility: vis, name });
+            out.push(Symbol {
+                kind: SYM_CONST,
+                visibility: vis,
+                name,
+            });
         }
     }
     out
@@ -653,9 +766,15 @@ fn extract_ident(s: &str) -> Option<String> {
             break;
         }
     }
-    if end == 0 { return None; }
+    if end == 0 {
+        return None;
+    }
     let name = &s[..end];
-    if name.is_empty() { None } else { Some(name.to_string()) }
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 fn build_symbol_manifest(files: &[(String, Vec<u8>)]) -> Vec<u8> {

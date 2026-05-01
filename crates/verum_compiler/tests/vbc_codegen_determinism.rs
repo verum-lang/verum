@@ -296,8 +296,7 @@ fn run_determinism_contract(name: &str, source: &str) {
          If a HashMap iteration was recently added to the codegen path, sort \
          it by a stable key (function-id / module path / name).  See commit \
          0723ad43 + 82303f94 for prior fixes.",
-        code_a,
-        code_b,
+        code_a, code_b,
     );
     assert_eq!(
         normalise_stderr(&err_a),
@@ -354,9 +353,7 @@ fn vbc_generic_mono_is_deterministic() {
 fn normalise_stderr(s: &str) -> String {
     s.lines()
         .filter(|line| {
-            !(line.contains("Date:")
-                || line.contains("Duration:")
-                || line.contains("[")) // strips ANSI INFO/WARN lines
+            !(line.contains("Date:") || line.contains("Duration:") || line.contains("[")) // strips ANSI INFO/WARN lines
         })
         .collect::<Vec<_>>()
         .join("\n")

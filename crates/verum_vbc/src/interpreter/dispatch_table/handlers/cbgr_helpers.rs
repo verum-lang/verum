@@ -1,7 +1,7 @@
 //! CBGR reference encoding/decoding/validation helpers.
 
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
+use crate::value::Value;
 
 /// Bit 31 of the lower 32 bits encodes mutability in CBGR register references.
 /// Set by RefMut (0x71), clear for Ref (0x70). Masked off during decode so

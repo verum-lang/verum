@@ -1,20 +1,22 @@
 //! Comparison operation handlers for VBC interpreter dispatch.
 
-use crate::instruction::Reg;
-use crate::module::FunctionId;
-use crate::types::StringId;
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
-use super::string_helpers::{extract_string, deep_value_eq};
+use super::string_helpers::{deep_value_eq, extract_string};
+use crate::instruction::Reg;
+use crate::module::FunctionId;
+use crate::types::StringId;
+use crate::value::Value;
 
 // ============================================================================
 // Handler Implementations - Comparison Operations
 // ============================================================================
 
-pub(in super::super) fn handle_eqi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_eqi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -25,7 +27,9 @@ pub(in super::super) fn handle_eqi(state: &mut InterpreterState) -> InterpreterR
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_nei(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_nei(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -36,43 +40,57 @@ pub(in super::super) fn handle_nei(state: &mut InterpreterState) -> InterpreterR
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_lti(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_lti(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_integer_compatible() < state.get_reg(b).as_integer_compatible();
+    let result =
+        state.get_reg(a).as_integer_compatible() < state.get_reg(b).as_integer_compatible();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_lei(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_lei(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_integer_compatible() <= state.get_reg(b).as_integer_compatible();
+    let result =
+        state.get_reg(a).as_integer_compatible() <= state.get_reg(b).as_integer_compatible();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_gti(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_gti(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_integer_compatible() > state.get_reg(b).as_integer_compatible();
+    let result =
+        state.get_reg(a).as_integer_compatible() > state.get_reg(b).as_integer_compatible();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_gei(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_gei(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_integer_compatible() >= state.get_reg(b).as_integer_compatible();
+    let result =
+        state.get_reg(a).as_integer_compatible() >= state.get_reg(b).as_integer_compatible();
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_eqf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_eqf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -81,7 +99,9 @@ pub(in super::super) fn handle_eqf(state: &mut InterpreterState) -> InterpreterR
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_nef(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_nef(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -90,7 +110,9 @@ pub(in super::super) fn handle_nef(state: &mut InterpreterState) -> InterpreterR
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_ltf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_ltf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -99,7 +121,9 @@ pub(in super::super) fn handle_ltf(state: &mut InterpreterState) -> InterpreterR
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_lef(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_lef(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -108,7 +132,9 @@ pub(in super::super) fn handle_lef(state: &mut InterpreterState) -> InterpreterR
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_gtf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_gtf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -117,7 +143,9 @@ pub(in super::super) fn handle_gtf(state: &mut InterpreterState) -> InterpreterR
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_gef(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_gef(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -137,7 +165,9 @@ pub(in super::super) fn handle_gef(state: &mut InterpreterState) -> InterpreterR
 /// - Primitive types (int, float, bool, unit, nil)
 /// - Strings (both small strings and heap strings)
 /// - Variants (Maybe<T>, Result<T,E>, etc.) with recursive payload comparison
-pub(in super::super) fn handle_eqg(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_eqg(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -164,21 +194,24 @@ pub(in super::super) fn handle_eqg(state: &mut InterpreterState) -> InterpreterR
             }
 
             if let Some(func_id) = found_func_id
-                && let Some(func) = state.module.get_function(func_id) {
-                    let reg_count = func.register_count;
-                    let return_pc = state.pc();
+                && let Some(func) = state.module.get_function(func_id)
+            {
+                let reg_count = func.register_count;
+                let return_pc = state.pc();
 
-                    let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, dst)?;
-                    state.registers.push_frame(reg_count);
+                let new_base = state
+                    .call_stack
+                    .push_frame(func_id, reg_count, return_pc, dst)?;
+                state.registers.push_frame(reg_count);
 
-                    // arg0 = self (va), arg1 = other (vb)
-                    state.registers.set(new_base, Reg(0), va);
-                    state.registers.set(new_base, Reg(1), vb);
+                // arg0 = self (va), arg1 = other (vb)
+                state.registers.set(new_base, Reg(0), va);
+                state.registers.set(new_base, Reg(1), vb);
 
-                    state.set_pc(0);
-                    state.record_call();
-                    return Ok(DispatchResult::Continue);
-                }
+                state.set_pc(0);
+                state.record_call();
+                return Ok(DispatchResult::Continue);
+            }
         }
         // Fall through to structural comparison if function not found
     }
@@ -200,7 +233,9 @@ pub(in super::super) fn handle_eqg(state: &mut InterpreterState) -> InterpreterR
 /// - Primitive types (int, float)
 /// - Strings (lexicographic comparison)
 /// - Complex types via deep comparison
-pub(in super::super) fn handle_cmpg(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_cmpg(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -215,9 +250,23 @@ pub(in super::super) fn handle_cmpg(state: &mut InterpreterState) -> Interpreter
     let va_is_int_like = va.is_int() || va.is_bool();
     let vb_is_int_like = vb.is_int() || vb.is_bool();
     let ordering: i64 = if va_is_int_like && vb_is_int_like {
-        let ia = if va.is_bool() { va.as_bool() as i64 } else { va.as_i64() };
-        let ib = if vb.is_bool() { vb.as_bool() as i64 } else { vb.as_i64() };
-        if ia < ib { -1 } else if ia > ib { 1 } else { 0 }
+        let ia = if va.is_bool() {
+            va.as_bool() as i64
+        } else {
+            va.as_i64()
+        };
+        let ib = if vb.is_bool() {
+            vb.as_bool() as i64
+        } else {
+            vb.as_i64()
+        };
+        if ia < ib {
+            -1
+        } else if ia > ib {
+            1
+        } else {
+            0
+        }
     } else if va.is_float() && vb.is_float() {
         let fa = va.as_f64();
         let fb = vb.as_f64();
@@ -245,7 +294,13 @@ pub(in super::super) fn handle_cmpg(state: &mut InterpreterState) -> Interpreter
         // Fallback: compare raw bits
         let bits_a = va.to_bits();
         let bits_b = vb.to_bits();
-        if bits_a < bits_b { -1 } else if bits_a > bits_b { 1 } else { 0 }
+        if bits_a < bits_b {
+            -1
+        } else if bits_a > bits_b {
+            1
+        } else {
+            0
+        }
     };
 
     state.set_reg(dst, Value::from_i64(ordering));
@@ -261,7 +316,9 @@ pub(in super::super) fn handle_cmpg(state: &mut InterpreterState) -> Interpreter
 
 /// This compares raw pointer values, not the content they point to.
 /// For content comparison, use EqG instead.
-pub(in super::super) fn handle_eqref(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_eqref(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -287,7 +344,9 @@ pub(in super::super) fn handle_eqref(state: &mut InterpreterState) -> Interprete
 ///
 
 /// Operands are interpreted as u64 for comparison purposes.
-pub(in super::super) fn handle_cmp_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_cmp_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
     let dst = read_reg(state)?;
     let a = read_reg(state)?;

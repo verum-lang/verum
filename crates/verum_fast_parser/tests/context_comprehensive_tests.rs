@@ -23,8 +23,8 @@
 //! - Sub-contexts (nested contexts)
 
 use verum_ast::{FileId, ItemKind, StmtKind, decl::*};
-use verum_lexer::Lexer;
 use verum_fast_parser::RecursiveParser;
+use verum_lexer::Lexer;
 
 fn parse_module(source: &str) -> Result<Vec<verum_ast::Item>, String> {
     let file_id = FileId::new(0);

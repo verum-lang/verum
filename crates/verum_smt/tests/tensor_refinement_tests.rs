@@ -25,11 +25,11 @@
 
 use verum_ast::{Expr, ExprKind, IntLit, Literal, LiteralKind, Span, Type, TypeKind};
 use verum_common::Heap;
+use verum_common::List;
 use verum_smt::TensorSort;
 use verum_smt::tensor_refinement::{
     TensorOperation, TensorRefinementError, TensorRefinementVerifier, TensorTypeInfo,
 };
-use verum_common::List;
 
 /// Helper to create integer literal expression
 fn expr_int(value: i128) -> Expr {

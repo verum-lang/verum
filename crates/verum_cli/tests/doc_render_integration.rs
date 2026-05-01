@@ -76,10 +76,7 @@ public fn main() {}
 #[test]
 fn doc_render_markdown_lists_both_theorems() {
     let (_t, dir) = create_project("dr_md", TWO_THEOREMS);
-    let out = run(
-        &["doc-render", "render", "--format", "markdown"],
-        &dir,
-    );
+    let out = run(&["doc-render", "render", "--format", "markdown"], &dir);
     assert!(
         out.status.success(),
         "doc-render markdown exited non-zero: stderr={}",
@@ -177,13 +174,7 @@ public fn main() {}
 "#,
     );
     let out = run(
-        &[
-            "doc-render",
-            "render",
-            "--format",
-            "json",
-            "--public",
-        ],
+        &["doc-render", "render", "--format", "json", "--public"],
         &dir,
     );
     // JSON wasn't in the doc-render render formats — instead we
@@ -269,10 +260,7 @@ fn doc_render_check_refs_json_well_formed() {
 #[test]
 fn doc_render_check_refs_rejects_unknown_format() {
     let (_t, dir) = create_project("dr_refs_bad", TWO_THEOREMS);
-    let out = run(
-        &["doc-render", "check-refs", "--format", "yaml"],
-        &dir,
-    );
+    let out = run(&["doc-render", "check-refs", "--format", "yaml"], &dir);
     assert!(!out.status.success());
 }
 

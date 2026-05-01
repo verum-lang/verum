@@ -220,7 +220,11 @@ pub fn compute_limit_in_psh(diagram: &LimitDiagram) -> Option<Limit> {
         return None;
     }
     Some(Limit {
-        name: Text::from(format!("lim_{}({})", diagram.index_category.as_str(), diagram.name.as_str())),
+        name: Text::from(format!(
+            "lim_{}({})",
+            diagram.index_category.as_str(),
+            diagram.name.as_str()
+        )),
         apex_name: Text::from(format!("apex(lim {})", diagram.name.as_str())),
         shape: diagram.shape,
         target_category: diagram.target_category.clone(),
@@ -237,7 +241,11 @@ pub fn compute_colimit_in_psh(diagram: &ColimitDiagram) -> Option<Colimit> {
         return None;
     }
     Some(Colimit {
-        name: Text::from(format!("colim_{}({})", diagram.index_category.as_str(), diagram.name.as_str())),
+        name: Text::from(format!(
+            "colim_{}({})",
+            diagram.index_category.as_str(),
+            diagram.name.as_str()
+        )),
         apex_name: Text::from(format!("apex(colim {})", diagram.name.as_str())),
         shape: diagram.shape,
         target_category: diagram.target_category.clone(),
@@ -291,11 +299,7 @@ pub fn build_pullback(
             c_text.as_str(),
             b_text.as_str()
         )),
-        apex_name: Text::from(format!(
-            "({}, {})_pb",
-            a_text.as_str(),
-            b_text.as_str()
-        )),
+        apex_name: Text::from(format!("({}, {})_pb", a_text.as_str(), b_text.as_str())),
         shape: LimitShape::Pullback,
         target_category: target.clone(),
         has_universal_cone: true,
@@ -319,11 +323,7 @@ pub fn build_pushout(
             c_text.as_str(),
             b_text.as_str()
         )),
-        apex_name: Text::from(format!(
-            "({}, {})_po",
-            a_text.as_str(),
-            b_text.as_str()
-        )),
+        apex_name: Text::from(format!("({}, {})_po", a_text.as_str(), b_text.as_str())),
         shape: LimitShape::Pullback,
         target_category: target.clone(),
         has_universal_cocone: true,
@@ -331,11 +331,7 @@ pub fn build_pushout(
 }
 
 /// Build the equaliser of a parallel pair `f, g : A → B` in `PSh(C)`.
-pub fn build_equaliser(
-    f: impl Into<Text>,
-    g: impl Into<Text>,
-    target: &InfinityCategory,
-) -> Limit {
+pub fn build_equaliser(f: impl Into<Text>, g: impl Into<Text>, target: &InfinityCategory) -> Limit {
     let f_text = f.into();
     let g_text = g.into();
     Limit {
@@ -383,8 +379,7 @@ pub fn colimit_universal_property(colim: &Colimit) -> bool {
 /// (admits all small limits) AND *cocomplete* (admits all small
 /// colimits).
 pub fn presheaf_is_bicomplete(c: &InfinityCategory) -> bool {
-    presheaf_admits_limits(c, LimitShape::Small)
-        && presheaf_admits_colimits(c, LimitShape::Small)
+    presheaf_admits_limits(c, LimitShape::Small) && presheaf_admits_colimits(c, LimitShape::Small)
 }
 
 /// Promotion: any limit/colimit existing at level 1 promotes to all
@@ -472,22 +467,18 @@ mod tests {
             "D",
             "I",
             sample_psh(),
-            LimitShape::Pullback,  // Pullback — not Terminal.
+            LimitShape::Pullback, // Pullback — not Terminal.
             vec![],
         );
-        assert!(compute_limit_in_psh(&diagram).is_none(),
-            "Empty diagram with non-terminal shape must be rejected");
+        assert!(
+            compute_limit_in_psh(&diagram).is_none(),
+            "Empty diagram with non-terminal shape must be rejected"
+        );
     }
 
     #[test]
     fn compute_limit_accepts_empty_terminal() {
-        let diagram = LimitDiagram::finite(
-            "D",
-            "∅",
-            sample_psh(),
-            LimitShape::Terminal,
-            vec![],
-        );
+        let diagram = LimitDiagram::finite("D", "∅", sample_psh(), LimitShape::Terminal, vec![]);
         let lim = compute_limit_in_psh(&diagram)
             .expect("Empty diagram with terminal shape ⇒ terminal object");
         assert_eq!(lim.shape, LimitShape::Terminal);
@@ -584,10 +575,7 @@ mod tests {
         // Definition 3.3 demands S_S^global is closed under colimits.
         // For a finite κ_1-accessible diagram in PSh(S_S^global),
         // the colimit exists and lives in PSh(S_S^global).
-        let s_s = InfinityCategory::at_canonical_universe(
-            "PSh(S_S^global)",
-            Ordinal::Finite(1),
-        );
+        let s_s = InfinityCategory::at_canonical_universe("PSh(S_S^global)", Ordinal::Finite(1));
         let diagram = ColimitDiagram::finite(
             "D",
             "I_κ1",

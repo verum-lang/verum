@@ -8,9 +8,8 @@
 use verum_llvm_sys::core::{
     LLVMConstAdd, LLVMConstBitCast, LLVMConstIntGetSExtValue, LLVMConstIntGetZExtValue,
     LLVMConstIntToPtr, LLVMConstMul, LLVMConstNSWAdd, LLVMConstNSWMul, LLVMConstNSWNeg,
-    LLVMConstNSWSub, LLVMConstNUWAdd, LLVMConstNUWMul, LLVMConstNUWSub, LLVMConstNeg,
-    LLVMConstNot, LLVMConstSub, LLVMConstTrunc, LLVMConstTruncOrBitCast, LLVMConstXor,
-    LLVMIsAConstantInt,
+    LLVMConstNSWSub, LLVMConstNUWAdd, LLVMConstNUWMul, LLVMConstNUWSub, LLVMConstNeg, LLVMConstNot,
+    LLVMConstSub, LLVMConstTrunc, LLVMConstTruncOrBitCast, LLVMConstXor, LLVMIsAConstantInt,
 };
 
 use verum_llvm_sys::prelude::LLVMValueRef;
@@ -145,7 +144,12 @@ impl<'ctx> IntValue<'ctx> {
     }
 
     pub fn const_to_pointer(self, ptr_type: PointerType<'ctx>) -> PointerValue<'ctx> {
-        unsafe { PointerValue::new(LLVMConstIntToPtr(self.as_value_ref(), ptr_type.as_type_ref())) }
+        unsafe {
+            PointerValue::new(LLVMConstIntToPtr(
+                self.as_value_ref(),
+                ptr_type.as_type_ref(),
+            ))
+        }
     }
 
     pub fn const_truncate(self, int_type: IntType<'ctx>) -> IntValue<'ctx> {
@@ -153,11 +157,21 @@ impl<'ctx> IntValue<'ctx> {
     }
 
     pub fn const_truncate_or_bit_cast(self, int_type: IntType<'ctx>) -> IntValue<'ctx> {
-        unsafe { IntValue::new(LLVMConstTruncOrBitCast(self.as_value_ref(), int_type.as_type_ref())) }
+        unsafe {
+            IntValue::new(LLVMConstTruncOrBitCast(
+                self.as_value_ref(),
+                int_type.as_type_ref(),
+            ))
+        }
     }
 
     pub fn const_bit_cast(self, int_type: IntType) -> IntValue<'ctx> {
-        unsafe { IntValue::new(LLVMConstBitCast(self.as_value_ref(), int_type.as_type_ref())) }
+        unsafe {
+            IntValue::new(LLVMConstBitCast(
+                self.as_value_ref(),
+                int_type.as_type_ref(),
+            ))
+        }
     }
 
     /// Determines whether or not an `IntValue` is an `llvm::Constant`.

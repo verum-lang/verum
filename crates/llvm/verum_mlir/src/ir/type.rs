@@ -18,15 +18,15 @@ pub use self::{
 };
 use super::Location;
 use crate::{context::Context, string_ref::StringRef, utility::print_callback};
-use verum_mlir_sys::{
-    MlirType, mlirBF16TypeGet, mlirF16TypeGet, mlirF32TypeGet, mlirF64TypeGet, mlirIndexTypeGet,
-    mlirNoneTypeGet, mlirTypeEqual, mlirTypeParseGet, mlirTypePrint, mlirVectorTypeGet,
-    mlirVectorTypeGetChecked,
-};
 use std::{
     ffi::c_void,
     fmt::{self, Debug, Display, Formatter},
     marker::PhantomData,
+};
+use verum_mlir_sys::{
+    MlirType, mlirBF16TypeGet, mlirF16TypeGet, mlirF32TypeGet, mlirF64TypeGet, mlirIndexTypeGet,
+    mlirNoneTypeGet, mlirTypeEqual, mlirTypeParseGet, mlirTypePrint, mlirVectorTypeGet,
+    mlirVectorTypeGetChecked,
 };
 
 /// A type.

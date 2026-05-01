@@ -28,8 +28,8 @@
 //! Tests for the Verum Context System (capability-based DI, NOT algebraic effects)
 
 use verum_ast::{FileId, ItemKind, Module, stmt::StmtKind, ty::PathSegment};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper to parse a module from source.
 fn parse_module(source: &str) -> Result<Module, String> {
@@ -368,8 +368,14 @@ fn test_context_group_alias_vs_traditional() {
         (ItemKind::ContextGroup(cg1), ItemKind::ContextGroup(cg2)) => {
             assert_eq!(cg1.name.name.as_str(), cg2.name.name.as_str());
             assert_eq!(cg1.contexts.len(), cg2.contexts.len());
-            assert_eq!(cg1.contexts[0].path.to_string(), cg2.contexts[0].path.to_string());
-            assert_eq!(cg1.contexts[1].path.to_string(), cg2.contexts[1].path.to_string());
+            assert_eq!(
+                cg1.contexts[0].path.to_string(),
+                cg2.contexts[0].path.to_string()
+            );
+            assert_eq!(
+                cg1.contexts[1].path.to_string(),
+                cg2.contexts[1].path.to_string()
+            );
         }
         _ => panic!("Expected ContextGroup items"),
     }

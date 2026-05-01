@@ -335,11 +335,7 @@ pub struct CogManifest {
 }
 
 impl CogManifest {
-    pub fn new(
-        name: impl Into<Text>,
-        version: CogVersion,
-        envelope: CogReproEnvelope,
-    ) -> Self {
+    pub fn new(name: impl Into<Text>, version: CogVersion, envelope: CogReproEnvelope) -> Self {
         Self {
             name: name.into(),
             version,
@@ -473,8 +469,7 @@ impl std::error::Error for RegistryError {}
 // (64 bytes hex-encoded) — both round-trip through `serde` cleanly.
 
 use ed25519_dalek::{
-    Signature as Ed25519Signature, Signer, SigningKey, Verifier, VerifyingKey,
-    SECRET_KEY_LENGTH,
+    SECRET_KEY_LENGTH, Signature as Ed25519Signature, Signer, SigningKey, Verifier, VerifyingKey,
 };
 
 /// Canonical message bytes Ed25519 signs over for a given
@@ -662,11 +657,7 @@ impl RegistryClient for MemoryRegistry {
         self.id.clone()
     }
 
-    fn lookup(
-        &self,
-        name: &str,
-        version: &CogVersion,
-    ) -> Result<LookupOutcome, RegistryError> {
+    fn lookup(&self, name: &str, version: &CogVersion) -> Result<LookupOutcome, RegistryError> {
         let g = self
             .entries
             .lock()
@@ -781,9 +772,7 @@ impl LocalFilesystemRegistry {
 
     fn path_for(&self, name: &str, version: &CogVersion) -> PathBuf {
         let safe_name = sanitize(name);
-        self.root
-            .join(safe_name)
-            .join(format!("{}.json", version))
+        self.root.join(safe_name).join(format!("{}.json", version))
     }
 }
 
@@ -801,11 +790,7 @@ impl RegistryClient for LocalFilesystemRegistry {
         self.id.clone()
     }
 
-    fn lookup(
-        &self,
-        name: &str,
-        version: &CogVersion,
-    ) -> Result<LookupOutcome, RegistryError> {
+    fn lookup(&self, name: &str, version: &CogVersion) -> Result<LookupOutcome, RegistryError> {
         let p = self.path_for(name, version);
         match std::fs::read_to_string(&p) {
             Ok(s) => {
@@ -927,16 +912,11 @@ impl RegistryClient for LocalFilesystemRegistry {
         }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                RegistryError::Io(Text::from(format!(
-                    "creating {}: {}",
-                    parent.display(),
-                    e
-                )))
+                RegistryError::Io(Text::from(format!("creating {}: {}", parent.display(), e)))
             })?;
         }
-        let json = serde_json::to_string_pretty(m).map_err(|e| {
-            RegistryError::Parse(Text::from(format!("serialise manifest: {}", e)))
-        })?;
+        let json = serde_json::to_string_pretty(m)
+            .map_err(|e| RegistryError::Parse(Text::from(format!("serialise manifest: {}", e))))?;
         std::fs::write(&path, json).map_err(|e| {
             RegistryError::Io(Text::from(format!("writing {}: {}", path.display(), e)))
         })?;
@@ -1055,9 +1035,9 @@ impl MultiMirrorClient {
 
         // Gate 3 — identity match (when required).
         let identity_ok = !policy.require_identity_match
-            || found_manifests.iter().all(|m| {
-                m.name.as_str() == name && &m.version == version
-            });
+            || found_manifests
+                .iter()
+                .all(|m| m.name.as_str() == name && &m.version == version);
 
         // Gate 4 — Ed25519 attestation verification (when required).
         let attestation_ok = policy.required_attestations.is_empty()
@@ -1067,14 +1047,8 @@ impl MultiMirrorClient {
                     m.attestations.iter().any(|att| {
                         att.kind == *kind
                             && pubkeys.iter().any(|pk| {
-                                verify_attestation(
-                                    pk,
-                                    m.name.as_str(),
-                                    &m.version,
-                                    chain_hash,
-                                    att,
-                                )
-                                .is_ok()
+                                verify_attestation(pk, m.name.as_str(), &m.version, chain_hash, att)
+                                    .is_ok()
                             })
                     })
                 })
@@ -1141,11 +1115,7 @@ mod tests {
     use super::*;
 
     fn fixture_envelope() -> CogReproEnvelope {
-        CogReproEnvelope::compute(
-            b"sources",
-            b"toolchain-pin",
-            b"compiled-output",
-        )
+        CogReproEnvelope::compute(b"sources", b"toolchain-pin", b"compiled-output")
     }
 
     fn fixture_manifest(name: &str, ver: CogVersion) -> CogManifest {
@@ -1220,10 +1190,8 @@ mod tests {
         let base = fixture_envelope();
         let with_diff_input =
             CogReproEnvelope::compute(b"different", b"toolchain-pin", b"compiled-output");
-        let with_diff_env =
-            CogReproEnvelope::compute(b"sources", b"different", b"compiled-output");
-        let with_diff_out =
-            CogReproEnvelope::compute(b"sources", b"toolchain-pin", b"different");
+        let with_diff_env = CogReproEnvelope::compute(b"sources", b"different", b"compiled-output");
+        let with_diff_out = CogReproEnvelope::compute(b"sources", b"toolchain-pin", b"different");
         assert_ne!(base.chain_hash, with_diff_input.chain_hash);
         assert_ne!(base.chain_hash, with_diff_env.chain_hash);
         assert_ne!(base.chain_hash, with_diff_out.chain_hash);
@@ -1280,7 +1248,9 @@ mod tests {
     #[test]
     fn memory_registry_lookup_missing_returns_not_found() {
         let r = MemoryRegistry::new("local");
-        let look = r.lookup("does-not-exist", &CogVersion::new(1, 0, 0)).unwrap();
+        let look = r
+            .lookup("does-not-exist", &CogVersion::new(1, 0, 0))
+            .unwrap();
         match look {
             LookupOutcome::NotFound { .. } => {}
             other => panic!("expected NotFound, got {:?}", other),
@@ -1574,12 +1544,7 @@ mod tests {
     fn attestation_message_distinguishes_components() {
         let v1 = CogVersion::new(1, 0, 0);
         let v2 = CogVersion::new(2, 0, 0);
-        let base = attestation_message(
-            "alpha",
-            &v1,
-            "abcd",
-            AttestationKind::VerifiedCi,
-        );
+        let base = attestation_message("alpha", &v1, "abcd", AttestationKind::VerifiedCi);
         // Each component change ⇒ different message bytes.
         assert_ne!(
             base,
@@ -1690,14 +1655,7 @@ mod tests {
         let (sk, pk) = test_keypair(0x11);
         let v = CogVersion::new(1, 0, 0);
         let chain = "deadbeef".to_string();
-        let sig = sign_attestation(
-            &sk,
-            "alpha",
-            &v,
-            &chain,
-            AttestationKind::VerifiedCi,
-        )
-        .unwrap();
+        let sig = sign_attestation(&sk, "alpha", &v, &chain, AttestationKind::VerifiedCi).unwrap();
         // Construct an Attestation with a *different* kind than was signed.
         let bogus = Attestation {
             kind: AttestationKind::FrameworkSoundness,
@@ -1736,13 +1694,7 @@ mod tests {
     #[test]
     fn sign_rejects_malformed_secret_key() {
         let v = CogVersion::new(1, 0, 0);
-        match sign_attestation(
-            "deadbeef",
-            "alpha",
-            &v,
-            "abcd",
-            AttestationKind::VerifiedCi,
-        ) {
+        match sign_attestation("deadbeef", "alpha", &v, "abcd", AttestationKind::VerifiedCi) {
             Err(AttestationCryptoError::InvalidSecretKey(_)) => {}
             other => panic!("expected InvalidSecretKey, got {:?}", other),
         }
@@ -1845,11 +1797,7 @@ mod tests {
             min_quorum: 2,
             ..Default::default()
         };
-        let v = composite.lookup_with_consensus_policy(
-            "alpha",
-            &CogVersion::new(1, 0, 0),
-            &policy,
-        );
+        let v = composite.lookup_with_consensus_policy("alpha", &CogVersion::new(1, 0, 0), &policy);
         assert!(!v.consensus);
     }
 
@@ -1865,11 +1813,7 @@ mod tests {
             min_quorum: 2,
             ..Default::default()
         };
-        let v = composite.lookup_with_consensus_policy(
-            "alpha",
-            &CogVersion::new(1, 0, 0),
-            &policy,
-        );
+        let v = composite.lookup_with_consensus_policy("alpha", &CogVersion::new(1, 0, 0), &policy);
         assert!(v.consensus);
     }
 
@@ -1890,11 +1834,7 @@ mod tests {
             require_identity_match: true,
             ..Default::default()
         };
-        let v = composite.lookup_with_consensus_policy(
-            "alpha",
-            &CogVersion::new(1, 0, 0),
-            &policy,
-        );
+        let v = composite.lookup_with_consensus_policy("alpha", &CogVersion::new(1, 0, 0), &policy);
         assert!(!v.consensus, "identity mismatch must break consensus");
     }
 
@@ -1910,11 +1850,7 @@ mod tests {
             required_attestations: vec![(AttestationKind::VerifiedCi, vec![Text::from(pk)])],
             ..Default::default()
         };
-        let v = composite.lookup_with_consensus_policy(
-            "alpha",
-            &CogVersion::new(1, 0, 0),
-            &policy,
-        );
+        let v = composite.lookup_with_consensus_policy("alpha", &CogVersion::new(1, 0, 0), &policy);
         assert!(!v.consensus, "missing attestation must break consensus");
     }
 
@@ -1930,11 +1866,7 @@ mod tests {
             required_attestations: vec![(AttestationKind::VerifiedCi, vec![Text::from(pk)])],
             ..Default::default()
         };
-        let v = composite.lookup_with_consensus_policy(
-            "alpha",
-            &CogVersion::new(1, 0, 0),
-            &policy,
-        );
+        let v = composite.lookup_with_consensus_policy("alpha", &CogVersion::new(1, 0, 0), &policy);
         assert!(v.consensus);
     }
 
@@ -1955,11 +1887,7 @@ mod tests {
             )],
             ..Default::default()
         };
-        let v = composite.lookup_with_consensus_policy(
-            "alpha",
-            &CogVersion::new(1, 0, 0),
-            &policy,
-        );
+        let v = composite.lookup_with_consensus_policy("alpha", &CogVersion::new(1, 0, 0), &policy);
         assert!(!v.consensus);
     }
 
@@ -1978,11 +1906,7 @@ mod tests {
             2,
             vec![(AttestationKind::VerifiedCi, vec![Text::from(pk)])],
         );
-        let v = composite.lookup_with_consensus_policy(
-            "alpha",
-            &CogVersion::new(1, 0, 0),
-            &policy,
-        );
+        let v = composite.lookup_with_consensus_policy("alpha", &CogVersion::new(1, 0, 0), &policy);
         assert!(v.consensus);
         assert!(policy.require_identity_match);
         assert_eq!(policy.min_quorum, 2);

@@ -1704,13 +1704,11 @@ Verum's syntax emphasizes readability and semantic clarity."#
                 },
             ]
             .into(),
-            solutions: vec![
-                Solution {
-                    title: "Replace Rust keywords with Verum equivalents".into(),
-                    description: "Use the keyword mapping table above to convert your code".into(),
-                    code: None,
-                },
-            ]
+            solutions: vec![Solution {
+                title: "Replace Rust keywords with Verum equivalents".into(),
+                description: "Use the keyword mapping table above to convert your code".into(),
+                code: None,
+            }]
             .into(),
             see_also: vec![
                 "Grammar: grammar/verum.ebnf".into(),
@@ -1726,7 +1724,8 @@ Verum's syntax emphasizes readability and semantic clarity."#
         ErrorExplanation {
             code: "E0E1".into(),
             title: "Rust type name used instead of Verum semantic type".into(),
-            description: r#"Verum uses semantic type names that describe meaning, not implementation.
+            description:
+                r#"Verum uses semantic type names that describe meaning, not implementation.
 If you are migrating from Rust, the following type mappings will help:
 
   String / &str  -->  Text
@@ -1738,7 +1737,7 @@ If you are migrating from Rust, the following type mappings will help:
   Option<T>      -->  Maybe<T>
 
 Verum's semantic types make code more readable and intent-revealing."#
-                .into(),
+                    .into(),
             examples: vec![
                 Example {
                     description: "Using List instead of Vec".into(),
@@ -1752,18 +1751,13 @@ Verum's semantic types make code more readable and intent-revealing."#
                 },
             ]
             .into(),
-            solutions: vec![
-                Solution {
-                    title: "Replace Rust type names with Verum semantic types".into(),
-                    description: "Use the type mapping table above to convert your code".into(),
-                    code: None,
-                },
-            ]
+            solutions: vec![Solution {
+                title: "Replace Rust type names with Verum semantic types".into(),
+                description: "Use the type mapping table above to convert your code".into(),
+                code: None,
+            }]
             .into(),
-            see_also: vec![
-                "Type System: docs/detailed/03-type-system.md".into(),
-            ]
-            .into(),
+            see_also: vec!["Type System: docs/detailed/03-type-system.md".into()].into(),
         },
     );
 
@@ -1801,18 +1795,13 @@ In Verum, compile-time constructs use the '@' prefix: @derive, @cfg, @const."#
                 },
             ]
             .into(),
-            solutions: vec![
-                Solution {
-                    title: "Remove the '!' and use Verum function syntax".into(),
-                    description: "Built-in functions in Verum are called like regular functions".into(),
-                    code: None,
-                },
-            ]
+            solutions: vec![Solution {
+                title: "Remove the '!' and use Verum function syntax".into(),
+                description: "Built-in functions in Verum are called like regular functions".into(),
+                code: None,
+            }]
             .into(),
-            see_also: vec![
-                "Grammar: grammar/verum.ebnf".into(),
-            ]
-            .into(),
+            see_also: vec!["Grammar: grammar/verum.ebnf".into()].into(),
         },
     );
 

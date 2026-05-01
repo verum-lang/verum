@@ -28,9 +28,9 @@
 // REQUIRES Z3 API MIGRATION (~8-10 hours): z3_context() method, Context params
 #![cfg(feature = "z3_old_api_tests_disabled")]
 
-use verum_smt::context::Context;
 #[allow(unused_imports)]
 use verum_common::{List, Map, Maybe, Text};
+use verum_smt::context::Context;
 use z3::ast::{Ast, Bool, Int};
 use z3::{SatResult, Solver};
 

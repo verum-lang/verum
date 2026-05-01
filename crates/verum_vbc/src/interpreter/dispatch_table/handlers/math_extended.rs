@@ -1,11 +1,11 @@
 //! Math extended opcode handler for VBC interpreter dispatch.
 
-use crate::instruction::{MathSubOpcode, Opcode};
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::instruction::{MathSubOpcode, Opcode};
+use crate::value::Value;
 
 /// MathExtended (0x29) - Transcendental and special math functions.
 ///
@@ -31,7 +31,9 @@ use super::bytecode_io::*;
 /// - 0x60-0x67: Special F32
 /// - 0x68-0x6F: Classification F64 (is_nan, is_inf, is_finite)
 /// - 0x70-0x77: Classification F32
-pub(in super::super) fn handle_math_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_math_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
     let sub_op = MathSubOpcode::from_byte(sub_op_byte);
 
@@ -634,7 +636,10 @@ pub(in super::super) fn handle_math_extended(state: &mut InterpreterState) -> In
             let y_reg = read_reg(state)?;
             let x = state.get_reg(x_reg).as_f64() as f32;
             let y = state.get_reg(y_reg).as_f64() as f32;
-            state.set_reg(dst, Value::from_f64(if x > y { (x - y) as f64 } else { 0.0 }));
+            state.set_reg(
+                dst,
+                Value::from_f64(if x > y { (x - y) as f64 } else { 0.0 }),
+            );
             Ok(DispatchResult::Continue)
         }
         Some(MathSubOpcode::MinnumF32) => {
@@ -707,11 +712,9 @@ pub(in super::super) fn handle_math_extended(state: &mut InterpreterState) -> In
         }
 
         // Unimplemented sub-opcodes
-        None => {
-            Err(InterpreterError::NotImplemented {
-                feature: "math_extended sub-opcode",
-                opcode: Some(Opcode::MathExtended),
-            })
-        }
+        None => Err(InterpreterError::NotImplemented {
+            feature: "math_extended sub-opcode",
+            opcode: Some(Opcode::MathExtended),
+        }),
     }
 }

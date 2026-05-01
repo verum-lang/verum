@@ -27,23 +27,23 @@
 //! | 1 | Checked | 0ns | Compile-time proven safe |
 //! | 2 | Unsafe | 0ns | Manual safety proof required |
 
+use super::types::RefTier;
+use crate::mlir::dialect::{attr_names, op_names};
+use crate::mlir::error::{MlirError, Result};
+use verum_common::Text;
 use verum_mlir::{
     Context,
+    dialect::llvm,
     ir::{
         Attribute, Block, Identifier, Location, Module, Operation, Region, Type, Value,
         attribute::{
-            ArrayAttribute, DenseI32ArrayAttribute, DenseI64ArrayAttribute,
-            IntegerAttribute, StringAttribute, TypeAttribute,
+            ArrayAttribute, DenseI32ArrayAttribute, DenseI64ArrayAttribute, IntegerAttribute,
+            StringAttribute, TypeAttribute,
         },
         operation::{OperationBuilder, OperationLike},
         r#type::IntegerType,
     },
-    dialect::llvm,
 };
-use verum_common::Text;
-use crate::mlir::error::{MlirError, Result};
-use crate::mlir::dialect::{op_names, attr_names};
-use super::types::RefTier;
 
 // ============================================================================
 // CBGR Type Structures
@@ -221,7 +221,15 @@ impl CbgrAllocOp {
         tier: RefTier,
     ) -> Result<Operation<'c>> {
         let caps = CbgrCapability::combine(&[CbgrCapability::Read, CbgrCapability::Write]);
-        Self::build(context, location, value, result_type, tier, caps, CbgrRefLayout::Thin)
+        Self::build(
+            context,
+            location,
+            value,
+            result_type,
+            tier,
+            caps,
+            CbgrRefLayout::Thin,
+        )
     }
 }
 
@@ -307,7 +315,14 @@ impl CbgrCheckOp {
         reference: Value<'c, '_>,
         expected_generation: Value<'c, '_>,
     ) -> Result<Operation<'c>> {
-        Self::build(context, location, reference, expected_generation, false, None)
+        Self::build(
+            context,
+            location,
+            reference,
+            expected_generation,
+            false,
+            None,
+        )
     }
 }
 

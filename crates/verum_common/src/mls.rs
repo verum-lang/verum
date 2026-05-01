@@ -64,8 +64,7 @@ use serde::{Deserialize, Serialize};
 /// the lattice's height ordering — directly usable for `cmp` and
 /// `min`/`max` (which compute meet/join).
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
-    Serialize, Deserialize, Default,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
 )]
 pub enum MlsLevel {
     /// No classification — the default for every value not
@@ -169,8 +168,12 @@ mod tests {
         // back to itself.
         for level in [MlsLevel::Public, MlsLevel::Secret, MlsLevel::TopSecret] {
             let s = level.as_manifest_str();
-            assert_eq!(MlsLevel::from_manifest_str(s), level,
-                "round-trip failed for {:?}", level);
+            assert_eq!(
+                MlsLevel::from_manifest_str(s),
+                level,
+                "round-trip failed for {:?}",
+                level
+            );
         }
     }
 
@@ -178,8 +181,10 @@ mod tests {
     fn from_manifest_str_accepts_hyphen_alias() {
         // Pin: `"top-secret"` (hyphen) is accepted as an alias for
         // `"top_secret"` for ergonomic CLI / configuration reasons.
-        assert_eq!(MlsLevel::from_manifest_str("top-secret"),
-                   MlsLevel::TopSecret);
+        assert_eq!(
+            MlsLevel::from_manifest_str("top-secret"),
+            MlsLevel::TopSecret
+        );
     }
 
     #[test]
@@ -187,34 +192,31 @@ mod tests {
         // Pin: unknown / typo values map to Public — the safe
         // default. Callers performing strict validation should
         // intercept upstream (see LanguageFeatures::validate).
-        assert_eq!(MlsLevel::from_manifest_str("classified"),
-                   MlsLevel::Public);
-        assert_eq!(MlsLevel::from_manifest_str(""),
-                   MlsLevel::Public);
+        assert_eq!(MlsLevel::from_manifest_str("classified"), MlsLevel::Public);
+        assert_eq!(MlsLevel::from_manifest_str(""), MlsLevel::Public);
     }
 
     #[test]
     fn join_is_max_on_total_order() {
         // Pin: join (least upper bound) on a total order = max.
-        assert_eq!(MlsLevel::Public.join(MlsLevel::Secret),
-                   MlsLevel::Secret);
-        assert_eq!(MlsLevel::Secret.join(MlsLevel::Public),
-                   MlsLevel::Secret);
-        assert_eq!(MlsLevel::Secret.join(MlsLevel::TopSecret),
-                   MlsLevel::TopSecret);
-        assert_eq!(MlsLevel::TopSecret.join(MlsLevel::Public),
-                   MlsLevel::TopSecret);
+        assert_eq!(MlsLevel::Public.join(MlsLevel::Secret), MlsLevel::Secret);
+        assert_eq!(MlsLevel::Secret.join(MlsLevel::Public), MlsLevel::Secret);
+        assert_eq!(
+            MlsLevel::Secret.join(MlsLevel::TopSecret),
+            MlsLevel::TopSecret
+        );
+        assert_eq!(
+            MlsLevel::TopSecret.join(MlsLevel::Public),
+            MlsLevel::TopSecret
+        );
     }
 
     #[test]
     fn meet_is_min_on_total_order() {
         // Pin: meet (greatest lower bound) on a total order = min.
-        assert_eq!(MlsLevel::Public.meet(MlsLevel::Secret),
-                   MlsLevel::Public);
-        assert_eq!(MlsLevel::Secret.meet(MlsLevel::TopSecret),
-                   MlsLevel::Secret);
-        assert_eq!(MlsLevel::TopSecret.meet(MlsLevel::Public),
-                   MlsLevel::Public);
+        assert_eq!(MlsLevel::Public.meet(MlsLevel::Secret), MlsLevel::Public);
+        assert_eq!(MlsLevel::Secret.meet(MlsLevel::TopSecret), MlsLevel::Secret);
+        assert_eq!(MlsLevel::TopSecret.meet(MlsLevel::Public), MlsLevel::Public);
     }
 
     #[test]

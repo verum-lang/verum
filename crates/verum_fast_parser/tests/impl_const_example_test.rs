@@ -16,8 +16,8 @@
 
 use std::fs;
 use verum_ast::span::FileId;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 #[test]
 fn test_parse_impl_with_const_example() {

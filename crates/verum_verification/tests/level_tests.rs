@@ -65,8 +65,15 @@ fn test_from_annotation_covers_every_grammar_strategy() {
     // Grammar production: verify_strategy = ( 'runtime' | 'static' | 'formal'
     //  | 'proof' | 'fast' | 'thorough' | 'reliable' | 'certified' | 'synthesize' ) ,
     let grammar_names = [
-        "runtime", "static", "formal", "proof",
-        "fast", "thorough", "reliable", "certified", "synthesize",
+        "runtime",
+        "static",
+        "formal",
+        "proof",
+        "fast",
+        "thorough",
+        "reliable",
+        "certified",
+        "synthesize",
     ];
     for name in grammar_names {
         assert!(

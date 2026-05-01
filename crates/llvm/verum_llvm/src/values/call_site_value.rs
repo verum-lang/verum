@@ -2,13 +2,13 @@ use std::fmt::{self, Display};
 
 use verum_llvm_sys::core::LLVMGetCalledFunctionType;
 use verum_llvm_sys::core::{
-    LLVMGetCalledValue, LLVMGetInstructionCallConv, LLVMGetTypeKind, LLVMIsTailCall, LLVMSetInstrParamAlignment,
-    LLVMSetInstructionCallConv, LLVMSetTailCall, LLVMTypeOf,
+    LLVMGetCalledValue, LLVMGetInstructionCallConv, LLVMGetTypeKind, LLVMIsTailCall,
+    LLVMSetInstrParamAlignment, LLVMSetInstructionCallConv, LLVMSetTailCall, LLVMTypeOf,
 };
 
+use verum_llvm_sys::LLVMTypeKind;
 use verum_llvm_sys::core::{LLVMGetTailCallKind, LLVMSetTailCallKind};
 use verum_llvm_sys::prelude::LLVMValueRef;
-use verum_llvm_sys::LLVMTypeKind;
 
 use crate::attributes::{Attribute, AttributeLoc};
 use crate::types::FunctionType;
@@ -278,7 +278,9 @@ impl<'ctx> CallSiteValue<'ctx> {
     pub fn try_as_basic_value(self) -> ValueKind<'ctx> {
         unsafe {
             match LLVMGetTypeKind(LLVMTypeOf(self.as_value_ref())) {
-                LLVMTypeKind::LLVMVoidTypeKind => ValueKind::Instruction(InstructionValue::new(self.as_value_ref())),
+                LLVMTypeKind::LLVMVoidTypeKind => {
+                    ValueKind::Instruction(InstructionValue::new(self.as_value_ref()))
+                }
                 _ => ValueKind::Basic(BasicValueEnum::new(self.as_value_ref())),
             }
         }
@@ -319,7 +321,9 @@ impl<'ctx> CallSiteValue<'ctx> {
     pub fn add_attribute(self, loc: AttributeLoc, attribute: Attribute) {
         use verum_llvm_sys::core::LLVMAddCallSiteAttribute;
 
-        unsafe { LLVMAddCallSiteAttribute(self.as_value_ref(), loc.get_index(), attribute.attribute) }
+        unsafe {
+            LLVMAddCallSiteAttribute(self.as_value_ref(), loc.get_index(), attribute.attribute)
+        }
     }
 
     /// Gets the `FunctionValue` this `CallSiteValue` is based on.
@@ -490,8 +494,8 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// assert_eq!(call_site_value.attributes(AttributeLoc::Return), vec![ string_attribute, enum_attribute ]);
     /// ```
     pub fn attributes(self, loc: AttributeLoc) -> Vec<Attribute> {
-        use verum_llvm_sys::core::LLVMGetCallSiteAttributes;
         use std::mem::{ManuallyDrop, MaybeUninit};
+        use verum_llvm_sys::core::LLVMGetCallSiteAttributes;
 
         let count = self.count_attributes(loc) as usize;
 
@@ -559,7 +563,8 @@ impl<'ctx> CallSiteValue<'ctx> {
     pub fn get_enum_attribute(self, loc: AttributeLoc, kind_id: u32) -> Option<Attribute> {
         use verum_llvm_sys::core::LLVMGetCallSiteEnumAttribute;
 
-        let ptr = unsafe { LLVMGetCallSiteEnumAttribute(self.as_value_ref(), loc.get_index(), kind_id) };
+        let ptr =
+            unsafe { LLVMGetCallSiteEnumAttribute(self.as_value_ref(), loc.get_index(), kind_id) };
 
         if ptr.is_null() {
             return None;
@@ -851,7 +856,11 @@ impl<'ctx> CallSiteValue<'ctx> {
     /// call_site_value.set_alignment_attribute(AttributeLoc::Param(0), 2);
     /// ```
     pub fn set_alignment_attribute(self, loc: AttributeLoc, alignment: u32) {
-        assert_eq!(alignment.count_ones(), 1, "Alignment must be a power of two.");
+        assert_eq!(
+            alignment.count_ones(),
+            1,
+            "Alignment must be a power of two."
+        );
 
         unsafe { LLVMSetInstrParamAlignment(self.as_value_ref(), loc.get_index(), alignment) }
     }

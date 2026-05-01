@@ -9,16 +9,14 @@
 //! "Check that induction is well-founded" with default `true`,
 //! but no code path consulted it.
 
+use verum_ast::Ident;
 use verum_ast::expr::{Expr, ExprKind, QuantifierBinding};
 use verum_ast::literal::{Literal, LiteralKind};
 use verum_ast::pattern::{Pattern, PatternKind};
 use verum_ast::span::Span;
-use verum_ast::Ident;
 use verum_common::{List, Maybe, Text};
 use verum_smt::proof_term_unified::ProofTerm;
-use verum_verification::proof_validator::{
-    ProofValidator, ValidationConfig, ValidationError,
-};
+use verum_verification::proof_validator::{ProofValidator, ValidationConfig, ValidationError};
 
 fn span() -> Span {
     Span::dummy()

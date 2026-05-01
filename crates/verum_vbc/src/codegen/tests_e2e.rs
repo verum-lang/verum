@@ -14,8 +14,8 @@
 #![cfg(test)]
 
 use verum_ast::{FileId, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 use crate::codegen::{CodegenConfig, VbcCodegen};
 use crate::module::VbcModule;
@@ -57,14 +57,12 @@ fn assert_parses(source: &str) {
 /// Helper to assert that compilation succeeds.
 fn assert_compiles(source: &str) {
     match parse_source(source) {
-        Ok(module) => {
-            match compile_module(&module) {
-                Ok(_) => {}
-                Err(e) => {
-                    panic!("Compilation failed:\n{}\n\nSource:\n{}", e, source);
-                }
+        Ok(module) => match compile_module(&module) {
+            Ok(_) => {}
+            Err(e) => {
+                panic!("Compilation failed:\n{}\n\nSource:\n{}", e, source);
             }
-        }
+        },
         Err(e) => {
             panic!("Parse failed:\n{}\n\nSource:\n{}", e, source);
         }
@@ -333,60 +331,71 @@ mod variable_tests {
 
     #[test]
     fn test_e2e_let_binding_int() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 42;
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_let_binding_with_type() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x: Int = 42;
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_multiple_let_bindings() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let a = 10;
                 let b = 20;
                 let c = 12;
                 a + b + c
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_let_binding_expression() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let result = 2 + 3 * 4;
                 result
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_shadowing() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 10;
                 let x = 20;
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_shadowing_in_block() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 10;
                 let y = {
@@ -395,50 +404,59 @@ mod variable_tests {
                 };
                 x + y
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_use_before_shadowing() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 10;
                 let y = x * 2;
                 let x = 5;
                 y + x
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_mutable_binding() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let mut x = 10;
                 x = 20;
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_let_with_bool() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Bool {
                 let flag = true;
                 flag
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_let_with_string() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Text {
                 let name = "hello";
                 name
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -453,47 +471,56 @@ mod control_flow_tests {
 
     #[test]
     fn test_e2e_if_true_branch() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 if true { 42 } else { 0 }
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_if_false_branch() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 if false { 0 } else { 42 }
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_if_with_condition() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 10;
                 if x > 5 { 42 } else { 0 }
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_if_without_else() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() {
                 let x = 10;
                 if x > 5 {
                     let y = 42;
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_if_else_if_chain() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 10;
                 if x < 0 {
@@ -504,12 +531,14 @@ mod control_flow_tests {
                     1
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_nested_if() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let a = 5;
                 let b = 10;
@@ -519,14 +548,16 @@ mod control_flow_tests {
                     3
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     // --- While Loops ---
 
     #[test]
     fn test_e2e_while_loop_simple() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let mut x = 0;
                 while x < 5 {
@@ -534,12 +565,14 @@ mod control_flow_tests {
                 }
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_while_loop_countdown() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let mut sum = 0;
                 let mut n = 5;
@@ -549,12 +582,14 @@ mod control_flow_tests {
                 }
                 sum
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_while_never_executes() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let mut x = 100;
                 while false {
@@ -562,14 +597,16 @@ mod control_flow_tests {
                 }
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     // --- For Loops ---
 
     #[test]
     fn test_e2e_for_loop_range() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let mut sum = 0;
                 for i in 1..6 {
@@ -577,12 +614,14 @@ mod control_flow_tests {
                 }
                 sum
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_for_loop_inclusive_range() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let mut sum = 0;
                 for i in 1..=5 {
@@ -590,14 +629,16 @@ mod control_flow_tests {
                 }
                 sum
             }
-        "#);
+        "#,
+        );
     }
 
     // --- Loop with break ---
 
     #[test]
     fn test_e2e_loop_with_break() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let mut x = 0;
                 loop {
@@ -608,24 +649,28 @@ mod control_flow_tests {
                 }
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_loop_break_with_value() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let result = loop {
                     break 42;
                 };
                 result
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_while_with_break() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let mut x = 0;
                 while true {
@@ -636,14 +681,16 @@ mod control_flow_tests {
                 }
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     // --- Continue ---
 
     #[test]
     fn test_e2e_while_with_continue() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let mut sum = 0;
                 let mut i = 0;
@@ -656,7 +703,8 @@ mod control_flow_tests {
                 }
                 sum
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -669,7 +717,8 @@ mod function_tests {
 
     #[test]
     fn test_e2e_simple_function() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn add(a: Int, b: Int) -> Int {
                 a + b
             }
@@ -677,12 +726,14 @@ mod function_tests {
             fn main() -> Int {
                 add(10, 32)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_function_no_params() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn get_answer() -> Int {
                 42
             }
@@ -690,24 +741,28 @@ mod function_tests {
             fn main() -> Int {
                 get_answer()
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_function_no_return() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn do_nothing() {
             }
 
             fn main() {
                 do_nothing()
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_function_with_body() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn multiply(x: Int, y: Int) -> Int {
                 let result = x * y;
                 result
@@ -716,12 +771,14 @@ mod function_tests {
             fn main() -> Int {
                 multiply(6, 7)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_function_early_return() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn abs(x: Int) -> Int {
                 if x < 0 {
                     return -x;
@@ -732,12 +789,14 @@ mod function_tests {
             fn main() -> Int {
                 abs(-42)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_nested_function_calls() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn double(x: Int) -> Int {
                 x * 2
             }
@@ -749,12 +808,14 @@ mod function_tests {
             fn main() -> Int {
                 double(triple(7))
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_recursive_factorial() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn factorial(n: Int) -> Int {
                 if n <= 1 {
                     1
@@ -766,12 +827,14 @@ mod function_tests {
             fn main() -> Int {
                 factorial(5)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_recursive_fibonacci() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn fib(n: Int) -> Int {
                 if n <= 1 {
                     n
@@ -783,12 +846,14 @@ mod function_tests {
             fn main() -> Int {
                 fib(10)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_tail_recursive() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn sum_to(n: Int, acc: Int) -> Int {
                 if n <= 0 {
                     acc
@@ -800,12 +865,14 @@ mod function_tests {
             fn main() -> Int {
                 sum_to(5, 0)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_multiple_functions() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn square(x: Int) -> Int {
                 x * x
             }
@@ -821,7 +888,8 @@ mod function_tests {
             fn main() -> Int {
                 add(square(3), cube(2))
             }
-        "#);
+        "#,
+        );
     }
 
     // ========================================================================
@@ -831,7 +899,8 @@ mod function_tests {
     #[test]
     fn test_e2e_simple_nested_function() {
         // Test a simple nested function that is defined inside another function
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn outer() -> Int {
                 fn inner() -> Int {
                     42
@@ -842,13 +911,15 @@ mod function_tests {
             fn main() -> Int {
                 outer()
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_nested_function_with_params() {
         // Test a nested function with parameters
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn outer(x: Int) -> Int {
                 fn inner(y: Int) -> Int {
                     y * 2
@@ -859,13 +930,15 @@ mod function_tests {
             fn main() -> Int {
                 outer(21)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_multiple_nested_functions() {
         // Test multiple nested functions at the same level
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn outer() -> Int {
                 fn add_one(x: Int) -> Int {
                     x + 1
@@ -881,13 +954,15 @@ mod function_tests {
             fn main() -> Int {
                 outer()
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_deeply_nested_functions() {
         // Test deeply nested functions (functions inside functions inside functions)
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn level1() -> Int {
                 fn level2() -> Int {
                     fn level3() -> Int {
@@ -901,13 +976,15 @@ mod function_tests {
             fn main() -> Int {
                 level1()
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_nested_function_shadowing() {
         // Test that nested function can have same name as outer variable
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn outer() -> Int {
                 let x = 10;
 
@@ -921,14 +998,16 @@ mod function_tests {
             fn main() -> Int {
                 outer()
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_nested_function_forward_reference() {
         // Test calling a nested function before its definition (forward reference)
         // This is a key test for the collect_nested_declarations fix
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn outer() -> Int {
                 let result = inner();
 
@@ -942,13 +1021,15 @@ mod function_tests {
             fn main() -> Int {
                 outer()
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_nested_function_in_impl_method() {
         // Test nested function inside an impl method
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             type Counter is { value: Int };
 
             implement Counter {
@@ -964,7 +1045,8 @@ mod function_tests {
                 let c = Counter { value: 41 };
                 c.increment()
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -1081,7 +1163,8 @@ mod block_tests {
 
     #[test]
     fn test_e2e_block_expression() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = {
                     let a = 20;
@@ -1090,12 +1173,14 @@ mod block_tests {
                 };
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_nested_blocks() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let outer = 10;
                 let result = {
@@ -1107,13 +1192,15 @@ mod block_tests {
                 };
                 result
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_block_scope_isolation() {
         // Variables in inner scope shouldn't affect outer scope
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 10;
                 {
@@ -1121,7 +1208,8 @@ mod block_tests {
                 }
                 x
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -1134,7 +1222,8 @@ mod match_tests {
 
     #[test]
     fn test_e2e_match_literal() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 2;
                 match x {
@@ -1143,12 +1232,14 @@ mod match_tests {
                     _ => 0
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_match_bool() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let flag = true;
                 match flag {
@@ -1156,12 +1247,14 @@ mod match_tests {
                     false => 0
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_match_with_guard() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 15;
                 match x {
@@ -1170,12 +1263,14 @@ mod match_tests {
                     _ => 3
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_match_wildcard() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 999;
                 match x {
@@ -1184,7 +1279,8 @@ mod match_tests {
                     _ => 42
                 }
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -1202,12 +1298,14 @@ mod advanced_expr_tests {
 
     #[test]
     fn test_e2e_tuple_access() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let t = (10, 20, 30);
                 t.0 + t.1 + t.2
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
@@ -1250,7 +1348,8 @@ mod edge_case_tests {
 
     #[test]
     fn test_e2e_many_parameters() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn many_params(a: Int, b: Int, c: Int, d: Int, e: Int) -> Int {
                 a + b + c + d + e
             }
@@ -1258,28 +1357,33 @@ mod edge_case_tests {
             fn main() -> Int {
                 many_params(1, 2, 3, 4, 5)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_expression_statement() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() {
                 let x = 10;
                 x + 5;
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_trailing_expression() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let x = 10;
                 let y = 20;
                 x + y
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
@@ -1295,13 +1399,15 @@ mod edge_case_tests {
 
     #[test]
     fn test_e2e_float_edge_cases() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Float {
                 let a = 0.0;
                 let b = -0.0;
                 a + b
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -1324,26 +1430,31 @@ mod compilation_tests {
 
     #[test]
     fn test_compile_let_binding() {
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn main() -> Int {
                 let x = 42;
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_compile_if_else() {
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn main() -> Int {
                 if true { 42 } else { 0 }
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_compile_function_call() {
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn double(x: Int) -> Int {
                 x * 2
             }
@@ -1351,12 +1462,14 @@ mod compilation_tests {
             fn main() -> Int {
                 double(21)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_compile_while_loop() {
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn main() -> Int {
                 let mut x = 0;
                 while x < 10 {
@@ -1364,12 +1477,14 @@ mod compilation_tests {
                 }
                 x
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_compile_complex_program() {
-        assert_compiles(r#"
+        assert_compiles(
+            r#"
             fn factorial(n: Int) -> Int {
                 if n <= 1 {
                     1
@@ -1382,7 +1497,8 @@ mod compilation_tests {
                 let result = factorial(5);
                 result
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -1395,50 +1511,59 @@ mod type_def_tests {
 
     #[test]
     fn test_e2e_type_alias() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Age is Int;
 
             fn main() -> Int {
                 let age: Age = 25;
                 age
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_record_type() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Point is { x: Int, y: Int };
 
             fn main() {
                 let p = Point { x: 10, y: 20 };
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_sum_type() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Maybe<T> is None | Some(T);
 
             fn main() {
                 let x: Maybe<Int> = None;
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_protocol_def() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Display is protocol {
                 fn display(&self) -> Text;
             };
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_implement_block() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Counter is { value: Int };
 
             implement Counter {
@@ -1446,7 +1571,8 @@ mod type_def_tests {
                     self.value = self.value + 1;
                 }
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -1459,38 +1585,45 @@ mod closure_tests {
 
     #[test]
     fn test_e2e_simple_closure() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let add_one = |x| x + 1;
                 add_one(41)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_closure_with_types() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let add = |a: Int, b: Int| -> Int { a + b };
                 add(20, 22)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_closure_capturing() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 let offset = 32;
                 let add_offset = |x| x + offset;
                 add_offset(10)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_e2e_closure_as_argument() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn apply(f: fn(Int) -> Int, x: Int) -> Int {
                 f(x)
             }
@@ -1498,7 +1631,8 @@ mod closure_tests {
             fn main() -> Int {
                 apply(|x| x * 2, 21)
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -1655,7 +1789,8 @@ mod complex_practical_tests {
     /// Option chaining pattern.
     #[test]
     fn test_complex_option_chaining() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Maybe<T> is None | Some(T);
 
             fn get_value() -> Maybe<Int> {
@@ -1668,13 +1803,15 @@ mod complex_practical_tests {
                     Some(x) => x
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Result error handling pattern.
     #[test]
     fn test_complex_result_handling() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Result<T, E> is Ok(T) | Err(E);
 
             fn divide(a: Int, b: Int) -> Result<Int, Text> {
@@ -1691,13 +1828,15 @@ mod complex_practical_tests {
                     Err(_) => -1
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Recursive data structure with pattern matching.
     #[test]
     fn test_complex_recursive_structure() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type List<T> is Nil | Cons(T, Heap<List<T>>);
 
             fn length<T>(list: &List<T>) -> Int {
@@ -1706,13 +1845,15 @@ mod complex_practical_tests {
                     Cons(_, tail) => 1 + length(tail)
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Method chaining with impl blocks.
     #[test]
     fn test_complex_method_chaining() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Builder is {
                 value: Int
             };
@@ -1740,13 +1881,15 @@ mod complex_practical_tests {
                 let mut b = new_builder();
                 b.add(10).add(20).add(12).build()
             }
-        "#);
+        "#,
+        );
     }
 
     /// Higher-order functions with generic constraints.
     #[test]
     fn test_complex_higher_order_generics() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn map<T, U>(list: List<T>, f: fn(T) -> U) -> List<U> {
                 match list {
                     Nil => Nil,
@@ -1758,13 +1901,15 @@ mod complex_practical_tests {
                 let nums: List<Int> = Cons(1, Heap(Cons(2, Heap(Nil))));
                 let doubled = map(nums, |x| x * 2);
             }
-        "#);
+        "#,
+        );
     }
 
     /// Complex control flow with early returns.
     #[test]
     fn test_complex_early_return() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn find_first_positive(list: List<Int>) -> Maybe<Int> {
                 match list {
                     Nil => None,
@@ -1776,13 +1921,15 @@ mod complex_practical_tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Nested generics with multiple type parameters.
     #[test]
     fn test_complex_nested_generics() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Pair<A, B> is { first: A, second: B };
             type Triple<A, B, C> is { a: A, b: B, c: C };
 
@@ -1792,13 +1939,15 @@ mod complex_practical_tests {
             ) -> Triple<X, Y, Z> {
                 Triple { a: p1.first, b: p1.second, c: z }
             }
-        "#);
+        "#,
+        );
     }
 
     /// State machine pattern.
     #[test]
     fn test_complex_state_machine() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type State is Idle | Running(Int) | Stopped;
 
             fn transition(state: State, event: Int) -> State {
@@ -1814,13 +1963,15 @@ mod complex_practical_tests {
                     Stopped => Stopped
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Iterator pattern with protocol implementation.
     #[test]
     fn test_complex_iterator_pattern() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Iterator<T> is protocol {
                 fn next(&mut self) -> Maybe<T>;
             };
@@ -1841,13 +1992,15 @@ mod complex_practical_tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Async-like pattern with context.
     #[test]
     fn test_complex_async_pattern() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Future<T> is Pending | Ready(T);
 
             fn poll<T>(fut: &mut Future<T>) -> Maybe<T> {
@@ -1856,7 +2009,8 @@ mod complex_practical_tests {
                     Ready(value) => Some(value)
                 }
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -1873,15 +2027,18 @@ mod error_edge_case_tests {
     /// Empty function body should parse.
     #[test]
     fn test_edge_empty_block() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() { }
-        "#);
+        "#,
+        );
     }
 
     /// Deeply nested blocks.
     #[test]
     fn test_edge_deeply_nested_blocks() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 {
                     {
@@ -1895,33 +2052,39 @@ mod error_edge_case_tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Long chain of binary operations.
     #[test]
     fn test_edge_long_binary_chain() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn main() -> Int {
                 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10
             }
-        "#);
+        "#,
+        );
     }
 
     /// Many parameters function.
     #[test]
     fn test_edge_many_parameters() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn many(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int {
                 a + b + c + d + e + f + g + h
             }
-        "#);
+        "#,
+        );
     }
 
     /// Nested match expressions.
     #[test]
     fn test_edge_nested_match() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Outer is A(Inner) | B;
             type Inner is X | Y(Int);
 
@@ -1934,37 +2097,43 @@ mod error_edge_case_tests {
                     B => -1
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Multiple type parameters on same struct.
     #[test]
     fn test_edge_multiple_type_params() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Multi<A, B, C, D> is {
                 a: A,
                 b: B,
                 c: C,
                 d: D
             };
-        "#);
+        "#,
+        );
     }
 
     /// Self-referential type through Heap.
     #[test]
     fn test_edge_self_referential_type() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Node<T> is {
                 value: T,
                 next: Maybe<Heap<Node<T>>>
             };
-        "#);
+        "#,
+        );
     }
 
     /// Chained field access.
     #[test]
     fn test_edge_chained_field_access() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type A is { b: B };
             type B is { c: C };
             type C is { value: Int };
@@ -1972,33 +2141,38 @@ mod error_edge_case_tests {
             fn get_value(a: A) -> Int {
                 a.b.c.value
             }
-        "#);
+        "#,
+        );
     }
 
     /// Complex pattern destructuring.
     #[test]
     fn test_edge_complex_destructuring() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Point is { x: Int, y: Int };
 
             fn main() -> Int {
                 let Point { x, y } = Point { x: 10, y: 20 };
                 x + y
             }
-        "#);
+        "#,
+        );
     }
 
     /// Unicode identifiers (if supported).
     #[test]
     fn test_edge_special_identifiers() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn test_fn() -> Int {
                 let x_1 = 10;
                 let _ignored = 20;
                 let value123 = 30;
                 x_1 + value123
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -2015,7 +2189,8 @@ mod new_pattern_tests {
     /// Or pattern: a | b
     #[test]
     fn test_pattern_or_simple() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Status is Active | Pending | Inactive;
 
             fn is_actionable(s: Status) -> Bool {
@@ -2024,13 +2199,15 @@ mod new_pattern_tests {
                     Inactive => false
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Or pattern with bindings
     #[test]
     fn test_pattern_or_with_bindings() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Value is A(Int) | B(Int) | C;
 
             fn get_value(v: Value) -> Int {
@@ -2039,13 +2216,15 @@ mod new_pattern_tests {
                     C => 0
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Range pattern: 1..10
     #[test]
     fn test_pattern_range_exclusive() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn categorize(n: Int) -> Text {
                 match n {
                     0..10 => "single digit",
@@ -2053,13 +2232,15 @@ mod new_pattern_tests {
                     _ => "large"
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Range pattern: 1..=10
     #[test]
     fn test_pattern_range_inclusive() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn grade(score: Int) -> Text {
                 match score {
                     90..=100 => "A",
@@ -2068,39 +2249,45 @@ mod new_pattern_tests {
                     _ => "F"
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Reference pattern: &x
     #[test]
     fn test_pattern_reference() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn deref_match(r: &Int) -> Int {
                 match r {
                     &0 => 0,
                     &x => x + 1
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Array pattern: [a, b, c]
     #[test]
     fn test_pattern_array() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn first_three(arr: List<Int>) -> Int {
                 match arr {
                     [a, b, c] => a + b + c,
                     _ => 0
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Slice pattern: [first, .., last]
     #[test]
     fn test_pattern_slice() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn first_and_last(arr: List<Int>) -> Int {
                 match arr {
                     [first, .., last] => first + last,
@@ -2108,13 +2295,15 @@ mod new_pattern_tests {
                     [] => 0
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Record pattern: Point { x, y }
     #[test]
     fn test_pattern_record() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Point is { x: Int, y: Int };
 
             fn at_origin(p: Point) -> Bool {
@@ -2123,13 +2312,15 @@ mod new_pattern_tests {
                     Point { x, y } => false
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Nested patterns
     #[test]
     fn test_pattern_nested_complex() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Tree<T> is Leaf(T) | Node(Heap<Tree<T>>, Heap<Tree<T>>);
 
             fn sum_leaves(t: &Tree<Int>) -> Int {
@@ -2138,13 +2329,15 @@ mod new_pattern_tests {
                     Node(left, right) => sum_leaves(left) + sum_leaves(right)
                 }
             }
-        "#);
+        "#,
+        );
     }
 
     /// Combined patterns
     #[test]
     fn test_pattern_combined() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Data is Value(Int) | Pair(Int, Int) | Empty;
 
             fn process(d: Data) -> Int {
@@ -2154,7 +2347,8 @@ mod new_pattern_tests {
                     Empty => 0
                 }
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -2171,19 +2365,22 @@ mod compound_assignment_tests {
     /// Field compound assignment: obj.field += value
     #[test]
     fn test_compound_field_add() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Counter is { value: Int };
 
             fn increment(c: &mut Counter) {
                 c.value += 1;
             }
-        "#);
+        "#,
+        );
     }
 
     /// Field compound assignment: all operators
     #[test]
     fn test_compound_field_all_ops() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Stats is { a: Int, b: Int };
 
             fn update(s: &mut Stats) {
@@ -2192,44 +2389,52 @@ mod compound_assignment_tests {
                 s.a *= 2;
                 s.b /= 3;
             }
-        "#);
+        "#,
+        );
     }
 
     /// Index compound assignment: arr[i] += value
     #[test]
     fn test_compound_index_add() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn increment_at(arr: &mut List<Int>, idx: Int) {
                 arr[idx] += 1;
             }
-        "#);
+        "#,
+        );
     }
 
     /// Index compound assignment: nested access
     #[test]
     fn test_compound_index_nested() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn update_matrix(m: &mut List<List<Int>>, row: Int, col: Int) {
                 m[row][col] += 100;
             }
-        "#);
+        "#,
+        );
     }
 
     /// Tuple index compound assignment
     #[test]
     fn test_compound_tuple_index() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn update_pair(p: &mut (Int, Int)) {
                 p.0 += 1;
                 p.1 -= 1;
             }
-        "#);
+        "#,
+        );
     }
 
     /// Bitwise compound assignment
     #[test]
     fn test_compound_bitwise() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Flags is { bits: Int };
 
             fn set_flag(f: &mut Flags, mask: Int) {
@@ -2239,26 +2444,30 @@ mod compound_assignment_tests {
             fn clear_flag(f: &mut Flags, mask: Int) {
                 f.bits &= ~mask;
             }
-        "#);
+        "#,
+        );
     }
 
     /// Chained field compound assignment
     #[test]
     fn test_compound_chained() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             type Inner is { value: Int };
             type Outer is { inner: Inner };
 
             fn update_inner(o: &mut Outer) {
                 o.inner.value += 10;
             }
-        "#);
+        "#,
+        );
     }
 
     /// Simple variable compound assignment (existing)
     #[test]
     fn test_compound_simple() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn accumulate(n: Int) -> Int {
                 let mut sum = 0;
                 let mut i = 0;
@@ -2268,7 +2477,8 @@ mod compound_assignment_tests {
                 }
                 sum
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -2285,159 +2495,189 @@ mod builtin_tests {
     /// assert_eq builtin
     #[test]
     fn test_builtin_assert_eq() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn test_equality() {
                 assert_eq(1 + 1, 2);
                 assert_eq(10 * 2, 20);
             }
-        "#);
+        "#,
+        );
     }
 
     /// assert_ne builtin
     #[test]
     fn test_builtin_assert_ne() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn test_inequality() {
                 assert_ne(1, 2);
                 assert_ne(0, 1);
             }
-        "#);
+        "#,
+        );
     }
 
     /// debug_assert builtin
     #[test]
     fn test_builtin_debug_assert() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn with_debug_checks(x: Int) {
                 debug_assert(x >= 0);
                 debug_assert(x < 100);
             }
-        "#);
+        "#,
+        );
     }
 
     /// dbg builtin
     #[test]
     fn test_builtin_dbg() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn debug_value() -> Int {
                 let x = dbg(42);
                 let y = dbg(x + 8);
                 y
             }
-        "#);
+        "#,
+        );
     }
 
     /// todo builtin
     #[test]
     fn test_builtin_todo() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn not_implemented_yet() -> Int {
                 todo()
             }
-        "#);
+        "#,
+        );
     }
 
     /// unimplemented builtin
     #[test]
     fn test_builtin_unimplemented() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn will_implement_later() -> Bool {
                 unimplemented()
             }
-        "#);
+        "#,
+        );
     }
 
     /// drop builtin
     #[test]
     fn test_builtin_drop() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn cleanup(x: Heap<Int>) {
                 drop(x);
             }
-        "#);
+        "#,
+        );
     }
 
     /// forget builtin
     #[test]
     fn test_builtin_forget() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn leak_value(x: Heap<Int>) {
                 forget(x);
             }
-        "#);
+        "#,
+        );
     }
 
     /// min builtin
     #[test]
     fn test_builtin_min() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn smaller(a: Int, b: Int) -> Int {
                 min(a, b)
             }
-        "#);
+        "#,
+        );
     }
 
     /// max builtin
     #[test]
     fn test_builtin_max() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn larger(a: Int, b: Int) -> Int {
                 max(a, b)
             }
-        "#);
+        "#,
+        );
     }
 
     /// abs builtin
     #[test]
     fn test_builtin_abs() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn absolute(x: Int) -> Int {
                 abs(x)
             }
-        "#);
+        "#,
+        );
     }
 
     /// Combined builtins
     #[test]
     fn test_builtin_combined() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn clamp(x: Int, lo: Int, hi: Int) -> Int {
                 max(lo, min(x, hi))
             }
-        "#);
+        "#,
+        );
     }
 
     /// print/println builtins
     #[test]
     fn test_builtin_print() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn output() {
                 print("hello");
                 println(" world");
                 println();
             }
-        "#);
+        "#,
+        );
     }
 
     /// assert builtin
     #[test]
     fn test_builtin_assert() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn check_positive(x: Int) {
                 assert(x > 0);
             }
-        "#);
+        "#,
+        );
     }
 
     /// unreachable builtin
     #[test]
     fn test_builtin_unreachable() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn always_some(x: Int) -> Int {
                 if x >= 0 { x }
                 else { unreachable() }
             }
-        "#);
+        "#,
+        );
     }
 }
 
@@ -2454,51 +2694,61 @@ mod array_repeat_tests {
     /// Simple array repeat
     #[test]
     fn test_array_repeat_simple() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn zeros(n: Int) -> List<Int> {
                 [0; n]
             }
-        "#);
+        "#,
+        );
     }
 
     /// Array repeat with expression
     #[test]
     fn test_array_repeat_expr() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn fill(value: Int, count: Int) -> List<Int> {
                 [value * 2; count + 1]
             }
-        "#);
+        "#,
+        );
     }
 
     /// Array repeat vs list literal
     #[test]
     fn test_array_list_vs_repeat() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn both_forms() {
                 let list_form = [1, 2, 3, 4, 5];
                 let repeat_form = [0; 5];
             }
-        "#);
+        "#,
+        );
     }
 
     /// Array repeat in function return
     #[test]
     fn test_array_repeat_return() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn make_buffer(size: Int) -> List<Int> {
                 [0; size]
             }
-        "#);
+        "#,
+        );
     }
 
     /// Nested array repeat
     #[test]
     fn test_array_repeat_nested() {
-        assert_parses(r#"
+        assert_parses(
+            r#"
             fn matrix(rows: Int, cols: Int) {
                 let m = [[0; cols]; rows];
             }
-        "#);
+        "#,
+        );
     }
 }

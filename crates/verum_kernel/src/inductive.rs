@@ -134,14 +134,24 @@ impl PathCtorSig {
     /// constructor. The most common case; `dim = 1`. For higher
     /// cells, use [`Self::n_cell`] with the explicit dimension.
     pub fn one_cell(name: Text, lhs: CoreTerm, rhs: CoreTerm) -> Self {
-        Self { name, dim: 1, lhs, rhs }
+        Self {
+            name,
+            dim: 1,
+            lhs,
+            rhs,
+        }
     }
 
     /// construct an n-cell path constructor
     /// at the given dimension. `dim ≥ 1`; the kernel registry
     /// rejects `dim = 0` at registration time.
     pub fn n_cell(name: Text, dim: u32, lhs: CoreTerm, rhs: CoreTerm) -> Self {
-        Self { name, dim, lhs, rhs }
+        Self {
+            name,
+            dim,
+            lhs,
+            rhs,
+        }
     }
 }
 
@@ -190,11 +200,7 @@ impl RegisteredInductive {
     /// path; HoTT-level declarations should call
     /// [`Self::with_universe`] to record `Concrete(2)` (univalent
     /// universes containing `Glue`-typed terms) or higher.
-    pub fn new(
-        name: Text,
-        params: List<Text>,
-        constructors: List<ConstructorSig>,
-    ) -> Self {
+    pub fn new(name: Text, params: List<Text>, constructors: List<ConstructorSig>) -> Self {
         Self {
             name,
             params,
@@ -234,7 +240,9 @@ pub struct InductiveRegistry {
 impl InductiveRegistry {
     /// Fresh empty registry.
     pub fn new() -> Self {
-        Self { entries: List::new() }
+        Self {
+            entries: List::new(),
+        }
     }
 
     /// Register a new inductive declaration. The kernel runs
@@ -243,10 +251,7 @@ impl InductiveRegistry {
     /// [`KernelError::PositivityViolation`] and the registration is
     /// rejected. Duplicate names surface as
     /// [`KernelError::DuplicateInductive`].
-    pub fn register(
-        &mut self,
-        decl: RegisteredInductive,
-    ) -> Result<(), KernelError> {
+    pub fn register(&mut self, decl: RegisteredInductive) -> Result<(), KernelError> {
         if self.entries.iter().any(|e| e.name == decl.name) {
             return Err(KernelError::DuplicateInductive(decl.name));
         }
@@ -295,7 +300,10 @@ impl InductiveRegistry {
 
     /// Look up an inductive by name.
     pub fn get(&self, name: &str) -> Maybe<&RegisteredInductive> {
-        self.entries.iter().find(|&e| e.name.as_str() == name).map(|v| v as _)
+        self.entries
+            .iter()
+            .find(|&e| e.name.as_str() == name)
+            .map(|v| v as _)
     }
 
     /// Enumerate every registered inductive.
@@ -318,10 +326,7 @@ impl InductiveRegistry {
     /// `Elim(motive, [c0, c1, ..., cn]) (App-chain(C, args))`
     /// where C is the i-th point ctor of inductive T reduces to
     /// `App-chain(c_i, args, recursor-calls(args))`.
-    pub fn lookup_point_ctor(
-        &self,
-        ctor_name: &str,
-    ) -> Option<(&RegisteredInductive, usize)> {
+    pub fn lookup_point_ctor(&self, ctor_name: &str) -> Option<(&RegisteredInductive, usize)> {
         for ind in self.entries.iter() {
             for (idx, c) in ind.constructors.iter().enumerate() {
                 if c.name.as_str() == ctor_name {
@@ -346,10 +351,7 @@ impl InductiveRegistry {
     /// `cases[N + j]` (the user-supplied path-case branch already
     /// shaped as PathOver/PathTy of the motive at the path's
     /// endpoints per [`eliminator_type`]).
-    pub fn lookup_path_ctor(
-        &self,
-        ctor_name: &str,
-    ) -> Option<(&RegisteredInductive, usize)> {
+    pub fn lookup_path_ctor(&self, ctor_name: &str) -> Option<(&RegisteredInductive, usize)> {
         for ind in self.entries.iter() {
             for (idx, c) in ind.path_constructors.iter().enumerate() {
                 if c.name.as_str() == ctor_name {
@@ -430,21 +432,19 @@ fn name_appears_in(target: &str, ty: &CoreTerm) -> bool {
             }
             false
         }
-        CoreTerm::Pi { domain, codomain, .. } => {
-            name_appears_in(target, domain) || name_appears_in(target, codomain)
-        }
+        CoreTerm::Pi {
+            domain, codomain, ..
+        } => name_appears_in(target, domain) || name_appears_in(target, codomain),
         CoreTerm::Sigma { fst_ty, snd_ty, .. } => {
             name_appears_in(target, fst_ty) || name_appears_in(target, snd_ty)
         }
-        CoreTerm::App(f, a) => {
-            name_appears_in(target, f) || name_appears_in(target, a)
-        }
+        CoreTerm::App(f, a) => name_appears_in(target, f) || name_appears_in(target, a),
         CoreTerm::Lam { domain, body, .. } => {
             name_appears_in(target, domain) || name_appears_in(target, body)
         }
-        CoreTerm::Refine { base, predicate, .. } => {
-            name_appears_in(target, base) || name_appears_in(target, predicate)
-        }
+        CoreTerm::Refine {
+            base, predicate, ..
+        } => name_appears_in(target, base) || name_appears_in(target, predicate),
         CoreTerm::PathTy { carrier, .. } => name_appears_in(target, carrier),
         // Atoms and SMT certificates carry no nested types.
         _ => false,
@@ -473,24 +473,22 @@ pub fn check_strict_positivity(
     ctx: &PositivityCtx,
 ) -> Result<(), KernelError> {
     match ty {
-        CoreTerm::Pi { domain, codomain, .. } => {
+        CoreTerm::Pi {
+            domain, codomain, ..
+        } => {
             // Negative position: target must not appear here.
             if name_appears_in(target, domain) {
                 return Err(KernelError::PositivityViolation {
                     type_name: Text::from(target),
                     constructor: Text::from(ctx.constructor),
-                    position: Text::from(format!(
-                        "{} → left of an arrow (negative position)",
-                        ctx.breadcrumb,
-                    ).as_str()),
+                    position: Text::from(
+                        format!("{} → left of an arrow (negative position)", ctx.breadcrumb,)
+                            .as_str(),
+                    ),
                 });
             }
             // Codomain: must be strictly positive in target.
-            check_strict_positivity(
-                target,
-                codomain,
-                &ctx.nested("codomain of Π"),
-            )
+            check_strict_positivity(target, codomain, &ctx.nested("codomain of Π"))
         }
 
         CoreTerm::Inductive { path, args } => {
@@ -506,11 +504,7 @@ pub fn check_strict_positivity(
             // negative position via its own constructor signature.
             let _ = path; // self vs other distinction is handled below
             for (i, a) in args.iter().enumerate() {
-                check_strict_positivity(
-                    target,
-                    a,
-                    &ctx.nested(&format!("Inductive arg #{}", i)),
-                )?;
+                check_strict_positivity(target, a, &ctx.nested(&format!("Inductive arg #{}", i)))?;
             }
             Ok(())
         }
@@ -525,7 +519,9 @@ pub fn check_strict_positivity(
             check_strict_positivity(target, a, &ctx.nested("App.arg"))
         }
 
-        CoreTerm::Refine { base, predicate, .. } => {
+        CoreTerm::Refine {
+            base, predicate, ..
+        } => {
             check_strict_positivity(target, base, &ctx.nested("Refine.base"))?;
             check_strict_positivity(target, predicate, &ctx.nested("Refine.predicate"))
         }
@@ -536,7 +532,7 @@ pub fn check_strict_positivity(
 
         CoreTerm::Lam { domain, body, .. } => {
             check_strict_positivity(target, domain, &ctx.nested("Lam.domain"))?;
-            check_strict_positivity(target, body,   &ctx.nested("Lam.body"))
+            check_strict_positivity(target, body, &ctx.nested("Lam.body"))
         }
 
         // Universes / Var / Axiom / SmtProof / Elim — atoms with no
@@ -569,14 +565,24 @@ pub fn check_strict_positivity(
 /// not part of the public kernel API.
 pub(crate) fn is_uip_shape(ty: &CoreTerm) -> bool {
     // Π A : Type(_) . (rest with `A` in scope)
-    let CoreTerm::Pi { binder: b_a, domain: dom_a, codomain: after_a } = ty else {
+    let CoreTerm::Pi {
+        binder: b_a,
+        domain: dom_a,
+        codomain: after_a,
+    } = ty
+    else {
         return false;
     };
     if !matches!(dom_a.as_ref(), CoreTerm::Universe(_)) {
         return false;
     }
     // Π a : A . ...
-    let CoreTerm::Pi { binder: b_a2, domain: dom_a2, codomain: after_a2 } = after_a.as_ref() else {
+    let CoreTerm::Pi {
+        binder: b_a2,
+        domain: dom_a2,
+        codomain: after_a2,
+    } = after_a.as_ref()
+    else {
         return false;
     };
     if !is_var_named(dom_a2, b_a.as_str()) {
@@ -584,7 +590,12 @@ pub(crate) fn is_uip_shape(ty: &CoreTerm) -> bool {
     }
     let _ = b_a2; // bound as `a`
     // Π b : A . ...
-    let CoreTerm::Pi { binder: b_b, domain: dom_b, codomain: after_b } = after_a2.as_ref() else {
+    let CoreTerm::Pi {
+        binder: b_b,
+        domain: dom_b,
+        codomain: after_b,
+    } = after_a2.as_ref()
+    else {
         return false;
     };
     if !is_var_named(dom_b, b_a.as_str()) {
@@ -592,21 +603,35 @@ pub(crate) fn is_uip_shape(ty: &CoreTerm) -> bool {
     }
     let _ = b_b; // bound as `b`
     // Π p : PathTy(A, a, b) . ...
-    let CoreTerm::Pi { binder: _, domain: dom_p, codomain: after_p } = after_b.as_ref() else {
+    let CoreTerm::Pi {
+        binder: _,
+        domain: dom_p,
+        codomain: after_p,
+    } = after_b.as_ref()
+    else {
         return false;
     };
     if !is_path_over(dom_p, b_a.as_str()) {
         return false;
     }
     // Π q : PathTy(A, a, b) . goal
-    let CoreTerm::Pi { binder: _, domain: dom_q, codomain: goal } = after_p.as_ref() else {
+    let CoreTerm::Pi {
+        binder: _,
+        domain: dom_q,
+        codomain: goal,
+    } = after_p.as_ref()
+    else {
         return false;
     };
     if !is_path_over(dom_q, b_a.as_str()) {
         return false;
     }
     // goal: PathTy(PathTy(A, a, b), p, q)
-    let CoreTerm::PathTy { carrier: outer_carrier, .. } = goal.as_ref() else {
+    let CoreTerm::PathTy {
+        carrier: outer_carrier,
+        ..
+    } = goal.as_ref()
+    else {
         return false;
     };
     is_path_over(outer_carrier, b_a.as_str())
@@ -702,8 +727,7 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
 
     // Innermost: Π (x : T) . motive(x).
     let scrut_var = CoreTerm::Var(Text::from("x"));
-    let scrut_image =
-        CoreTerm::App(Heap::new(motive_var.clone()), Heap::new(scrut_var));
+    let scrut_image = CoreTerm::App(Heap::new(motive_var.clone()), Heap::new(scrut_var));
     let mut acc = CoreTerm::Pi {
         binder: Text::from("x"),
         domain: Heap::new(parent_ind.clone()),
@@ -720,8 +744,7 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
     // (a value of `motive(point)` per the dependent eliminator's
     // type) — which is what an actual user-supplied recursor case
     // body has to typecheck against.
-    let point_ctor_names: Vec<&str> =
-        decl.constructors.iter().map(|c| c.name.as_str()).collect();
+    let point_ctor_names: Vec<&str> = decl.constructors.iter().map(|c| c.name.as_str()).collect();
 
     for path in iter_rev(&decl.path_constructors) {
         let lhs_image = recursor_image_at_endpoint(&path.lhs, &point_ctor_names);
@@ -793,24 +816,15 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
 ///
 
 /// Nullary ctors collapse to `motive(C)` (no Π binders).
-pub fn point_constructor_case_type(
-    motive_var: &CoreTerm,
-    ctor: &ConstructorSig,
-) -> CoreTerm {
+pub fn point_constructor_case_type(motive_var: &CoreTerm, ctor: &ConstructorSig) -> CoreTerm {
     // Build the constructor application: App_chain(Var(C), a₁, …, aₙ).
     let mut ctor_app = CoreTerm::Var(ctor.name.clone());
     for (i, _arg_ty) in ctor.arg_types.iter().enumerate() {
         let arg_name = Text::from(format!("a{}", i).as_str());
-        ctor_app = CoreTerm::App(
-            Heap::new(ctor_app),
-            Heap::new(CoreTerm::Var(arg_name)),
-        );
+        ctor_app = CoreTerm::App(Heap::new(ctor_app), Heap::new(CoreTerm::Var(arg_name)));
     }
     // Goal: motive(C(a₁,…,aₙ)).
-    let mut acc = CoreTerm::App(
-        Heap::new(motive_var.clone()),
-        Heap::new(ctor_app),
-    );
+    let mut acc = CoreTerm::App(Heap::new(motive_var.clone()), Heap::new(ctor_app));
     // Wrap in Π binders, right-to-left.
     let arg_count = ctor.arg_types.iter().count();
     for (rev_i, arg_ty) in ctor.arg_types.iter().rev().enumerate() {
@@ -863,16 +877,11 @@ pub fn point_constructor_case_type(
 ///  express nested path endpoints; the kernel surface is ready
 ///  (recursive recursor-image is shape-correct for any depth) but
 ///  the parser doesn't admit the surface yet.
-fn recursor_image_at_endpoint(
-    endpoint: &CoreTerm,
-    point_ctor_names: &[&str],
-) -> CoreTerm {
+fn recursor_image_at_endpoint(endpoint: &CoreTerm, point_ctor_names: &[&str]) -> CoreTerm {
     match endpoint {
         CoreTerm::Var(name) => {
             if point_ctor_names.iter().any(|c| *c == name.as_str()) {
-                CoreTerm::Var(Text::from(
-                    format!("case_{}", name.as_str()).as_str(),
-                ))
+                CoreTerm::Var(Text::from(format!("case_{}", name.as_str()).as_str()))
             } else {
                 endpoint.clone()
             }
@@ -922,10 +931,7 @@ fn build_n_cell_branch_type(
 ) -> CoreTerm {
     // Base dim=1 branch — same logic as before.
     let dim1_branch = if crate::support::structural_eq(path_lhs, path_rhs) {
-        let carrier = CoreTerm::App(
-            Heap::new(motive_var.clone()),
-            Heap::new(path_lhs.clone()),
-        );
+        let carrier = CoreTerm::App(Heap::new(motive_var.clone()), Heap::new(path_lhs.clone()));
         CoreTerm::PathTy {
             carrier: Heap::new(carrier),
             lhs: Heap::new(lhs_image.clone()),
@@ -967,10 +973,9 @@ fn build_n_cell_branch_type(
             motive: Heap::new(motive_var.clone()),
             path: Heap::new(current_path.clone()),
             lhs: Heap::new(acc),
-            rhs: Heap::new(CoreTerm::Var(Text::from(format!(
-                "case_n_cell_dim_{}_rhs_image",
-                _level + 1
-            ).as_str()))),
+            rhs: Heap::new(CoreTerm::Var(Text::from(
+                format!("case_n_cell_dim_{}_rhs_image", _level + 1).as_str(),
+            ))),
         };
     }
     acc

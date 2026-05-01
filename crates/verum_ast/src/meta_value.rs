@@ -55,11 +55,11 @@ use std::fmt;
 
 use verum_common::{ConstValue, Heap, List, Maybe, OrderedMap, OrderedSet, Text};
 
+use crate::Item;
 use crate::expr::Expr;
 use crate::literal::{Literal, LiteralKind};
 use crate::pattern::Pattern;
 use crate::ty::Type;
-use crate::Item;
 
 // ============================================================================
 // MetaValue Enum
@@ -83,7 +83,6 @@ pub enum MetaValue {
     // ─────────────────────────────────────────────────────────────────────
     // Primitive variants (matching ConstValue)
     // ─────────────────────────────────────────────────────────────────────
-
     /// Unit/void value
     Unit,
 
@@ -126,7 +125,6 @@ pub enum MetaValue {
     // ─────────────────────────────────────────────────────────────────────
     // AST variants (meta-programming only)
     // ─────────────────────────────────────────────────────────────────────
-
     /// AST expression for code generation
     Expr(Expr),
 

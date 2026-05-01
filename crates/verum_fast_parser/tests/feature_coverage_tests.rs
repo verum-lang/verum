@@ -23,8 +23,8 @@
 //! - Module system: mount, module declarations
 
 use verum_ast::{FileId, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper to parse a complete module.
 fn parse_module(source: &str) -> Result<Module, String> {

@@ -18,10 +18,10 @@
 //! only want to fail on hard breakage.
 
 use crate::error::{CliError, Result};
-use crate::script::cache::ScriptCache;
-use crate::script::permissions::{Permission, PermissionKind};
 use crate::registry::content_store::ContentStore;
 use crate::registry::lockfile_v3::{LockfileV3, SCHEMA_VERSION};
+use crate::script::cache::ScriptCache;
+use crate::script::permissions::{Permission, PermissionKind};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -105,8 +105,12 @@ fn max_status(a: Status, b: Status) -> Status {
 
 fn emit_human(results: &[CheckResult], summary_status: Status) -> Result<()> {
     let mut out = io::stdout().lock();
-    writeln!(out, "verum doctor — compiler v{}", env!("CARGO_PKG_VERSION"))
-        .map_err(CliError::Io)?;
+    writeln!(
+        out,
+        "verum doctor — compiler v{}",
+        env!("CARGO_PKG_VERSION")
+    )
+    .map_err(CliError::Io)?;
     writeln!(out).map_err(CliError::Io)?;
     let mut name_w = 0usize;
     for r in results {
@@ -194,7 +198,9 @@ fn run_all_checks() -> Vec<CheckResult> {
         results.push(check_content_store(home));
     }
     results.push(check_permission_grammar());
-    results.push(check_project_lockfile_if_present(std::env::current_dir().ok().as_deref()));
+    results.push(check_project_lockfile_if_present(
+        std::env::current_dir().ok().as_deref(),
+    ));
     results
 }
 
@@ -323,9 +329,7 @@ fn check_content_store(home: &Path) -> CheckResult {
                             return CheckResult {
                                 id: "content_store",
                                 status: Status::Fail,
-                                summary: format!(
-                                    "integrity failure on sample entry: {e}"
-                                ),
+                                summary: format!("integrity failure on sample entry: {e}"),
                                 hint: Some(
                                     "the entry has been evicted; rerun \
                                      `verum install` to repopulate"

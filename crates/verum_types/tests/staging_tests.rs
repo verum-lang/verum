@@ -140,9 +140,11 @@ fn test_stage_0_same_stage_call() {
         .unwrap();
     checker.enter_function(&Text::from("runtime_a"), 0, test_span());
 
-    assert!(checker
-        .check_call(&Text::from("runtime_b"), 0, test_span())
-        .is_ok());
+    assert!(
+        checker
+            .check_call(&Text::from("runtime_b"), 0, test_span())
+            .is_ok()
+    );
 }
 
 #[test]
@@ -242,9 +244,11 @@ fn test_runtime_can_reference_runtime_value() {
         .unwrap();
     checker.enter_function(&Text::from("runtime_fn"), 0, test_span());
 
-    assert!(checker
-        .check_variable_reference(&Text::from("runtime_var"), 0, test_span())
-        .is_ok());
+    assert!(
+        checker
+            .check_variable_reference(&Text::from("runtime_var"), 0, test_span())
+            .is_ok()
+    );
 }
 
 #[test]
@@ -256,9 +260,11 @@ fn test_meta_can_reference_same_stage_value() {
         .unwrap();
     checker.enter_function(&Text::from("meta_fn"), 1, test_span());
 
-    assert!(checker
-        .check_variable_reference(&Text::from("meta_var"), 1, test_span())
-        .is_ok());
+    assert!(
+        checker
+            .check_variable_reference(&Text::from("meta_var"), 1, test_span())
+            .is_ok()
+    );
 }
 
 #[test]
@@ -270,9 +276,11 @@ fn test_meta_can_reference_lower_stage_value() {
         .unwrap();
     checker.enter_function(&Text::from("meta_fn"), 1, test_span());
 
-    assert!(checker
-        .check_variable_reference(&Text::from("runtime_var"), 0, test_span())
-        .is_ok());
+    assert!(
+        checker
+            .check_variable_reference(&Text::from("runtime_var"), 0, test_span())
+            .is_ok()
+    );
 }
 
 #[test]
@@ -302,9 +310,11 @@ fn test_quote_type_at_correct_stage() {
     checker.enter_function(&Text::from("meta_fn"), 1, test_span());
 
     // Stage 0 type used in stage 0 generated code -- valid
-    assert!(checker
-        .check_quote_type(0, &Text::from("Int"), 0, test_span())
-        .is_ok());
+    assert!(
+        checker
+            .check_quote_type(0, &Text::from("Int"), 0, test_span())
+            .is_ok()
+    );
 }
 
 #[test]
@@ -329,9 +339,11 @@ fn test_quote_type_lower_stage_ok() {
         .unwrap();
     checker.enter_function(&Text::from("meta2_fn"), 2, test_span());
 
-    assert!(checker
-        .check_quote_type(1, &Text::from("Int"), 0, test_span())
-        .is_ok());
+    assert!(
+        checker
+            .check_quote_type(1, &Text::from("Int"), 0, test_span())
+            .is_ok()
+    );
 }
 
 // =============================================================================
@@ -408,9 +420,11 @@ fn test_stage_overflow_custom_max() {
     let mut checker = StageChecker::new(config);
 
     // Stage 5 is OK
-    assert!(checker
-        .register_function(Text::from("stage5"), 5, test_span())
-        .is_ok());
+    assert!(
+        checker
+            .register_function(Text::from("stage5"), 5, test_span())
+            .is_ok()
+    );
 
     // Stage 6 is overflow
     let result = checker.register_function(Text::from("stage6"), 6, test_span());
@@ -420,15 +434,21 @@ fn test_stage_overflow_custom_max() {
 #[test]
 fn test_stage_0_and_1_always_valid() {
     let mut checker = StageChecker::with_defaults();
-    assert!(checker
-        .register_function(Text::from("rt"), 0, test_span())
-        .is_ok());
-    assert!(checker
-        .register_function(Text::from("meta"), 1, test_span())
-        .is_ok());
-    assert!(checker
-        .register_function(Text::from("meta2"), 2, test_span())
-        .is_ok());
+    assert!(
+        checker
+            .register_function(Text::from("rt"), 0, test_span())
+            .is_ok()
+    );
+    assert!(
+        checker
+            .register_function(Text::from("meta"), 1, test_span())
+            .is_ok()
+    );
+    assert!(
+        checker
+            .register_function(Text::from("meta2"), 2, test_span())
+            .is_ok()
+    );
 }
 
 // =============================================================================
@@ -556,9 +576,11 @@ fn test_stage_0_functions_no_unused_warning() {
         .unwrap();
 
     let warnings = checker.collect_warnings();
-    assert!(!warnings
-        .iter()
-        .any(|w| matches!(w, StageWarning::UnusedStage { .. })));
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| matches!(w, StageWarning::UnusedStage { .. }))
+    );
 }
 
 #[test]
@@ -603,9 +625,11 @@ fn test_no_downgrade_warning_when_correct() {
     checker.exit_function();
 
     let warnings = checker.collect_warnings();
-    assert!(!warnings
-        .iter()
-        .any(|w| matches!(w, StageWarning::StageDowngrade { .. })));
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| matches!(w, StageWarning::StageDowngrade { .. }))
+    );
 }
 
 // =============================================================================
@@ -685,9 +709,11 @@ fn test_non_strict_mode_allows_cross_stage() {
     checker.enter_function(&Text::from("meta2"), 2, test_span());
 
     // In non-strict mode, cross-stage calls are allowed (but recorded)
-    assert!(checker
-        .check_call(&Text::from("meta1"), 1, test_span())
-        .is_ok());
+    assert!(
+        checker
+            .check_call(&Text::from("meta1"), 1, test_span())
+            .is_ok()
+    );
 }
 
 #[test]
@@ -702,9 +728,11 @@ fn test_disable_unused_warnings() {
         .unwrap();
 
     let warnings = checker.collect_warnings();
-    assert!(!warnings
-        .iter()
-        .any(|w| matches!(w, StageWarning::UnusedStage { .. })));
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| matches!(w, StageWarning::UnusedStage { .. }))
+    );
 }
 
 #[test]
@@ -726,9 +754,11 @@ fn test_disable_downgrade_warnings() {
     checker.exit_function();
 
     let warnings = checker.collect_warnings();
-    assert!(!warnings
-        .iter()
-        .any(|w| matches!(w, StageWarning::StageDowngrade { .. })));
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| matches!(w, StageWarning::StageDowngrade { .. }))
+    );
 }
 
 // =============================================================================

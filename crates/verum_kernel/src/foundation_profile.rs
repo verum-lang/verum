@@ -349,9 +349,7 @@ impl FoundationProfile {
             // dependent type theory; mathlib4 lives in Lean 4).
             // Foundation-classification operates at the family
             // granularity, so they all map to Cic.
-            "coq_stdlib" | "lean4_stdlib" | "mathlib4" => {
-                Some(FoundationProfile::Cic)
-            }
+            "coq_stdlib" | "lean4_stdlib" | "mathlib4" => Some(FoundationProfile::Cic),
             // Pure ZFC (elementary mathematics, no Grothendieck universes).
             "arnold_catastrophe"
             | "bounded_arithmetic_i_delta_0"
@@ -575,11 +573,7 @@ fn conflict_reason(a: FoundationProfile, b: FoundationProfile) -> String {
     } else if b.assumes_uip() && a.assumes_univalence() {
         (b, a)
     } else {
-        return format!(
-            "incompatible foundations: {} and {}",
-            a.tag(),
-            b.tag(),
-        );
+        return format!("incompatible foundations: {} and {}", a.tag(), b.tag(),);
     };
     format!(
         "{} assumes UIP; {} assumes univalence — UIP and univalence are \
@@ -639,7 +633,10 @@ mod tests {
         assert!(FoundationProfile::Mltt.is_constructive());
         assert!(FoundationProfile::Cubical.is_constructive());
         assert!(FoundationProfile::PredicativeMltt.is_constructive());
-        assert!(!FoundationProfile::Hott.is_constructive(), "HoTT axiomatic univalence breaks constructivity");
+        assert!(
+            !FoundationProfile::Hott.is_constructive(),
+            "HoTT axiomatic univalence breaks constructivity"
+        );
         assert!(!FoundationProfile::Zfc.is_constructive());
     }
 
@@ -679,15 +676,28 @@ mod tests {
     #[test]
     fn required_inaccessibles_count_matches_variant() {
         assert_eq!(FoundationProfile::Zfc.required_inaccessibles(), 0);
-        assert_eq!(FoundationProfile::ZfcOneInaccessible.required_inaccessibles(), 1);
-        assert_eq!(FoundationProfile::ZfcTwoInaccessibles.required_inaccessibles(), 2);
-        assert_eq!(FoundationProfile::ZfcThreeInaccessibles.required_inaccessibles(), 3);
+        assert_eq!(
+            FoundationProfile::ZfcOneInaccessible.required_inaccessibles(),
+            1
+        );
+        assert_eq!(
+            FoundationProfile::ZfcTwoInaccessibles.required_inaccessibles(),
+            2
+        );
+        assert_eq!(
+            FoundationProfile::ZfcThreeInaccessibles.required_inaccessibles(),
+            3
+        );
         assert_eq!(FoundationProfile::Hott.required_inaccessibles(), 0);
     }
 
     #[test]
     fn required_zfc_inaccessibles_returns_correct_levels() {
-        assert!(FoundationProfile::Zfc.required_zfc_inaccessibles().is_empty());
+        assert!(
+            FoundationProfile::Zfc
+                .required_zfc_inaccessibles()
+                .is_empty()
+        );
         assert_eq!(
             FoundationProfile::ZfcOneInaccessible.required_zfc_inaccessibles(),
             vec![InaccessibleLevel::Kappa1],
@@ -703,7 +713,11 @@ mod tests {
         for profile in FoundationProfile::all() {
             let json = serde_json::to_string(&profile).unwrap();
             let restored: FoundationProfile = serde_json::from_str(&json).unwrap();
-            assert_eq!(restored, profile, "serde round-trip failed for {:?}", profile);
+            assert_eq!(
+                restored, profile,
+                "serde round-trip failed for {:?}",
+                profile
+            );
         }
     }
 
@@ -788,7 +802,10 @@ mod tests {
     fn from_framework_tag_unknown_returns_none() {
         assert!(FoundationProfile::from_framework_tag("").is_none());
         assert!(FoundationProfile::from_framework_tag("some_garbage_tag").is_none());
-        assert!(FoundationProfile::from_framework_tag("ZFC").is_none(), "case-sensitive");
+        assert!(
+            FoundationProfile::from_framework_tag("ZFC").is_none(),
+            "case-sensitive"
+        );
     }
 
     #[test]
@@ -929,10 +946,7 @@ mod tests {
         let dist = FoundationDistribution::from_citations(&citations);
         assert_eq!(dist.resolved_count(), 3);
         assert_eq!(dist.unresolved_count(), 1);
-        assert_eq!(
-            dist.by_foundation[&FoundationProfile::Hott],
-            1,
-        );
+        assert_eq!(dist.by_foundation[&FoundationProfile::Hott], 1,);
         assert_eq!(
             dist.by_foundation[&FoundationProfile::ZfcTwoInaccessibles],
             1,
@@ -975,8 +989,7 @@ mod tests {
         // One of left/right is MlttUip, the other is Hott.
         assert!(
             (c.left == FoundationProfile::MlttUip && c.right == FoundationProfile::Hott)
-                || (c.left == FoundationProfile::Hott
-                    && c.right == FoundationProfile::MlttUip),
+                || (c.left == FoundationProfile::Hott && c.right == FoundationProfile::MlttUip),
         );
     }
 

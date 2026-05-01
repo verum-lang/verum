@@ -260,7 +260,8 @@ impl KernelLaunchParams {
     /// Total number of threads across all blocks.
     pub fn total_threads(&self) -> u64 {
         let blocks = self.grid_dim[0] as u64 * self.grid_dim[1] as u64 * self.grid_dim[2] as u64;
-        let threads = self.block_dim[0] as u64 * self.block_dim[1] as u64 * self.block_dim[2] as u64;
+        let threads =
+            self.block_dim[0] as u64 * self.block_dim[1] as u64 * self.block_dim[2] as u64;
         blocks * threads
     }
 
@@ -469,13 +470,7 @@ mod tests {
     #[test]
     fn test_gpu_thread_context() {
         let smem = SharedMemoryBlock::new(256);
-        let ctx = GpuThreadContext::new(
-            [5, 2, 0],
-            [1, 3, 0],
-            [8, 4, 1],
-            [4, 4, 1],
-            &smem,
-        );
+        let ctx = GpuThreadContext::new([5, 2, 0], [1, 3, 0], [8, 4, 1], [4, 4, 1], &smem);
 
         assert_eq!(ctx.thread_id, [5, 2, 0]);
         assert_eq!(ctx.block_id, [1, 3, 0]);

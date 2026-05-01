@@ -1,13 +1,13 @@
 //! Core tensor opcode handlers for VBC interpreter dispatch.
 
-use crate::value::Value;
 use super::super::super::error::InterpreterResult;
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::value::Value;
 
-use crate::instruction::{TensorBinaryOp, TensorUnaryOp, TensorReduceOp};
-use super::super::super::tensor::{TensorHandle, DType};
+use super::super::super::tensor::{DType, TensorHandle};
+use crate::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
 
 // ============================================================================
 // Main Tensor Opcode Handlers (0xF0-0xF7)
@@ -18,7 +18,9 @@ use super::super::super::tensor::{TensorHandle, DType};
 ///
 
 /// Format: `dst:reg, shape_len:u8, shape..., dtype:u8`
-pub(in super::super) fn handle_tensor_new(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_new(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let shape_len = read_u8(state)? as usize;
     let mut shape = Vec::with_capacity(shape_len);
@@ -42,7 +44,9 @@ pub(in super::super) fn handle_tensor_new(state: &mut InterpreterState) -> Inter
 ///
 
 /// Format: `op:u8, dst:reg, a:reg, b:reg`
-pub(in super::super) fn handle_tensor_binop(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_binop(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let op_byte = read_u8(state)?;
     let dst = read_reg(state)?;
     let a_reg = read_reg(state)?;
@@ -76,7 +80,9 @@ pub(in super::super) fn handle_tensor_binop(state: &mut InterpreterState) -> Int
 ///
 
 /// Format: `op:u8, dst:reg, src:reg`
-pub(in super::super) fn handle_tensor_unop(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_unop(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let op_byte = read_u8(state)?;
     let dst = read_reg(state)?;
     let src_reg = read_reg(state)?;
@@ -105,7 +111,9 @@ pub(in super::super) fn handle_tensor_unop(state: &mut InterpreterState) -> Inte
 ///
 
 /// Format: `dst:reg, a:reg, b:reg`
-pub(in super::super) fn handle_tensor_matmul(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_matmul(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a_reg = read_reg(state)?;
     let b_reg = read_reg(state)?;
@@ -137,7 +145,9 @@ pub(in super::super) fn handle_tensor_matmul(state: &mut InterpreterState) -> In
 ///
 
 /// Format: `op:u8, dst:reg, src:reg, axes_len:u8, axes..., keepdim:bool`
-pub(in super::super) fn handle_tensor_reduce(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_reduce(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let op_byte = read_u8(state)?;
     let dst = read_reg(state)?;
     let src_reg = read_reg(state)?;
@@ -175,7 +185,9 @@ pub(in super::super) fn handle_tensor_reduce(state: &mut InterpreterState) -> In
 ///
 
 /// Format: `dst:reg, src:reg, shape_len:u8, shape...`
-pub(in super::super) fn handle_tensor_reshape(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_reshape(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src_reg = read_reg(state)?;
     let shape_len = read_u8(state)? as usize;
@@ -207,7 +219,9 @@ pub(in super::super) fn handle_tensor_reshape(state: &mut InterpreterState) -> I
 ///
 
 /// Format: `dst:reg, src:reg`
-pub(in super::super) fn handle_tensor_transpose(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_transpose(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src_reg = read_reg(state)?;
 
@@ -234,7 +248,9 @@ pub(in super::super) fn handle_tensor_transpose(state: &mut InterpreterState) ->
 ///
 
 /// Format: `dst:reg, src:reg, ranges_len:u8, (start, end)...`
-pub(in super::super) fn handle_tensor_slice(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_slice(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src_reg = read_reg(state)?;
     let ranges_len = read_u8(state)? as usize;
@@ -270,7 +286,9 @@ pub(in super::super) fn handle_tensor_slice(state: &mut InterpreterState) -> Int
 ///
 
 /// Format: `dst:reg, value:reg, shape_len:varint, shape_regs..., dtype:u8`
-pub(in super::super) fn handle_tensor_full(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_full(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let value_reg = read_reg(state)?;
     let shape_len = read_varint(state)? as usize;
@@ -303,7 +321,9 @@ pub(in super::super) fn handle_tensor_full(state: &mut InterpreterState) -> Inte
 ///
 
 /// Format: `dst:reg, data:reg, shape_len:varint, shape_regs..., dtype:u8`
-pub(in super::super) fn handle_tensor_from_slice(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tensor_from_slice(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let data_reg = read_reg(state)?;
     let shape_len = read_varint(state)? as usize;

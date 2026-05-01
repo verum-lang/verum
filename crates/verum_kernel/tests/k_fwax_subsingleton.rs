@@ -18,8 +18,7 @@
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
-    AxiomRegistry, CoreTerm, FrameworkId, KernelError, SubsingletonRegime, UniverseLevel,
-    free_vars,
+    AxiomRegistry, CoreTerm, FrameworkId, KernelError, SubsingletonRegime, UniverseLevel, free_vars,
 };
 
 fn fw(name: &str) -> FrameworkId {
@@ -255,10 +254,7 @@ fn open_axiom_rejected_under_subsingleton_regime() {
                 free_vars_rendered.as_str(),
             );
         }
-        other => panic!(
-            "expected AxiomNotSubsingleton, got {:?}",
-            other,
-        ),
+        other => panic!("expected AxiomNotSubsingleton, got {:?}", other,),
     }
 }
 
@@ -272,11 +268,7 @@ fn open_axiom_admitted_under_uip_permitted_regime() {
         fw("test_corpus"),
         SubsingletonRegime::UipPermitted,
     );
-    assert!(
-        res.is_ok(),
-        "UIP regime admits open body: {:?}",
-        res,
-    );
+    assert!(res.is_ok(), "UIP regime admits open body: {:?}", res,);
 }
 
 #[test]
@@ -320,23 +312,18 @@ fn v8_1_register_legacy_unchecked_preserves_pre_v8_behaviour() {
         open_prop_ty(),
         fw("test_corpus"),
     );
-    assert!(res.is_ok(), "register_legacy_unchecked must admit pre-V8.1 shape");
+    assert!(
+        res.is_ok(),
+        "register_legacy_unchecked must admit pre-V8.1 shape"
+    );
 }
 
 #[test]
 fn duplicate_name_rejected_before_subsingleton_check() {
     let mut reg = AxiomRegistry::new();
-    reg.register_subsingleton(
-        Text::from("dup"),
-        closed_prop_ty(),
-        fw("test_corpus"),
-    )
-    .expect("first registration succeeds");
-    let res = reg.register_subsingleton(
-        Text::from("dup"),
-        closed_prop_ty(),
-        fw("test_corpus"),
-    );
+    reg.register_subsingleton(Text::from("dup"), closed_prop_ty(), fw("test_corpus"))
+        .expect("first registration succeeds");
+    let res = reg.register_subsingleton(Text::from("dup"), closed_prop_ty(), fw("test_corpus"));
     assert!(matches!(res, Err(KernelError::DuplicateAxiom(_))));
 }
 
@@ -408,18 +395,11 @@ fn uip_shape_rejected_under_all_regimes() {
 #[test]
 fn rejected_subsingleton_check_does_not_commit_entry() {
     let mut reg = AxiomRegistry::new();
-    let _ = reg.register_subsingleton(
-        Text::from("rejected"),
-        open_prop_ty(),
-        fw("test_corpus"),
-    );
+    let _ = reg.register_subsingleton(Text::from("rejected"), open_prop_ty(), fw("test_corpus"));
     assert!(reg.all().is_empty(), "rejected registration must not leak");
     // Re-register with closed body — must succeed.
-    let res = reg.register_subsingleton(
-        Text::from("rejected"),
-        closed_prop_ty(),
-        fw("test_corpus"),
-    );
+    let res =
+        reg.register_subsingleton(Text::from("rejected"), closed_prop_ty(), fw("test_corpus"));
     assert!(res.is_ok());
     assert_eq!(reg.all().len(), 1);
 }
@@ -433,8 +413,7 @@ fn closed_inductive_body_admitted_as_prop() {
     // Unit is at Universe(Concrete(0)) — admitted under the
     // pragmatic Prop check (Concrete(0) ≈ Prop set-theoretically).
     let mut reg = AxiomRegistry::new();
-    let res =
-        reg.register_subsingleton(Text::from("unit_witness"), unit_ty(), fw("test"));
+    let res = reg.register_subsingleton(Text::from("unit_witness"), unit_ty(), fw("test"));
     assert!(res.is_ok(), "Unit body must be admitted: {:?}", res);
 }
 
@@ -443,11 +422,7 @@ fn closed_pi_body_at_type_zero_admitted_as_prop() {
     // Π(_: Unit). Unit lives at Universe(Max(0, 0)) — pragmatic
     // Prop accepts (no component >= 1).
     let mut reg = AxiomRegistry::new();
-    let res = reg.register_subsingleton(
-        Text::from("pi_witness"),
-        closed_prop_ty(),
-        fw("test"),
-    );
+    let res = reg.register_subsingleton(Text::from("pi_witness"), closed_prop_ty(), fw("test"));
     assert!(res.is_ok(), "Pi at Type_0 must be admitted: {:?}", res);
 }
 
@@ -466,13 +441,12 @@ fn b220_non_type_body_rejected_as_not_prop() {
     use verum_kernel::CoreTerm;
     let mut reg = AxiomRegistry::new();
     let bogus_body = CoreTerm::Refl(verum_common::Heap::new(unit_ty()));
-    let res = reg.register_subsingleton(
-        Text::from("bogus_axiom"),
-        bogus_body,
-        fw("test"),
-    );
+    let res = reg.register_subsingleton(Text::from("bogus_axiom"), bogus_body, fw("test"));
     match res {
-        Err(KernelError::AxiomBodyNotProp { name, inferred_universe_shape }) => {
+        Err(KernelError::AxiomBodyNotProp {
+            name,
+            inferred_universe_shape,
+        }) => {
             assert_eq!(name.as_str(), "bogus_axiom");
             // Refl's type infers to PathTy → shape head "Path".
             assert!(
@@ -495,18 +469,14 @@ fn b220_closed_body_with_unbound_inductive_admitted_via_pragmatic_fallback() {
     // check. Documents the fallback behaviour: production code
     // that wants stricter checking should populate an
     // InductiveRegistry alongside the axiom registry.
-    use verum_kernel::CoreTerm;
     use verum_common::List;
+    use verum_kernel::CoreTerm;
     let mut reg = AxiomRegistry::new();
     let bool_ind = CoreTerm::Inductive {
         path: Text::from("Bool"),
         args: List::new(),
     };
-    let res = reg.register_subsingleton(
-        Text::from("bool_axiom"),
-        bool_ind,
-        fw("test"),
-    );
+    let res = reg.register_subsingleton(Text::from("bool_axiom"), bool_ind, fw("test"));
     assert!(
         res.is_ok(),
         "unregistered inductive admitted under pragmatic fallback: {:?}",
@@ -531,11 +501,7 @@ fn b220_uip_permitted_skips_prop_check() {
         fw("test"),
         SubsingletonRegime::UipPermitted,
     );
-    assert!(
-        res.is_ok(),
-        "UipPermitted skips Prop check: {:?}",
-        res,
-    );
+    assert!(res.is_ok(), "UipPermitted skips Prop check: {:?}", res,);
 }
 
 #[test]
@@ -561,17 +527,10 @@ fn b220_subsingleton_check_runs_before_prop_check() {
     // body-is-Prop. An open body fails subsingleton FIRST and
     // never reaches the Prop check.
     let mut reg = AxiomRegistry::new();
-    let res = reg.register_subsingleton(
-        Text::from("open_body"),
-        open_prop_ty(),
-        fw("test"),
-    );
+    let res = reg.register_subsingleton(Text::from("open_body"), open_prop_ty(), fw("test"));
     match res {
         Err(KernelError::AxiomNotSubsingleton { .. }) => {}
-        other => panic!(
-            "expected subsingleton failure first, got {:?}",
-            other,
-        ),
+        other => panic!("expected subsingleton failure first, got {:?}", other,),
     }
 }
 
@@ -594,7 +553,9 @@ fn diagnostic_renders_free_vars_sorted_for_determinism() {
         .register_subsingleton(Text::from("multi_open"), t, fw("test_corpus"))
         .expect_err("must reject");
     match err {
-        KernelError::AxiomNotSubsingleton { free_vars_rendered, .. } => {
+        KernelError::AxiomNotSubsingleton {
+            free_vars_rendered, ..
+        } => {
             // Sorted: "A, B, C"
             assert_eq!(free_vars_rendered.as_str(), "A, B, C");
         }

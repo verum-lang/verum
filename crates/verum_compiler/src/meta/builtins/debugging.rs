@@ -45,8 +45,8 @@
 
 use verum_common::{List, Text};
 
-use crate::meta::context::{ConstValue, MetaContext};
 use crate::meta::MetaError;
+use crate::meta::context::{ConstValue, MetaContext};
 
 use super::context_requirements::{BuiltinInfo, BuiltinRegistry};
 

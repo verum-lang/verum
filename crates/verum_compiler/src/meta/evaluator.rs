@@ -30,11 +30,11 @@ use verum_ast::{
 use verum_common::well_known_types::variant_tags;
 use verum_common::{Heap, List, Maybe, Text};
 
-use super::{MetaError, MetaExpr, MetaPattern, MetaStmt};
 use super::builtins::EnabledContexts;
 use super::context::{ConstValue, MetaContext};
 use super::ir::expr::MetaArm;
 use super::registry::MetaFunction;
+use super::{MetaError, MetaExpr, MetaPattern, MetaStmt};
 
 /// Extract a qualified path from an expression chain.
 ///
@@ -51,7 +51,9 @@ fn extract_qualified_path(expr: &Expr) -> Option<String> {
             } else {
                 // Multi-segment path like std::collections
                 // Join segments with dots for Verum syntax
-                let segments: Vec<&str> = path.segments.iter()
+                let segments: Vec<&str> = path
+                    .segments
+                    .iter()
                     .filter_map(|seg| match seg {
                         verum_ast::ty::PathSegment::Name(ident) => Some(ident.as_str()),
                         _ => None,
@@ -66,9 +68,7 @@ fn extract_qualified_path(expr: &Expr) -> Option<String> {
         }
         // Recursive case: field access like std.env
         ExprKind::Field { expr: inner, field } => {
-            extract_qualified_path(inner).map(|prefix| {
-                format!("{}.{}", prefix, field.as_str())
-            })
+            extract_qualified_path(inner).map(|prefix| format!("{}.{}", prefix, field.as_str()))
         }
         _ => None,
     }
@@ -83,7 +83,9 @@ fn ast_pattern_to_meta_pattern(pattern: &Pattern) -> Result<MetaPattern, MetaErr
     match &pattern.kind {
         PatternKind::Wildcard => Ok(MetaPattern::Wildcard),
 
-        PatternKind::Ident { name, subpattern, .. } => {
+        PatternKind::Ident {
+            name, subpattern, ..
+        } => {
             if let Maybe::Some(sub) = subpattern {
                 // x @ pattern - supported
                 let sub_meta = ast_pattern_to_meta_pattern(sub)?;
@@ -129,7 +131,11 @@ fn ast_pattern_to_meta_pattern(pattern: &Pattern) -> Result<MetaPattern, MetaErr
             Ok(MetaPattern::Array(meta_patterns))
         }
 
-        PatternKind::Slice { before, rest, after } => {
+        PatternKind::Slice {
+            before,
+            rest,
+            after,
+        } => {
             let before_meta = before
                 .iter()
                 .map(ast_pattern_to_meta_pattern)
@@ -186,9 +192,12 @@ fn ast_pattern_to_meta_pattern(pattern: &Pattern) -> Result<MetaPattern, MetaErr
                 .map(|i| Text::from(i.as_str()))
                 .unwrap_or_else(|| {
                     // For paths like Option::Some, use the last segment
-                    path.segments.last()
+                    path.segments
+                        .last()
                         .and_then(|s| match s {
-                            verum_ast::ty::PathSegment::Name(ident) => Some(Text::from(ident.as_str())),
+                            verum_ast::ty::PathSegment::Name(ident) => {
+                                Some(Text::from(ident.as_str()))
+                            }
                             _ => None,
                         })
                         .unwrap_or_else(|| Text::from(""))
@@ -230,7 +239,10 @@ fn ast_pattern_to_meta_pattern(pattern: &Pattern) -> Result<MetaPattern, MetaErr
             } else {
                 Maybe::None
             };
-            Ok(MetaPattern::Variant { name, data: data_meta.map(Heap::new) })
+            Ok(MetaPattern::Variant {
+                name,
+                data: data_meta.map(Heap::new),
+            })
         }
 
         PatternKind::Reference { mutable, inner } => {
@@ -241,7 +253,11 @@ fn ast_pattern_to_meta_pattern(pattern: &Pattern) -> Result<MetaPattern, MetaErr
             })
         }
 
-        PatternKind::Range { start, end, inclusive } => {
+        PatternKind::Range {
+            start,
+            end,
+            inclusive,
+        } => {
             let start_val = if let Maybe::Some(lit) = start {
                 Maybe::Some(ConstValue::from_literal(lit))
             } else {
@@ -283,19 +299,19 @@ fn ast_pattern_to_meta_pattern(pattern: &Pattern) -> Result<MetaPattern, MetaErr
 
         // Patterns that require runtime execution
         PatternKind::View { .. } => Err(MetaError::Other(Text::from(
-            "View patterns require runtime execution and are not supported in meta patterns"
+            "View patterns require runtime execution and are not supported in meta patterns",
         ))),
         PatternKind::Active { .. } => Err(MetaError::Other(Text::from(
-            "Active patterns require runtime execution and are not supported in meta patterns"
+            "Active patterns require runtime execution and are not supported in meta patterns",
         ))),
         PatternKind::Stream { .. } => Err(MetaError::Other(Text::from(
-            "Stream patterns require async execution and are not supported in meta patterns"
+            "Stream patterns require async execution and are not supported in meta patterns",
         ))),
         PatternKind::Guard { .. } => Err(MetaError::Other(Text::from(
-            "Guard patterns require runtime evaluation and are not supported in meta patterns"
+            "Guard patterns require runtime evaluation and are not supported in meta patterns",
         ))),
         PatternKind::Cons { .. } => Err(MetaError::Other(Text::from(
-            "Cons patterns are not supported in meta patterns"
+            "Cons patterns are not supported in meta patterns",
         ))),
     }
 }
@@ -358,12 +374,10 @@ impl MetaContext {
 
                 // Handle different pattern kinds
                 match &pattern.kind {
-                    PatternKind::Ident { name, .. } => {
-                        Ok(MetaStmt::Let {
-                            name: Text::from(name.as_str()),
-                            value: meta_value,
-                        })
-                    }
+                    PatternKind::Ident { name, .. } => Ok(MetaStmt::Let {
+                        name: Text::from(name.as_str()),
+                        value: meta_value,
+                    }),
                     PatternKind::Tuple(patterns) => {
                         // Convert tuple pattern to LetTuple
                         let names = patterns
@@ -384,36 +398,24 @@ impl MetaContext {
                     ))),
                 }
             }
-            StmtKind::LetElse { .. } => {
-                Err(MetaError::Other(Text::from(
-                    "let-else not yet supported in meta functions"
-                )))
-            }
-            StmtKind::Item(_) => {
-                Err(MetaError::Other(Text::from(
-                    "Item declarations not yet supported in meta blocks"
-                )))
-            }
-            StmtKind::Defer(_) => {
-                Err(MetaError::Other(Text::from(
-                    "defer not yet supported in meta functions"
-                )))
-            }
-            StmtKind::Errdefer { .. } => {
-                Err(MetaError::Other(Text::from(
-                    "errdefer not yet supported in meta functions"
-                )))
-            }
-            StmtKind::Provide { .. } => {
-                Err(MetaError::Other(Text::from(
-                    "provide not yet supported in meta functions"
-                )))
-            }
-            StmtKind::ProvideScope { .. } => {
-                Err(MetaError::Other(Text::from(
-                    "provide scope not yet supported in meta functions"
-                )))
-            }
+            StmtKind::LetElse { .. } => Err(MetaError::Other(Text::from(
+                "let-else not yet supported in meta functions",
+            ))),
+            StmtKind::Item(_) => Err(MetaError::Other(Text::from(
+                "Item declarations not yet supported in meta blocks",
+            ))),
+            StmtKind::Defer(_) => Err(MetaError::Other(Text::from(
+                "defer not yet supported in meta functions",
+            ))),
+            StmtKind::Errdefer { .. } => Err(MetaError::Other(Text::from(
+                "errdefer not yet supported in meta functions",
+            ))),
+            StmtKind::Provide { .. } => Err(MetaError::Other(Text::from(
+                "provide not yet supported in meta functions",
+            ))),
+            StmtKind::ProvideScope { .. } => Err(MetaError::Other(Text::from(
+                "provide scope not yet supported in meta functions",
+            ))),
             StmtKind::Empty => {
                 // Empty statement - just return Unit
                 Ok(MetaStmt::Expr(MetaExpr::Literal(ConstValue::Unit)))
@@ -450,9 +452,8 @@ impl MetaContext {
                     } else if is_likely_type_name(name) {
                         // PascalCase name - likely a user-defined type (Point, Color, etc.)
                         // Treat as a type literal using Path TypeKind
-                        let ty = path_to_type(path).unwrap_or_else(|| {
-                            Type::new(TypeKind::Unknown, Span::default())
-                        });
+                        let ty = path_to_type(path)
+                            .unwrap_or_else(|| Type::new(TypeKind::Unknown, Span::default()));
                         Ok(MetaExpr::Literal(ConstValue::Type(ty)))
                     } else {
                         // snake_case name - treat as a variable
@@ -470,9 +471,7 @@ impl MetaContext {
             }
             // TypeExpr: generic type expressions like List<Int>, Maybe<Text>, etc.
             // These are parsed as ExprKind::TypeExpr(Type) and should produce a Type literal.
-            ExprKind::TypeExpr(ty) => {
-                Ok(MetaExpr::Literal(ConstValue::Type(ty.clone())))
-            }
+            ExprKind::TypeExpr(ty) => Ok(MetaExpr::Literal(ConstValue::Type(ty.clone()))),
             ExprKind::Binary { op, left, right } => {
                 let left_meta = self.ast_expr_to_meta_expr(left)?;
                 let right_meta = self.ast_expr_to_meta_expr(right)?;
@@ -513,18 +512,28 @@ impl MetaContext {
 
                 Ok(MetaExpr::Block(stmts))
             }
-            ExprKind::If { condition, then_branch, else_branch } => {
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 // Extract the first condition expression from IfCondition
-                let cond_expr = condition.conditions.first()
+                let cond_expr = condition
+                    .conditions
+                    .first()
                     .ok_or_else(|| MetaError::Other(Text::from("Empty if condition")))?;
                 let cond = match cond_expr {
                     verum_ast::ConditionKind::Expr(e) => self.ast_expr_to_meta_expr(e)?,
                     verum_ast::ConditionKind::Let { .. } => {
-                        return Err(MetaError::Other(Text::from("Let bindings in if condition not supported in meta")))
+                        return Err(MetaError::Other(Text::from(
+                            "Let bindings in if condition not supported in meta",
+                        )));
                     }
                 };
                 // Convert block to expression (use block result)
-                let then_stmts: List<MetaStmt> = then_branch.stmts.iter()
+                let then_stmts: List<MetaStmt> = then_branch
+                    .stmts
+                    .iter()
                     .map(|s| self.ast_stmt_to_meta_stmt(s))
                     .collect::<Result<List<_>, _>>()?;
                 let mut then_all_stmts = then_stmts;
@@ -589,7 +598,9 @@ impl MetaContext {
                         let val = self.ast_expr_to_meta_expr(value)?;
                         let count_val = self.ast_expr_to_meta_expr(count)?;
                         // For now, just quote the repeat expression
-                        if let (MetaExpr::Literal(v), MetaExpr::Literal(ConstValue::UInt(n))) = (&val, &count_val) {
+                        if let (MetaExpr::Literal(v), MetaExpr::Literal(ConstValue::UInt(n))) =
+                            (&val, &count_val)
+                        {
                             let arr: List<ConstValue> = (0..*n).map(|_| v.clone()).collect();
                             Ok(MetaExpr::Literal(ConstValue::Array(arr)))
                         } else {
@@ -600,16 +611,23 @@ impl MetaContext {
                 }
             }
             // Priority 1: MethodCall
-            ExprKind::MethodCall { receiver, method, args, .. } => {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
                 // First, check if this is a qualified function call like std.env.var(...)
                 // Extract the full path from the receiver
                 if let Some(receiver_path) = extract_qualified_path(receiver) {
                     // Combine receiver path with method to get full qualified name
-                    let qualified_name = Text::from(format!("{}.{}", receiver_path, method.as_str()));
+                    let qualified_name =
+                        Text::from(format!("{}.{}", receiver_path, method.as_str()));
 
                     // Check if this is a forbidden operation
                     if self.is_forbidden_function(&qualified_name) {
-                        let category = self.get_forbidden_category(&qualified_name)
+                        let category = self
+                            .get_forbidden_category(&qualified_name)
                             .unwrap_or("I/O");
                         return Err(MetaError::ForbiddenOperation {
                             operation: qualified_name,
@@ -658,7 +676,10 @@ impl MetaContext {
                 })
             }
             // Priority 1: Match
-            ExprKind::Match { expr: scrutinee, arms } => {
+            ExprKind::Match {
+                expr: scrutinee,
+                arms,
+            } => {
                 let scrutinee_meta = self.ast_expr_to_meta_expr(scrutinee)?;
                 let meta_arms = arms
                     .iter()
@@ -670,7 +691,11 @@ impl MetaContext {
                             Maybe::None
                         };
                         let body = self.ast_expr_to_meta_expr(&arm.body)?;
-                        Ok(MetaArm { pattern, guard, body })
+                        Ok(MetaArm {
+                            pattern,
+                            guard,
+                            body,
+                        })
                     })
                     .collect::<Result<List<_>, _>>()?;
                 Ok(MetaExpr::Match {
@@ -679,7 +704,12 @@ impl MetaContext {
                 })
             }
             // Priority 1: Closure
-            ExprKind::Closure { params, body, return_type, .. } => {
+            ExprKind::Closure {
+                params,
+                body,
+                return_type,
+                ..
+            } => {
                 let meta_params = params
                     .iter()
                     .filter_map(|p| {
@@ -699,7 +729,12 @@ impl MetaContext {
                 })
             }
             // Priority 1: For loop
-            ExprKind::For { pattern, iter, body, .. } => {
+            ExprKind::For {
+                pattern,
+                iter,
+                body,
+                ..
+            } => {
                 let pattern_meta = ast_pattern_to_meta_pattern(pattern)?;
                 let iter_meta = self.ast_expr_to_meta_expr(iter)?;
                 let body_stmts = body
@@ -714,7 +749,9 @@ impl MetaContext {
                 })
             }
             // Priority 1: While loop
-            ExprKind::While { condition, body, .. } => {
+            ExprKind::While {
+                condition, body, ..
+            } => {
                 let cond_meta = self.ast_expr_to_meta_expr(condition)?;
                 let body_stmts = body
                     .stmts
@@ -787,9 +824,9 @@ impl MetaContext {
                 })
             }
             // Priority 2: Continue
-            ExprKind::Continue { label } => {
-                Ok(MetaExpr::Continue { label: label.clone() })
-            }
+            ExprKind::Continue { label } => Ok(MetaExpr::Continue {
+                label: label.clone(),
+            }),
             // Priority 2: Cast
             ExprKind::Cast { expr: inner, ty } => {
                 let inner_meta = self.ast_expr_to_meta_expr(inner)?;
@@ -866,8 +903,7 @@ impl MetaContext {
         if self.timeout_ms > 0 {
             if self.current_deadline.is_none() {
                 self.current_deadline = Some(
-                    std::time::Instant::now()
-                        + std::time::Duration::from_millis(self.timeout_ms),
+                    std::time::Instant::now() + std::time::Duration::from_millis(self.timeout_ms),
                 );
             }
             // Periodic check at every dispatch — meta evaluation
@@ -896,17 +932,17 @@ impl MetaContext {
         match expr {
             MetaExpr::Literal(val) => Ok(val.clone()),
 
-            MetaExpr::Variable(name) => self
-                .get(name)
-                .ok_or_else(|| MetaError::MetaEvaluationFailed {
-                    message: format!("Undefined variable: {}", name).into(),
-                }),
+            MetaExpr::Variable(name) => {
+                self.get(name)
+                    .ok_or_else(|| MetaError::MetaEvaluationFailed {
+                        message: format!("Undefined variable: {}", name).into(),
+                    })
+            }
 
             MetaExpr::Call(func_name, args) => {
                 // Check for forbidden operations FIRST (before evaluating args)
                 if self.is_forbidden_function(func_name) {
-                    let category = self.get_forbidden_category(func_name)
-                        .unwrap_or("I/O");
+                    let category = self.get_forbidden_category(func_name).unwrap_or("I/O");
                     return Err(MetaError::ForbiddenOperation {
                         operation: func_name.clone(),
                         reason: Text::from(format!(
@@ -931,9 +967,12 @@ impl MetaContext {
                     Err(MetaError::MetaFunctionNotFound(_)) => {
                         // Builtin not found - try user-defined meta function
                         if let Some(ref registry) = self.registry {
-                            if let Maybe::Some(user_fn) = registry.get_user_meta_fn(&self.current_module, func_name) {
+                            if let Maybe::Some(user_fn) =
+                                registry.get_user_meta_fn(&self.current_module, func_name)
+                            {
                                 // Convert List to Vec for execute_user_meta_fn
-                                let args_vec: Vec<ConstValue> = arg_values.iter().cloned().collect();
+                                let args_vec: Vec<ConstValue> =
+                                    arg_values.iter().cloned().collect();
                                 return self.execute_user_meta_fn(&user_fn, args_vec);
                             }
 
@@ -941,7 +980,9 @@ impl MetaContext {
                             if registry.is_any_extern_function(func_name) {
                                 return Err(MetaError::ForbiddenOperation {
                                     operation: func_name.clone(),
-                                    reason: Text::from("FFI/extern functions cannot be called in meta context"),
+                                    reason: Text::from(
+                                        "FFI/extern functions cannot be called in meta context",
+                                    ),
                                 });
                             }
                         }
@@ -1053,7 +1094,12 @@ impl MetaContext {
                 self.eval_unary_op(*op, val)
             }
 
-            MetaExpr::ListComp { expr, var, iter, filter } => {
+            MetaExpr::ListComp {
+                expr,
+                var,
+                iter,
+                filter,
+            } => {
                 let iter_val = self.eval_meta_expr(iter)?;
                 let elements = match iter_val {
                     ConstValue::Array(arr) => arr,
@@ -1088,8 +1134,11 @@ impl MetaContext {
             }
 
             // === New expression kinds (Phase 6) ===
-
-            MetaExpr::MethodCall { receiver, method, args } => {
+            MetaExpr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
                 let receiver_val = self.eval_meta_expr(receiver)?;
                 let arg_values = args
                     .iter()
@@ -1117,8 +1166,9 @@ impl MetaContext {
                 // A full implementation would store the closure environment
                 Ok(ConstValue::Expr(Expr::new(
                     ExprKind::Closure {
-                        params: params.iter().map(|p| {
-                            verum_ast::ClosureParam {
+                        params: params
+                            .iter()
+                            .map(|p| verum_ast::ClosureParam {
                                 pattern: Pattern::ident(
                                     Ident::new(p.as_str(), Span::dummy()),
                                     false,
@@ -1126,8 +1176,8 @@ impl MetaContext {
                                 ),
                                 ty: Maybe::None,
                                 span: Span::dummy(),
-                            }
-                        }).collect(),
+                            })
+                            .collect(),
                         body: Heap::new(Expr::literal(verum_ast::Literal::int(0, Span::dummy()))),
                         return_type: Maybe::None,
                         move_: false,
@@ -1138,12 +1188,20 @@ impl MetaContext {
                 )))
             }
 
-            MetaExpr::For { pattern, iter, body } => {
+            MetaExpr::For {
+                pattern,
+                iter,
+                body,
+            } => {
                 let iter_val = self.eval_meta_expr(iter)?;
                 let elements = match iter_val {
                     ConstValue::Array(arr) => arr,
                     ConstValue::Tuple(tup) => tup,
-                    _ => return Err(MetaError::Other(Text::from("Expected iterable in for loop"))),
+                    _ => {
+                        return Err(MetaError::Other(Text::from(
+                            "Expected iterable in for loop",
+                        )));
+                    }
                 };
 
                 // Iteration cap sourced from `MetaContext.iteration_limit`
@@ -1217,7 +1275,8 @@ impl MetaContext {
                         } else {
                             Err(MetaError::Other(Text::from(format!(
                                 "Tuple index {} out of bounds (tuple has {} elements)",
-                                idx, elems.len()
+                                idx,
+                                elems.len()
                             ))))
                         }
                     }
@@ -1228,7 +1287,11 @@ impl MetaContext {
                 }
             }
 
-            MetaExpr::Record { name: _, fields, base } => {
+            MetaExpr::Record {
+                name: _,
+                fields,
+                base,
+            } => {
                 // Evaluate all field values
                 let mut field_values = List::new();
                 for (field_name, field_expr) in fields {
@@ -1245,7 +1308,8 @@ impl MetaContext {
 
                 // Records become tuples of field values in meta evaluation
                 // A full implementation would preserve record structure
-                let tuple_vals: List<ConstValue> = field_values.iter().map(|(_, v)| v.clone()).collect();
+                let tuple_vals: List<ConstValue> =
+                    field_values.iter().map(|(_, v)| v.clone()).collect();
                 let tuple = ConstValue::Tuple(tuple_vals);
                 // Memory tracking — closes #240 for the record-literal
                 // path. Same recipe as the ListComp arm: estimate the
@@ -1292,17 +1356,23 @@ impl MetaContext {
                 Ok(ConstValue::Unit)
             }
 
-            MetaExpr::AssignIndex { target, index, value } => {
+            MetaExpr::AssignIndex {
+                target,
+                index,
+                value,
+            } => {
                 // Evaluate index and value, update the array element
                 let idx_val = self.eval_meta_expr(index)?;
                 let new_val = self.eval_meta_expr(value)?;
                 let idx = match &idx_val {
                     ConstValue::Int(n) => *n as usize,
                     ConstValue::UInt(n) => *n as usize,
-                    _ => return Err(MetaError::TypeMismatch {
-                        expected: Text::from("integer"),
-                        found: idx_val.type_name(),
-                    }),
+                    _ => {
+                        return Err(MetaError::TypeMismatch {
+                            expected: Text::from("integer"),
+                            found: idx_val.type_name(),
+                        });
+                    }
                 };
                 // Get the existing array, update it, and re-bind
                 if let Some(arr_val) = self.get(target) {
@@ -1312,7 +1382,10 @@ impl MetaContext {
                             self.bind(target.clone(), ConstValue::Array(arr));
                             Ok(ConstValue::Unit)
                         } else {
-                            Err(MetaError::IndexOutOfBounds { index: idx as i128, length: arr.len() })
+                            Err(MetaError::IndexOutOfBounds {
+                                index: idx as i128,
+                                length: arr.len(),
+                            })
                         }
                     } else {
                         Err(MetaError::TypeMismatch {
@@ -1322,7 +1395,8 @@ impl MetaContext {
                     }
                 } else {
                     Err(MetaError::MetaEvaluationFailed {
-                        message: format!("Undefined variable in index assignment: {}", target).into(),
+                        message: format!("Undefined variable in index assignment: {}", target)
+                            .into(),
                     })
                 }
             }
@@ -1338,35 +1412,32 @@ impl MetaContext {
     ) -> Result<ConstValue, MetaError> {
         match (&receiver, method.as_str()) {
             // Array/List methods
-            (ConstValue::Array(arr), "len") => {
-                Ok(ConstValue::UInt(arr.len() as u128))
-            }
-            (ConstValue::Array(arr), "is_empty") => {
-                Ok(ConstValue::Bool(arr.is_empty()))
-            }
-            (ConstValue::Array(arr), "first") => {
-                match arr.first() {
-                    Some(v) => Ok(ConstValue::Maybe(Maybe::Some(Heap::new(v.clone())))),
-                    None => Ok(ConstValue::Maybe(Maybe::None)),
-                }
-            }
-            (ConstValue::Array(arr), "last") => {
-                match arr.last() {
-                    Some(v) => Ok(ConstValue::Maybe(Maybe::Some(Heap::new(v.clone())))),
-                    None => Ok(ConstValue::Maybe(Maybe::None)),
-                }
-            }
+            (ConstValue::Array(arr), "len") => Ok(ConstValue::UInt(arr.len() as u128)),
+            (ConstValue::Array(arr), "is_empty") => Ok(ConstValue::Bool(arr.is_empty())),
+            (ConstValue::Array(arr), "first") => match arr.first() {
+                Some(v) => Ok(ConstValue::Maybe(Maybe::Some(Heap::new(v.clone())))),
+                None => Ok(ConstValue::Maybe(Maybe::None)),
+            },
+            (ConstValue::Array(arr), "last") => match arr.last() {
+                Some(v) => Ok(ConstValue::Maybe(Maybe::Some(Heap::new(v.clone())))),
+                None => Ok(ConstValue::Maybe(Maybe::None)),
+            },
             (ConstValue::Array(arr), "get") => {
                 if args.len() != 1 {
-                    return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+                    return Err(MetaError::ArityMismatch {
+                        expected: 1,
+                        got: args.len(),
+                    });
                 }
                 let idx = match &args[0] {
                     ConstValue::Int(i) => *i as usize,
                     ConstValue::UInt(u) => *u as usize,
-                    _ => return Err(MetaError::TypeMismatch {
-                        expected: Text::from("Int or UInt"),
-                        found: args[0].type_name(),
-                    }),
+                    _ => {
+                        return Err(MetaError::TypeMismatch {
+                            expected: Text::from("Int or UInt"),
+                            found: args[0].type_name(),
+                        });
+                    }
                 };
                 match arr.get(idx) {
                     Some(v) => Ok(ConstValue::Maybe(Maybe::Some(Heap::new(v.clone())))),
@@ -1375,24 +1446,21 @@ impl MetaContext {
             }
 
             // Text/String methods
-            (ConstValue::Text(s), "len") => {
-                Ok(ConstValue::UInt(s.len() as u128))
-            }
-            (ConstValue::Text(s), "is_empty") => {
-                Ok(ConstValue::Bool(s.is_empty()))
-            }
+            (ConstValue::Text(s), "len") => Ok(ConstValue::UInt(s.len() as u128)),
+            (ConstValue::Text(s), "is_empty") => Ok(ConstValue::Bool(s.is_empty())),
             (ConstValue::Text(s), "to_uppercase") => {
                 Ok(ConstValue::Text(Text::from(s.to_uppercase())))
             }
             (ConstValue::Text(s), "to_lowercase") => {
                 Ok(ConstValue::Text(Text::from(s.to_lowercase())))
             }
-            (ConstValue::Text(s), "trim") => {
-                Ok(ConstValue::Text(Text::from(s.trim())))
-            }
+            (ConstValue::Text(s), "trim") => Ok(ConstValue::Text(Text::from(s.trim()))),
             (ConstValue::Text(s), "contains") => {
                 if args.len() != 1 {
-                    return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+                    return Err(MetaError::ArityMismatch {
+                        expected: 1,
+                        got: args.len(),
+                    });
                 }
                 match &args[0] {
                     ConstValue::Text(needle) => Ok(ConstValue::Bool(s.contains(needle.as_str()))),
@@ -1404,10 +1472,15 @@ impl MetaContext {
             }
             (ConstValue::Text(s), "starts_with") => {
                 if args.len() != 1 {
-                    return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+                    return Err(MetaError::ArityMismatch {
+                        expected: 1,
+                        got: args.len(),
+                    });
                 }
                 match &args[0] {
-                    ConstValue::Text(prefix) => Ok(ConstValue::Bool(s.starts_with(prefix.as_str()))),
+                    ConstValue::Text(prefix) => {
+                        Ok(ConstValue::Bool(s.starts_with(prefix.as_str())))
+                    }
                     _ => Err(MetaError::TypeMismatch {
                         expected: Text::from("Text"),
                         found: args[0].type_name(),
@@ -1416,7 +1489,10 @@ impl MetaContext {
             }
             (ConstValue::Text(s), "ends_with") => {
                 if args.len() != 1 {
-                    return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+                    return Err(MetaError::ArityMismatch {
+                        expected: 1,
+                        got: args.len(),
+                    });
                 }
                 match &args[0] {
                     ConstValue::Text(suffix) => Ok(ConstValue::Bool(s.ends_with(suffix.as_str()))),
@@ -1428,28 +1504,24 @@ impl MetaContext {
             }
 
             // Tuple methods
-            (ConstValue::Tuple(elems), "len") => {
-                Ok(ConstValue::UInt(elems.len() as u128))
-            }
+            (ConstValue::Tuple(elems), "len") => Ok(ConstValue::UInt(elems.len() as u128)),
 
             _ => Err(MetaError::Other(Text::from(format!(
                 "Unknown method '{}' for type {}",
-                method, receiver.type_name()
+                method,
+                receiver.type_name()
             )))),
         }
     }
 
     /// Evaluate field access on a value
-    fn eval_field_access(
-        &self,
-        value: ConstValue,
-        field: &Text,
-    ) -> Result<ConstValue, MetaError> {
+    fn eval_field_access(&self, value: ConstValue, field: &Text) -> Result<ConstValue, MetaError> {
         // In meta context, we don't have actual struct definitions,
         // so field access is limited
         Err(MetaError::Other(Text::from(format!(
             "Field access '.{}' not supported on {} in meta context",
-            field, value.type_name()
+            field,
+            value.type_name()
         ))))
     }
 
@@ -1465,7 +1537,8 @@ impl MetaContext {
                 arr.get(idx).cloned().ok_or_else(|| {
                     MetaError::Other(Text::from(format!(
                         "Array index {} out of bounds (length {})",
-                        i, arr.len()
+                        i,
+                        arr.len()
                     )))
                 })
             }
@@ -1474,7 +1547,8 @@ impl MetaContext {
                 arr.get(idx).cloned().ok_or_else(|| {
                     MetaError::Other(Text::from(format!(
                         "Array index {} out of bounds (length {})",
-                        u, arr.len()
+                        u,
+                        arr.len()
                     )))
                 })
             }
@@ -1483,7 +1557,8 @@ impl MetaContext {
                 elems.get(idx).cloned().ok_or_else(|| {
                     MetaError::Other(Text::from(format!(
                         "Tuple index {} out of bounds (length {})",
-                        i, elems.len()
+                        i,
+                        elems.len()
                     )))
                 })
             }
@@ -1492,29 +1567,34 @@ impl MetaContext {
                 elems.get(idx).cloned().ok_or_else(|| {
                     MetaError::Other(Text::from(format!(
                         "Tuple index {} out of bounds (length {})",
-                        u, elems.len()
+                        u,
+                        elems.len()
                     )))
                 })
             }
             (ConstValue::Text(s), ConstValue::Int(i)) => {
                 let idx = *i as usize;
-                s.chars().nth(idx)
+                s.chars()
+                    .nth(idx)
                     .map(|c| ConstValue::Char(c))
                     .ok_or_else(|| {
                         MetaError::Other(Text::from(format!(
                             "String index {} out of bounds (length {})",
-                            i, s.len()
+                            i,
+                            s.len()
                         )))
                     })
             }
             (ConstValue::Text(s), ConstValue::UInt(u)) => {
                 let idx = *u as usize;
-                s.chars().nth(idx)
+                s.chars()
+                    .nth(idx)
                     .map(|c| ConstValue::Char(c))
                     .ok_or_else(|| {
                         MetaError::Other(Text::from(format!(
                             "String index {} out of bounds (length {})",
-                            u, s.len()
+                            u,
+                            s.len()
                         )))
                     })
             }
@@ -1532,54 +1612,47 @@ impl MetaContext {
         // Simple type casts in meta context
         match &ty.kind {
             TypeKind::Path(path) => {
-                let type_name = path.segments.last()
-                    .and_then(|s| {
-                        match s {
-                            PathSegment::Name(ident) => Some(ident.as_str()),
-                            _ => None,
-                        }
+                let type_name = path
+                    .segments
+                    .last()
+                    .and_then(|s| match s {
+                        PathSegment::Name(ident) => Some(ident.as_str()),
+                        _ => None,
                     })
                     .unwrap_or("");
 
                 match type_name {
-                    "Int" | "i64" | "i32" | "i16" | "i8" => {
-                        match value {
-                            ConstValue::Int(i) => Ok(ConstValue::Int(i)),
-                            ConstValue::UInt(u) => Ok(ConstValue::Int(u as i128)),
-                            ConstValue::Float(f) => Ok(ConstValue::Int(f as i128)),
-                            ConstValue::Bool(b) => Ok(ConstValue::Int(if b { 1 } else { 0 })),
-                            _ => Err(MetaError::Other(Text::from(format!(
-                                "Cannot cast {} to Int", value.type_name()
-                            )))),
-                        }
-                    }
-                    "UInt" | "u64" | "u32" | "u16" | "u8" => {
-                        match value {
-                            ConstValue::Int(i) => Ok(ConstValue::UInt(i as u128)),
-                            ConstValue::UInt(u) => Ok(ConstValue::UInt(u)),
-                            ConstValue::Float(f) => Ok(ConstValue::UInt(f as u128)),
-                            ConstValue::Bool(b) => Ok(ConstValue::UInt(if b { 1 } else { 0 })),
-                            _ => Err(MetaError::Other(Text::from(format!(
-                                "Cannot cast {} to UInt", value.type_name()
-                            )))),
-                        }
-                    }
-                    "Float" | "f64" | "f32" => {
-                        match value {
-                            ConstValue::Int(i) => Ok(ConstValue::Float(i as f64)),
-                            ConstValue::UInt(u) => Ok(ConstValue::Float(u as f64)),
-                            ConstValue::Float(f) => Ok(ConstValue::Float(f)),
-                            _ => Err(MetaError::Other(Text::from(format!(
-                                "Cannot cast {} to Float", value.type_name()
-                            )))),
-                        }
-                    }
-                    "Text" | "String" => {
-                        Ok(ConstValue::Text(Text::from(format!("{}", value))))
-                    }
-                    "Bool" => {
-                        Ok(ConstValue::Bool(value.as_bool()))
-                    }
+                    "Int" | "i64" | "i32" | "i16" | "i8" => match value {
+                        ConstValue::Int(i) => Ok(ConstValue::Int(i)),
+                        ConstValue::UInt(u) => Ok(ConstValue::Int(u as i128)),
+                        ConstValue::Float(f) => Ok(ConstValue::Int(f as i128)),
+                        ConstValue::Bool(b) => Ok(ConstValue::Int(if b { 1 } else { 0 })),
+                        _ => Err(MetaError::Other(Text::from(format!(
+                            "Cannot cast {} to Int",
+                            value.type_name()
+                        )))),
+                    },
+                    "UInt" | "u64" | "u32" | "u16" | "u8" => match value {
+                        ConstValue::Int(i) => Ok(ConstValue::UInt(i as u128)),
+                        ConstValue::UInt(u) => Ok(ConstValue::UInt(u)),
+                        ConstValue::Float(f) => Ok(ConstValue::UInt(f as u128)),
+                        ConstValue::Bool(b) => Ok(ConstValue::UInt(if b { 1 } else { 0 })),
+                        _ => Err(MetaError::Other(Text::from(format!(
+                            "Cannot cast {} to UInt",
+                            value.type_name()
+                        )))),
+                    },
+                    "Float" | "f64" | "f32" => match value {
+                        ConstValue::Int(i) => Ok(ConstValue::Float(i as f64)),
+                        ConstValue::UInt(u) => Ok(ConstValue::Float(u as f64)),
+                        ConstValue::Float(f) => Ok(ConstValue::Float(f)),
+                        _ => Err(MetaError::Other(Text::from(format!(
+                            "Cannot cast {} to Float",
+                            value.type_name()
+                        )))),
+                    },
+                    "Text" | "String" => Ok(ConstValue::Text(Text::from(format!("{}", value)))),
+                    "Bool" => Ok(ConstValue::Bool(value.as_bool())),
                     _ => {
                         // Unknown type - return value unchanged
                         Ok(value)
@@ -1609,8 +1682,14 @@ impl MetaContext {
                     ConstValue::Tuple(elements) => {
                         if elements.len() != names.len() {
                             return Err(MetaError::TypeMismatch {
-                                expected: Text::from(format!("tuple with {} elements", names.len())),
-                                found: Text::from(format!("tuple with {} elements", elements.len())),
+                                expected: Text::from(format!(
+                                    "tuple with {} elements",
+                                    names.len()
+                                )),
+                                found: Text::from(format!(
+                                    "tuple with {} elements",
+                                    elements.len()
+                                )),
                             });
                         }
                         for (i, name) in names.iter().enumerate() {
@@ -1742,7 +1821,11 @@ impl MetaContext {
                 }
             }
 
-            MetaPattern::Slice { before, rest, after } => {
+            MetaPattern::Slice {
+                before,
+                rest,
+                after,
+            } => {
                 if let ConstValue::Array(values) = value {
                     let total_fixed = before.len() + after.len();
                     if values.len() < total_fixed {
@@ -1825,9 +1908,7 @@ impl MetaContext {
                             Ok(true)
                         }
                     }
-                    (variant_tags::NONE, ConstValue::Maybe(Maybe::None)) => {
-                        Ok(data.is_none())
-                    }
+                    (variant_tags::NONE, ConstValue::Maybe(Maybe::None)) => Ok(data.is_none()),
                     ("true", ConstValue::Bool(true)) | ("True", ConstValue::Bool(true)) => {
                         Ok(data.is_none())
                     }
@@ -1843,7 +1924,11 @@ impl MetaContext {
                 }
             }
 
-            MetaPattern::Range { start, end, inclusive } => {
+            MetaPattern::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 // Range patterns work with Int, UInt, Char
                 match value {
                     ConstValue::Int(n) => {
@@ -1854,7 +1939,11 @@ impl MetaContext {
                         };
                         let in_end = match end {
                             Maybe::Some(ConstValue::Int(e)) => {
-                                if *inclusive { *n <= *e } else { *n < *e }
+                                if *inclusive {
+                                    *n <= *e
+                                } else {
+                                    *n < *e
+                                }
                             }
                             Maybe::None => true,
                             _ => false,
@@ -1870,10 +1959,18 @@ impl MetaContext {
                         };
                         let in_end = match end {
                             Maybe::Some(ConstValue::UInt(e)) => {
-                                if *inclusive { *n <= *e } else { *n < *e }
+                                if *inclusive {
+                                    *n <= *e
+                                } else {
+                                    *n < *e
+                                }
                             }
                             Maybe::Some(ConstValue::Int(e)) if *e >= 0 => {
-                                if *inclusive { *n <= (*e as u128) } else { *n < (*e as u128) }
+                                if *inclusive {
+                                    *n <= (*e as u128)
+                                } else {
+                                    *n < (*e as u128)
+                                }
                             }
                             Maybe::None => true,
                             _ => false,
@@ -1888,7 +1985,11 @@ impl MetaContext {
                         };
                         let in_end = match end {
                             Maybe::Some(ConstValue::Char(e)) => {
-                                if *inclusive { *c <= *e } else { *c < *e }
+                                if *inclusive {
+                                    *c <= *e
+                                } else {
+                                    *c < *e
+                                }
                             }
                             Maybe::None => true,
                             _ => false,
@@ -1960,9 +2061,7 @@ impl MetaContext {
         use super::value_ops::MetaValueOps;
 
         // Helper to convert SandboxError to MetaError with proper categorization
-        let map_err = |e: super::sandbox::SandboxError| {
-            Self::sandbox_error_to_meta_error(e)
-        };
+        let map_err = |e: super::sandbox::SandboxError| Self::sandbox_error_to_meta_error(e);
 
         match op {
             BinOp::Add => left.add(right).map_err(map_err),
@@ -1995,9 +2094,7 @@ impl MetaContext {
         use super::value_ops::MetaValueOps;
 
         // Helper to convert SandboxError to MetaError with proper categorization
-        let map_err = |e: super::sandbox::SandboxError| {
-            Self::sandbox_error_to_meta_error(e)
-        };
+        let map_err = |e: super::sandbox::SandboxError| Self::sandbox_error_to_meta_error(e);
 
         match op {
             UnOp::Not => val.not().map_err(map_err),
@@ -2016,9 +2113,12 @@ impl MetaContext {
         match &e {
             SandboxError::UnsafeOperation { operation, reason } => {
                 let reason_lower = reason.as_str().to_lowercase();
-                if reason_lower.contains("division by zero") || reason_lower.contains("modulo by zero") {
+                if reason_lower.contains("division by zero")
+                    || reason_lower.contains("modulo by zero")
+                {
                     MetaError::DivisionByZero
-                } else if reason_lower.contains("overflow") || reason_lower.contains("shift amount") {
+                } else if reason_lower.contains("overflow") || reason_lower.contains("shift amount")
+                {
                     MetaError::ConstOverflow {
                         operation: operation.clone(),
                         value: reason.clone(),
@@ -2028,20 +2128,32 @@ impl MetaContext {
                 }
             }
             SandboxError::IterationLimitExceeded { iterations, limit } => {
-                MetaError::IterationLimitExceeded { count: *iterations, limit: *limit }
+                MetaError::IterationLimitExceeded {
+                    count: *iterations,
+                    limit: *limit,
+                }
             }
-            SandboxError::StackOverflow { depth, limit } => {
-                MetaError::RecursionLimitExceeded { depth: *depth, limit: *limit }
-            }
-            SandboxError::Timeout { elapsed_ms, limit_ms } => {
-                MetaError::TimeoutExceeded { elapsed_ms: *elapsed_ms, limit_ms: *limit_ms }
-            }
+            SandboxError::StackOverflow { depth, limit } => MetaError::RecursionLimitExceeded {
+                depth: *depth,
+                limit: *limit,
+            },
+            SandboxError::Timeout {
+                elapsed_ms,
+                limit_ms,
+            } => MetaError::TimeoutExceeded {
+                elapsed_ms: *elapsed_ms,
+                limit_ms: *limit_ms,
+            },
             _ => MetaError::Other(Text::from(format!("{}", e))),
         }
     }
 
     /// Bitwise AND operation
-    fn eval_bitwise_and(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue, MetaError> {
+    fn eval_bitwise_and(
+        &self,
+        left: ConstValue,
+        right: ConstValue,
+    ) -> Result<ConstValue, MetaError> {
         match (&left, &right) {
             (ConstValue::Int(a), ConstValue::Int(b)) => Ok(ConstValue::Int(a & b)),
             (ConstValue::UInt(a), ConstValue::UInt(b)) => Ok(ConstValue::UInt(a & b)),
@@ -2053,7 +2165,11 @@ impl MetaContext {
     }
 
     /// Bitwise OR operation
-    fn eval_bitwise_or(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue, MetaError> {
+    fn eval_bitwise_or(
+        &self,
+        left: ConstValue,
+        right: ConstValue,
+    ) -> Result<ConstValue, MetaError> {
         match (&left, &right) {
             (ConstValue::Int(a), ConstValue::Int(b)) => Ok(ConstValue::Int(a | b)),
             (ConstValue::UInt(a), ConstValue::UInt(b)) => Ok(ConstValue::UInt(a | b)),
@@ -2065,7 +2181,11 @@ impl MetaContext {
     }
 
     /// Bitwise XOR operation
-    fn eval_bitwise_xor(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue, MetaError> {
+    fn eval_bitwise_xor(
+        &self,
+        left: ConstValue,
+        right: ConstValue,
+    ) -> Result<ConstValue, MetaError> {
         match (&left, &right) {
             (ConstValue::Int(a), ConstValue::Int(b)) => Ok(ConstValue::Int(a ^ b)),
             (ConstValue::UInt(a), ConstValue::UInt(b)) => Ok(ConstValue::UInt(a ^ b)),
@@ -2077,7 +2197,11 @@ impl MetaContext {
     }
 
     /// Shift left operation
-    fn eval_shift_left(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue, MetaError> {
+    fn eval_shift_left(
+        &self,
+        left: ConstValue,
+        right: ConstValue,
+    ) -> Result<ConstValue, MetaError> {
         match (&left, &right) {
             (ConstValue::Int(a), ConstValue::Int(b)) => {
                 if *b < 0 || *b > 127 {
@@ -2105,7 +2229,11 @@ impl MetaContext {
     }
 
     /// Shift right operation
-    fn eval_shift_right(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue, MetaError> {
+    fn eval_shift_right(
+        &self,
+        left: ConstValue,
+        right: ConstValue,
+    ) -> Result<ConstValue, MetaError> {
         match (&left, &right) {
             (ConstValue::Int(a), ConstValue::Int(b)) => {
                 if *b < 0 || *b > 127 {
@@ -2178,7 +2306,10 @@ impl MetaContext {
                 }
             }
             ConstValue::Tuple(elems) => {
-                let types: List<Type> = elems.iter().map(|e| self.infer_type_from_value(e)).collect();
+                let types: List<Type> = elems
+                    .iter()
+                    .map(|e| self.infer_type_from_value(e))
+                    .collect();
                 Type::new(TypeKind::Tuple(types), span)
             }
             ConstValue::Maybe(inner) => {
@@ -2197,9 +2328,7 @@ impl MetaContext {
                 };
                 self.make_generic_type("Map", vec![Type::text(span), value_ty])
             }
-            ConstValue::Set(_) => {
-                self.make_generic_type("Set", vec![Type::text(span)])
-            }
+            ConstValue::Set(_) => self.make_generic_type("Set", vec![Type::text(span)]),
             ConstValue::Type(_) => self.make_path_type("Type"),
             ConstValue::Expr(_) => self.make_path_type("Expr"),
             ConstValue::Pattern(_) => self.make_path_type("Pattern"),
@@ -2220,10 +2349,7 @@ impl MetaContext {
     fn make_generic_type(&self, name: &str, args: Vec<Type>) -> Type {
         let span = Span::dummy();
         let base = self.make_path_type(name);
-        let generic_args: List<GenericArg> = args
-            .into_iter()
-            .map(GenericArg::Type)
-            .collect();
+        let generic_args: List<GenericArg> = args.into_iter().map(GenericArg::Type).collect();
         Type::new(
             TypeKind::Generic {
                 base: Heap::new(base),
@@ -2260,7 +2386,8 @@ impl MetaContext {
                 Type::inferred(span)
             }
             ExprKind::Tuple(elems) => {
-                let types: List<Type> = elems.iter().map(|e| self.infer_type_from_expr(e)).collect();
+                let types: List<Type> =
+                    elems.iter().map(|e| self.infer_type_from_expr(e)).collect();
                 Type::new(TypeKind::Tuple(types), span)
             }
             ExprKind::Array(array_expr) => {
@@ -2318,7 +2445,11 @@ impl MetaContext {
 
     /// # Returns
     /// The result of evaluating the function body
-    pub fn execute_user_meta_fn(&mut self, func: &MetaFunction, args: Vec<ConstValue>) -> Result<ConstValue, MetaError> {
+    pub fn execute_user_meta_fn(
+        &mut self,
+        func: &MetaFunction,
+        args: Vec<ConstValue>,
+    ) -> Result<ConstValue, MetaError> {
         // Check recursion limit FIRST to prevent stack overflow
         if self.current_recursion_depth >= self.recursion_limit {
             return Err(MetaError::RecursionLimitExceeded {
@@ -2341,7 +2472,11 @@ impl MetaContext {
 
     /// Internal implementation of user meta function execution.
     /// Called by execute_user_meta_fn after recursion limit check.
-    fn execute_user_meta_fn_inner(&mut self, func: &MetaFunction, args: Vec<ConstValue>) -> Result<ConstValue, MetaError> {
+    fn execute_user_meta_fn_inner(
+        &mut self,
+        func: &MetaFunction,
+        args: Vec<ConstValue>,
+    ) -> Result<ConstValue, MetaError> {
         #[cfg(debug_assertions)]
         {
             // eprintln!("[DEBUG] execute_user_meta_fn_inner: func.name = {:?}", func.name);
@@ -2365,7 +2500,9 @@ impl MetaContext {
 
         // Extract context names from the function's using clause and enable them
         if !func.contexts.is_empty() {
-            let context_names: Vec<Text> = func.contexts.iter()
+            let context_names: Vec<Text> = func
+                .contexts
+                .iter()
                 .filter_map(|ctx| {
                     // Extract the context name from the path
                     // For simple contexts like `MetaTypes`, this is just the path's string representation
@@ -2378,7 +2515,9 @@ impl MetaContext {
 
             // Check for duplicate context declarations
             if !parsed.duplicates.is_empty() {
-                return Err(MetaError::DuplicateContext(parsed.duplicates[0].name.clone()));
+                return Err(MetaError::DuplicateContext(
+                    parsed.duplicates[0].name.clone(),
+                ));
             }
 
             // Apply the parsed contexts
@@ -2403,14 +2542,17 @@ impl MetaContext {
         }
 
         // Convert body to MetaExpr and evaluate
-        let result = self.ast_expr_to_meta_expr(&func.body)
+        let result = self
+            .ast_expr_to_meta_expr(&func.body)
             .and_then(|meta_expr| self.eval_meta_expr(&meta_expr));
 
         // Restore original bindings
         for (name, saved_value) in saved_bindings {
             match saved_value {
                 Some(val) => self.bind(name, val),
-                None => { self.unbind(&name); }
+                None => {
+                    self.unbind(&name);
+                }
             }
         }
 
@@ -2504,7 +2646,11 @@ impl MetaContext {
         use verum_ast::expr::ExprKind;
 
         // Only process Quote expressions
-        if let ExprKind::Quote { target_stage, tokens } = &expr.kind {
+        if let ExprKind::Quote {
+            target_stage,
+            tokens,
+        } = &expr.kind
+        {
             // Expand splices in the token tree
             let expanded_tokens = self.expand_token_tree_splices(tokens)?;
 
@@ -2563,11 +2709,8 @@ impl MetaContext {
         tokens: &List<verum_ast::expr::TokenTree>,
         span: verum_ast::span::Span,
     ) {
-        use crate::hygiene::{HygieneChecker, CheckerConfig, HygieneContext};
-        let mut checker = HygieneChecker::new(
-            HygieneContext::new(),
-            CheckerConfig::default(),
-        );
+        use crate::hygiene::{CheckerConfig, HygieneChecker, HygieneContext};
+        let mut checker = HygieneChecker::new(HygieneContext::new(), CheckerConfig::default());
         // Seed the checker's binding table with the meta function's
         // own local bindings (closes #237). Pre-fix the fresh checker
         // had no bindings registered, so `flag_capture_if_shadowing`
@@ -2593,11 +2736,7 @@ impl MetaContext {
         // the precise location is the meta function's local-binding
         // site which we don't track per-binding here — refining to
         // per-binding origin is followup-class work).
-        let seed_names: Vec<verum_common::Text> = self
-            .bindings
-            .keys()
-            .cloned()
-            .collect();
+        let seed_names: Vec<verum_common::Text> = self.bindings.keys().cloned().collect();
         for name in seed_names {
             checker.seed_outer_binding(name, span);
         }
@@ -2633,7 +2772,7 @@ impl MetaContext {
         &self,
         tokens: &List<verum_ast::expr::TokenTree>,
     ) -> Result<List<verum_ast::expr::TokenTree>, MetaError> {
-        use verum_ast::expr::{TokenTree, TokenTreeKind, MacroDelimiter};
+        use verum_ast::expr::{MacroDelimiter, TokenTree, TokenTreeKind};
 
         let mut result = List::new();
         let mut i = 0;
@@ -2651,7 +2790,8 @@ impl MetaContext {
                                     if next_tok.kind == TokenTreeKind::Ident =>
                                 {
                                     let var_name = Text::from(next_tok.text.as_str());
-                                    let expanded = self.expand_ident_splice(&var_name, next_tok.span)?;
+                                    let expanded =
+                                        self.expand_ident_splice(&var_name, next_tok.span)?;
                                     for t in expanded {
                                         result.push(t);
                                     }
@@ -2679,7 +2819,8 @@ impl MetaContext {
                                     tokens: inner_tokens,
                                     span,
                                 } => {
-                                    let expanded = self.expand_repetition_splice(inner_tokens, *span)?;
+                                    let expanded =
+                                        self.expand_repetition_splice(inner_tokens, *span)?;
                                     for t in expanded {
                                         result.push(t);
                                     }
@@ -2702,7 +2843,11 @@ impl MetaContext {
                     }
                 }
 
-                TokenTree::Group { delimiter, tokens: inner, span } => {
+                TokenTree::Group {
+                    delimiter,
+                    tokens: inner,
+                    span,
+                } => {
                     // Recursively expand splices in nested groups
                     let expanded_inner = self.expand_token_tree_splices(inner)?;
                     result.push(TokenTree::Group {
@@ -2762,13 +2907,14 @@ impl MetaContext {
         // Parse as expression using a dummy file ID
         let parser = verum_fast_parser::FastParser::new();
         let file_id = verum_common::FileId::dummy();
-        let expr = parser.parse_expr_str(&source_text, file_id)
-            .map_err(|_| MetaError::InvalidQuoteSyntax {
+        let expr = parser.parse_expr_str(&source_text, file_id).map_err(|_| {
+            MetaError::InvalidQuoteSyntax {
                 message: Text::from(format!(
                     "failed to parse splice expression: {}",
                     &source_text
                 )),
-            })?;
+            }
+        })?;
 
         // Convert AST expression to meta expression
         let meta_expr = self.ast_expr_to_meta_expr(&expr)?;
@@ -2794,11 +2940,12 @@ impl MetaContext {
     /// - Simple method calls on known types (len, is_empty, etc.)
     fn evaluate_simple_meta_expr(&self, expr: &MetaExpr) -> Result<ConstValue, MetaError> {
         match expr {
-            MetaExpr::Variable(name) => {
-                self.get(name).ok_or_else(|| MetaError::Other(
-                    Text::from(format!("undefined variable '{}' in splice expression", name.as_str()))
-                ))
-            }
+            MetaExpr::Variable(name) => self.get(name).ok_or_else(|| {
+                MetaError::Other(Text::from(format!(
+                    "undefined variable '{}' in splice expression",
+                    name.as_str()
+                )))
+            }),
             MetaExpr::Literal(val) => Ok(val.clone()),
 
             // Binary operations - evaluate both sides and apply operator
@@ -2820,19 +2967,27 @@ impl MetaContext {
                 match &val {
                     ConstValue::Tuple(tup) => {
                         let i = *index as usize;
-                        tup.get(i).cloned().ok_or_else(|| MetaError::Other(
-                            Text::from(format!("tuple index {} out of bounds (len: {})", i, tup.len()))
-                        ))
+                        tup.get(i).cloned().ok_or_else(|| {
+                            MetaError::Other(Text::from(format!(
+                                "tuple index {} out of bounds (len: {})",
+                                i,
+                                tup.len()
+                            )))
+                        })
                     }
                     _ => Err(MetaError::TypeMismatch {
                         expected: Text::from("Tuple"),
                         found: Text::from(val.type_name()),
-                    })
+                    }),
                 }
             }
 
             // Method calls - support common methods on known types
-            MetaExpr::MethodCall { receiver, method, args } => {
+            MetaExpr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
                 let recv_val = self.evaluate_simple_meta_expr(receiver)?;
                 let method_name = method.as_str();
 
@@ -2845,21 +3000,21 @@ impl MetaContext {
                         Ok(ConstValue::Bool(arr.is_empty()))
                     }
                     (ConstValue::Array(arr), "first") if args.is_empty() => {
-                        arr.first().cloned().ok_or_else(|| MetaError::Other(
-                            Text::from("first() called on empty array")
-                        ))
+                        arr.first().cloned().ok_or_else(|| {
+                            MetaError::Other(Text::from("first() called on empty array"))
+                        })
                     }
                     (ConstValue::Array(arr), "last") if args.is_empty() => {
-                        arr.last().cloned().ok_or_else(|| MetaError::Other(
-                            Text::from("last() called on empty array")
-                        ))
+                        arr.last().cloned().ok_or_else(|| {
+                            MetaError::Other(Text::from("last() called on empty array"))
+                        })
                     }
                     (ConstValue::Array(arr), "get") if args.len() == 1 => {
                         let idx = self.evaluate_simple_meta_expr(&args[0])?;
                         if let ConstValue::Int(i) = idx {
-                            arr.get(i as usize).cloned().ok_or_else(|| MetaError::Other(
-                                Text::from(format!("index {} out of bounds", i))
-                            ))
+                            arr.get(i as usize).cloned().ok_or_else(|| {
+                                MetaError::Other(Text::from(format!("index {} out of bounds", i)))
+                            })
                         } else {
                             Err(MetaError::TypeMismatch {
                                 expected: Text::from("Int"),
@@ -2944,9 +3099,12 @@ impl MetaContext {
                     (ConstValue::Map(map), "get") if args.len() == 1 => {
                         let key = self.evaluate_simple_meta_expr(&args[0])?;
                         if let ConstValue::Text(k) = key {
-                            map.get(&k).cloned().ok_or_else(|| MetaError::Other(
-                                Text::from(format!("key '{}' not found in map", k.as_str()))
-                            ))
+                            map.get(&k).cloned().ok_or_else(|| {
+                                MetaError::Other(Text::from(format!(
+                                    "key '{}' not found in map",
+                                    k.as_str()
+                                )))
+                            })
                         } else {
                             Err(MetaError::TypeMismatch {
                                 expected: Text::from("Text"),
@@ -2956,9 +3114,7 @@ impl MetaContext {
                     }
 
                     // Numeric methods
-                    (ConstValue::Int(n), "abs") if args.is_empty() => {
-                        Ok(ConstValue::Int(n.abs()))
-                    }
+                    (ConstValue::Int(n), "abs") if args.is_empty() => Ok(ConstValue::Int(n.abs())),
                     (ConstValue::Float(n), "abs") if args.is_empty() => {
                         Ok(ConstValue::Float(n.abs()))
                     }
@@ -2975,18 +3131,20 @@ impl MetaContext {
                         Ok(ConstValue::Float(n.sqrt()))
                     }
 
-                    _ => Err(MetaError::Other(
-                        Text::from(format!(
-                            "unknown method '{}' on type '{}' in splice context",
-                            method_name,
-                            recv_val.type_name()
-                        ))
-                    ))
+                    _ => Err(MetaError::Other(Text::from(format!(
+                        "unknown method '{}' on type '{}' in splice context",
+                        method_name,
+                        recv_val.type_name()
+                    )))),
                 }
             }
 
             // If expression - evaluate condition and choose branch
-            MetaExpr::If { condition, then_branch, else_branch } => {
+            MetaExpr::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 let cond_val = self.evaluate_simple_meta_expr(condition)?;
                 if cond_val.as_bool() {
                     self.evaluate_simple_meta_expr(then_branch)
@@ -3000,14 +3158,15 @@ impl MetaContext {
             MetaExpr::FieldAccess { expr, field } => {
                 let val = self.evaluate_simple_meta_expr(expr)?;
                 match &val {
-                    ConstValue::Map(map) => {
-                        map.get(field).cloned().ok_or_else(|| MetaError::Other(
-                            Text::from(format!("field '{}' not found", field.as_str()))
-                        ))
-                    }
-                    _ => Err(MetaError::Other(
-                        Text::from("field access on non-map value")
-                    ))
+                    ConstValue::Map(map) => map.get(field).cloned().ok_or_else(|| {
+                        MetaError::Other(Text::from(format!(
+                            "field '{}' not found",
+                            field.as_str()
+                        )))
+                    }),
+                    _ => Err(MetaError::Other(Text::from(
+                        "field access on non-map value",
+                    ))),
                 }
             }
             MetaExpr::Index { expr, index } => {
@@ -3016,27 +3175,30 @@ impl MetaContext {
                 match (&val, &idx) {
                     (ConstValue::Array(arr), ConstValue::Int(i)) => {
                         let i = *i as usize;
-                        arr.get(i).cloned().ok_or_else(|| MetaError::Other(
-                            Text::from(format!("index {} out of bounds", i))
-                        ))
+                        arr.get(i).cloned().ok_or_else(|| {
+                            MetaError::Other(Text::from(format!("index {} out of bounds", i)))
+                        })
                     }
                     (ConstValue::Tuple(tup), ConstValue::Int(i)) => {
                         let i = *i as usize;
-                        tup.get(i).cloned().ok_or_else(|| MetaError::Other(
-                            Text::from(format!("tuple index {} out of bounds", i))
-                        ))
+                        tup.get(i).cloned().ok_or_else(|| {
+                            MetaError::Other(Text::from(format!("tuple index {} out of bounds", i)))
+                        })
                     }
                     (ConstValue::Text(s), ConstValue::Int(i)) => {
                         let i = *i as usize;
-                        s.as_str().chars().nth(i)
+                        s.as_str()
+                            .chars()
+                            .nth(i)
                             .map(|c| ConstValue::Text(Text::from(c.to_string())))
-                            .ok_or_else(|| MetaError::Other(
-                                Text::from(format!("string index {} out of bounds", i))
-                            ))
+                            .ok_or_else(|| {
+                                MetaError::Other(Text::from(format!(
+                                    "string index {} out of bounds",
+                                    i
+                                )))
+                            })
                     }
-                    _ => Err(MetaError::Other(
-                        Text::from("invalid index operation")
-                    ))
+                    _ => Err(MetaError::Other(Text::from("invalid index operation"))),
                 }
             }
 
@@ -3054,31 +3216,47 @@ impl MetaContext {
                             _ => Err(MetaError::TypeMismatch {
                                 expected: Text::from("Array, Text, Tuple, or Map"),
                                 found: Text::from(val.type_name()),
-                            })
+                            }),
                         }
                     }
                     "min" if args.len() == 2 => {
                         let a = self.evaluate_simple_meta_expr(&args[0])?;
                         let b = self.evaluate_simple_meta_expr(&args[1])?;
                         match (&a, &b) {
-                            (ConstValue::Int(x), ConstValue::Int(y)) => Ok(ConstValue::Int((*x).min(*y))),
-                            (ConstValue::Float(x), ConstValue::Float(y)) => Ok(ConstValue::Float(x.min(*y))),
+                            (ConstValue::Int(x), ConstValue::Int(y)) => {
+                                Ok(ConstValue::Int((*x).min(*y)))
+                            }
+                            (ConstValue::Float(x), ConstValue::Float(y)) => {
+                                Ok(ConstValue::Float(x.min(*y)))
+                            }
                             _ => Err(MetaError::TypeMismatch {
                                 expected: Text::from("numeric types"),
-                                found: Text::from(format!("({}, {})", a.type_name(), b.type_name())),
-                            })
+                                found: Text::from(format!(
+                                    "({}, {})",
+                                    a.type_name(),
+                                    b.type_name()
+                                )),
+                            }),
                         }
                     }
                     "max" if args.len() == 2 => {
                         let a = self.evaluate_simple_meta_expr(&args[0])?;
                         let b = self.evaluate_simple_meta_expr(&args[1])?;
                         match (&a, &b) {
-                            (ConstValue::Int(x), ConstValue::Int(y)) => Ok(ConstValue::Int((*x).max(*y))),
-                            (ConstValue::Float(x), ConstValue::Float(y)) => Ok(ConstValue::Float(x.max(*y))),
+                            (ConstValue::Int(x), ConstValue::Int(y)) => {
+                                Ok(ConstValue::Int((*x).max(*y)))
+                            }
+                            (ConstValue::Float(x), ConstValue::Float(y)) => {
+                                Ok(ConstValue::Float(x.max(*y)))
+                            }
                             _ => Err(MetaError::TypeMismatch {
                                 expected: Text::from("numeric types"),
-                                found: Text::from(format!("({}, {})", a.type_name(), b.type_name())),
-                            })
+                                found: Text::from(format!(
+                                    "({}, {})",
+                                    a.type_name(),
+                                    b.type_name()
+                                )),
+                            }),
                         }
                     }
                     "abs" if args.len() == 1 => {
@@ -3089,7 +3267,7 @@ impl MetaContext {
                             _ => Err(MetaError::TypeMismatch {
                                 expected: Text::from("Int or Float"),
                                 found: Text::from(val.type_name()),
-                            })
+                            }),
                         }
                     }
                     "sqrt" if args.len() == 1 => {
@@ -3100,7 +3278,7 @@ impl MetaContext {
                             _ => Err(MetaError::TypeMismatch {
                                 expected: Text::from("Float"),
                                 found: Text::from(val.type_name()),
-                            })
+                            }),
                         }
                     }
                     "to_string" if args.len() == 1 => {
@@ -3111,18 +3289,16 @@ impl MetaContext {
                         let val = self.evaluate_simple_meta_expr(&args[0])?;
                         Ok(ConstValue::Text(Text::from(val.type_name())))
                     }
-                    _ => Err(MetaError::Other(
-                        Text::from(format!(
-                            "unknown function '{}' in splice context (use $var for complex expressions)",
-                            func_name
-                        ))
-                    ))
+                    _ => Err(MetaError::Other(Text::from(format!(
+                        "unknown function '{}' in splice context (use $var for complex expressions)",
+                        func_name
+                    )))),
                 }
             }
 
-            _ => Err(MetaError::Other(
-                Text::from("expression type not supported in splice context - use $var for complex expressions")
-            ))
+            _ => Err(MetaError::Other(Text::from(
+                "expression type not supported in splice context - use $var for complex expressions",
+            ))),
         }
     }
 
@@ -3135,7 +3311,7 @@ impl MetaContext {
         inner_tokens: &List<verum_ast::expr::TokenTree>,
         _span: Span,
     ) -> Result<List<verum_ast::expr::TokenTree>, MetaError> {
-        use verum_ast::expr::{TokenTree, TokenTreeKind, MacroDelimiter};
+        use verum_ast::expr::{MacroDelimiter, TokenTree, TokenTreeKind};
 
         // Parse the repetition structure: for pattern in iter { body }
         // Expected tokens: for, pattern, in, iter_name, { body_tokens }
@@ -3180,7 +3356,11 @@ impl MetaContext {
                     });
                 }
             }
-            TokenTree::Group { delimiter: MacroDelimiter::Paren, tokens: pattern_tokens, .. } => {
+            TokenTree::Group {
+                delimiter: MacroDelimiter::Paren,
+                tokens: pattern_tokens,
+                ..
+            } => {
                 // Tuple pattern: extract identifiers
                 let mut names = List::new();
                 for ptok in pattern_tokens.iter() {
@@ -3266,12 +3446,14 @@ impl MetaContext {
         };
 
         // Look up the iterator value
-        let iter_value = self.get(&iter_name).ok_or_else(|| MetaError::InvalidQuoteSyntax {
-            message: Text::from(format!(
-                "unbound variable '{}' in repetition",
-                iter_name.as_str()
-            )),
-        })?;
+        let iter_value = self
+            .get(&iter_name)
+            .ok_or_else(|| MetaError::InvalidQuoteSyntax {
+                message: Text::from(format!(
+                    "unbound variable '{}' in repetition",
+                    iter_name.as_str()
+                )),
+            })?;
 
         // Get elements to iterate over
         let elements = match iter_value {
@@ -3304,7 +3486,8 @@ impl MetaContext {
                                 )),
                             });
                         }
-                        pattern_names.iter()
+                        pattern_names
+                            .iter()
                             .zip(tuple_elems.iter())
                             .map(|(name, val)| (name.clone(), val.clone()))
                             .collect()
@@ -3323,10 +3506,7 @@ impl MetaContext {
             };
 
             // Create a child context with the pattern variables bound
-            let expanded_body = self.expand_repetition_body_multi(
-                &body_tokens,
-                &bindings,
-            )?;
+            let expanded_body = self.expand_repetition_body_multi(&body_tokens, &bindings)?;
             for t in expanded_body {
                 result.push(t);
             }
@@ -3369,7 +3549,8 @@ impl MetaContext {
                                     let mut found = false;
                                     for (var_name, var_value) in bindings.iter() {
                                         if splice_name == *var_name {
-                                            let tokens = self.const_value_to_tokens(var_value, next_tok.span)?;
+                                            let tokens = self
+                                                .const_value_to_tokens(var_value, next_tok.span)?;
                                             for t in tokens {
                                                 result.push(t);
                                             }
@@ -3384,7 +3565,8 @@ impl MetaContext {
 
                                     // Otherwise, look up in the meta scope
                                     if let Some(value) = self.get(&splice_name) {
-                                        let tokens = self.const_value_to_tokens(&value, next_tok.span)?;
+                                        let tokens =
+                                            self.const_value_to_tokens(&value, next_tok.span)?;
                                         for t in tokens {
                                             result.push(t);
                                         }
@@ -3405,7 +3587,11 @@ impl MetaContext {
                     }
                 }
 
-                TokenTree::Group { delimiter, tokens: inner, span } => {
+                TokenTree::Group {
+                    delimiter,
+                    tokens: inner,
+                    span,
+                } => {
                     // Recursively expand in nested groups
                     let expanded_inner = self.expand_repetition_body_multi(inner, bindings)?;
                     result.push(TokenTree::Group {
@@ -3430,7 +3616,7 @@ impl MetaContext {
         value: &ConstValue,
         span: Span,
     ) -> Result<List<verum_ast::expr::TokenTree>, MetaError> {
-        use verum_ast::expr::{TokenTree, TokenTreeToken, TokenTreeKind};
+        use verum_ast::expr::{TokenTree, TokenTreeKind, TokenTreeToken};
 
         let mut result = List::new();
 
@@ -3585,7 +3771,7 @@ impl MetaContext {
 
     /// Convert tokens to source text for parsing
     fn tokens_to_source_text(&self, tokens: &List<verum_ast::expr::TokenTree>) -> String {
-        use verum_ast::expr::{TokenTree, MacroDelimiter};
+        use verum_ast::expr::{MacroDelimiter, TokenTree};
 
         let mut result = String::new();
         let mut prev_needs_space = false;
@@ -3596,8 +3782,10 @@ impl MetaContext {
                     // Add space between tokens if needed
                     if prev_needs_space && !result.is_empty() {
                         let text = tok.text.as_str();
-                        if !text.starts_with(',') && !text.starts_with(';')
-                            && !text.starts_with(')') && !text.starts_with(']')
+                        if !text.starts_with(',')
+                            && !text.starts_with(';')
+                            && !text.starts_with(')')
+                            && !text.starts_with(']')
                             && !text.starts_with('}')
                         {
                             result.push(' ');
@@ -3606,7 +3794,11 @@ impl MetaContext {
                     result.push_str(tok.text.as_str());
                     prev_needs_space = true;
                 }
-                TokenTree::Group { delimiter, tokens: inner, .. } => {
+                TokenTree::Group {
+                    delimiter,
+                    tokens: inner,
+                    ..
+                } => {
                     let (open, close) = match delimiter {
                         MacroDelimiter::Paren => ('(', ')'),
                         MacroDelimiter::Brace => ('{', '}'),
@@ -3647,7 +3839,7 @@ impl MetaContext {
             if let Some(binding_name) = local_bindings.iter().next() {
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG] M402 triggered for shadow conflict: '{}' in @transparent macro",
-//  binding_name.as_str());
+                //  binding_name.as_str());
                 violations.push(MetaError::HygieneViolation {
                     identifier: binding_name.clone(),
                     message: Text::from(format!(
@@ -3662,7 +3854,13 @@ impl MetaContext {
         // Now analyze with knowledge of local bindings
         // Pass check_double_splice=true for the outermost quote
         // Pass inside_meta_fn=false because we're at the outermost level
-        self.analyze_token_tree_hygiene_with_locals(tokens, &local_bindings, violations, true, false);
+        self.analyze_token_tree_hygiene_with_locals(
+            tokens,
+            &local_bindings,
+            violations,
+            true,
+            false,
+        );
     }
 
     /// Collect all identifiers that are declared within the quote's token tree
@@ -3678,7 +3876,7 @@ impl MetaContext {
         &self,
         tokens: &List<verum_ast::expr::TokenTree>,
     ) -> std::collections::HashSet<Text> {
-        use verum_ast::expr::{TokenTree, TokenTreeKind, MacroDelimiter};
+        use verum_ast::expr::{MacroDelimiter, TokenTree, TokenTreeKind};
 
         let mut bindings = std::collections::HashSet::new();
         let mut i = 0;
@@ -3689,7 +3887,7 @@ impl MetaContext {
                     // Helper: check if token is a keyword (can be Ident or Keyword kind)
                     let is_keyword = |t: &verum_ast::expr::TokenTreeToken, kw: &str| {
                         (t.kind == TokenTreeKind::Ident || t.kind == TokenTreeKind::Keyword)
-                        && t.text.as_str() == kw
+                            && t.text.as_str() == kw
                     };
 
                     // Check for `let` keyword followed by identifier
@@ -3698,8 +3896,10 @@ impl MetaContext {
                         // Note: Some keywords (like `result`) can be used as variable names
                         if i + 1 < tokens.len() {
                             match &tokens[i + 1] {
-                                TokenTree::Token(next) if next.kind == TokenTreeKind::Ident
-                                    || next.kind == TokenTreeKind::Keyword => {
+                                TokenTree::Token(next)
+                                    if next.kind == TokenTreeKind::Ident
+                                        || next.kind == TokenTreeKind::Keyword =>
+                                {
                                     let name = Text::from(next.text.as_str());
                                     // Don't treat actual keywords like let, fn, etc. as bindings
                                     // but contextual keywords like 'result' can be variable names
@@ -3708,7 +3908,11 @@ impl MetaContext {
                                     }
                                 }
                                 // Tuple pattern: let (a, b) = ...
-                                TokenTree::Group { delimiter: MacroDelimiter::Paren, tokens: inner, .. } => {
+                                TokenTree::Group {
+                                    delimiter: MacroDelimiter::Paren,
+                                    tokens: inner,
+                                    ..
+                                } => {
                                     self.collect_pattern_bindings(inner, &mut bindings);
                                 }
                                 _ => {}
@@ -3733,12 +3937,19 @@ impl MetaContext {
                         // Skip function name, look for parameter list
                         let mut j = i + 1;
                         while j < tokens.len() {
-                            if let TokenTree::Group { delimiter: MacroDelimiter::Paren, tokens: params, .. } = &tokens[j] {
+                            if let TokenTree::Group {
+                                delimiter: MacroDelimiter::Paren,
+                                tokens: params,
+                                ..
+                            } = &tokens[j]
+                            {
                                 self.collect_fn_param_bindings(params, &mut bindings);
                                 break;
                             }
                             j += 1;
-                            if j > i + 3 { break; } // Don't look too far
+                            if j > i + 3 {
+                                break;
+                            } // Don't look too far
                         }
                     }
                     // Check for closure: |params| ...
@@ -3847,12 +4058,12 @@ impl MetaContext {
         check_double_splice: bool,
         inside_meta_fn: bool,
     ) {
-        use verum_ast::expr::{TokenTree, TokenTreeKind, MacroDelimiter};
+        use verum_ast::expr::{MacroDelimiter, TokenTree, TokenTreeKind};
 
         #[cfg(debug_assertions)]
         {
             // eprintln!("[DEBUG] analyze_token_tree_hygiene: {} tokens, {} local bindings",
-//  tokens.len(), local_bindings.len());
+            //  tokens.len(), local_bindings.len());
             for binding in local_bindings.iter() {
                 eprintln!("  [LOCAL] {}", binding.as_str());
             }
@@ -3860,10 +4071,24 @@ impl MetaContext {
             for (idx, tok) in tokens.iter().enumerate().take(20) {
                 match tok {
                     verum_ast::expr::TokenTree::Token(t) => {
-                        eprintln!("  Token[{}]: kind={:?}, text='{}'", idx, t.kind, t.text.as_str());
+                        eprintln!(
+                            "  Token[{}]: kind={:?}, text='{}'",
+                            idx,
+                            t.kind,
+                            t.text.as_str()
+                        );
                     }
-                    verum_ast::expr::TokenTree::Group { delimiter, tokens: inner, .. } => {
-                        eprintln!("  Group[{}]: {:?} with {} inner tokens", idx, delimiter, inner.len());
+                    verum_ast::expr::TokenTree::Group {
+                        delimiter,
+                        tokens: inner,
+                        ..
+                    } => {
+                        eprintln!(
+                            "  Group[{}]: {:?} with {} inner tokens",
+                            idx,
+                            delimiter,
+                            inner.len()
+                        );
                     }
                 }
             }
@@ -3881,8 +4106,10 @@ impl MetaContext {
         // Track indices of identifiers that are being defined (not referenced)
         // These follow: fn, meta fn, type, implement, context, module, protocol
         // Also track type references (after -> or :) which should not trigger hygiene checks
-        let mut definition_idents: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        let mut type_reference_idents: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut definition_idents: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+        let mut type_reference_idents: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
 
         // First pass: find all identifiers that are being defined or are type references
         let mut i = 0;
@@ -3991,7 +4218,10 @@ impl MetaContext {
                     // (inner quote accesses outer quote's scope)
                     // Note: The lexer may tokenize $$ as a single token with text="$$"
                     // or as two separate $ tokens. Check both cases.
-                    if check_double_splice && token.kind == TokenTreeKind::Punct && token.text.as_str() == "$$" {
+                    if check_double_splice
+                        && token.kind == TokenTreeKind::Punct
+                        && token.text.as_str() == "$$"
+                    {
                         // Single $$ token case
                         // Look for the identifier after $$
                         let var_hint = if i + 1 < tokens.len() {
@@ -4020,7 +4250,10 @@ impl MetaContext {
                         return; // Report first violation
                     }
                     // Also check for two separate $ tokens (alternative tokenization)
-                    if check_double_splice && token.kind == TokenTreeKind::Punct && token.text.as_str() == "$" {
+                    if check_double_splice
+                        && token.kind == TokenTreeKind::Punct
+                        && token.text.as_str() == "$"
+                    {
                         if i + 1 < tokens.len() {
                             if let TokenTree::Token(next) = &tokens[i + 1] {
                                 if next.kind == TokenTreeKind::Punct && next.text.as_str() == "$" {
@@ -4061,7 +4294,9 @@ impl MetaContext {
                         if i + 1 < tokens.len() {
                             match &tokens[i + 1] {
                                 // $ident pattern
-                                TokenTree::Token(next_token) if next_token.kind == TokenTreeKind::Ident => {
+                                TokenTree::Token(next_token)
+                                    if next_token.kind == TokenTreeKind::Ident =>
+                                {
                                     let var_name = Text::from(next_token.text.as_str());
                                     // Check if this variable is in the current meta scope
                                     if self.get(&var_name).is_none() {
@@ -4076,13 +4311,21 @@ impl MetaContext {
                                     i += 1; // Skip the ident token
                                 }
                                 // ${expr} pattern
-                                TokenTree::Group { delimiter: MacroDelimiter::Brace, tokens: inner_tokens, span } => {
+                                TokenTree::Group {
+                                    delimiter: MacroDelimiter::Brace,
+                                    tokens: inner_tokens,
+                                    span,
+                                } => {
                                     // Analyze the expression inside the splice
                                     self.analyze_splice_expr(inner_tokens, *span, violations);
                                     i += 1; // Skip the group
                                 }
                                 // $[...] pattern - check for repetition syntax
-                                TokenTree::Group { delimiter: MacroDelimiter::Bracket, tokens: inner_tokens, .. } => {
+                                TokenTree::Group {
+                                    delimiter: MacroDelimiter::Bracket,
+                                    tokens: inner_tokens,
+                                    ..
+                                } => {
                                     // $[...] must be a repetition: $[for ... in ... { ... }]
                                     // Check if the first token is 'for' (can be Ident or Keyword kind)
                                     let is_valid_repetition = inner_tokens.first().map_or(false, |t| {
@@ -4093,7 +4336,9 @@ impl MetaContext {
                                     if !is_valid_repetition {
                                         // M400: Invalid quote syntax - $[...] requires 'for' for repetition
                                         violations.push(MetaError::InvalidQuoteSyntax {
-                                            message: Text::from("expected 'for' after '$[' for repetition syntax"),
+                                            message: Text::from(
+                                                "expected 'for' after '$[' for repetition syntax",
+                                            ),
                                         });
                                     } else {
                                         // M409: Check for zip with mismatched lengths
@@ -4114,15 +4359,21 @@ impl MetaContext {
                     // Check for lift() calls and validate the argument type
                     // M406 is emitted for unliftable types (Expr, Type, Pattern, Item - AST nodes)
                     // lift can be tokenized as Ident, Keyword, or Punct (with text "Lift")
-                    else if ((token.kind == TokenTreeKind::Ident || token.kind == TokenTreeKind::Keyword)
-                             && token.text.as_str() == "lift")
-                         || (token.kind == TokenTreeKind::Punct
-                             && token.text.as_str().eq_ignore_ascii_case("lift"))
+                    else if ((token.kind == TokenTreeKind::Ident
+                        || token.kind == TokenTreeKind::Keyword)
+                        && token.text.as_str() == "lift")
+                        || (token.kind == TokenTreeKind::Punct
+                            && token.text.as_str().eq_ignore_ascii_case("lift"))
                     {
                         // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG] Found 'lift' at index {}", i);
                         if i + 1 < tokens.len() {
-                            if let TokenTree::Group { delimiter: MacroDelimiter::Paren, tokens: lift_args, .. } = &tokens[i + 1] {
+                            if let TokenTree::Group {
+                                delimiter: MacroDelimiter::Paren,
+                                tokens: lift_args,
+                                ..
+                            } = &tokens[i + 1]
+                            {
                                 // Check if the lift argument is an unliftable type
                                 // Look for the identifier being lifted
                                 if let Some(TokenTree::Token(arg_tok)) = lift_args.first() {
@@ -4134,11 +4385,11 @@ impl MetaContext {
                                             // These are AST nodes that don't have a syntactic representation as literals
                                             let is_unliftable = matches!(
                                                 value,
-                                                ConstValue::Expr(_) |
-                                                ConstValue::Type(_) |
-                                                ConstValue::Pattern(_) |
-                                                ConstValue::Item(_) |
-                                                ConstValue::Items(_)
+                                                ConstValue::Expr(_)
+                                                    | ConstValue::Type(_)
+                                                    | ConstValue::Pattern(_)
+                                                    | ConstValue::Item(_)
+                                                    | ConstValue::Items(_)
                                             );
                                             if is_unliftable {
                                                 // #[cfg(debug_assertions)]
@@ -4165,7 +4416,9 @@ impl MetaContext {
                         }
                     }
                     // Check for bare identifiers that might be accessing meta scope
-                    else if token.kind == TokenTreeKind::Ident || token.kind == TokenTreeKind::Keyword {
+                    else if token.kind == TokenTreeKind::Ident
+                        || token.kind == TokenTreeKind::Keyword
+                    {
                         let var_name = Text::from(token.text.as_str());
 
                         // Skip identifiers that are being DEFINED (e.g., fn name, type Name)
@@ -4188,7 +4441,12 @@ impl MetaContext {
 
                         // Skip identifiers that start with uppercase - these are typically type names
                         // In Verum (like many languages), types use PascalCase, variables use snake_case
-                        if var_name.as_str().chars().next().map_or(false, |c| c.is_uppercase()) {
+                        if var_name
+                            .as_str()
+                            .chars()
+                            .next()
+                            .map_or(false, |c| c.is_uppercase())
+                        {
                             // #[cfg(debug_assertions)]
                             // eprintln!("[DEBUG] Skipping uppercase identifier '{}' (likely type name)", var_name.as_str());
                             i += 1;
@@ -4196,12 +4454,14 @@ impl MetaContext {
                         }
 
                         // Skip reserved keywords, builtins, and locally declared identifiers
-                        if !self.is_keyword_or_builtin(&var_name) && !local_bindings.contains(&var_name) {
+                        if !self.is_keyword_or_builtin(&var_name)
+                            && !local_bindings.contains(&var_name)
+                        {
                             // Check if this identifier exists in the meta scope
                             if self.get(&var_name).is_some() {
                                 // #[cfg(debug_assertions)]
                                 // eprintln!("[DEBUG] M405 triggered for identifier: '{}' (stage mismatch - meta binding used in quote)",
-//  var_name.as_str());
+                                //  var_name.as_str());
                                 // M405: Quote stage error - referencing stage 1 binding from stage 0 code
                                 // The user should use $var_name (splice) or lift(var_name) to cross stages
                                 violations.push(MetaError::QuoteStageError {
@@ -4214,7 +4474,7 @@ impl MetaContext {
                                 // This is dangerous - user should use explicit splice $ or lift().
                                 // #[cfg(debug_assertions)]
                                 // eprintln!("[DEBUG] M402 triggered for identifier: '{}' (potential capture in @transparent macro)",
-//  var_name.as_str());
+                                //  var_name.as_str());
                                 violations.push(MetaError::HygieneViolation {
                                     identifier: var_name,
                                     message: Text::from(format!(
@@ -4233,7 +4493,7 @@ impl MetaContext {
                                 // splice a meta-level binding but forgot to use $
                                 // #[cfg(debug_assertions)]
                                 // eprintln!("[DEBUG] M408 triggered for identifier: '{}' (undeclared capture)",
-//  var_name.as_str());
+                                //  var_name.as_str());
                                 violations.push(MetaError::CaptureNotDeclared {
                                     identifier: var_name,
                                     span: token.span,
@@ -4243,7 +4503,11 @@ impl MetaContext {
                         }
                     }
                 }
-                TokenTree::Group { tokens: inner_tokens, delimiter, .. } => {
+                TokenTree::Group {
+                    tokens: inner_tokens,
+                    delimiter,
+                    ..
+                } => {
                     // Check if this is a nested quote block: `quote { ... }`
                     // If so, don't check for double-splice $$ in the nested quote
                     // because $$x is valid for inner quotes to access outer scope
@@ -4253,9 +4517,9 @@ impl MetaContext {
                             // The quote keyword can be tokenized as:
                             // - kind=Keyword/Ident, text="quote"
                             // - kind=Punct, text="QuoteKeyword"
-                            let is_quote_keyword =
-                                (is_keyword_token(prev, "quote"))
-                                || (prev.kind == TokenTreeKind::Punct && prev.text.as_str() == "QuoteKeyword");
+                            let is_quote_keyword = (is_keyword_token(prev, "quote"))
+                                || (prev.kind == TokenTreeKind::Punct
+                                    && prev.text.as_str() == "QuoteKeyword");
                             is_quote_keyword && *delimiter == MacroDelimiter::Brace
                         } else {
                             false
@@ -4280,9 +4544,7 @@ impl MetaContext {
                                 } else if saw_meta && is_keyword_token(t, "fn") {
                                     is_meta_fn = true;
                                     break;
-                                } else if t.kind == TokenTreeKind::Punct
-                                    && t.text.as_str() == ";"
-                                {
+                                } else if t.kind == TokenTreeKind::Punct && t.text.as_str() == ";" {
                                     saw_meta = false; // Reset on semicolon (new statement)
                                 }
                             }
@@ -4365,7 +4627,10 @@ impl MetaContext {
                         }
                     }
                 }
-                TokenTree::Group { tokens: inner_tokens, .. } => {
+                TokenTree::Group {
+                    tokens: inner_tokens,
+                    ..
+                } => {
                     // Recursively check nested groups
                     self.analyze_splice_expr(inner_tokens, span, violations);
                 }
@@ -4377,9 +4642,11 @@ impl MetaContext {
     /// Check if a name is a keyword or builtin that shouldn't be checked for scope
     fn is_keyword_or_builtin(&self, name: &Text) -> bool {
         let n = name.as_str();
-        is_primitive_type_name(n) || matches!(n,
-            // Keywords
-            "let" | "fn" | "if" | "else" | "match" | "for" | "while" | "loop" |
+        is_primitive_type_name(n)
+            || matches!(
+                n,
+                // Keywords
+                "let" | "fn" | "if" | "else" | "match" | "for" | "while" | "loop" |
             "return" | "break" | "continue" | "true" | "false" | "in" | "is" |
             "type" | "implement" | "meta" | "quote" | "using" | "provide" |
             // Common builtins
@@ -4387,24 +4654,66 @@ impl MetaContext {
             // Meta builtins
             "type_name" | "fields_of" | "variants_of" | "ident" | "concat" |
             "stringify" | "lift" | "gensym" | "unquote"
-        )
+            )
     }
 
     /// Check if a name is a reserved keyword that cannot be used as a variable name
     /// This excludes contextual keywords like 'result' that can be used as identifiers
     fn is_reserved_keyword(&self, name: &Text) -> bool {
-        matches!(name.as_str(),
+        matches!(
+            name.as_str(),
             // Reserved keywords that cannot be variable names
-            "let" | "fn" | "if" | "else" | "match" | "for" | "while" | "loop" |
-            "return" | "break" | "continue" | "true" | "false" | "in" | "is" |
-            "type" | "implement" | "meta" | "quote" | "using" | "provide" |
-            "async" | "await" | "spawn" | "mut" | "const" | "static" |
-            "pub" | "public" | "private" | "internal" | "protected" |
-            "module" | "protocol" | "extends" | "where" | "as" | "ref" | "move" |
-            "unsafe" | "context" | "defer" | "stream" | "yield" | "self" | "Self" |
-            variant_tags::NONE | variant_tags::SOME | variant_tags::OK | variant_tags::ERR
-            // Note: 'result', 'ensures', 'requires', 'invariant' are contextual keywords
-            // that CAN be used as variable names
+            "let"
+                | "fn"
+                | "if"
+                | "else"
+                | "match"
+                | "for"
+                | "while"
+                | "loop"
+                | "return"
+                | "break"
+                | "continue"
+                | "true"
+                | "false"
+                | "in"
+                | "is"
+                | "type"
+                | "implement"
+                | "meta"
+                | "quote"
+                | "using"
+                | "provide"
+                | "async"
+                | "await"
+                | "spawn"
+                | "mut"
+                | "const"
+                | "static"
+                | "pub"
+                | "public"
+                | "private"
+                | "internal"
+                | "protected"
+                | "module"
+                | "protocol"
+                | "extends"
+                | "where"
+                | "as"
+                | "ref"
+                | "move"
+                | "unsafe"
+                | "context"
+                | "defer"
+                | "stream"
+                | "yield"
+                | "self"
+                | "Self"
+                | variant_tags::NONE
+                | variant_tags::SOME
+                | variant_tags::OK
+                | variant_tags::ERR // Note: 'result', 'ensures', 'requires', 'invariant' are contextual keywords
+                                    // that CAN be used as variable names
         )
     }
 
@@ -4418,7 +4727,7 @@ impl MetaContext {
         tokens: &List<verum_ast::expr::TokenTree>,
         violations: &mut Vec<MetaError>,
     ) {
-        use verum_ast::expr::{TokenTree, TokenTreeKind, MacroDelimiter};
+        use verum_ast::expr::{MacroDelimiter, TokenTree, TokenTreeKind};
 
         // Look for pattern: for ... in zip(var1, var2) { ... }
         // Tokens should be: for, pattern, in, zip, (args...), { body }
@@ -4467,8 +4776,8 @@ impl MetaContext {
                                         if first_len != other_len {
                                             // #[cfg(debug_assertions)]
                                             // eprintln!("[DEBUG] M409 triggered: '{}' has {} elements, '{}' has {}",
-//  first_name.as_str(), first_len,
-//  other_name.as_str(), other_len);
+                                            //  first_name.as_str(), first_len,
+                                            //  other_name.as_str(), other_len);
 
                                             violations.push(MetaError::RepetitionMismatch {
                                                 first_name: first_name.clone(),
@@ -4491,10 +4800,7 @@ impl MetaContext {
 
     /// Extract variable names from zip() arguments
     /// Returns a list of variable names found in the argument tokens
-    fn extract_zip_arg_names(
-        &self,
-        tokens: &List<verum_ast::expr::TokenTree>,
-    ) -> Vec<Text> {
+    fn extract_zip_arg_names(&self, tokens: &List<verum_ast::expr::TokenTree>) -> Vec<Text> {
         use verum_ast::expr::{TokenTree, TokenTreeKind};
 
         let mut names = Vec::new();
@@ -4535,11 +4841,18 @@ pub(crate) fn hygiene_violation_to_diagnostic(
 ) -> verum_diagnostics::Diagnostic {
     use verum_diagnostics::DiagnosticBuilder;
     let v_span = v.span();
-    let resolved_span = if v_span.is_dummy() { fallback_span } else { v_span };
+    let resolved_span = if v_span.is_dummy() {
+        fallback_span
+    } else {
+        v_span
+    };
     DiagnosticBuilder::warning()
         .code(verum_common::Text::from(v.error_code()))
         .message(v.message())
-        .span(crate::phases::ast_span_to_diagnostic_span(resolved_span, None))
+        .span(crate::phases::ast_span_to_diagnostic_span(
+            resolved_span,
+            None,
+        ))
         .build()
 }
 
@@ -4586,12 +4899,8 @@ pub(crate) fn const_value_alloc_size(v: &ConstValue) -> usize {
         | MetaValue::Int(_)
         | MetaValue::Float(_) => WORD,
         MetaValue::Text(s) => WORD + s.as_str().len(),
-        MetaValue::Array(arr) => {
-            VEC_HEADER + arr.iter().map(const_value_alloc_size).sum::<usize>()
-        }
-        MetaValue::Tuple(arr) => {
-            VEC_HEADER + arr.iter().map(const_value_alloc_size).sum::<usize>()
-        }
+        MetaValue::Array(arr) => VEC_HEADER + arr.iter().map(const_value_alloc_size).sum::<usize>(),
+        MetaValue::Tuple(arr) => VEC_HEADER + arr.iter().map(const_value_alloc_size).sum::<usize>(),
         // Other MetaValue variants (Type, Expr, Path, …) are
         // heap-allocated AST nodes; approximate at 4 words.
         // Refinement is welcome but the budget-tracking
@@ -4608,7 +4917,10 @@ mod hygiene_diagnostic_tests {
     //! conversion preserves M4xx error codes and routes the
     //! per-violation span through the standard span adapter.
     use super::*;
-    use crate::hygiene::{HygieneViolation, scope::{HygienicIdent, ScopeSet}};
+    use crate::hygiene::{
+        HygieneViolation,
+        scope::{HygienicIdent, ScopeSet},
+    };
     use verum_ast::span::Span;
     use verum_common::Text;
 
@@ -4616,21 +4928,13 @@ mod hygiene_diagnostic_tests {
         // Construct a non-dummy span with a known byte offset so
         // the resolved-span branch can be pinned (the dummy-span
         // fallback case is exercised by a sister test).
-        verum_common::span::Span::new(
-            byte_offset,
-            byte_offset + 1,
-            verum_ast::FileId::new(0),
-        )
+        verum_common::span::Span::new(byte_offset, byte_offset + 1, verum_ast::FileId::new(0))
     }
 
     #[test]
     fn accidental_capture_yields_m402_warning() {
         let violation = HygieneViolation::AccidentalCapture {
-            captured: HygienicIdent::new(
-                Text::from("foo"),
-                ScopeSet::default(),
-                dummy_span_at(42),
-            ),
+            captured: HygienicIdent::new(Text::from("foo"), ScopeSet::default(), dummy_span_at(42)),
             intended_binding: dummy_span_at(10),
             actual_binding: dummy_span_at(20),
         };
@@ -4651,11 +4955,7 @@ mod hygiene_diagnostic_tests {
     #[test]
     fn shadow_conflict_yields_m402_warning() {
         let violation = HygieneViolation::ShadowConflict {
-            shadowed: HygienicIdent::new(
-                Text::from("bar"),
-                ScopeSet::default(),
-                dummy_span_at(7),
-            ),
+            shadowed: HygienicIdent::new(Text::from("bar"), ScopeSet::default(), dummy_span_at(7)),
             introduced_at: dummy_span_at(7),
         };
         let diag = hygiene_violation_to_diagnostic(&violation, Span::dummy());
@@ -4738,7 +5038,7 @@ mod hygiene_diagnostic_tests {
     /// fires.
     #[test]
     fn shadow_violation_fires_when_post_splice_names_a_meta_local() {
-        use verum_ast::expr::{TokenTree, TokenTreeToken, TokenTreeKind};
+        use verum_ast::expr::{TokenTree, TokenTreeKind, TokenTreeToken};
         let mut ctx = MetaContext::new();
         // Bind a meta-local "outer_var" — this represents a let
         // in the meta function's body, the kind of scope the
@@ -4787,11 +5087,7 @@ mod iteration_limit_tests {
     //! (default 1_000_000, override via SecurityContext) to the
     //! actual loop counters.
     use super::*;
-    use crate::meta::ir::{
-        expr::MetaExpr,
-        pattern::MetaPattern,
-        stmt::MetaStmt,
-    };
+    use crate::meta::ir::{expr::MetaExpr, pattern::MetaPattern, stmt::MetaStmt};
     use verum_common::{Heap, List};
 
     #[test]
@@ -4799,9 +5095,7 @@ mod iteration_limit_tests {
         let mut ctx = MetaContext::new();
         ctx.iteration_limit = 3; // Cap to 3 iterations.
         // Build a 5-element array iterable.
-        let elements: Vec<ConstValue> = (0..5)
-            .map(|i| ConstValue::Int(i as i128))
-            .collect();
+        let elements: Vec<ConstValue> = (0..5).map(|i| ConstValue::Int(i as i128)).collect();
         let iter_expr = MetaExpr::Literal(ConstValue::Array(List::from(elements)));
         let body: List<MetaStmt> = List::new();
         let for_expr = MetaExpr::For {
@@ -4823,9 +5117,7 @@ mod iteration_limit_tests {
     fn for_loop_within_limit_completes_normally() {
         let mut ctx = MetaContext::new();
         ctx.iteration_limit = 100;
-        let elements: Vec<ConstValue> = (0..5)
-            .map(|i| ConstValue::Int(i as i128))
-            .collect();
+        let elements: Vec<ConstValue> = (0..5).map(|i| ConstValue::Int(i as i128)).collect();
         let iter_expr = MetaExpr::Literal(ConstValue::Array(List::from(elements)));
         let body: List<MetaStmt> = List::new();
         let for_expr = MetaExpr::For {
@@ -4954,7 +5246,10 @@ mod iteration_limit_tests {
         assert_eq!(ctx.peak_memory, 0);
         ctx.track_allocation(2048).expect("ok");
         assert_eq!(ctx.memory_used, 2048);
-        assert_eq!(ctx.peak_memory, 2048, "peak_memory must mirror memory_used on growth");
+        assert_eq!(
+            ctx.peak_memory, 2048,
+            "peak_memory must mirror memory_used on growth"
+        );
     }
 
     /// Pin: const_value_alloc_size grows monotonically with
@@ -5049,20 +5344,38 @@ mod tests {
     #[test]
     fn test_matches_wildcard() {
         let mut ctx = MetaContext::new();
-        assert!(ctx.matches_pattern(&ConstValue::Int(42), &MetaPattern::Wildcard).unwrap());
+        assert!(
+            ctx.matches_pattern(&ConstValue::Int(42), &MetaPattern::Wildcard)
+                .unwrap()
+        );
     }
 
     #[test]
     fn test_matches_literal() {
         let mut ctx = MetaContext::new();
-        assert!(ctx.matches_pattern(&ConstValue::Int(42), &MetaPattern::Literal(ConstValue::Int(42))).unwrap());
-        assert!(!ctx.matches_pattern(&ConstValue::Int(42), &MetaPattern::Literal(ConstValue::Int(43))).unwrap());
+        assert!(
+            ctx.matches_pattern(
+                &ConstValue::Int(42),
+                &MetaPattern::Literal(ConstValue::Int(42))
+            )
+            .unwrap()
+        );
+        assert!(
+            !ctx.matches_pattern(
+                &ConstValue::Int(42),
+                &MetaPattern::Literal(ConstValue::Int(43))
+            )
+            .unwrap()
+        );
     }
 
     #[test]
     fn test_matches_ident_binding() {
         let mut ctx = MetaContext::new();
-        assert!(ctx.matches_pattern(&ConstValue::Int(42), &MetaPattern::Ident(Text::from("x"))).unwrap());
+        assert!(
+            ctx.matches_pattern(&ConstValue::Int(42), &MetaPattern::Ident(Text::from("x")))
+                .unwrap()
+        );
         assert_eq!(ctx.get(&Text::from("x")), Some(ConstValue::Int(42)));
     }
 
@@ -5075,7 +5388,9 @@ mod tests {
             vec![
                 MetaExpr::Literal(ConstValue::Int(1)),
                 MetaExpr::Literal(ConstValue::Int(2)),
-            ].into_iter().collect()
+            ]
+            .into_iter()
+            .collect(),
         );
         let result = ctx.eval_meta_expr(&expr);
         assert!(result.is_err(), "Expected ArityMismatch error");
@@ -5092,14 +5407,16 @@ mod tests {
     fn test_block_with_call() {
         // Test that a block with a function call evaluates the call
         let mut ctx = MetaContext::new();
-        let expr = MetaExpr::Block(vec![
-            MetaStmt::Expr(MetaExpr::Call(
+        let expr = MetaExpr::Block(
+            vec![MetaStmt::Expr(MetaExpr::Call(
                 Text::from("abs"),
-                vec![
-                    MetaExpr::Literal(ConstValue::Int(-5)),
-                ].into_iter().collect()
-            )),
-        ].into_iter().collect());
+                vec![MetaExpr::Literal(ConstValue::Int(-5))]
+                    .into_iter()
+                    .collect(),
+            ))]
+            .into_iter()
+            .collect(),
+        );
         let result = ctx.eval_meta_expr(&expr);
         assert!(result.is_ok(), "Expected success, got {:?}", result.err());
         assert_eq!(result.unwrap(), ConstValue::Int(5));
@@ -5109,15 +5426,19 @@ mod tests {
     fn test_block_with_arity_error() {
         // Test that a block with a function call with wrong arity propagates the error
         let mut ctx = MetaContext::new();
-        let expr = MetaExpr::Block(vec![
-            MetaStmt::Expr(MetaExpr::Call(
+        let expr = MetaExpr::Block(
+            vec![MetaStmt::Expr(MetaExpr::Call(
                 Text::from("abs"),
                 vec![
                     MetaExpr::Literal(ConstValue::Int(1)),
                     MetaExpr::Literal(ConstValue::Int(2)),
-                ].into_iter().collect()
-            )),
-        ].into_iter().collect());
+                ]
+                .into_iter()
+                .collect(),
+            ))]
+            .into_iter()
+            .collect(),
+        );
         let result = ctx.eval_meta_expr(&expr);
         assert!(result.is_err(), "Expected ArityMismatch error");
     }
@@ -5142,7 +5463,10 @@ mod tests {
             },
             Span::dummy(),
         );
-        assert_eq!(extract_qualified_path(&field_expr), Some("std.env".to_string()));
+        assert_eq!(
+            extract_qualified_path(&field_expr),
+            Some("std.env".to_string())
+        );
 
         // Test extracting qualified path from nested field access: std.env.var
         let nested_field_expr = Expr::new(
@@ -5161,7 +5485,10 @@ mod tests {
             },
             Span::dummy(),
         );
-        assert_eq!(extract_qualified_path(&nested_field_expr), Some("std.env.var".to_string()));
+        assert_eq!(
+            extract_qualified_path(&nested_field_expr),
+            Some("std.env.var".to_string())
+        );
     }
 
     #[test]
@@ -5172,12 +5499,20 @@ mod tests {
         // Create a direct call to http_get (forbidden network operation)
         let call_expr = MetaExpr::Call(
             Text::from("http_get"),
-            vec![MetaExpr::Literal(ConstValue::Text(Text::from("http://example.com")))].into_iter().collect(),
+            vec![MetaExpr::Literal(ConstValue::Text(Text::from(
+                "http://example.com",
+            )))]
+            .into_iter()
+            .collect(),
         );
 
         // This should fail with ForbiddenOperation during evaluation
         let result = ctx.eval_meta_expr(&call_expr);
-        assert!(result.is_err(), "Expected ForbiddenOperation error for http_get, got {:?}", result);
+        assert!(
+            result.is_err(),
+            "Expected ForbiddenOperation error for http_get, got {:?}",
+            result
+        );
         match result.unwrap_err() {
             super::MetaError::ForbiddenOperation { operation, .. } => {
                 assert_eq!(operation, Text::from("http_get"));
@@ -5207,16 +5542,20 @@ mod tests {
                 )),
                 method: Ident::new("var", Span::dummy()),
                 type_args: List::new(),
-                args: List::from(vec![
-                    Expr::literal(verum_ast::Literal::string("HOME".into(), Span::dummy())),
-                ]),
+                args: List::from(vec![Expr::literal(verum_ast::Literal::string(
+                    "HOME".into(),
+                    Span::dummy(),
+                ))]),
             },
             Span::dummy(),
         );
 
         // This should fail with ForbiddenOperation during conversion
         let result = ctx.ast_expr_to_meta_expr(&method_call);
-        assert!(result.is_err(), "Expected ForbiddenOperation error for std.env.var");
+        assert!(
+            result.is_err(),
+            "Expected ForbiddenOperation error for std.env.var"
+        );
         match result.unwrap_err() {
             super::MetaError::ForbiddenOperation { operation, .. } => {
                 assert_eq!(operation, Text::from("std.env.var"));
@@ -5224,5 +5563,4 @@ mod tests {
             other => panic!("Expected ForbiddenOperation, got {:?}", other),
         }
     }
-
 }

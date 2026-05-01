@@ -180,6 +180,10 @@ public theorem thm_c()
     let stdout = String::from_utf8_lossy(&out.stdout);
     let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let walks = payload["total_walks"].as_u64().expect("total_walks number");
-    assert!(walks >= 3, "expected ≥ 3 walks for 3 annotated theorems; got {}", walks);
+    assert!(
+        walks >= 3,
+        "expected ≥ 3 walks for 3 annotated theorems; got {}",
+        walks
+    );
     assert_eq!(payload["total_violations"], 0);
 }

@@ -40,8 +40,12 @@ use verum_common::{Heap, List, Maybe, Text};
 pub struct DeriveShellRender;
 
 impl DeriveMacro for DeriveShellRender {
-    fn name(&self) -> &'static str { "ShellRender" }
-    fn protocol_name(&self) -> &'static str { "ShellRender" }
+    fn name(&self) -> &'static str {
+        "ShellRender"
+    }
+    fn protocol_name(&self) -> &'static str {
+        "ShellRender"
+    }
 
     fn expand(&self, ctx: &DeriveContext) -> DeriveResult<Item> {
         let span = ctx.span;
@@ -80,19 +84,14 @@ fn build_render_body(ctx: &DeriveContext, span: Span) -> Block {
             pattern: Pattern::new(
                 PatternKind::Ident {
                     by_ref: false,
-                    name:   out_id.clone(),
+                    name: out_id.clone(),
                     mutable: true,
                     subpattern: None,
                 },
                 span,
             ),
             ty: Maybe::None,
-            value: Maybe::Some(method_call(
-                string_lit("", span),
-                "into",
-                List::new(),
-                span,
-            )),
+            value: Maybe::Some(method_call(string_lit("", span), "into", List::new(), span)),
         },
         span,
     );
@@ -113,12 +112,7 @@ fn build_render_body(ctx: &DeriveContext, span: Span) -> Block {
     )
 }
 
-fn render_field(
-    out: &Ident,
-    field: &FieldInfo,
-    is_first: bool,
-    span: Span,
-) -> Vec<Stmt> {
+fn render_field(out: &Ident, field: &FieldInfo, is_first: bool, span: Span) -> Vec<Stmt> {
     let mut flag_text: Option<Text> = None;
     let mut positional: bool = false;
     for attr in field.attributes.iter() {
@@ -152,7 +146,7 @@ fn render_field(
         };
         let if_expr = Expr::new(
             ExprKind::If {
-                condition:   Heap::new(cond),
+                condition: Heap::new(cond),
                 then_branch: Block::new(inner, Maybe::None, span),
                 else_branch: Maybe::None,
             },
@@ -210,7 +204,10 @@ fn push_escape_stmt(out: &Ident, value: Expr, span: Span) -> Stmt {
         escaper,
         "posix",
         List::from(vec![Expr::new(
-            ExprKind::Unary { op: UnOp::Ref, expr: Box::new(value) },
+            ExprKind::Unary {
+                op: UnOp::Ref,
+                expr: Box::new(value),
+            },
             span,
         )]),
         span,
@@ -230,7 +227,7 @@ fn first_string_arg(attr: &verum_ast::Attribute) -> Option<Text> {
     use verum_ast::literal::{LiteralKind, StringLit};
     let args = match &attr.args {
         Maybe::Some(args) => args,
-        Maybe::None       => return None,
+        Maybe::None => return None,
     };
     for arg in args.iter() {
         if let EK::Literal(lit) = &arg.kind {

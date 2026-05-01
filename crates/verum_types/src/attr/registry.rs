@@ -355,9 +355,7 @@ impl AttributeRegistry {
         let attr_names: List<&Text> = attrs.iter().map(|a| &a.name).collect();
         for attr in attrs {
             if let Some(meta) = self.get(attr.name.as_str()) {
-                if let Maybe::Some(conflict) =
-                    meta.conflicts_with_any(&attr_names)
-                {
+                if let Maybe::Some(conflict) = meta.conflicts_with_any(&attr_names) {
                     errors.push(AttributeError::Conflict {
                         attr1: attr.name.clone(),
                         attr2: conflict,
@@ -370,8 +368,7 @@ impl AttributeRegistry {
         // Check for missing requirements
         for attr in attrs {
             if let Some(meta) = self.get(attr.name.as_str()) {
-                let missing =
-                    meta.missing_requirements(&attr_names);
+                let missing = meta.missing_requirements(&attr_names);
                 for req in missing {
                     errors.push(AttributeError::MissingRequirement {
                         attr: attr.name.clone(),
@@ -487,7 +484,10 @@ impl AttributeRegistry {
                                     if let Some(ident) = path.as_ident() {
                                         let arg_name = ident.name.clone();
                                         // Check for duplicate arguments
-                                        if found_names.iter().any(|n| n.as_str() == arg_name.as_str()) {
+                                        if found_names
+                                            .iter()
+                                            .any(|n| n.as_str() == arg_name.as_str())
+                                        {
                                             return Err(ArgValidationError {
                                                 kind: verum_ast::attr::ArgValidationErrorKind::DuplicateArg {
                                                     name: arg_name,
@@ -497,10 +497,10 @@ impl AttributeRegistry {
                                             });
                                         }
                                         // Check that the argument name is recognized
-                                        if !specs.iter().any(|s| s.matches_name(arg_name.as_str())) {
-                                            let suggestions: List<Text> = specs.iter()
-                                                .map(|s| s.name.clone())
-                                                .collect();
+                                        if !specs.iter().any(|s| s.matches_name(arg_name.as_str()))
+                                        {
+                                            let suggestions: List<Text> =
+                                                specs.iter().map(|s| s.name.clone()).collect();
                                             return Err(ArgValidationError::unknown_arg(
                                                 arg_name,
                                                 suggestions,
@@ -515,7 +515,9 @@ impl AttributeRegistry {
                                 // Non key=value expression in a Named arg spec is invalid
                                 return Err(ArgValidationError {
                                     kind: verum_ast::attr::ArgValidationErrorKind::InvalidValue {
-                                        message: Text::from("expected named argument (key = value)"),
+                                        message: Text::from(
+                                            "expected named argument (key = value)",
+                                        ),
                                     },
                                     span,
                                     context: Maybe::None,

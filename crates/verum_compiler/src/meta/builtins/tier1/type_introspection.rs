@@ -48,11 +48,11 @@
 use verum_ast::ty::{PathSegment, TypeKind};
 use verum_common::{List, Text};
 
+use crate::meta::TypeKind as MetaTypeKind;
 use crate::meta::builtins::context_requirements::{BuiltinInfo, BuiltinRegistry};
 use crate::meta::builtins::type_props::{compute_type_id, compute_type_name};
 use crate::meta::context::{ConstValue, MetaContext};
 use crate::meta::error::MetaError;
-use crate::meta::TypeKind as MetaTypeKind;
 
 /// Helper function to extract the name from a PathSegment
 fn segment_name(segment: &PathSegment) -> Option<Text> {
@@ -81,11 +81,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("type_id"),
-        BuiltinInfo::meta_types(
-            meta_type_id,
-            "Get unique type identifier",
-            "(Type) -> UInt",
-        ),
+        BuiltinInfo::meta_types(meta_type_id, "Get unique type identifier", "(Type) -> UInt"),
     );
     map.insert(
         Text::from("type_of"),
@@ -118,11 +114,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("is_tuple"),
-        BuiltinInfo::meta_types(
-            meta_is_tuple,
-            "Check if type is a tuple",
-            "(Type) -> Bool",
-        ),
+        BuiltinInfo::meta_types(meta_is_tuple, "Check if type is a tuple", "(Type) -> Bool"),
     );
     map.insert(
         Text::from("kind_of"),
@@ -171,11 +163,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("is_sized"),
-        BuiltinInfo::meta_types(
-            meta_is_sized,
-            "Check if type is Sized",
-            "(Type) -> Bool",
-        ),
+        BuiltinInfo::meta_types(meta_is_sized, "Check if type is Sized", "(Type) -> Bool"),
     );
     map.insert(
         Text::from("needs_drop"),
@@ -205,14 +193,20 @@ fn meta_type_name(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Cons
     if args.len() > 1 {
         let all_types = args.iter().all(|a| matches!(a, ConstValue::Type(_)));
         if all_types {
-            let names: Vec<String> = args.iter().map(|a| {
-                if let ConstValue::Type(ty) = a {
-                    compute_type_name(&ty.kind).to_string()
-                } else {
-                    "unknown".to_string()
-                }
-            }).collect();
-            return Ok(ConstValue::Text(Text::from(format!("({})", names.join(", ")))));
+            let names: Vec<String> = args
+                .iter()
+                .map(|a| {
+                    if let ConstValue::Type(ty) = a {
+                        compute_type_name(&ty.kind).to_string()
+                    } else {
+                        "unknown".to_string()
+                    }
+                })
+                .collect();
+            return Ok(ConstValue::Text(Text::from(format!(
+                "({})",
+                names.join(", ")
+            ))));
         }
         return Err(MetaError::ArityMismatch {
             expected: 1,
@@ -227,14 +221,20 @@ fn meta_type_name(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Cons
         }
         // Handle tuple of types
         ConstValue::Tuple(elements) => {
-            let names: Vec<String> = elements.iter().map(|e| {
-                if let ConstValue::Type(ty) = e {
-                    compute_type_name(&ty.kind).to_string()
-                } else {
-                    "unknown".to_string()
-                }
-            }).collect();
-            Ok(ConstValue::Text(Text::from(format!("({})", names.join(", ")))))
+            let names: Vec<String> = elements
+                .iter()
+                .map(|e| {
+                    if let ConstValue::Type(ty) = e {
+                        compute_type_name(&ty.kind).to_string()
+                    } else {
+                        "unknown".to_string()
+                    }
+                })
+                .collect();
+            Ok(ConstValue::Text(Text::from(format!(
+                "({})",
+                names.join(", ")
+            ))))
         }
         // Handle Expr that might represent a type
         ConstValue::Expr(expr) => {
@@ -271,11 +271,17 @@ fn meta_type_id(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstV
         let all_types = args.iter().all(|a| matches!(a, ConstValue::Type(_)));
         if all_types {
             // Compute a combined hash for tuple types
-            let combined: u64 = args.iter().enumerate().map(|(i, a)| {
-                if let ConstValue::Type(ty) = a {
-                    compute_type_id(&ty.kind).wrapping_mul((i as u64).wrapping_add(1))
-                } else { 0 }
-            }).fold(0u64, |acc, x| acc.wrapping_add(x));
+            let combined: u64 = args
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    if let ConstValue::Type(ty) = a {
+                        compute_type_id(&ty.kind).wrapping_mul((i as u64).wrapping_add(1))
+                    } else {
+                        0
+                    }
+                })
+                .fold(0u64, |acc, x| acc.wrapping_add(x));
             return Ok(ConstValue::UInt(combined.into()));
         }
     }
@@ -421,20 +427,27 @@ fn meta_kind_of(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstVa
                 TypeKind::Never => MetaTypeKind::Never,
                 TypeKind::Unit => MetaTypeKind::Unit,
                 TypeKind::Unknown => MetaTypeKind::Infer,
-                TypeKind::Bool | TypeKind::Char | TypeKind::Int | TypeKind::Float | TypeKind::Text => {
-                    MetaTypeKind::Primitive
-                }
+                TypeKind::Bool
+                | TypeKind::Char
+                | TypeKind::Int
+                | TypeKind::Float
+                | TypeKind::Text => MetaTypeKind::Primitive,
                 TypeKind::Path(path) => {
                     // Look up in type definitions
                     if let Some(first) = path.segments.first() {
-                        let type_name = segment_name(first).unwrap_or_else(|| Text::from("unknown"));
+                        let type_name =
+                            segment_name(first).unwrap_or_else(|| Text::from("unknown"));
                         if let Some(def) = ctx.get_type_definition(&type_name) {
                             match def {
                                 crate::meta::TypeDefinition::Struct { .. } => MetaTypeKind::Struct,
                                 crate::meta::TypeDefinition::Enum { .. } => MetaTypeKind::Enum,
-                                crate::meta::TypeDefinition::Protocol { .. } => MetaTypeKind::Protocol,
+                                crate::meta::TypeDefinition::Protocol { .. } => {
+                                    MetaTypeKind::Protocol
+                                }
                                 crate::meta::TypeDefinition::Alias { .. } => MetaTypeKind::Alias,
-                                crate::meta::TypeDefinition::Newtype { .. } => MetaTypeKind::Newtype,
+                                crate::meta::TypeDefinition::Newtype { .. } => {
+                                    MetaTypeKind::Newtype
+                                }
                             }
                         } else {
                             MetaTypeKind::Unknown
@@ -459,10 +472,7 @@ fn meta_kind_of(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstVa
 // ============================================================================
 
 /// Check if type implements a protocol
-fn meta_implements(
-    ctx: &mut MetaContext,
-    args: List<ConstValue>,
-) -> Result<ConstValue, MetaError> {
+fn meta_implements(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 2 {
         return Err(MetaError::ArityMismatch {
             expected: 2,
@@ -567,7 +577,10 @@ fn meta_is_sized(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Const
 }
 
 /// Check if type needs drop
-fn meta_needs_drop(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_needs_drop(
+    _ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
         return Err(MetaError::ArityMismatch {
             expected: 1,

@@ -7,7 +7,7 @@
 use crate::document::DocumentState;
 use crate::position_utils::ast_span_to_range;
 use tower_lsp::lsp_types::*;
-use verum_ast::{ExprKind, ItemKind, StmtKind, PatternKind};
+use verum_ast::{ExprKind, ItemKind, PatternKind, StmtKind};
 
 /// Inline value information
 #[derive(Debug, Clone)]
@@ -17,10 +17,7 @@ pub struct InlineValueInfo {
 }
 
 /// Compute inline values for a range in a document
-pub fn compute_inline_values(
-    document: &DocumentState,
-    visible_range: Range,
-) -> Vec<InlineValue> {
+pub fn compute_inline_values(document: &DocumentState, visible_range: Range) -> Vec<InlineValue> {
     let module = match &document.module {
         Some(m) => m,
         None => return Vec::new(),
@@ -32,7 +29,12 @@ pub fn compute_inline_values(
         if let ItemKind::Function(func) = &item.kind {
             if let Some(body) = &func.body {
                 if let verum_ast::decl::FunctionBody::Block(block) = body {
-                    collect_inline_values_from_block(block, &document.text, visible_range, &mut values);
+                    collect_inline_values_from_block(
+                        block,
+                        &document.text,
+                        visible_range,
+                        &mut values,
+                    );
                 }
             }
         }

@@ -1034,13 +1034,22 @@ fn test_context_set_negative_tracking() {
     let mut set = ContextSet::new();
 
     // Add positive context
-    set.add(ContextRequirement::new("Logger".to_string(), Span::default()));
+    set.add(ContextRequirement::new(
+        "Logger".to_string(),
+        Span::default(),
+    ));
 
     // Add negative context
-    set.add(ContextRequirement::negative("Database".to_string(), Span::default()));
+    set.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
 
     assert!(set.contains("Logger"), "Should contain positive Logger");
-    assert!(!set.contains("Database"), "contains() should return false for negative contexts");
+    assert!(
+        !set.contains("Database"),
+        "contains() should return false for negative contexts"
+    );
     assert!(set.is_excluded("Database"), "Database should be excluded");
     assert!(!set.is_excluded("Logger"), "Logger should not be excluded");
 }
@@ -1048,8 +1057,14 @@ fn test_context_set_negative_tracking() {
 #[test]
 fn test_context_set_validate_usage() {
     let mut set = ContextSet::new();
-    set.add(ContextRequirement::negative("Database".to_string(), Span::default()));
-    set.add(ContextRequirement::new("Logger".to_string(), Span::default()));
+    set.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
+    set.add(ContextRequirement::new(
+        "Logger".to_string(),
+        Span::default(),
+    ));
 
     // Validation should fail for excluded context
     let result = set.validate_usage("Database");
@@ -1067,9 +1082,18 @@ fn test_context_set_validate_usage() {
 #[test]
 fn test_context_set_negative_iteration() {
     let mut set = ContextSet::new();
-    set.add(ContextRequirement::new("Logger".to_string(), Span::default()));
-    set.add(ContextRequirement::negative("Database".to_string(), Span::default()));
-    set.add(ContextRequirement::negative("Network".to_string(), Span::default()));
+    set.add(ContextRequirement::new(
+        "Logger".to_string(),
+        Span::default(),
+    ));
+    set.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
+    set.add(ContextRequirement::negative(
+        "Network".to_string(),
+        Span::default(),
+    ));
 
     // Should have 1 positive context
     let positive: Vec<_> = set.positive_contexts().collect();
@@ -1092,8 +1116,14 @@ fn test_check_context_not_excluded() {
 
     // Set up requirements with negative context
     let mut required = ContextSet::new();
-    required.add(ContextRequirement::new("Logger".to_string(), Span::default()));
-    required.add(ContextRequirement::negative("Database".to_string(), Span::default()));
+    required.add(ContextRequirement::new(
+        "Logger".to_string(),
+        Span::default(),
+    ));
+    required.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
     checker.set_required(required);
 
     // Accessing Logger should be OK
@@ -1113,7 +1143,10 @@ fn test_transitive_negative_context_violation() {
 
     // Register the callee function that requires Database
     let mut callee_contexts = ContextSet::new();
-    callee_contexts.add(ContextRequirement::new("Database".to_string(), Span::default()));
+    callee_contexts.add(ContextRequirement::new(
+        "Database".to_string(),
+        Span::default(),
+    ));
 
     let callee_info = FunctionContextInfo {
         name: "db_query".into(),
@@ -1127,14 +1160,21 @@ fn test_transitive_negative_context_violation() {
 
     // Set up caller with negative Database constraint
     let mut caller_contexts = ContextSet::new();
-    caller_contexts.add(ContextRequirement::negative("Database".to_string(), Span::default()));
+    caller_contexts.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
     checker.set_required(caller_contexts);
 
     // Calling db_query should fail because it uses excluded Database
     let result = checker.check_call_negative_constraints("db_query", Span::default());
 
     match result {
-        Err(TypeError::TransitiveNegativeContextViolation { excluded_context, callee, .. }) => {
+        Err(TypeError::TransitiveNegativeContextViolation {
+            excluded_context,
+            callee,
+            ..
+        }) => {
             assert_eq!(excluded_context, "Database");
             assert_eq!(callee, "db_query");
         }
@@ -1152,7 +1192,10 @@ fn test_transitive_verification_deep_call_chain() {
 
     // db_helper uses Database
     let mut db_helper_contexts = ContextSet::new();
-    db_helper_contexts.add(ContextRequirement::new("Database".to_string(), Span::default()));
+    db_helper_contexts.add(ContextRequirement::new(
+        "Database".to_string(),
+        Span::default(),
+    ));
     checker.register_function(FunctionContextInfo {
         name: "db_helper".into(),
         required_contexts: db_helper_contexts,
@@ -1164,7 +1207,10 @@ fn test_transitive_verification_deep_call_chain() {
 
     // logger calls db_helper (transitively uses Database)
     let mut logger_contexts = ContextSet::new();
-    logger_contexts.add(ContextRequirement::new("Logger".to_string(), Span::default()));
+    logger_contexts.add(ContextRequirement::new(
+        "Logger".to_string(),
+        Span::default(),
+    ));
     let mut logger_callees = List::new();
     logger_callees.push("db_helper".into());
     checker.register_function(FunctionContextInfo {
@@ -1178,7 +1224,10 @@ fn test_transitive_verification_deep_call_chain() {
 
     // pure excludes Database and calls logger
     let mut pure_contexts = ContextSet::new();
-    pure_contexts.add(ContextRequirement::negative("Database".to_string(), Span::default()));
+    pure_contexts.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
     let mut pure_excluded = List::new();
     pure_excluded.push("Database".into());
     let mut pure_callees = List::new();
@@ -1196,9 +1245,16 @@ fn test_transitive_verification_deep_call_chain() {
     let result = checker.verify_transitive_negative_contexts("pure");
 
     match result {
-        Err(TypeError::TransitiveNegativeContextViolation { excluded_context, callee, .. }) => {
+        Err(TypeError::TransitiveNegativeContextViolation {
+            excluded_context,
+            callee,
+            ..
+        }) => {
             assert_eq!(excluded_context, "Database");
-            assert!(callee.contains("db_helper"), "Error should mention db_helper");
+            assert!(
+                callee.contains("db_helper"),
+                "Error should mention db_helper"
+            );
         }
         _ => panic!("Expected TransitiveNegativeContextViolation for deep call chain"),
     }
@@ -1212,7 +1268,10 @@ fn test_transitive_verification_no_violation() {
 
     // pure_logger only uses Logger, no Database
     let mut logger_contexts = ContextSet::new();
-    logger_contexts.add(ContextRequirement::new("Logger".to_string(), Span::default()));
+    logger_contexts.add(ContextRequirement::new(
+        "Logger".to_string(),
+        Span::default(),
+    ));
     checker.register_function(FunctionContextInfo {
         name: "pure_logger".into(),
         required_contexts: logger_contexts,
@@ -1224,7 +1283,10 @@ fn test_transitive_verification_no_violation() {
 
     // pure excludes Database but only calls pure_logger (no Database usage)
     let mut pure_contexts = ContextSet::new();
-    pure_contexts.add(ContextRequirement::negative("Database".to_string(), Span::default()));
+    pure_contexts.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
     let mut pure_excluded = List::new();
     pure_excluded.push("Database".into());
     let mut pure_callees = List::new();
@@ -1240,7 +1302,10 @@ fn test_transitive_verification_no_violation() {
 
     // Verification should pass
     let result = checker.verify_transitive_negative_contexts("pure");
-    assert!(result.is_ok(), "Should pass when callees don't use excluded contexts");
+    assert!(
+        result.is_ok(),
+        "Should pass when callees don't use excluded contexts"
+    );
 }
 
 // ============================================================================
@@ -1374,9 +1439,18 @@ fn test_alias_conflict_to_type_error() {
 #[test]
 fn test_build_negative_context_map() {
     let mut set = ContextSet::new();
-    set.add(ContextRequirement::new("Logger".to_string(), Span::default()));
-    set.add(ContextRequirement::negative("Database".to_string(), Span::default()));
-    set.add(ContextRequirement::negative("Network".to_string(), Span::default()));
+    set.add(ContextRequirement::new(
+        "Logger".to_string(),
+        Span::default(),
+    ));
+    set.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
+    set.add(ContextRequirement::negative(
+        "Network".to_string(),
+        Span::default(),
+    ));
 
     let map = build_negative_context_map(&set);
 
@@ -1390,10 +1464,10 @@ fn test_build_negative_context_map() {
 // CallGraph and Enhanced Transitive Verification Tests (Advanced context patterns (negative contexts, call graph verification, module aliases) Section 7.3)
 // ============================================================================
 
-use verum_types::context_check::{
-    CallGraph, CallSiteInfo, CallChainStep, TransitiveViolationInfo, ContextPath,
-};
 use verum_common::Map;
+use verum_types::context_check::{
+    CallChainStep, CallGraph, CallSiteInfo, ContextPath, TransitiveViolationInfo,
+};
 
 #[test]
 fn test_call_graph_basic() {
@@ -1401,11 +1475,17 @@ fn test_call_graph_basic() {
 
     // Add functions
     let mut db_contexts = ContextSet::new();
-    db_contexts.add(ContextRequirement::new("Database".to_string(), Span::default()));
+    db_contexts.add(ContextRequirement::new(
+        "Database".to_string(),
+        Span::default(),
+    ));
     graph.add_function("db_query", db_contexts, Span::default());
 
     let mut logger_contexts = ContextSet::new();
-    logger_contexts.add(ContextRequirement::new("Logger".to_string(), Span::default()));
+    logger_contexts.add(ContextRequirement::new(
+        "Logger".to_string(),
+        Span::default(),
+    ));
     graph.add_function("log_helper", logger_contexts, Span::default());
 
     graph.add_function("pure_function", ContextSet::new(), Span::default());
@@ -1422,15 +1502,24 @@ fn test_call_graph_edges() {
 
     // Add functions
     let mut db_contexts = ContextSet::new();
-    db_contexts.add(ContextRequirement::new("Database".to_string(), Span::default()));
+    db_contexts.add(ContextRequirement::new(
+        "Database".to_string(),
+        Span::default(),
+    ));
     graph.add_function("db_helper", db_contexts, Span::default());
 
     graph.add_function("middle_function", ContextSet::new(), Span::default());
     graph.add_function("top_function", ContextSet::new(), Span::default());
 
     // Add call edges: top -> middle -> db_helper
-    graph.add_call("middle_function", CallSiteInfo::new("db_helper", 42, 5, Span::default()));
-    graph.add_call("top_function", CallSiteInfo::new("middle_function", 15, 3, Span::default()));
+    graph.add_call(
+        "middle_function",
+        CallSiteInfo::new("db_helper", 42, 5, Span::default()),
+    );
+    graph.add_call(
+        "top_function",
+        CallSiteInfo::new("middle_function", 15, 3, Span::default()),
+    );
 
     // Check callees
     let top_callees = graph.get_callees("top_function");
@@ -1522,7 +1611,11 @@ fn test_transitive_violation_to_type_error() {
     let type_error = violation.to_type_error();
 
     match type_error {
-        TypeError::TransitiveNegativeContextViolation { excluded_context, callee, .. } => {
+        TypeError::TransitiveNegativeContextViolation {
+            excluded_context,
+            callee,
+            ..
+        } => {
             assert_eq!(excluded_context, "Database");
             assert!(callee.contains("middle() at line 10"));
             assert!(callee.contains("db_user() at line 20"));
@@ -1540,22 +1633,37 @@ fn test_verify_transitive_with_call_graph() {
 
     // db_helper uses Database
     let mut db_contexts = ContextSet::new();
-    db_contexts.add(ContextRequirement::new("Database".to_string(), Span::default()));
+    db_contexts.add(ContextRequirement::new(
+        "Database".to_string(),
+        Span::default(),
+    ));
     graph.add_function("db_helper", db_contexts, Span::default());
 
     // middle_function calls db_helper
     graph.add_function("middle_function", ContextSet::new(), Span::default());
-    graph.add_call("middle_function", CallSiteInfo::new("db_helper", 42, 5, Span::default()));
+    graph.add_call(
+        "middle_function",
+        CallSiteInfo::new("db_helper", 42, 5, Span::default()),
+    );
 
     // pure_function excludes Database and calls middle_function
     let mut pure_contexts = ContextSet::new();
-    pure_contexts.add(ContextRequirement::negative("Database".to_string(), Span::default()));
+    pure_contexts.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
     graph.add_function("pure_function", pure_contexts.clone(), Span::default());
-    graph.add_call("pure_function", CallSiteInfo::new("middle_function", 15, 3, Span::default()));
+    graph.add_call(
+        "pure_function",
+        CallSiteInfo::new("middle_function", 15, 3, Span::default()),
+    );
 
     // Register the pure function with the checker
     let mut call_sites = Map::new();
-    call_sites.insert("middle_function".into(), CallSiteInfo::new("middle_function", 15, 3, Span::default()));
+    call_sites.insert(
+        "middle_function".into(),
+        CallSiteInfo::new("middle_function", 15, 3, Span::default()),
+    );
 
     checker.register_function(FunctionContextInfo {
         name: "pure_function".into(),
@@ -1576,11 +1684,8 @@ fn test_verify_transitive_with_call_graph() {
 
     // Verify using call graph - should detect the transitive violation
     let excluded = vec![ContextPath::simple("Database")];
-    let result = checker.verify_transitive_negative_contexts_with_graph(
-        "pure_function",
-        &excluded,
-        &graph,
-    );
+    let result =
+        checker.verify_transitive_negative_contexts_with_graph("pure_function", &excluded, &graph);
 
     match result {
         Err(violation) => {
@@ -1604,22 +1709,28 @@ fn test_verify_transitive_no_violation() {
 
     // log_helper uses Logger (not Database)
     let mut logger_contexts = ContextSet::new();
-    logger_contexts.add(ContextRequirement::new("Logger".to_string(), Span::default()));
+    logger_contexts.add(ContextRequirement::new(
+        "Logger".to_string(),
+        Span::default(),
+    ));
     graph.add_function("log_helper", logger_contexts, Span::default());
 
     // pure_function excludes Database, but only calls log_helper (which doesn't use Database)
     let mut pure_contexts = ContextSet::new();
-    pure_contexts.add(ContextRequirement::negative("Database".to_string(), Span::default()));
+    pure_contexts.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
     graph.add_function("pure_function", pure_contexts, Span::default());
-    graph.add_call("pure_function", CallSiteInfo::new("log_helper", 10, 3, Span::default()));
+    graph.add_call(
+        "pure_function",
+        CallSiteInfo::new("log_helper", 10, 3, Span::default()),
+    );
 
     // Verify using call graph - should pass
     let excluded = vec![ContextPath::simple("Database")];
-    let result = checker.verify_transitive_negative_contexts_with_graph(
-        "pure_function",
-        &excluded,
-        &graph,
-    );
+    let result =
+        checker.verify_transitive_negative_contexts_with_graph("pure_function", &excluded, &graph);
 
     assert!(result.is_ok(), "Should pass when no violations");
 }
@@ -1635,23 +1746,35 @@ fn test_verify_transitive_with_cycle() {
     graph.add_function("func_b", ContextSet::new(), Span::default());
     graph.add_function("func_c", ContextSet::new(), Span::default());
 
-    graph.add_call("func_a", CallSiteInfo::new("func_b", 10, 1, Span::default()));
-    graph.add_call("func_b", CallSiteInfo::new("func_c", 20, 1, Span::default()));
-    graph.add_call("func_c", CallSiteInfo::new("func_a", 30, 1, Span::default())); // Cycle!
+    graph.add_call(
+        "func_a",
+        CallSiteInfo::new("func_b", 10, 1, Span::default()),
+    );
+    graph.add_call(
+        "func_b",
+        CallSiteInfo::new("func_c", 20, 1, Span::default()),
+    );
+    graph.add_call(
+        "func_c",
+        CallSiteInfo::new("func_a", 30, 1, Span::default()),
+    ); // Cycle!
 
     // pure_function excludes Database and calls func_a
     let mut pure_contexts = ContextSet::new();
-    pure_contexts.add(ContextRequirement::negative("Database".to_string(), Span::default()));
+    pure_contexts.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
     graph.add_function("pure_function", pure_contexts, Span::default());
-    graph.add_call("pure_function", CallSiteInfo::new("func_a", 5, 1, Span::default()));
+    graph.add_call(
+        "pure_function",
+        CallSiteInfo::new("func_a", 5, 1, Span::default()),
+    );
 
     // Verify - should handle cycle without infinite loop and pass (no Database usage)
     let excluded = vec![ContextPath::simple("Database")];
-    let result = checker.verify_transitive_negative_contexts_with_graph(
-        "pure_function",
-        &excluded,
-        &graph,
-    );
+    let result =
+        checker.verify_transitive_negative_contexts_with_graph("pure_function", &excluded, &graph);
 
     assert!(result.is_ok(), "Should handle cycles gracefully");
 }
@@ -1664,35 +1787,55 @@ fn test_verify_transitive_cycle_with_violation() {
     let mut graph = CallGraph::new();
 
     let mut db_contexts = ContextSet::new();
-    db_contexts.add(ContextRequirement::new("Database".to_string(), Span::default()));
+    db_contexts.add(ContextRequirement::new(
+        "Database".to_string(),
+        Span::default(),
+    ));
 
     graph.add_function("func_a", ContextSet::new(), Span::default());
     graph.add_function("func_b", db_contexts, Span::default()); // Uses Database!
     graph.add_function("func_c", ContextSet::new(), Span::default());
 
-    graph.add_call("func_a", CallSiteInfo::new("func_b", 10, 1, Span::default()));
-    graph.add_call("func_b", CallSiteInfo::new("func_c", 20, 1, Span::default()));
-    graph.add_call("func_c", CallSiteInfo::new("func_a", 30, 1, Span::default())); // Cycle back
+    graph.add_call(
+        "func_a",
+        CallSiteInfo::new("func_b", 10, 1, Span::default()),
+    );
+    graph.add_call(
+        "func_b",
+        CallSiteInfo::new("func_c", 20, 1, Span::default()),
+    );
+    graph.add_call(
+        "func_c",
+        CallSiteInfo::new("func_a", 30, 1, Span::default()),
+    ); // Cycle back
 
     // pure_function excludes Database and calls func_a
     let mut pure_contexts = ContextSet::new();
-    pure_contexts.add(ContextRequirement::negative("Database".to_string(), Span::default()));
+    pure_contexts.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
     graph.add_function("pure_function", pure_contexts, Span::default());
-    graph.add_call("pure_function", CallSiteInfo::new("func_a", 5, 1, Span::default()));
+    graph.add_call(
+        "pure_function",
+        CallSiteInfo::new("func_a", 5, 1, Span::default()),
+    );
 
     // Verify - should detect violation in cycle
     let excluded = vec![ContextPath::simple("Database")];
-    let result = checker.verify_transitive_negative_contexts_with_graph(
-        "pure_function",
-        &excluded,
-        &graph,
-    );
+    let result =
+        checker.verify_transitive_negative_contexts_with_graph("pure_function", &excluded, &graph);
 
     match result {
         Err(violation) => {
             assert_eq!(violation.excluded_context, "Database");
             // Should find func_b which uses Database
-            assert!(violation.call_chain.iter().any(|step| step.function_name == "func_b"));
+            assert!(
+                violation
+                    .call_chain
+                    .iter()
+                    .any(|step| step.function_name == "func_b")
+            );
         }
         Ok(_) => panic!("Expected violation to be detected in cycle"),
     }
@@ -1706,7 +1849,10 @@ fn test_build_call_graph_from_registry() {
 
     // Register functions with callees
     let mut db_contexts = ContextSet::new();
-    db_contexts.add(ContextRequirement::new("Database".to_string(), Span::default()));
+    db_contexts.add(ContextRequirement::new(
+        "Database".to_string(),
+        Span::default(),
+    ));
 
     checker.register_function(FunctionContextInfo {
         name: "db_helper".into(),
@@ -1720,7 +1866,10 @@ fn test_build_call_graph_from_registry() {
     let mut middle_callees = List::new();
     middle_callees.push("db_helper".into());
     let mut middle_call_sites = Map::new();
-    middle_call_sites.insert("db_helper".into(), CallSiteInfo::new("db_helper", 42, 1, Span::default()));
+    middle_call_sites.insert(
+        "db_helper".into(),
+        CallSiteInfo::new("db_helper", 42, 1, Span::default()),
+    );
 
     checker.register_function(FunctionContextInfo {
         name: "middle".into(),
@@ -1751,7 +1900,10 @@ fn test_verify_all_negative_contexts() {
 
     // Register a function with no violations
     let mut logger_contexts = ContextSet::new();
-    logger_contexts.add(ContextRequirement::new("Logger".to_string(), Span::default()));
+    logger_contexts.add(ContextRequirement::new(
+        "Logger".to_string(),
+        Span::default(),
+    ));
 
     checker.register_function(FunctionContextInfo {
         name: "log_helper".into(),
@@ -1764,7 +1916,10 @@ fn test_verify_all_negative_contexts() {
 
     // Register a pure function that excludes Database
     let mut pure_contexts = ContextSet::new();
-    pure_contexts.add(ContextRequirement::negative("Database".to_string(), Span::default()));
+    pure_contexts.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
 
     let mut pure_callees = List::new();
     pure_callees.push("log_helper".into());
@@ -1796,26 +1951,35 @@ fn test_multiple_excluded_contexts() {
 
     // network_helper uses Network
     let mut network_contexts = ContextSet::new();
-    network_contexts.add(ContextRequirement::new("Network".to_string(), Span::default()));
+    network_contexts.add(ContextRequirement::new(
+        "Network".to_string(),
+        Span::default(),
+    ));
     graph.add_function("network_helper", network_contexts, Span::default());
 
     // pure_function excludes both Database and Network
     let mut pure_contexts = ContextSet::new();
-    pure_contexts.add(ContextRequirement::negative("Database".to_string(), Span::default()));
-    pure_contexts.add(ContextRequirement::negative("Network".to_string(), Span::default()));
+    pure_contexts.add(ContextRequirement::negative(
+        "Database".to_string(),
+        Span::default(),
+    ));
+    pure_contexts.add(ContextRequirement::negative(
+        "Network".to_string(),
+        Span::default(),
+    ));
     graph.add_function("pure_function", pure_contexts, Span::default());
-    graph.add_call("pure_function", CallSiteInfo::new("network_helper", 15, 1, Span::default()));
+    graph.add_call(
+        "pure_function",
+        CallSiteInfo::new("network_helper", 15, 1, Span::default()),
+    );
 
     // Verify - should detect Network violation
     let excluded = vec![
         ContextPath::simple("Database"),
         ContextPath::simple("Network"),
     ];
-    let result = checker.verify_transitive_negative_contexts_with_graph(
-        "pure_function",
-        &excluded,
-        &graph,
-    );
+    let result =
+        checker.verify_transitive_negative_contexts_with_graph("pure_function", &excluded, &graph);
 
     match result {
         Err(violation) => {

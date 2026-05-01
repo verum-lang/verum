@@ -31,8 +31,8 @@
 // - Reference patterns
 
 use verum_ast::{FileId, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Parse patterns by wrapping code in a function body
 /// Patterns appear in let statements, match arms, for loops, function params

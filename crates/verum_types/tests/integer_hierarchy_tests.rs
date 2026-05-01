@@ -118,10 +118,19 @@ fn test_suffix_inference() {
     let hierarchy = IntegerHierarchy::new();
     // Compat suffixes still work for FFI
     assert_eq!(hierarchy.infer_from_suffix("i32"), Some(IntegerKind::Int32));
-    assert_eq!(hierarchy.infer_from_suffix("u64"), Some(IntegerKind::UInt64));
+    assert_eq!(
+        hierarchy.infer_from_suffix("u64"),
+        Some(IntegerKind::UInt64)
+    );
     // Semantic suffixes also work
-    assert_eq!(hierarchy.infer_from_suffix("Int32"), Some(IntegerKind::Int32));
-    assert_eq!(hierarchy.infer_from_suffix("UInt64"), Some(IntegerKind::UInt64));
+    assert_eq!(
+        hierarchy.infer_from_suffix("Int32"),
+        Some(IntegerKind::Int32)
+    );
+    assert_eq!(
+        hierarchy.infer_from_suffix("UInt64"),
+        Some(IntegerKind::UInt64)
+    );
     assert_eq!(hierarchy.infer_from_suffix("invalid"), None);
 }
 

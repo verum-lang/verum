@@ -19,8 +19,8 @@
 //! ```
 
 use verum_ast::{Expr, Span};
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 use verum_common::Text;
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 /// URL interpolation handler
 ///

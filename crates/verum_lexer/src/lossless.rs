@@ -36,11 +36,7 @@ pub(crate) fn detect_utf8_bom(source: &str, file_id: FileId) -> Option<TriviaIte
 /// (if any). Spans are emitted relative to the *original* source — the
 /// caller passes in `start` (typically 0 or `UTF8_BOM.len()` when a BOM has
 /// already been stripped) so spans round-trip cleanly.
-pub(crate) fn detect_shebang_at(
-    source: &str,
-    start: usize,
-    file_id: FileId,
-) -> Option<TriviaItem> {
+pub(crate) fn detect_shebang_at(source: &str, start: usize, file_id: FileId) -> Option<TriviaItem> {
     let bytes = source.as_bytes();
     if start + 2 > bytes.len() || bytes[start] != b'#' || bytes[start + 1] != b'!' {
         return None;
@@ -175,7 +171,11 @@ impl RichToken {
         let end = if self.trailing_trivia.is_empty() {
             self.token.span.end
         } else {
-            self.trailing_trivia.items.last().map(|i| i.span.end).unwrap_or(self.token.span.end)
+            self.trailing_trivia
+                .items
+                .last()
+                .map(|i| i.span.end)
+                .unwrap_or(self.token.span.end)
         };
         Span::new(start, end, self.token.span.file_id)
     }
@@ -359,7 +359,9 @@ impl<'source> LosslessLexer<'source> {
                         if self.peek_char() == Some('*') && self.peek_char_nth(1) == Some('/') {
                             self.advance(2);
                             depth -= 1;
-                        } else if self.peek_char() == Some('/') && self.peek_char_nth(1) == Some('*') {
+                        } else if self.peek_char() == Some('/')
+                            && self.peek_char_nth(1) == Some('*')
+                        {
                             self.advance(2);
                             depth += 1;
                         } else {
@@ -463,7 +465,11 @@ impl<'source> LosslessLexer<'source> {
                     TokenKind::Eof,
                     Span::new(self.pos as u32, self.pos as u32, self.file_id),
                 );
-                tokens.push(RichToken::with_trivia(eof_token, combined_leading, Trivia::new()));
+                tokens.push(RichToken::with_trivia(
+                    eof_token,
+                    combined_leading,
+                    Trivia::new(),
+                ));
                 break;
             }
         }
@@ -521,10 +527,17 @@ mod tests {
         assert!(!tokens[0].trailing_trivia.is_empty()); // space after 'let'
 
         // Check that comment is preserved
-        let semicolon_idx = tokens.iter().position(|t| t.token.kind == TokenKind::Semicolon);
+        let semicolon_idx = tokens
+            .iter()
+            .position(|t| t.token.kind == TokenKind::Semicolon);
         assert!(semicolon_idx.is_some());
         let semi = &tokens[semicolon_idx.unwrap()];
-        assert!(semi.trailing_trivia.items.iter().any(|t| t.kind == TriviaKind::LineComment));
+        assert!(
+            semi.trailing_trivia
+                .items
+                .iter()
+                .any(|t| t.kind == TriviaKind::LineComment)
+        );
     }
 
     #[test]
@@ -551,7 +564,11 @@ mod tests {
                 reconstructed.push_str(&token.trailing_trivia.text());
             }
 
-            assert_eq!(source, reconstructed, "Lossless roundtrip failed for: {}", source);
+            assert_eq!(
+                source, reconstructed,
+                "Lossless roundtrip failed for: {}",
+                source
+            );
         }
     }
 
@@ -563,8 +580,14 @@ mod tests {
 
         // Block comment should be in trailing trivia of 'let' or leading of 'x'
         let has_block_comment = tokens.iter().any(|t| {
-            t.leading_trivia.items.iter().any(|i| i.kind == TriviaKind::BlockComment)
-                || t.trailing_trivia.items.iter().any(|i| i.kind == TriviaKind::BlockComment)
+            t.leading_trivia
+                .items
+                .iter()
+                .any(|i| i.kind == TriviaKind::BlockComment)
+                || t.trailing_trivia
+                    .items
+                    .iter()
+                    .any(|i| i.kind == TriviaKind::BlockComment)
         });
         assert!(has_block_comment);
     }
@@ -577,9 +600,9 @@ mod tests {
 
         // The entire nested comment should be captured
         assert!(!tokens.is_empty());
-        let has_full_comment = tokens.iter().any(|t| {
-            t.leading_trivia.items.iter().any(|i| i.text == source)
-        });
+        let has_full_comment = tokens
+            .iter()
+            .any(|t| t.leading_trivia.items.iter().any(|i| i.text == source));
         assert!(has_full_comment);
     }
 
@@ -593,6 +616,12 @@ mod tests {
         let fn_token = tokens.iter().find(|t| t.token.kind == TokenKind::Fn);
         assert!(fn_token.is_some());
         let fn_token = fn_token.unwrap();
-        assert!(fn_token.leading_trivia.items.iter().any(|i| i.kind == TriviaKind::DocComment));
+        assert!(
+            fn_token
+                .leading_trivia
+                .items
+                .iter()
+                .any(|i| i.kind == TriviaKind::DocComment)
+        );
     }
 }

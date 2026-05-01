@@ -8,12 +8,12 @@ use verum_ast::{
     expr::{Expr, ExprKind},
     ty::{Ident, Path},
 };
-use verum_compiler::quote::{
-    MetaContext, Quote, QuoteBuilder, ToTokens, TokenStream, generate_fn,
-    generate_impl, generate_method_call, generate_self_field, ident, literal_int, literal_string,
-};
-use verum_compiler::hygiene::HygieneContext;
 use verum_common::Heap;
+use verum_compiler::hygiene::HygieneContext;
+use verum_compiler::quote::{
+    MetaContext, Quote, QuoteBuilder, ToTokens, TokenStream, generate_fn, generate_impl,
+    generate_method_call, generate_self_field, ident, literal_int, literal_string,
+};
 
 fn main() {
     let file_id = FileId::new(0);

@@ -360,9 +360,7 @@ impl VbcEscapeAnalyzer {
                 }
 
                 // Method call: receiver + arguments escape.
-                Instruction::CallM {
-                    receiver, args, ..
-                } => {
+                Instruction::CallM { receiver, args, .. } => {
                     escaping.insert(receiver.0);
                     for i in 0..args.count as u16 {
                         escaping.insert(args.start.0 + i);
@@ -370,9 +368,7 @@ impl VbcEscapeAnalyzer {
                 }
 
                 // Closure call: closure + arguments escape.
-                Instruction::CallClosure {
-                    closure, args, ..
-                } => {
+                Instruction::CallClosure { closure, args, .. } => {
                     escaping.insert(closure.0);
                     for i in 0..args.count as u16 {
                         escaping.insert(args.start.0 + i);

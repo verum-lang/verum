@@ -2,8 +2,8 @@ use crate::{
     Error,
     ir::{OperationRef, Value, ValueLike},
 };
-use verum_mlir_sys::{MlirValue, mlirOpResultGetOwner, mlirOpResultGetResultNumber};
 use std::fmt::{self, Display, Formatter};
+use verum_mlir_sys::{MlirValue, mlirOpResultGetOwner, mlirOpResultGetResultNumber};
 
 /// An operation result.
 #[derive(Clone, Copy, Debug)]

@@ -39,7 +39,10 @@ fn test_counterexample() {
         .add_assignment("result", "-2.5")
         .with_trace("Found by Z3 solver");
 
-    assert_eq!(ce.assignments.get(&Text::from("x")), Some(&Text::from("-5")));
+    assert_eq!(
+        ce.assignments.get(&Text::from("x")),
+        Some(&Text::from("-5"))
+    );
     assert!(ce.trace.is_some());
 }
 

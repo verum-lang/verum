@@ -391,9 +391,9 @@ pub fn resolve_import(
 
     // Determine if the import is relative (starts with self/super/cog) or absolute.
     // Absolute imports resolve from the project root, not relative to the current module.
-    let first_is_relative = segments.first().is_some_and(|s| {
-        *s == "self" || *s == "super" || *s == "cog"
-    });
+    let first_is_relative = segments
+        .first()
+        .is_some_and(|s| *s == "self" || *s == "super" || *s == "cog");
     let mut result_segments = if first_is_relative {
         current_module.segments.clone()
     } else {

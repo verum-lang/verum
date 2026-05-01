@@ -149,10 +149,14 @@ pub fn get_type_constructors(ty: &Type, env: &TypeEnv) -> TypeConstructors {
         }
 
         // Char - large but finite (Unicode code points)
-        Type::Char => TypeConstructors::new(List::from_iter([Constructor::default_ctor("_")]), true),
+        Type::Char => {
+            TypeConstructors::new(List::from_iter([Constructor::default_ctor("_")]), true)
+        }
 
         // String/Text - infinite
-        Type::Text => TypeConstructors::new(List::from_iter([Constructor::default_ctor("_")]), true),
+        Type::Text => {
+            TypeConstructors::new(List::from_iter([Constructor::default_ctor("_")]), true)
+        }
 
         // Tuple - single constructor with element types
         Type::Tuple(elements) => {
@@ -162,9 +166,7 @@ pub fn get_type_constructors(ty: &Type, env: &TypeEnv) -> TypeConstructors {
         // Array - single constructor with element pattern
         Type::Array { element, size } => {
             if let Some(n) = size {
-                let args = (0..*n)
-                    .map(|_| element.as_ref().clone())
-                    .collect();
+                let args = (0..*n).map(|_| element.as_ref().clone()).collect();
                 TypeConstructors::single(Constructor::with_args("[]", args))
             } else {
                 // Dynamic array - treat as infinite (like a slice)
@@ -180,9 +182,10 @@ pub fn get_type_constructors(ty: &Type, env: &TypeEnv) -> TypeConstructors {
         // Reference - single constructor (deref)
         Type::Reference { inner, .. }
         | Type::CheckedReference { inner, .. }
-        | Type::Pointer { inner, .. } => {
-            TypeConstructors::single(Constructor::with_args("&", List::from_iter([inner.as_ref().clone()])))
-        }
+        | Type::Pointer { inner, .. } => TypeConstructors::single(Constructor::with_args(
+            "&",
+            List::from_iter([inner.as_ref().clone()]),
+        )),
 
         // Variant type (sum type) - one constructor per variant
         Type::Variant(variants) => {
@@ -200,9 +203,7 @@ pub fn get_type_constructors(ty: &Type, env: &TypeEnv) -> TypeConstructors {
         }
 
         // Generic types - look up in environment
-        Type::Generic { name, args } => {
-            get_generic_constructors(name, args, env)
-        }
+        Type::Generic { name, args } => get_generic_constructors(name, args, env),
 
         // Named types - look up definition
         Type::Named { path, args } => {
@@ -251,7 +252,10 @@ fn get_generic_constructors(name: &Text, args: &List<Type>, env: &TypeEnv) -> Ty
                     if *ctor_ty == Type::Unit {
                         Constructor::nullary(ctor_name.clone())
                     } else {
-                        Constructor::with_args(ctor_name.clone(), List::from_iter([ctor_ty.clone()]))
+                        Constructor::with_args(
+                            ctor_name.clone(),
+                            List::from_iter([ctor_ty.clone()]),
+                        )
                     }
                 })
                 .collect();

@@ -3,11 +3,11 @@ use crate::{
     context::{Context, ContextRef},
     string_ref::StringRef,
 };
+use std::{ffi::CString, marker::PhantomData};
 use verum_mlir_sys::{
     MlirModule, mlirModuleCreateEmpty, mlirModuleCreateParse, mlirModuleDestroy,
     mlirModuleFromOperation, mlirModuleGetBody, mlirModuleGetContext, mlirModuleGetOperation,
 };
-use std::{ffi::CString, marker::PhantomData};
 
 /// A module.
 #[derive(Debug)]

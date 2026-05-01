@@ -117,11 +117,7 @@ use crate::support::definitional_eq;
 /// Context: typically a human-readable label describing the
 /// callsite (e.g. `"AC/OC duality at Theorem 10.4"`), surfaced in
 /// the rejection diagnostic.
-pub fn check_round_trip(
-    lhs: &CoreTerm,
-    rhs: &CoreTerm,
-    context: &str,
-) -> Result<(), KernelError> {
+pub fn check_round_trip(lhs: &CoreTerm, rhs: &CoreTerm, context: &str) -> Result<(), KernelError> {
     // V0 — structural equality fast-path. Catches the trivial
     // `α == α` round-trip without invoking normalize.
     if lhs == rhs {
@@ -201,11 +197,7 @@ const CANONICALIZE_ITERATION_BUDGET: u32 = 64;
 
 /// `context` is propagated into every bridge admit so external
 /// reporters can attribute admits back to a callsite.
-pub fn canonical_form(
-    term: &CoreTerm,
-    audit: &mut BridgeAudit,
-    context: &str,
-) -> CoreTerm {
+pub fn canonical_form(term: &CoreTerm, audit: &mut BridgeAudit, context: &str) -> CoreTerm {
     let mut current = term.clone();
     for _ in 0..CANONICALIZE_ITERATION_BUDGET {
         let rewritten = rewrite_one_pass(&current, audit, context);
@@ -226,11 +218,7 @@ pub fn canonical_form(
 /// rewrite once at every position, returning the new term. Idempotent
 /// under composition with [`crate::support::normalize`] modulo the
 /// confluence bridge.
-fn rewrite_one_pass(
-    term: &CoreTerm,
-    audit: &mut BridgeAudit,
-    context: &str,
-) -> CoreTerm {
+fn rewrite_one_pass(term: &CoreTerm, audit: &mut BridgeAudit, context: &str) -> CoreTerm {
     match term {
         // K-Adj-Unit: AlphaOf(EpsilonOf(x)) → x.
         CoreTerm::AlphaOf(inner) => {
@@ -261,7 +249,11 @@ fn rewrite_one_pass(
         // binders differ. Iteration to fixed point happens at the
         // outer canonical_form layer — a K-level-N nested Refine
         // collapses in N-1 outer iterations.
-        CoreTerm::Refine { base, binder, predicate } => {
+        CoreTerm::Refine {
+            base,
+            binder,
+            predicate,
+        } => {
             let base_rw = rewrite_one_pass(base.as_ref(), audit, context);
             let pred_rw = rewrite_one_pass(predicate.as_ref(), audit, context);
             let candidate = CoreTerm::Refine {
@@ -270,8 +262,7 @@ fn rewrite_one_pass(
                 predicate: Heap::new(pred_rw),
             };
             // Refine fold: if the rewritten base is itself a Refine, fuse.
-            crate::support::fold_refine_of_refine(&candidate)
-                .unwrap_or(candidate)
+            crate::support::fold_refine_of_refine(&candidate).unwrap_or(candidate)
         }
 
         // K-Modal-Idem (S5): ModalBox(ModalBox(x)) → ModalBox(x),
@@ -322,17 +313,29 @@ fn rewrite_one_pass(
             Heap::new(rewrite_one_pass(f.as_ref(), audit, context)),
             Heap::new(rewrite_one_pass(a.as_ref(), audit, context)),
         ),
-        CoreTerm::Pi { binder, domain, codomain } => CoreTerm::Pi {
+        CoreTerm::Pi {
+            binder,
+            domain,
+            codomain,
+        } => CoreTerm::Pi {
             binder: binder.clone(),
             domain: Heap::new(rewrite_one_pass(domain.as_ref(), audit, context)),
             codomain: Heap::new(rewrite_one_pass(codomain.as_ref(), audit, context)),
         },
-        CoreTerm::Lam { binder, domain, body } => CoreTerm::Lam {
+        CoreTerm::Lam {
+            binder,
+            domain,
+            body,
+        } => CoreTerm::Lam {
             binder: binder.clone(),
             domain: Heap::new(rewrite_one_pass(domain.as_ref(), audit, context)),
             body: Heap::new(rewrite_one_pass(body.as_ref(), audit, context)),
         },
-        CoreTerm::Sigma { binder, fst_ty, snd_ty } => CoreTerm::Sigma {
+        CoreTerm::Sigma {
+            binder,
+            fst_ty,
+            snd_ty,
+        } => CoreTerm::Sigma {
             binder: binder.clone(),
             fst_ty: Heap::new(rewrite_one_pass(fst_ty.as_ref(), audit, context)),
             snd_ty: Heap::new(rewrite_one_pass(snd_ty.as_ref(), audit, context)),
@@ -341,12 +344,8 @@ fn rewrite_one_pass(
             Heap::new(rewrite_one_pass(a.as_ref(), audit, context)),
             Heap::new(rewrite_one_pass(b.as_ref(), audit, context)),
         ),
-        CoreTerm::Fst(p) => {
-            CoreTerm::Fst(Heap::new(rewrite_one_pass(p.as_ref(), audit, context)))
-        }
-        CoreTerm::Snd(p) => {
-            CoreTerm::Snd(Heap::new(rewrite_one_pass(p.as_ref(), audit, context)))
-        }
+        CoreTerm::Fst(p) => CoreTerm::Fst(Heap::new(rewrite_one_pass(p.as_ref(), audit, context))),
+        CoreTerm::Snd(p) => CoreTerm::Snd(Heap::new(rewrite_one_pass(p.as_ref(), audit, context))),
         CoreTerm::Refl(t) => {
             CoreTerm::Refl(Heap::new(rewrite_one_pass(t.as_ref(), audit, context)))
         }
@@ -485,8 +484,11 @@ mod tests {
         let mut audit = BridgeAudit::new();
         let canon = canonical_form(&aef, &mut audit, "test");
         assert_eq!(canon, f);
-        assert!(audit.is_decidable(),
-            "K-Adj-Unit collapse must be decidable; got {} admits", audit.admits().len());
+        assert!(
+            audit.is_decidable(),
+            "K-Adj-Unit collapse must be decidable; got {} admits",
+            audit.admits().len()
+        );
     }
 
     #[test]
@@ -582,7 +584,9 @@ mod tests {
         let mut audit = BridgeAudit::new();
         let canon = canonical_form(&pi, &mut audit, "test");
         match canon {
-            CoreTerm::Pi { domain, codomain, .. } => {
+            CoreTerm::Pi {
+                domain, codomain, ..
+            } => {
                 assert_eq!(domain.as_ref(), &f);
                 assert_eq!(codomain.as_ref(), &f);
             }
@@ -597,8 +601,10 @@ mod tests {
         let f = var("F");
         let aef = CoreTerm::AlphaOf(Heap::new(CoreTerm::EpsilonOf(Heap::new(f.clone()))));
         let audit = check_round_trip_v2(&aef, &f, "K-Adj-Unit").unwrap();
-        assert!(audit.is_decidable(),
-            "V0/V1-decidable pair must produce empty V2 audit");
+        assert!(
+            audit.is_decidable(),
+            "V0/V1-decidable pair must produce empty V2 audit"
+        );
     }
 
     #[test]
@@ -616,8 +622,7 @@ mod tests {
     #[test]
     fn check_round_trip_v2_rejects_distinct_atoms() {
         // Even V2 can't admit truly distinct atoms.
-        let err = check_round_trip_v2(&var("alpha"), &var("beta"), "distinct")
-            .unwrap_err();
+        let err = check_round_trip_v2(&var("alpha"), &var("beta"), "distinct").unwrap_err();
         assert!(matches!(err, KernelError::RoundTripFailed { .. }));
     }
 
@@ -628,8 +633,10 @@ mod tests {
         let f = var("F");
         let aef = CoreTerm::AlphaOf(Heap::new(CoreTerm::EpsilonOf(Heap::new(f))));
         let audit = enumerate_bridge_admits(&aef, "test");
-        assert!(audit.is_decidable(),
-            "K-Adj-Unit reduction must not invoke a bridge");
+        assert!(
+            audit.is_decidable(),
+            "K-Adj-Unit reduction must not invoke a bridge"
+        );
     }
 
     #[test]
@@ -641,8 +648,7 @@ mod tests {
         let canon1 = canonical_form(&aef, &mut audit1, "test");
         let mut audit2 = BridgeAudit::new();
         let canon2 = canonical_form(&canon1, &mut audit2, "test");
-        assert_eq!(canon1, canon2,
-            "canonicalize must be idempotent");
+        assert_eq!(canon1, canon2, "canonicalize must be idempotent");
     }
 
     // -------------------------------------------------------------------------
@@ -668,7 +674,11 @@ mod tests {
         let mut audit = BridgeAudit::new();
         let canon = canonical_form(&outer, &mut audit, "K-Refine V3 same-binder");
         match canon {
-            CoreTerm::Refine { base, binder, predicate } => {
+            CoreTerm::Refine {
+                base,
+                binder,
+                predicate,
+            } => {
                 assert_eq!(base.as_ref(), &b, "base must be the original Int");
                 assert_eq!(binder.as_str(), "x");
                 let (p_back, q_back) = crate::support::is_conjunction(predicate.as_ref())
@@ -678,8 +688,10 @@ mod tests {
             }
             other => panic!("expected single Refine, got {:?}", other),
         }
-        assert!(audit.is_decidable(),
-            "K-Refine V3 fold must be fully decidable (no bridge admit)");
+        assert!(
+            audit.is_decidable(),
+            "K-Refine V3 fold must be fully decidable (no bridge admit)"
+        );
     }
 
     #[test]
@@ -706,9 +718,14 @@ mod tests {
         let mut audit = BridgeAudit::new();
         let canon = canonical_form(&l3, &mut audit, "K-Refine V3 three-level");
         match &canon {
-            CoreTerm::Refine { base, predicate, .. } => {
-                assert_eq!(base.as_ref(), &b,
-                    "three-level fold must collapse fully to a single Refine over the underlying base");
+            CoreTerm::Refine {
+                base, predicate, ..
+            } => {
+                assert_eq!(
+                    base.as_ref(),
+                    &b,
+                    "three-level fold must collapse fully to a single Refine over the underlying base"
+                );
                 // Predicate is some conjunction of p, q, r — check the
                 // structural shape contains all three names.
                 let pred_str = format!("{:?}", predicate.as_ref());
@@ -716,7 +733,10 @@ mod tests {
                 assert!(pred_str.contains('q'));
                 assert!(pred_str.contains('r'));
             }
-            other => panic!("three-level fold must produce single Refine, got {:?}", other),
+            other => panic!(
+                "three-level fold must produce single Refine, got {:?}",
+                other
+            ),
         }
         assert!(audit.is_decidable());
     }
@@ -729,30 +749,30 @@ mod tests {
         let inner = CoreTerm::Refine {
             base: Heap::new(b.clone()),
             binder: Text::from("y"),
-            predicate: Heap::new(CoreTerm::App(
-                Heap::new(var("p")),
-                Heap::new(var("y")),
-            )),
+            predicate: Heap::new(CoreTerm::App(Heap::new(var("p")), Heap::new(var("y")))),
         };
         let outer = CoreTerm::Refine {
             base: Heap::new(inner),
             binder: Text::from("x"),
-            predicate: Heap::new(CoreTerm::App(
-                Heap::new(var("q")),
-                Heap::new(var("x")),
-            )),
+            predicate: Heap::new(CoreTerm::App(Heap::new(var("q")), Heap::new(var("x")))),
         };
         let mut audit = BridgeAudit::new();
         let canon = canonical_form(&outer, &mut audit, "K-Refine V3 alpha-rename");
         match canon {
-            CoreTerm::Refine { base, binder, predicate } => {
+            CoreTerm::Refine {
+                base,
+                binder,
+                predicate,
+            } => {
                 assert_eq!(base.as_ref(), &b);
                 assert_eq!(binder.as_str(), "x");
                 // Verify y was renamed to x by checking the conjunction
                 // contains p(x), not p(y).
                 let pred_str = format!("{:?}", predicate.as_ref());
-                assert!(!pred_str.contains("\"y\""),
-                    "inner binder y must have been alpha-renamed away: {pred_str}");
+                assert!(
+                    !pred_str.contains("\"y\""),
+                    "inner binder y must have been alpha-renamed away: {pred_str}"
+                );
             }
             other => panic!("expected Refine, got {:?}", other),
         }
@@ -795,7 +815,9 @@ mod tests {
             predicate: Heap::new(crate::support::make_conjunction(&var("p"), &var("q"))),
         };
         let audit = check_round_trip_v2(&nested, &folded, "Refine fold").unwrap();
-        assert!(audit.is_decidable(),
-            "K-Refine V3 fold must be fully decidable — no Diakrisis bridge");
+        assert!(
+            audit.is_decidable(),
+            "K-Refine V3 fold must be fully decidable — no Diakrisis bridge"
+        );
     }
 }

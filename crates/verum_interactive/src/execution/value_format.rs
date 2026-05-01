@@ -291,13 +291,7 @@ pub fn format_map(
 
     let mut parts: Vec<String> = entries[..show_count]
         .iter()
-        .map(|(k, v)| {
-            format!(
-                "{}: {}",
-                format_value(k, options),
-                format_value(v, options)
-            )
-        })
+        .map(|(k, v)| format!("{}: {}", format_value(k, options), format_value(v, options)))
         .collect();
 
     if len > show_count {
@@ -305,7 +299,15 @@ pub fn format_map(
     }
 
     if options.show_types {
-        Text::from(format!("{{ {} }}: Map<{}, {}>", parts.join(", "), key_type, value_type).as_str())
+        Text::from(
+            format!(
+                "{{ {} }}: Map<{}, {}>",
+                parts.join(", "),
+                key_type,
+                value_type
+            )
+            .as_str(),
+        )
     } else {
         Text::from(format!("{{ {} }}", parts.join(", ")).as_str())
     }
@@ -370,7 +372,10 @@ mod tests {
 
         assert_eq!(format_float(f64::NAN, &options).as_str(), "NaN");
         assert_eq!(format_float(f64::INFINITY, &options).as_str(), "Infinity");
-        assert_eq!(format_float(f64::NEG_INFINITY, &options).as_str(), "-Infinity");
+        assert_eq!(
+            format_float(f64::NEG_INFINITY, &options).as_str(),
+            "-Infinity"
+        );
     }
 
     #[test]
@@ -378,8 +383,14 @@ mod tests {
         let options = ValueDisplayOptions::default();
 
         assert_eq!(format_string("hello", &options).as_str(), "\"hello\"");
-        assert_eq!(format_string("with\nnewline", &options).as_str(), "\"with\\nnewline\"");
-        assert_eq!(format_string("with\ttab", &options).as_str(), "\"with\\ttab\"");
+        assert_eq!(
+            format_string("with\nnewline", &options).as_str(),
+            "\"with\\nnewline\""
+        );
+        assert_eq!(
+            format_string("with\ttab", &options).as_str(),
+            "\"with\\ttab\""
+        );
     }
 
     #[test]
@@ -396,7 +407,10 @@ mod tests {
         let options = ValueDisplayOptions::default();
 
         assert_eq!(format_value(&Value::from_i64(42), &options).as_str(), "42");
-        assert_eq!(format_value(&Value::from_bool(true), &options).as_str(), "true");
+        assert_eq!(
+            format_value(&Value::from_bool(true), &options).as_str(),
+            "true"
+        );
         assert_eq!(format_value(&Value::unit(), &options).as_str(), "()");
     }
 

@@ -154,18 +154,14 @@ impl HygieneViolation {
     /// Get a human-readable message for this violation
     pub fn message(&self) -> Text {
         match self {
-            HygieneViolation::AccidentalCapture { captured, .. } => {
-                Text::from(format!(
-                    "Accidental variable capture: '{}' was captured from the expansion site",
-                    captured.name.as_str()
-                ))
-            }
-            HygieneViolation::ShadowConflict { shadowed, .. } => {
-                Text::from(format!(
-                    "Variable shadowing conflict: '{}' shadows a binding from the call site",
-                    shadowed.name.as_str()
-                ))
-            }
+            HygieneViolation::AccidentalCapture { captured, .. } => Text::from(format!(
+                "Accidental variable capture: '{}' was captured from the expansion site",
+                captured.name.as_str()
+            )),
+            HygieneViolation::ShadowConflict { shadowed, .. } => Text::from(format!(
+                "Variable shadowing conflict: '{}' shadows a binding from the call site",
+                shadowed.name.as_str()
+            )),
             HygieneViolation::UnquoteOutsideQuote { .. } => {
                 Text::from("Unquote ($) used outside of a quote expression")
             }
@@ -173,53 +169,43 @@ impl HygieneViolation {
                 expected_stage,
                 actual_stage,
                 ..
-            } => {
-                Text::from(format!(
-                    "Stage mismatch: expected stage {}, found stage {}",
-                    expected_stage, actual_stage
-                ))
-            }
-            HygieneViolation::LiftTypeMismatch { expected, found, .. } => {
-                Text::from(format!(
-                    "Cannot lift value: expected liftable type {}, found {}",
-                    expected.as_str(),
-                    found.as_str()
-                ))
-            }
+            } => Text::from(format!(
+                "Stage mismatch: expected stage {}, found stage {}",
+                expected_stage, actual_stage
+            )),
+            HygieneViolation::LiftTypeMismatch {
+                expected, found, ..
+            } => Text::from(format!(
+                "Cannot lift value: expected liftable type {}, found {}",
+                expected.as_str(),
+                found.as_str()
+            )),
             HygieneViolation::InvalidQuoteSyntax { message, .. } => message.clone(),
-            HygieneViolation::ScopeResolutionFailed { ident, .. } => {
-                Text::from(format!(
-                    "Cannot resolve identifier '{}' in this scope",
-                    ident.as_str()
-                ))
-            }
-            HygieneViolation::CaptureNotDeclared { ident, .. } => {
-                Text::from(format!(
-                    "Variable '{}' is referenced but not in scope or captured",
-                    ident.as_str()
-                ))
-            }
+            HygieneViolation::ScopeResolutionFailed { ident, .. } => Text::from(format!(
+                "Cannot resolve identifier '{}' in this scope",
+                ident.as_str()
+            )),
+            HygieneViolation::CaptureNotDeclared { ident, .. } => Text::from(format!(
+                "Variable '{}' is referenced but not in scope or captured",
+                ident.as_str()
+            )),
             HygieneViolation::RepetitionMismatch {
                 first_name,
                 first_len,
                 second_name,
                 second_len,
                 ..
-            } => {
-                Text::from(format!(
-                    "Repetition length mismatch: '{}' has {} elements, '{}' has {} elements",
-                    first_name.as_str(),
-                    first_len,
-                    second_name.as_str(),
-                    second_len
-                ))
-            }
-            HygieneViolation::GensymCollision { name, .. } => {
-                Text::from(format!(
-                    "Internal error: generated name '{}' collides with existing identifier",
-                    name.as_str()
-                ))
-            }
+            } => Text::from(format!(
+                "Repetition length mismatch: '{}' has {} elements, '{}' has {} elements",
+                first_name.as_str(),
+                first_len,
+                second_name.as_str(),
+                second_len
+            )),
+            HygieneViolation::GensymCollision { name, .. } => Text::from(format!(
+                "Internal error: generated name '{}' collides with existing identifier",
+                name.as_str()
+            )),
             HygieneViolation::InvalidTokenTree { message, .. } => {
                 Text::from(format!("Invalid token tree: {}", message.as_str()))
             }
@@ -310,11 +296,7 @@ impl HygieneViolations {
 
     /// Convert to a Result
     pub fn into_result(self) -> Result<(), Self> {
-        if self.is_empty() {
-            Ok(())
-        } else {
-            Err(self)
-        }
+        if self.is_empty() { Ok(()) } else { Err(self) }
     }
 }
 

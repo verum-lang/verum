@@ -12,11 +12,11 @@
 //! A user could pair a proof of `P <=> Q` with claim `A = B` for
 //! unrelated A, B — pre-fix this silently passed.
 
+use verum_ast::LiteralKind;
 use verum_ast::expr::{BinOp, Expr, ExprKind};
 use verum_ast::literal::Literal;
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path};
-use verum_ast::LiteralKind;
 use verum_common::Heap;
 use verum_smt::proof_term_unified::ProofTerm;
 use verum_verification::proof_validator::ProofValidator;

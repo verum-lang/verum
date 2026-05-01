@@ -98,16 +98,13 @@ impl CacheMetadata {
         // data[6..8] is padding
 
         let type_hash = u64::from_le_bytes([
-            data[8], data[9], data[10], data[11],
-            data[12], data[13], data[14], data[15],
+            data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
         ]);
         let function_hash = u64::from_le_bytes([
-            data[16], data[17], data[18], data[19],
-            data[20], data[21], data[22], data[23],
+            data[16], data[17], data[18], data[19], data[20], data[21], data[22], data[23],
         ]);
         let timestamp_secs = u64::from_le_bytes([
-            data[24], data[25], data[26], data[27],
-            data[28], data[29], data[30], data[31],
+            data[24], data[25], data[26], data[27], data[28], data[29], data[30], data[31],
         ]);
 
         Ok(Self {
@@ -137,7 +134,8 @@ impl CacheMetadata {
         data.extend_from_slice(&self.function_hash.to_le_bytes());
 
         // Timestamp
-        let timestamp_secs = self.created_at
+        let timestamp_secs = self
+            .created_at
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
@@ -279,15 +277,19 @@ impl MonomorphizationResolver {
 
         // Step 1: Check stdlib precompiled
         if let Some(ref stdlib) = self.stdlib
-            && let Some(spec) = self.find_stdlib_precompiled(stdlib, request) {
-                self.resolved.insert(request.hash, ResolvedSpecialization::StdlibPrecompiled {
+            && let Some(spec) = self.find_stdlib_precompiled(stdlib, request)
+        {
+            self.resolved.insert(
+                request.hash,
+                ResolvedSpecialization::StdlibPrecompiled {
                     bytecode_offset: spec.bytecode_offset,
                     bytecode_length: spec.bytecode_length,
                     register_count: spec.register_count,
-                });
-                self.stats.stdlib_hits += 1;
-                return Ok(());
-            }
+                },
+            );
+            self.stats.stdlib_hits += 1;
+            return Ok(());
+        }
 
         // Step 2: Check persistent cache
         if let Some(ref mut cache) = self.cache {
@@ -302,11 +304,14 @@ impl MonomorphizationResolver {
                 // Validate cache
                 if let Ok(metadata) = CacheMetadata::load(&metadata_path) {
                     if self.validate_cache(&metadata, request) {
-                        self.resolved.insert(request.hash, ResolvedSpecialization::Cached {
-                            cache_file,
-                            bytecode_offset: 0,
-                            bytecode_length: bytecode_len,
-                        });
+                        self.resolved.insert(
+                            request.hash,
+                            ResolvedSpecialization::Cached {
+                                cache_file,
+                                bytecode_offset: 0,
+                                bytecode_length: bytecode_len,
+                            },
+                        );
                         self.stats.cache_hits += 1;
                         return Ok(());
                     } else {
@@ -317,7 +322,8 @@ impl MonomorphizationResolver {
         }
 
         // Step 3: Schedule for specialization
-        self.resolved.insert(request.hash, ResolvedSpecialization::Pending);
+        self.resolved
+            .insert(request.hash, ResolvedSpecialization::Pending);
         self.pending.push(request.clone());
         self.stats.pending_count += 1;
 
@@ -330,10 +336,13 @@ impl MonomorphizationResolver {
         stdlib: &VbcModule,
         request: &InstantiationRequest,
     ) -> Option<SpecializationEntry> {
-        stdlib.specializations.iter().find(|entry| {
-            entry.generic_fn == request.function_id &&
-            entry.type_args == request.type_args
-        }).cloned()
+        stdlib
+            .specializations
+            .iter()
+            .find(|entry| {
+                entry.generic_fn == request.function_id && entry.type_args == request.type_args
+            })
+            .cloned()
     }
 
     /// Validates a cached specialization.
@@ -359,17 +368,21 @@ impl MonomorphizationResolver {
         // Check function definition hasn't changed
         // Look up the generic function's bytecode
         if let Some(ref stdlib) = self.stdlib
-            && let Some(func) = stdlib.functions.iter().find(|f| f.id == request.function_id) {
-                let start = func.bytecode_offset as usize;
-                let end = start + func.bytecode_length as usize;
-                if end <= stdlib.bytecode.len() {
-                    let bytecode = &stdlib.bytecode[start..end];
-                    let current_func_hash = self.compute_function_hash(bytecode);
-                    if metadata.function_hash != current_func_hash {
-                        return false;
-                    }
+            && let Some(func) = stdlib
+                .functions
+                .iter()
+                .find(|f| f.id == request.function_id)
+        {
+            let start = func.bytecode_offset as usize;
+            let end = start + func.bytecode_length as usize;
+            if end <= stdlib.bytecode.len() {
+                let bytecode = &stdlib.bytecode[start..end];
+                let current_func_hash = self.compute_function_hash(bytecode);
+                if metadata.function_hash != current_func_hash {
+                    return false;
                 }
             }
+        }
 
         true
     }
@@ -464,10 +477,26 @@ mod tests {
 
     #[test]
     fn test_version_compatibility() {
-        let v1 = Version { major: 0, minor: 4, patch: 0 };
-        let v2 = Version { major: 0, minor: 4, patch: 1 };
-        let v3 = Version { major: 0, minor: 5, patch: 0 };
-        let v4 = Version { major: 1, minor: 0, patch: 0 };
+        let v1 = Version {
+            major: 0,
+            minor: 4,
+            patch: 0,
+        };
+        let v2 = Version {
+            major: 0,
+            minor: 4,
+            patch: 1,
+        };
+        let v3 = Version {
+            major: 0,
+            minor: 5,
+            patch: 0,
+        };
+        let v4 = Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        };
 
         assert!(v1.compatible_with(&v2)); // Same major/minor
         assert!(v1.compatible_with(&v3)); // Same major, newer minor

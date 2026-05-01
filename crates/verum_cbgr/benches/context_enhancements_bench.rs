@@ -168,7 +168,11 @@ fn bench_adaptive_depth_policy(c: &mut Criterion) {
 
                 // Add some calls
                 for i in 1..num_funcs {
-                    call_graph.add_call(FunctionId(i as u64), FunctionId((i / 2) as u64), RefFlow::default());
+                    call_graph.add_call(
+                        FunctionId(i as u64),
+                        FunctionId((i / 2) as u64),
+                        RefFlow::default(),
+                    );
                 }
 
                 b.iter(|| {

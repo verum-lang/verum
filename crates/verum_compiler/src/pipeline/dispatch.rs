@@ -235,10 +235,7 @@ impl<'s> CompilationPipeline<'s> {
         let args_value = interpreter
             .alloc_string_list(&rust_args)
             .map_err(|e| anyhow::anyhow!("Failed to allocate args: {:?}", e))?;
-        info!(
-            "Executing cached VBC with {} args",
-            rust_args.len()
-        );
+        info!("Executing cached VBC with {} args", rust_args.len());
         let result = interpreter.call(main_func_id, &[args_value]);
         self.finalize_run_result(result)
     }
@@ -285,5 +282,4 @@ impl<'s> CompilationPipeline<'s> {
 
         Ok(())
     }
-
 }

@@ -15,9 +15,9 @@
 // Tests for formatting module
 // Comprehensive tests for syntax-tree-based formatting with trivia preservation
 
+use tower_lsp::lsp_types::{Position, Range};
 use verum_ast::FileId;
 use verum_lsp::formatting::*;
-use tower_lsp::lsp_types::{Position, Range};
 
 // ============================================================================
 // Basic Formatting Tests
@@ -212,8 +212,14 @@ fn test_format_document_empty() {
 fn test_format_range_single_line() {
     let input = "fn foo() {\n    let x = 1;\n}";
     let range = Range {
-        start: Position { line: 1, character: 0 },
-        end: Position { line: 1, character: 100 },
+        start: Position {
+            line: 1,
+            character: 0,
+        },
+        end: Position {
+            line: 1,
+            character: 100,
+        },
     };
     let edits = format_range(input, range);
     assert!(edits.len() <= 1);
@@ -223,8 +229,14 @@ fn test_format_range_single_line() {
 fn test_format_range_multi_line() {
     let input = "fn foo() {\nlet x = 1;\nlet y = 2;\n}";
     let range = Range {
-        start: Position { line: 1, character: 0 },
-        end: Position { line: 2, character: 100 },
+        start: Position {
+            line: 1,
+            character: 0,
+        },
+        end: Position {
+            line: 2,
+            character: 100,
+        },
     };
     let edits = format_range(input, range);
     // May return edits for the range
@@ -234,8 +246,14 @@ fn test_format_range_multi_line() {
 fn test_format_range_out_of_bounds() {
     let input = "fn foo() { }";
     let range = Range {
-        start: Position { line: 100, character: 0 },
-        end: Position { line: 101, character: 0 },
+        start: Position {
+            line: 100,
+            character: 0,
+        },
+        end: Position {
+            line: 101,
+            character: 0,
+        },
     };
     let edits = format_range(input, range);
     assert!(edits.is_empty());
@@ -248,7 +266,10 @@ fn test_format_range_out_of_bounds() {
 #[test]
 fn test_format_on_type_closing_brace() {
     let input = "fn foo() {\n    let x = 1;\n}";
-    let position = Position { line: 2, character: 1 };
+    let position = Position {
+        line: 2,
+        character: 1,
+    };
     let edits = format_on_type(input, position, '}');
     // May fix indentation of closing brace
 }
@@ -256,7 +277,10 @@ fn test_format_on_type_closing_brace() {
 #[test]
 fn test_format_on_type_semicolon() {
     let input = "fn foo() {\n    let x = 1;\n}";
-    let position = Position { line: 1, character: 14 };
+    let position = Position {
+        line: 1,
+        character: 14,
+    };
     let edits = format_on_type(input, position, ';');
     // Currently no-op for semicolons
     assert!(edits.is_empty());
@@ -265,7 +289,10 @@ fn test_format_on_type_semicolon() {
 #[test]
 fn test_format_on_type_newline() {
     let input = "fn foo() {\n";
-    let position = Position { line: 1, character: 0 };
+    let position = Position {
+        line: 1,
+        character: 0,
+    };
     let edits = format_on_type(input, position, '\n');
     // Should insert proper indentation
 }
@@ -273,7 +300,10 @@ fn test_format_on_type_newline() {
 #[test]
 fn test_format_on_type_other_char() {
     let input = "fn foo() { }";
-    let position = Position { line: 0, character: 5 };
+    let position = Position {
+        line: 0,
+        character: 5,
+    };
     let edits = format_on_type(input, position, 'x');
     // Other characters should not trigger formatting
     assert!(edits.is_empty());
@@ -383,7 +413,13 @@ fn test_format_deeply_nested() {
     let input = "fn foo() {\nif a {\nif b {\nif c {\nlet x = 1;\n}\n}\n}\n}";
     let result = basic_format(input);
     // Should maintain proper indentation for deeply nested code
-    assert!(result.lines().filter(|l| l.starts_with("            ")).count() >= 1);
+    assert!(
+        result
+            .lines()
+            .filter(|l| l.starts_with("            "))
+            .count()
+            >= 1
+    );
 }
 
 #[test]
@@ -409,7 +445,11 @@ fn test_format_trailing_whitespace_removal() {
     let result = basic_format(input);
     // Lines should not have trailing whitespace
     for line in result.lines() {
-        assert!(!line.ends_with(' '), "Line has trailing whitespace: {:?}", line);
+        assert!(
+            !line.ends_with(' '),
+            "Line has trailing whitespace: {:?}",
+            line
+        );
     }
 }
 

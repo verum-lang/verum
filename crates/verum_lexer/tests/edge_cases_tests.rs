@@ -30,8 +30,8 @@
 // Tests lexer behavior at boundaries of the Verum lexical grammar.
 
 use verum_ast::span::FileId;
-use verum_lexer::{Lexer, TokenKind};
 use verum_common::Text;
+use verum_lexer::{Lexer, TokenKind};
 
 /// Helper to tokenize and extract kinds (including EOF and errors).
 fn tokenize(source: &str) -> Vec<TokenKind> {
@@ -284,7 +284,10 @@ fn test_raw_multiline_with_special_content() {
 #[test]
 fn test_raw_multiline_with_many_lines() {
     // Test raw multiline string spanning many lines
-    let content = (0..20).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+    let content = (0..20)
+        .map(|i| format!("line {}", i))
+        .collect::<Vec<_>>()
+        .join("\n");
     let source = format!(r#""""{}""""#, content);
     let token = first_token(&source);
 

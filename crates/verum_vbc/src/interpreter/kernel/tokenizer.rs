@@ -85,9 +85,7 @@ mod real_impl {
     /// A tokenizer handle, or None if loading fails.
     pub fn load_bpe(vocab_path: &str, merges_path: &str) -> Option<TokenizerHandle> {
         // Build BPE model from vocab and merges
-        let bpe = BPE::from_file(vocab_path, merges_path)
-            .build()
-            .ok()?;
+        let bpe = BPE::from_file(vocab_path, merges_path).build().ok()?;
 
         let vocab_size = bpe.get_vocab_size();
         let tokenizer = Tokenizer::new(bpe);
@@ -267,7 +265,10 @@ mod real_impl {
 
     /// # Returns
     /// A vector of decoded texts, or None if decoding fails.
-    pub fn decode_batch(tokenizer: &TokenizerHandle, token_sequences: &[Vec<u32>]) -> Option<Vec<String>> {
+    pub fn decode_batch(
+        tokenizer: &TokenizerHandle,
+        token_sequences: &[Vec<u32>],
+    ) -> Option<Vec<String>> {
         let refs: Vec<&[u32]> = token_sequences.iter().map(|v| v.as_slice()).collect();
         tokenizer.inner.decode_batch(&refs, true).ok()
     }
@@ -312,9 +313,10 @@ mod stub_impl {
 
     /// Stub: Decode tokens as bytes to text.
     pub fn decode(_tokenizer: &TokenizerHandle, tokens: &[u32]) -> Option<String> {
-        let bytes: Vec<u8> = tokens.iter().filter_map(|&t| {
-            if t < 256 { Some(t as u8) } else { None }
-        }).collect();
+        let bytes: Vec<u8> = tokens
+            .iter()
+            .filter_map(|&t| if t < 256 { Some(t as u8) } else { None })
+            .collect();
         String::from_utf8(bytes).ok()
     }
 
@@ -333,8 +335,16 @@ mod stub_impl {
     }
 
     /// Stub: Batch decode (decodes each individually).
-    pub fn decode_batch(tokenizer: &TokenizerHandle, token_sequences: &[Vec<u32>]) -> Option<Vec<String>> {
-        Some(token_sequences.iter().filter_map(|t| decode(tokenizer, t)).collect())
+    pub fn decode_batch(
+        tokenizer: &TokenizerHandle,
+        token_sequences: &[Vec<u32>],
+    ) -> Option<Vec<String>> {
+        Some(
+            token_sequences
+                .iter()
+                .filter_map(|t| decode(tokenizer, t))
+                .collect(),
+        )
     }
 }
 
@@ -428,7 +438,10 @@ pub fn dispatch_tokenizer_spm_encode(tokenizer: &TokenizerHandle, text: &str) ->
 
 /// Decode with SentencePiece (alias for decode).
 #[inline]
-pub fn dispatch_tokenizer_spm_decode(tokenizer: &TokenizerHandle, tokens: &[u32]) -> Option<String> {
+pub fn dispatch_tokenizer_spm_decode(
+    tokenizer: &TokenizerHandle,
+    tokens: &[u32],
+) -> Option<String> {
     impl_mod::decode(tokenizer, tokens)
 }
 
@@ -444,7 +457,10 @@ pub fn dispatch_tokenizer_encode_special(
 
 /// Batch encode multiple texts.
 #[inline]
-pub fn dispatch_tokenizer_encode_batch(tokenizer: &TokenizerHandle, texts: &[&str]) -> Option<Vec<Vec<u32>>> {
+pub fn dispatch_tokenizer_encode_batch(
+    tokenizer: &TokenizerHandle,
+    texts: &[&str],
+) -> Option<Vec<Vec<u32>>> {
     impl_mod::encode_batch(tokenizer, texts)
 }
 

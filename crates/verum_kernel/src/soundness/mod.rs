@@ -219,7 +219,9 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
 
     // Helper: build an `Admitted` status with the reason verbatim.
     fn admitted(reason: &str) -> LemmaStatus {
-        Admitted { reason: reason.to_string() }
+        Admitted {
+            reason: reason.to_string(),
+        }
     }
 
     // Helper: build a `DischargedByFramework` status citing an
@@ -234,172 +236,385 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
         }
     }
 
-    let spec = |name: &str, cat: RuleCategory, arity: usize, side: bool, status: LemmaStatus| {
-        RuleSpec {
+    let spec =
+        |name: &str, cat: RuleCategory, arity: usize, side: bool, status: LemmaStatus| RuleSpec {
             rule_name: name.to_string(),
             lemma_name: format!("{}_sound", name),
             category: cat,
             premise_arity: arity,
             has_side_condition: side,
             status,
-        }
-    };
+        };
 
     vec![
         // ---- Structural (9) -------------------------------------------------
-        spec("K_Var", Structural, 0, false, proved(
-            "  intros d Hrule Hwf. apply ctx_lookup_sound; auto.",
-            "  intros d Hrule Hwf\n  exact ctx_lookup_sound Hrule Hwf",
-        )),
-        spec("K_Univ", Structural, 0, false, proved(
-            "  intros d Hrule. apply universe_form_sound.",
-            "  intros d Hrule\n  exact universe_form_sound",
-        )),
-        spec("K_Pi_Form", Structural, 2, false, discharged(
-            "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing",
-            "mathlib4",
-            "Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing",
-        )),
-        spec("K_Lam_Intro", Structural, 2, false, discharged(
-            "core.verify.kernel_v0.lemmas.cartesian.cartesian_closure_for_pi",
-            "mathlib4",
-            "Mathlib.CategoryTheory.Closed.Cartesian",
-        )),
-        spec("K_App_Elim", Structural, 2, false, discharged(
-            "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing + core.verify.kernel_v0.lemmas.beta.church_rosser_confluence",
-            "mathlib4",
-            "Mathlib.LambdaCalculus.LambdaPi.Substitution + Mathlib.Computability.Lambda.ChurchRosser",
-        )),
-        spec("K_Sigma_Form", Structural, 2, false, discharged(
-            "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing",
-            "mathlib4",
-            "Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing (Sigma form via duality)",
-        )),
-        spec("K_Pair_Intro", Structural, 2, false, discharged(
-            "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing",
-            "mathlib4",
-            "Mathlib.LambdaCalculus.LambdaPi.Substitution + dependent-product structure",
-        )),
-        spec("K_Fst_Elim", Structural, 1, false, discharged(
-            "core.verify.kernel_v0.lemmas.eta.function_extensionality",
-            "zfc",
-            "Sigma-projection eta-rule (fst (a, b) ≡ a) — derivable from extensionality",
-        )),
-        spec("K_Snd_Elim", Structural, 1, false, discharged(
-            "core.verify.kernel_v0.lemmas.eta.function_extensionality",
-            "zfc",
-            "Sigma-projection eta-rule (snd (a, b) : B[a/x]) — derivable from extensionality + subst",
-        )),
+        spec(
+            "K_Var",
+            Structural,
+            0,
+            false,
+            proved(
+                "  intros d Hrule Hwf. apply ctx_lookup_sound; auto.",
+                "  intros d Hrule Hwf\n  exact ctx_lookup_sound Hrule Hwf",
+            ),
+        ),
+        spec(
+            "K_Univ",
+            Structural,
+            0,
+            false,
+            proved(
+                "  intros d Hrule. apply universe_form_sound.",
+                "  intros d Hrule\n  exact universe_form_sound",
+            ),
+        ),
+        spec(
+            "K_Pi_Form",
+            Structural,
+            2,
+            false,
+            discharged(
+                "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing",
+                "mathlib4",
+                "Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing",
+            ),
+        ),
+        spec(
+            "K_Lam_Intro",
+            Structural,
+            2,
+            false,
+            discharged(
+                "core.verify.kernel_v0.lemmas.cartesian.cartesian_closure_for_pi",
+                "mathlib4",
+                "Mathlib.CategoryTheory.Closed.Cartesian",
+            ),
+        ),
+        spec(
+            "K_App_Elim",
+            Structural,
+            2,
+            false,
+            discharged(
+                "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing + core.verify.kernel_v0.lemmas.beta.church_rosser_confluence",
+                "mathlib4",
+                "Mathlib.LambdaCalculus.LambdaPi.Substitution + Mathlib.Computability.Lambda.ChurchRosser",
+            ),
+        ),
+        spec(
+            "K_Sigma_Form",
+            Structural,
+            2,
+            false,
+            discharged(
+                "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing",
+                "mathlib4",
+                "Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing (Sigma form via duality)",
+            ),
+        ),
+        spec(
+            "K_Pair_Intro",
+            Structural,
+            2,
+            false,
+            discharged(
+                "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing",
+                "mathlib4",
+                "Mathlib.LambdaCalculus.LambdaPi.Substitution + dependent-product structure",
+            ),
+        ),
+        spec(
+            "K_Fst_Elim",
+            Structural,
+            1,
+            false,
+            discharged(
+                "core.verify.kernel_v0.lemmas.eta.function_extensionality",
+                "zfc",
+                "Sigma-projection eta-rule (fst (a, b) ≡ a) — derivable from extensionality",
+            ),
+        ),
+        spec(
+            "K_Snd_Elim",
+            Structural,
+            1,
+            false,
+            discharged(
+                "core.verify.kernel_v0.lemmas.eta.function_extensionality",
+                "zfc",
+                "Sigma-projection eta-rule (snd (a, b) : B[a/x]) — derivable from extensionality + subst",
+            ),
+        ),
         // ---- Cubical (6) ----------------------------------------------------
-        spec("K_Path_Ty_Form", Cubical, 3, false, admitted(
-            "requires interval-object semantics (CCHM De Morgan algebra) — \
+        spec(
+            "K_Path_Ty_Form",
+            Cubical,
+            3,
+            false,
+            admitted(
+                "requires interval-object semantics (CCHM De Morgan algebra) — \
              once formalised, the formation lemma is structural",
-        )),
-        spec("K_Path_Over_Form", Cubical, 4, false, admitted(
-            "requires K-Path-Ty-Form + dependent-path semantics over a motive (HoTT Book §6.2)",
-        )),
-        spec("K_Refl_Intro", Cubical, 1, false, admitted(
-            "requires K-Path-Ty-Form + the J-rule's unit law \
+            ),
+        ),
+        spec(
+            "K_Path_Over_Form",
+            Cubical,
+            4,
+            false,
+            admitted(
+                "requires K-Path-Ty-Form + dependent-path semantics over a motive (HoTT Book §6.2)",
+            ),
+        ),
+        spec(
+            "K_Refl_Intro",
+            Cubical,
+            1,
+            false,
+            admitted(
+                "requires K-Path-Ty-Form + the J-rule's unit law \
              (refl is the identity element in the path groupoid)",
-        )),
-        spec("K_HComp", Cubical, 3, false, admitted(
-            "requires CCHM hcomp regularity + Kan-filling lemmas \
+            ),
+        ),
+        spec(
+            "K_HComp",
+            Cubical,
+            3,
+            false,
+            admitted(
+                "requires CCHM hcomp regularity + Kan-filling lemmas \
              (Cohen-Coquand-Huber-Mörtberg §3)",
-        )),
-        spec("K_Transp", Cubical, 3, false, admitted(
-            "requires CCHM transp regularity \
+            ),
+        ),
+        spec(
+            "K_Transp",
+            Cubical,
+            3,
+            false,
+            admitted(
+                "requires CCHM transp regularity \
              (the regularity endpoint at i=1 reduces to identity)",
-        )),
-        spec("K_Glue", Cubical, 4, false, admitted(
-            "requires univalence-via-Glue \
+            ),
+        ),
+        spec(
+            "K_Glue",
+            Cubical,
+            4,
+            false,
+            admitted(
+                "requires univalence-via-Glue \
              (the equivalence on the boundary lifts to a path in the universe)",
-        )),
+            ),
+        ),
         // ---- Refinement (4) -------------------------------------------------
-        spec("K_Refine", Refinement, 2, false, admitted(
-            "requires the refinement-typing hierarchy: predicates over base types \
+        spec(
+            "K_Refine",
+            Refinement,
+            2,
+            false,
+            admitted(
+                "requires the refinement-typing hierarchy: predicates over base types \
              are themselves Bool-valued at universe Type(0)",
-        )),
-        spec("K_Refine_Omega", Refinement, 2, true, admitted(
-            "requires modal-depth ordinal arithmetic well-foundedness \
+            ),
+        ),
+        spec(
+            "K_Refine_Omega",
+            Refinement,
+            2,
+            true,
+            admitted(
+                "requires modal-depth ordinal arithmetic well-foundedness \
              (md^ω is bounded by ω₁ at a fixed predicate; \
              see Definition 136.D1 + Lemma 136.L0)",
-        )),
-        spec("K_Refine_Intro", Refinement, 2, false, admitted(
-            "requires K-Refine + decidability of the predicate at the introduced value \
+            ),
+        ),
+        spec(
+            "K_Refine_Intro",
+            Refinement,
+            2,
+            false,
+            admitted(
+                "requires K-Refine + decidability of the predicate at the introduced value \
              (Bool-discharged at this layer)",
-        )),
-        spec("K_Refine_Erase", Refinement, 1, false, admitted(
-            "requires the underlying-type-recovery lemma: erasing the predicate yields the base type",
-        )),
+            ),
+        ),
+        spec(
+            "K_Refine_Erase",
+            Refinement,
+            1,
+            false,
+            admitted(
+                "requires the underlying-type-recovery lemma: erasing the predicate yields the base type",
+            ),
+        ),
         // ---- Quotient (3) ---------------------------------------------------
-        spec("K_Quot_Form", Quotient, 2, true, admitted(
-            "requires equivalence-relation properties (refl/symm/trans) to be \
+        spec(
+            "K_Quot_Form",
+            Quotient,
+            2,
+            true,
+            admitted(
+                "requires equivalence-relation properties (refl/symm/trans) to be \
              witnessed at the kernel layer; currently framework-axiomatised",
-        )),
-        spec("K_Quot_Intro", Quotient, 3, false, admitted(
-            "requires K-Quot-Form + projection-onto-equivalence-class well-typedness",
-        )),
-        spec("K_Quot_Elim", Quotient, 3, true, admitted(
-            "requires the respect-of-equivalence side-condition to be discharged \
+            ),
+        ),
+        spec(
+            "K_Quot_Intro",
+            Quotient,
+            3,
+            false,
+            admitted("requires K-Quot-Form + projection-onto-equivalence-class well-typedness"),
+        ),
+        spec(
+            "K_Quot_Elim",
+            Quotient,
+            3,
+            true,
+            admitted(
+                "requires the respect-of-equivalence side-condition to be discharged \
              structurally; currently audited via verum audit --proof-honesty",
-        )),
+            ),
+        ),
         // ---- Inductive (3) --------------------------------------------------
-        spec("K_Inductive", Inductive, 0, false, admitted(
-            "requires positivity-condition decision procedure (mutual recursion with K-Pos)",
-        )),
-        spec("K_Pos", Inductive, 0, true, proved(
-            "  intros d Hrule Hside.\n  destruct Hside as [strict_pos _].\n  exact (strict_positivity_sound strict_pos).",
-            "  intros d Hrule Hside\n  rcases Hside with ⟨strict_pos, _⟩\n  exact strict_positivity_sound strict_pos",
-        )),
-        spec("K_Elim", Inductive, 3, false, admitted(
-            "requires the dependent eliminator's motive-substitution lemma + W-type recursion",
-        )),
+        spec(
+            "K_Inductive",
+            Inductive,
+            0,
+            false,
+            admitted(
+                "requires positivity-condition decision procedure (mutual recursion with K-Pos)",
+            ),
+        ),
+        spec(
+            "K_Pos",
+            Inductive,
+            0,
+            true,
+            proved(
+                "  intros d Hrule Hside.\n  destruct Hside as [strict_pos _].\n  exact (strict_positivity_sound strict_pos).",
+                "  intros d Hrule Hside\n  rcases Hside with ⟨strict_pos, _⟩\n  exact strict_positivity_sound strict_pos",
+            ),
+        ),
+        spec(
+            "K_Elim",
+            Inductive,
+            3,
+            false,
+            admitted(
+                "requires the dependent eliminator's motive-substitution lemma + W-type recursion",
+            ),
+        ),
         // ---- SMT / Axiom (2) ------------------------------------------------
-        spec("K_Smt", SmtAxiom, 0, true, admitted(
-            "requires the SMT-cert replay lemma: every cert that \
+        spec(
+            "K_Smt",
+            SmtAxiom,
+            0,
+            true,
+            admitted(
+                "requires the SMT-cert replay lemma: every cert that \
              verum_kernel::replay_smt_cert accepts denotes a well-typed CoreTerm derivation",
-        )),
-        spec("K_FwAx", SmtAxiom, 0, true, proved(
-            "  intros d Hrule Hpremises Hside.\n  destruct Hside as [body_prop _].\n  exact (axiom_body_typed_in_prop body_prop).",
-            "  intros d Hrule Hpremises Hside\n  rcases Hside with ⟨body_prop, _⟩\n  exact axiom_body_typed_in_prop body_prop",
-        )),
+            ),
+        ),
+        spec(
+            "K_FwAx",
+            SmtAxiom,
+            0,
+            true,
+            proved(
+                "  intros d Hrule Hpremises Hside.\n  destruct Hside as [body_prop _].\n  exact (axiom_body_typed_in_prop body_prop).",
+                "  intros d Hrule Hpremises Hside\n  rcases Hside with ⟨body_prop, _⟩\n  exact axiom_body_typed_in_prop body_prop",
+            ),
+        ),
         // ---- Diakrisis (11) -------------------------------------------------
-        spec("K_Eps_Mu", Diakrisis, 2, false, admitted(
-            "requires Proposition 5.1 + Corollary 5.10 of the M ⊣ A biadjunction; \
+        spec(
+            "K_Eps_Mu",
+            Diakrisis,
+            2,
+            false,
+            admitted(
+                "requires Proposition 5.1 + Corollary 5.10 of the M ⊣ A biadjunction; \
              the τ-witness construction is V1 work",
-        )),
-        spec("K_Universe_Ascent", Diakrisis, 1, true, admitted(
-            "requires κ-tower well-foundedness for arbitrary heights (κ a regular cardinal); \
+            ),
+        ),
+        spec(
+            "K_Universe_Ascent",
+            Diakrisis,
+            1,
+            true,
+            admitted(
+                "requires κ-tower well-foundedness for arbitrary heights (κ a regular cardinal); \
              proved for finite heights, transfinite case is separate work",
-        )),
-        spec("K_Round_Trip", Diakrisis, 2, false, admitted(
-            "requires the bridge-audit completeness lemma: \
+            ),
+        ),
+        spec(
+            "K_Round_Trip",
+            Diakrisis,
+            2,
+            false,
+            admitted(
+                "requires the bridge-audit completeness lemma: \
              every BridgeAudit trail recovers the original term modulo normalisation",
-        )),
-        spec("K_Epsilon_Of", Diakrisis, 1, false, admitted(
-            "requires the M ⊣ A biadjunction unit law",
-        )),
-        spec("K_Alpha_Of", Diakrisis, 1, false, admitted(
-            "requires the M ⊣ A biadjunction counit law",
-        )),
-        spec("K_Modal_Box", Diakrisis, 1, false, admitted(
-            "requires modal-depth recursion lemma: md^ω(□φ) = md^ω(φ) + 1 (Definition 136.D1)",
-        )),
-        spec("K_Modal_Diamond", Diakrisis, 1, false, admitted(
-            "structurally identical to K-Modal-Box; awaits the same modal-depth recursion lemma",
-        )),
-        spec("K_Modal_Big_And", Diakrisis, 1, false, admitted(
-            "requires transfinite-supremum lemma for ordinal recursion (Lemma 136.L0)",
-        )),
-        spec("K_Shape", Diakrisis, 1, false, admitted(
-            "requires Schreiber DCCT cohesive triple-adjunction ∫ ⊣ ♭ ⊣ ♯ (DCCT §3.4)",
-        )),
-        spec("K_Flat", Diakrisis, 1, false, admitted(
-            "requires the discrete-subuniverse localisation lemma (Shulman 2018 §3)",
-        )),
-        spec("K_Sharp", Diakrisis, 1, false, admitted(
-            "requires the codiscrete-subuniverse colocalisation lemma (DCCT §3.4)",
-        )),
+            ),
+        ),
+        spec(
+            "K_Epsilon_Of",
+            Diakrisis,
+            1,
+            false,
+            admitted("requires the M ⊣ A biadjunction unit law"),
+        ),
+        spec(
+            "K_Alpha_Of",
+            Diakrisis,
+            1,
+            false,
+            admitted("requires the M ⊣ A biadjunction counit law"),
+        ),
+        spec(
+            "K_Modal_Box",
+            Diakrisis,
+            1,
+            false,
+            admitted(
+                "requires modal-depth recursion lemma: md^ω(□φ) = md^ω(φ) + 1 (Definition 136.D1)",
+            ),
+        ),
+        spec(
+            "K_Modal_Diamond",
+            Diakrisis,
+            1,
+            false,
+            admitted(
+                "structurally identical to K-Modal-Box; awaits the same modal-depth recursion lemma",
+            ),
+        ),
+        spec(
+            "K_Modal_Big_And",
+            Diakrisis,
+            1,
+            false,
+            admitted("requires transfinite-supremum lemma for ordinal recursion (Lemma 136.L0)"),
+        ),
+        spec(
+            "K_Shape",
+            Diakrisis,
+            1,
+            false,
+            admitted("requires Schreiber DCCT cohesive triple-adjunction ∫ ⊣ ♭ ⊣ ♯ (DCCT §3.4)"),
+        ),
+        spec(
+            "K_Flat",
+            Diakrisis,
+            1,
+            false,
+            admitted("requires the discrete-subuniverse localisation lemma (Shulman 2018 §3)"),
+        ),
+        spec(
+            "K_Sharp",
+            Diakrisis,
+            1,
+            false,
+            admitted("requires the codiscrete-subuniverse colocalisation lemma (DCCT §3.4)"),
+        ),
     ]
 }
 
@@ -487,7 +702,9 @@ impl SoundnessExporter {
     /// the production path; tests can use [`Self::with_rules`] to
     /// drive a custom list.
     pub fn new() -> Self {
-        Self { rules: canonical_rules() }
+        Self {
+            rules: canonical_rules(),
+        }
     }
 
     /// Construct an exporter with a custom rule list (test path).
@@ -550,9 +767,7 @@ impl SoundnessExporter {
             .iter()
             .filter_map(|r| match &r.status {
                 LemmaStatus::Proved { .. } => None,
-                LemmaStatus::Admitted { reason } => {
-                    Some((r.rule_name.as_str(), reason.as_str()))
-                }
+                LemmaStatus::Admitted { reason } => Some((r.rule_name.as_str(), reason.as_str())),
                 LemmaStatus::DischargedByFramework { citation, .. } => {
                     Some((r.rule_name.as_str(), citation.as_str()))
                 }

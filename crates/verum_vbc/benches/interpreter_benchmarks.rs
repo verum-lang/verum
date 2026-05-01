@@ -9,14 +9,16 @@
 
 //! Run with: cargo bench -p verum_vbc -- interpreter
 
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::sync::Arc;
 
 use verum_vbc::bytecode::encode_instructions_with_fixup;
 use verum_vbc::instruction::{BinaryIntOp, CompareOp, Instruction, Reg, UnaryIntOp};
-use verum_vbc::interpreter::{execute_table, InterpreterState};
-use verum_vbc::module::{CallingConvention, FunctionDescriptor, FunctionId, OptimizationHints, VbcModule};
+use verum_vbc::interpreter::{InterpreterState, execute_table};
+use verum_vbc::module::{
+    CallingConvention, FunctionDescriptor, FunctionId, OptimizationHints, VbcModule,
+};
 use verum_vbc::types::{PropertySet, TypeId, TypeRef, Visibility};
 
 // ============================================================================
@@ -58,11 +60,20 @@ fn create_loop_module(iterations: i64) -> Arc<VbcModule> {
 
     let instructions = vec![
         // 0: Load iteration count into r0
-        Instruction::LoadI { dst: Reg(0), value: iterations },
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: iterations,
+        },
         // 1: r1 = sum = 0
-        Instruction::LoadI { dst: Reg(1), value: 0 },
+        Instruction::LoadI {
+            dst: Reg(1),
+            value: 0,
+        },
         // 2: r2 = i = 0
-        Instruction::LoadI { dst: Reg(2), value: 0 },
+        Instruction::LoadI {
+            dst: Reg(2),
+            value: 0,
+        },
         // 3: loop: r3 = i < n (CmpI)
         Instruction::CmpI {
             op: CompareOp::Lt,
@@ -80,13 +91,13 @@ fn create_loop_module(iterations: i64) -> Arc<VbcModule> {
             op: BinaryIntOp::Add,
             dst: Reg(1),
             a: Reg(1),
-            b: Reg(2)
+            b: Reg(2),
         },
         // 6: i = i + 1 (UnaryI with Inc)
         Instruction::UnaryI {
             op: UnaryIntOp::Inc,
             dst: Reg(2),
-            src: Reg(2)
+            src: Reg(2),
         },
         // 7: goto loop (jump to index 3)
         Instruction::Jmp { offset: -4 }, // Relative: from 7 to 3
@@ -160,36 +171,54 @@ fn create_arith_module(iterations: i64) -> Arc<VbcModule> {
 
     let instructions = vec![
         // 0: r0 = iterations
-        Instruction::LoadI { dst: Reg(0), value: iterations },
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: iterations,
+        },
         // 1: r1 = counter = 0
-        Instruction::LoadI { dst: Reg(1), value: 0 },
+        Instruction::LoadI {
+            dst: Reg(1),
+            value: 0,
+        },
         // 2: r2 = a = 1
-        Instruction::LoadI { dst: Reg(2), value: 1 },
+        Instruction::LoadI {
+            dst: Reg(2),
+            value: 1,
+        },
         // 3: r3 = b = 2
-        Instruction::LoadI { dst: Reg(3), value: 2 },
+        Instruction::LoadI {
+            dst: Reg(3),
+            value: 2,
+        },
         // 4: loop: r4 = a + b
         Instruction::BinaryI {
             op: BinaryIntOp::Add,
             dst: Reg(4),
             a: Reg(2),
-            b: Reg(3)
+            b: Reg(3),
         },
         // 5: r2 = r4
-        Instruction::Mov { dst: Reg(2), src: Reg(4) },
+        Instruction::Mov {
+            dst: Reg(2),
+            src: Reg(4),
+        },
         // 6: r4 = a + b (again, simulating more work)
         Instruction::BinaryI {
             op: BinaryIntOp::Add,
             dst: Reg(4),
             a: Reg(2),
-            b: Reg(3)
+            b: Reg(3),
         },
         // 7: r3 = r4
-        Instruction::Mov { dst: Reg(3), src: Reg(4) },
+        Instruction::Mov {
+            dst: Reg(3),
+            src: Reg(4),
+        },
         // 8: counter++
         Instruction::UnaryI {
             op: UnaryIntOp::Inc,
             dst: Reg(1),
-            src: Reg(1)
+            src: Reg(1),
         },
         // 9: r5 = counter < iterations
         Instruction::CmpI {
@@ -258,17 +287,13 @@ fn bench_dispatch_loop(c: &mut Criterion) {
         let module = create_loop_module(*iterations);
 
         group.throughput(Throughput::Elements(*iterations as u64));
-        group.bench_with_input(
-            BenchmarkId::new("loop", iterations),
-            iterations,
-            |b, _| {
-                b.iter(|| {
-                    let mut state = InterpreterState::new(Arc::clone(&module));
-                    let result = execute_table(&mut state, FunctionId(0));
-                    black_box(result)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("loop", iterations), iterations, |b, _| {
+            b.iter(|| {
+                let mut state = InterpreterState::new(Arc::clone(&module));
+                let result = execute_table(&mut state, FunctionId(0));
+                black_box(result)
+            });
+        });
     }
 
     group.finish();
@@ -281,17 +306,13 @@ fn bench_arith(c: &mut Criterion) {
         let module = create_arith_module(*iterations);
 
         group.throughput(Throughput::Elements(*iterations as u64));
-        group.bench_with_input(
-            BenchmarkId::new("arith", iterations),
-            iterations,
-            |b, _| {
-                b.iter(|| {
-                    let mut state = InterpreterState::new(Arc::clone(&module));
-                    let result = execute_table(&mut state, FunctionId(0));
-                    black_box(result)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("arith", iterations), iterations, |b, _| {
+            b.iter(|| {
+                let mut state = InterpreterState::new(Arc::clone(&module));
+                let result = execute_table(&mut state, FunctionId(0));
+                black_box(result)
+            });
+        });
     }
 
     group.finish();
@@ -308,29 +329,21 @@ fn bench_dispatch_comprehensive(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements(*iterations as u64));
 
-        group.bench_with_input(
-            BenchmarkId::new("loop", iterations),
-            iterations,
-            |b, _| {
-                b.iter(|| {
-                    let mut state = InterpreterState::new(Arc::clone(&loop_module));
-                    let result = execute_table(&mut state, FunctionId(0));
-                    black_box(result)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("loop", iterations), iterations, |b, _| {
+            b.iter(|| {
+                let mut state = InterpreterState::new(Arc::clone(&loop_module));
+                let result = execute_table(&mut state, FunctionId(0));
+                black_box(result)
+            });
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("arith", iterations),
-            iterations,
-            |b, _| {
-                b.iter(|| {
-                    let mut state = InterpreterState::new(Arc::clone(&arith_module));
-                    let result = execute_table(&mut state, FunctionId(0));
-                    black_box(result)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("arith", iterations), iterations, |b, _| {
+            b.iter(|| {
+                let mut state = InterpreterState::new(Arc::clone(&arith_module));
+                let result = execute_table(&mut state, FunctionId(0));
+                black_box(result)
+            });
+        });
     }
 
     group.finish();

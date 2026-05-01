@@ -21,8 +21,7 @@
 //! 5. Stub-mode CVC5 falls back to Z3-only routing transparently.
 
 use verum_smt::capability_router::{
-    CapabilityRouter, CrossValidationStrictness, ExtendedCharacteristics, SolverChoice,
-    TieBreaker,
+    CapabilityRouter, CrossValidationStrictness, ExtendedCharacteristics, SolverChoice, TieBreaker,
 };
 use verum_smt::portfolio_executor::{
     CrossValidateResult, PortfolioExecutor, PortfolioSolver, SolverId, SolverVerdict,
@@ -103,10 +102,7 @@ fn verify_strategy_thorough_uses_portfolio() {
     #[cfg(feature = "cvc5")]
     {
         use verum_smt::backend_switcher::BackendChoice;
-        assert_eq!(
-            strategy.to_backend_choice(),
-            Some(BackendChoice::Portfolio)
-        );
+        assert_eq!(strategy.to_backend_choice(), Some(BackendChoice::Portfolio));
     }
 }
 
@@ -118,8 +114,14 @@ fn verify_strategy_rejects_solver_specific_names() {
     assert_eq!(VerifyStrategy::from_attribute_value("cvc5"), None);
     // Semantic aliases still work. `reliable` is its own ladder rung
     // since the split (no longer a `Thorough` alias).
-    assert_eq!(VerifyStrategy::from_attribute_value("fast"), Some(VerifyStrategy::Fast));
-    assert_eq!(VerifyStrategy::from_attribute_value("reliable"), Some(VerifyStrategy::Reliable));
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("fast"),
+        Some(VerifyStrategy::Fast)
+    );
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("reliable"),
+        Some(VerifyStrategy::Reliable)
+    );
 }
 
 // ============================================================================
@@ -146,7 +148,10 @@ fn router_dispatches_nonlinear_real_to_cvc5() {
     let mut chars = ExtendedCharacteristics::default();
     chars.has_nonlinear_real = true;
 
-    assert!(matches!(router.route(&chars), SolverChoice::Cvc5Only { .. }));
+    assert!(matches!(
+        router.route(&chars),
+        SolverChoice::Cvc5Only { .. }
+    ));
 }
 
 #[test]
@@ -181,7 +186,7 @@ fn router_falls_back_to_z3_when_cvc5_unavailable() {
     // when CVC5 is not available.
     let router = CapabilityRouter::z3_only();
     let mut chars = ExtendedCharacteristics::default();
-    chars.has_nonlinear_real = true;  // would be CVC5 if available
+    chars.has_nonlinear_real = true; // would be CVC5 if available
 
     match router.route(&chars) {
         SolverChoice::Z3Only { reason, .. } => {
@@ -208,12 +213,8 @@ fn portfolio_first_wins_basic() {
         delay_ms: 200,
     };
 
-    let result = PortfolioExecutor::solve_portfolio(
-        z3,
-        cvc5,
-        Duration::from_secs(2),
-        TieBreaker::Fastest,
-    );
+    let result =
+        PortfolioExecutor::solve_portfolio(z3, cvc5, Duration::from_secs(2), TieBreaker::Fastest);
 
     assert_eq!(result.winner, SolverId::Z3);
     assert_eq!(result.verdict, SolverVerdict::Sat);
@@ -232,12 +233,8 @@ fn portfolio_tie_breaker_respects_preference() {
         delay_ms: 30,
     };
 
-    let result = PortfolioExecutor::solve_portfolio(
-        z3,
-        cvc5,
-        Duration::from_secs(2),
-        TieBreaker::Cvc5,
-    );
+    let result =
+        PortfolioExecutor::solve_portfolio(z3, cvc5, Duration::from_secs(2), TieBreaker::Cvc5);
 
     // Both produced SAT, verdict should match.
     assert_eq!(result.verdict, SolverVerdict::Sat);
@@ -249,7 +246,7 @@ fn portfolio_tie_breaker_respects_preference() {
 
 #[test]
 fn cross_validate_agreement_returns_agreed() {
-let z3 = MockSolver {
+    let z3 = MockSolver {
         id: SolverId::Z3,
         verdict: SolverVerdict::Unsat,
         delay_ms: 10,
@@ -277,7 +274,7 @@ let z3 = MockSolver {
 
 #[test]
 fn cross_validate_divergence_detected() {
-let z3 = MockSolver {
+    let z3 = MockSolver {
         id: SolverId::Z3,
         verdict: SolverVerdict::Sat,
         delay_ms: 10,

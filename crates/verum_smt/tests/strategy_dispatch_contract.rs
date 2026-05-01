@@ -65,8 +65,14 @@ fn fast_strategy_contract() {
     assert!(s.timeout_multiplier() < VerifyStrategy::Formal.timeout_multiplier());
 
     // Aliases per §12.3.
-    assert_eq!(VerifyStrategy::from_attribute_value("quick"), Some(VerifyStrategy::Fast));
-    assert_eq!(VerifyStrategy::from_attribute_value("rapid"), Some(VerifyStrategy::Fast));
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("quick"),
+        Some(VerifyStrategy::Fast)
+    );
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("rapid"),
+        Some(VerifyStrategy::Fast)
+    );
 }
 
 #[test]
@@ -87,7 +93,10 @@ fn proof_strategy_contract() {
     assert_eq!(s.nu_ordinal(), NuOrdinal::OmegaPlusOne);
     // §12.5: user-supplied tactic, kernel rechecks. No SMT
     // dispatch — the tactic IS the proof.
-    assert!(!s.requires_smt(), "proof is user-supplied tactic, kernel rechecks");
+    assert!(
+        !s.requires_smt(),
+        "proof is user-supplied tactic, kernel rechecks"
+    );
     assert!(!s.is_synthesis());
 }
 
@@ -103,7 +112,10 @@ fn thorough_strategy_contract() {
     assert!(s.timeout_multiplier() >= VerifyStrategy::Formal.timeout_multiplier());
 
     // Alias per §12.6.
-    assert_eq!(VerifyStrategy::from_attribute_value("robust"), Some(VerifyStrategy::Thorough));
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("robust"),
+        Some(VerifyStrategy::Thorough)
+    );
 }
 
 #[test]
@@ -141,11 +153,20 @@ fn synthesize_strategy_contract() {
     assert_eq!(s.as_str(), "synthesize");
     // §12.9: orthogonal — ν ≤ ω·3+1.
     assert!(s.is_synthesis());
-    assert!(s.requires_smt(), "synthesis goes through SyGuS-capable backend");
+    assert!(
+        s.requires_smt(),
+        "synthesis goes through SyGuS-capable backend"
+    );
 
     // Aliases per §12.9.
-    assert_eq!(VerifyStrategy::from_attribute_value("synth"), Some(VerifyStrategy::Synthesize));
-    assert_eq!(VerifyStrategy::from_attribute_value("synthesis"), Some(VerifyStrategy::Synthesize));
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("synth"),
+        Some(VerifyStrategy::Synthesize)
+    );
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("synthesis"),
+        Some(VerifyStrategy::Synthesize)
+    );
 }
 
 // =============================================================================
@@ -178,7 +199,9 @@ fn ladder_nu_ordinals_strictly_monotone_excluding_synthesize() {
         assert!(
             high.at_least(low) && !low.at_least(high),
             "ladder monotonicity break at position {}: {:?} → {:?}",
-            i, low, high,
+            i,
+            low,
+            high,
         );
     }
 }

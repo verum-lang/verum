@@ -324,8 +324,7 @@ mod tests {
         assert_eq!(graph.get_backward(FunctionId(0)), Some(FunctionId(1)));
 
         graph.add_checkpoint(
-            CheckpointBoundary::new(InstructionId(0), InstructionId(10))
-                .with_memory_savings(4096),
+            CheckpointBoundary::new(InstructionId(0), InstructionId(10)).with_memory_savings(4096),
         );
         assert_eq!(graph.checkpoint_memory_savings(), 4096);
     }

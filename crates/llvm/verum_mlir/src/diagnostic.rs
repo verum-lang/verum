@@ -5,14 +5,14 @@ mod severity;
 
 pub use self::{handler_id::DiagnosticHandlerId, severity::DiagnosticSeverity};
 use crate::{Error, ir::Location, utility::print_callback};
-use verum_mlir_sys::{
-    MlirDiagnostic, mlirDiagnosticGetLocation, mlirDiagnosticGetNote, mlirDiagnosticGetNumNotes,
-    mlirDiagnosticGetSeverity, mlirDiagnosticPrint,
-};
 use std::{
     ffi::c_void,
     fmt::{self, Display, Formatter},
     marker::PhantomData,
+};
+use verum_mlir_sys::{
+    MlirDiagnostic, mlirDiagnosticGetLocation, mlirDiagnosticGetNote, mlirDiagnosticGetNumNotes,
+    mlirDiagnosticGetSeverity, mlirDiagnosticPrint,
 };
 
 #[derive(Debug)]

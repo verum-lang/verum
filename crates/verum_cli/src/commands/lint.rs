@@ -107,9 +107,7 @@ pub fn deprecation_notice(name: &str) -> Option<String> {
     match rule_status(name) {
         LintRuleStatus::Active => None,
         LintRuleStatus::Deprecated { since, replacement } => Some(match replacement {
-            Some(repl) => format!(
-                "deprecated since {since} — use `{repl}` instead",
-            ),
+            Some(repl) => format!("deprecated since {since} — use `{repl}` instead",),
             None => format!("deprecated since {since} — slated for removal"),
         }),
     }
@@ -348,24 +346,21 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "unrefined-public-int",
         level: LintLevel::Warning,
-        description:
-            "Public fn parameter or return is Int/Text without a refinement — \
+        description: "Public fn parameter or return is Int/Text without a refinement — \
              tighten the type to express valid usage at the type level",
         category: LintCategory::Verification,
     },
     LintRule {
         name: "verify-implied-by-refinement",
         level: LintLevel::Warning,
-        description:
-            "Function uses refinement types but lacks @verify — \
+        description: "Function uses refinement types but lacks @verify — \
              the type-level obligation will only be checked at runtime",
         category: LintCategory::Verification,
     },
     LintRule {
         name: "public-must-have-verify",
         level: LintLevel::Hint,
-        description:
-            "Public function lacks @verify(...) — declare its verification \
+        description: "Public function lacks @verify(...) — declare its verification \
              strategy explicitly (runtime | static | formal | …)",
         category: LintCategory::Verification,
     },
@@ -374,8 +369,7 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "forbidden-context",
         level: LintLevel::Error,
-        description:
-            "Function uses a context (`using [X]`) that the project's \
+        description: "Function uses a context (`using [X]`) that the project's \
              [lint.context_policy.modules] forbids in this module path",
         category: LintCategory::Safety,
     },
@@ -384,8 +378,7 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "architecture-violation",
         level: LintLevel::Error,
-        description:
-            "`mount` crosses a layer boundary or matches an explicit ban — \
+        description: "`mount` crosses a layer boundary or matches an explicit ban — \
              the project's [lint.architecture] forbids this import",
         category: LintCategory::Style,
     },
@@ -394,8 +387,7 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "cbgr-budget-exceeded",
         level: LintLevel::Warning,
-        description:
-            "Managed CBGR reference (`&` / `&mut`) used in a module whose \
+        description: "Managed CBGR reference (`&` / `&mut`) used in a module whose \
              [lint.cbgr_budgets].max_check_ns budget is below the static \
              per-deref cost — promote to `&checked` (0ns) or `&unsafe`",
         category: LintCategory::Performance,
@@ -430,8 +422,7 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "public-must-have-doc",
         level: LintLevel::Hint,
-        description:
-            "Public item lacks a doc comment (`///`) — add one or set \
+        description: "Public item lacks a doc comment (`///`) — add one or set \
              [lint.documentation].public_must_have_doc = false",
         category: LintCategory::Style,
     },
@@ -440,16 +431,14 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "unsafe-without-capability",
         level: LintLevel::Warning,
-        description:
-            "Function uses `unsafe { … }` but lacks @cap(...) — declare \
+        description: "Function uses `unsafe { … }` but lacks @cap(...) — declare \
              the capability explicitly so the trust boundary is auditable",
         category: LintCategory::Safety,
     },
     LintRule {
         name: "ffi-without-capability",
         level: LintLevel::Warning,
-        description:
-            "FFI item (`@ffi` / `@extern`) lacks @cap(...) — declare \
+        description: "FFI item (`@ffi` / `@extern`) lacks @cap(...) — declare \
              the foreign-boundary capability explicitly",
         category: LintCategory::Safety,
     },
@@ -460,8 +449,7 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "custom-ast-rule",
         level: LintLevel::Warning,
-        description:
-            "User-authored AST-pattern rule from [[lint.custom]] (Phase D) — \
+        description: "User-authored AST-pattern rule from [[lint.custom]] (Phase D) — \
              accepts kind = \"method_call|call|unsafe_block|attribute\" with \
              extra fields: method | path | name",
         category: LintCategory::Style,
@@ -473,8 +461,7 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "circular-import",
         level: LintLevel::Error,
-        description:
-            "Module graph contains a cycle — module A mounts B, \
+        description: "Module graph contains a cycle — module A mounts B, \
              B (transitively) mounts A. Break the cycle by extracting \
              the shared types into a leaf module.",
         category: LintCategory::Style,
@@ -482,24 +469,21 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "orphan-module",
         level: LintLevel::Hint,
-        description:
-            "File under src/ that no other corpus file mounts. \
+        description: "File under src/ that no other corpus file mounts. \
              Excludes main.vr / lib.vr / mod.vr entry points.",
         category: LintCategory::Style,
     },
     LintRule {
         name: "unused-public",
         level: LintLevel::Hint,
-        description:
-            "Public symbol whose name does not appear in any other file. \
+        description: "Public symbol whose name does not appear in any other file. \
              Heuristic — opt-in via [lint.rules.unused-public].enabled = true.",
         category: LintCategory::Style,
     },
     LintRule {
         name: "unused-private",
         level: LintLevel::Hint,
-        description:
-            "Non-public symbol with no callers in its own file — \
+        description: "Non-public symbol with no callers in its own file — \
              dead code that the type-checker doesn't catch because the \
              visibility is technically fine.",
         category: LintCategory::Style,
@@ -507,32 +491,28 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "dead-module",
         level: LintLevel::Hint,
-        description:
-            "File not reachable from any entry point (main.vr / lib.vr / mod.vr) \
+        description: "File not reachable from any entry point (main.vr / lib.vr / mod.vr) \
              along the mount graph.",
         category: LintCategory::Style,
     },
     LintRule {
         name: "inconsistent-public-doc",
         level: LintLevel::Hint,
-        description:
-            "Module exports K public symbols, M of them documented; fires \
+        description: "Module exports K public symbols, M of them documented; fires \
              when 0 < M < K. Opt-in via [lint.rules.inconsistent-public-doc].enabled.",
         category: LintCategory::Style,
     },
     LintRule {
         name: "mount-cycle-via-stdlib",
         level: LintLevel::Warning,
-        description:
-            "Module graph contains a back-edge through a stdlib path — \
+        description: "Module graph contains a back-edge through a stdlib path — \
              cycle hidden by re-export. Refactor to break the round trip.",
         category: LintCategory::Style,
     },
     LintRule {
         name: "pub-exports-unsafe",
         level: LintLevel::Warning,
-        description:
-            "Public symbol's signature mentions `&unsafe` or `unsafe fn` — \
+        description: "Public symbol's signature mentions `&unsafe` or `unsafe fn` — \
              unsafe surface leaked across the project boundary.",
         category: LintCategory::Safety,
     },
@@ -543,8 +523,7 @@ const LINT_RULES: &[LintRule] = &[
     LintRule {
         name: "parse-error",
         level: LintLevel::Error,
-        description:
-            "File failed to parse — every AST-driven lint pass was skipped \
+        description: "File failed to parse — every AST-driven lint pass was skipped \
              for this file. The text-scan half of the pipeline still ran.",
         category: LintCategory::Safety,
     },
@@ -845,22 +824,29 @@ impl LintConfig {
 /// Heuristic implementation (no full glob crate); good enough for
 /// the patterns documented in lint-configuration.md.
 fn glob_path_match(pat: &str, path: &str) -> bool {
-    if pat == path { return true; }
+    if pat == path {
+        return true;
+    }
     // "x/**" → starts_with("x/") OR equals "x"
     if let Some(prefix) = pat.strip_suffix("/**") {
-        return path == prefix
-            || path.starts_with(&format!("{}/", prefix));
+        return path == prefix || path.starts_with(&format!("{}/", prefix));
     }
     // "**/x.vr" → ends_with("/x.vr") OR equals "x.vr"
     if let Some(suffix) = pat.strip_prefix("**/") {
-        if path == suffix { return true; }
+        if path == suffix {
+            return true;
+        }
         return path.ends_with(&format!("/{}", suffix));
     }
     // "**" alone matches anything
-    if pat == "**" { return true; }
+    if pat == "**" {
+        return true;
+    }
     // Single-segment wildcards: "x/*" → "x/" + non-empty + no extra /
     if let Some(prefix) = pat.strip_suffix("/*") {
-        if !path.starts_with(&format!("{}/", prefix)) { return false; }
+        if !path.starts_with(&format!("{}/", prefix)) {
+            return false;
+        }
         let rest = &path[prefix.len() + 1..];
         return !rest.is_empty() && !rest.contains('/');
     }
@@ -870,16 +856,27 @@ fn glob_path_match(pat: &str, path: &str) -> bool {
         let mut pos = 0usize;
         let bytes = path.as_bytes();
         for (i, part) in parts.iter().enumerate() {
-            if part.is_empty() { continue; }
+            if part.is_empty() {
+                continue;
+            }
             if i == 0 {
-                if !path.starts_with(part) { return false; }
+                if !path.starts_with(part) {
+                    return false;
+                }
                 pos = part.len();
             } else if i == parts.len() - 1 {
-                if !path.ends_with(part) { return false; }
-                if path.len() < pos + part.len() { return false; }
+                if !path.ends_with(part) {
+                    return false;
+                }
+                if path.len() < pos + part.len() {
+                    return false;
+                }
             } else {
                 match path[pos..].find(part) {
-                    Some(idx) => { pos = pos + idx + part.len(); let _ = bytes; }
+                    Some(idx) => {
+                        pos = pos + idx + part.len();
+                        let _ = bytes;
+                    }
                     None => return false,
                 }
             }
@@ -1151,7 +1148,9 @@ fn apply_preset(config: &mut LintConfig, name: &str) {
                     continue;
                 }
                 if let Some(rule) = LINT_RULES.iter().find(|r| r.name == rule_name) {
-                    config.severity_map.insert(rule_name.to_string(), rule.level);
+                    config
+                        .severity_map
+                        .insert(rule_name.to_string(), rule.level);
                 }
             }
         }
@@ -1175,7 +1174,9 @@ fn apply_preset(config: &mut LintConfig, name: &str) {
             continue;
         }
         let preset_level = preset.level_for(rule);
-        config.severity_map.insert(rule.name.to_string(), preset_level);
+        config
+            .severity_map
+            .insert(rule.name.to_string(), preset_level);
     }
 }
 
@@ -1316,15 +1317,15 @@ fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_r
     // so the rules consuming them go through the same
     // `cfg.rule_config::<T>` path as every other rule.
     let synthetic_keys = [
-        ("naming",                "naming-convention"),     // Phase B.3
-        ("refinement_policy",     "refinement-policy"),     // Phase C.1
-        ("capability_policy",     "capability-policy"),     // Phase C.2
-        ("context_policy",        "context-policy"),        // Phase C.3
-        ("cbgr_budgets",          "cbgr-budgets"),          // Phase C.4
-        ("verification_policy",   "verification-policy"),   // Phase C.5
-        ("documentation",         "documentation-policy"),  // Phase C.5
-        ("style",                 "style-policy"),          // Phase C.6
-        ("architecture",          "architecture-policy"),   // Phase B.4
+        ("naming", "naming-convention"),                // Phase B.3
+        ("refinement_policy", "refinement-policy"),     // Phase C.1
+        ("capability_policy", "capability-policy"),     // Phase C.2
+        ("context_policy", "context-policy"),           // Phase C.3
+        ("cbgr_budgets", "cbgr-budgets"),               // Phase C.4
+        ("verification_policy", "verification-policy"), // Phase C.5
+        ("documentation", "documentation-policy"),      // Phase C.5
+        ("style", "style-policy"),                      // Phase C.6
+        ("architecture", "architecture-policy"),        // Phase B.4
     ];
     for (toml_key, rule_key) in synthetic_keys {
         if let Some(v) = lint.get(toml_key) {
@@ -1390,19 +1391,25 @@ fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_r
                 if let Some(s) = t.get("pattern").and_then(|v| v.as_str()) {
                     rule.pattern = s.to_string();
                 }
-                if let Some(s) = t.get("message").and_then(|v| v.as_str())
+                if let Some(s) = t
+                    .get("message")
+                    .and_then(|v| v.as_str())
                     .or_else(|| t.get("description").and_then(|v| v.as_str()))
                 {
                     rule.message = s.to_string();
                 }
-                if let Some(s) = t.get("level").and_then(|v| v.as_str())
+                if let Some(s) = t
+                    .get("level")
+                    .and_then(|v| v.as_str())
                     .or_else(|| t.get("severity").and_then(|v| v.as_str()))
                 {
                     if let Some(lvl) = LintLevel::parse(s) {
                         rule.level = lvl;
                     }
                 }
-                if let Some(s) = t.get("suggestion").and_then(|v| v.as_str())
+                if let Some(s) = t
+                    .get("suggestion")
+                    .and_then(|v| v.as_str())
                     .or_else(|| t.get("fix").and_then(|v| v.as_str()))
                 {
                     rule.suggestion = Some(s.to_string());
@@ -1416,7 +1423,8 @@ fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_r
                 // Phase D: structured AST matcher (alternative to
                 // the regex `pattern` field).
                 if let Some(am) = t.get("ast_match") {
-                    if let Ok(spec) = <AstMatchSpec as serde::Deserialize>::deserialize(am.clone()) {
+                    if let Ok(spec) = <AstMatchSpec as serde::Deserialize>::deserialize(am.clone())
+                    {
                         if !spec.kind.is_empty() {
                             rule.ast_match = Some(spec);
                         }
@@ -1433,7 +1441,6 @@ fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_r
     }
 }
 
-
 /// Run custom lint rules against a file.
 fn lint_custom_rules(path: &Path, content: &str, config: &LintConfig) -> Vec<LintIssue> {
     let mut issues = Vec::new();
@@ -1443,7 +1450,9 @@ fn lint_custom_rules(path: &Path, content: &str, config: &LintConfig) -> Vec<Lin
         // Check path filters
         if !rule.paths.is_empty() {
             let matches_path = rule.paths.iter().any(|p| path_str.contains(p.as_str()));
-            if !matches_path { continue; }
+            if !matches_path {
+                continue;
+            }
         }
         if rule.exclude.iter().any(|p| path_str.contains(p.as_str())) {
             continue;
@@ -1721,10 +1730,7 @@ impl FileInfo {
                     // Count fields in single-line type decl
                     if trimmed.contains('}') {
                         let body = extract_between(trimmed, '{', '}');
-                        let field_count = body
-                            .split(',')
-                            .filter(|f| f.contains(':'))
-                            .count();
+                        let field_count = body.split(',').filter(|f| f.contains(':')).count();
                         type_decls.insert(name, (line_num, field_count));
                     } else {
                         // Multi-line type decl
@@ -1747,10 +1753,7 @@ impl FileInfo {
                     }
                 }
                 if trimmed.contains(':') && brace_depth == 1 {
-                    current_field_count += trimmed
-                        .split(',')
-                        .filter(|f| f.contains(':'))
-                        .count();
+                    current_field_count += trimmed.split(',').filter(|f| f.contains(':')).count();
                 }
                 if brace_depth <= 0 {
                     if let Some(ref name) = current_type_name {
@@ -1929,8 +1932,7 @@ fn build_masked_views(
                     code.push(b' ');
                     cc.push(byte);
                 }
-                super::lex_mask::ByteClass::String
-                | super::lex_mask::ByteClass::RawString => {
+                super::lex_mask::ByteClass::String | super::lex_mask::ByteClass::RawString => {
                     code.push(b' ');
                     cc.push(b' ');
                 }
@@ -2239,11 +2241,8 @@ fn check_unnecessary_heap(path: &Path, info: &FileInfo, issues: &mut List<LintIs
                             inner
                         ),
                         suggestion: Some(
-                            format!(
-                                "Use '{}' directly; Int/Float/Bool fit in registers",
-                                inner
-                            )
-                            .into(),
+                            format!("Use '{}' directly; Int/Float/Bool fit in registers", inner)
+                                .into(),
                         ),
                         fixable: true,
                     });
@@ -2279,7 +2278,10 @@ fn check_heap_of_small_type(
                 file: path.to_path_buf(),
                 line: line_num + 1,
                 column: col + 1,
-                message: format!("Unnecessary heap allocation for small type: Heap({})", inner),
+                message: format!(
+                    "Unnecessary heap allocation for small type: Heap({})",
+                    inner
+                ),
                 suggestion: Some(
                     format!("{} is a small type that fits in a register", inner).into(),
                 ),
@@ -2331,7 +2333,11 @@ fn check_missing_error_context(path: &Path, info: &FileInfo, issues: &mut List<L
             if abs_pos > 0 {
                 // Must follow a ) or identifier char or ] (expression context)
                 let prev_char = trimmed.as_bytes()[abs_pos - 1];
-                if prev_char == b')' || prev_char == b']' || prev_char.is_ascii_alphanumeric() || prev_char == b'_' {
+                if prev_char == b')'
+                    || prev_char == b']'
+                    || prev_char.is_ascii_alphanumeric()
+                    || prev_char == b'_'
+                {
                     // Check if preceded by .with_context( or .map_err(
                     let before = &trimmed[..abs_pos];
                     let has_context = before.contains(".with_context(")
@@ -2397,7 +2403,11 @@ fn check_large_copy(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) 
                 // Parse each parameter
                 for param in split_params(params) {
                     let param = param.trim();
-                    if param.is_empty() || param == "&self" || param == "&mut self" || param == "self" {
+                    if param.is_empty()
+                        || param == "&self"
+                        || param == "&mut self"
+                        || param == "self"
+                    {
                         continue;
                     }
 
@@ -2412,11 +2422,7 @@ fn check_large_copy(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) 
                         }
 
                         // Check if the type is a known large struct
-                        let type_name = param_type
-                            .split('<')
-                            .next()
-                            .unwrap_or(param_type)
-                            .trim();
+                        let type_name = param_type.split('<').next().unwrap_or(param_type).trim();
 
                         if let Some((_, field_count)) = info.type_decls.get(type_name) {
                             if *field_count > 4 {
@@ -2520,11 +2526,7 @@ fn check_unused_result(path: &Path, info: &FileInfo, issues: &mut List<LintIssue
                 // e.g., "foo.bar()" -> "bar"
                 if let Some(dot_pos) = stmt.rfind('.') {
                     let after_dot = &stmt[dot_pos + 1..];
-                    after_dot
-                        .split('(')
-                        .next()
-                        .unwrap_or("")
-                        .trim()
+                    after_dot.split('(').next().unwrap_or("").trim()
                 } else {
                     ""
                 }
@@ -2541,10 +2543,7 @@ fn check_unused_result(path: &Path, info: &FileInfo, issues: &mut List<LintIssue
                     file: path.to_path_buf(),
                     line: line_num + 1,
                     column: 1,
-                    message: format!(
-                        "Return value of '{}' (Result/Maybe) is unused",
-                        fn_name
-                    ),
+                    message: format!("Return value of '{}' (Result/Maybe) is unused", fn_name),
                     suggestion: Some(
                         "Use 'let _ = ...' to explicitly discard, or handle the result".into(),
                     ),
@@ -2646,7 +2645,9 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
                 line: line_num + 1,
                 column: col,
                 message: "Use 'type Name is protocol { ... }' instead of 'trait'".to_string(),
-                suggestion: Some("Use 'type X is protocol { ... }' instead of 'trait X { ... }'".into()),
+                suggestion: Some(
+                    "Use 'type X is protocol { ... }' instead of 'trait X { ... }'".into(),
+                ),
                 fixable: false,
             });
         }
@@ -2762,7 +2763,11 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
                     file: path.to_path_buf(),
                     line: line_num + 1,
                     column: col,
-                    message: format!("Use '{}' instead of '{}' (Verum has no '!' macro syntax)", good, bad.trim_end_matches('(')),
+                    message: format!(
+                        "Use '{}' instead of '{}' (Verum has no '!' macro syntax)",
+                        good,
+                        bad.trim_end_matches('(')
+                    ),
                     suggestion: Some(format!("Use '{}' without '!'", good).into()),
                     fixable: true,
                 });
@@ -2812,7 +2817,8 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
                 file: path.to_path_buf(),
                 line: line_num + 1,
                 column: col,
-                message: "Use '.' path separator instead of '::' (Verum uses dot paths)".to_string(),
+                message: "Use '.' path separator instead of '::' (Verum uses dot paths)"
+                    .to_string(),
                 suggestion: Some("Replace '::' with '.' in module paths".into()),
                 fixable: false,
             });
@@ -2882,7 +2888,10 @@ fn check_cbgr_hotspot(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>
                 }
             }
 
-            if (trimmed.contains("&") && !trimmed.contains("&&") && !trimmed.contains("&checked") && !trimmed.contains("&unsafe"))
+            if (trimmed.contains("&")
+                && !trimmed.contains("&&")
+                && !trimmed.contains("&checked")
+                && !trimmed.contains("&unsafe"))
                 && (trimmed.contains("let ") || trimmed.contains("= &"))
             {
                 loop_has_deref = true;
@@ -2955,8 +2964,8 @@ fn lint_file_with(path: &Path, cfg: &LintConfig) -> Result<List<LintIssue>> {
     // the Module with verum_ast::Visitor. Parse failures fall through
     // silently so text-scan output is still produced.
     use verum_ast::FileId;
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
     let fid = FileId::new(0);
     let lexer = Lexer::new(&content, fid);
     let parser = VerumParser::new();
@@ -2999,10 +3008,7 @@ fn issue_sort_key(i: &LintIssue) -> (String, usize, usize, &'static str) {
 /// parallel, return a flat sorted issue list. Errors per-file are
 /// surfaced via `eprintln!` rather than failing the whole run — one
 /// unreadable fixture should not block the rest of the corpus.
-fn lint_paths_parallel(
-    search_dirs: &[PathBuf],
-    cfg: &LintConfig,
-) -> (Vec<LintIssue>, usize) {
+fn lint_paths_parallel(search_dirs: &[PathBuf], cfg: &LintConfig) -> (Vec<LintIssue>, usize) {
     let cache = build_lint_cache(cfg);
     cache.gc();
     lint_paths_parallel_with_cache(search_dirs, cfg, &cache)
@@ -3034,25 +3040,29 @@ fn lint_paths_parallel_with_cache(
     // cross-file phase can reuse them without re-parsing. Cache
     // hits skip the parse, so the corpus file is None and the
     // cross-file phase will fill it in below.
-    let per_file: Vec<(PathBuf, Vec<LintIssue>, Option<super::lint_engine::CorpusFile>)> =
-        files
-            .par_iter()
-            .map(|path| {
-                let (issues, corpus) = lint_one_with_cache(path, cfg, cache);
-                (path.clone(), issues, corpus)
-            })
-            .collect();
+    let per_file: Vec<(
+        PathBuf,
+        Vec<LintIssue>,
+        Option<super::lint_engine::CorpusFile>,
+    )> = files
+        .par_iter()
+        .map(|path| {
+            let (issues, corpus) = lint_one_with_cache(path, cfg, cache);
+            (path.clone(), issues, corpus)
+        })
+        .collect();
 
-    let mut issues: Vec<LintIssue> =
-        per_file.iter().flat_map(|(_, i, _)| i.iter().cloned()).collect();
+    let mut issues: Vec<LintIssue> = per_file
+        .iter()
+        .flat_map(|(_, i, _)| i.iter().cloned())
+        .collect();
 
     // Cross-file phase. Fill in the parsed AST for cache-hit
     // entries (we only have the path), then run cross-file passes
     // on the assembled corpus. Single-source-of-truth parses: each
     // file is parsed at most once across the entire `verum lint`
     // invocation.
-    let mut corpus: Vec<super::lint_engine::CorpusFile> =
-        Vec::with_capacity(per_file.len());
+    let mut corpus: Vec<super::lint_engine::CorpusFile> = Vec::with_capacity(per_file.len());
     let mut to_parse: Vec<PathBuf> = Vec::new();
     for (path, _, c) in per_file {
         match c {
@@ -3087,8 +3097,8 @@ fn lint_paths_parallel_with_cache(
 /// them, mirroring the per-file phase's behaviour.
 fn parse_corpus_file(path: &Path) -> Option<super::lint_engine::CorpusFile> {
     use verum_ast::FileId;
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
     let source = fs::read_to_string(path).ok()?;
     let fid = FileId::new(0);
     let lexer = Lexer::new(&source, fid);
@@ -3140,11 +3150,7 @@ fn lint_one_with_cache(
 
 /// Lint already-loaded content. Hot-path counterpart to
 /// `lint_file_with` for the cache flow that has the bytes in hand.
-fn lint_content_with(
-    path: &Path,
-    content: &str,
-    cfg: &LintConfig,
-) -> Result<List<LintIssue>> {
+fn lint_content_with(path: &Path, content: &str, cfg: &LintConfig) -> Result<List<LintIssue>> {
     let (issues, _) = lint_content_with_module(path, content, cfg)?;
     Ok(issues)
 }
@@ -3179,8 +3185,8 @@ fn lint_content_with_module(
     }
 
     use verum_ast::FileId;
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
     let fid = FileId::new(0);
     let lexer = Lexer::new(content, fid);
     let parser = VerumParser::new();
@@ -3203,10 +3209,7 @@ fn lint_content_with_module(
                     line: line.max(1),
                     column: column.max(1),
                     message: format!("parse error: {}", err.kind),
-                    suggestion: err
-                        .help
-                        .as_ref()
-                        .map(|h| Text::from(h.as_str())),
+                    suggestion: err.help.as_ref().map(|h| Text::from(h.as_str())),
                     fixable: false,
                 });
             }
@@ -3250,11 +3253,7 @@ pub fn clean_cache() -> Result<()> {
     let cache_root = target.join("lint-cache");
     if cache_root.exists() {
         std::fs::remove_dir_all(&cache_root).map_err(|e| {
-            CliError::Custom(format!(
-                "failed to remove {}: {}",
-                cache_root.display(),
-                e
-            ))
+            CliError::Custom(format!("failed to remove {}: {}", cache_root.display(), e))
         })?;
         ui::success(&format!("removed {}", cache_root.display()));
     } else {
@@ -3339,8 +3338,12 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
             for prev_idx in 0..line_num {
                 let prev = info.code_line(prev_idx).trim_start();
                 if prev.starts_with("let mut ") {
-                    if let Some(var_name) = prev.strip_prefix("let mut ").and_then(|s| s.split_whitespace().next()) {
-                        let var_name = var_name.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
+                    if let Some(var_name) = prev
+                        .strip_prefix("let mut ")
+                        .and_then(|s| s.split_whitespace().next())
+                    {
+                        let var_name =
+                            var_name.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
                         // Concatenate the next 20 code-only lines so
                         // the variable's spawn-block reference is
                         // detected without firing on string-literal
@@ -3356,8 +3359,13 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                                 file: path.to_path_buf(),
                                 line: line_num + 1,
                                 column: 1,
-                                message: format!("Mutable variable `{var_name}` captured by spawn closure"),
-                                suggestion: Some("Use a Channel or Mutex to share mutable state across threads".into()),
+                                message: format!(
+                                    "Mutable variable `{var_name}` captured by spawn closure"
+                                ),
+                                suggestion: Some(
+                                    "Use a Channel or Mutex to share mutable state across threads"
+                                        .into(),
+                                ),
                                 fixable: false,
                             });
                             break;
@@ -3376,14 +3384,18 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                 line: line_num + 1,
                 column: pos + 1,
                 message: "Channel created without capacity limit".to_string(),
-                suggestion: Some("Use Channel.new(capacity) to prevent OOM under backpressure".into()),
+                suggestion: Some(
+                    "Use Channel.new(capacity) to prevent OOM under backpressure".into(),
+                ),
                 fixable: false,
             });
         }
 
         // missing-timeout — blocking operation without a timeout.
         if (code.contains(".recv()") || code.contains(".await") || code.contains("join("))
-            && !code.contains("timeout") && !code.contains("try_recv") && !code.contains("select")
+            && !code.contains("timeout")
+            && !code.contains("try_recv")
+            && !code.contains("select")
         {
             issues.push(LintIssue {
                 rule: "missing-timeout",
@@ -3392,13 +3404,16 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                 line: line_num + 1,
                 column: 1,
                 message: "Blocking operation without timeout".to_string(),
-                suggestion: Some("Consider using select { } with a timeout arm for robustness".into()),
+                suggestion: Some(
+                    "Consider using select { } with a timeout arm for robustness".into(),
+                ),
                 fixable: false,
             });
         }
 
         // empty-match-arm.
-        if code.contains("=> ()") || code.contains("=> { }") || code.trim_end().ends_with("=> {},") {
+        if code.contains("=> ()") || code.contains("=> { }") || code.trim_end().ends_with("=> {},")
+        {
             issues.push(LintIssue {
                 rule: "empty-match-arm",
                 level: LintLevel::Warning,
@@ -3406,7 +3421,9 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                 line: line_num + 1,
                 column: 1,
                 message: "Match arm has empty body".to_string(),
-                suggestion: Some("drop the arm and let exhaustiveness handle it, or add a body".into()),
+                suggestion: Some(
+                    "drop the arm and let exhaustiveness handle it, or add a body".into(),
+                ),
                 fixable: true,
             });
         }
@@ -3420,22 +3437,34 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                 line: line_num + 1,
                 column: code.find("&unsafe").unwrap_or(0) + 1,
                 message: "Public function exposes &unsafe reference in its signature".to_string(),
-                suggestion: Some("Consider using &T (tier 0) or &checked T (tier 1) in public APIs".into()),
+                suggestion: Some(
+                    "Consider using &T (tier 0) or &checked T (tier 1) in public APIs".into(),
+                ),
                 fixable: false,
             });
         }
 
         // shadow-binding.
         if trimmed.starts_with("let ") || trimmed.starts_with("let mut ") {
-            let var_start = if trimmed.starts_with("let mut ") { "let mut " } else { "let " };
-            if let Some(var_name) = trimmed.strip_prefix(var_start).and_then(|s| s.split(|c: char| !c.is_alphanumeric() && c != '_').next()) {
+            let var_start = if trimmed.starts_with("let mut ") {
+                "let mut "
+            } else {
+                "let "
+            };
+            if let Some(var_name) = trimmed
+                .strip_prefix(var_start)
+                .and_then(|s| s.split(|c: char| !c.is_alphanumeric() && c != '_').next())
+            {
                 if !var_name.is_empty() && var_name != "_" {
                     for prev_idx in 0..line_num {
                         let pcode = info.code_line(prev_idx);
                         let pt = pcode.trim_start();
-                        if (pt.starts_with("let ") || pt.starts_with("let mut ")) && contains_word(pcode, var_name) {
+                        if (pt.starts_with("let ") || pt.starts_with("let mut "))
+                            && contains_word(pcode, var_name)
+                        {
                             let cur_indent = leading;
-                            let prev_indent = info.lines[prev_idx].len() - info.lines[prev_idx].trim_start().len();
+                            let prev_indent = info.lines[prev_idx].len()
+                                - info.lines[prev_idx].trim_start().len();
                             if cur_indent == prev_indent {
                                 issues.push(LintIssue {
                                     rule: "shadow-binding",
@@ -3443,8 +3472,13 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                                     file: path.to_path_buf(),
                                     line: line_num + 1,
                                     column: 1,
-                                    message: format!("Variable `{var_name}` shadows previous binding"),
-                                    suggestion: Some(format!("rename the inner binding (e.g. `{var_name}2`)").into()),
+                                    message: format!(
+                                        "Variable `{var_name}` shadows previous binding"
+                                    ),
+                                    suggestion: Some(
+                                        format!("rename the inner binding (e.g. `{var_name}2`)")
+                                            .into(),
+                                    ),
                                     fixable: true,
                                 });
                                 break;
@@ -3479,10 +3513,7 @@ fn print_issue(issue: &LintIssue, deny_warnings: bool) {
 
     let rule_display = issue.rule.dimmed();
 
-    println!(
-        "{}: {} [{}]",
-        level_str, issue.message, rule_display
-    );
+    println!("{}: {} [{}]", level_str, issue.message, rule_display);
 
     println!(
         "  {} {}:{}:{}",
@@ -3517,11 +3548,7 @@ fn print_issue(issue: &LintIssue, deny_warnings: bool) {
 /// don't depend on disk I/O. Production code paths still go through
 /// `lint_file` to keep the on-disk caching/paralleism story
 /// centralised.
-pub fn lint_source(
-    path: &Path,
-    content: &str,
-    config: Option<&LintConfig>,
-) -> List<LintIssue> {
+pub fn lint_source(path: &Path, content: &str, config: Option<&LintConfig>) -> List<LintIssue> {
     let mut issues = List::new();
     let info = FileInfo::parse(content);
 
@@ -3544,8 +3571,8 @@ pub fn lint_source(
     }
 
     use verum_ast::FileId;
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
     let fid = FileId::new(0);
     let lexer = Lexer::new(content, fid);
     let parser = VerumParser::new();
@@ -3585,10 +3612,7 @@ pub fn lint_source(
                     line: line.max(1),
                     column: column.max(1),
                     message: format!("parse error: {}", err.kind),
-                    suggestion: err
-                        .help
-                        .as_ref()
-                        .map(|h| Text::from(h.as_str())),
+                    suggestion: err.help.as_ref().map(|h| Text::from(h.as_str())),
                     fixable: false,
                 });
             }
@@ -3672,8 +3696,14 @@ pub fn lint_path(path: &Path, fix: bool, deny_warnings: bool) -> Result<()> {
         }
     }
 
-    let error_count = all_issues.iter().filter(|i| i.level == LintLevel::Error).count();
-    let warning_count = all_issues.iter().filter(|i| i.level == LintLevel::Warning).count();
+    let error_count = all_issues
+        .iter()
+        .filter(|i| i.level == LintLevel::Error)
+        .count();
+    let warning_count = all_issues
+        .iter()
+        .filter(|i| i.level == LintLevel::Warning)
+        .count();
 
     if error_count > 0 {
         Err(CliError::Custom(format!(
@@ -3690,7 +3720,6 @@ pub fn lint_path(path: &Path, fix: bool, deny_warnings: bool) -> Result<()> {
     }
 }
 
-
 // ===================================================================
 // Phase A.1 extensions: --list-rules, --explain, --validate-config,
 // --format json. These are additive on top of the existing surface.
@@ -3699,11 +3728,13 @@ pub fn lint_path(path: &Path, fix: bool, deny_warnings: bool) -> Result<()> {
 /// Print every known built-in lint rule and exit. Used by
 /// `verum lint --list-rules`.
 pub fn list_rules() -> Result<()> {
-    println!("{:<32} {:<8} {:<14} {}",
+    println!(
+        "{:<32} {:<8} {:<14} {}",
         "Name".bold(),
         "Level".bold(),
         "Category".bold(),
-        "Description".bold());
+        "Description".bold()
+    );
     println!("{}", "-".repeat(110));
     let mut rules: Vec<&LintRule> = LINT_RULES.iter().collect();
     rules.sort_by_key(|r| r.name);
@@ -3807,10 +3838,7 @@ pub fn explain_rule_open(name: &str) -> Result<()> {
             name
         )));
     }
-    let url = format!(
-        "https://verum-lang.dev/docs/reference/lint-rules#{}",
-        name
-    );
+    let url = format!("https://verum-lang.dev/docs/reference/lint-rules#{}", name);
     // Test hatch: when VERUM_OPEN_DRY_RUN=1 is set we just print
     // the URL instead of dispatching a real browser command. Lets
     // CI assert the URL without spawning anything.
@@ -3907,13 +3935,19 @@ pub fn explain_rule(name: &str) -> Result<()> {
     println!();
     println!("{}", r.description);
     println!();
-    println!("To suppress in source: `@allow({}, reason = \"...\")`", r.name);
+    println!(
+        "To suppress in source: `@allow({}, reason = \"...\")`",
+        r.name
+    );
     println!("To force-error:       `@deny({})`", r.name);
     println!();
     println!("Or in `verum.toml`:");
     println!();
     println!("  [lint.severity]");
-    println!("  {} = \"off\"   # off | warn | error | info | hint", r.name);
+    println!(
+        "  {} = \"off\"   # off | warn | error | info | hint",
+        r.name
+    );
     println!();
     println!("Full schema: docs/reference/lint-configuration");
     Ok(())
@@ -3930,15 +3964,12 @@ pub fn validate_config() -> Result<()> {
     // 1. extends preset must be a known name OR a `verum::<group>`
     //  handle. Both surfaces share the same load-time pipeline.
     if let Some(p) = &cfg.extends {
-        let is_preset =
-            matches!(p.as_str(), "minimal" | "recommended" | "strict" | "relaxed");
+        let is_preset = matches!(p.as_str(), "minimal" | "recommended" | "strict" | "relaxed");
         let is_known_group = lint_groups().iter().any(|(name, _)| name == p);
         if !is_preset && !is_known_group {
             // Build did-you-mean over both surfaces so a typo on
             // either side gets a useful suggestion.
-            let mut candidates: Vec<&str> = vec![
-                "minimal", "recommended", "strict", "relaxed",
-            ];
+            let mut candidates: Vec<&str> = vec!["minimal", "recommended", "strict", "relaxed"];
             for (name, _) in lint_groups() {
                 candidates.push(name);
             }
@@ -3961,17 +3992,13 @@ pub fn validate_config() -> Result<()> {
     let mut unknown: Vec<String> = Vec::new();
     for set in [&cfg.disabled, &cfg.denied, &cfg.allowed, &cfg.warned] {
         for name in set {
-            if !known.contains(name.as_str())
-                && !cfg.custom_rules.iter().any(|r| &r.name == name)
-            {
+            if !known.contains(name.as_str()) && !cfg.custom_rules.iter().any(|r| &r.name == name) {
                 unknown.push(name.clone());
             }
         }
     }
     for name in cfg.severity_map.keys() {
-        if !known.contains(name.as_str())
-            && !cfg.custom_rules.iter().any(|r| &r.name == name)
-        {
+        if !known.contains(name.as_str()) && !cfg.custom_rules.iter().any(|r| &r.name == name) {
             unknown.push(name.clone());
         }
     }
@@ -3979,8 +4006,10 @@ pub fn validate_config() -> Result<()> {
         unknown.sort();
         unknown.dedup();
         let mut msg = String::new();
-        msg.push_str("unknown lint rule(s) referenced:
-");
+        msg.push_str(
+            "unknown lint rule(s) referenced:
+",
+        );
         for n in &unknown {
             let suggestion = LINT_RULES
                 .iter()
@@ -4025,17 +4054,21 @@ fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     let (m, n) = (a.len(), b.len());
-    if m == 0 { return n; }
-    if n == 0 { return m; }
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
     let mut prev: Vec<usize> = (0..=n).collect();
     let mut curr: Vec<usize> = vec![0; n + 1];
     for i in 1..=m {
         curr[0] = i;
         for j in 1..=n {
-            let cost = if a[i-1] == b[j-1] { 0 } else { 1 };
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
             curr[j] = std::cmp::min(
-                std::cmp::min(curr[j-1] + 1, prev[j] + 1),
-                prev[j-1] + cost,
+                std::cmp::min(curr[j - 1] + 1, prev[j] + 1),
+                prev[j - 1] + cost,
             );
         }
         std::mem::swap(&mut prev, &mut curr);
@@ -4182,13 +4215,14 @@ pub fn apply_fix_edits(content: &str, edits: &[FixEdit]) -> std::result::Result<
                     e.start_line, e.start_column
                 )
             })?;
-        let end = line_col_to_offset(content, &line_starts, e.end_line, e.end_column)
-            .ok_or_else(|| {
+        let end = line_col_to_offset(content, &line_starts, e.end_line, e.end_column).ok_or_else(
+            || {
                 format!(
                     "edit end out of bounds: line {} col {}",
                     e.end_line, e.end_column
                 )
-            })?;
+            },
+        )?;
         if end < start {
             return Err(format!(
                 "edit end < start at line {} col {}",
@@ -4251,9 +4285,7 @@ fn line_col_to_offset(
     let start = *line_starts.get(idx)?;
     let next = line_starts.get(idx + 1).copied().unwrap_or(content.len());
     let line_len_with_nl = next - start;
-    let line_len = if line_len_with_nl > 0
-        && content.as_bytes()[next - 1] == b'\n'
-    {
+    let line_len = if line_len_with_nl > 0 && content.as_bytes()[next - 1] == b'\n' {
         line_len_with_nl - 1
     } else {
         line_len_with_nl
@@ -4441,8 +4473,14 @@ fn synthesize_deprecated_syntax_edits(issue: &LintIssue, line: &str) -> Option<V
     // `name!(` → `name(` for the macro-style calls.
     if suggestion.contains("without '!'") {
         for bad in &[
-            "println!(", "format!(", "panic!(", "assert!(", "assert_eq!(",
-            "assert_ne!(", "unreachable!(", "todo!(",
+            "println!(",
+            "format!(",
+            "panic!(",
+            "assert!(",
+            "assert_eq!(",
+            "assert_ne!(",
+            "unreachable!(",
+            "todo!(",
         ] {
             if let Some(pos) = line.find(bad) {
                 let bang_pos = pos + bad.len() - 2; // index of '!'
@@ -4581,7 +4619,10 @@ pub fn run_with_format(fix: bool, deny_warnings: bool, format: LintOutputFormat)
     if errors > 0 {
         Err(CliError::Custom(format!("{} lint errors", errors)))
     } else if deny_warnings && warnings > 0 {
-        Err(CliError::Custom(format!("{} lint warnings (denied)", warnings)))
+        Err(CliError::Custom(format!(
+            "{} lint warnings (denied)",
+            warnings
+        )))
     } else {
         Ok(())
     }
@@ -4802,7 +4843,12 @@ pub fn run_new_only_since(
     // Step 4: clean the worktree before computing the diff (so a
     // diff-time panic doesn't leak the worktree).
     let _ = PCommand::new("git")
-        .args(["worktree", "remove", "--force", worktree_path.to_string_lossy().as_ref()])
+        .args([
+            "worktree",
+            "remove",
+            "--force",
+            worktree_path.to_string_lossy().as_ref(),
+        ])
         .status();
 
     // Step 5: compute A − B keyed on (rule, file, line, message_hash).
@@ -4832,7 +4878,10 @@ pub fn run_new_only_since(
 
     emit_issues(&new_only, format)?;
 
-    let errors = new_only.iter().filter(|i| i.level == LintLevel::Error).count();
+    let errors = new_only
+        .iter()
+        .filter(|i| i.level == LintLevel::Error)
+        .count();
     let warnings = new_only
         .iter()
         .filter(|i| i.level == LintLevel::Warning)
@@ -4892,8 +4941,7 @@ fn collect_issues_for_current_tree(
 /// process and lets us reuse the stable `--format json` schema.
 fn collect_issues_at(path: &Path) -> Result<Vec<LintIssue>> {
     use std::process::Command as PCommand;
-    let exe = std::env::current_exe()
-        .map_err(|e| CliError::Custom(format!("current_exe: {e}")))?;
+    let exe = std::env::current_exe().map_err(|e| CliError::Custom(format!("current_exe: {e}")))?;
     let out = PCommand::new(&exe)
         .args(["lint", "--no-cache", "--format", "json"])
         .current_dir(path)
@@ -4963,7 +5011,7 @@ pub fn run_watch(
     clear: bool,
 ) -> Result<()> {
     use notify::{Event, RecursiveMode, Watcher};
-    use std::sync::mpsc::{channel, RecvTimeoutError};
+    use std::sync::mpsc::{RecvTimeoutError, channel};
     use std::time::{Duration, Instant};
 
     // Initial run — establish the cache and surface every issue.
@@ -4991,7 +5039,9 @@ pub fn run_watch(
             watcher.watch(&p, RecursiveMode::Recursive)?;
         }
     }
-    watcher.watch(Path::new("verum.toml"), RecursiveMode::NonRecursive).ok();
+    watcher
+        .watch(Path::new("verum.toml"), RecursiveMode::NonRecursive)
+        .ok();
 
     ui::step("Watching for changes — press Ctrl-C to exit.");
 
@@ -5059,13 +5109,10 @@ fn is_relevant_event(ev: &notify::Event) -> bool {
     matches!(
         ev.kind,
         EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-    ) && ev
-        .paths
-        .iter()
-        .any(|p| {
-            p.extension().and_then(|s| s.to_str()) == Some("vr")
-                || p.file_name().and_then(|s| s.to_str()) == Some("verum.toml")
-        })
+    ) && ev.paths.iter().any(|p| {
+        p.extension().and_then(|s| s.to_str()) == Some("vr")
+            || p.file_name().and_then(|s| s.to_str()) == Some("verum.toml")
+    })
 }
 
 /// Backwards-compatible entry — callers that don't pass a
@@ -5079,7 +5126,15 @@ pub fn run_extended(
     since: Option<String>,
     severity_min: Option<LintLevel>,
 ) -> Result<()> {
-    run_extended_full(fix, deny_warnings, format, profile, since, severity_min, None)
+    run_extended_full(
+        fix,
+        deny_warnings,
+        format,
+        profile,
+        since,
+        severity_min,
+        None,
+    )
 }
 
 /// Resolved baseline mode for one run.
@@ -5105,11 +5160,7 @@ impl BaselineMode {
     /// Precedence: `--write-baseline` wins over `--baseline FILE`,
     /// which wins over the default-path lookup. `--no-baseline`
     /// disables read-mode (write-mode still works).
-    pub fn from_flags(
-        baseline: Option<String>,
-        no_baseline: bool,
-        write_baseline: bool,
-    ) -> Self {
+    pub fn from_flags(baseline: Option<String>, no_baseline: bool, write_baseline: bool) -> Self {
         let path = match &baseline {
             Some(p) => PathBuf::from(p),
             None => super::lint_baseline::default_path(),
@@ -5262,64 +5313,68 @@ fn run_extended_inner(
     // Per-file phase. Returns issues + parsed module per file; cache
     // hits skip the parse and surface a None corpus entry that the
     // cross-file phase fills in.
-    let per_file: Vec<(PathBuf, Vec<LintIssue>, Option<super::lint_engine::CorpusFile>)> =
-        if streaming_eligible {
-            // Lock stdout once per file-completion: this is the only
-            // contention point and it's small (a single emit per
-            // issue). Severity filter is applied before emission so
-            // we don't print issues that the consumer would discard.
-            use std::io::Write;
-            let stdout = std::io::stdout();
-            files
-                .par_iter()
-                .map(|path| {
-                    let (mut issues, corpus) = lint_one_with_cache(path, &cfg, &cache);
-                    issues.retain_mut(|i| {
-                        match cfg.effective_level_for_file(i.rule, &i.file, i.level) {
-                            Some(lvl) => {
-                                if let Some(min) = severity_min {
-                                    if !meets_severity(lvl, min) {
-                                        return false;
-                                    }
+    let per_file: Vec<(
+        PathBuf,
+        Vec<LintIssue>,
+        Option<super::lint_engine::CorpusFile>,
+    )> = if streaming_eligible {
+        // Lock stdout once per file-completion: this is the only
+        // contention point and it's small (a single emit per
+        // issue). Severity filter is applied before emission so
+        // we don't print issues that the consumer would discard.
+        use std::io::Write;
+        let stdout = std::io::stdout();
+        files
+            .par_iter()
+            .map(|path| {
+                let (mut issues, corpus) = lint_one_with_cache(path, &cfg, &cache);
+                issues.retain_mut(|i| {
+                    match cfg.effective_level_for_file(i.rule, &i.file, i.level) {
+                        Some(lvl) => {
+                            if let Some(min) = severity_min {
+                                if !meets_severity(lvl, min) {
+                                    return false;
                                 }
-                                i.level = lvl;
-                                true
                             }
-                            None => false,
+                            i.level = lvl;
+                            true
                         }
-                    });
-                    if !issues.is_empty() {
-                        // One write per file rather than per issue —
-                        // amortises the lock cost.
-                        let mut buf = String::new();
-                        for issue in &issues {
-                            buf.push_str(&format_issue_json(issue));
-                            buf.push('\n');
-                        }
-                        let mut handle = stdout.lock();
-                        let _ = handle.write_all(buf.as_bytes());
-                        let _ = handle.flush();
+                        None => false,
                     }
-                    (path.clone(), issues, corpus)
-                })
-                .collect()
-        } else {
-            files
-                .par_iter()
-                .map(|path| {
-                    let (issues, corpus) = lint_one_with_cache(path, &cfg, &cache);
-                    (path.clone(), issues, corpus)
-                })
-                .collect()
-        };
-    let raw_issues: Vec<LintIssue> =
-        per_file.iter().flat_map(|(_, i, _)| i.iter().cloned()).collect();
+                });
+                if !issues.is_empty() {
+                    // One write per file rather than per issue —
+                    // amortises the lock cost.
+                    let mut buf = String::new();
+                    for issue in &issues {
+                        buf.push_str(&format_issue_json(issue));
+                        buf.push('\n');
+                    }
+                    let mut handle = stdout.lock();
+                    let _ = handle.write_all(buf.as_bytes());
+                    let _ = handle.flush();
+                }
+                (path.clone(), issues, corpus)
+            })
+            .collect()
+    } else {
+        files
+            .par_iter()
+            .map(|path| {
+                let (issues, corpus) = lint_one_with_cache(path, &cfg, &cache);
+                (path.clone(), issues, corpus)
+            })
+            .collect()
+    };
+    let raw_issues: Vec<LintIssue> = per_file
+        .iter()
+        .flat_map(|(_, i, _)| i.iter().cloned())
+        .collect();
 
     // Build the corpus directly from the per-file phase. Cache-miss
     // entries already have a parse; for cache hits we re-read +
     // parse just-in-time so cross-file passes see every file.
-    let mut corpus: Vec<super::lint_engine::CorpusFile> =
-        Vec::with_capacity(per_file.len());
+    let mut corpus: Vec<super::lint_engine::CorpusFile> = Vec::with_capacity(per_file.len());
     let mut to_parse: Vec<PathBuf> = Vec::new();
     for (path, _, c) in per_file {
         match c {
@@ -5328,8 +5383,10 @@ fn run_extended_inner(
         }
     }
     if !to_parse.is_empty() {
-        let recovered: Vec<super::lint_engine::CorpusFile> =
-            to_parse.par_iter().filter_map(|p| parse_corpus_file(p)).collect();
+        let recovered: Vec<super::lint_engine::CorpusFile> = to_parse
+            .par_iter()
+            .filter_map(|p| parse_corpus_file(p))
+            .collect();
         corpus.extend(recovered);
     }
     let cross_issues: Vec<LintIssue> = if corpus.is_empty() {
@@ -5348,9 +5405,7 @@ fn run_extended_inner(
             use std::io::Write;
             let mut filtered: Vec<LintIssue> = Vec::with_capacity(raw_cross.len());
             for mut i in raw_cross {
-                if let Some(lvl) =
-                    cfg.effective_level_for_file(i.rule, &i.file, i.level)
-                {
+                if let Some(lvl) = cfg.effective_level_for_file(i.rule, &i.file, i.level) {
                     if let Some(min) = severity_min {
                         if !meets_severity(lvl, min) {
                             continue;
@@ -5505,10 +5560,7 @@ fn apply_autofix_run(issues: &[LintIssue]) {
     }
     let mut by_file: HashMap<PathBuf, List<&LintIssue>> = HashMap::new();
     for issue in &fixable {
-        by_file
-            .entry(issue.file.clone())
-            .or_default()
-            .push(*issue);
+        by_file.entry(issue.file.clone()).or_default().push(*issue);
     }
     let mut fixed = 0usize;
     for (path, file_issues) in by_file {

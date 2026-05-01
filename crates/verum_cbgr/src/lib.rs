@@ -98,9 +98,7 @@ pub mod z3_feasibility;
 // ============================================================================
 
 // Unified tier types (primary API)
-pub use tier_types::{
-    CbgrTier, ReferenceId, ReferenceTier, Tier0Reason, TierStatistics,
-};
+pub use tier_types::{CbgrTier, ReferenceId, ReferenceTier, Tier0Reason, TierStatistics};
 
 // CFG builder for tier analysis
 pub use analysis::{CfgBuilder, DefSite, Span, UseeSite};
@@ -225,18 +223,17 @@ pub use tier_analysis::{
 
 // Ownership analysis for compile-time memory safety (Phase 6)
 pub use ownership_analysis::{
-    AllocId, AllocationInfo, AllocationKind, DeallocationKind, DeallocationSite,
-    DoubleFreeWarning, LeakReason, LeakWarning, OwnershipAnalysisConfig, OwnershipAnalysisResult,
-    OwnershipAnalyzer, OwnershipState, OwnershipStats, OwnershipTransfer, TransferKind,
-    UseAfterFreeWarning,
+    AllocId, AllocationInfo, AllocationKind, DeallocationKind, DeallocationSite, DoubleFreeWarning,
+    LeakReason, LeakWarning, OwnershipAnalysisConfig, OwnershipAnalysisResult, OwnershipAnalyzer,
+    OwnershipState, OwnershipStats, OwnershipTransfer, TransferKind, UseAfterFreeWarning,
 };
 
 // Concurrency analysis for data race detection (Phase 6)
 pub use concurrency_analysis::{
     AccessKind, ConcurrencyAnalysisConfig, ConcurrencyAnalysisResult, ConcurrencyAnalyzer,
-    ConcurrencyStats, DataRaceReason, DataRaceWarning, DeadlockKind, DeadlockWarning, LockId,
-    LocationId as ConcurrencyLocationId, MemoryAccess, MemoryOrdering, SyncKind, SyncOperation,
-    ThreadId, ThreadSafetyKind, ThreadSafetyViolation, VectorClock,
+    ConcurrencyStats, DataRaceReason, DataRaceWarning, DeadlockKind, DeadlockWarning,
+    LocationId as ConcurrencyLocationId, LockId, MemoryAccess, MemoryOrdering, SyncKind,
+    SyncOperation, ThreadId, ThreadSafetyKind, ThreadSafetyViolation, VectorClock,
 };
 
 // Lifetime analysis for borrow checking (Phase 7)
@@ -258,13 +255,14 @@ pub use nll_analysis::{
 // Polonius-style origin analysis (Phase 9)
 pub use polonius_analysis::{
     InputFacts, Loan, LoanId, LoanKind, MoveTracker, OriginId, OutputFacts, PoloniusAnalysisResult,
-    PoloniusAnalyzer, PoloniusConfig, PoloniusError, PoloniusErrorKind, PoloniusPoint, PoloniusStats,
+    PoloniusAnalyzer, PoloniusConfig, PoloniusError, PoloniusErrorKind, PoloniusPoint,
+    PoloniusStats,
 };
 
 // Diagnostics integration (converts CBGR warnings to verum_diagnostics)
 pub use diagnostics::{
-    codes as diagnostic_codes, generate_diagnostics, generate_diagnostics_with_config, has_errors,
-    diagnostic_count, CbgrDiagnostics, DiagnosticsConfig,
+    CbgrDiagnostics, DiagnosticsConfig, codes as diagnostic_codes, diagnostic_count,
+    generate_diagnostics, generate_diagnostics_with_config, has_errors,
 };
 
 // Comprehensive security and integration tests

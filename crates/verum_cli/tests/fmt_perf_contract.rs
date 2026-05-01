@@ -73,18 +73,9 @@ fn repo_100_rewrite_completes_under_2_seconds() {
 fn parallel_speedup_within_50_percent_of_sequential() {
     let dir = fixture_repo("speedup_200", 200);
     // Warm both runs to the same FS cache state.
-    let _ = run(
-        &dir.path().to_path_buf(),
-        &["--check", "--threads", "1"],
-    );
-    let seq = run(
-        &dir.path().to_path_buf(),
-        &["--check", "--threads", "1"],
-    );
-    let par = run(
-        &dir.path().to_path_buf(),
-        &["--check", "--threads", "8"],
-    );
+    let _ = run(&dir.path().to_path_buf(), &["--check", "--threads", "1"]);
+    let seq = run(&dir.path().to_path_buf(), &["--check", "--threads", "1"]);
+    let par = run(&dir.path().to_path_buf(), &["--check", "--threads", "8"]);
     let ratio = seq.as_secs_f64() / par.as_secs_f64();
     // Parallel must not be more than 1.5× slower than sequential
     // — a softer floor than "must be faster" because at 200 trivial

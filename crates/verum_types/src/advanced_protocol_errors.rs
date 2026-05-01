@@ -33,10 +33,10 @@
 
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path};
-use verum_common::span::FileId;
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Label as DiagLabel, SpanLabel};
-use verum_common::{List, Map, Text};
 use verum_common::ToText;
+use verum_common::span::FileId;
+use verum_common::{List, Map, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Label as DiagLabel, SpanLabel};
 
 use crate::protocol::{ProtocolBound, WhereClause};
 use crate::ty::{Type, TypeVar};

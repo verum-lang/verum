@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use verum_ast::decl::{ItemKind, ProofBody, ProofStep, ProofStepKind, TacticExpr};
-use verum_ast::{Expr, ExprKind, LiteralKind, Literal, Module};
+use verum_ast::{Expr, ExprKind, Literal, LiteralKind, Module};
 use verum_kernel::intrinsic_dispatch::{IntrinsicValue, dispatch_intrinsic, is_known_intrinsic};
 
 /// One callsite's discharge result. Each `apply kernel_*_strict(args)`
@@ -206,7 +206,11 @@ fn visit_tactic_for_apply(
             // is a Call, hoist its inner args.
             let owned_args: Vec<Expr>;
             let (effective_lemma, arg_refs): (&Expr, Vec<&Expr>) = match &lemma.kind {
-                ExprKind::Call { func, args: call_args, .. } if args.is_empty() => {
+                ExprKind::Call {
+                    func,
+                    args: call_args,
+                    ..
+                } if args.is_empty() => {
                     owned_args = call_args.iter().cloned().collect();
                     let refs: Vec<&Expr> = owned_args.iter().collect();
                     (&**func, refs)
@@ -218,7 +222,9 @@ fn visit_tactic_for_apply(
             };
             handle_apply_callsite(effective_lemma, &arg_refs, rel_path, item_name, aggregator);
         }
-        TacticExpr::Try(inner) | TacticExpr::Repeat(inner) | TacticExpr::AllGoals(inner)
+        TacticExpr::Try(inner)
+        | TacticExpr::Repeat(inner)
+        | TacticExpr::AllGoals(inner)
         | TacticExpr::Focus(inner) => {
             visit_tactic_for_apply(inner, rel_path, item_name, aggregator);
         }
@@ -264,7 +270,10 @@ fn handle_apply_callsite(
     // The dispatcher table is keyed on the bare name; strict-form
     // bridges share the same entry. Strip the `_strict` suffix if
     // present.
-    let bare_name = raw_name.strip_suffix("_strict").unwrap_or(&raw_name).to_string();
+    let bare_name = raw_name
+        .strip_suffix("_strict")
+        .unwrap_or(&raw_name)
+        .to_string();
 
     let mut args_text: Vec<String> = Vec::with_capacity(args.len());
     let mut intrinsic_args: Vec<Option<IntrinsicValue>> = Vec::with_capacity(args.len());
@@ -274,8 +283,7 @@ fn handle_apply_callsite(
         intrinsic_args.push(expr_to_intrinsic_value(a));
     }
 
-    let all_literal = !intrinsic_args.is_empty()
-        && intrinsic_args.iter().all(|v| v.is_some());
+    let all_literal = !intrinsic_args.is_empty() && intrinsic_args.iter().all(|v| v.is_some());
     // Dispatcher invocation policy:
     //  - all-literal args: invoke and capture verdict
     //  - bare call (zero args): invoke with empty arg slice; some
@@ -286,26 +294,30 @@ fn handle_apply_callsite(
     let dispatcher_eligible = all_literal || intrinsic_args.is_empty();
 
     let (holds, reason) = if dispatcher_eligible {
-        let resolved: Vec<IntrinsicValue> = intrinsic_args
-            .iter()
-            .filter_map(|v| v.clone())
-            .collect();
+        let resolved: Vec<IntrinsicValue> =
+            intrinsic_args.iter().filter_map(|v| v.clone()).collect();
         match dispatch_intrinsic(&bare_name, &resolved) {
-            Some(IntrinsicValue::Decision { holds, reason }) => {
-                (Some(holds), reason.clone())
-            }
+            Some(IntrinsicValue::Decision { holds, reason }) => (Some(holds), reason.clone()),
             Some(IntrinsicValue::Bool(b)) => (Some(b), String::new()),
             Some(_) => (None, "dispatcher returned non-Decision value".to_string()),
-            None => (None, "dispatcher rejected the args (likely wrong shape)".to_string()),
+            None => (
+                None,
+                "dispatcher rejected the args (likely wrong shape)".to_string(),
+            ),
         }
     } else {
-        (None, "non-literal arg — dispatcher invocation deferred to #135".to_string())
+        (
+            None,
+            "non-literal arg — dispatcher invocation deferred to #135".to_string(),
+        )
     };
 
-    let report = aggregator.entry(bare_name.clone()).or_insert_with(|| BridgeReport {
-        bridge_name: bare_name.clone(),
-        ..Default::default()
-    });
+    let report = aggregator
+        .entry(bare_name.clone())
+        .or_insert_with(|| BridgeReport {
+            bridge_name: bare_name.clone(),
+            ..Default::default()
+        });
     report.callsites_total += 1;
     if all_literal {
         report.callsites_literal_args += 1;

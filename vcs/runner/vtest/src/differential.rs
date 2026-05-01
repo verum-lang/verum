@@ -85,25 +85,25 @@ impl DifferentialConfig {
         let backends = vec![
             BackendDescriptor {
                 name: "bash".into(),
-                cmd:  "/bin/bash".into(),
+                cmd: "/bin/bash".into(),
                 flags: vec!["-eu".into()],
                 skip_if_missing: true,
             },
             BackendDescriptor {
                 name: "zsh".into(),
-                cmd:  "/bin/zsh".into(),
+                cmd: "/bin/zsh".into(),
                 flags: vec!["-e".into()],
                 skip_if_missing: true,
             },
             BackendDescriptor {
                 name: "dash".into(),
-                cmd:  "/bin/dash".into(),
+                cmd: "/bin/dash".into(),
                 flags: vec!["-eu".into()],
                 skip_if_missing: true,
             },
             BackendDescriptor {
                 name: "fish".into(),
-                cmd:  "/usr/bin/fish".into(),
+                cmd: "/usr/bin/fish".into(),
                 flags: vec![],
                 skip_if_missing: true,
             },
@@ -112,13 +112,13 @@ impl DifferentialConfig {
         let backends = vec![
             BackendDescriptor {
                 name: "pwsh".into(),
-                cmd:  "pwsh".into(),
+                cmd: "pwsh".into(),
                 flags: vec!["-NoProfile".into()],
                 skip_if_missing: true,
             },
             BackendDescriptor {
                 name: "cmd".into(),
-                cmd:  "cmd.exe".into(),
+                cmd: "cmd.exe".into(),
                 flags: vec!["/C".into()],
                 skip_if_missing: true,
             },
@@ -138,7 +138,7 @@ impl DifferentialConfig {
         match std::fs::read_to_string(path) {
             Ok(s) => match toml::from_str(&s) {
                 Ok(cfg) => cfg,
-                Err(_)  => Self::host_default(),
+                Err(_) => Self::host_default(),
             },
             Err(_) => Self::host_default(),
         }
@@ -149,9 +149,7 @@ impl DifferentialConfig {
         let test_str = test.to_string_lossy();
         self.allowed_divergence
             .iter()
-            .find(|a| {
-                test_str.ends_with(&a.test) && a.backends.iter().any(|b| b == backend)
-            })
+            .find(|a| test_str.ends_with(&a.test) && a.backends.iter().any(|b| b == backend))
             .map(|a| a.reason.as_str())
     }
 }
@@ -163,9 +161,9 @@ impl DifferentialConfig {
 #[derive(Debug, Clone)]
 pub struct ExecutionResult {
     pub backend: String,
-    pub tier:    Tier,
-    pub stdout:  String,
-    pub stderr:  String,
+    pub tier: Tier,
+    pub stdout: String,
+    pub stderr: String,
     pub exit_code: i32,
     pub duration: Duration,
     pub skipped: bool,
@@ -174,10 +172,10 @@ pub struct ExecutionResult {
 
 #[derive(Debug, Clone)]
 pub struct DifferentialReport {
-    pub test_path:   PathBuf,
-    pub executions:  Vec<ExecutionResult>,
+    pub test_path: PathBuf,
+    pub executions: Vec<ExecutionResult>,
     pub divergences: Vec<Divergence>,
-    pub passed:      bool,
+    pub passed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -207,7 +205,10 @@ pub struct DifferentialRunner {
 
 impl DifferentialRunner {
     pub fn new(config: DifferentialConfig) -> Self {
-        Self { config, timeout_ms: 30_000 }
+        Self {
+            config,
+            timeout_ms: 30_000,
+        }
     }
 
     /// Run the entire matrix on `test_path`.
@@ -228,7 +229,12 @@ impl DifferentialRunner {
         }
     }
 
-    fn run_one(&self, test_path: &Path, backend: &BackendDescriptor, tier: Tier) -> ExecutionResult {
+    fn run_one(
+        &self,
+        test_path: &Path,
+        backend: &BackendDescriptor,
+        tier: Tier,
+    ) -> ExecutionResult {
         let start = std::time::Instant::now();
 
         // Probe binary existence when skip_if_missing is set.
@@ -253,8 +259,8 @@ impl DifferentialRunner {
         // simply sees identical results across backends, which is the win.
         let tier_arg = match tier {
             Tier::Interpreter => "0",
-            Tier::Jit         => "1",
-            Tier::Aot         => "2",
+            Tier::Jit => "1",
+            Tier::Aot => "2",
         };
         let mut cmd = Command::new("verum");
         cmd.args(["run", "--tier", tier_arg, "--shell", &backend.cmd]);
@@ -264,7 +270,9 @@ impl DifferentialRunner {
             Ok((stdout, stderr, code)) => ExecutionResult {
                 backend: backend.name.clone(),
                 tier,
-                stdout, stderr, exit_code: code,
+                stdout,
+                stderr,
+                exit_code: code,
                 duration: start.elapsed(),
                 skipped: false,
                 skip_reason: None,
@@ -286,18 +294,32 @@ impl DifferentialRunner {
         let mut out = Vec::new();
         // Pairwise compare every two non-skipped executions.
         for i in 0..exes.len() {
-            if exes[i].skipped { continue; }
+            if exes[i].skipped {
+                continue;
+            }
             for j in (i + 1)..exes.len() {
-                if exes[j].skipped { continue; }
+                if exes[j].skipped {
+                    continue;
+                }
                 let a = &exes[i];
                 let b = &exes[j];
                 if a.exit_code != b.exit_code {
-                    out.push(self.divergence(test_path, a, b, DivergenceKind::ExitCode,
-                        format!("a={}, b={}", a.exit_code, b.exit_code)));
+                    out.push(self.divergence(
+                        test_path,
+                        a,
+                        b,
+                        DivergenceKind::ExitCode,
+                        format!("a={}, b={}", a.exit_code, b.exit_code),
+                    ));
                 }
                 if normalise(&a.stdout) != normalise(&b.stdout) {
-                    out.push(self.divergence(test_path, a, b, DivergenceKind::Stdout,
-                        unified_diff(&a.stdout, &b.stdout)));
+                    out.push(self.divergence(
+                        test_path,
+                        a,
+                        b,
+                        DivergenceKind::Stdout,
+                        unified_diff(&a.stdout, &b.stdout),
+                    ));
                 }
             }
         }
@@ -314,7 +336,9 @@ impl DifferentialRunner {
     ) -> Divergence {
         // Mark divergence as justified if either backend appears in the
         // allow list for this test.
-        let justified = self.config.divergence_allowed(test_path, &a.backend)
+        let justified = self
+            .config
+            .divergence_allowed(test_path, &a.backend)
             .or_else(|| self.config.divergence_allowed(test_path, &b.backend))
             .map(|s| s.to_string());
         Divergence {
@@ -343,7 +367,7 @@ fn command_available(cmd: &str) -> bool {
     #[cfg(target_os = "windows")]
     let probe = Command::new("where").arg(cmd).output();
     match probe {
-        Ok(o)  => o.status.success(),
+        Ok(o) => o.status.success(),
         Err(_) => false,
     }
 }
@@ -355,7 +379,9 @@ fn run_with_timeout(
     use std::io::Read;
     use std::process::Stdio;
 
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let mut child = cmd.spawn()?;
 
     let timeout = Duration::from_millis(timeout_ms);
@@ -365,8 +391,12 @@ fn run_with_timeout(
             Some(status) => {
                 let mut stdout = String::new();
                 let mut stderr = String::new();
-                if let Some(mut h) = child.stdout.take() { let _ = h.read_to_string(&mut stdout); }
-                if let Some(mut h) = child.stderr.take() { let _ = h.read_to_string(&mut stderr); }
+                if let Some(mut h) = child.stdout.take() {
+                    let _ = h.read_to_string(&mut stdout);
+                }
+                if let Some(mut h) = child.stderr.take() {
+                    let _ = h.read_to_string(&mut stderr);
+                }
                 return Ok((stdout, stderr, status.code().unwrap_or(-1)));
             }
             None => {
@@ -431,8 +461,8 @@ impl PerTestOverrides {
                             .into_iter()
                             .filter_map(|s| match s.as_str() {
                                 "0" | "interpreter" => Some(Tier::Interpreter),
-                                "1" | "jit"         => Some(Tier::Jit),
-                                "2" | "aot"         => Some(Tier::Aot),
+                                "1" | "jit" => Some(Tier::Jit),
+                                "2" | "aot" => Some(Tier::Aot),
                                 _ => None,
                             })
                             .collect(),
@@ -446,7 +476,8 @@ impl PerTestOverrides {
     /// Apply per-test overrides on top of a base config.
     pub fn apply(&self, mut base: DifferentialConfig) -> DifferentialConfig {
         if let Some(filter) = &self.backends {
-            base.backends.retain(|b| filter.iter().any(|n| n == &b.name));
+            base.backends
+                .retain(|b| filter.iter().any(|n| n == &b.name));
         }
         if let Some(t) = &self.tiers {
             base.tiers = t.clone();
@@ -480,7 +511,9 @@ impl DifferentialReport {
         ));
         if !self.passed {
             for d in &self.divergences {
-                if d.justified.is_some() { continue; }
+                if d.justified.is_some() {
+                    continue;
+                }
                 out.push_str(&format!(
                     "\n  {:?}: {}({:?}) vs {}({:?})\n",
                     d.kind, d.a.0, d.a.1, d.b.0, d.b.1
@@ -507,15 +540,24 @@ mod tests {
     #[test]
     fn host_default_has_some_backends() {
         let cfg = DifferentialConfig::host_default();
-        assert!(!cfg.backends.is_empty(), "host default backends should not be empty");
+        assert!(
+            !cfg.backends.is_empty(),
+            "host default backends should not be empty"
+        );
     }
 
     #[test]
     fn parse_overrides_extracts_backend_filter() {
         let src = "// @backends: [bash, zsh]\n// @tiers: [0, 2]\nfn main() {}\n";
         let o = PerTestOverrides::parse(src);
-        assert_eq!(o.backends.as_ref().unwrap(), &vec!["bash".to_string(), "zsh".to_string()]);
-        assert_eq!(o.tiers.as_ref().unwrap(), &vec![Tier::Interpreter, Tier::Aot]);
+        assert_eq!(
+            o.backends.as_ref().unwrap(),
+            &vec!["bash".to_string(), "zsh".to_string()]
+        );
+        assert_eq!(
+            o.tiers.as_ref().unwrap(),
+            &vec![Tier::Interpreter, Tier::Aot]
+        );
     }
 
     #[test]
@@ -527,7 +569,7 @@ mod tests {
     #[test]
     fn normalise_strips_crlf_and_trailing_ws() {
         assert_eq!(normalise("hello\r\n"), "hello");
-        assert_eq!(normalise("a\nb\r\n"),  "a\nb");
+        assert_eq!(normalise("a\nb\r\n"), "a\nb");
         assert_eq!(normalise("  trailing  "), "  trailing");
     }
 

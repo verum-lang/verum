@@ -10,8 +10,8 @@
 //! 2. If the pattern starts with a wildcard, check each possible constructor
 //! 3. If the pattern starts with a constructor, specialize and recurse
 
-use super::constructors::{get_type_constructors, Constructor};
-use super::matrix::{specialize_matrix, CoverageMatrix, PatternColumn, PatternRow};
+use super::constructors::{Constructor, get_type_constructors};
+use super::matrix::{CoverageMatrix, PatternColumn, PatternRow, specialize_matrix};
 use crate::context::TypeEnv;
 use crate::ty::Type;
 use std::collections::HashSet;
@@ -88,7 +88,11 @@ pub fn is_useful(earlier_rows: &[PatternRow], row: &PatternRow) -> bool {
             is_useful_literal(earlier_rows, row, lit)
         }
 
-        PatternColumn::Range { start, end, inclusive } => {
+        PatternColumn::Range {
+            start,
+            end,
+            inclusive,
+        } => {
             // Range pattern - check if any part of the range is uncovered
             is_useful_range(earlier_rows, row, *start, *end, *inclusive)
         }
@@ -100,8 +104,7 @@ pub fn is_useful(earlier_rows: &[PatternRow], row: &PatternRow) -> bool {
 
         PatternColumn::Record { fields, .. } => {
             // Expand record fields and recurse
-            let elements: List<PatternColumn> =
-                fields.iter().map(|(_, col)| col.clone()).collect();
+            let elements: List<PatternColumn> = fields.iter().map(|(_, col)| col.clone()).collect();
             is_useful_product(earlier_rows, row, &elements)
         }
 
@@ -111,7 +114,10 @@ pub fn is_useful(earlier_rows: &[PatternRow], row: &PatternRow) -> bool {
             is_useful(earlier_rows, &modified_row)
         }
 
-        PatternColumn::Stream { head_patterns, tail } => {
+        PatternColumn::Stream {
+            head_patterns,
+            tail,
+        } => {
             // Stream patterns are like Cons/Nil for lists
             is_useful_stream(earlier_rows, row, head_patterns, tail)
         }
@@ -122,7 +128,11 @@ pub fn is_useful(earlier_rows: &[PatternRow], row: &PatternRow) -> bool {
             is_useful_typetest(earlier_rows, row, type_name, binding)
         }
 
-        PatternColumn::Active { name, bindings, is_total } => {
+        PatternColumn::Active {
+            name,
+            bindings,
+            is_total,
+        } => {
             // Active patterns are user-defined
             is_useful_active(earlier_rows, row, name, bindings, *is_total)
         }
@@ -167,10 +177,7 @@ fn is_useful_stream(
 
     if cons_covered {
         // Expand and recurse
-        let expanded_earlier: Vec<_> = earlier_rows
-            .iter()
-            .filter_map(expand_stream_row)
-            .collect();
+        let expanded_earlier: Vec<_> = earlier_rows.iter().filter_map(expand_stream_row).collect();
 
         let mut new_columns = List::new();
         if let Some(first_head) = head_patterns.first() {
@@ -231,16 +238,17 @@ fn expand_stream_row(row: &PatternRow) -> Option<PatternRow> {
         match first {
             PatternColumn::Wildcard => {
                 // Wildcard matches everything - expand to wildcard head and tail
-                let mut new_cols = List::from_iter([
-                    PatternColumn::Wildcard,
-                    PatternColumn::Wildcard,
-                ]);
+                let mut new_cols =
+                    List::from_iter([PatternColumn::Wildcard, PatternColumn::Wildcard]);
                 for col in row.columns.iter().skip(1) {
                     new_cols.push(col.clone());
                 }
                 Some(PatternRow::new(new_cols, row.original_index, row.has_guard))
             }
-            PatternColumn::Stream { head_patterns, tail } if !head_patterns.is_empty() => {
+            PatternColumn::Stream {
+                head_patterns,
+                tail,
+            } if !head_patterns.is_empty() => {
                 let mut new_cols = List::new();
                 if let Some(head) = head_patterns.first() {
                     new_cols.push(head.clone());
@@ -293,7 +301,11 @@ fn is_useful_typetest(
     // Check if an earlier row has the same type test
     let same_typetest_covered = earlier_rows.iter().any(|earlier| {
         if let Some(first) = earlier.columns.first() {
-            if let PatternColumn::TypeTest { type_name: other_name, .. } = first {
+            if let PatternColumn::TypeTest {
+                type_name: other_name,
+                ..
+            } = first
+            {
                 other_name == type_name && !earlier.has_guard
             } else {
                 matches!(first, PatternColumn::Wildcard) && !earlier.has_guard
@@ -310,7 +322,10 @@ fn is_useful_typetest(
             let earlier_bindings: Vec<_> = earlier_rows
                 .iter()
                 .filter_map(|r| {
-                    if let Some(PatternColumn::TypeTest { binding: Some(b), .. }) = r.columns.first() {
+                    if let Some(PatternColumn::TypeTest {
+                        binding: Some(b), ..
+                    }) = r.columns.first()
+                    {
                         Some(PatternRow::new(
                             List::from_iter([b.as_ref().clone()]),
                             r.original_index,
@@ -346,7 +361,9 @@ fn is_useful_active(
         // Total active patterns can always fail, so they're always potentially useful
         // unless an earlier wildcard covers everything
         let wildcard_covered = earlier_rows.iter().any(|earlier| {
-            earlier.columns.first()
+            earlier
+                .columns
+                .first()
                 .map(|first| matches!(first, PatternColumn::Wildcard) && !earlier.has_guard)
                 .unwrap_or(false)
         });
@@ -357,9 +374,9 @@ fn is_useful_active(
     let same_active_covered = earlier_rows.iter().any(|earlier| {
         if let Some(first) = earlier.columns.first() {
             match first {
-                PatternColumn::Active { name: other_name, .. } if other_name == name => {
-                    !earlier.has_guard
-                }
+                PatternColumn::Active {
+                    name: other_name, ..
+                } if other_name == name => !earlier.has_guard,
                 PatternColumn::Wildcard => !earlier.has_guard,
                 _ => false,
             }
@@ -373,7 +390,11 @@ fn is_useful_active(
         let earlier_bindings: Vec<_> = earlier_rows
             .iter()
             .filter_map(|r| {
-                if let Some(PatternColumn::Active { bindings: other_bindings, .. }) = r.columns.first() {
+                if let Some(PatternColumn::Active {
+                    bindings: other_bindings,
+                    ..
+                }) = r.columns.first()
+                {
                     if !other_bindings.is_empty() {
                         Some(PatternRow::new(
                             other_bindings.clone(),
@@ -533,10 +554,7 @@ fn is_useful_literal(
 }
 
 /// Check if a literal is covered by a pattern column
-fn literal_covered_by(
-    lit: &super::matrix::LiteralPattern,
-    col: &PatternColumn,
-) -> bool {
+fn literal_covered_by(lit: &super::matrix::LiteralPattern, col: &PatternColumn) -> bool {
     match col {
         PatternColumn::Wildcard => true,
         PatternColumn::Literal(other) => {
@@ -629,11 +647,8 @@ fn range_covered_by(
         } => {
             // Check if [start, end] is subset of [s2, e2]
             let covers_start = s2.is_none_or(|s| start.is_some_and(|st| st >= s));
-            let covers_end = e2.is_none_or(|e| {
-                end.is_some_and(|en| {
-                    if *inc2 { en <= e } else { en < e }
-                })
-            });
+            let covers_end =
+                e2.is_none_or(|e| end.is_some_and(|en| if *inc2 { en <= e } else { en < e }));
             covers_start && covers_end
         }
         PatternColumn::Or(alts) => {
@@ -725,11 +740,7 @@ fn specialize_for_constructor(rows: &[PatternRow], ctor: &Constructor) -> Vec<Pa
                     for col in row.columns.iter().skip(1) {
                         new_cols.push(col.clone());
                     }
-                    specialized.push(PatternRow::new(
-                        new_cols,
-                        row.original_index,
-                        row.has_guard,
-                    ));
+                    specialized.push(PatternRow::new(new_cols, row.original_index, row.has_guard));
                 }
                 PatternColumn::Or(alts) => {
                     // Check alternatives

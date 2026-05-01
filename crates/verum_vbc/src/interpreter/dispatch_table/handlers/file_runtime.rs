@@ -72,16 +72,16 @@
 //! `permissions = ["time"]` (no `fs`) is denied uniformly with the
 //! libSystem open/read FFI gate.
 
-use crate::interpreter::heap;
-use crate::interpreter::permission::{PermissionDecision, PermissionScope};
-use crate::interpreter::state::InterpreterState;
-use crate::types::TypeId;
-use crate::value::Value;
 use super::super::super::error::InterpreterResult;
 use super::heap_helpers::{
     alloc_byte_list, alloc_record_n_fields, extract_text_arg, wrap_in_variant,
 };
 use super::string_helpers::{alloc_string_value, extract_string};
+use crate::interpreter::heap;
+use crate::interpreter::permission::{PermissionDecision, PermissionScope};
+use crate::interpreter::state::InterpreterState;
+use crate::types::TypeId;
+use crate::value::Value;
 
 /// Try to intercept a file-I/O runtime call. Returns `Some(value)`
 /// when the interception fires, `None` otherwise (caller falls through
@@ -117,9 +117,7 @@ pub(in super::super) fn try_intercept_file_runtime(
         // signature is preserved; we dispatch on whether the second
         // arg is a Text or a List<Byte> by trying Text extraction
         // first, then byte-list extraction.
-        "write" if arg_count == 2 => {
-            intercept_write_dispatch(state, args_start_reg, caller_base)
-        }
+        "write" if arg_count == 2 => intercept_write_dispatch(state, args_start_reg, caller_base),
         "write_bytes" if arg_count == 2 => {
             intercept_write_bytes(state, args_start_reg, arg_count, caller_base)
         }
@@ -427,7 +425,9 @@ fn value_is_text(v: &Value) -> bool {
 /// above — the caller's `std::fs::*` invocation will then surface a
 /// `NotFound` error which the script can match on.
 fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
-    let v = state.registers.get(caller_base, crate::instruction::Reg(reg));
+    let v = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(reg));
     let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
         let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
         state.registers.get_absolute(abs_index)
@@ -451,8 +451,7 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
             // (one Value slot). Peek field 0; if it's a Text, that's
             // the path content.
             if (header.size as usize) >= std::mem::size_of::<Value>() {
-                let field0 =
-                    unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
+                let field0 = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
                 if value_is_text(&field0) {
                     return extract_string(&field0, state);
                 }
@@ -469,7 +468,9 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
 /// into an owned `Vec<u8>`. Reads the List header `[len, cap,
 /// backing_ptr]` and copies the byte payload.
 fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Vec<u8> {
-    let v = state.registers.get(caller_base, crate::instruction::Reg(reg));
+    let v = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(reg));
     let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
         let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
         state.registers.get_absolute(abs_index)
@@ -524,7 +525,8 @@ fn check_fs_permission(state: &mut InterpreterState, _kind: &str) -> Option<Valu
         let kind_variant = build_io_error_kind(state, "PermissionDenied", 1).ok()?;
         let msg_text = alloc_string_value(state, "permission denied: filesystem access").ok()?;
         let msg_some = wrap_in_variant(state, "Maybe", 1, &[msg_text]).ok()?;
-        let stream_err = alloc_record_n_fields(state, "StreamError", &[kind_variant, msg_some]).ok()?;
+        let stream_err =
+            alloc_record_n_fields(state, "StreamError", &[kind_variant, msg_some]).ok()?;
         return wrap_in_variant(state, "Result", 1, &[stream_err]).ok();
     }
     None
@@ -537,26 +539,26 @@ fn check_fs_permission(state: &mut InterpreterState, _kind: &str) -> Option<Valu
 fn build_io_err(state: &mut InterpreterState, e: &std::io::Error) -> InterpreterResult<Value> {
     use std::io::ErrorKind as K;
     let (kind_name, kind_tag) = match e.kind() {
-        K::NotFound          => ("NotFound", 0u32),
-        K::PermissionDenied  => ("PermissionDenied", 1),
+        K::NotFound => ("NotFound", 0u32),
+        K::PermissionDenied => ("PermissionDenied", 1),
         K::ConnectionRefused => ("ConnectionRefused", 2),
-        K::ConnectionReset   => ("ConnectionReset", 3),
+        K::ConnectionReset => ("ConnectionReset", 3),
         K::ConnectionAborted => ("ConnectionAborted", 4),
-        K::NotConnected      => ("NotConnected", 5),
-        K::AddrInUse         => ("AddrInUse", 6),
-        K::AddrNotAvailable  => ("AddrNotAvailable", 7),
-        K::BrokenPipe        => ("BrokenPipe", 8),
-        K::AlreadyExists     => ("AlreadyExists", 9),
-        K::WouldBlock        => ("WouldBlock", 10),
-        K::InvalidInput      => ("InvalidInput", 11),
-        K::InvalidData       => ("InvalidData", 12),
-        K::TimedOut          => ("TimedOut", 13),
-        K::WriteZero         => ("WriteZero", 14),
-        K::Interrupted       => ("Interrupted", 15),
-        K::UnexpectedEof     => ("UnexpectedEof", 16),
-        K::OutOfMemory       => ("OutOfMemory", 17),
-        K::Unsupported       => ("Unsupported", 18),
-        _                    => ("Other", 19),
+        K::NotConnected => ("NotConnected", 5),
+        K::AddrInUse => ("AddrInUse", 6),
+        K::AddrNotAvailable => ("AddrNotAvailable", 7),
+        K::BrokenPipe => ("BrokenPipe", 8),
+        K::AlreadyExists => ("AlreadyExists", 9),
+        K::WouldBlock => ("WouldBlock", 10),
+        K::InvalidInput => ("InvalidInput", 11),
+        K::InvalidData => ("InvalidData", 12),
+        K::TimedOut => ("TimedOut", 13),
+        K::WriteZero => ("WriteZero", 14),
+        K::Interrupted => ("Interrupted", 15),
+        K::UnexpectedEof => ("UnexpectedEof", 16),
+        K::OutOfMemory => ("OutOfMemory", 17),
+        K::Unsupported => ("Unsupported", 18),
+        _ => ("Other", 19),
     };
     let kind_variant = build_io_error_kind(state, kind_name, kind_tag)?;
     let msg_text = alloc_string_value(state, &format!("{}", e))?;

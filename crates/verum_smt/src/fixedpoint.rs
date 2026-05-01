@@ -115,8 +115,14 @@ unsafe fn get_z3_params(params: &z3::Params) -> Z3_params {
 // Compile-time layout assertions: if z3 crate changes its struct sizes,
 // these will fail at compile time, catching layout drift before UB occurs.
 const _: () = {
-    assert!(std::mem::size_of::<Context>() > 0, "Context must not be ZST");
-    assert!(std::mem::size_of::<FuncDecl>() > std::mem::size_of::<Context>(), "FuncDecl must be larger than Context (ctx + z3_func_decl)");
+    assert!(
+        std::mem::size_of::<Context>() > 0,
+        "Context must not be ZST"
+    );
+    assert!(
+        std::mem::size_of::<FuncDecl>() > std::mem::size_of::<Context>(),
+        "FuncDecl must be larger than Context (ctx + z3_func_decl)"
+    );
 };
 
 // ==================== Core Types ====================

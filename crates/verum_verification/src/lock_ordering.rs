@@ -664,10 +664,7 @@ mod tests {
     // outcome on the same input (an unregistered lock type at use-site).
     // -------------------------------------------------------------------------
 
-    fn make_verifier_with(
-        require_levels: bool,
-        strict_mode: bool,
-    ) -> LockOrderingVerifier {
+    fn make_verifier_with(require_levels: bool, strict_mode: bool) -> LockOrderingVerifier {
         let cfg = LockOrderingConfig {
             require_levels,
             detect_cycles: false,

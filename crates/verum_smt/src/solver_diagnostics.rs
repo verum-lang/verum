@@ -176,24 +176,18 @@ mod tests {
 
     #[test]
     fn dump_smt_query_writes_to_configured_dir() {
-        let tmpdir = std::env::temp_dir().join(format!(
-            "verum-dump-test-{}",
-            std::process::id()
-        ));
+        let tmpdir = std::env::temp_dir().join(format!("verum-dump-test-{}", std::process::id()));
         std::fs::create_dir_all(&tmpdir).unwrap();
-        with_env_vars(
-            &[(DUMP_DIR_ENV, Some(tmpdir.to_str().unwrap()))],
-            || {
-                reset_counter_for_testing();
-                let path = dump_smt_query("test", "(check-sat)").unwrap();
-                assert!(path.exists());
-                let content = std::fs::read_to_string(&path).unwrap();
-                assert_eq!(content, "(check-sat)");
-                let fname = path.file_name().unwrap().to_string_lossy();
-                assert!(fname.starts_with("test-"));
-                assert!(fname.ends_with(".smt2"));
-            },
-        );
+        with_env_vars(&[(DUMP_DIR_ENV, Some(tmpdir.to_str().unwrap()))], || {
+            reset_counter_for_testing();
+            let path = dump_smt_query("test", "(check-sat)").unwrap();
+            assert!(path.exists());
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(content, "(check-sat)");
+            let fname = path.file_name().unwrap().to_string_lossy();
+            assert!(fname.starts_with("test-"));
+            assert!(fname.ends_with(".smt2"));
+        });
         std::fs::remove_dir_all(&tmpdir).ok();
     }
 

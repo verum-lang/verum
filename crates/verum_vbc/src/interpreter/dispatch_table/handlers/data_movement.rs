@@ -1,19 +1,21 @@
 //! Data movement and type conversion handlers for VBC interpreter dispatch.
 
-use crate::value::Value;
-use crate::types::TypeId;
-use crate::module::ConstId;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::super::load_constant;
 use super::bytecode_io::*;
+use crate::module::ConstId;
+use crate::types::TypeId;
+use crate::value::Value;
 
 // ============================================================================
 // Handler Implementations - Data Movement
 // ============================================================================
 
-pub(in super::super) fn handle_mov(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_mov(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let value = state.get_reg(src);
@@ -21,7 +23,9 @@ pub(in super::super) fn handle_mov(state: &mut InterpreterState) -> InterpreterR
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_loadk(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_loadk(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let const_id = read_varint(state)? as u32;
     let value = load_constant(state, ConstId(const_id))?;
@@ -29,59 +33,77 @@ pub(in super::super) fn handle_loadk(state: &mut InterpreterState) -> Interprete
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_loadi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_loadi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let value = read_signed_varint(state)?;
     state.set_reg(dst, Value::from_i64(value));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_loadf(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_loadf(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let value = read_f64(state)?;
     state.set_reg(dst, Value::from_f64(value));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_load_true(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_load_true(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     state.set_reg(dst, Value::from_bool(true));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_load_false(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_load_false(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     state.set_reg(dst, Value::from_bool(false));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_load_unit(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_load_unit(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     state.set_reg(dst, Value::unit());
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_loadt(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_loadt(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let type_id = read_varint(state)? as u32;
     state.set_reg(dst, Value::from_type(TypeId(type_id)));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_load_smalli(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_load_smalli(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let value = read_i8(state)? as i64;
     state.set_reg(dst, Value::from_i64(value));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_load_nil(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_load_nil(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     state.set_reg(dst, Value::nil());
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_nop(_state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_nop(
+    _state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     Ok(DispatchResult::Continue)
 }
 
@@ -89,7 +111,9 @@ pub(in super::super) fn handle_nop(_state: &mut InterpreterState) -> Interpreter
 // Handler Implementations - Type Conversions
 // ============================================================================
 
-pub(in super::super) fn handle_cvt_if(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_cvt_if(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let int_val = state.get_reg(src).as_i64();
@@ -97,7 +121,9 @@ pub(in super::super) fn handle_cvt_if(state: &mut InterpreterState) -> Interpret
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_cvt_fi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_cvt_fi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let mode = read_u8(state)?;
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
@@ -114,7 +140,9 @@ pub(in super::super) fn handle_cvt_fi(state: &mut InterpreterState) -> Interpret
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_cvt_ic(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_cvt_ic(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let int_val = state.get_reg(src).as_i64();
@@ -134,7 +162,9 @@ pub(in super::super) fn handle_cvt_ic(state: &mut InterpreterState) -> Interpret
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_cvt_ci(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_cvt_ci(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let char_val = state.get_reg(src).as_char();
@@ -142,7 +172,9 @@ pub(in super::super) fn handle_cvt_ci(state: &mut InterpreterState) -> Interpret
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_cvt_bi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_cvt_bi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let bool_val = state.get_reg(src).as_bool();
@@ -150,7 +182,9 @@ pub(in super::super) fn handle_cvt_bi(state: &mut InterpreterState) -> Interpret
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_cvt_toi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_cvt_toi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let val = state.get_reg(src);
@@ -173,7 +207,9 @@ pub(in super::super) fn handle_cvt_toi(state: &mut InterpreterState) -> Interpre
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_cvt_tof(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_cvt_tof(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let val = state.get_reg(src);

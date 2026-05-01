@@ -1,11 +1,11 @@
 //! Char extended opcode handler for VBC interpreter dispatch.
 
-use crate::instruction::{CharSubOpcode, Opcode};
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::instruction::{CharSubOpcode, Opcode};
+use crate::value::Value;
 
 /// CharExtended (0x2B) - Character classification and conversion.
 ///
@@ -28,7 +28,9 @@ use super::bytecode_io::*;
 
 /// CBGR tier analysis: char extended operations dispatched via sub-opcode byte after
 /// the primary CharExtended (0xCA) opcode. Unicode lookups take ~20-50ns.
-pub(in super::super) fn handle_char_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_char_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
     let sub_op = CharSubOpcode::from_byte(sub_op_byte);
 
@@ -304,11 +306,16 @@ pub(in super::super) fn handle_char_extended(state: &mut InterpreterState) -> In
             let len = encoded.len();
 
             // Allocate backing array for bytes
-            let backing_layout = std::alloc::Layout::from_size_align(len * 8, 8)
-                .map_err(|_| InterpreterError::Panic { message: "bad layout for utf8 bytes".into() })?;
+            let backing_layout = std::alloc::Layout::from_size_align(len * 8, 8).map_err(|_| {
+                InterpreterError::Panic {
+                    message: "bad layout for utf8 bytes".into(),
+                }
+            })?;
             let backing_ptr = unsafe { std::alloc::alloc_zeroed(backing_layout) };
             if backing_ptr.is_null() {
-                return Err(InterpreterError::Panic { message: "alloc failed for utf8 bytes".into() });
+                return Err(InterpreterError::Panic {
+                    message: "alloc failed for utf8 bytes".into(),
+                });
             }
             // Fill backing array with byte values
             for (i, &byte_val) in buf.iter().enumerate().take(len) {
@@ -319,11 +326,16 @@ pub(in super::super) fn handle_char_extended(state: &mut InterpreterState) -> In
             }
 
             // Allocate list header: [length, capacity, backing_ptr]
-            let header_layout = std::alloc::Layout::from_size_align(3 * 8, 8)
-                .map_err(|_| InterpreterError::Panic { message: "bad layout for utf8 header".into() })?;
+            let header_layout = std::alloc::Layout::from_size_align(3 * 8, 8).map_err(|_| {
+                InterpreterError::Panic {
+                    message: "bad layout for utf8 header".into(),
+                }
+            })?;
             let header_ptr = unsafe { std::alloc::alloc_zeroed(header_layout) };
             if header_ptr.is_null() {
-                return Err(InterpreterError::Panic { message: "alloc failed for utf8 header".into() });
+                return Err(InterpreterError::Panic {
+                    message: "alloc failed for utf8 header".into(),
+                });
             }
             unsafe {
                 std::ptr::write(header_ptr as *mut i64, len as i64);
@@ -425,11 +437,9 @@ pub(in super::super) fn handle_char_extended(state: &mut InterpreterState) -> In
         // ================================================================
         // Unimplemented sub-opcodes
         // ================================================================
-        None => {
-            Err(InterpreterError::NotImplemented {
-                feature: "char_extended sub-opcode",
-                opcode: Some(Opcode::CharExtended),
-            })
-        }
+        None => Err(InterpreterError::NotImplemented {
+            feature: "char_extended sub-opcode",
+            opcode: Some(Opcode::CharExtended),
+        }),
     }
 }

@@ -372,7 +372,10 @@ impl DerivePartialEq {
     /// Create the eq method declaration
     fn create_eq_method(&self, ctx: &DeriveContext, body: Block, span: Span) -> FunctionDecl {
         // Return type: Bool
-        let return_type = Type::new(TypeKind::Path(Path::single(Ident::new(type_names::BOOL, span))), span);
+        let return_type = Type::new(
+            TypeKind::Path(Path::single(Ident::new(type_names::BOOL, span))),
+            span,
+        );
 
         // Parameter: other: &Self
         let other_type = Type::new(

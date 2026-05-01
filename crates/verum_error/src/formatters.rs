@@ -265,7 +265,11 @@ impl<E: fmt::Display> ContextError<E> {
         if !contexts.is_empty() {
             let contexts_json: Vec<String> = contexts
                 .iter()
-                .map(|c| ContextValue::Text((*c).clone()).to_json(false).into_string())
+                .map(|c| {
+                    ContextValue::Text((*c).clone())
+                        .to_json(false)
+                        .into_string()
+                })
                 .collect();
             parts.push(format!("\"context\":[{}]", contexts_json.join(",")));
         }

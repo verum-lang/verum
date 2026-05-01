@@ -9,8 +9,8 @@
 //! complete end-to-end.
 
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use verum_common::Text;
 use verum_compiler::options::CompilerOptions;
@@ -26,15 +26,15 @@ fn session_shares_routing_stats_handle_with_switcher() {
     let session = Session::new(opts);
 
     // Session starts with an empty stats collector.
-    let before = session.routing_stats().total_queries.load(Ordering::Relaxed);
+    let before = session
+        .routing_stats()
+        .total_queries
+        .load(Ordering::Relaxed);
     assert_eq!(before, 0, "fresh session must have zero recorded queries");
 
     // Build a switcher sharing the session's stats handle.
     let stats = session.routing_stats().clone();
-    let switcher = SmtBackendSwitcher::with_shared_stats(
-        SwitcherConfig::default(),
-        stats,
-    );
+    let switcher = SmtBackendSwitcher::with_shared_stats(SwitcherConfig::default(), stats);
 
     // `switcher.routing_stats()` must return the SAME Arc instance as
     // the session holds — this is the contract that makes per-session
@@ -217,7 +217,10 @@ fn context_without_stats_records_nothing() {
 
     // The session's collector must still be empty.
     assert_eq!(
-        session.routing_stats().total_queries.load(Ordering::Relaxed),
+        session
+            .routing_stats()
+            .total_queries
+            .load(Ordering::Relaxed),
         0,
         "uninstrumented Context must not touch the session collector"
     );
@@ -231,9 +234,7 @@ fn set_routing_stats_replaces_handle() {
     let mut session = Session::new(opts);
 
     let original = session.routing_stats().clone();
-    let injected = std::sync::Arc::new(
-        verum_smt::routing_stats::RoutingStats::new(),
-    );
+    let injected = std::sync::Arc::new(verum_smt::routing_stats::RoutingStats::new());
     // Pre-load the injected collector to distinguish it.
     injected.total_sat.store(42, Ordering::Relaxed);
 

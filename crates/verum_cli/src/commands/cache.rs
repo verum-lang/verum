@@ -131,7 +131,11 @@ fn list(root: Option<PathBuf>, sort: &str, limit: usize, json: bool) -> Result<(
     sort_entries(&mut entries, sort)?;
     let total: u64 = entries.iter().map(|(_, m)| m.vbc_len).sum();
 
-    let take = if limit == 0 { entries.len() } else { limit.min(entries.len()) };
+    let take = if limit == 0 {
+        entries.len()
+    } else {
+        limit.min(entries.len())
+    };
 
     if json {
         let mut out = io::stdout().lock();
@@ -179,7 +183,10 @@ fn list(root: Option<PathBuf>, sort: &str, limit: usize, json: bool) -> Result<(
         );
     }
     if take < entries.len() {
-        println!("\n({} more, pass --limit 0 to see all)", entries.len() - take);
+        println!(
+            "\n({} more, pass --limit 0 to see all)",
+            entries.len() - take
+        );
     }
     Ok(())
 }
@@ -206,11 +213,13 @@ fn clear(root: Option<PathBuf>, yes: bool) -> Result<()> {
         println!("cache already empty: {}", cache.root().display());
         return Ok(());
     }
-    if !yes && !confirm(&format!(
-        "Remove {} cache entries from {}?",
-        entries.len(),
-        cache.root().display()
-    ))? {
+    if !yes
+        && !confirm(&format!(
+            "Remove {} cache entries from {}?",
+            entries.len(),
+            cache.root().display()
+        ))?
+    {
         println!("aborted");
         return Ok(());
     }
@@ -245,7 +254,10 @@ fn gc(root: Option<PathBuf>, max_size: &str, dry_run: bool) -> Result<()> {
         return Ok(());
     }
     let evicted = cache.gc_to_size(max_bytes).map_err(into_cli_err)?;
-    println!("evicted {evicted} entries (target: {})", format_bytes(max_bytes));
+    println!(
+        "evicted {evicted} entries (target: {})",
+        format_bytes(max_bytes)
+    );
     Ok(())
 }
 
@@ -320,12 +332,12 @@ fn parse_size(input: &str) -> Result<u64> {
             )));
         }
     };
-    let n: u64 = num.trim().parse().map_err(|_| {
-        CliError::InvalidArgument(format!("--max-size {input:?} is not numeric"))
-    })?;
-    n.checked_mul(mult).ok_or_else(|| {
-        CliError::InvalidArgument(format!("--max-size {input:?} overflows u64"))
-    })
+    let n: u64 = num
+        .trim()
+        .parse()
+        .map_err(|_| CliError::InvalidArgument(format!("--max-size {input:?} is not numeric")))?;
+    n.checked_mul(mult)
+        .ok_or_else(|| CliError::InvalidArgument(format!("--max-size {input:?} overflows u64")))
 }
 
 fn format_bytes(n: u64) -> String {

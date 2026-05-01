@@ -46,7 +46,10 @@ fn test_violation_kind_ffi_error_codes() {
     // Verify error codes are in expected range 0x1001-0x1008
     assert_eq!(CbgrViolationKind::UseAfterFree.ffi_error_code(), 0x1001);
     assert_eq!(CbgrViolationKind::DoubleFree.ffi_error_code(), 0x1002);
-    assert_eq!(CbgrViolationKind::GenerationMismatch.ffi_error_code(), 0x1003);
+    assert_eq!(
+        CbgrViolationKind::GenerationMismatch.ffi_error_code(),
+        0x1003
+    );
     assert_eq!(CbgrViolationKind::EpochExpired.ffi_error_code(), 0x1004);
     assert_eq!(CbgrViolationKind::CapabilityDenied.ffi_error_code(), 0x1005);
     assert_eq!(CbgrViolationKind::InvalidReference.ffi_error_code(), 0x1006);
@@ -148,10 +151,19 @@ fn test_violation_kind_description() {
 fn test_violation_kind_name() {
     assert_eq!(CbgrViolationKind::UseAfterFree.name(), "UseAfterFree");
     assert_eq!(CbgrViolationKind::DoubleFree.name(), "DoubleFree");
-    assert_eq!(CbgrViolationKind::GenerationMismatch.name(), "GenerationMismatch");
+    assert_eq!(
+        CbgrViolationKind::GenerationMismatch.name(),
+        "GenerationMismatch"
+    );
     assert_eq!(CbgrViolationKind::EpochExpired.name(), "EpochExpired");
-    assert_eq!(CbgrViolationKind::CapabilityDenied.name(), "CapabilityDenied");
-    assert_eq!(CbgrViolationKind::InvalidReference.name(), "InvalidReference");
+    assert_eq!(
+        CbgrViolationKind::CapabilityDenied.name(),
+        "CapabilityDenied"
+    );
+    assert_eq!(
+        CbgrViolationKind::InvalidReference.name(),
+        "InvalidReference"
+    );
     assert_eq!(CbgrViolationKind::NullPointer.name(), "NullPointer");
     assert_eq!(CbgrViolationKind::OutOfBounds.name(), "OutOfBounds");
 }
@@ -210,8 +222,8 @@ fn test_violation_new() {
 
 #[test]
 fn test_violation_with_generation() {
-    let violation = CbgrViolation::new(CbgrViolationKind::GenerationMismatch, 0x1000)
-        .with_generation(42, 100);
+    let violation =
+        CbgrViolation::new(CbgrViolationKind::GenerationMismatch, 0x1000).with_generation(42, 100);
 
     assert_eq!(violation.expected_generation, Some(42));
     assert_eq!(violation.actual_generation, Some(100));
@@ -230,7 +242,10 @@ fn test_violation_with_type_name() {
     let violation =
         CbgrViolation::new(CbgrViolationKind::UseAfterFree, 0x3000).with_type_name("MyStruct");
 
-    assert_eq!(violation.type_name.as_ref().map(|s| s.as_str()), Some("MyStruct"));
+    assert_eq!(
+        violation.type_name.as_ref().map(|s| s.as_str()),
+        Some("MyStruct")
+    );
 }
 
 #[test]
@@ -246,7 +261,10 @@ fn test_violation_builder_chaining() {
     assert_eq!(violation.actual_generation, Some(100));
     assert_eq!(violation.expected_epoch, Some(1));
     assert_eq!(violation.actual_epoch, Some(2));
-    assert_eq!(violation.type_name.as_ref().map(|s| s.as_str()), Some("TestType"));
+    assert_eq!(
+        violation.type_name.as_ref().map(|s| s.as_str()),
+        Some("TestType")
+    );
 }
 
 #[test]
@@ -311,8 +329,8 @@ fn test_violation_equality() {
 
 #[test]
 fn test_violation_clone() {
-    let original = CbgrViolation::new(CbgrViolationKind::OutOfBounds, 0x3000)
-        .with_type_name("Vec<u8>");
+    let original =
+        CbgrViolation::new(CbgrViolationKind::OutOfBounds, 0x3000).with_type_name("Vec<u8>");
 
     let cloned = original.clone();
 
@@ -338,17 +356,29 @@ fn test_cbgr_specific_constructors() {
     // Note: use_after_free requires matching epochs to trigger the "use-after-free" message
     let err = VerumError::use_after_free(42, 100, 1, 1, "TestType", 0);
     assert_eq!(err.kind(), ErrorKind::Cbgr);
-    assert!(err.message().as_str().contains("use-after-free"), "Expected 'use-after-free' in: {}", err.message());
+    assert!(
+        err.message().as_str().contains("use-after-free"),
+        "Expected 'use-after-free' in: {}",
+        err.message()
+    );
 
     // Test null pointer case (gen == gen_unallocated)
     let err = VerumError::use_after_free(0, 100, 1, 1, "NullTest", 0);
     assert_eq!(err.kind(), ErrorKind::Cbgr);
-    assert!(err.message().as_str().contains("null pointer"), "Expected 'null pointer' in: {}", err.message());
+    assert!(
+        err.message().as_str().contains("null pointer"),
+        "Expected 'null pointer' in: {}",
+        err.message()
+    );
 
     // Test epoch mismatch case (epoch1 != epoch2)
     let err = VerumError::use_after_free(42, 100, 1, 2, "EpochTest", 0);
     assert_eq!(err.kind(), ErrorKind::Cbgr);
-    assert!(err.message().as_str().contains("epoch mismatch"), "Expected 'epoch mismatch' in: {}", err.message());
+    assert!(
+        err.message().as_str().contains("epoch mismatch"),
+        "Expected 'epoch mismatch' in: {}",
+        err.message()
+    );
 
     let err = VerumError::generation_mismatch(10, 20, "Node");
     assert_eq!(err.kind(), ErrorKind::Cbgr);

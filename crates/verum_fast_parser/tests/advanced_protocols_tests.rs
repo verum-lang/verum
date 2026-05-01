@@ -31,8 +31,8 @@ use verum_ast::{
     decl::{ImplKind, ProtocolItemKind},
     ty::TypeBoundKind,
 };
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse_module(source: &str) -> verum_ast::Module {
     let file_id = FileId::new(0);
@@ -123,21 +123,22 @@ fn test_gat_with_where_clause() {
     assert_eq!(module.items.len(), 1);
 
     if let verum_ast::ItemKind::Type(type_decl) = &module.items[0].kind
-        && let verum_ast::TypeDeclBody::Protocol(protocol_body) = &type_decl.body {
-            if let ProtocolItemKind::Type {
-                name,
-                type_params,
-                where_clause,
-                ..
-            } = &protocol_body.items[0].kind
-            {
-                assert_eq!(name.name.as_str(), "Item");
-                assert_eq!(type_params.len(), 1);
-                assert!(where_clause.is_some());
-            } else {
-                panic!("Expected Type protocol item");
-            }
+        && let verum_ast::TypeDeclBody::Protocol(protocol_body) = &type_decl.body
+    {
+        if let ProtocolItemKind::Type {
+            name,
+            type_params,
+            where_clause,
+            ..
+        } = &protocol_body.items[0].kind
+        {
+            assert_eq!(name.name.as_str(), "Item");
+            assert_eq!(type_params.len(), 1);
+            assert!(where_clause.is_some());
+        } else {
+            panic!("Expected Type protocol item");
         }
+    }
 }
 
 #[test]
@@ -192,21 +193,22 @@ fn test_genref_type_parsing() {
     assert_eq!(module.items.len(), 1);
 
     if let verum_ast::ItemKind::Type(type_decl) = &module.items[0].kind
-        && let verum_ast::TypeDeclBody::Record(fields) = &type_decl.body {
-            // Check first field is GenRef
-            assert_eq!(fields[0].name.name.as_str(), "data");
+        && let verum_ast::TypeDeclBody::Record(fields) = &type_decl.body
+    {
+        // Check first field is GenRef
+        assert_eq!(fields[0].name.name.as_str(), "data");
 
-            if let TypeKind::GenRef { inner } = &fields[0].ty.kind {
-                // Inner should be List<T>
-                if let TypeKind::Generic { .. } = &inner.kind {
-                    // Success - we have GenRef<List<T>>
-                } else {
-                    panic!("Expected Generic type inside GenRef");
-                }
+        if let TypeKind::GenRef { inner } = &fields[0].ty.kind {
+            // Inner should be List<T>
+            if let TypeKind::Generic { .. } = &inner.kind {
+                // Success - we have GenRef<List<T>>
             } else {
-                panic!("Expected GenRef type for data field");
+                panic!("Expected Generic type inside GenRef");
             }
+        } else {
+            panic!("Expected GenRef type for data field");
         }
+    }
 }
 
 #[test]
@@ -223,16 +225,18 @@ fn test_genref_in_protocol_return_type() {
     assert_eq!(module.items.len(), 1);
 
     if let verum_ast::ItemKind::Type(type_decl) = &module.items[0].kind
-        && let verum_ast::TypeDeclBody::Protocol(protocol_body) = &type_decl.body {
-            // Check method return type contains GenRef
-            if let ProtocolItemKind::Function { decl, .. } = &protocol_body.items[1].kind
-                && let Some(ret_ty) = &decl.return_type {
-                    // Should have Maybe<GenRef<...>>
-                    if let TypeKind::Generic { base, .. } = &ret_ty.kind {
-                        // Success
-                    }
-                }
+        && let verum_ast::TypeDeclBody::Protocol(protocol_body) = &type_decl.body
+    {
+        // Check method return type contains GenRef
+        if let ProtocolItemKind::Function { decl, .. } = &protocol_body.items[1].kind
+            && let Some(ret_ty) = &decl.return_type
+        {
+            // Should have Maybe<GenRef<...>>
+            if let TypeKind::Generic { base, .. } = &ret_ty.kind {
+                // Success
+            }
         }
+    }
 }
 
 // ==================== Higher-Kinded Types Tests ====================
@@ -251,16 +255,17 @@ fn test_higher_kinded_type_placeholder() {
     assert_eq!(module.items.len(), 1);
 
     if let verum_ast::ItemKind::Type(type_decl) = &module.items[0].kind
-        && let verum_ast::TypeDeclBody::Protocol(protocol_body) = &type_decl.body {
-            // Check F<_> type constructor
-            if let ProtocolItemKind::Type {
-                name, type_params, ..
-            } = &protocol_body.items[0].kind
-            {
-                assert_eq!(name.name.as_str(), "F");
-                assert_eq!(type_params.len(), 1); // One placeholder
-            }
+        && let verum_ast::TypeDeclBody::Protocol(protocol_body) = &type_decl.body
+    {
+        // Check F<_> type constructor
+        if let ProtocolItemKind::Type {
+            name, type_params, ..
+        } = &protocol_body.items[0].kind
+        {
+            assert_eq!(name.name.as_str(), "F");
+            assert_eq!(type_params.len(), 1); // One placeholder
         }
+    }
 }
 
 #[test]
@@ -378,18 +383,19 @@ fn test_negative_bound_parsing() {
     assert_eq!(module.items.len(), 1);
 
     if let verum_ast::ItemKind::Impl(impl_decl) = &module.items[0].kind
-        && let Some(where_clause) = &impl_decl.generic_where_clause {
-            // Check for negative bound
-            for predicate in where_clause.predicates.iter() {
-                if let verum_ast::WherePredicateKind::Type { bounds, .. } = &predicate.kind {
-                    // Should have both Send and !Sync
-                    let has_negative = bounds
-                        .iter()
-                        .any(|b| matches!(b.kind, TypeBoundKind::NegativeProtocol(_)));
-                    assert!(has_negative, "Should have negative bound");
-                }
+        && let Some(where_clause) = &impl_decl.generic_where_clause
+    {
+        // Check for negative bound
+        for predicate in where_clause.predicates.iter() {
+            if let verum_ast::WherePredicateKind::Type { bounds, .. } = &predicate.kind {
+                // Should have both Send and !Sync
+                let has_negative = bounds
+                    .iter()
+                    .any(|b| matches!(b.kind, TypeBoundKind::NegativeProtocol(_)));
+                assert!(has_negative, "Should have negative bound");
             }
         }
+    }
 }
 
 #[test]
@@ -404,20 +410,21 @@ fn test_multiple_negative_bounds() {
     assert_eq!(module.items.len(), 1);
 
     if let verum_ast::ItemKind::Function(func_decl) = &module.items[0].kind
-        && let Some(where_clause) = &func_decl.generic_where_clause {
-            for predicate in where_clause.predicates.iter() {
-                if let verum_ast::WherePredicateKind::Type { bounds, .. } = &predicate.kind {
-                    let negative_count = bounds
-                        .iter()
-                        .filter(|b| matches!(b.kind, TypeBoundKind::NegativeProtocol(_)))
-                        .count();
-                    assert_eq!(
-                        negative_count, 2,
-                        "Should have 2 negative bounds (!Copy, !Send)"
-                    );
-                }
+        && let Some(where_clause) = &func_decl.generic_where_clause
+    {
+        for predicate in where_clause.predicates.iter() {
+            if let verum_ast::WherePredicateKind::Type { bounds, .. } = &predicate.kind {
+                let negative_count = bounds
+                    .iter()
+                    .filter(|b| matches!(b.kind, TypeBoundKind::NegativeProtocol(_)))
+                    .count();
+                assert_eq!(
+                    negative_count, 2,
+                    "Should have 2 negative bounds (!Copy, !Send)"
+                );
             }
         }
+    }
 }
 
 // ==================== Refinement in Protocol Methods ====================
@@ -435,14 +442,15 @@ fn test_protocol_method_with_inline_refinement() {
     assert_eq!(module.items.len(), 1);
 
     if let verum_ast::ItemKind::Type(type_decl) = &module.items[0].kind
-        && let verum_ast::TypeDeclBody::Protocol(protocol_body) = &type_decl.body {
-            assert_eq!(protocol_body.items.len(), 2);
+        && let verum_ast::TypeDeclBody::Protocol(protocol_body) = &type_decl.body
+    {
+        assert_eq!(protocol_body.items.len(), 2);
 
-            // Check divide has refinement on y parameter
-            if let ProtocolItemKind::Function { decl, .. } = &protocol_body.items[0].kind {
-                assert_eq!(decl.params.len(), 3); // self, x, y
-            }
+        // Check divide has refinement on y parameter
+        if let ProtocolItemKind::Function { decl, .. } = &protocol_body.items[0].kind {
+            assert_eq!(decl.params.len(), 3); // self, x, y
         }
+    }
 }
 
 #[test]
@@ -457,12 +465,13 @@ fn test_protocol_method_with_sigma_refinement() {
     assert_eq!(module.items.len(), 1);
 
     if let verum_ast::ItemKind::Type(type_decl) = &module.items[0].kind
-        && let verum_ast::TypeDeclBody::Protocol(protocol_body) = &type_decl.body {
-            // Method should parse successfully with sigma-type refinement
-            if let ProtocolItemKind::Function { decl, .. } = &protocol_body.items[0].kind {
-                assert_eq!(decl.name.name.as_str(), "get_bounded");
-            }
+        && let verum_ast::TypeDeclBody::Protocol(protocol_body) = &type_decl.body
+    {
+        // Method should parse successfully with sigma-type refinement
+        if let ProtocolItemKind::Function { decl, .. } = &protocol_body.items[0].kind {
+            assert_eq!(decl.name.name.as_str(), "get_bounded");
         }
+    }
 }
 
 // ==================== Complex Integration Tests ====================
@@ -504,9 +513,10 @@ fn test_lending_iterator_full_protocol() {
 
     // Check implementation
     if let verum_ast::ItemKind::Impl(impl_decl) = &module.items[1].kind
-        && let ImplKind::Protocol { protocol, .. } = &impl_decl.kind {
-            assert_eq!(protocol.segments.len(), 1);
-        }
+        && let ImplKind::Protocol { protocol, .. } = &impl_decl.kind
+    {
+        assert_eq!(protocol.segments.len(), 1);
+    }
 }
 
 #[test]
@@ -623,18 +633,20 @@ fn test_hkt_protocol_args_preserved() {
             );
             if let verum_ast::ty::GenericArg::Type(ty) = &protocol_args[0] {
                 if let TypeKind::Path(path) = &ty.kind
-                    && let verum_ast::ty::PathSegment::Name(name) = &path.segments[0] {
-                        assert_eq!(name.name.as_str(), "List", "Protocol arg should be List");
-                    }
+                    && let verum_ast::ty::PathSegment::Name(name) = &path.segments[0]
+                {
+                    assert_eq!(name.name.as_str(), "List", "Protocol arg should be List");
+                }
             } else {
                 panic!("Expected Type argument, got {:?}", protocol_args[0]);
             }
 
             // Verify for_type
             if let TypeKind::Path(path) = &for_type.kind
-                && let verum_ast::ty::PathSegment::Name(name) = &path.segments[0] {
-                    assert_eq!(name.name.as_str(), "ListFunctor");
-                }
+                && let verum_ast::ty::PathSegment::Name(name) = &path.segments[0]
+            {
+                assert_eq!(name.name.as_str(), "ListFunctor");
+            }
         } else {
             panic!("Expected Protocol impl kind");
         }

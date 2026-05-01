@@ -79,8 +79,7 @@ impl FieldInfo {
     /// True iff the field's declared type is `Bool`.
     pub fn is_bool(&self) -> bool {
         match &self.ty.kind {
-            verum_ast::ty::TypeKind::Path(path) =>
-                path.last_segment_name() == "Bool",
+            verum_ast::ty::TypeKind::Path(path) => path.last_segment_name() == "Bool",
             _ => false,
         }
     }
@@ -88,8 +87,7 @@ impl FieldInfo {
     /// True iff the declared type is `List<...>`.
     pub fn is_list(&self) -> bool {
         match &self.ty.kind {
-            verum_ast::ty::TypeKind::Path(path) =>
-                path.last_segment_name() == "List",
+            verum_ast::ty::TypeKind::Path(path) => path.last_segment_name() == "List",
             _ => false,
         }
     }
@@ -97,8 +95,7 @@ impl FieldInfo {
     /// True iff the declared type is `Maybe<...>`.
     pub fn is_maybe(&self) -> bool {
         match &self.ty.kind {
-            verum_ast::ty::TypeKind::Path(path) =>
-                path.last_segment_name() == "Maybe",
+            verum_ast::ty::TypeKind::Path(path) => path.last_segment_name() == "Maybe",
             _ => false,
         }
     }

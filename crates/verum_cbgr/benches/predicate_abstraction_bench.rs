@@ -97,7 +97,9 @@ fn bench_abstraction_overhead(c: &mut Criterion) {
             PathPredicate::Or(
                 Box::new(PathPredicate::And(
                     Box::new(PathPredicate::BlockTrue(BlockId(1))),
-                    Box::new(PathPredicate::Not(Box::new(PathPredicate::BlockTrue(BlockId(2))))),
+                    Box::new(PathPredicate::Not(Box::new(PathPredicate::BlockTrue(
+                        BlockId(2),
+                    )))),
                 )),
                 Box::new(PathPredicate::And(
                     Box::new(PathPredicate::BlockTrue(BlockId(3))),

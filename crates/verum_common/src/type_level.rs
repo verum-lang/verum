@@ -55,49 +55,31 @@ use crate::{Maybe, Text};
 #[derive(Debug, Clone)]
 pub enum TypeLevelError {
     /// Type error during computation
-    TypeError {
-        expected: Text,
-        actual: Text,
-    },
+    TypeError { expected: Text, actual: Text },
 
     /// Unbound type variable
-    UnboundVariable {
-        name: Text,
-    },
+    UnboundVariable { name: Text },
 
     /// Function application error
-    ApplicationError {
-        message: Text,
-    },
+    ApplicationError { message: Text },
 
     /// Generic computation failure
-    ComputationFailed {
-        message: Text,
-    },
+    ComputationFailed { message: Text },
 
     /// Meta parameter error
-    MetaParameterError {
-        message: Text,
-    },
+    MetaParameterError { message: Text },
 
     /// Pattern match error
-    MatchError {
-        message: Text,
-    },
+    MatchError { message: Text },
 
     /// Universe level error
-    UniverseError {
-        message: Text,
-    },
+    UniverseError { message: Text },
 
     /// Maximum evaluation depth exceeded
     MaxDepthExceeded(usize),
 
     /// Arity mismatch in function application
-    ArityMismatch {
-        expected: usize,
-        got: usize,
-    },
+    ArityMismatch { expected: usize, got: usize },
 
     /// Invalid type function
     InvalidTypeFunction(Text),
@@ -109,19 +91,13 @@ pub enum TypeLevelError {
     NotAType,
 
     /// SMT solver timeout
-    SmtTimeout {
-        timeout_ms: u64,
-    },
+    SmtTimeout { timeout_ms: u64 },
 
     /// SMT solver error
-    SmtError {
-        message: Text,
-    },
+    SmtError { message: Text },
 
     /// Backend not supported
-    UnsupportedOperation {
-        operation: Text,
-    },
+    UnsupportedOperation { operation: Text },
 
     /// Generic other error
     Other(Text),
@@ -155,7 +131,11 @@ impl fmt::Display for TypeLevelError {
                 write!(f, "maximum evaluation depth exceeded: {}", depth)
             }
             Self::ArityMismatch { expected, got } => {
-                write!(f, "arity mismatch: expected {} arguments, got {}", expected, got)
+                write!(
+                    f,
+                    "arity mismatch: expected {} arguments, got {}",
+                    expected, got
+                )
             }
             Self::InvalidTypeFunction(name) => {
                 write!(f, "invalid type function: {}", name)
@@ -288,9 +268,7 @@ pub enum VerificationResult {
         counterexample: Maybe<Text>,
     },
     /// Constraint validity is unknown (timeout or undecidable)
-    Unknown {
-        reason: Text,
-    },
+    Unknown { reason: Text },
     /// Constraint is satisfiable (can be true)
     Satisfiable {
         /// Witness/model if available
@@ -506,8 +484,18 @@ mod tests {
     #[test]
     fn test_verification_result() {
         assert!(VerificationResult::Valid.is_success());
-        assert!(VerificationResult::Invalid { counterexample: None }.is_failure());
-        assert!(!VerificationResult::Unknown { reason: "timeout".into() }.is_definitive());
+        assert!(
+            VerificationResult::Invalid {
+                counterexample: None
+            }
+            .is_failure()
+        );
+        assert!(
+            !VerificationResult::Unknown {
+                reason: "timeout".into()
+            }
+            .is_definitive()
+        );
     }
 
     #[test]

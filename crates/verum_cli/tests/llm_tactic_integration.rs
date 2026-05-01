@@ -90,10 +90,7 @@ fn propose_garbage_step_kernel_rejects() {
         "--hint",
         "xyz_garbage_step",
     ]);
-    assert!(
-        !out.status.success(),
-        "kernel must reject garbage proposal"
-    );
+    assert!(!out.status.success(), "kernel must reject garbage proposal");
 }
 
 #[test]
@@ -249,10 +246,7 @@ fn audit_trail_records_kernel_rejected_events() {
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     assert_eq!(parsed["count"], 2);
     let events = parsed["events"].as_array().unwrap();
-    let kinds: Vec<&str> = events
-        .iter()
-        .map(|e| e["kind"].as_str().unwrap())
-        .collect();
+    let kinds: Vec<&str> = events.iter().map(|e| e["kind"].as_str().unwrap()).collect();
     assert!(kinds.contains(&"LlmInvoked"));
     assert!(kinds.contains(&"KernelRejected"));
 }
@@ -286,27 +280,13 @@ fn models_json_well_formed() {
 
 #[test]
 fn propose_rejects_empty_theorem() {
-    let out = run(&[
-        "llm-tactic",
-        "propose",
-        "--theorem",
-        "",
-        "--goal",
-        "True",
-    ]);
+    let out = run(&["llm-tactic", "propose", "--theorem", "", "--goal", "True"]);
     assert!(!out.status.success());
 }
 
 #[test]
 fn propose_rejects_empty_goal() {
-    let out = run(&[
-        "llm-tactic",
-        "propose",
-        "--theorem",
-        "thm",
-        "--goal",
-        "",
-    ]);
+    let out = run(&["llm-tactic", "propose", "--theorem", "thm", "--goal", ""]);
     assert!(!out.status.success());
 }
 

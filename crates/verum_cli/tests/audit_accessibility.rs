@@ -121,8 +121,7 @@ public fn main() {}
         combined,
     );
     assert!(
-        combined.contains("Axi-4")
-            || combined.contains("accessibility-certificate gap"),
+        combined.contains("Axi-4") || combined.contains("accessibility-certificate gap"),
         "diagnostic explains the Axi-4 gap: {}",
         combined,
     );
@@ -169,10 +168,7 @@ public axiom b() -> Bool;
 public fn main() {}
 "#,
     );
-    let out = run_verum(
-        &["audit", "--accessibility", "--format", "json"],
-        &dir,
-    );
+    let out = run_verum(&["audit", "--accessibility", "--format", "json"], &dir);
     assert!(!out.status.success(), "missing on `b` → non-zero");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("\"schema_version\": 1"));

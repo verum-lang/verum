@@ -1,20 +1,22 @@
 //! Memory allocation and collection instruction handlers for VBC interpreter.
 
-use crate::types::TypeId;
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
-use super::super::super::state::InterpreterState;
 use super::super::super::heap;
+use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
-use super::cbgr_helpers::{is_cbgr_ref, decode_cbgr_ref};
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+use crate::types::TypeId;
+use crate::value::Value;
 
 // ============================================================================
 // Memory + Collection Operations
 // ============================================================================
 
 /// New (0x60) - Allocate object with given type
-pub(in super::super) fn handle_new(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let type_id_val = read_varint(state)? as u32;
     let type_id = TypeId(type_id_val);
@@ -31,7 +33,9 @@ pub(in super::super) fn handle_new(state: &mut InterpreterState) -> InterpreterR
 
 /// NewArray (0x61 in table, but actually 0x67 in instruction.rs)
 /// Encoding: dst, elem, len - allocate array: dst = [elem; len]
-pub(in super::super) fn handle_new_array(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new_array(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let elem = read_reg(state)?;
     let len_reg = read_reg(state)?;
@@ -48,7 +52,10 @@ pub(in super::super) fn handle_new_array(state: &mut InterpreterState) -> Interp
     const MAX_ARRAY_LENGTH: usize = 1 << 30;
     if length > MAX_ARRAY_LENGTH {
         return Err(InterpreterError::Panic {
-            message: format!("array length {} exceeds maximum {}", length, MAX_ARRAY_LENGTH),
+            message: format!(
+                "array length {} exceeds maximum {}",
+                length, MAX_ARRAY_LENGTH
+            ),
         });
     }
     let init_val = state.get_reg(elem);
@@ -61,9 +68,7 @@ pub(in super::super) fn handle_new_array(state: &mut InterpreterState) -> Interp
     // `length` Value slots of storage. Skipping OBJECT_HEADER_SIZE lands on
     // the first Value slot of the allocation; the slice runs for `length`
     // 8-byte Value entries.
-    let data_ptr = unsafe {
-        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     for i in 0..length {
         // SAFETY: `i < length` and the allocation has `length` Value slots
         // reachable from `data_ptr`, so the write is in bounds and aligned.
@@ -75,7 +80,9 @@ pub(in super::super) fn handle_new_array(state: &mut InterpreterState) -> Interp
 }
 
 /// GetF (0x62) - Get field: dst = obj.field
-pub(in super::super) fn handle_get_field(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_get_field(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let obj = read_reg(state)?;
     let field_idx = read_varint(state)? as usize;
@@ -115,9 +122,8 @@ pub(in super::super) fn handle_get_field(state: &mut InterpreterState) -> Interp
                     // data storage after the header. Adding
                     // OBJECT_HEADER_SIZE yields a pointer to the initialized
                     // byte buffer.
-                    let data_ptr = unsafe {
-                        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE)
-                    };
+                    let data_ptr =
+                        unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) };
                     state.set_reg(dst, Value::from_ptr(data_ptr));
                 }
             }
@@ -153,9 +159,12 @@ pub(in super::super) fn handle_get_field(state: &mut InterpreterState) -> Interp
         // AllocationHeader is 32 bytes: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
         // Validate field_byte_offset to prevent out-of-bounds read on malicious bytecode.
         const CBGR_ALLOC_HEADER_SIZE: usize = 32;
-        let field_byte_offset = field_idx.checked_mul(4).ok_or_else(|| {
-            InterpreterError::Panic { message: "field index overflow in CBGR header access".into() }
-        })?;
+        let field_byte_offset =
+            field_idx
+                .checked_mul(4)
+                .ok_or_else(|| InterpreterError::Panic {
+                    message: "field index overflow in CBGR header access".into(),
+                })?;
         if field_byte_offset + 4 > CBGR_ALLOC_HEADER_SIZE {
             return Err(InterpreterError::Panic {
                 message: format!(
@@ -243,9 +252,7 @@ pub(in super::super) fn handle_get_field(state: &mut InterpreterState) -> Interp
         // SAFETY: Variant objects are laid out as [ObjectHeader, tag:u64,
         // payload...]; payload[0] sits at `OBJECT_HEADER_SIZE + 8` and is
         // initialized at construction. Alignment is satisfied (8 bytes).
-        let inner_value = unsafe {
-            *(ptr.add(payload_offset) as *const Value)
-        };
+        let inner_value = unsafe { *(ptr.add(payload_offset) as *const Value) };
         // The inner value should be a pointer to the actual record object
         if inner_value.is_ptr() && !inner_value.is_nil() {
             ptr = inner_value.as_ptr::<u8>();
@@ -256,14 +263,16 @@ pub(in super::super) fn handle_get_field(state: &mut InterpreterState) -> Interp
     }
 
     // Read field at offset — with bounds check against object data size.
-    let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
+    let field_offset = field_idx
+        .checked_mul(std::mem::size_of::<Value>())
         .ok_or_else(|| InterpreterError::Panic {
             message: "field offset overflow".into(),
         })?;
     // Bounds check: verify field_offset + sizeof(Value) fits within the
     // object's data area (header.size bytes). This prevents reading
     // uninitialized memory or out-of-bounds heap data.
-    let field_end = field_offset.checked_add(std::mem::size_of::<Value>())
+    let field_end = field_offset
+        .checked_add(std::mem::size_of::<Value>())
         .ok_or_else(|| InterpreterError::Panic {
             message: "field end offset overflow".into(),
         })?;
@@ -271,23 +280,27 @@ pub(in super::super) fn handle_get_field(state: &mut InterpreterState) -> Interp
         return Err(InterpreterError::Panic {
             message: format!(
                 "field access out of bounds: field index {} (offset {}+{} = {}) exceeds object data size {}",
-                field_idx, field_offset, std::mem::size_of::<Value>(), field_end, header.size
+                field_idx,
+                field_offset,
+                std::mem::size_of::<Value>(),
+                field_end,
+                header.size
             ),
         });
     }
     // SAFETY: `field_offset` is bounds-checked against `header.size` above.
     // `ptr` is a live, aligned heap object. The data area at
     // `OBJECT_HEADER_SIZE + field_offset` contains an initialized Value.
-    let data_ptr = unsafe {
-        ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) as *const Value
-    };
+    let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) as *const Value };
     let value = unsafe { *data_ptr };
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)
 }
 
 /// SetF (0x63) - Set field: obj.field = val
-pub(in super::super) fn handle_set_field(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_set_field(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let obj = read_reg(state)?;
     let field_idx = read_varint(state)? as usize;
     let val = read_reg(state)?;
@@ -347,9 +360,7 @@ pub(in super::super) fn handle_set_field(state: &mut InterpreterState) -> Interp
     if header.type_id.0 >= 0x8000 {
         let payload_offset = heap::OBJECT_HEADER_SIZE + 8;
         // SAFETY: See handle_get_field — variant payload layout applies.
-        let inner_value = unsafe {
-            *(ptr.add(payload_offset) as *const Value)
-        };
+        let inner_value = unsafe { *(ptr.add(payload_offset) as *const Value) };
         if inner_value.is_ptr() && !inner_value.is_nil() {
             ptr = inner_value.as_ptr::<u8>();
             if ptr.is_null() {
@@ -359,13 +370,15 @@ pub(in super::super) fn handle_set_field(state: &mut InterpreterState) -> Interp
     }
 
     let value = state.get_reg(val);
-    let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
+    let field_offset = field_idx
+        .checked_mul(std::mem::size_of::<Value>())
         .ok_or_else(|| InterpreterError::Panic {
             message: "field offset overflow".into(),
         })?;
     // Bounds check: verify field fits within the object's data area.
     // This prevents writing to arbitrary memory locations via malformed bytecode.
-    let field_end = field_offset.checked_add(std::mem::size_of::<Value>())
+    let field_end = field_offset
+        .checked_add(std::mem::size_of::<Value>())
         .ok_or_else(|| InterpreterError::Panic {
             message: "field end offset overflow".into(),
         })?;
@@ -373,21 +386,25 @@ pub(in super::super) fn handle_set_field(state: &mut InterpreterState) -> Interp
         return Err(InterpreterError::Panic {
             message: format!(
                 "field write out of bounds: field index {} (offset {}+{} = {}) exceeds object data size {}",
-                field_idx, field_offset, std::mem::size_of::<Value>(), field_end, header.size
+                field_idx,
+                field_offset,
+                std::mem::size_of::<Value>(),
+                field_end,
+                header.size
             ),
         });
     }
     // SAFETY: `field_offset` is bounds-checked against `header.size` above.
     // `ptr` is a live, aligned, mutable heap object.
-    let data_ptr = unsafe {
-        ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) as *mut Value
-    };
+    let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) as *mut Value };
     unsafe { *data_ptr = value };
     Ok(DispatchResult::Continue)
 }
 
 /// GetE (0x64) - Get element: dst = arr[idx]
-pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_get_index(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let arr = read_reg(state)?;
     let idx = read_reg(state)?;
@@ -404,7 +421,10 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
         // Bounds check
         if idx_val >= len {
             return Err(InterpreterError::Panic {
-                message: format!("Slice index out of bounds: index {} but length is {}", idx_val, len),
+                message: format!(
+                    "Slice index out of bounds: index {} but length is {}",
+                    idx_val, len
+                ),
             });
         }
 
@@ -480,7 +500,7 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
     // CBGR ref (encoded negative i64 with register index + generation).
     // We transparently read through the reference to get the underlying
     // collection value so indexing works correctly.
-    use super::super::handlers::cbgr_helpers::{is_cbgr_ref, decode_cbgr_ref};
+    use super::super::handlers::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
     let arr_val = if is_cbgr_ref(&arr_val) {
         let (abs_index, _gen) = decode_cbgr_ref(arr_val.as_i64());
         state.registers.get_absolute(abs_index)
@@ -501,7 +521,13 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
             state.set_reg(dst, arr_val);
             return Ok(DispatchResult::Continue);
         }
-        return Err(InterpreterError::InvalidOperand { message: format!("GetE: expected pointer in R{}, got tag={:?}", arr.0, arr_val.tag()) });
+        return Err(InterpreterError::InvalidOperand {
+            message: format!(
+                "GetE: expected pointer in R{}, got tag={:?}",
+                arr.0,
+                arr_val.tag()
+            ),
+        });
     }
     let ptr = arr_val.as_ptr::<u8>();
     if ptr.is_null() {
@@ -517,14 +543,10 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
     if header.type_id == TypeId::MAP {
         // Map index read: map[key] → delegate to map lookup
         let key = state.get_reg(idx);
-        let header_ptr = unsafe {
-            ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
         let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-        let entries_data = unsafe {
-            entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         let hash = value_hash(key);
         let mut map_idx = hash % capacity;
         let start_idx = map_idx;
@@ -559,9 +581,8 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
         if is_range {
             // Range indexing: arr[start..end] → create a new array with slice elements
             let idx_ptr = idx_val.as_ptr::<u8>();
-            let range_data = unsafe {
-                (idx_ptr as *const u8).add(heap::OBJECT_HEADER_SIZE) as *const Value
-            };
+            let range_data =
+                unsafe { (idx_ptr as *const u8).add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let start_val = unsafe { *range_data };
             let end_val = unsafe { *range_data.add(1) };
             let inclusive_val = unsafe { *range_data.add(2) };
@@ -574,9 +595,7 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
 
             // Determine element count of the source array
             let element_count = if header.type_id == TypeId::LIST {
-                let data_ptr = unsafe {
-                    ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                };
+                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 (unsafe { (*data_ptr).as_i64() }) as usize
             } else if header.type_id == TypeId::U8 {
                 header_size
@@ -587,7 +606,10 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
             // Bounds check
             if start > element_count || end > element_count || start > end {
                 return Err(InterpreterError::Panic {
-                    message: format!("Index out of bounds: slice [{}..{}] exceeds length {}", start, end, element_count),
+                    message: format!(
+                        "Index out of bounds: slice [{}..{}] exceeds length {}",
+                        start, end, element_count
+                    ),
                 });
             }
 
@@ -597,15 +619,14 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
                 let new_obj = state.heap.alloc(TypeId::U8, slice_len)?;
                 state.record_allocation();
                 let src = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + start) };
-                let dst_data = unsafe {
-                    (new_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE)
-                };
-                unsafe { std::ptr::copy_nonoverlapping(src, dst_data, slice_len); }
+                let dst_data =
+                    unsafe { (new_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) };
+                unsafe {
+                    std::ptr::copy_nonoverlapping(src, dst_data, slice_len);
+                }
                 state.set_reg(dst, Value::from_ptr(new_obj.as_ptr() as *mut u8));
             } else if header.type_id == TypeId::LIST {
-                let data_ptr = unsafe {
-                    ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                };
+                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
                 let new_obj = state.heap.alloc_array(TypeId::UNIT, slice_len)?;
                 state.record_allocation();
@@ -614,144 +635,150 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
                 };
                 for i in 0..slice_len {
                     let elem = unsafe {
-                        *((backing as *const u8).add(heap::OBJECT_HEADER_SIZE + (start + i) * std::mem::size_of::<Value>()) as *const Value)
+                        *((backing as *const u8).add(
+                            heap::OBJECT_HEADER_SIZE + (start + i) * std::mem::size_of::<Value>(),
+                        ) as *const Value)
                     };
-                    unsafe { *dst_data.add(i) = elem; }
+                    unsafe {
+                        *dst_data.add(i) = elem;
+                    }
                 }
                 state.set_reg(dst, Value::from_ptr(new_obj.as_ptr() as *mut u8));
             } else {
                 let new_obj = state.heap.alloc_array(TypeId::UNIT, slice_len)?;
                 state.record_allocation();
-                let src_data = unsafe {
-                    ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                };
+                let src_data = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let dst_data = unsafe {
                     (new_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
                 };
                 for i in 0..slice_len {
-                    unsafe { *dst_data.add(i) = *src_data.add(start + i); }
+                    unsafe {
+                        *dst_data.add(i) = *src_data.add(start + i);
+                    }
                 }
                 state.set_reg(dst, Value::from_ptr(new_obj.as_ptr() as *mut u8));
             }
         } else {
-        // Non-range: index must be an integer
-        let index = idx_val.as_i64();
+            // Non-range: index must be an integer
+            let index = idx_val.as_i64();
 
-        if header.type_id == TypeId::U8 {
-            // Byte array - elements are raw bytes, 1 byte each
-            let element_count = header_size;
+            if header.type_id == TypeId::U8 {
+                // Byte array - elements are raw bytes, 1 byte each
+                let element_count = header_size;
 
-            if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds {
-                    index,
-                    length: element_count,
-                });
+                if index < 0 || index as usize >= element_count {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index,
+                        length: element_count,
+                    });
+                }
+
+                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + index as usize) };
+                let byte_value = unsafe { *data_ptr };
+                state.set_reg(dst, Value::from_i64(byte_value as i64));
+            } else if header.type_id == TypeId::U16 {
+                // 16-bit typed array
+                let element_count = header_size / 2;
+                if index < 0 || index as usize >= element_count {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index,
+                        length: element_count,
+                    });
+                }
+                let data_ptr = unsafe {
+                    ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 2) as *const u16
+                };
+                state.set_reg(dst, Value::from_i64(unsafe { *data_ptr } as i64));
+            } else if header.type_id == TypeId::U32 {
+                // 32-bit typed array (UInt32 / Int32 / Float32 storage).
+                //
+
+                // Root fix for Issue #2 (third code path, after the FatRef
+                // branch above and `DerefRaw` in `ffi_extended.rs`): read as
+                // `*const u32` and zero-extend into the i64 NaN-box slot. The
+                // prior `i32 as i64` cast sign-extended any element whose
+                // bit 31 was set, which propagated 0xFFFFFFFF into the upper
+                // half of subsequent shift/XOR results — the canonical
+                // symptom being a `[UInt32; 256]` CRC32 table lookup
+                // returning a "negative" i64 representation of the same bits.
+                //
+
+                // Callers needing signed-32 semantics can truncate at the use
+                // site (`as i32`); zero-extension is the invariant-preserving
+                // default for unsigned raw storage, matching the policy used
+                // in `handle_get_index`'s FatRef branch and `DerefRaw`.
+                let element_count = header_size / 4;
+                if index < 0 || index as usize >= element_count {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index,
+                        length: element_count,
+                    });
+                }
+                let data_ptr = unsafe {
+                    ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *const u32
+                };
+                state.set_reg(dst, Value::from_i64(unsafe { *data_ptr } as i64));
+            } else if header.type_id == TypeId::U64 {
+                // 64-bit typed array (Int64, UInt64, Float64)
+                let element_count = header_size / 8;
+                if index < 0 || index as usize >= element_count {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index,
+                        length: element_count,
+                    });
+                }
+                let data_ptr = unsafe {
+                    ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *const i64
+                };
+                state.set_reg(dst, Value::from_i64(unsafe { *data_ptr }));
+            } else if header.type_id == TypeId::LIST {
+                // List layout: [len: Value, cap: Value, backing_ptr: Value]
+                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                let len = unsafe { (*data_ptr).as_i64() } as usize;
+                let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() }; // backing_ptr is at index 2
+
+                if index < 0 || index as usize >= len {
+                    return Err(InterpreterError::IndexOutOfBounds { index, length: len });
+                }
+
+                let elem_offset = index as usize * std::mem::size_of::<Value>();
+                let data_ptr = unsafe { backing.add(heap::OBJECT_HEADER_SIZE + elem_offset) };
+                let value = unsafe { *(data_ptr as *const Value) };
+                state.set_reg(dst, value);
+            } else {
+                // Array/Tuple - elements are stored directly in the object data
+                let element_count = header_size / std::mem::size_of::<Value>();
+
+                if index < 0 || index as usize >= element_count {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index,
+                        length: element_count,
+                    });
+                }
+
+                let elem_offset = index as usize * std::mem::size_of::<Value>();
+                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + elem_offset) };
+                let value = unsafe { *(data_ptr as *const Value) };
+                state.set_reg(dst, value);
             }
-
-            let data_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE + index as usize)
-            };
-            let byte_value = unsafe { *data_ptr };
-            state.set_reg(dst, Value::from_i64(byte_value as i64));
-        } else if header.type_id == TypeId::U16 {
-            // 16-bit typed array
-            let element_count = header_size / 2;
-            if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds { index, length: element_count });
-            }
-            let data_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 2) as *const u16
-            };
-            state.set_reg(dst, Value::from_i64(unsafe { *data_ptr } as i64));
-        } else if header.type_id == TypeId::U32 {
-            // 32-bit typed array (UInt32 / Int32 / Float32 storage).
-            //
-
-            // Root fix for Issue #2 (third code path, after the FatRef
-            // branch above and `DerefRaw` in `ffi_extended.rs`): read as
-            // `*const u32` and zero-extend into the i64 NaN-box slot. The
-            // prior `i32 as i64` cast sign-extended any element whose
-            // bit 31 was set, which propagated 0xFFFFFFFF into the upper
-            // half of subsequent shift/XOR results — the canonical
-            // symptom being a `[UInt32; 256]` CRC32 table lookup
-            // returning a "negative" i64 representation of the same bits.
-            //
-
-            // Callers needing signed-32 semantics can truncate at the use
-            // site (`as i32`); zero-extension is the invariant-preserving
-            // default for unsigned raw storage, matching the policy used
-            // in `handle_get_index`'s FatRef branch and `DerefRaw`.
-            let element_count = header_size / 4;
-            if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds { index, length: element_count });
-            }
-            let data_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *const u32
-            };
-            state.set_reg(dst, Value::from_i64(unsafe { *data_ptr } as i64));
-        } else if header.type_id == TypeId::U64 {
-            // 64-bit typed array (Int64, UInt64, Float64)
-            let element_count = header_size / 8;
-            if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds { index, length: element_count });
-            }
-            let data_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *const i64
-            };
-            state.set_reg(dst, Value::from_i64(unsafe { *data_ptr }));
-        } else if header.type_id == TypeId::LIST {
-            // List layout: [len: Value, cap: Value, backing_ptr: Value]
-            let data_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-            };
-            let len = unsafe { (*data_ptr).as_i64() } as usize;
-            let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() }; // backing_ptr is at index 2
-
-            if index < 0 || index as usize >= len {
-                return Err(InterpreterError::IndexOutOfBounds {
-                    index,
-                    length: len,
-                });
-            }
-
-            let elem_offset = index as usize * std::mem::size_of::<Value>();
-            let data_ptr = unsafe {
-                backing.add(heap::OBJECT_HEADER_SIZE + elem_offset)
-            };
-            let value = unsafe { *(data_ptr as *const Value) };
-            state.set_reg(dst, value);
-        } else {
-            // Array/Tuple - elements are stored directly in the object data
-            let element_count = header_size / std::mem::size_of::<Value>();
-
-            if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds {
-                    index,
-                    length: element_count,
-                });
-            }
-
-            let elem_offset = index as usize * std::mem::size_of::<Value>();
-            let data_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE + elem_offset)
-            };
-            let value = unsafe { *(data_ptr as *const Value) };
-            state.set_reg(dst, value);
-        }
         } // end non-range
     }
     Ok(DispatchResult::Continue)
 }
 
 /// SetE (0x65) - Set element: arr[idx] = val
-pub(in super::super) fn handle_set_index(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_set_index(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let arr = read_reg(state)?;
     let idx = read_reg(state)?;
     let val = read_reg(state)?;
 
     // Auto-dereference CBGR register-based references, same as GET_E.
     let arr_val = state.get_reg(arr);
-    use super::super::handlers::cbgr_helpers::{is_cbgr_ref as is_cbgr_ref2, decode_cbgr_ref as decode_cbgr_ref2};
+    use super::super::handlers::cbgr_helpers::{
+        decode_cbgr_ref as decode_cbgr_ref2, is_cbgr_ref as is_cbgr_ref2,
+    };
     let arr_val = if is_cbgr_ref2(&arr_val) {
         let (abs_index, _gen) = decode_cbgr_ref2(arr_val.as_i64());
         state.registers.get_absolute(abs_index)
@@ -780,9 +807,7 @@ pub(in super::super) fn handle_set_index(state: &mut InterpreterState) -> Interp
     if header.type_id == TypeId::MAP {
         let key = state.get_reg(idx);
         // Reuse map set logic inline
-        let header_ptr = unsafe {
-            ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-        };
+        let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
         let mut count = unsafe { (*header_ptr).as_i64() } as usize;
         let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
         let mut entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
@@ -793,15 +818,13 @@ pub(in super::super) fn handle_set_index(state: &mut InterpreterState) -> Interp
             let new_entries = state.heap.alloc_array(TypeId::UNIT, new_capacity * 2)?;
             state.record_allocation();
             let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-            let new_data = unsafe {
-                new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let new_data = unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             for i in 0..(new_capacity * 2) {
-                unsafe { *new_data.add(i) = Value::unit(); }
+                unsafe {
+                    *new_data.add(i) = Value::unit();
+                }
             }
-            let old_data = unsafe {
-                entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-            };
+            let old_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             for i in 0..capacity {
                 let old_key = unsafe { *old_data.add(i * 2) };
                 if !old_key.is_unit() {
@@ -829,9 +852,7 @@ pub(in super::super) fn handle_set_index(state: &mut InterpreterState) -> Interp
             }
         }
 
-        let entries_data = unsafe {
-            entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-        };
+        let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
         let hash = value_hash(key);
         let mut map_idx = hash % capacity;
         loop {
@@ -843,12 +864,16 @@ pub(in super::super) fn handle_set_index(state: &mut InterpreterState) -> Interp
                     *entries_data.add(map_idx * 2 + 1) = value;
                 }
                 count += 1;
-                unsafe { *header_ptr = Value::from_i64(count as i64); }
+                unsafe {
+                    *header_ptr = Value::from_i64(count as i64);
+                }
                 break;
             }
             if value_eq(entry_key, key) {
                 // Update existing
-                unsafe { *entries_data.add(map_idx * 2 + 1) = value; }
+                unsafe {
+                    *entries_data.add(map_idx * 2 + 1) = value;
+                }
                 break;
             }
             map_idx = (map_idx + 1) % capacity;
@@ -861,7 +886,10 @@ pub(in super::super) fn handle_set_index(state: &mut InterpreterState) -> Interp
             // Byte array - elements are raw bytes, 1 byte each
             let element_count = header_size;
             if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds { index, length: element_count });
+                return Err(InterpreterError::IndexOutOfBounds {
+                    index,
+                    length: element_count,
+                });
             }
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + index as usize) };
             let byte_value = value.as_i64() as u8;
@@ -869,29 +897,35 @@ pub(in super::super) fn handle_set_index(state: &mut InterpreterState) -> Interp
         } else if header.type_id == TypeId::U16 {
             let element_count = header_size / 2;
             if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds { index, length: element_count });
+                return Err(InterpreterError::IndexOutOfBounds {
+                    index,
+                    length: element_count,
+                });
             }
-            let data_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 2) as *mut u16
-            };
+            let data_ptr =
+                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 2) as *mut u16 };
             unsafe { *data_ptr = value.as_i64() as u16 };
         } else if header.type_id == TypeId::U32 {
             let element_count = header_size / 4;
             if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds { index, length: element_count });
+                return Err(InterpreterError::IndexOutOfBounds {
+                    index,
+                    length: element_count,
+                });
             }
-            let data_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *mut i32
-            };
+            let data_ptr =
+                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *mut i32 };
             unsafe { *data_ptr = value.as_i64() as i32 };
         } else if header.type_id == TypeId::U64 {
             let element_count = header_size / 8;
             if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds { index, length: element_count });
+                return Err(InterpreterError::IndexOutOfBounds {
+                    index,
+                    length: element_count,
+                });
             }
-            let data_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *mut i64
-            };
+            let data_ptr =
+                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *mut i64 };
             unsafe { *data_ptr = value.as_i64() };
         } else if header.type_id == TypeId::LIST {
             // List layout: [len: Value, cap: Value, backing_ptr: Value]
@@ -908,7 +942,10 @@ pub(in super::super) fn handle_set_index(state: &mut InterpreterState) -> Interp
             // Array/Tuple - elements are stored directly
             let element_count = header_size / std::mem::size_of::<Value>();
             if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds { index, length: element_count });
+                return Err(InterpreterError::IndexOutOfBounds {
+                    index,
+                    length: element_count,
+                });
             }
             let elem_offset = index as usize * std::mem::size_of::<Value>();
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + elem_offset) };
@@ -919,7 +956,9 @@ pub(in super::super) fn handle_set_index(state: &mut InterpreterState) -> Interp
 }
 
 /// Len (0x66) - Get array/list length: dst = arr.len()
-pub(in super::super) fn handle_array_len(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_array_len(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let arr = read_reg(state)?;
     // Read and discard type_hint byte (used by LLVM lowering, not interpreter).
@@ -998,7 +1037,9 @@ pub(in super::super) fn handle_array_len(state: &mut InterpreterState) -> Interp
             // Recursively get length from the inner value
             let inner_ptr = inner_val.as_ptr::<u8>();
             let inner_header = unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
-            if inner_header.type_id == crate::types::TypeId::TEXT || inner_header.type_id == crate::types::TypeId(0x0001) {
+            if inner_header.type_id == crate::types::TypeId::TEXT
+                || inner_header.type_id == crate::types::TypeId(0x0001)
+            {
                 // Heap string layout: [ObjectHeader][len: u64][bytes...]
                 let len_ptr = unsafe { inner_ptr.add(heap::OBJECT_HEADER_SIZE) as *const u64 };
                 let len = (unsafe { *len_ptr }) as i64;
@@ -1019,19 +1060,17 @@ pub(in super::super) fn handle_array_len(state: &mut InterpreterState) -> Interp
         header_size / 8
     } else if header.type_id == TypeId::LIST {
         // List layout: [len, cap, backing_ptr] - read len
-        let data_ptr = unsafe {
-            ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         let len = (unsafe { (*data_ptr).as_i64() }) as usize;
         // eprintln!("[DEBUG Len instruction] List ptr={:?}, len={}", ptr, len);
         len
     } else if header.type_id == TypeId::MAP || header.type_id == TypeId::SET {
         // Map/Set layout: [count, capacity, entries_ptr] - read count
-        let data_ptr = unsafe {
-            ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         (unsafe { (*data_ptr).as_i64() }) as usize
-    } else if header.type_id == crate::types::TypeId::TEXT || header.type_id == crate::types::TypeId(0x0001) {
+    } else if header.type_id == crate::types::TypeId::TEXT
+        || header.type_id == crate::types::TypeId(0x0001)
+    {
         // Text objects come in two runtime shapes sharing the same TypeId:
         //  * static / intrinsic-built heap string: `[ObjectHeader][len:u64][bytes…]`
         //  * stdlib builder `Text {ptr, len, cap}`: three NaN-boxed Value fields,
@@ -1058,15 +1097,11 @@ pub(in super::super) fn handle_array_len(state: &mut InterpreterState) -> Interp
         (unsafe { *len_ptr }) as usize
     } else if header.type_id == TypeId::CHANNEL {
         // Channel layout: [len, cap, head, buffer_ptr, closed] — read len (field 0)
-        let data_ptr = unsafe {
-            ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         (unsafe { (*data_ptr).as_i64() }) as usize
     } else if header.type_id == TypeId::DEQUE {
         // Deque layout: [data, head, len, cap] — read len (field 2)
-        let data_ptr = unsafe {
-            ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         (unsafe { (*data_ptr.add(2)).as_i64() }) as usize
     } else {
         // Array/Tuple - elements stored directly, size / sizeof(Value)
@@ -1081,7 +1116,9 @@ pub(in super::super) fn handle_array_len(state: &mut InterpreterState) -> Interp
 /// Same as New but reads additional type parameter count.
 /// In the interpreter, generic types are erased — all values are NaN-boxed —
 /// so type parameters are read and discarded, and allocation proceeds like New.
-pub(in super::super) fn handle_new_generic(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new_generic(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let type_id_val = read_varint(state)? as u32;
     let type_id = TypeId(type_id_val);
@@ -1103,21 +1140,23 @@ pub(in super::super) fn handle_new_generic(state: &mut InterpreterState) -> Inte
 }
 
 /// NewList (0x68) - Create new list
-pub(in super::super) fn handle_new_list(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new_list(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
 
     // List layout: [len: Value, cap: Value, backing_ptr: Value]
     let cap: usize = 16; // Default capacity
 
-    let obj = state.heap.alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
+    let obj = state
+        .heap
+        .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();
     // eprintln!("[DEBUG NewList] created obj at {:p}, TypeId::LIST={:?}", obj.as_ptr(), TypeId::LIST);
     let _verify_header = unsafe { &*(obj.as_ptr() as *const heap::ObjectHeader) };
     // eprintln!("[DEBUG NewList] verify header type_id={:?}", verify_header.type_id);
 
-    let data_ptr = unsafe {
-        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     // Allocate backing array
     let backing = state.heap.alloc_array(TypeId::LIST, cap)?;
@@ -1135,7 +1174,9 @@ pub(in super::super) fn handle_new_list(state: &mut InterpreterState) -> Interpr
 }
 
 /// ListPush (0x69) - Push value to list
-pub(in super::super) fn handle_list_push(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_list_push(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let list_reg = read_reg(state)?;
     let val_reg = read_reg(state)?;
 
@@ -1147,9 +1188,7 @@ pub(in super::super) fn handle_list_push(state: &mut InterpreterState) -> Interp
     let value = state.get_reg(val_reg);
 
     // Read list header
-    let data_ptr = unsafe {
-        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let len = unsafe { (*data_ptr).as_i64() } as usize;
     let cap = unsafe { (*data_ptr.add(1)).as_i64() } as usize;
     let mut backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
@@ -1165,17 +1204,13 @@ pub(in super::super) fn handle_list_push(state: &mut InterpreterState) -> Interp
 
         // Copy existing elements
         if len > 0 {
-            let old_data = unsafe {
-                backing_ptr.add(heap::OBJECT_HEADER_SIZE)
-            };
-            let new_data = unsafe {
-                new_backing_ptr.add(heap::OBJECT_HEADER_SIZE)
-            };
+            let old_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
+            let new_data = unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     old_data,
                     new_data,
-                    len * std::mem::size_of::<Value>()
+                    len * std::mem::size_of::<Value>(),
                 );
             }
         }
@@ -1202,7 +1237,9 @@ pub(in super::super) fn handle_list_push(state: &mut InterpreterState) -> Interp
 }
 
 /// ListPop (0x6A) - Pop value from list
-pub(in super::super) fn handle_list_pop(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_list_pop(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let list_reg = read_reg(state)?;
 
@@ -1212,9 +1249,7 @@ pub(in super::super) fn handle_list_pop(state: &mut InterpreterState) -> Interpr
     }
 
     // Read list header
-    let data_ptr = unsafe {
-        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let len = unsafe { (*data_ptr).as_i64() } as usize;
 
     if len == 0 {
@@ -1226,7 +1261,8 @@ pub(in super::super) fn handle_list_pop(state: &mut InterpreterState) -> Interpr
 
     // Read last element
     let elem_ptr = unsafe {
-        backing_ptr.add(heap::OBJECT_HEADER_SIZE + (len - 1) * std::mem::size_of::<Value>()) as *const Value
+        backing_ptr.add(heap::OBJECT_HEADER_SIZE + (len - 1) * std::mem::size_of::<Value>())
+            as *const Value
     };
     let value = unsafe { *elem_ptr };
 
@@ -1338,9 +1374,15 @@ pub(crate) fn value_eq(a: Value, b: Value) -> bool {
 fn heap_string_content_eq(a: &Value, b: &Value) -> bool {
     let (a_ptr, a_len) = text_value_bytes_and_len(a);
     let (b_ptr, b_len) = text_value_bytes_and_len(b);
-    if a_len != b_len { return false; }
-    if a_len == 0 { return true; }
-    if a_ptr.is_null() || b_ptr.is_null() { return false; }
+    if a_len != b_len {
+        return false;
+    }
+    if a_len == 0 {
+        return true;
+    }
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return false;
+    }
     let a_bytes = unsafe { std::slice::from_raw_parts(a_ptr, a_len) };
     let b_bytes = unsafe { std::slice::from_raw_parts(b_ptr, b_len) };
     a_bytes == b_bytes
@@ -1351,7 +1393,9 @@ fn heap_string_content_eq(a: &Value, b: &Value) -> bool {
 fn text_value_bytes_and_len(v: &Value) -> (*const u8, usize) {
     let data_offset = heap::OBJECT_HEADER_SIZE;
     let ptr = v.as_ptr::<u8>();
-    if ptr.is_null() { return (std::ptr::null(), 0); }
+    if ptr.is_null() {
+        return (std::ptr::null(), 0);
+    }
     let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
     if header.size as usize == 24 {
         let f0 = unsafe { *(ptr.add(data_offset) as *const Value) };
@@ -1374,19 +1418,22 @@ fn text_value_bytes_and_len(v: &Value) -> (*const u8, usize) {
 
 /// Format: `NewMap dst`
 /// Creates an empty map and stores pointer in dst.
-pub(in super::super) fn handle_new_map(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new_map(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let _capacity_hint = read_varint(state)?; // consume capacity varint from bytecode
 
     // Map header: [count, capacity, entries_ptr]
     const DEFAULT_CAP: usize = 16;
 
-    let obj = state.heap.alloc(TypeId::MAP, 3 * std::mem::size_of::<Value>())?;
+    let obj = state
+        .heap
+        .alloc(TypeId::MAP, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();
 
-    let header_ptr = unsafe {
-        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let header_ptr =
+        unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     // Allocate entries array: capacity * 2 Values (key, value pairs)
     let entries = state.heap.alloc_array(TypeId::MAP, DEFAULT_CAP * 2)?;
@@ -1394,11 +1441,11 @@ pub(in super::super) fn handle_new_map(state: &mut InterpreterState) -> Interpre
     let entries_ptr = entries.as_ptr() as *mut u8;
 
     // Initialize entries with unit (empty marker)
-    let entries_data = unsafe {
-        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     for i in 0..(DEFAULT_CAP * 2) {
-        unsafe { *entries_data.add(i) = Value::unit(); }
+        unsafe {
+            *entries_data.add(i) = Value::unit();
+        }
     }
 
     // Initialize header: count=0, capacity, entries_ptr
@@ -1417,7 +1464,9 @@ pub(in super::super) fn handle_new_map(state: &mut InterpreterState) -> Interpre
 
 /// Format: `MapGet dst, map, key`
 /// Looks up key in map, stores value in dst (or unit if not found).
-pub(in super::super) fn handle_map_get(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_map_get(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let map_reg = read_reg(state)?;
     let key_reg = read_reg(state)?;
@@ -1430,15 +1479,11 @@ pub(in super::super) fn handle_map_get(state: &mut InterpreterState) -> Interpre
     let key = state.get_reg(key_reg);
 
     // Read map header
-    let header_ptr = unsafe {
-        map_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-    };
+    let header_ptr = unsafe { map_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
 
-    let entries_data = unsafe {
-        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-    };
+    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
     // Linear probing lookup
     let hash = value_hash(key);
@@ -1477,7 +1522,9 @@ pub(in super::super) fn handle_map_get(state: &mut InterpreterState) -> Interpre
 
 /// Format: `MapSet map, key, val`
 /// Sets map[key] = val, growing the map if necessary.
-pub(in super::super) fn handle_map_set(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_map_set(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let map_reg = read_reg(state)?;
     let key_reg = read_reg(state)?;
     let val_reg = read_reg(state)?;
@@ -1491,9 +1538,7 @@ pub(in super::super) fn handle_map_set(state: &mut InterpreterState) -> Interpre
     let val = state.get_reg(val_reg);
 
     // Read map header
-    let header_ptr = unsafe {
-        map_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let header_ptr = unsafe { map_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
     let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
     let mut entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
@@ -1506,17 +1551,15 @@ pub(in super::super) fn handle_map_set(state: &mut InterpreterState) -> Interpre
         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
 
         // Initialize new entries with unit
-        let new_data = unsafe {
-            new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-        };
+        let new_data = unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
         for i in 0..(new_capacity * 2) {
-            unsafe { *new_data.add(i) = Value::unit(); }
+            unsafe {
+                *new_data.add(i) = Value::unit();
+            }
         }
 
         // Rehash existing entries
-        let old_data = unsafe {
-            entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let old_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         for i in 0..capacity {
             let old_key = unsafe { *old_data.add(i * 2) };
             if !old_key.is_unit() {
@@ -1547,9 +1590,7 @@ pub(in super::super) fn handle_map_set(state: &mut InterpreterState) -> Interpre
     }
 
     // Insert or update
-    let entries_data = unsafe {
-        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     let hash = value_hash(key);
     let mut idx = hash % capacity;
@@ -1564,7 +1605,9 @@ pub(in super::super) fn handle_map_set(state: &mut InterpreterState) -> Interpre
                 *entries_data.add(idx * 2 + 1) = val;
             }
             count += 1;
-            unsafe { *header_ptr = Value::from_i64(count as i64); }
+            unsafe {
+                *header_ptr = Value::from_i64(count as i64);
+            }
             return Ok(DispatchResult::Continue);
         }
 
@@ -1586,7 +1629,9 @@ pub(in super::super) fn handle_map_set(state: &mut InterpreterState) -> Interpre
 
 /// Format: `MapContains dst, map, key`
 /// Sets dst to true if key exists, false otherwise.
-pub(in super::super) fn handle_map_contains(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_map_contains(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let map_reg = read_reg(state)?;
     let key_reg = read_reg(state)?;
@@ -1599,15 +1644,11 @@ pub(in super::super) fn handle_map_contains(state: &mut InterpreterState) -> Int
     let key = state.get_reg(key_reg);
 
     // Read map header
-    let header_ptr = unsafe {
-        map_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-    };
+    let header_ptr = unsafe { map_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
 
-    let entries_data = unsafe {
-        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-    };
+    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
     // Linear probing lookup
     let hash = value_hash(key);
@@ -1650,16 +1691,16 @@ pub(in super::super) fn handle_map_contains(state: &mut InterpreterState) -> Int
 /// the root of the stdlib `Text { ptr, … }` literal producing a struct
 /// whose `ptr` field pointed to a freshly-allocated "Clone" of the raw
 /// buffer instead of the buffer itself.
-pub(in super::super) fn handle_clone(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_clone(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let value = state.get_reg(src);
 
     if value.is_ptr() && !value.is_nil() {
         let src_ptr = value.as_ptr::<u8>();
-        if !src_ptr.is_null()
-            && state.heap.contains(src_ptr as *const heap::ObjectHeader)
-        {
+        if !src_ptr.is_null() && state.heap.contains(src_ptr as *const heap::ObjectHeader) {
             // SAFETY: `contains` verified `src_ptr` is the head of a
             // tracked heap object whose first `OBJECT_HEADER_SIZE` bytes
             // are a real `ObjectHeader`.
@@ -1695,19 +1736,22 @@ pub(in super::super) fn handle_clone(state: &mut InterpreterState) -> Interprete
 
 /// Format: `NewSet dst`
 /// Creates an empty set and stores pointer in dst.
-pub(in super::super) fn handle_new_set(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new_set(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let _capacity_hint = read_varint(state)?; // consume capacity varint from bytecode
 
     // Set header: [count, capacity, entries_ptr]
     const DEFAULT_CAP: usize = 16;
 
-    let obj = state.heap.alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
+    let obj = state
+        .heap
+        .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();
 
-    let header_ptr = unsafe {
-        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let header_ptr =
+        unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     // Allocate entries array: capacity * 2 Values (key, dummy-value pairs)
     // Set uses the same [key, value] slot layout as Map to share the insert/contains
@@ -1717,11 +1761,11 @@ pub(in super::super) fn handle_new_set(state: &mut InterpreterState) -> Interpre
     let entries_ptr = entries.as_ptr() as *mut u8;
 
     // Initialize entries with unit (empty marker)
-    let entries_data = unsafe {
-        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     for i in 0..(DEFAULT_CAP * 2) {
-        unsafe { *entries_data.add(i) = Value::unit(); }
+        unsafe {
+            *entries_data.add(i) = Value::unit();
+        }
     }
 
     // Initialize header: count=0, capacity, entries_ptr
@@ -1740,7 +1784,9 @@ pub(in super::super) fn handle_new_set(state: &mut InterpreterState) -> Interpre
 
 /// Format: `SetInsert set, elem`
 /// Inserts elem into set if not already present.
-pub(in super::super) fn handle_set_insert(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_set_insert(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let set_reg = read_reg(state)?;
     let elem_reg = read_reg(state)?;
 
@@ -1752,9 +1798,7 @@ pub(in super::super) fn handle_set_insert(state: &mut InterpreterState) -> Inter
     let elem = state.get_reg(elem_reg);
 
     // Read set header
-    let header_ptr = unsafe {
-        set_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let header_ptr = unsafe { set_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
     let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
     let mut entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
@@ -1767,17 +1811,15 @@ pub(in super::super) fn handle_set_insert(state: &mut InterpreterState) -> Inter
         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
 
         // Initialize new entries with unit
-        let new_data = unsafe {
-            new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-        };
+        let new_data = unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
         for i in 0..new_capacity {
-            unsafe { *new_data.add(i) = Value::unit(); }
+            unsafe {
+                *new_data.add(i) = Value::unit();
+            }
         }
 
         // Rehash existing entries
-        let old_data = unsafe {
-            entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let old_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         for i in 0..capacity {
             let old_elem = unsafe { *old_data.add(i) };
             if !old_elem.is_unit() {
@@ -1786,7 +1828,9 @@ pub(in super::super) fn handle_set_insert(state: &mut InterpreterState) -> Inter
                 loop {
                     let slot = unsafe { *new_data.add(idx) };
                     if slot.is_unit() {
-                        unsafe { *new_data.add(idx) = old_elem; }
+                        unsafe {
+                            *new_data.add(idx) = old_elem;
+                        }
                         break;
                     }
                     idx = (idx + 1) % new_capacity;
@@ -1804,9 +1848,7 @@ pub(in super::super) fn handle_set_insert(state: &mut InterpreterState) -> Inter
     }
 
     // Insert element (if not already present)
-    let entries_data = unsafe {
-        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     let hash = value_hash(elem);
     let mut idx = hash % capacity;
@@ -1817,9 +1859,13 @@ pub(in super::super) fn handle_set_insert(state: &mut InterpreterState) -> Inter
 
         if slot.is_unit() {
             // Empty slot - insert new element
-            unsafe { *entries_data.add(idx) = elem; }
+            unsafe {
+                *entries_data.add(idx) = elem;
+            }
             count += 1;
-            unsafe { *header_ptr = Value::from_i64(count as i64); }
+            unsafe {
+                *header_ptr = Value::from_i64(count as i64);
+            }
             return Ok(DispatchResult::Continue);
         }
 
@@ -1832,7 +1878,9 @@ pub(in super::super) fn handle_set_insert(state: &mut InterpreterState) -> Inter
         idx = (idx + 1) % capacity;
         if idx == start_idx {
             // Full circle - this shouldn't happen with proper load factor
-            return Err(InterpreterError::InvalidOperand { message: "Set is full".into() });
+            return Err(InterpreterError::InvalidOperand {
+                message: "Set is full".into(),
+            });
         }
     }
 }
@@ -1842,7 +1890,9 @@ pub(in super::super) fn handle_set_insert(state: &mut InterpreterState) -> Inter
 
 /// Format: `SetContains dst, set, elem`
 /// Sets dst to true if elem is in set, false otherwise.
-pub(in super::super) fn handle_set_contains(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_set_contains(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let set_reg = read_reg(state)?;
     let elem_reg = read_reg(state)?;
@@ -1855,15 +1905,11 @@ pub(in super::super) fn handle_set_contains(state: &mut InterpreterState) -> Int
     let elem = state.get_reg(elem_reg);
 
     // Read set header
-    let header_ptr = unsafe {
-        set_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-    };
+    let header_ptr = unsafe { set_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
 
-    let entries_data = unsafe {
-        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-    };
+    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
     // Linear probing lookup
     let hash = value_hash(elem);
@@ -1900,7 +1946,9 @@ pub(in super::super) fn handle_set_contains(state: &mut InterpreterState) -> Int
 
 /// Format: `SetRemove set, elem`
 /// Removes elem from set if present.
-pub(in super::super) fn handle_set_remove(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_set_remove(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let set_reg = read_reg(state)?;
     let elem_reg = read_reg(state)?;
 
@@ -1912,16 +1960,12 @@ pub(in super::super) fn handle_set_remove(state: &mut InterpreterState) -> Inter
     let elem = state.get_reg(elem_reg);
 
     // Read set header
-    let header_ptr = unsafe {
-        set_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let header_ptr = unsafe { set_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
 
-    let entries_data = unsafe {
-        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     // Find and remove element
     let hash = value_hash(elem);
@@ -1939,15 +1983,21 @@ pub(in super::super) fn handle_set_remove(state: &mut InterpreterState) -> Inter
         if value_eq(slot, elem) {
             // Found element - remove it using tombstone-free deletion
             // We need to rehash subsequent elements in the probe chain
-            unsafe { *entries_data.add(idx) = Value::unit(); }
+            unsafe {
+                *entries_data.add(idx) = Value::unit();
+            }
             count -= 1;
-            unsafe { *header_ptr = Value::from_i64(count as i64); }
+            unsafe {
+                *header_ptr = Value::from_i64(count as i64);
+            }
 
             // Rehash subsequent elements in probe chain
             let mut next_idx = (idx + 1) % capacity;
             while !unsafe { *entries_data.add(next_idx) }.is_unit() {
                 let elem_to_rehash = unsafe { *entries_data.add(next_idx) };
-                unsafe { *entries_data.add(next_idx) = Value::unit(); }
+                unsafe {
+                    *entries_data.add(next_idx) = Value::unit();
+                }
 
                 // Reinsert the element
                 let rehash = value_hash(elem_to_rehash);
@@ -1955,7 +2005,9 @@ pub(in super::super) fn handle_set_remove(state: &mut InterpreterState) -> Inter
                 loop {
                     let new_slot = unsafe { *entries_data.add(new_idx) };
                     if new_slot.is_unit() {
-                        unsafe { *entries_data.add(new_idx) = elem_to_rehash; }
+                        unsafe {
+                            *entries_data.add(new_idx) = elem_to_rehash;
+                        }
                         break;
                     }
                     new_idx = (new_idx + 1) % capacity;
@@ -1980,7 +2032,9 @@ pub(in super::super) fn handle_set_remove(state: &mut InterpreterState) -> Inter
 ///
 
 /// Format: `NewDeque dst`
-pub(in super::super) fn handle_new_deque(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new_deque(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let _capacity_hint = read_varint(state)?;
 
@@ -1988,22 +2042,23 @@ pub(in super::super) fn handle_new_deque(state: &mut InterpreterState) -> Interp
 
     // Deque header: [data(0), head(1), len(2), cap(3)]
     // Layout matches stdlib: type Deque<T> is { data, head, len, cap }
-    let obj = state.heap.alloc(TypeId::DEQUE, 4 * std::mem::size_of::<Value>())?;
+    let obj = state
+        .heap
+        .alloc(TypeId::DEQUE, 4 * std::mem::size_of::<Value>())?;
     state.record_allocation();
 
-    let header_ptr = unsafe {
-        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let header_ptr =
+        unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     let buffer = state.heap.alloc_array(TypeId::UNIT, DEFAULT_CAP)?;
     state.record_allocation();
     let buffer_ptr = buffer.as_ptr() as *mut u8;
 
-    let buf_data = unsafe {
-        buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let buf_data = unsafe { buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     for i in 0..DEFAULT_CAP {
-        unsafe { *buf_data.add(i) = Value::unit(); }
+        unsafe {
+            *buf_data.add(i) = Value::unit();
+        }
     }
 
     unsafe {
@@ -2021,28 +2076,31 @@ pub(in super::super) fn handle_new_deque(state: &mut InterpreterState) -> Interp
 ///
 
 /// Format: `NewChannel dst, capacity`
-pub(in super::super) fn handle_new_channel(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new_channel(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let cap_reg = read_reg(state)?;
     let cap = state.get_reg(cap_reg).as_i64().max(1) as usize;
 
     // Channel header: [len, cap, head, buffer_ptr, closed]
-    let obj = state.heap.alloc(TypeId::CHANNEL, 5 * std::mem::size_of::<Value>())?;
+    let obj = state
+        .heap
+        .alloc(TypeId::CHANNEL, 5 * std::mem::size_of::<Value>())?;
     state.record_allocation();
 
-    let header_ptr = unsafe {
-        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let header_ptr =
+        unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     let buffer = state.heap.alloc_array(TypeId::UNIT, cap)?;
     state.record_allocation();
     let buffer_ptr = buffer.as_ptr() as *mut u8;
 
-    let buf_data = unsafe {
-        buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let buf_data = unsafe { buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     for i in 0..cap {
-        unsafe { *buf_data.add(i) = Value::unit(); }
+        unsafe {
+            *buf_data.add(i) = Value::unit();
+        }
     }
 
     unsafe {
@@ -2062,7 +2120,9 @@ pub(in super::super) fn handle_new_channel(state: &mut InterpreterState) -> Inte
 
 /// Format: `Push src`
 /// Pushes the value from src register onto the argument stack.
-pub(in super::super) fn handle_push(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_push(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let src = read_reg(state)?;
     let value = state.get_reg(src);
     state.arg_stack.push(value);
@@ -2074,10 +2134,11 @@ pub(in super::super) fn handle_push(state: &mut InterpreterState) -> Interpreter
 
 /// Format: `Pop dst`
 /// Pops a value from the argument stack into dst register.
-pub(in super::super) fn handle_pop(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_pop(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let value = state.arg_stack.pop().unwrap_or_default();
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)
 }
-

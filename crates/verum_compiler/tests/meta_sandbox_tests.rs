@@ -17,8 +17,8 @@
 use verum_ast::Span;
 use verum_ast::attr::Attribute;
 use verum_ast::decl::{FunctionBody, FunctionDecl, Visibility};
-use verum_compiler::meta::sandbox::*;
 use verum_common::Text;
+use verum_compiler::meta::sandbox::*;
 
 fn default_span() -> Span {
     Span::default()
@@ -77,7 +77,11 @@ fn create_function_with_context(context_name: &str) -> FunctionDecl {
             default_span(),
         )));
         let path = Path::new(segments, default_span());
-        ctxs.push(ContextRequirement::simple(path, List::new(), default_span()));
+        ctxs.push(ContextRequirement::simple(
+            path,
+            List::new(),
+            default_span(),
+        ));
         ctxs
     };
 
@@ -468,10 +472,9 @@ fn test_size_of_tuple_values() {
     let ctx = MetaContext::new();
 
     // Tuple of two i32s should be 8 bytes
-    let args = vec![ConstValue::Tuple(vec![
-        ConstValue::Int(0),
-        ConstValue::Int(0),
-    ].into())];
+    let args = vec![ConstValue::Tuple(
+        vec![ConstValue::Int(0), ConstValue::Int(0)].into(),
+    )];
     let result = sandbox.execute_builtin_function(&Text::from("size_of"), &args, &ctx);
     assert!(result.is_ok());
     if let Ok(ConstValue::Int(size)) = result {

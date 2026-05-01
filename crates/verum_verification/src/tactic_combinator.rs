@@ -72,7 +72,7 @@
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
-use verum_smt::tactic_laws::{LawId, CANONICAL_LAW_TABLE};
+use verum_smt::tactic_laws::{CANONICAL_LAW_TABLE, LawId};
 
 // =============================================================================
 // TacticCombinator — the 15 canonical forms
@@ -194,13 +194,10 @@ impl TacticCombinator {
         match self {
             Self::Skip | Self::Fail => CombinatorCategory::Identity,
             Self::Seq | Self::OrElse | Self::FirstOf => CombinatorCategory::Composition,
-            Self::Repeat | Self::RepeatN | Self::Try | Self::Solve => {
-                CombinatorCategory::Control
+            Self::Repeat | Self::RepeatN | Self::Try | Self::Solve => CombinatorCategory::Control,
+            Self::AllGoals | Self::IndexFocus | Self::NamedFocus | Self::PerGoalSplit => {
+                CombinatorCategory::Focus
             }
-            Self::AllGoals
-            | Self::IndexFocus
-            | Self::NamedFocus
-            | Self::PerGoalSplit => CombinatorCategory::Focus,
             Self::Have | Self::ApplyWith => CombinatorCategory::Forward,
         }
     }
@@ -363,11 +360,7 @@ fn entry_for(c: TacticCombinator) -> TacticEntry {
             "seq(first: Tactic, then: Tactic)",
             "Sequential composition: run `first`, then run `then` on every resulting subgoal.",
             "intro ; split ; auto",
-            &[
-                "seq-left-identity",
-                "seq-right-identity",
-                "seq-associative",
-            ],
+            &["seq-left-identity", "seq-right-identity", "seq-associative"],
         ),
         TacticCombinator::OrElse => (
             "orelse(primary: Tactic, fallback: Tactic)",
@@ -535,8 +528,7 @@ impl std::fmt::Debug for CompositeTacticCatalog {
 
 impl TacticCatalog for CompositeTacticCatalog {
     fn entries(&self) -> Vec<TacticEntry> {
-        let mut seen: std::collections::BTreeSet<&'static str> =
-            std::collections::BTreeSet::new();
+        let mut seen: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
         let mut out: Vec<TacticEntry> = Vec::new();
         for c in &self.catalogs {
             for e in c.entries() {
@@ -558,8 +550,7 @@ impl TacticCatalog for CompositeTacticCatalog {
     }
 
     fn laws(&self) -> Vec<AlgebraicLaw> {
-        let mut seen: std::collections::BTreeSet<String> =
-            std::collections::BTreeSet::new();
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         let mut out: Vec<AlgebraicLaw> = Vec::new();
         for c in &self.catalogs {
             for l in c.laws() {
@@ -605,13 +596,7 @@ mod tests {
             *by_cat.entry(c.category().name()).or_insert(0) += 1;
         }
         // Every category receives at least one member.
-        for cat in [
-            "identity",
-            "composition",
-            "control",
-            "focus",
-            "forward",
-        ] {
+        for cat in ["identity", "composition", "control", "focus", "forward"] {
             assert!(
                 by_cat.get(cat).copied().unwrap_or(0) > 0,
                 "category {} has no members",
@@ -783,9 +768,15 @@ mod tests {
         // Empty + Default → lookup must find every combinator (falls through to Default).
         struct Empty;
         impl TacticCatalog for Empty {
-            fn entries(&self) -> Vec<TacticEntry> { Vec::new() }
-            fn lookup(&self, _: &str) -> Option<TacticEntry> { None }
-            fn laws(&self) -> Vec<AlgebraicLaw> { Vec::new() }
+            fn entries(&self) -> Vec<TacticEntry> {
+                Vec::new()
+            }
+            fn lookup(&self, _: &str) -> Option<TacticEntry> {
+                None
+            }
+            fn laws(&self) -> Vec<AlgebraicLaw> {
+                Vec::new()
+            }
         }
         let composite = CompositeTacticCatalog::new(vec![
             Box::new(Empty),

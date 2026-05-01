@@ -81,9 +81,7 @@ impl Layer {
 impl Ord for Layer {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (Layer::Fibrant, Layer::Fibrant) | (Layer::Strict, Layer::Strict) => {
-                Ordering::Equal
-            }
+            (Layer::Fibrant, Layer::Fibrant) | (Layer::Strict, Layer::Strict) => Ordering::Equal,
             (Layer::Fibrant, Layer::Strict) => Ordering::Less,
             (Layer::Strict, Layer::Fibrant) => Ordering::Greater,
         }
@@ -311,10 +309,7 @@ mod tests {
         let strct = StratifiedUniverse::strict(UniverseLevel::Concrete(0));
         let fib = StratifiedUniverse::fibrant(UniverseLevel::Concrete(0));
         let err = check_layer_flow(&strct, &fib).unwrap_err();
-        assert!(matches!(
-            err,
-            LayerViolation::StrictInFibrantContext { .. }
-        ));
+        assert!(matches!(err, LayerViolation::StrictInFibrantContext { .. }));
     }
 
     #[test]

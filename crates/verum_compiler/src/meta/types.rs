@@ -22,8 +22,8 @@
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
 //! registry, Pass 3+ performs semantic analysis. Sandboxed execution (no I/O).
 
-use verum_ast::ty::Type;
 use verum_ast::MetaValue;
+use verum_ast::ty::Type;
 use verum_common::{List, Maybe, Text};
 
 /// Attribute definition with optional value
@@ -215,16 +215,18 @@ impl TypeDefinition {
     /// Get associated types
     pub fn associated_types(&self) -> List<(Text, Type)> {
         match self {
-            TypeDefinition::Struct { associated_types, .. } => associated_types.clone(),
-            TypeDefinition::Enum { associated_types, .. } => associated_types.clone(),
-            TypeDefinition::Protocol { associated_types, .. } => {
-                associated_types
-                    .iter()
-                    .filter_map(|(name, ty)| {
-                        ty.as_ref().map(|t| (name.clone(), t.clone()))
-                    })
-                    .collect()
-            }
+            TypeDefinition::Struct {
+                associated_types, ..
+            } => associated_types.clone(),
+            TypeDefinition::Enum {
+                associated_types, ..
+            } => associated_types.clone(),
+            TypeDefinition::Protocol {
+                associated_types, ..
+            } => associated_types
+                .iter()
+                .filter_map(|(name, ty)| ty.as_ref().map(|t| (name.clone(), t.clone())))
+                .collect(),
             TypeDefinition::Alias { .. } | TypeDefinition::Newtype { .. } => List::new(),
         }
     }
@@ -234,7 +236,9 @@ impl TypeDefinition {
         match self {
             TypeDefinition::Struct { super_types, .. } => super_types.clone(),
             TypeDefinition::Enum { super_types, .. } => super_types.clone(),
-            TypeDefinition::Protocol { super_protocols, .. } => super_protocols.clone(),
+            TypeDefinition::Protocol {
+                super_protocols, ..
+            } => super_protocols.clone(),
             TypeDefinition::Alias { .. } | TypeDefinition::Newtype { .. } => List::new(),
         }
     }
@@ -252,12 +256,16 @@ impl TypeDefinition {
 
     /// Check if type has a specific attribute
     pub fn has_attribute(&self, attr_name: &str) -> bool {
-        self.attributes().iter().any(|a| a.name.as_str() == attr_name)
+        self.attributes()
+            .iter()
+            .any(|a| a.name.as_str() == attr_name)
     }
 
     /// Get attribute value by name
     pub fn get_attribute(&self, attr_name: &str) -> Option<&TypeAttribute> {
-        self.attributes().iter().find(|a| a.name.as_str() == attr_name)
+        self.attributes()
+            .iter()
+            .find(|a| a.name.as_str() == attr_name)
     }
 
     /// Create a simple struct definition (for backward compatibility)

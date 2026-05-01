@@ -4,10 +4,11 @@ use verum_llvm_sys::analysis::{LLVMVerifierFailureAction, LLVMVerifyModule};
 use verum_llvm_sys::bit_reader::LLVMParseBitcodeInContext2;
 use verum_llvm_sys::bit_writer::{LLVMWriteBitcodeToFile, LLVMWriteBitcodeToMemoryBuffer};
 use verum_llvm_sys::core::{
-    LLVMAddFunction, LLVMAddGlobal, LLVMAddGlobalInAddressSpace, LLVMAddNamedMetadataOperand, LLVMCloneModule,
-    LLVMDisposeMessage, LLVMDisposeModule, LLVMDumpModule, LLVMGetFirstFunction, LLVMGetFirstGlobal,
-    LLVMGetLastFunction, LLVMGetLastGlobal, LLVMGetModuleContext, LLVMGetModuleIdentifier, LLVMGetNamedFunction,
-    LLVMGetNamedGlobal, LLVMGetNamedMetadataNumOperands, LLVMGetNamedMetadataOperands, LLVMGetTarget,
+    LLVMAddFunction, LLVMAddGlobal, LLVMAddGlobalInAddressSpace, LLVMAddNamedMetadataOperand,
+    LLVMCloneModule, LLVMDisposeMessage, LLVMDisposeModule, LLVMDumpModule, LLVMGetFirstFunction,
+    LLVMGetFirstGlobal, LLVMGetLastFunction, LLVMGetLastGlobal, LLVMGetModuleContext,
+    LLVMGetModuleIdentifier, LLVMGetNamedFunction, LLVMGetNamedGlobal,
+    LLVMGetNamedMetadataNumOperands, LLVMGetNamedMetadataOperands, LLVMGetTarget,
     LLVMPrintModuleToFile, LLVMPrintModuleToString, LLVMSetDataLayout, LLVMSetModuleIdentifier,
     LLVMSetModuleInlineAsm2, LLVMSetTarget,
 };
@@ -16,21 +17,21 @@ use verum_llvm_sys::debuginfo::{LLVMGetModuleDebugMetadataVersion, LLVMStripModu
 
 use verum_llvm_sys::error::LLVMGetErrorMessage;
 use verum_llvm_sys::execution_engine::{
-    LLVMCreateExecutionEngineForModule, LLVMCreateInterpreterForModule, LLVMCreateJITCompilerForModule,
-    LLVMCreateSimpleMCJITMemoryManager,
+    LLVMCreateExecutionEngineForModule, LLVMCreateInterpreterForModule,
+    LLVMCreateJITCompilerForModule, LLVMCreateSimpleMCJITMemoryManager,
 };
 use verum_llvm_sys::prelude::{LLVMModuleRef, LLVMValueRef};
 
-use verum_llvm_sys::transforms::pass_builder::LLVMRunPasses;
 use verum_llvm_sys::LLVMLinkage;
+use verum_llvm_sys::transforms::pass_builder::LLVMRunPasses;
 
 use verum_llvm_sys::LLVMModuleFlagBehavior;
 
 use std::cell::{Cell, Ref, RefCell};
-use std::ffi::{c_void, CStr};
+use std::ffi::{CStr, c_void};
 use std::fs::File;
 use std::marker::PhantomData;
-use std::mem::{forget, MaybeUninit};
+use std::mem::{MaybeUninit, forget};
 use std::path::Path;
 use std::ptr;
 use std::rc::Rc;
@@ -43,12 +44,12 @@ use crate::debug_info::{DICompileUnit, DWARFEmissionKind, DWARFSourceLanguage, D
 use crate::execution_engine::ExecutionEngine;
 use crate::memory_buffer::MemoryBuffer;
 use crate::memory_manager::{
-    allocate_code_section_adapter, allocate_data_section_adapter, destroy_adapter, finalize_memory_adapter,
-    McjitMemoryManager, MemoryManagerAdapter,
+    McjitMemoryManager, MemoryManagerAdapter, allocate_code_section_adapter,
+    allocate_data_section_adapter, destroy_adapter, finalize_memory_adapter,
 };
 
 use crate::passes::PassBuilderOptions;
-use crate::support::{to_c_str, LLVMString};
+use crate::support::{LLVMString, to_c_str};
 
 use crate::targets::TargetMachine;
 use crate::targets::{CodeModel, InitializationConfig, Target, TargetTriple};
@@ -225,11 +226,20 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(fn_val.get_name().to_str(), Ok("my_function"));
     /// assert_eq!(fn_val.get_linkage(), Linkage::External);
     /// ```
-    pub fn add_function(&self, name: &str, ty: FunctionType<'ctx>, linkage: Option<Linkage>) -> FunctionValue<'ctx> {
+    pub fn add_function(
+        &self,
+        name: &str,
+        ty: FunctionType<'ctx>,
+        linkage: Option<Linkage>,
+    ) -> FunctionValue<'ctx> {
         let c_string = to_c_str(name);
         let fn_value = unsafe {
-            FunctionValue::new(LLVMAddFunction(self.module.get(), c_string.as_ptr(), ty.as_type_ref()))
-                .expect("add_function should always succeed in adding a new function")
+            FunctionValue::new(LLVMAddFunction(
+                self.module.get(),
+                c_string.as_ptr(),
+                ty.as_type_ref(),
+            ))
+            .expect("add_function should always succeed in adding a new function")
         };
 
         if let Some(linkage) = linkage {
@@ -756,7 +766,8 @@ impl<'ctx> Module<'ctx> {
         }
 
         // 4) Build LLVMMCJITCompilerOptions
-        let mut options_uninit = MaybeUninit::<verum_llvm_sys::execution_engine::LLVMMCJITCompilerOptions>::zeroed();
+        let mut options_uninit =
+            MaybeUninit::<verum_llvm_sys::execution_engine::LLVMMCJITCompilerOptions>::zeroed();
         unsafe {
             // Ensure defaults are initialized
             verum_llvm_sys::execution_engine::LLVMInitializeMCJITCompilerOptions(
@@ -885,8 +896,8 @@ impl<'ctx> Module<'ctx> {
     pub fn write_bitcode_to_file(&self, file: &File, should_close: bool, unbuffered: bool) -> bool {
         #[cfg(unix)]
         {
-            use verum_llvm_sys::bit_writer::LLVMWriteBitcodeToFD;
             use std::os::unix::io::AsRawFd;
+            use verum_llvm_sys::bit_writer::LLVMWriteBitcodeToFD;
 
             // REVIEW: as_raw_fd docs suggest it only works in *nix
             // Also, should_close should maybe be hardcoded to true?
@@ -998,7 +1009,8 @@ impl<'ctx> Module<'ctx> {
     /// ```
     pub fn get_data_layout(&self) -> Ref<'_, DataLayout> {
         Ref::map(self.data_layout.borrow(), |l| {
-            l.as_ref().expect("DataLayout should always exist until Drop")
+            l.as_ref()
+                .expect("DataLayout should always exist until Drop")
         })
     }
 
@@ -1084,7 +1096,13 @@ impl<'ctx> Module<'ctx> {
 
     /// Sets the inline assembly for the `Module`.
     pub fn set_inline_assembly(&self, asm: &str) {
-        unsafe { LLVMSetModuleInlineAsm2(self.module.get(), asm.as_ptr() as *const ::libc::c_char, asm.len()) }
+        unsafe {
+            LLVMSetModuleInlineAsm2(
+                self.module.get(),
+                asm.as_ptr() as *const ::libc::c_char,
+                asm.len(),
+            )
+        }
     }
 
     /// Appends a `MetaDataValue` to a global list indexed by a particular key.
@@ -1135,14 +1153,22 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(md_1[0].into_int_value(), bool_val);
     /// assert_eq!(md_1[1].into_float_value(), f32_val);
     /// ```
-    pub fn add_global_metadata(&self, key: &str, metadata: &MetadataValue<'ctx>) -> Result<(), crate::Error> {
+    pub fn add_global_metadata(
+        &self,
+        key: &str,
+        metadata: &MetadataValue<'ctx>,
+    ) -> Result<(), crate::Error> {
         if !metadata.is_node() {
             return Err(crate::Error::GlobalMetadataError);
         }
 
         let c_string = to_c_str(key);
         unsafe {
-            LLVMAddNamedMetadataOperand(self.module.get(), c_string.as_ptr(), metadata.as_value_ref());
+            LLVMAddNamedMetadataOperand(
+                self.module.get(),
+                c_string.as_ptr(),
+                metadata.as_value_ref(),
+            );
         }
 
         Ok(())
@@ -1263,7 +1289,9 @@ impl<'ctx> Module<'ctx> {
             vec.set_len(count);
         };
 
-        vec.iter().map(|val| unsafe { MetadataValue::new(*val) }).collect()
+        vec.iter()
+            .map(|val| unsafe { MetadataValue::new(*val) })
+            .collect()
     }
 
     /// Gets the first `GlobalValue` in a module.
@@ -1405,7 +1433,11 @@ impl<'ctx> Module<'ctx> {
 
         // LLVMParseBitcodeInContext2 returns 0 on success, non-zero on failure
         let success = unsafe {
-            LLVMParseBitcodeInContext2(context.as_ctx_ref(), buffer.memory_buffer, module.as_mut_ptr())
+            LLVMParseBitcodeInContext2(
+                context.as_ctx_ref(),
+                buffer.memory_buffer,
+                module.as_mut_ptr(),
+            )
         };
 
         if success != 0 {
@@ -1490,7 +1522,13 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(module.get_name().to_str(), Ok("my_module2"));
     /// ```
     pub fn set_name(&self, name: &str) {
-        unsafe { LLVMSetModuleIdentifier(self.module.get(), name.as_ptr() as *const ::libc::c_char, name.len()) }
+        unsafe {
+            LLVMSetModuleIdentifier(
+                self.module.get(),
+                name.as_ptr() as *const ::libc::c_char,
+                name.len(),
+            )
+        }
     }
 
     /// Gets the source file name. It defaults to the module identifier but is separate from it.
@@ -1590,7 +1628,8 @@ impl<'ctx> Module<'ctx> {
         let context = self.get_context();
 
         let mut char_ptr: *mut ::libc::c_char = ptr::null_mut();
-        let char_ptr_ptr = &mut char_ptr as *mut *mut ::libc::c_char as *mut *mut c_void as *mut c_void;
+        let char_ptr_ptr =
+            &mut char_ptr as *mut *mut ::libc::c_char as *mut *mut c_void as *mut c_void;
 
         // Newer LLVM versions don't use an out ptr anymore which was really straightforward...
         // Here we assign an error handler to extract the error message, if any, for us.
@@ -1627,13 +1666,20 @@ impl<'ctx> Module<'ctx> {
     pub fn get_flag(&self, key: &str) -> Option<MetadataValue<'ctx>> {
         use verum_llvm_sys::core::LLVMMetadataAsValue;
 
-        let flag = unsafe { LLVMGetModuleFlag(self.module.get(), key.as_ptr() as *const ::libc::c_char, key.len()) };
+        let flag = unsafe {
+            LLVMGetModuleFlag(
+                self.module.get(),
+                key.as_ptr() as *const ::libc::c_char,
+                key.len(),
+            )
+        };
 
         if flag.is_null() {
             return None;
         }
 
-        let flag_value = unsafe { LLVMMetadataAsValue(LLVMGetModuleContext(self.module.get()), flag) };
+        let flag_value =
+            unsafe { LLVMMetadataAsValue(LLVMGetModuleContext(self.module.get()), flag) };
 
         unsafe { Some(MetadataValue::new(flag_value)) }
     }
@@ -1657,7 +1703,12 @@ impl<'ctx> Module<'ctx> {
     /// Append a `BasicValue` as a module wide flag. Note that using the same key twice
     /// will likely invalidate the module.
     // REVIEW: What happens if value is not const?
-    pub fn add_basic_value_flag<BV: BasicValue<'ctx>>(&self, key: &str, behavior: FlagBehavior, flag: BV) {
+    pub fn add_basic_value_flag<BV: BasicValue<'ctx>>(
+        &self,
+        key: &str,
+        behavior: FlagBehavior,
+        flag: BV,
+    ) {
         use verum_llvm_sys::core::LLVMValueAsMetadata;
 
         let md = unsafe { LLVMValueAsMetadata(flag.as_value_ref()) };

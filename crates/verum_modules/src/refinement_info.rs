@@ -509,7 +509,10 @@ pub fn extract_contract_from_attributes(
     let mut contract = RefinementContract::new();
 
     // Set parameter names
-    contract.param_names = param_names.iter().map(|i| Text::from(i.name.as_str())).collect();
+    contract.param_names = param_names
+        .iter()
+        .map(|i| Text::from(i.name.as_str()))
+        .collect();
 
     for attr in attrs {
         let name = attr.name.as_str();
@@ -571,7 +574,10 @@ pub fn extract_contract_from_attributes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_ast::{expr::ExprKind, literal::{Literal, LiteralKind}};
+    use verum_ast::{
+        expr::ExprKind,
+        literal::{Literal, LiteralKind},
+    };
 
     fn dummy_span() -> Span {
         Span::dummy()

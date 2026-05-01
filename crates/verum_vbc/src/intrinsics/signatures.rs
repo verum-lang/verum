@@ -86,27 +86,53 @@ impl ProtocolBound {
     /// Check if a type name satisfies this protocol bound.
     pub fn is_satisfied_by(self, type_name: &str) -> bool {
         match self {
-            ProtocolBound::Atomic => matches!(
-                type_name,
-                "U8" | "UInt8" | "u8"
-                    | "U16" | "UInt16" | "u16"
-                    | "U32" | "UInt32" | "u32"
-                    | "U64" | "UInt64" | "u64"
-                    | "Int" | "i64"
-                    | "Bool" | "bool"
-            ) || type_name.starts_with("*const ")
-                || type_name.starts_with("*mut "),
+            ProtocolBound::Atomic => {
+                matches!(
+                    type_name,
+                    "U8" | "UInt8"
+                        | "u8"
+                        | "U16"
+                        | "UInt16"
+                        | "u16"
+                        | "U32"
+                        | "UInt32"
+                        | "u32"
+                        | "U64"
+                        | "UInt64"
+                        | "u64"
+                        | "Int"
+                        | "i64"
+                        | "Bool"
+                        | "bool"
+                ) || type_name.starts_with("*const ")
+                    || type_name.starts_with("*mut ")
+            }
 
             ProtocolBound::Integer => matches!(
                 type_name,
-                "I8" | "Int8" | "i8"
-                    | "I16" | "Int16" | "i16"
-                    | "I32" | "Int32" | "i32"
-                    | "I64" | "Int64" | "i64"
-                    | "U8" | "UInt8" | "u8"
-                    | "U16" | "UInt16" | "u16"
-                    | "U32" | "UInt32" | "u32"
-                    | "U64" | "UInt64" | "u64"
+                "I8" | "Int8"
+                    | "i8"
+                    | "I16"
+                    | "Int16"
+                    | "i16"
+                    | "I32"
+                    | "Int32"
+                    | "i32"
+                    | "I64"
+                    | "Int64"
+                    | "i64"
+                    | "U8"
+                    | "UInt8"
+                    | "u8"
+                    | "U16"
+                    | "UInt16"
+                    | "u16"
+                    | "U32"
+                    | "UInt32"
+                    | "u32"
+                    | "U64"
+                    | "UInt64"
+                    | "u64"
                     | "Int"
                     | "ISize"
                     | "USize"
@@ -116,10 +142,17 @@ impl ProtocolBound {
 
             ProtocolBound::SignedInteger => matches!(
                 type_name,
-                "I8" | "Int8" | "i8"
-                    | "I16" | "Int16" | "i16"
-                    | "I32" | "Int32" | "i32"
-                    | "I64" | "Int64" | "i64"
+                "I8" | "Int8"
+                    | "i8"
+                    | "I16"
+                    | "Int16"
+                    | "i16"
+                    | "I32"
+                    | "Int32"
+                    | "i32"
+                    | "I64"
+                    | "Int64"
+                    | "i64"
                     | "Int"
                     | "ISize"
                     | "isize"
@@ -127,16 +160,26 @@ impl ProtocolBound {
 
             ProtocolBound::UnsignedInteger => matches!(
                 type_name,
-                "U8" | "UInt8" | "u8"
-                    | "U16" | "UInt16" | "u16"
-                    | "U32" | "UInt32" | "u32"
-                    | "U64" | "UInt64" | "u64"
+                "U8" | "UInt8"
+                    | "u8"
+                    | "U16"
+                    | "UInt16"
+                    | "u16"
+                    | "U32"
+                    | "UInt32"
+                    | "u32"
+                    | "U64"
+                    | "UInt64"
+                    | "u64"
                     | "USize"
                     | "usize"
             ),
 
             ProtocolBound::FloatingPoint => {
-                matches!(type_name, "F32" | "Float32" | "f32" | "F64" | "Float64" | "f64")
+                matches!(
+                    type_name,
+                    "F32" | "Float32" | "f32" | "F64" | "Float64" | "f64"
+                )
             }
 
             ProtocolBound::Sized | ProtocolBound::Copy | ProtocolBound::None => true,
@@ -169,7 +212,9 @@ impl TypeParam {
 
     /// Check if a type satisfies all bounds.
     pub fn is_satisfied_by(&self, type_name: &str) -> bool {
-        self.bounds.iter().all(|bound| bound.is_satisfied_by(type_name))
+        self.bounds
+            .iter()
+            .all(|bound| bound.is_satisfied_by(type_name))
     }
 }
 
@@ -448,8 +493,7 @@ impl IntrinsicSignature {
         }
 
         // Second pass: validate argument types
-        for (i, (param_type, arg_type)) in
-            self.param_types.iter().zip(arg_types.iter()).enumerate()
+        for (i, (param_type, arg_type)) in self.param_types.iter().zip(arg_types.iter()).enumerate()
         {
             if !param_type.matches(arg_type, &bindings) {
                 return Err(SignatureError::WrongArgType {
@@ -512,8 +556,8 @@ fn build_signature_registry() -> HashMap<&'static str, IntrinsicSignature> {
             vec![TypeParam::new("T", vec![ProtocolBound::Atomic])],
             vec![
                 IntrinsicType::mut_ptr(IntrinsicType::param("T")),
-                IntrinsicType::param("T"), // expected
-                IntrinsicType::param("T"), // desired
+                IntrinsicType::param("T"),     // expected
+                IntrinsicType::param("T"),     // desired
                 IntrinsicType::concrete("U8"), // success ordering
                 IntrinsicType::concrete("U8"), // failure ordering
             ],
@@ -542,7 +586,10 @@ fn build_signature_registry() -> HashMap<&'static str, IntrinsicSignature> {
         "atomic_fetch_add",
         IntrinsicSignature::new(
             "atomic_fetch_add",
-            vec![TypeParam::new("T", vec![ProtocolBound::Atomic, ProtocolBound::Integer])],
+            vec![TypeParam::new(
+                "T",
+                vec![ProtocolBound::Atomic, ProtocolBound::Integer],
+            )],
             vec![
                 IntrinsicType::mut_ptr(IntrinsicType::param("T")),
                 IntrinsicType::param("T"),
@@ -556,7 +603,10 @@ fn build_signature_registry() -> HashMap<&'static str, IntrinsicSignature> {
         "atomic_fetch_sub",
         IntrinsicSignature::new(
             "atomic_fetch_sub",
-            vec![TypeParam::new("T", vec![ProtocolBound::Atomic, ProtocolBound::Integer])],
+            vec![TypeParam::new(
+                "T",
+                vec![ProtocolBound::Atomic, ProtocolBound::Integer],
+            )],
             vec![
                 IntrinsicType::mut_ptr(IntrinsicType::param("T")),
                 IntrinsicType::param("T"),
@@ -609,9 +659,23 @@ fn build_signature_registry() -> HashMap<&'static str, IntrinsicSignature> {
 
     // === Float Math (F64) ===
     for name in [
-        "sqrt_f64", "sin_f64", "cos_f64", "tan_f64", "asin_f64", "acos_f64", "atan_f64",
-        "exp_f64", "log_f64", "log10_f64", "log2_f64", "floor_f64", "ceil_f64",
-        "round_f64", "trunc_f64", "abs_f64", "cbrt_f64",
+        "sqrt_f64",
+        "sin_f64",
+        "cos_f64",
+        "tan_f64",
+        "asin_f64",
+        "acos_f64",
+        "atan_f64",
+        "exp_f64",
+        "log_f64",
+        "log10_f64",
+        "log2_f64",
+        "floor_f64",
+        "ceil_f64",
+        "round_f64",
+        "trunc_f64",
+        "abs_f64",
+        "cbrt_f64",
     ] {
         registry.insert(
             name,
@@ -631,7 +695,10 @@ fn build_signature_registry() -> HashMap<&'static str, IntrinsicSignature> {
             IntrinsicSignature::new(
                 name,
                 vec![],
-                vec![IntrinsicType::concrete("F64"), IntrinsicType::concrete("F64")],
+                vec![
+                    IntrinsicType::concrete("F64"),
+                    IntrinsicType::concrete("F64"),
+                ],
                 IntrinsicType::concrete("F64"),
             ),
         );
@@ -654,7 +721,11 @@ fn build_signature_registry() -> HashMap<&'static str, IntrinsicSignature> {
 
     // === Float Math (F32) ===
     for name in [
-        "sqrt_f32", "floor_f32", "ceil_f32", "round_f32", "trunc_f32",
+        "sqrt_f32",
+        "floor_f32",
+        "ceil_f32",
+        "round_f32",
+        "trunc_f32",
     ] {
         registry.insert(
             name,
@@ -798,12 +869,7 @@ fn build_signature_registry() -> HashMap<&'static str, IntrinsicSignature> {
     // Advance the global CBGR epoch (synchronization point)
     registry.insert(
         "cbgr_advance_epoch",
-        IntrinsicSignature::new(
-            "cbgr_advance_epoch",
-            vec![],
-            vec![],
-            IntrinsicType::Unit,
-        ),
+        IntrinsicSignature::new("cbgr_advance_epoch", vec![], vec![], IntrinsicType::Unit),
     );
 
     // Get the generation counter from an allocation header
@@ -929,7 +995,10 @@ mod tests {
         let args = vec!["*const U64".to_string()]; // Missing ordering
 
         match sig.validate_args(&args, &HashMap::new()) {
-            Err(SignatureError::WrongArgCount { expected: 2, actual: 1 }) => {}
+            Err(SignatureError::WrongArgCount {
+                expected: 2,
+                actual: 1,
+            }) => {}
             other => panic!("Expected WrongArgCount, got {:?}", other),
         }
     }

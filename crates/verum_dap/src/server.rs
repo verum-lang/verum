@@ -61,18 +61,13 @@ fn read_message(reader: &mut impl BufRead) -> io::Result<Option<Request>> {
     let mut body = vec![0u8; length];
     reader.read_exact(&mut body)?;
 
-    let body_str = String::from_utf8(body).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("Invalid UTF-8: {}", e))
-    })?;
+    let body_str = String::from_utf8(body)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Invalid UTF-8: {}", e)))?;
 
     tracing::debug!("DAP recv: {}", body_str);
 
-    let request: Request = serde_json::from_str(&body_str).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Invalid JSON: {}", e),
-        )
-    })?;
+    let request: Request = serde_json::from_str(&body_str)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Invalid JSON: {}", e)))?;
 
     Ok(Some(request))
 }
@@ -99,11 +94,17 @@ fn write_message(writer: &mut impl Write, message: &serde_json::Value) -> io::Re
 /// Writes a Response as a DAP message.
 fn write_response(writer: &mut impl Write, response: &Response) -> io::Result<()> {
     let mut value = serde_json::to_value(response).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("Serialize error: {}", e))
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Serialize error: {}", e),
+        )
     })?;
     // Inject the "type" field since Response doesn't have it as a struct field.
     if let serde_json::Value::Object(ref mut map) = value {
-        map.insert("type".to_string(), serde_json::Value::String("response".to_string()));
+        map.insert(
+            "type".to_string(),
+            serde_json::Value::String("response".to_string()),
+        );
     }
     write_message(writer, &value)
 }
@@ -111,11 +112,17 @@ fn write_response(writer: &mut impl Write, response: &Response) -> io::Result<()
 /// Writes an Event as a DAP message.
 fn write_event(writer: &mut impl Write, event: &Event) -> io::Result<()> {
     let mut value = serde_json::to_value(event).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("Serialize error: {}", e))
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Serialize error: {}", e),
+        )
     })?;
     // Inject the "type" field.
     if let serde_json::Value::Object(ref mut map) = value {
-        map.insert("type".to_string(), serde_json::Value::String("event".to_string()));
+        map.insert(
+            "type".to_string(),
+            serde_json::Value::String("event".to_string()),
+        );
     }
     write_message(writer, &value)
 }
@@ -125,10 +132,7 @@ fn write_event(writer: &mut impl Write, event: &Event) -> io::Result<()> {
 // ============================================================================
 
 /// Runs the DAP event loop over a reader/writer pair.
-fn run_event_loop(
-    reader: &mut impl BufRead,
-    writer: &mut impl Write,
-) -> io::Result<()> {
+fn run_event_loop(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<()> {
     let mut adapter = DebugAdapter::new();
 
     loop {

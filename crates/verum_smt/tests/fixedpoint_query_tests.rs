@@ -18,8 +18,8 @@
 //! These tests verify that the fixed-point engine can correctly answer
 //! queries about derivable facts using Datalog rules.
 
-use verum_smt::fixedpoint::{Atom, DatalogSolver};
 use verum_common::{List, Text};
+use verum_smt::fixedpoint::{Atom, DatalogSolver};
 use z3::{Context, Sort, ast::Int};
 
 #[test]

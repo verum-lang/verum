@@ -68,15 +68,15 @@
 //! ```
 
 use crate::mlir::error::{MlirError, Result};
-use crate::mlir::jit::{JitEngine, JitConfig, CompiledFunction};
+use crate::mlir::jit::{CompiledFunction, JitConfig, JitEngine};
 use dashmap::DashMap;
-use verum_mlir::ir::Module;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicBool, AtomicPtr, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 use verum_common::Text;
+use verum_mlir::ir::Module;
 
 // ============================================================================
 // Hot Reload Configuration
@@ -149,9 +149,7 @@ impl HotReloadConfig {
 
     /// Create development configuration.
     pub fn development() -> Self {
-        Self::new()
-            .verbose(true)
-            .version_history(10)
+        Self::new().verbose(true).version_history(10)
     }
 
     /// Create production configuration (stricter).
@@ -204,12 +202,7 @@ unsafe impl Sync for FunctionVersion {}
 
 impl FunctionVersion {
     /// Create a new function version.
-    pub fn new(
-        version: u64,
-        address: *mut (),
-        signature_hash: u64,
-        source_hash: [u8; 32],
-    ) -> Self {
+    pub fn new(version: u64, address: *mut (), signature_hash: u64, source_hash: [u8; 32]) -> Self {
         Self {
             version,
             address,
@@ -272,10 +265,17 @@ impl HotFunction {
     ///
 
     /// The address must point to valid JIT-compiled code.
-    pub unsafe fn new(name: impl Into<Text>, initial_address: *mut (), signature_hash: u64) -> Self {
+    pub unsafe fn new(
+        name: impl Into<Text>,
+        initial_address: *mut (),
+        signature_hash: u64,
+    ) -> Self {
         let version = FunctionVersion::new(0, initial_address, signature_hash, [0u8; 32]);
         let mut versions = Vec::with_capacity(5);
-        versions.push(FunctionVersion { active: true, ..version });
+        versions.push(FunctionVersion {
+            active: true,
+            ..version
+        });
 
         Self {
             name: name.into(),
@@ -306,14 +306,18 @@ impl HotFunction {
     ///
 
     /// The new address must point to valid JIT-compiled code.
-    pub unsafe fn replace(&mut self, new_address: *mut (), signature_hash: u64, source_hash: [u8; 32]) -> Result<()> {
+    pub unsafe fn replace(
+        &mut self,
+        new_address: *mut (),
+        signature_hash: u64,
+        source_hash: [u8; 32],
+    ) -> Result<()> {
         // Mark as replacing
-        if self.replacing.compare_exchange(
-            false,
-            true,
-            Ordering::SeqCst,
-            Ordering::Relaxed,
-        ).is_err() {
+        if self
+            .replacing
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+            .is_err()
+        {
             return Err(MlirError::HotCodeError {
                 message: Text::from("Function is already being replaced"),
             });
@@ -391,7 +395,10 @@ impl HotFunction {
 
     /// Rollback to specific version.
     pub fn rollback_to(&mut self, version: u64) -> Result<()> {
-        let index = self.versions.iter().position(|v| v.version == version)
+        let index = self
+            .versions
+            .iter()
+            .position(|v| v.version == version)
             .ok_or_else(|| MlirError::HotCodeError {
                 message: Text::from(format!("Version {} not found", version)),
             })?;
@@ -578,7 +585,9 @@ impl HotReloader {
         let hot_fn = unsafe { HotFunction::new(name.clone(), address, signature_hash) };
 
         self.functions.insert(name, Arc::new(RwLock::new(hot_fn)));
-        self.stats.functions_registered.fetch_add(1, Ordering::Relaxed);
+        self.stats
+            .functions_registered
+            .fetch_add(1, Ordering::Relaxed);
 
         Ok(())
     }
@@ -631,18 +640,25 @@ impl HotReloader {
         let start = instant::Instant::now();
 
         let name_text = Text::from(name);
-        let hot_fn = self.functions.get(&name_text).ok_or_else(|| MlirError::HotCodeError {
-            message: Text::from(format!("Function '{}' not registered", name)),
-        })?;
+        let hot_fn = self
+            .functions
+            .get(&name_text)
+            .ok_or_else(|| MlirError::HotCodeError {
+                message: Text::from(format!("Function '{}' not registered", name)),
+            })?;
 
         // Validate signature if enabled
         if self.config.validate_signatures {
             let current = hot_fn.read();
             if let Some(current_ver) = current.versions.last() {
                 if current_ver.signature_hash != signature_hash {
-                    self.stats.validation_failures.fetch_add(1, Ordering::Relaxed);
+                    self.stats
+                        .validation_failures
+                        .fetch_add(1, Ordering::Relaxed);
                     return Err(MlirError::HotCodeError {
-                        message: Text::from("Signature mismatch - function parameters or return type changed"),
+                        message: Text::from(
+                            "Signature mismatch - function parameters or return type changed",
+                        ),
                     });
                 }
             }
@@ -651,7 +667,9 @@ impl HotReloader {
         // Perform replacement
         let mut hot_fn = hot_fn.write();
         // SAFETY: Caller guarantees new_address points to valid JIT-compiled code
-        unsafe { hot_fn.replace(new_address, signature_hash, source_hash)?; }
+        unsafe {
+            hot_fn.replace(new_address, signature_hash, source_hash)?;
+        }
 
         // Prune old versions
         hot_fn.prune(self.config.version_history);
@@ -660,7 +678,9 @@ impl HotReloader {
         let elapsed = start.elapsed();
         let elapsed_us = elapsed.as_micros() as u64;
         self.stats.replacements.fetch_add(1, Ordering::Relaxed);
-        self.stats.total_replacement_time_us.fetch_add(elapsed_us, Ordering::Relaxed);
+        self.stats
+            .total_replacement_time_us
+            .fetch_add(elapsed_us, Ordering::Relaxed);
 
         // Honour `HotReloadConfig.max_replacement_time_us` budget:
         // a replacement that exceeds the configured ceiling is
@@ -694,9 +714,12 @@ impl HotReloader {
     /// Rollback a function to previous version.
     pub fn rollback(&self, name: &str) -> Result<()> {
         let name_text = Text::from(name);
-        let hot_fn = self.functions.get(&name_text).ok_or_else(|| MlirError::HotCodeError {
-            message: Text::from(format!("Function '{}' not registered", name)),
-        })?;
+        let hot_fn = self
+            .functions
+            .get(&name_text)
+            .ok_or_else(|| MlirError::HotCodeError {
+                message: Text::from(format!("Function '{}' not registered", name)),
+            })?;
 
         let mut hot_fn = hot_fn.write();
         hot_fn.rollback()?;
@@ -704,7 +727,11 @@ impl HotReloader {
         self.stats.rollbacks.fetch_add(1, Ordering::Relaxed);
 
         if self.config.verbose {
-            tracing::info!("Rolled back function '{}' to v{}", name, hot_fn.current_version);
+            tracing::info!(
+                "Rolled back function '{}' to v{}",
+                name,
+                hot_fn.current_version
+            );
         }
 
         Ok(())
@@ -713,9 +740,12 @@ impl HotReloader {
     /// Rollback a function to specific version.
     pub fn rollback_to(&self, name: &str, version: u64) -> Result<()> {
         let name_text = Text::from(name);
-        let hot_fn = self.functions.get(&name_text).ok_or_else(|| MlirError::HotCodeError {
-            message: Text::from(format!("Function '{}' not registered", name)),
-        })?;
+        let hot_fn = self
+            .functions
+            .get(&name_text)
+            .ok_or_else(|| MlirError::HotCodeError {
+                message: Text::from(format!("Function '{}' not registered", name)),
+            })?;
 
         let mut hot_fn = hot_fn.write();
         hot_fn.rollback_to(version)?;
@@ -892,9 +922,7 @@ impl HotReloader {
         // — the migration list is bounded by `version_history` so
         // O(N²) is acceptable for the typical N ≤ 5.
         while current < to_version {
-            let next = migrations
-                .iter()
-                .find(|m| m.from_version == current)?;
+            let next = migrations.iter().find(|m| m.from_version == current)?;
             state = (next.migrate)(&state);
             current = next.to_version;
         }
@@ -979,8 +1007,7 @@ mod tests {
     #[test]
     fn register_migration_succeeds_when_enabled() {
         let reloader = HotReloader::new(HotReloadConfig::default());
-        let result =
-            reloader.register_migration("fn1", 1, 2, |bytes| bytes.to_vec());
+        let result = reloader.register_migration("fn1", 1, 2, |bytes| bytes.to_vec());
         assert!(
             result.is_ok(),
             "registration should succeed under default enable_migration=true"
@@ -993,8 +1020,7 @@ mod tests {
         config.enable_migration = false;
         let reloader = HotReloader::new(config);
 
-        let result =
-            reloader.register_migration("fn1", 1, 2, |bytes| bytes.to_vec());
+        let result = reloader.register_migration("fn1", 1, 2, |bytes| bytes.to_vec());
         match result {
             Err(MlirError::HotCodeError { message }) => {
                 assert!(
@@ -1086,7 +1112,9 @@ mod tests {
         let stats = HotReloadStats::new();
 
         stats.replacements.fetch_add(5, Ordering::Relaxed);
-        stats.total_replacement_time_us.fetch_add(1000, Ordering::Relaxed);
+        stats
+            .total_replacement_time_us
+            .fetch_add(1000, Ordering::Relaxed);
 
         assert_eq!(stats.avg_replacement_time_us(), 200.0);
     }
@@ -1176,8 +1204,7 @@ mod tests {
         // Pin: `enable_migration = false` short-circuits to None
         // even for would-be-valid chains. Mirrors the
         // registration-time gate at `register_migration`.
-        let cfg = HotReloadConfig::new()
-            .enable_migration(false);
+        let cfg = HotReloadConfig::new().enable_migration(false);
         let reloader = HotReloader::new(cfg);
         // register_migration would itself error here, but pin
         // the chain-application gate independently by calling

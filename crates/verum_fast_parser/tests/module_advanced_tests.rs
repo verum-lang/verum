@@ -26,8 +26,8 @@
 
 use verum_ast::decl::{MountDecl, MountTreeKind, Visibility};
 use verum_ast::{FileId, ItemKind, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse_module(source: &str) -> Module {
     let file_id = FileId::new(0);
@@ -129,12 +129,10 @@ fn test_mount_group_basic() {
     let source = "mount collections.{List, Map, Set};";
     let item = parse_first_item(source);
     match item {
-        ItemKind::Mount(mount) => {
-            match &mount.tree.kind {
-                MountTreeKind::Nested { .. } => {}
-                _ => panic!("Expected Nested mount, got {:?}", mount.tree.kind),
-            }
-        }
+        ItemKind::Mount(mount) => match &mount.tree.kind {
+            MountTreeKind::Nested { .. } => {}
+            _ => panic!("Expected Nested mount, got {:?}", mount.tree.kind),
+        },
         _ => panic!("Expected Mount item"),
     }
 }
@@ -168,12 +166,10 @@ fn test_mount_wildcard_basic() {
     let source = "mount std.prelude.*;";
     let item = parse_first_item(source);
     match item {
-        ItemKind::Mount(mount) => {
-            match &mount.tree.kind {
-                MountTreeKind::Glob(_) => {}
-                _ => panic!("Expected Glob mount, got {:?}", mount.tree.kind),
-            }
-        }
+        ItemKind::Mount(mount) => match &mount.tree.kind {
+            MountTreeKind::Glob(_) => {}
+            _ => panic!("Expected Glob mount, got {:?}", mount.tree.kind),
+        },
         _ => panic!("Expected Mount item"),
     }
 }

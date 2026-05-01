@@ -80,7 +80,10 @@ fn idempotent_on_implement_block() {
 
 #[test]
 fn idempotent_on_mount_with_alias() {
-    assert_idempotent("mount alias", "mount stdlib.collections.list as l;\n\nfn main() {}\n");
+    assert_idempotent(
+        "mount alias",
+        "mount stdlib.collections.list as l;\n\nfn main() {}\n",
+    );
 }
 
 #[test]
@@ -97,10 +100,7 @@ fn idempotent_on_excessive_blank_lines() {
     // fixed point. The input has many blanks; the formatter
     // collapses to at most one consecutive blank, and the second
     // pass sees the canonical form.
-    assert_idempotent(
-        "blanks",
-        "fn a() {}\n\n\n\n\nfn b() {}\n\n\n\nfn c() {}\n",
-    );
+    assert_idempotent("blanks", "fn a() {}\n\n\n\n\nfn b() {}\n\n\n\nfn c() {}\n");
 }
 
 #[test]

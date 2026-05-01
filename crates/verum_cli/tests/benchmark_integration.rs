@@ -21,11 +21,16 @@ fn run(args: &[&str]) -> Output {
 #[test]
 fn run_single_system_smoke() {
     let out = run(&[
-        "benchmark", "run",
-        "--system", "verum",
-        "--suite-name", "test-suite",
-        "--theorem", "addnC",
-        "--theorem", "addn0",
+        "benchmark",
+        "run",
+        "--system",
+        "verum",
+        "--suite-name",
+        "test-suite",
+        "--theorem",
+        "addnC",
+        "--theorem",
+        "addn0",
     ]);
     assert!(
         out.status.success(),
@@ -39,11 +44,16 @@ fn run_single_system_smoke() {
 #[test]
 fn run_json_well_formed() {
     let out = run(&[
-        "benchmark", "run",
-        "--system", "coq",
-        "--suite-name", "test",
-        "--theorem", "thm1",
-        "--format", "json",
+        "benchmark",
+        "run",
+        "--system",
+        "coq",
+        "--suite-name",
+        "test",
+        "--theorem",
+        "thm1",
+        "--format",
+        "json",
     ]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
@@ -59,11 +69,16 @@ fn run_json_well_formed() {
 #[test]
 fn run_csv_format() {
     let out = run(&[
-        "benchmark", "run",
-        "--system", "verum",
-        "--suite-name", "s",
-        "--theorem", "t",
-        "--format", "csv",
+        "benchmark",
+        "run",
+        "--system",
+        "verum",
+        "--suite-name",
+        "s",
+        "--theorem",
+        "t",
+        "--format",
+        "csv",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -73,11 +88,16 @@ fn run_csv_format() {
 #[test]
 fn run_markdown_format() {
     let out = run(&[
-        "benchmark", "run",
-        "--system", "verum",
-        "--suite-name", "s",
-        "--theorem", "t",
-        "--format", "markdown",
+        "benchmark",
+        "run",
+        "--system",
+        "verum",
+        "--suite-name",
+        "s",
+        "--theorem",
+        "t",
+        "--format",
+        "markdown",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -92,10 +112,14 @@ fn run_markdown_format() {
 #[test]
 fn compare_default_runs_all_systems() {
     let out = run(&[
-        "benchmark", "compare",
-        "--suite-name", "s",
-        "--theorem", "t",
-        "--format", "json",
+        "benchmark",
+        "compare",
+        "--suite-name",
+        "s",
+        "--theorem",
+        "t",
+        "--format",
+        "json",
     ]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
@@ -110,12 +134,18 @@ fn compare_default_runs_all_systems() {
 #[test]
 fn compare_explicit_two_systems_includes_both() {
     let out = run(&[
-        "benchmark", "compare",
-        "--system", "verum",
-        "--system", "coq",
-        "--suite-name", "s",
-        "--theorem", "t",
-        "--format", "json",
+        "benchmark",
+        "compare",
+        "--system",
+        "verum",
+        "--system",
+        "coq",
+        "--suite-name",
+        "s",
+        "--theorem",
+        "t",
+        "--format",
+        "json",
     ]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
@@ -133,12 +163,18 @@ fn compare_explicit_two_systems_includes_both() {
 #[test]
 fn compare_markdown_emits_leader_marker() {
     let out = run(&[
-        "benchmark", "compare",
-        "--system", "verum",
-        "--system", "coq",
-        "--suite-name", "s",
-        "--theorem", "t",
-        "--format", "markdown",
+        "benchmark",
+        "compare",
+        "--system",
+        "verum",
+        "--system",
+        "coq",
+        "--suite-name",
+        "s",
+        "--theorem",
+        "t",
+        "--format",
+        "markdown",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -150,12 +186,18 @@ fn compare_markdown_emits_leader_marker() {
 #[test]
 fn compare_csv_lists_every_metric_x_system_pair() {
     let out = run(&[
-        "benchmark", "compare",
-        "--system", "verum",
-        "--system", "coq",
-        "--suite-name", "s",
-        "--theorem", "t",
-        "--format", "csv",
+        "benchmark",
+        "compare",
+        "--system",
+        "verum",
+        "--system",
+        "coq",
+        "--suite-name",
+        "s",
+        "--theorem",
+        "t",
+        "--format",
+        "csv",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -167,12 +209,18 @@ fn compare_csv_lists_every_metric_x_system_pair() {
 #[test]
 fn compare_verum_leads_kernel_loc() {
     let out = run(&[
-        "benchmark", "compare",
-        "--system", "verum",
-        "--system", "coq",
-        "--system", "lean4",
-        "--suite-name", "s",
-        "--format", "json",
+        "benchmark",
+        "compare",
+        "--system",
+        "verum",
+        "--system",
+        "coq",
+        "--system",
+        "lean4",
+        "--suite-name",
+        "s",
+        "--format",
+        "json",
     ]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
@@ -188,9 +236,12 @@ fn compare_verum_leads_kernel_loc() {
 #[test]
 fn compare_only_verum_leads_llm_acceptance() {
     let out = run(&[
-        "benchmark", "compare",
-        "--suite-name", "s",
-        "--format", "json",
+        "benchmark",
+        "compare",
+        "--suite-name",
+        "s",
+        "--format",
+        "json",
     ]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
@@ -245,30 +296,33 @@ fn metrics_csv() {
 #[test]
 fn run_rejects_unknown_system() {
     let out = run(&[
-        "benchmark", "run",
-        "--system", "garbage",
-        "--suite-name", "s",
+        "benchmark",
+        "run",
+        "--system",
+        "garbage",
+        "--suite-name",
+        "s",
     ]);
     assert!(!out.status.success());
 }
 
 #[test]
 fn run_rejects_empty_suite_name() {
-    let out = run(&[
-        "benchmark", "run",
-        "--system", "verum",
-        "--suite-name", "",
-    ]);
+    let out = run(&["benchmark", "run", "--system", "verum", "--suite-name", ""]);
     assert!(!out.status.success());
 }
 
 #[test]
 fn run_rejects_unknown_format() {
     let out = run(&[
-        "benchmark", "run",
-        "--system", "verum",
-        "--suite-name", "s",
-        "--format", "yaml",
+        "benchmark",
+        "run",
+        "--system",
+        "verum",
+        "--suite-name",
+        "s",
+        "--format",
+        "yaml",
     ]);
     assert!(!out.status.success());
 }
@@ -276,9 +330,12 @@ fn run_rejects_unknown_format() {
 #[test]
 fn compare_rejects_unknown_system() {
     let out = run(&[
-        "benchmark", "compare",
-        "--system", "garbage",
-        "--suite-name", "s",
+        "benchmark",
+        "compare",
+        "--system",
+        "garbage",
+        "--suite-name",
+        "s",
     ]);
     assert!(!out.status.success());
 }

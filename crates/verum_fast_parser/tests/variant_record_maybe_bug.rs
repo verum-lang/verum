@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_imports, unused_variables, unused_mut)]
 use verum_ast::{FileId, ItemKind, Module, TypeDeclBody};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse_module(source: &str) -> Result<Module, String> {
     let file_id = FileId::new(0);
@@ -26,7 +26,9 @@ fn repro_1_maybe_in_first_variant_record_no_leading_pipe() {
     "#;
     let r = parse_module(src);
     eprintln!("repro_1 result: {:?}", r.is_ok());
-    if let Err(e) = &r { eprintln!("{}", e); }
+    if let Err(e) = &r {
+        eprintln!("{}", e);
+    }
     assert!(r.is_ok(), "repro_1 should parse");
 }
 
@@ -79,7 +81,9 @@ fn repro_6_generic_in_tuple_variant_no_leading_pipe() {
     "#;
     let r = parse_module(src);
     eprintln!("repro_6 result: {:?}", r.is_ok());
-    if let Err(e) = &r { eprintln!("{}", e); }
+    if let Err(e) = &r {
+        eprintln!("{}", e);
+    }
     assert!(r.is_ok());
 }
 
@@ -92,6 +96,8 @@ fn repro_7_maybe_two_generic_args_in_record() {
     "#;
     let r = parse_module(src);
     eprintln!("repro_7 result: {:?}", r.is_ok());
-    if let Err(e) = &r { eprintln!("{}", e); }
+    if let Err(e) = &r {
+        eprintln!("{}", e);
+    }
     assert!(r.is_ok());
 }

@@ -1,19 +1,21 @@
 //! ML extended opcode handler for VBC interpreter dispatch.
 
-use crate::value::Value;
+use super::super::super::autodiff::GradMode as AutodiffGradMode;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
-use super::string_helpers::{extract_string, alloc_string_value};
-use super::super::super::autodiff::GradMode as AutodiffGradMode;
+use super::string_helpers::{alloc_string_value, extract_string};
+use crate::value::Value;
 
 /// Handler for MlExtended opcode (0xFD).
 ///
 
 /// This dispatches to ML operations based on the sub-opcode byte.
 /// Supports tokenizer, sampling, distributed training, and gradient operations.
-pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_ml_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     use crate::instruction::MlSubOpcode;
 
     let sub_op_byte = read_u8(state)?;
@@ -23,7 +25,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Forward-Mode Autodiff (JVP) Operations (0x66-0x67)
         // ====================================================================
-
         Some(MlSubOpcode::JvpBegin) => {
             let dst = read_reg(state)?;
             let _primals_reg = read_reg(state)?;
@@ -51,7 +52,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Custom Gradient Operations (0x68-0x6A)
         // ====================================================================
-
         Some(MlSubOpcode::GradCustom) => {
             let dst = read_reg(state)?;
             let forward_fn_reg = read_reg(state)?;
@@ -89,7 +89,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Existing ML Operations (delegate to kernel dispatchers)
         // ====================================================================
-
         Some(MlSubOpcode::ZeroGrad) => {
             let _params_reg = read_reg(state)?;
 
@@ -118,7 +117,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Tokenizer Operations (0x00-0x06)
         // ====================================================================
-
         Some(MlSubOpcode::TokenizerLoadBpe) => {
             let dst = read_reg(state)?;
             let vocab_path_reg = read_reg(state)?;
@@ -127,7 +125,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             let vocab_path = extract_string(&state.get_reg(vocab_path_reg), state);
             let merges_path = extract_string(&state.get_reg(merges_path_reg), state);
 
-            if let Some(handle) = super::super::super::kernel::dispatch_tokenizer_load_bpe(&vocab_path, &merges_path) {
+            if let Some(handle) =
+                super::super::super::kernel::dispatch_tokenizer_load_bpe(&vocab_path, &merges_path)
+            {
                 let ptr = Box::into_raw(Box::new(handle));
                 state.set_reg(dst, Value::from_ptr(ptr));
             } else {
@@ -142,7 +142,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             let model_name = extract_string(&state.get_reg(model_name_reg), state);
 
-            if let Some(handle) = super::super::super::kernel::dispatch_tokenizer_load_pretrained(&model_name) {
+            if let Some(handle) =
+                super::super::super::kernel::dispatch_tokenizer_load_pretrained(&model_name)
+            {
                 let ptr = Box::into_raw(Box::new(handle));
                 state.set_reg(dst, Value::from_ptr(ptr));
             } else {
@@ -157,15 +159,22 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             let text_reg = read_reg(state)?;
 
             let tok_val = state.get_reg(tokenizer_reg);
-            let tok_ptr = tok_val.as_ptr::<super::super::super::kernel::tokenizer::TokenizerHandle>();
+            let tok_ptr =
+                tok_val.as_ptr::<super::super::super::kernel::tokenizer::TokenizerHandle>();
             let text = extract_string(&state.get_reg(text_reg), state);
 
             if !tok_ptr.is_null() {
                 let tok = unsafe { &*tok_ptr };
-                if let Some(tokens) = super::super::super::kernel::dispatch_tokenizer_encode(tok, &text) {
+                if let Some(tokens) =
+                    super::super::super::kernel::dispatch_tokenizer_encode(tok, &text)
+                {
                     // Store token array as a tensor of u32 values
                     let floats: Vec<f64> = tokens.iter().map(|&t| t as f64).collect();
-                    if let Some(tensor) = super::super::super::tensor::tensor_from_slice(&floats, &[floats.len()], super::super::super::tensor::DType::F64) {
+                    if let Some(tensor) = super::super::super::tensor::tensor_from_slice(
+                        &floats,
+                        &[floats.len()],
+                        super::super::super::tensor::DType::F64,
+                    ) {
                         let ptr = Box::into_raw(Box::new(tensor));
                         state.set_reg(dst, Value::from_ptr(ptr));
                     } else {
@@ -186,9 +195,11 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             let tokens_reg = read_reg(state)?;
 
             let tok_val = state.get_reg(tokenizer_reg);
-            let tok_ptr = tok_val.as_ptr::<super::super::super::kernel::tokenizer::TokenizerHandle>();
+            let tok_ptr =
+                tok_val.as_ptr::<super::super::super::kernel::tokenizer::TokenizerHandle>();
             let tokens_val = state.get_reg(tokens_reg);
-            let tokens_tensor_ptr = tokens_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tokens_tensor_ptr =
+                tokens_val.as_ptr::<super::super::super::tensor::TensorHandle>();
 
             if !tok_ptr.is_null() && !tokens_tensor_ptr.is_null() {
                 let tok = unsafe { &*tok_ptr };
@@ -200,7 +211,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
                 for i in 0..n {
                     tokens.push(unsafe { *data_ptr.add(i) } as u32);
                 }
-                if let Some(text) = super::super::super::kernel::dispatch_tokenizer_decode(tok, &tokens) {
+                if let Some(text) =
+                    super::super::super::kernel::dispatch_tokenizer_decode(tok, &tokens)
+                {
                     let val = alloc_string_value(state, &text)?;
                     state.set_reg(dst, val);
                 } else {
@@ -218,7 +231,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             let model_path = extract_string(&state.get_reg(model_path_reg), state);
 
-            if let Some(handle) = super::super::super::kernel::dispatch_tokenizer_load_spm(&model_path) {
+            if let Some(handle) =
+                super::super::super::kernel::dispatch_tokenizer_load_spm(&model_path)
+            {
                 let ptr = Box::into_raw(Box::new(handle));
                 state.set_reg(dst, Value::from_ptr(ptr));
             } else {
@@ -233,14 +248,21 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             let text_reg = read_reg(state)?;
 
             let tok_val = state.get_reg(tokenizer_reg);
-            let tok_ptr = tok_val.as_ptr::<super::super::super::kernel::tokenizer::TokenizerHandle>();
+            let tok_ptr =
+                tok_val.as_ptr::<super::super::super::kernel::tokenizer::TokenizerHandle>();
             let text = extract_string(&state.get_reg(text_reg), state);
 
             if !tok_ptr.is_null() {
                 let tok = unsafe { &*tok_ptr };
-                if let Some(tokens) = super::super::super::kernel::dispatch_tokenizer_spm_encode(tok, &text) {
+                if let Some(tokens) =
+                    super::super::super::kernel::dispatch_tokenizer_spm_encode(tok, &text)
+                {
                     let floats: Vec<f64> = tokens.iter().map(|&t| t as f64).collect();
-                    if let Some(tensor) = super::super::super::tensor::tensor_from_slice(&floats, &[floats.len()], super::super::super::tensor::DType::F64) {
+                    if let Some(tensor) = super::super::super::tensor::tensor_from_slice(
+                        &floats,
+                        &[floats.len()],
+                        super::super::super::tensor::DType::F64,
+                    ) {
                         let ptr = Box::into_raw(Box::new(tensor));
                         state.set_reg(dst, Value::from_ptr(ptr));
                     } else {
@@ -261,9 +283,11 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             let tokens_reg = read_reg(state)?;
 
             let tok_val = state.get_reg(tokenizer_reg);
-            let tok_ptr = tok_val.as_ptr::<super::super::super::kernel::tokenizer::TokenizerHandle>();
+            let tok_ptr =
+                tok_val.as_ptr::<super::super::super::kernel::tokenizer::TokenizerHandle>();
             let tokens_val = state.get_reg(tokens_reg);
-            let tokens_tensor_ptr = tokens_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tokens_tensor_ptr =
+                tokens_val.as_ptr::<super::super::super::tensor::TensorHandle>();
 
             if !tok_ptr.is_null() && !tokens_tensor_ptr.is_null() {
                 let tok = unsafe { &*tok_ptr };
@@ -274,7 +298,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
                 for i in 0..n {
                     tokens.push(unsafe { *data_ptr.add(i) } as u32);
                 }
-                if let Some(text) = super::super::super::kernel::dispatch_tokenizer_spm_decode(tok, &tokens) {
+                if let Some(text) =
+                    super::super::super::kernel::dispatch_tokenizer_spm_decode(tok, &tokens)
+                {
                     let val = alloc_string_value(state, &text)?;
                     state.set_reg(dst, val);
                 } else {
@@ -289,7 +315,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Sampling Operations (0x10-0x15)
         // ====================================================================
-
         Some(MlSubOpcode::SampleTopP) => {
             let dst = read_reg(state)?;
             let logits_reg = read_reg(state)?;
@@ -323,7 +348,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             if !logits_ptr.is_null() {
                 let logits = unsafe { &*logits_ptr };
-                if let Some(token) = super::super::super::kernel::dispatch_sample_temperature(logits, temperature) {
+                if let Some(token) =
+                    super::super::super::kernel::dispatch_sample_temperature(logits, temperature)
+                {
                     state.set_reg(dst, Value::from_i64(token as i64));
                 } else {
                     state.set_reg(dst, Value::nil());
@@ -353,7 +380,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
                 let q = unsafe { &*q_ptr };
                 let kv = unsafe { &*kv_ptr };
                 let bt = unsafe { &*bt_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_paged_attention(q, kv, bt, context_len) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_paged_attention(q, kv, bt, context_len)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -400,7 +429,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             if !logits_ptr.is_null() {
                 let logits = unsafe { &*logits_ptr };
-                if let Some(token) = super::super::super::kernel::dispatch_sample_top_k_top_p(logits, k, p) {
+                if let Some(token) =
+                    super::super::super::kernel::dispatch_sample_top_k_top_p(logits, k, p)
+                {
                     state.set_reg(dst, Value::from_i64(token as i64));
                 } else {
                     state.set_reg(dst, Value::nil());
@@ -426,7 +457,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             if !logits_ptr.is_null() && !past_ptr.is_null() {
                 let logits = unsafe { &*logits_ptr };
                 let past = unsafe { &*past_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_repetition_penalty(logits, past, penalty) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_repetition_penalty(logits, past, penalty)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -441,13 +474,14 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Inference Utility Operations (0x20-0x28)
         // ====================================================================
-
         Some(MlSubOpcode::ParseToolCall) => {
             let dst = read_reg(state)?;
             let action_reg = read_reg(state)?;
 
             let action = extract_string(&state.get_reg(action_reg), state);
-            if let Some((name, args)) = super::super::super::kernel::dispatch_parse_tool_call(&action) {
+            if let Some((name, args)) =
+                super::super::super::kernel::dispatch_parse_tool_call(&action)
+            {
                 // Return as a string "{name}:{args}"
                 let result = format!("{}:{}", name, args);
                 let val = alloc_string_value(state, &result)?;
@@ -485,12 +519,18 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             let zp_val = state.get_reg(zero_point_reg);
             let zp_ptr = zp_val.as_ptr::<super::super::super::tensor::TensorHandle>();
 
-            if !input_ptr.is_null() && !weight_ptr.is_null() && !scale_ptr.is_null() && !zp_ptr.is_null() {
+            if !input_ptr.is_null()
+                && !weight_ptr.is_null()
+                && !scale_ptr.is_null()
+                && !zp_ptr.is_null()
+            {
                 let input = unsafe { &*input_ptr };
                 let weight = unsafe { &*weight_ptr };
                 let scale = unsafe { &*scale_ptr };
                 let zp = unsafe { &*zp_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_quantized_matmul(input, weight, scale, zp) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_quantized_matmul(input, weight, scale, zp)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -538,7 +578,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             let response_reg = read_reg(state)?;
 
             let response = extract_string(&state.get_reg(response_reg), state);
-            if let Some(calls) = super::super::super::kernel::dispatch_parse_function_calls(&response) {
+            if let Some(calls) =
+                super::super::super::kernel::dispatch_parse_function_calls(&response)
+            {
                 // Return count of parsed calls as int
                 state.set_reg(dst, Value::from_i64(calls.len() as i64));
             } else {
@@ -571,7 +613,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             if !draft_ptr.is_null() && !target_ptr.is_null() {
                 let draft = unsafe { &*draft_ptr };
                 let target = unsafe { &*target_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_speculative_verify(draft, target) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_speculative_verify(draft, target)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -586,7 +630,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Distributed/Collective Operations (0x30-0x3A)
         // ====================================================================
-
         Some(MlSubOpcode::AllReduce) => {
             let dst = read_reg(state)?;
             let tensor_reg = read_reg(state)?;
@@ -601,8 +644,11 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             if !tensor_ptr.is_null() && !group_ptr.is_null() {
                 let tensor = unsafe { &*tensor_ptr };
                 let group = unsafe { &*group_ptr };
-                let op = super::super::super::kernel::ReduceOp::from_u8(op_byte).unwrap_or(super::super::super::kernel::ReduceOp::Sum);
-                if let Some(result) = super::super::super::kernel::dispatch_all_reduce(tensor, group, op) {
+                let op = super::super::super::kernel::ReduceOp::from_u8(op_byte)
+                    .unwrap_or(super::super::super::kernel::ReduceOp::Sum);
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_all_reduce(tensor, group, op)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -627,7 +673,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             if !tensor_ptr.is_null() && !group_ptr.is_null() {
                 let tensor = unsafe { &*tensor_ptr };
                 let group = unsafe { &*group_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_all_gather(tensor, group) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_all_gather(tensor, group)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -654,7 +702,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             if !tensor_ptr.is_null() && !group_ptr.is_null() {
                 let tensor = unsafe { &*tensor_ptr };
                 let group = unsafe { &*group_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_broadcast(tensor, src_rank, group) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_broadcast(tensor, src_rank, group)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -680,8 +730,11 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             if !tensor_ptr.is_null() && !group_ptr.is_null() {
                 let tensor = unsafe { &*tensor_ptr };
                 let group = unsafe { &*group_ptr };
-                let op = super::super::super::kernel::ReduceOp::from_u8(op_byte).unwrap_or(super::super::super::kernel::ReduceOp::Sum);
-                if let Some(result) = super::super::super::kernel::dispatch_reduce_scatter(tensor, group, op) {
+                let op = super::super::super::kernel::ReduceOp::from_u8(op_byte)
+                    .unwrap_or(super::super::super::kernel::ReduceOp::Sum);
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_reduce_scatter(tensor, group, op)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -717,7 +770,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             if !tensor_ptr.is_null() {
                 let tensor = unsafe { &*tensor_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_pmap_psum(tensor, &axis_name) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_pmap_psum(tensor, &axis_name)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -740,7 +795,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             if !tensor_ptr.is_null() {
                 let tensor = unsafe { &*tensor_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_pmap_pmean(tensor, &axis_name) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_pmap_pmean(tensor, &axis_name)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -763,7 +820,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             if !tensor_ptr.is_null() {
                 let tensor = unsafe { &*tensor_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_pmap_pmax(tensor, &axis_name) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_pmap_pmax(tensor, &axis_name)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -786,7 +845,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             if !tensor_ptr.is_null() {
                 let tensor = unsafe { &*tensor_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_pmap_all_gather(tensor, &axis_name) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_pmap_all_gather(tensor, &axis_name)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -831,7 +892,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Process Group Operations (0x40-0x44)
         // ====================================================================
-
         Some(MlSubOpcode::DistWorldGroup) => {
             let dst = read_reg(state)?;
 
@@ -905,7 +965,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Point-to-Point Operations (0x50-0x54)
         // ====================================================================
-
         Some(MlSubOpcode::P2PSend) => {
             let tensor_reg = read_reg(state)?;
             let dst_rank_reg = read_reg(state)?;
@@ -936,7 +995,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             if !group_ptr.is_null() {
                 let group = unsafe { &*group_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_p2p_recv(src_rank, group) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_p2p_recv(src_rank, group)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -963,7 +1024,8 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
             if !tensor_ptr.is_null() && !group_ptr.is_null() {
                 let tensor = unsafe { &*tensor_ptr };
                 let group = unsafe { &*group_ptr };
-                let handle_id = super::super::super::kernel::dispatch_p2p_isend(tensor, dst_rank, group);
+                let handle_id =
+                    super::super::super::kernel::dispatch_p2p_isend(tensor, dst_rank, group);
                 state.set_reg(handle_dst, Value::from_i64(handle_id as i64));
             } else {
                 state.set_reg(handle_dst, Value::from_i64(0));
@@ -983,7 +1045,8 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             if !group_ptr.is_null() {
                 let group = unsafe { &*group_ptr };
-                let (handle_id, maybe_tensor) = super::super::super::kernel::dispatch_p2p_irecv(src_rank, group);
+                let (handle_id, maybe_tensor) =
+                    super::super::super::kernel::dispatch_p2p_irecv(src_rank, group);
                 state.set_reg(handle_dst, Value::from_i64(handle_id as i64));
                 if let Some(tensor) = maybe_tensor {
                     let ptr = Box::into_raw(Box::new(tensor));
@@ -1009,7 +1072,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Gradient Operations (0x60-0x63) — remaining ones
         // ====================================================================
-
         Some(MlSubOpcode::BucketGradients) => {
             let dst = read_reg(state)?;
             let gradients_reg = read_reg(state)?;
@@ -1072,7 +1134,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
 
             if !grad_ptr.is_null() {
                 let grad = unsafe { &*grad_ptr };
-                if let Some(result) = super::super::super::kernel::dispatch_module_backward(&(), grad) {
+                if let Some(result) =
+                    super::super::super::kernel::dispatch_module_backward(&(), grad)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -1087,7 +1151,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // Actor/Mesh Operations (0x70-0x73)
         // ====================================================================
-
         Some(MlSubOpcode::MeshSelect) => {
             let dst = read_reg(state)?;
             let mesh_reg = read_reg(state)?;
@@ -1104,7 +1167,9 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
                     let ct = unsafe { &*coords_ptr };
                     let n = ct.shape[0];
                     let dp = ct.data_ptr_f64();
-                    (0..n).map(|i| unsafe { *dp.add(i) } as usize).collect::<Vec<_>>()
+                    (0..n)
+                        .map(|i| unsafe { *dp.add(i) } as usize)
+                        .collect::<Vec<_>>()
                 } else {
                     vec![0]
                 };
@@ -1159,7 +1224,11 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
                 let mesh = unsafe { &*mesh_ptr };
                 let shape = super::super::super::kernel::dispatch_mesh_shape(mesh);
                 let floats: Vec<f64> = shape.iter().map(|&s| s as f64).collect();
-                if let Some(tensor) = super::super::super::tensor::tensor_from_slice(&floats, &[floats.len()], super::super::super::tensor::DType::F64) {
+                if let Some(tensor) = super::super::super::tensor::tensor_from_slice(
+                    &floats,
+                    &[floats.len()],
+                    super::super::super::tensor::DType::F64,
+                ) {
                     let ptr = Box::into_raw(Box::new(tensor));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -1174,7 +1243,6 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         // ====================================================================
         // RDMA Operations (0x80-0x83)
         // ====================================================================
-
         Some(MlSubOpcode::RdmaCreateRef) => {
             let dst = read_reg(state)?;
             let tensor_reg = read_reg(state)?;

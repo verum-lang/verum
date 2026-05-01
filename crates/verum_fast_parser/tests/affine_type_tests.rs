@@ -19,8 +19,8 @@
 // Affine/linear types: at-most-once (affine) or exactly-once (linear) usage guarantees
 
 use verum_ast::{ItemKind, ResourceModifier, TypeDecl, TypeDeclBody, span::FileId};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper to parse a type declaration from source code
 fn parse_type_decl(source: &str) -> Result<TypeDecl, String> {

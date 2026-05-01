@@ -39,8 +39,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
 use anyhow::Result;
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_common::{List, ToText};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 
 use super::mir_lowering::{
     BlockId, DominatorTree, LocalId, LoopInfo, MetadataKind, MirConstant, MirFunction, MirModule,
@@ -417,7 +417,7 @@ impl OptimizationPhase {
     ///
 
     /// Escape analysis: determines which references can be promoted from
-/// Tier 0 (~15ns managed) to Tier 1 (0ns compiler-proven safe).
+    /// Tier 0 (~15ns managed) to Tier 1 (0ns compiler-proven safe).
     /// SBGL analysis restricted to NoEscape references only (conservative).
     fn escape_analysis(&mut self, func: &MirFunction) -> EscapeAnalysisResult {
         tracing::debug!("Running escape analysis for function: {}", func.name);
@@ -772,7 +772,7 @@ impl OptimizationPhase {
 
     /// Typical elimination rate: 50-90% of checks
     /// CBGR check elimination: removes generation counter checks for
-/// references proven safe via escape analysis or SBGL.
+    /// references proven safe via escape analysis or SBGL.
     fn check_elimination(&mut self, func: &mut MirFunction, escape_info: &EscapeAnalysisResult) {
         tracing::debug!("Running check elimination for function: {}", func.name);
 
@@ -1458,10 +1458,7 @@ impl OptimizationPhase {
         vectorized: &VectorizedLoop,
     ) {
         // Find the loop header block
-        let header_idx = func
-            .blocks
-            .iter()
-            .position(|b| b.id == loop_region.header);
+        let header_idx = func.blocks.iter().position(|b| b.id == loop_region.header);
 
         if header_idx.is_none() {
             tracing::warn!(
@@ -2547,14 +2544,16 @@ mod tests {
     #[test]
     fn test_vectorization_blocker_variants() {
         // Ensure all variants can be created
-        let blockers = [VectorizationBlocker::LoopCarriedDependency,
+        let blockers = [
+            VectorizationBlocker::LoopCarriedDependency,
             VectorizationBlocker::UnalignedAccess,
             VectorizationBlocker::UnprovenBounds,
             VectorizationBlocker::PotentialAliasing,
             VectorizationBlocker::NonVectorizableOperation,
             VectorizationBlocker::NonVectorizableStatement,
             VectorizationBlocker::TooSmall,
-            VectorizationBlocker::ComplexControlFlow];
+            VectorizationBlocker::ComplexControlFlow,
+        ];
         assert_eq!(blockers.len(), 8);
     }
 

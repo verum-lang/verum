@@ -137,10 +137,7 @@ impl SecurityScanner {
     /// inert-defense gap traced in `enterprise.rs:213` (pre-fix the
     /// level landed on the manifest but `log_action` recorded every
     /// action regardless).
-    pub fn with_audit_level(
-        mut self,
-        level: super::enterprise::AuditLevel,
-    ) -> Self {
+    pub fn with_audit_level(mut self, level: super::enterprise::AuditLevel) -> Self {
         self.audit_level = level;
         self
     }
@@ -668,9 +665,11 @@ mod audit_persistence_tests {
         let mut s = SecurityScanner::new();
         let now = chrono::Utc::now().timestamp();
         // Old entry: 100 days ago — outside any reasonable window.
-        s.audit_log.push(entry_at(now - 100 * 86_400, AuditAction::Install));
+        s.audit_log
+            .push(entry_at(now - 100 * 86_400, AuditAction::Install));
         // Recent entry: 1 day ago — within a 30-day window.
-        s.audit_log.push(entry_at(now - 86_400, AuditAction::Update));
+        s.audit_log
+            .push(entry_at(now - 86_400, AuditAction::Update));
         let evicted = s.evict_older_than(30);
         assert_eq!(evicted, 1, "exactly one entry past the 30-day window");
         assert_eq!(s.audit_log.iter().count(), 1, "recent entry retained");
@@ -695,8 +694,8 @@ mod audit_level_filter_tests {
     //! Pre-fix `log_action` recorded every call regardless of the
     //! configured level; these tests pin the load-bearing filter
     //! installed via `SecurityScanner::with_audit_level`.
-    use super::*;
     use super::super::enterprise::AuditLevel;
+    use super::*;
 
     fn count_entries(s: &SecurityScanner) -> usize {
         s.audit_log.iter().count()
@@ -713,8 +712,7 @@ mod audit_level_filter_tests {
 
     #[test]
     fn changes_level_records_only_state_changing_actions() {
-        let mut s = SecurityScanner::new()
-            .with_audit_level(AuditLevel::Changes);
+        let mut s = SecurityScanner::new().with_audit_level(AuditLevel::Changes);
         s.log_action(AuditAction::Install, None, None, "a".into());
         s.log_action(AuditAction::Update, None, None, "b".into());
         s.log_action(AuditAction::Remove, None, None, "c".into());
@@ -723,19 +721,26 @@ mod audit_level_filter_tests {
         // Security-flavoured actions are filtered out.
         s.log_action(AuditAction::SecurityScan, None, None, "f".into());
         s.log_action(AuditAction::VulnerabilityFound, None, None, "g".into());
-        assert_eq!(count_entries(&s), 5, "5 change actions recorded; 2 security actions filtered");
+        assert_eq!(
+            count_entries(&s),
+            5,
+            "5 change actions recorded; 2 security actions filtered"
+        );
     }
 
     #[test]
     fn security_level_records_only_security_flavoured_actions() {
-        let mut s = SecurityScanner::new()
-            .with_audit_level(AuditLevel::Security);
+        let mut s = SecurityScanner::new().with_audit_level(AuditLevel::Security);
         s.log_action(AuditAction::Install, None, None, "a".into());
         s.log_action(AuditAction::Update, None, None, "b".into());
         // Security actions kept.
         s.log_action(AuditAction::SecurityScan, None, None, "c".into());
         s.log_action(AuditAction::VulnerabilityFound, None, None, "d".into());
-        assert_eq!(count_entries(&s), 2, "2 security actions recorded; 2 changes filtered");
+        assert_eq!(
+            count_entries(&s),
+            2,
+            "2 security actions recorded; 2 changes filtered"
+        );
     }
 
     #[test]

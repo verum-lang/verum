@@ -132,11 +132,7 @@ impl PolynomialMap {
 
     /// Returns the resulting polynomial in `d`, with coefficients
     /// `[f(x), f'(x), f''(x)/2!, ..., f^(k)(x)/k!]`.
-    pub fn evaluate_at_perturbation(
-        &self,
-        x: f64,
-        inf: Infinitesimal,
-    ) -> List<f64> {
+    pub fn evaluate_at_perturbation(&self, x: f64, inf: Infinitesimal) -> List<f64> {
         let mut result = vec![0.0; (inf.order as usize) + 1];
 
         // For each coefficient c_n of f, contribute c_n * (x + d)^n
@@ -199,11 +195,7 @@ fn binomial(n: usize, k: usize) -> u64 {
 /// `f'(x)` as computed both by the polynomial-derivative rule and
 /// by the SDG perturbation extraction. Returns true iff the two
 /// definitions agree to within `tolerance`.
-pub fn kock_lawvere_holds(
-    f: &PolynomialMap,
-    x: f64,
-    tolerance: f64,
-) -> bool {
+pub fn kock_lawvere_holds(f: &PolynomialMap, x: f64, tolerance: f64) -> bool {
     let classical = f.derivative_polynomial().evaluate(x);
     let synthetic = f.derivative_at(x);
     (classical - synthetic).abs() < tolerance
@@ -295,9 +287,13 @@ mod tests {
         for &x in &[0.0, 1.0, -2.5, 7.0] {
             let classical = fprime.evaluate(x);
             let synthetic = f.derivative_at(x);
-            assert!(approx_eq(classical, synthetic),
+            assert!(
+                approx_eq(classical, synthetic),
                 "disagreement at x={}: classical={}, synthetic={}",
-                x, classical, synthetic);
+                x,
+                classical,
+                synthetic
+            );
         }
     }
 
@@ -305,8 +301,11 @@ mod tests {
     fn kock_lawvere_holds_for_polynomial() {
         let f = PolynomialMap::new([1.0, -3.0, 2.0, 0.5]);
         for &x in &[-2.0, -0.5, 0.0, 1.0, 4.0] {
-            assert!(kock_lawvere_holds(&f, x, 1e-9),
-                "Kock-Lawvere violated at x={}", x);
+            assert!(
+                kock_lawvere_holds(&f, x, 1e-9),
+                "Kock-Lawvere violated at x={}",
+                x
+            );
         }
     }
 

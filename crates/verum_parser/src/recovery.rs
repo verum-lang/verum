@@ -51,10 +51,9 @@ use verum_syntax::SyntaxKind;
 
 // Re-export base recovery types from verum_fast_parser
 pub use verum_fast_parser::{
-    Delimiter, RecoveryContext, RecoveryStrategy, SyncPoint,
-    can_start_expression, can_start_item, can_start_statement, is_statement_terminator,
-    missing_token_message, unexpected_token_message,
-    ParseError,
+    Delimiter, ParseError, RecoveryContext, RecoveryStrategy, SyncPoint, can_start_expression,
+    can_start_item, can_start_statement, is_statement_terminator, missing_token_message,
+    unexpected_token_message,
 };
 
 // =============================================================================

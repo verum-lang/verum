@@ -222,23 +222,19 @@ impl VerificationLevel {
 
             // Static: proven → elide; failed or unattempted → runtime
             // fallback with warning.
-            (VerificationLevel::Static, ProofAttempt::Proven) => {
-                VerificationOutcome::ElideCheck
-            }
+            (VerificationLevel::Static, ProofAttempt::Proven) => VerificationOutcome::ElideCheck,
             (VerificationLevel::Static, ProofAttempt::Failed(reason)) => {
                 VerificationOutcome::FallbackWithWarning(reason)
             }
             (VerificationLevel::Static, ProofAttempt::Unattempted) => {
-                VerificationOutcome::FallbackWithWarning(
-                    Text::from("SMT not attempted (e.g. --no-smt)"),
-                )
+                VerificationOutcome::FallbackWithWarning(Text::from(
+                    "SMT not attempted (e.g. --no-smt)",
+                ))
             }
 
             // Proof: proven → elide; failed → hard error; unattempted
             // → hard error (Proof's whole contract is "must prove").
-            (VerificationLevel::Proof, ProofAttempt::Proven) => {
-                VerificationOutcome::ElideCheck
-            }
+            (VerificationLevel::Proof, ProofAttempt::Proven) => VerificationOutcome::ElideCheck,
             (VerificationLevel::Proof, ProofAttempt::Failed(reason)) => {
                 VerificationOutcome::HardFail(reason)
             }
@@ -303,8 +299,7 @@ impl VerificationOutcome {
     pub fn requires_runtime_check(&self) -> bool {
         matches!(
             self,
-            VerificationOutcome::EmitRuntimeCheck
-                | VerificationOutcome::FallbackWithWarning(_)
+            VerificationOutcome::EmitRuntimeCheck | VerificationOutcome::FallbackWithWarning(_)
         )
     }
 
@@ -652,8 +647,7 @@ mod attempt_tests {
             VerificationOutcome::EmitRuntimeCheck
         );
         assert_eq!(
-            VerificationLevel::Runtime
-                .evaluate_attempt(ProofAttempt::Failed(Text::from("x"))),
+            VerificationLevel::Runtime.evaluate_attempt(ProofAttempt::Failed(Text::from("x"))),
             VerificationOutcome::EmitRuntimeCheck
         );
     }
@@ -670,8 +664,8 @@ mod attempt_tests {
 
     #[test]
     fn static_falls_back_with_warning_on_proof_failure() {
-        let outcome = VerificationLevel::Static
-            .evaluate_attempt(ProofAttempt::Failed(Text::from("timeout")));
+        let outcome =
+            VerificationLevel::Static.evaluate_attempt(ProofAttempt::Failed(Text::from("timeout")));
         match outcome {
             VerificationOutcome::FallbackWithWarning(reason) => {
                 assert_eq!(reason.as_str(), "timeout");
@@ -682,8 +676,7 @@ mod attempt_tests {
 
     #[test]
     fn static_falls_back_with_warning_on_unattempted() {
-        let outcome =
-            VerificationLevel::Static.evaluate_attempt(ProofAttempt::Unattempted);
+        let outcome = VerificationLevel::Static.evaluate_attempt(ProofAttempt::Unattempted);
         assert!(outcome.is_warning());
         assert!(outcome.requires_runtime_check());
         assert!(!outcome.is_hard_failure());
@@ -713,8 +706,7 @@ mod attempt_tests {
 
     #[test]
     fn proof_hard_fails_on_unattempted() {
-        let outcome =
-            VerificationLevel::Proof.evaluate_attempt(ProofAttempt::Unattempted);
+        let outcome = VerificationLevel::Proof.evaluate_attempt(ProofAttempt::Unattempted);
         assert!(outcome.is_hard_failure());
         assert!(!outcome.requires_runtime_check());
     }

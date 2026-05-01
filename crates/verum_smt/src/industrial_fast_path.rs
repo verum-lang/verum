@@ -46,9 +46,8 @@
 
 use verum_common::Text;
 use verum_kernel::tactics_industrial::{
-    BoolFormula, CongruenceEquation, EautoHint, LinearConstraint,
-    TacticOutcome, tactic_congruence, tactic_decide, tactic_eauto,
-    tactic_induction, tactic_lia,
+    BoolFormula, CongruenceEquation, EautoHint, LinearConstraint, TacticOutcome, tactic_congruence,
+    tactic_decide, tactic_eauto, tactic_induction, tactic_lia,
 };
 
 /// Kind of tactic the fast-path dispatcher recognises. Mirrors the
@@ -143,12 +142,8 @@ pub fn try_industrial_fast_path(
     args: IndustrialArgs,
 ) -> Option<FastPathClosure> {
     let outcome = match (&tactic, args) {
-        (IndustrialTactic::Lia, IndustrialArgs::Lia { constraints }) => {
-            tactic_lia(&constraints)
-        }
-        (IndustrialTactic::Decide, IndustrialArgs::Decide { formula }) => {
-            tactic_decide(&formula)
-        }
+        (IndustrialTactic::Lia, IndustrialArgs::Lia { constraints }) => tactic_lia(&constraints),
+        (IndustrialTactic::Decide, IndustrialArgs::Decide { formula }) => tactic_decide(&formula),
         (
             IndustrialTactic::Induction,
             IndustrialArgs::Induction {
@@ -165,14 +160,9 @@ pub fn try_industrial_fast_path(
                 universe_size,
             },
         ) => tactic_congruence(&equations, &target, universe_size),
-        (
-            IndustrialTactic::Eauto,
-            IndustrialArgs::Eauto {
-                hints,
-                goal,
-                bound,
-            },
-        ) => tactic_eauto(&hints, goal, bound),
+        (IndustrialTactic::Eauto, IndustrialArgs::Eauto { hints, goal, bound }) => {
+            tactic_eauto(&hints, goal, bound)
+        }
         _ => return None, // tactic / args mismatch
     };
 
@@ -191,10 +181,7 @@ pub fn try_industrial_fast_path(
 /// Lookup-by-name dispatch. Returns `Some(FastPathClosure)` when
 /// `name` matches a fast-path tactic AND the kernel decides the
 /// goal. Used by the proof-DSL resolver as a single entry point.
-pub fn dispatch_by_name(
-    name: &str,
-    args: IndustrialArgs,
-) -> Option<FastPathClosure> {
+pub fn dispatch_by_name(name: &str, args: IndustrialArgs) -> Option<FastPathClosure> {
     let tactic = IndustrialTactic::from_name(name)?;
     try_industrial_fast_path(tactic, args)
 }
@@ -208,18 +195,33 @@ mod tests {
 
     #[test]
     fn from_name_recognises_all_five() {
-        assert_eq!(IndustrialTactic::from_name("lia"), Some(IndustrialTactic::Lia));
-        assert_eq!(IndustrialTactic::from_name("decide"), Some(IndustrialTactic::Decide));
-        assert_eq!(IndustrialTactic::from_name("induction"), Some(IndustrialTactic::Induction));
-        assert_eq!(IndustrialTactic::from_name("congruence"), Some(IndustrialTactic::Congruence));
-        assert_eq!(IndustrialTactic::from_name("eauto"), Some(IndustrialTactic::Eauto));
+        assert_eq!(
+            IndustrialTactic::from_name("lia"),
+            Some(IndustrialTactic::Lia)
+        );
+        assert_eq!(
+            IndustrialTactic::from_name("decide"),
+            Some(IndustrialTactic::Decide)
+        );
+        assert_eq!(
+            IndustrialTactic::from_name("induction"),
+            Some(IndustrialTactic::Induction)
+        );
+        assert_eq!(
+            IndustrialTactic::from_name("congruence"),
+            Some(IndustrialTactic::Congruence)
+        );
+        assert_eq!(
+            IndustrialTactic::from_name("eauto"),
+            Some(IndustrialTactic::Eauto)
+        );
     }
 
     #[test]
     fn from_name_rejects_unknown() {
         assert_eq!(IndustrialTactic::from_name("auto"), None);
         assert_eq!(IndustrialTactic::from_name(""), None);
-        assert_eq!(IndustrialTactic::from_name("LIA"), None);  // case-sensitive
+        assert_eq!(IndustrialTactic::from_name("LIA"), None); // case-sensitive
     }
 
     // ----- LIA fast-path -----
@@ -252,8 +254,7 @@ mod tests {
                 }],
             },
         );
-        assert!(outcome.is_none(),
-            "Non-trivial LIA falls through to Z3");
+        assert!(outcome.is_none(), "Non-trivial LIA falls through to Z3");
     }
 
     // ----- Decide fast-path -----
@@ -265,10 +266,7 @@ mod tests {
             Box::new(BoolFormula::Atom(0)),
             Box::new(BoolFormula::Not(Box::new(BoolFormula::Atom(0)))),
         );
-        let outcome = dispatch_by_name(
-            "decide",
-            IndustrialArgs::Decide { formula },
-        );
+        let outcome = dispatch_by_name("decide", IndustrialArgs::Decide { formula });
         assert!(outcome.is_some());
     }
 
@@ -278,10 +276,7 @@ mod tests {
             Box::new(BoolFormula::Atom(0)),
             Box::new(BoolFormula::Atom(1)),
         );
-        let outcome = dispatch_by_name(
-            "decide",
-            IndustrialArgs::Decide { formula },
-        );
+        let outcome = dispatch_by_name("decide", IndustrialArgs::Decide { formula });
         assert!(outcome.is_none());
     }
 
@@ -325,7 +320,10 @@ mod tests {
         let outcome = dispatch_by_name(
             "eauto",
             IndustrialArgs::Eauto {
-                hints: vec![EautoHint { head: 0, body: vec![] }],
+                hints: vec![EautoHint {
+                    head: 0,
+                    body: vec![],
+                }],
                 goal: 0,
                 bound: 0,
             },
@@ -350,7 +348,7 @@ mod tests {
     #[test]
     fn dispatch_returns_none_for_unknown_name() {
         let outcome = dispatch_by_name(
-            "auto",  // not in fast-path set
+            "auto", // not in fast-path set
             IndustrialArgs::Lia {
                 constraints: vec![],
             },

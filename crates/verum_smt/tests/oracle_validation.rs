@@ -750,13 +750,14 @@ impl ValidationEngine {
 
         // 4. Check against oracle (if available)
         if let Maybe::Some(oracle_result) = self.oracle.lookup(&expr_str)
-            && oracle_result != z3_result {
-                return ValidationResult::Disagreement {
-                    z3_result,
-                    cvc5_result,
-                    oracle_result: Maybe::Some(oracle_result),
-                };
-            }
+            && oracle_result != z3_result
+        {
+            return ValidationResult::Disagreement {
+                z3_result,
+                cvc5_result,
+                oracle_result: Maybe::Some(oracle_result),
+            };
+        }
 
         ValidationResult::Correct
     }

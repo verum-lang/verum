@@ -100,11 +100,7 @@ impl MetaSandbox {
     ///
 
     /// This is the main entry point for executing meta functions at compile-time.
-    pub fn execute(
-        &self,
-        ctx: &MetaContext,
-        expr: &Expr,
-    ) -> Result<ConstValue, SandboxError> {
+    pub fn execute(&self, ctx: &MetaContext, expr: &Expr) -> Result<ConstValue, SandboxError> {
         self.executor.execute(ctx, expr)
     }
 
@@ -575,16 +571,37 @@ mod tests {
 
     #[test]
     fn test_size_of() {
-        assert_eq!(compute_size_of(&ConstValue::Text(Text::from("Int8"))).unwrap(), 1);
-        assert_eq!(compute_size_of(&ConstValue::Text(Text::from("Int32"))).unwrap(), 4);
-        assert_eq!(compute_size_of(&ConstValue::Text(Text::from("Int64"))).unwrap(), 8);
-        assert_eq!(compute_size_of(&ConstValue::Text(Text::from("Bool"))).unwrap(), 1);
+        assert_eq!(
+            compute_size_of(&ConstValue::Text(Text::from("Int8"))).unwrap(),
+            1
+        );
+        assert_eq!(
+            compute_size_of(&ConstValue::Text(Text::from("Int32"))).unwrap(),
+            4
+        );
+        assert_eq!(
+            compute_size_of(&ConstValue::Text(Text::from("Int64"))).unwrap(),
+            8
+        );
+        assert_eq!(
+            compute_size_of(&ConstValue::Text(Text::from("Bool"))).unwrap(),
+            1
+        );
     }
 
     #[test]
     fn test_align_of() {
-        assert_eq!(compute_align_of(&ConstValue::Text(Text::from("Int8"))).unwrap(), 1);
-        assert_eq!(compute_align_of(&ConstValue::Text(Text::from("Int32"))).unwrap(), 4);
-        assert_eq!(compute_align_of(&ConstValue::Text(Text::from("Int64"))).unwrap(), 8);
+        assert_eq!(
+            compute_align_of(&ConstValue::Text(Text::from("Int8"))).unwrap(),
+            1
+        );
+        assert_eq!(
+            compute_align_of(&ConstValue::Text(Text::from("Int32"))).unwrap(),
+            4
+        );
+        assert_eq!(
+            compute_align_of(&ConstValue::Text(Text::from("Int64"))).unwrap(),
+            8
+        );
     }
 }

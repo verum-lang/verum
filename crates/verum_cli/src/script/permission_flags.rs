@@ -92,13 +92,12 @@ pub enum BuildError {
 impl std::fmt::Display for BuildError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ConflictingOverrides => f.write_str(
-                "--allow-all and --deny-all are mutually exclusive; pick one",
-            ),
-            Self::InvalidFrontmatterScope { value, source } => write!(
-                f,
-                "frontmatter `permissions` entry {value:?}: {source}"
-            ),
+            Self::ConflictingOverrides => {
+                f.write_str("--allow-all and --deny-all are mutually exclusive; pick one")
+            }
+            Self::InvalidFrontmatterScope { value, source } => {
+                write!(f, "frontmatter `permissions` entry {value:?}: {source}")
+            }
             Self::InvalidFrontmatterRunScope { value, source } => write!(
                 f,
                 "frontmatter `[run].default-permissions` entry {value:?}: {source}"
@@ -135,12 +134,11 @@ pub fn build_permission_set(
     let mut grants: Vec<Permission> = Vec::new();
     if let Some(fm) = frontmatter {
         for raw in &fm.permissions {
-            let perm = Permission::parse(raw).map_err(|source| {
-                BuildError::InvalidFrontmatterScope {
+            let perm =
+                Permission::parse(raw).map_err(|source| BuildError::InvalidFrontmatterScope {
                     value: raw.clone(),
                     source,
-                }
-            })?;
+                })?;
             grants.push(perm);
         }
         if let Some(run) = &fm.run {
@@ -221,26 +219,26 @@ mod tests {
     #[test]
     fn frontmatter_permissions_passed_through() {
         let fm = fm_with(vec!["net=api.example.com:443"], vec![]);
-        let set =
-            build_permission_set(Some(&fm), &PermissionFlags::default()).unwrap();
+        let set = build_permission_set(Some(&fm), &PermissionFlags::default()).unwrap();
         assert_eq!(set.len(), 1);
-        assert!(set
-            .check(&PermissionRequest::Net {
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: Some(443),
             })
-            .is_ok());
+            .is_ok()
+        );
     }
 
     #[test]
     fn run_default_permissions_folded_in() {
         let fm = fm_with(vec![], vec!["fs:read=./data"]);
-        let set =
-            build_permission_set(Some(&fm), &PermissionFlags::default()).unwrap();
+        let set = build_permission_set(Some(&fm), &PermissionFlags::default()).unwrap();
         assert_eq!(set.len(), 1);
-        assert!(set
-            .check(&PermissionRequest::FsRead(Path::new("./data/file")))
-            .is_ok());
+        assert!(
+            set.check(&PermissionRequest::FsRead(Path::new("./data/file")))
+                .is_ok()
+        );
     }
 
     #[test]
@@ -252,15 +250,17 @@ mod tests {
         };
         let set = build_permission_set(Some(&fm), &flags).unwrap();
         assert_eq!(set.len(), 2);
-        assert!(set
-            .check(&PermissionRequest::Net {
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: Some(443),
             })
-            .is_ok());
-        assert!(set
-            .check(&PermissionRequest::FsRead(Path::new("./data/file")))
-            .is_ok());
+            .is_ok()
+        );
+        assert!(
+            set.check(&PermissionRequest::FsRead(Path::new("./data/file")))
+                .is_ok()
+        );
     }
 
     #[test]
@@ -358,25 +358,28 @@ mod tests {
             ..Default::default()
         };
         let set = build_permission_set(Some(&fm), &flags).unwrap();
-        assert!(set
-            .check(&PermissionRequest::Net {
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: Some(443),
             })
-            .is_ok());
-        assert!(set
-            .check(&PermissionRequest::Net {
+            .is_ok()
+        );
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "fallback.example.com",
                 port: Some(80),
             })
-            .is_ok());
+            .is_ok()
+        );
         // A request matching neither grant must still fail.
-        assert!(set
-            .check(&PermissionRequest::Net {
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "evil.example.com",
                 port: Some(80),
             })
-            .is_err());
+            .is_err()
+        );
     }
 
     #[test]
@@ -409,7 +412,11 @@ mod tests {
             .collect();
         assert_eq!(
             env_grants,
-            vec![vec!["A".to_string()], vec!["B".to_string()], vec!["C".to_string()]]
+            vec![
+                vec!["A".to_string()],
+                vec!["B".to_string()],
+                vec!["C".to_string()]
+            ]
         );
     }
 }

@@ -146,15 +146,34 @@ impl WellKnownType {
 
     /// Check if this type is a collection (List, Map, Set, Deque, BTreeMap, BTreeSet, BinaryHeap).
     pub const fn is_collection(self) -> bool {
-        matches!(self, Self::List | Self::Map | Self::Set | Self::Deque
-            | Self::BTreeMap | Self::BTreeSet | Self::BinaryHeap)
+        matches!(
+            self,
+            Self::List
+                | Self::Map
+                | Self::Set
+                | Self::Deque
+                | Self::BTreeMap
+                | Self::BTreeSet
+                | Self::BinaryHeap
+        )
     }
 
     /// Check if this type is a concurrency primitive.
     pub const fn is_concurrency(self) -> bool {
-        matches!(self, Self::Channel | Self::Mutex | Self::Task | Self::Nursery
-            | Self::Semaphore | Self::RwLock | Self::Barrier | Self::WaitGroup
-            | Self::Once | Self::AtomicInt | Self::AtomicBool)
+        matches!(
+            self,
+            Self::Channel
+                | Self::Mutex
+                | Self::Task
+                | Self::Nursery
+                | Self::Semaphore
+                | Self::RwLock
+                | Self::Barrier
+                | Self::WaitGroup
+                | Self::Once
+                | Self::AtomicInt
+                | Self::AtomicBool
+        )
     }
 
     /// Check if this type is a primitive (Int, Float, Bool).
@@ -315,7 +334,8 @@ pub mod type_names {
     pub fn is_signed_integer_type(name: &str) -> bool {
         matches!(
             name,
-            "Int" | "Int8"
+            "Int"
+                | "Int8"
                 | "Int16"
                 | "Int32"
                 | "Int64"
@@ -360,7 +380,8 @@ pub mod type_names {
     pub fn is_primitive_value_type(name: &str) -> bool {
         matches!(
             name,
-            "Int" | "Float"
+            "Int"
+                | "Float"
                 | "Bool"
                 | "Char"
                 | "Byte"
@@ -386,7 +407,8 @@ pub mod type_names {
     pub fn is_collection_type(name: &str) -> bool {
         matches!(
             name,
-            "List" | "Map"
+            "List"
+                | "Map"
                 | "Set"
                 | "Deque"
                 | "Array"
@@ -402,7 +424,8 @@ pub mod type_names {
     pub fn is_builtin_method_type(name: &str) -> bool {
         matches!(
             name,
-            "List" | "Map"
+            "List"
+                | "Map"
                 | "Set"
                 | "Deque"
                 | "Channel"
@@ -689,11 +712,21 @@ mod tests {
     #[test]
     fn roundtrip_name() {
         for wkt in [
-            WellKnownType::Int, WellKnownType::Float, WellKnownType::Bool,
-            WellKnownType::Text, WellKnownType::List, WellKnownType::Map,
-            WellKnownType::Set, WellKnownType::Deque, WellKnownType::Maybe,
-            WellKnownType::Heap, WellKnownType::Channel, WellKnownType::Semaphore,
-            WellKnownType::BTreeMap, WellKnownType::Once, WellKnownType::Range,
+            WellKnownType::Int,
+            WellKnownType::Float,
+            WellKnownType::Bool,
+            WellKnownType::Text,
+            WellKnownType::List,
+            WellKnownType::Map,
+            WellKnownType::Set,
+            WellKnownType::Deque,
+            WellKnownType::Maybe,
+            WellKnownType::Heap,
+            WellKnownType::Channel,
+            WellKnownType::Semaphore,
+            WellKnownType::BTreeMap,
+            WellKnownType::Once,
+            WellKnownType::Range,
         ] {
             assert_eq!(WellKnownType::from_name(wkt.as_str()), Some(wkt));
             assert!(wkt.matches(wkt.as_str()));
@@ -717,11 +750,16 @@ mod tests {
     #[test]
     fn protocol_roundtrip() {
         for wkp in [
-            WellKnownProtocol::Copy, WellKnownProtocol::Clone,
-            WellKnownProtocol::Eq, WellKnownProtocol::Ord,
-            WellKnownProtocol::Hash, WellKnownProtocol::Default,
-            WellKnownProtocol::Debug, WellKnownProtocol::Display,
-            WellKnownProtocol::Iterator, WellKnownProtocol::Future,
+            WellKnownProtocol::Copy,
+            WellKnownProtocol::Clone,
+            WellKnownProtocol::Eq,
+            WellKnownProtocol::Ord,
+            WellKnownProtocol::Hash,
+            WellKnownProtocol::Default,
+            WellKnownProtocol::Debug,
+            WellKnownProtocol::Display,
+            WellKnownProtocol::Iterator,
+            WellKnownProtocol::Future,
         ] {
             assert_eq!(WellKnownProtocol::from_name(wkp.as_str()), Some(wkp));
             assert!(wkp.matches(wkp.as_str()));
@@ -733,7 +771,10 @@ mod tests {
         assert_eq!(method_to_protocol("hash"), Some(WellKnownProtocol::Hash));
         assert_eq!(method_to_protocol("eq"), Some(WellKnownProtocol::Eq));
         assert_eq!(method_to_protocol("clone"), Some(WellKnownProtocol::Clone));
-        assert_eq!(method_to_protocol("next"), Some(WellKnownProtocol::Iterator));
+        assert_eq!(
+            method_to_protocol("next"),
+            Some(WellKnownProtocol::Iterator)
+        );
         assert_eq!(method_to_protocol("drop"), Some(WellKnownProtocol::Drop));
         assert_eq!(method_to_protocol("unknown_method"), None);
     }

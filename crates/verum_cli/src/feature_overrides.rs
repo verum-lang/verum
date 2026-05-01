@@ -78,8 +78,7 @@ pub fn apply_global(manifest: &mut Manifest) -> Result<()> {
 
 /// Use this instead of `CompilerOptions::default().language_features`
 /// — the latter silently drops every CLI override.
-pub fn scratch_features(
-) -> Result<verum_compiler::language_features::LanguageFeatures> {
+pub fn scratch_features() -> Result<verum_compiler::language_features::LanguageFeatures> {
     let mut m = crate::config::create_default_manifest(
         "script",
         false,
@@ -191,13 +190,18 @@ pub fn manifest_to_features(
     {
         let strategy = manifest.verify.default_strategy.as_str();
         let valid = [
-            "runtime", "static", "formal", "proof", "fast",
-            "thorough", "reliable", "certified", "synthesize",
+            "runtime",
+            "static",
+            "formal",
+            "proof",
+            "fast",
+            "thorough",
+            "reliable",
+            "certified",
+            "synthesize",
         ];
         if !valid.contains(&strategy) {
-            let suggestion = verum_compiler::language_features::closest_match_pub(
-                strategy, &valid,
-            );
+            let suggestion = verum_compiler::language_features::closest_match_pub(strategy, &valid);
             let mut msg = format!(
                 "invalid configuration in verum.toml\n  \
                  [verify].default_strategy: '{}' is not a valid value\n  \
@@ -250,7 +254,11 @@ pub struct LanguageFeatureOverrides {
     pub gpu: bool,
 
     /// Disable GPU code generation (mutually exclusive with --gpu).
-    #[clap(long = "no-gpu", help_heading = "Language features", conflicts_with = "gpu")]
+    #[clap(
+        long = "no-gpu",
+        help_heading = "Language features",
+        conflicts_with = "gpu"
+    )]
     pub no_gpu: bool,
 
     /// GPU backend: metal|cuda|rocm|vulkan|auto.
@@ -321,7 +329,11 @@ pub struct LanguageFeatureOverrides {
     pub dap: bool,
 
     /// Disable the DAP server.
-    #[clap(long = "no-dap", help_heading = "Language features", conflicts_with = "dap")]
+    #[clap(
+        long = "no-dap",
+        help_heading = "Language features",
+        conflicts_with = "dap"
+    )]
     pub no_dap: bool,
 
     /// DAP port (0 = auto-pick).
@@ -341,7 +353,7 @@ pub struct LanguageFeatureOverrides {
         short = 'Z',
         long = "set",
         value_name = "KEY=VAL",
-        help_heading = "Language features",
+        help_heading = "Language features"
     )]
     pub raw_overrides: Vec<Text>,
 }
@@ -440,10 +452,7 @@ impl LanguageFeatureOverrides {
 /// rather than being silently ignored.
 fn apply_raw_override(m: &mut Manifest, raw: &str) -> Result<()> {
     let (key, value) = raw.split_once('=').ok_or_else(|| {
-        CliError::Custom(format!(
-            "invalid -Z override '{}': expected KEY=VALUE",
-            raw
-        ))
+        CliError::Custom(format!("invalid -Z override '{}': expected KEY=VALUE", raw))
     })?;
     let key = key.trim();
     let value = value.trim();
@@ -454,22 +463,16 @@ fn apply_raw_override(m: &mut Manifest, raw: &str) -> Result<()> {
         "types.refinement" => m.types.refinement = parse_bool(key, value)?,
         "types.cubical" => m.types.cubical = parse_bool(key, value)?,
         "types.higher_kinded" => m.types.higher_kinded = parse_bool(key, value)?,
-        "types.universe_polymorphism" => {
-            m.types.universe_polymorphism = parse_bool(key, value)?
-        }
+        "types.universe_polymorphism" => m.types.universe_polymorphism = parse_bool(key, value)?,
         "types.coinductive" => m.types.coinductive = parse_bool(key, value)?,
         "types.quotient" => m.types.quotient = parse_bool(key, value)?,
         "types.instance_search" => m.types.instance_search = parse_bool(key, value)?,
-        "types.coherence_check_depth" => {
-            m.types.coherence_check_depth = parse_u32(key, value)?
-        }
+        "types.coherence_check_depth" => m.types.coherence_check_depth = parse_u32(key, value)?,
 
         // ---------- runtime ----------
         "runtime.cbgr_mode" => m.runtime.cbgr_mode = Text::from(value),
         "runtime.async_scheduler" => m.runtime.async_scheduler = Text::from(value),
-        "runtime.async_worker_threads" => {
-            m.runtime.async_worker_threads = parse_u32(key, value)?
-        }
+        "runtime.async_worker_threads" => m.runtime.async_worker_threads = parse_u32(key, value)?,
         "runtime.futures" => m.runtime.futures = parse_bool(key, value)?,
         "runtime.nurseries" => m.runtime.nurseries = parse_bool(key, value)?,
         "runtime.task_stack_size" => m.runtime.task_stack_size = parse_u64(key, value)?,
@@ -492,29 +495,21 @@ fn apply_raw_override(m: &mut Manifest, raw: &str) -> Result<()> {
         "codegen.inline_depth" => m.codegen.inline_depth = parse_u32(key, value)?,
 
         // ---------- meta ----------
-        "meta.compile_time_functions" => {
-            m.meta.compile_time_functions = parse_bool(key, value)?
-        }
+        "meta.compile_time_functions" => m.meta.compile_time_functions = parse_bool(key, value)?,
         "meta.quote_syntax" => m.meta.quote_syntax = parse_bool(key, value)?,
-        "meta.macro_recursion_limit" => {
-            m.meta.macro_recursion_limit = parse_u32(key, value)?
-        }
+        "meta.macro_recursion_limit" => m.meta.macro_recursion_limit = parse_u32(key, value)?,
         "meta.reflection" => m.meta.reflection = parse_bool(key, value)?,
         "meta.derive" => m.meta.derive = parse_bool(key, value)?,
         "meta.max_stage_level" => m.meta.max_stage_level = parse_u32(key, value)?,
 
         // ---------- protocols ----------
         "protocols.coherence" => m.protocols.coherence = Text::from(value),
-        "protocols.resolution_strategy" => {
-            m.protocols.resolution_strategy = Text::from(value)
-        }
+        "protocols.resolution_strategy" => m.protocols.resolution_strategy = Text::from(value),
         "protocols.blanket_impls" => m.protocols.blanket_impls = parse_bool(key, value)?,
         "protocols.higher_kinded_protocols" => {
             m.protocols.higher_kinded_protocols = parse_bool(key, value)?
         }
-        "protocols.associated_types" => {
-            m.protocols.associated_types = parse_bool(key, value)?
-        }
+        "protocols.associated_types" => m.protocols.associated_types = parse_bool(key, value)?,
         "protocols.generic_associated_types" => {
             m.protocols.generic_associated_types = parse_bool(key, value)?
         }
@@ -522,24 +517,16 @@ fn apply_raw_override(m: &mut Manifest, raw: &str) -> Result<()> {
         // ---------- context ----------
         "context.enabled" => m.context.enabled = parse_bool(key, value)?,
         "context.unresolved_policy" => m.context.unresolved_policy = Text::from(value),
-        "context.negative_constraints" => {
-            m.context.negative_constraints = parse_bool(key, value)?
-        }
-        "context.propagation_depth" => {
-            m.context.propagation_depth = parse_u32(key, value)?
-        }
+        "context.negative_constraints" => m.context.negative_constraints = parse_bool(key, value)?,
+        "context.propagation_depth" => m.context.propagation_depth = parse_u32(key, value)?,
 
         // ---------- safety ----------
         "safety.unsafe_allowed" => m.safety.unsafe_allowed = parse_bool(key, value)?,
         "safety.ffi" => m.safety.ffi = parse_bool(key, value)?,
         "safety.ffi_boundary" => m.safety.ffi_boundary = Text::from(value),
-        "safety.capability_required" => {
-            m.safety.capability_required = parse_bool(key, value)?
-        }
+        "safety.capability_required" => m.safety.capability_required = parse_bool(key, value)?,
         "safety.mls_level" => m.safety.mls_level = Text::from(value),
-        "safety.forbid_stdlib_extern" => {
-            m.safety.forbid_stdlib_extern = parse_bool(key, value)?
-        }
+        "safety.forbid_stdlib_extern" => m.safety.forbid_stdlib_extern = parse_bool(key, value)?,
 
         // ---------- test ----------
         "test.differential" => m.test.differential = parse_bool(key, value)?,
@@ -556,24 +543,14 @@ fn apply_raw_override(m: &mut Manifest, raw: &str) -> Result<()> {
         "debug.step_granularity" => m.debug.step_granularity = Text::from(value),
         "debug.inspect_depth" => m.debug.inspect_depth = parse_u32(key, value)?,
         "debug.port" => m.debug.port = parse_u16(key, value)?,
-        "debug.show_erased_proofs" => {
-            m.debug.show_erased_proofs = parse_bool(key, value)?
-        }
+        "debug.show_erased_proofs" => m.debug.show_erased_proofs = parse_bool(key, value)?,
 
         // ---------- verify ----------
-        "verify.default_strategy" => {
-            m.verify.default_strategy = Text::from(value)
-        }
-        "verify.solver_timeout_ms" => {
-            m.verify.solver_timeout_ms = parse_u64(key, value)?
-        }
-        "verify.enable_telemetry" => {
-            m.verify.enable_telemetry = parse_bool(key, value)?
-        }
+        "verify.default_strategy" => m.verify.default_strategy = Text::from(value),
+        "verify.solver_timeout_ms" => m.verify.solver_timeout_ms = parse_u64(key, value)?,
+        "verify.enable_telemetry" => m.verify.enable_telemetry = parse_bool(key, value)?,
         "verify.persist_stats" => m.verify.persist_stats = parse_bool(key, value)?,
-        "verify.fail_on_divergence" => {
-            m.verify.fail_on_divergence = parse_bool(key, value)?
-        }
+        "verify.fail_on_divergence" => m.verify.fail_on_divergence = parse_bool(key, value)?,
 
         _ => {
             return Err(CliError::Custom(format!(
@@ -600,29 +577,27 @@ fn parse_bool(key: &str, value: &str) -> Result<bool> {
 }
 
 fn parse_u32(key: &str, value: &str) -> Result<u32> {
-    value.parse::<u32>().map_err(|_| {
-        CliError::Custom(format!("invalid u32 for '{}': '{}'", key, value))
-    })
+    value
+        .parse::<u32>()
+        .map_err(|_| CliError::Custom(format!("invalid u32 for '{}': '{}'", key, value)))
 }
 
 fn parse_u64(key: &str, value: &str) -> Result<u64> {
-    value.parse::<u64>().map_err(|_| {
-        CliError::Custom(format!("invalid u64 for '{}': '{}'", key, value))
-    })
+    value
+        .parse::<u64>()
+        .map_err(|_| CliError::Custom(format!("invalid u64 for '{}': '{}'", key, value)))
 }
 
 fn parse_u16(key: &str, value: &str) -> Result<u16> {
-    value.parse::<u16>().map_err(|_| {
-        CliError::Custom(format!("invalid u16 for '{}': '{}'", key, value))
-    })
+    value
+        .parse::<u16>()
+        .map_err(|_| CliError::Custom(format!("invalid u16 for '{}': '{}'", key, value)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        create_default_manifest, LanguageProfile,
-    };
+    use crate::config::{LanguageProfile, create_default_manifest};
 
     fn manifest() -> Manifest {
         create_default_manifest("test-cog", false, LanguageProfile::Application)

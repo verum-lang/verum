@@ -86,11 +86,7 @@ impl std::error::Error for CertStoreError {}
 pub trait CertificateStore: Send + Sync {
     /// Persist a certificate under the given declaration name.
     /// Overwrites any existing cert for the same name.
-    fn save(
-        &mut self,
-        decl_name: &str,
-        cert: &SmtCertificate,
-    ) -> Result<(), CertStoreError>;
+    fn save(&mut self, decl_name: &str, cert: &SmtCertificate) -> Result<(), CertStoreError>;
 
     /// Look up the certificate for a declaration. Returns
     /// `Maybe::None` when no cert is stored — callers fall
@@ -159,19 +155,11 @@ impl FileSystemCertificateStore {
 }
 
 impl CertificateStore for FileSystemCertificateStore {
-    fn save(
-        &mut self,
-        decl_name: &str,
-        cert: &SmtCertificate,
-    ) -> Result<(), CertStoreError> {
+    fn save(&mut self, decl_name: &str, cert: &SmtCertificate) -> Result<(), CertStoreError> {
         let path = self.path_for(decl_name)?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                CertStoreError::Io(Text::from(format!(
-                    "creating {}: {}",
-                    parent.display(),
-                    e
-                )))
+                CertStoreError::Io(Text::from(format!("creating {}: {}", parent.display(), e)))
             })?;
         }
         let json = serde_json::to_string_pretty(cert).map_err(|e| {
@@ -181,11 +169,7 @@ impl CertificateStore for FileSystemCertificateStore {
             )))
         })?;
         std::fs::write(&path, json.as_bytes()).map_err(|e| {
-            CertStoreError::Io(Text::from(format!(
-                "writing {}: {}",
-                path.display(),
-                e
-            )))
+            CertStoreError::Io(Text::from(format!("writing {}: {}", path.display(), e)))
         })
     }
 
@@ -215,8 +199,7 @@ impl CertificateStore for FileSystemCertificateStore {
             Err(_) => return out,
         };
         // Sort via BTreeSet for deterministic order.
-        let mut names: std::collections::BTreeSet<String> =
-            std::collections::BTreeSet::new();
+        let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().map(|e| e == "json").unwrap_or(false) {
@@ -295,11 +278,7 @@ impl InMemoryCertificateStore {
 }
 
 impl CertificateStore for InMemoryCertificateStore {
-    fn save(
-        &mut self,
-        decl_name: &str,
-        cert: &SmtCertificate,
-    ) -> Result<(), CertStoreError> {
+    fn save(&mut self, decl_name: &str, cert: &SmtCertificate) -> Result<(), CertStoreError> {
         if sanitise_name(decl_name).is_empty() {
             return Err(CertStoreError::InvalidName(Text::from(decl_name)));
         }
@@ -441,9 +420,7 @@ mod tests {
 
     #[test]
     fn fs_store_load_from_nonexistent_root_returns_none() {
-        let store = FileSystemCertificateStore::new(
-            PathBuf::from("/nonexistent/path/to/nowhere"),
-        );
+        let store = FileSystemCertificateStore::new(PathBuf::from("/nonexistent/path/to/nowhere"));
         assert!(matches!(store.load("anything"), Maybe::None));
     }
 

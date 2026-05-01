@@ -16,8 +16,8 @@
 //! Tests for VBC type system (TypeId, TypeRef) and CBGR reference types
 //! (ThinRef, FatRef, Capabilities).
 
-use verum_vbc::types::{TypeId, TypeRef, StringId, TypeParamId};
-use verum_vbc::value::{Capabilities, ThinRef, FatRef};
+use verum_vbc::types::{StringId, TypeId, TypeParamId, TypeRef};
+use verum_vbc::value::{Capabilities, FatRef, ThinRef};
 
 // ============================================================================
 // TypeId Tests

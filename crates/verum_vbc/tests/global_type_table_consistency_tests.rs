@@ -45,14 +45,11 @@ fn compile_stdlib_subgraph(rel_path: &str) -> VbcCodegen {
     if !std::path::Path::new(&path).exists() {
         // No stdlib in this build environment — skip the assertion.
         // Mirrors the policy in `stdlib_lenient_skip_baseline.rs`.
-        eprintln!(
-            "[global_type_table_consistency] {} absent — skipping",
-            path
-        );
+        eprintln!("[global_type_table_consistency] {} absent — skipping", path);
         return VbcCodegen::new();
     }
-    let source = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {} failed: {}", path, e));
+    let source =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {} failed: {}", path, e));
     let mut parser = Parser::new(&source);
     let module = parser
         .parse_module()
@@ -211,7 +208,8 @@ fn global_type_table_baseline_for_result() {
             "type-table issue count for `base/result.vr` IMPROVED: {} < baseline {}.\n\
              Lower RESULT_ISSUE_BASELINE in this file to pin the new value, \
              so the gain can't silently regress.\n\n{}",
-            count, RESULT_ISSUE_BASELINE,
+            count,
+            RESULT_ISSUE_BASELINE,
             format_report_failure("base/result.vr (improved — refresh baseline)", &report),
         );
     }
@@ -261,7 +259,10 @@ fn global_type_table_clean_for_sync_atomic() {
 fn orphan_make_variants_dump_for_result() {
     let codegen = compile_stdlib_subgraph("base/result.vr");
     let orphans = codegen.find_orphan_make_variants();
-    eprintln!("[#188 dump] base/result.vr — {} orphan MakeVariant(s)", orphans.len());
+    eprintln!(
+        "[#188 dump] base/result.vr — {} orphan MakeVariant(s)",
+        orphans.len()
+    );
 }
 
 // === Strict-codegen end-to-end test (#166) ============================
@@ -290,9 +291,8 @@ fn strict_codegen_halts_on_bug_class_skip() {
 
     // === Lenient (default): compile_module_items_lenient returns Ok
     {
-        let mut codegen = VbcCodegen::with_config(
-            CodegenConfig::new("test_lenient").with_validation(),
-        );
+        let mut codegen =
+            VbcCodegen::with_config(CodegenConfig::new("test_lenient").with_validation());
         codegen.collect_protocol_definitions(&module);
         codegen
             .collect_all_declarations(&module)
@@ -355,8 +355,12 @@ fn global_type_table_dump_for_result() {
         eprintln!(
             "[#170 dump]   variant tags non-dense in `{}` (TypeId({})): \
              expected {} variants, max tag {}, duplicates {:?}, missing {:?}",
-            a.type_name, a.type_id, a.expected_count,
-            a.max_tag_seen, a.duplicate_tags, a.missing_tags,
+            a.type_name,
+            a.type_id,
+            a.expected_count,
+            a.max_tag_seen,
+            a.duplicate_tags,
+            a.missing_tags,
         );
     }
 }
@@ -411,10 +415,7 @@ fn orphan_make_variants_baseline_for_result() {
             ));
         }
         if orphans.len() > 16 {
-            sample.push_str(&format!(
-                "  ... and {} more\n",
-                orphans.len() - 16,
-            ));
+            sample.push_str(&format!("  ... and {} more\n", orphans.len() - 16,));
         }
         panic!(
             "orphan MakeVariant count for `base/result.vr` regressed: {} > baseline {}\n\n\

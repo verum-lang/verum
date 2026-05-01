@@ -83,50 +83,44 @@
 //!  └── verum.refinement_check
 //! ```
 
-pub mod types;
-pub mod ops;
+pub mod async_state;
 pub mod builders;
 pub mod cbgr;
-pub mod context_system;
 pub mod closure;
-pub mod async_state;
+pub mod context_system;
+pub mod ops;
+pub mod types;
 
-use verum_mlir::Context;
 use verum_common::Text;
+use verum_mlir::Context;
 
 // Re-export core types and operations
-pub use types::*;
-pub use ops::*;
 pub use builders::*;
+pub use ops::*;
+pub use types::*;
 
 // Re-export enhanced modules
-pub use cbgr::{
-    CbgrRefLayout, CbgrCapability, EscapeCategory, BorrowKind,
-    CbgrAllocOp, CbgrCheckOp, CbgrDerefOp, CbgrStoreOp, CbgrDropOp,
-    CbgrBorrowScopeOp, CbgrPromoteOp, CbgrDemoteOp, CbgrEscapeAnnotateOp,
-    CbgrTypeBuilder,
+pub use async_state::{
+    AsyncAnalysis, AsyncCloneWakerOp, AsyncGetResultOp, AsyncGetStateOp, AsyncGetWakerOp,
+    AsyncJoinOp, AsyncPollIsReadyOp, AsyncPollOp, AsyncPollValueOp, AsyncRaceOp,
+    AsyncRestoreLocalsOp, AsyncReturnPendingOp, AsyncReturnReadyOp, AsyncSaveLocalsOp,
+    AsyncSelectOp, AsyncSetResultOp, AsyncSetStateOp, AsyncSpawnOp, AsyncStateMachineCreateOp,
+    AsyncStateMachineGenerator, AsyncTypeBuilder, AsyncWakeOp, AwaitPoint, LiveVariable, PollState,
 };
-pub use context_system::{
-    ContextCapability, ContextLifetime, ContextResolution,
-    ContextGetOp, ContextProvideOp, ContextScopeOp, ContextRequireOp,
-    ContextWithOp, ContextHasOp, ContextMonoOp,
-    ContextTypeBuilder, ContextAnalysis,
+pub use cbgr::{
+    BorrowKind, CbgrAllocOp, CbgrBorrowScopeOp, CbgrCapability, CbgrCheckOp, CbgrDemoteOp,
+    CbgrDerefOp, CbgrDropOp, CbgrEscapeAnnotateOp, CbgrPromoteOp, CbgrRefLayout, CbgrStoreOp,
+    CbgrTypeBuilder, EscapeCategory,
 };
 pub use closure::{
-    CaptureMode, CapturedVar, ClosureEnv,
-    ClosureCreateOp, ClosureCallOp, ClosureEnvLoadOp, ClosureEnvStoreOp,
-    ClosureDropOp, FnPtrCreateOp, IndirectCallOp, MethodCallOp, VTableLookupOp,
-    ClosureTypeBuilder, ClosureLowering,
+    CaptureMode, CapturedVar, ClosureCallOp, ClosureCreateOp, ClosureDropOp, ClosureEnv,
+    ClosureEnvLoadOp, ClosureEnvStoreOp, ClosureLowering, ClosureTypeBuilder, FnPtrCreateOp,
+    IndirectCallOp, MethodCallOp, VTableLookupOp,
 };
-pub use async_state::{
-    PollState, AwaitPoint, LiveVariable, AsyncAnalysis,
-    AsyncStateMachineCreateOp, AsyncGetStateOp, AsyncSetStateOp,
-    AsyncSaveLocalsOp, AsyncRestoreLocalsOp, AsyncSetResultOp, AsyncGetResultOp,
-    AsyncPollOp, AsyncPollIsReadyOp, AsyncPollValueOp,
-    AsyncReturnPendingOp, AsyncReturnReadyOp,
-    AsyncSpawnOp, AsyncJoinOp, AsyncSelectOp, AsyncRaceOp,
-    AsyncGetWakerOp, AsyncWakeOp, AsyncCloneWakerOp,
-    AsyncTypeBuilder, AsyncStateMachineGenerator,
+pub use context_system::{
+    ContextAnalysis, ContextCapability, ContextGetOp, ContextHasOp, ContextLifetime, ContextMonoOp,
+    ContextProvideOp, ContextRequireOp, ContextResolution, ContextScopeOp, ContextTypeBuilder,
+    ContextWithOp,
 };
 
 /// The Verum MLIR dialect.

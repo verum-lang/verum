@@ -130,39 +130,39 @@ impl LadderStrategy {
     /// Diagnostic name (matches the `@verify(<name>)` annotation form).
     pub fn name(self) -> &'static str {
         match self {
-            LadderStrategy::Runtime         => "runtime",
-            LadderStrategy::Static          => "static",
-            LadderStrategy::Fast            => "fast",
+            LadderStrategy::Runtime => "runtime",
+            LadderStrategy::Static => "static",
+            LadderStrategy::Fast => "fast",
             LadderStrategy::ComplexityTyped => "complexity_typed",
-            LadderStrategy::Formal          => "formal",
-            LadderStrategy::Proof           => "proof",
-            LadderStrategy::Thorough        => "thorough",
-            LadderStrategy::Reliable        => "reliable",
-            LadderStrategy::Certified       => "certified",
-            LadderStrategy::CoherentStatic  => "coherent_static",
+            LadderStrategy::Formal => "formal",
+            LadderStrategy::Proof => "proof",
+            LadderStrategy::Thorough => "thorough",
+            LadderStrategy::Reliable => "reliable",
+            LadderStrategy::Certified => "certified",
+            LadderStrategy::CoherentStatic => "coherent_static",
             LadderStrategy::CoherentRuntime => "coherent_runtime",
-            LadderStrategy::Coherent        => "coherent",
-            LadderStrategy::Synthesize      => "synthesize",
+            LadderStrategy::Coherent => "coherent",
+            LadderStrategy::Synthesize => "synthesize",
         }
     }
 
     /// Parse a strategy from its `@verify(...)` form.
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
-            "runtime"          => Some(LadderStrategy::Runtime),
-            "static"           => Some(LadderStrategy::Static),
-            "fast"             => Some(LadderStrategy::Fast),
+            "runtime" => Some(LadderStrategy::Runtime),
+            "static" => Some(LadderStrategy::Static),
+            "fast" => Some(LadderStrategy::Fast),
             "complexity_typed" => Some(LadderStrategy::ComplexityTyped),
-            "formal"           => Some(LadderStrategy::Formal),
-            "proof"            => Some(LadderStrategy::Proof),
-            "thorough"         => Some(LadderStrategy::Thorough),
-            "reliable"         => Some(LadderStrategy::Reliable),
-            "certified"        => Some(LadderStrategy::Certified),
-            "coherent_static"  => Some(LadderStrategy::CoherentStatic),
+            "formal" => Some(LadderStrategy::Formal),
+            "proof" => Some(LadderStrategy::Proof),
+            "thorough" => Some(LadderStrategy::Thorough),
+            "reliable" => Some(LadderStrategy::Reliable),
+            "certified" => Some(LadderStrategy::Certified),
+            "coherent_static" => Some(LadderStrategy::CoherentStatic),
             "coherent_runtime" => Some(LadderStrategy::CoherentRuntime),
-            "coherent"         => Some(LadderStrategy::Coherent),
-            "synthesize"       => Some(LadderStrategy::Synthesize),
-            _                  => None,
+            "coherent" => Some(LadderStrategy::Coherent),
+            "synthesize" => Some(LadderStrategy::Synthesize),
+            _ => None,
         }
     }
 
@@ -207,19 +207,19 @@ impl LadderStrategy {
     /// Diagnostic ν-ordinal label (matches VVA §2.3).
     pub fn nu_ordinal_label(self) -> &'static str {
         match self {
-            LadderStrategy::Runtime         => "0",
-            LadderStrategy::Static          => "1",
-            LadderStrategy::Fast            => "2",
+            LadderStrategy::Runtime => "0",
+            LadderStrategy::Static => "1",
+            LadderStrategy::Fast => "2",
             LadderStrategy::ComplexityTyped => "3",
-            LadderStrategy::Formal          => "ω",
-            LadderStrategy::Proof           => "ω + 1",
-            LadderStrategy::Thorough        => "ω · 2",
-            LadderStrategy::Reliable        => "ω · 2 + 1",
-            LadderStrategy::Certified       => "ω · 2 + 2",
-            LadderStrategy::CoherentStatic  => "ω · 2 + 3",
+            LadderStrategy::Formal => "ω",
+            LadderStrategy::Proof => "ω + 1",
+            LadderStrategy::Thorough => "ω · 2",
+            LadderStrategy::Reliable => "ω · 2 + 1",
+            LadderStrategy::Certified => "ω · 2 + 2",
+            LadderStrategy::CoherentStatic => "ω · 2 + 3",
             LadderStrategy::CoherentRuntime => "ω · 2 + 4",
-            LadderStrategy::Coherent        => "ω · 2 + 5",
-            LadderStrategy::Synthesize      => "≤ ω · 3 + 1",
+            LadderStrategy::Coherent => "ω · 2 + 5",
+            LadderStrategy::Synthesize => "≤ ω · 3 + 1",
         }
     }
 
@@ -634,8 +634,8 @@ impl LadderImplStatus {
     pub fn name(self) -> &'static str {
         match self {
             LadderImplStatus::Implemented => "implemented",
-            LadderImplStatus::Fallback    => "fallback",
-            LadderImplStatus::Pending     => "pending",
+            LadderImplStatus::Fallback => "fallback",
+            LadderImplStatus::Pending => "pending",
         }
     }
 
@@ -698,27 +698,19 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 // #114 hardening — real SMT path when typed AST
                 // assertions are present. Falls through to the
                 // trivial-tautology decider for text-only obligations.
-                if let Some(verdict) =
-                    dispatch_via_smt_solver(obligation, LadderStrategy::Fast)
-                {
+                if let Some(verdict) = dispatch_via_smt_solver(obligation, LadderStrategy::Fast) {
                     return verdict;
                 }
-                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
-                {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
                     LadderVerdict::Closed {
                         strategy: LadderStrategy::Fast,
-                        witness: Text::from(format!(
-                            "fast-trivial-tautology: {}",
-                            rule
-                        )),
+                        witness: Text::from(format!("fast-trivial-tautology: {}", rule)),
                         elapsed_ms: 0,
                     }
                 } else {
                     LadderVerdict::DispatchPending {
                         strategy: LadderStrategy::Fast,
-                        note: Text::from(
-                            "V1: typed `ast_assertions` required for SMT dispatch",
-                        ),
+                        note: Text::from("V1: typed `ast_assertions` required for SMT dispatch"),
                     }
                 }
             }
@@ -730,8 +722,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 {
                     return verdict;
                 }
-                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
-                {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
                     LadderVerdict::Closed {
                         strategy: LadderStrategy::ComplexityTyped,
                         witness: Text::from(format!(
@@ -751,27 +742,19 @@ impl LadderDispatcher for DefaultLadderDispatcher {
             }
             LadderStrategy::Formal => {
                 // #114 hardening — portfolio SMT via capability routing.
-                if let Some(verdict) =
-                    dispatch_via_smt_solver(obligation, LadderStrategy::Formal)
-                {
+                if let Some(verdict) = dispatch_via_smt_solver(obligation, LadderStrategy::Formal) {
                     return verdict;
                 }
-                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
-                {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
                     LadderVerdict::Closed {
                         strategy: LadderStrategy::Formal,
-                        witness: Text::from(format!(
-                            "formal-trivial-tautology: {}",
-                            rule
-                        )),
+                        witness: Text::from(format!("formal-trivial-tautology: {}", rule)),
                         elapsed_ms: 0,
                     }
                 } else {
                     LadderVerdict::DispatchPending {
                         strategy: LadderStrategy::Formal,
-                        note: Text::from(
-                            "V1: typed `ast_assertions` required for portfolio SMT",
-                        ),
+                        note: Text::from("V1: typed `ast_assertions` required for portfolio SMT"),
                     }
                 }
             }
@@ -783,27 +766,26 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 // that attestation directly.
                 if let Some(outcome) = &obligation.kernel_recheck_outcome {
                     return match outcome {
-                        KernelRecheckOutcome::Admitted { context } => {
-                            LadderVerdict::Closed {
-                                strategy: LadderStrategy::Proof,
-                                witness: Text::from(format!(
-                                    "kernel-recheck-theorem: {}",
-                                    context.as_str()
-                                )),
-                                elapsed_ms: 0,
-                            }
-                        }
-                        KernelRecheckOutcome::Rejected { reason, error_count } => {
-                            LadderVerdict::Open {
-                                strategy: LadderStrategy::Proof,
-                                reason: Text::from(format!(
-                                    "kernel-recheck-theorem: {} (and {} more rejection{})",
-                                    reason.as_str(),
-                                    error_count.saturating_sub(1),
-                                    if *error_count == 2 { "" } else { "s" }
-                                )),
-                            }
-                        }
+                        KernelRecheckOutcome::Admitted { context } => LadderVerdict::Closed {
+                            strategy: LadderStrategy::Proof,
+                            witness: Text::from(format!(
+                                "kernel-recheck-theorem: {}",
+                                context.as_str()
+                            )),
+                            elapsed_ms: 0,
+                        },
+                        KernelRecheckOutcome::Rejected {
+                            reason,
+                            error_count,
+                        } => LadderVerdict::Open {
+                            strategy: LadderStrategy::Proof,
+                            reason: Text::from(format!(
+                                "kernel-recheck-theorem: {} (and {} more rejection{})",
+                                reason.as_str(),
+                                error_count.saturating_sub(1),
+                                if *error_count == 2 { "" } else { "s" }
+                            )),
+                        },
                     };
                 }
                 // #113 hardening — when the obligation carries a
@@ -812,22 +794,17 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 // `verum_kernel::infer::{infer, verify_full}`. This
                 // is the production path: the kernel is the single
                 // trust boundary for `@verify(proof)` obligations.
-                if let Some(verdict) =
-                    dispatch_proof_via_kernel(obligation, LadderStrategy::Proof)
+                if let Some(verdict) = dispatch_proof_via_kernel(obligation, LadderStrategy::Proof)
                 {
                     return verdict;
                 }
                 // Fallback: trivial-tautology decider for
                 // text-only obligations. Strict ν-monotone lift —
                 // anything Fast admits, Proof admits.
-                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
-                {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
                     LadderVerdict::Closed {
                         strategy: LadderStrategy::Proof,
-                        witness: Text::from(format!(
-                            "proof-trivial-tautology: {}",
-                            rule
-                        )),
+                        witness: Text::from(format!("proof-trivial-tautology: {}", rule)),
                         elapsed_ms: 0,
                     }
                 } else {
@@ -849,13 +826,11 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 {
                     return verdict;
                 }
-                if let Some(verdict) =
-                    dispatch_via_smt_solver(obligation, LadderStrategy::Thorough)
+                if let Some(verdict) = dispatch_via_smt_solver(obligation, LadderStrategy::Thorough)
                 {
                     return verdict;
                 }
-                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
-                {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
                     LadderVerdict::Closed {
                         strategy: LadderStrategy::Thorough,
                         witness: Text::from(format!(
@@ -879,13 +854,11 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 {
                     return verdict;
                 }
-                if let Some(verdict) =
-                    dispatch_via_smt_solver(obligation, LadderStrategy::Reliable)
+                if let Some(verdict) = dispatch_via_smt_solver(obligation, LadderStrategy::Reliable)
                 {
                     return verdict;
                 }
-                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
-                {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
                     LadderVerdict::Closed {
                         strategy: LadderStrategy::Reliable,
                         witness: Text::from(format!(
@@ -914,8 +887,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 {
                     return verdict;
                 }
-                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
-                {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
                     LadderVerdict::Closed {
                         strategy: LadderStrategy::Certified,
                         witness: Text::from(format!(
@@ -944,8 +916,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 {
                     return verdict;
                 }
-                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
-                {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
                     LadderVerdict::Closed {
                         strategy: LadderStrategy::CoherentStatic,
                         witness: Text::from(format!(
@@ -971,8 +942,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 {
                     return verdict;
                 }
-                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
-                {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
                     LadderVerdict::Closed {
                         strategy: LadderStrategy::CoherentRuntime,
                         witness: Text::from(format!(
@@ -998,8 +968,7 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 {
                     return verdict;
                 }
-                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
-                {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
                     LadderVerdict::Closed {
                         strategy: LadderStrategy::Coherent,
                         witness: Text::from(format!(
@@ -1028,19 +997,19 @@ impl LadderDispatcher for DefaultLadderDispatcher {
 
     fn implementation_status(&self, strategy: LadderStrategy) -> LadderImplStatus {
         match strategy {
-            LadderStrategy::Runtime         => LadderImplStatus::Implemented,
-            LadderStrategy::Static          => LadderImplStatus::Implemented,
-            LadderStrategy::Fast            => LadderImplStatus::Implemented,
+            LadderStrategy::Runtime => LadderImplStatus::Implemented,
+            LadderStrategy::Static => LadderImplStatus::Implemented,
+            LadderStrategy::Fast => LadderImplStatus::Implemented,
             LadderStrategy::ComplexityTyped => LadderImplStatus::Implemented,
-            LadderStrategy::Formal          => LadderImplStatus::Implemented,
-            LadderStrategy::Proof           => LadderImplStatus::Implemented,
-            LadderStrategy::Thorough        => LadderImplStatus::Implemented,
-            LadderStrategy::Reliable        => LadderImplStatus::Implemented,
-            LadderStrategy::Certified       => LadderImplStatus::Implemented,
-            LadderStrategy::CoherentStatic  => LadderImplStatus::Implemented,
+            LadderStrategy::Formal => LadderImplStatus::Implemented,
+            LadderStrategy::Proof => LadderImplStatus::Implemented,
+            LadderStrategy::Thorough => LadderImplStatus::Implemented,
+            LadderStrategy::Reliable => LadderImplStatus::Implemented,
+            LadderStrategy::Certified => LadderImplStatus::Implemented,
+            LadderStrategy::CoherentStatic => LadderImplStatus::Implemented,
             LadderStrategy::CoherentRuntime => LadderImplStatus::Implemented,
-            LadderStrategy::Coherent        => LadderImplStatus::Implemented,
-            LadderStrategy::Synthesize      => LadderImplStatus::Pending,
+            LadderStrategy::Coherent => LadderImplStatus::Implemented,
+            LadderStrategy::Synthesize => LadderImplStatus::Pending,
         }
     }
 }
@@ -1195,19 +1164,19 @@ pub fn dispatch_proof_via_kernel(
 fn ladder_to_smt_strategy(s: LadderStrategy) -> verum_smt::verify_strategy::VerifyStrategy {
     use verum_smt::verify_strategy::VerifyStrategy as VS;
     match s {
-        LadderStrategy::Runtime         => VS::Runtime,
-        LadderStrategy::Static          => VS::Static,
-        LadderStrategy::Fast            => VS::Fast,
+        LadderStrategy::Runtime => VS::Runtime,
+        LadderStrategy::Static => VS::Static,
+        LadderStrategy::Fast => VS::Fast,
         LadderStrategy::ComplexityTyped => VS::ComplexityTyped,
-        LadderStrategy::Formal          => VS::Formal,
-        LadderStrategy::Proof           => VS::Proof,
-        LadderStrategy::Thorough        => VS::Thorough,
-        LadderStrategy::Reliable        => VS::Reliable,
-        LadderStrategy::Certified       => VS::Certified,
-        LadderStrategy::CoherentStatic  => VS::CoherentStatic,
+        LadderStrategy::Formal => VS::Formal,
+        LadderStrategy::Proof => VS::Proof,
+        LadderStrategy::Thorough => VS::Thorough,
+        LadderStrategy::Reliable => VS::Reliable,
+        LadderStrategy::Certified => VS::Certified,
+        LadderStrategy::CoherentStatic => VS::CoherentStatic,
         LadderStrategy::CoherentRuntime => VS::CoherentRuntime,
-        LadderStrategy::Coherent        => VS::Coherent,
-        LadderStrategy::Synthesize      => VS::Synthesize,
+        LadderStrategy::Coherent => VS::Coherent,
+        LadderStrategy::Synthesize => VS::Synthesize,
     }
 }
 
@@ -1237,9 +1206,7 @@ pub fn dispatch_via_smt_solver(
     if obligation.ast_assertions.is_empty() {
         return None;
     }
-    use verum_smt::backend_switcher::{
-        SmtBackendSwitcher, SolveResult, SwitcherConfig,
-    };
+    use verum_smt::backend_switcher::{SmtBackendSwitcher, SolveResult, SwitcherConfig};
 
     // Translate Vec<Expr> to verum_common::List<Expr> (the SMT
     // backend's assertion type).
@@ -1266,7 +1233,9 @@ pub fn dispatch_via_smt_solver(
     };
 
     Some(match result {
-        SolveResult::Unsat { backend, time_ms, .. } => LadderVerdict::Closed {
+        SolveResult::Unsat {
+            backend, time_ms, ..
+        } => LadderVerdict::Closed {
             strategy,
             witness: Text::from(format!(
                 "smt-unsat: backend={}, time_ms={}",
@@ -1274,7 +1243,12 @@ pub fn dispatch_via_smt_solver(
             )),
             elapsed_ms: time_ms.max(elapsed_ms),
         },
-        SolveResult::Sat { backend, time_ms, model, .. } => LadderVerdict::Open {
+        SolveResult::Sat {
+            backend,
+            time_ms,
+            model,
+            ..
+        } => LadderVerdict::Open {
             strategy,
             reason: Text::from(format!(
                 "smt-sat (counterexample): backend={}, time_ms={}{}",
@@ -1359,7 +1333,9 @@ pub fn dispatch_coherent_via_alpha_epsilon(
         if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
             return Ok(Text::from(format!("alpha-trivial-tautology: {}", rule)));
         }
-        Err(Text::from("α-side discharge: no typed payload, no trivial admission"))
+        Err(Text::from(
+            "α-side discharge: no typed payload, no trivial admission",
+        ))
     })();
 
     let alpha_witness = match alpha_outcome {
@@ -1550,12 +1526,8 @@ impl StrategyStep {
     pub fn from_verdict(verdict: &LadderVerdict) -> Self {
         let strategy = verdict.strategy();
         let (closed, verdict_kind, detail) = match verdict {
-            LadderVerdict::Closed { witness, .. } => {
-                (true, VerdictKind::Closed, witness.clone())
-            }
-            LadderVerdict::Open { reason, .. } => {
-                (false, VerdictKind::Open, reason.clone())
-            }
+            LadderVerdict::Closed { witness, .. } => (true, VerdictKind::Closed, witness.clone()),
+            LadderVerdict::Open { reason, .. } => (false, VerdictKind::Open, reason.clone()),
             LadderVerdict::DispatchPending { note, .. } => {
                 (false, VerdictKind::DispatchPending, note.clone())
             }
@@ -1642,8 +1614,7 @@ pub fn dispatch_ladder_walk<D: LadderDispatcher>(
         };
     }
 
-    let stop_at = backbone_index(declared)
-        .expect("declared is on backbone — checked above");
+    let stop_at = backbone_index(declared).expect("declared is on backbone — checked above");
     let mut steps: Vec<StrategyStep> = Vec::with_capacity(stop_at + 1);
 
     for &strat in LadderStrategy::backbone()[..=stop_at].iter() {
@@ -1776,7 +1747,7 @@ mod tests {
     #[test]
     fn from_name_rejects_unknown() {
         assert_eq!(LadderStrategy::from_name(""), None);
-        assert_eq!(LadderStrategy::from_name("RUNTIME"), None);  // case-sensitive
+        assert_eq!(LadderStrategy::from_name("RUNTIME"), None); // case-sensitive
         assert_eq!(LadderStrategy::from_name("garbage"), None);
     }
 
@@ -1792,10 +1763,18 @@ mod tests {
 
     #[test]
     fn backbone_cmp_ordered_correctly() {
-        assert!(LadderStrategy::Runtime.backbone_cmp(LadderStrategy::Static).unwrap()
-            == std::cmp::Ordering::Less);
-        assert!(LadderStrategy::Coherent.backbone_cmp(LadderStrategy::Runtime).unwrap()
-            == std::cmp::Ordering::Greater);
+        assert!(
+            LadderStrategy::Runtime
+                .backbone_cmp(LadderStrategy::Static)
+                .unwrap()
+                == std::cmp::Ordering::Less
+        );
+        assert!(
+            LadderStrategy::Coherent
+                .backbone_cmp(LadderStrategy::Runtime)
+                .unwrap()
+                == std::cmp::Ordering::Greater
+        );
         assert_eq!(
             LadderStrategy::Synthesize.backbone_cmp(LadderStrategy::Formal),
             None,
@@ -1851,8 +1830,12 @@ mod tests {
         let d = DefaultLadderDispatcher::new();
         for &s in &LadderStrategy::all() {
             let v = d.dispatch(&obligation(s));
-            assert_eq!(v.strategy(), s,
-                "Verdict strategy must match obligation declared_strategy ({:?})", s);
+            assert_eq!(
+                v.strategy(),
+                s,
+                "Verdict strategy must match obligation declared_strategy ({:?})",
+                s
+            );
         }
     }
 
@@ -1884,16 +1867,18 @@ mod tests {
             fn implementation_status(&self, s: LadderStrategy) -> LadderImplStatus {
                 match s {
                     LadderStrategy::Runtime => LadderImplStatus::Implemented,
-                    LadderStrategy::Static  => LadderImplStatus::Pending,  // GAP
-                    LadderStrategy::Fast    => LadderImplStatus::Pending,
-                    LadderStrategy::Formal  => LadderImplStatus::Implemented,  // jumped over `Static`
+                    LadderStrategy::Static => LadderImplStatus::Pending, // GAP
+                    LadderStrategy::Fast => LadderImplStatus::Pending,
+                    LadderStrategy::Formal => LadderImplStatus::Implemented, // jumped over `Static`
                     _ => LadderImplStatus::Pending,
                 }
             }
         }
         let bad = Bad;
-        assert!(verify_monotonicity(&bad).is_err(),
-            "Monotonicity violation must be caught");
+        assert!(
+            verify_monotonicity(&bad).is_err(),
+            "Monotonicity violation must be caught"
+        );
     }
 
     // -- Trivial-tautology decider (#110) -------------------------------
@@ -1940,10 +1925,7 @@ mod tests {
 
     #[test]
     fn trivial_decider_admits_reflexive_path() {
-        assert_eq!(
-            trivial_tautology_rule("Path A x x"),
-            Some("reflexive-path")
-        );
+        assert_eq!(trivial_tautology_rule("Path A x x"), Some("reflexive-path"));
         assert_eq!(
             trivial_tautology_rule("Path Nat zero zero"),
             Some("reflexive-path")
@@ -1965,12 +1947,7 @@ mod tests {
     #[test]
     fn trivial_decider_rejects_non_trivial_shapes() {
         for s in ["x = y", "P -> Q", "Path A x y", "False", ""] {
-            assert_eq!(
-                trivial_tautology_rule(s),
-                None,
-                "expected None for `{}`",
-                s
-            );
+            assert_eq!(trivial_tautology_rule(s), None, "expected None for `{}`", s);
         }
     }
 
@@ -1979,7 +1956,9 @@ mod tests {
         let d = DefaultLadderDispatcher::new();
         let v = d.dispatch(&obligation_with_text(LadderStrategy::Fast, "x = x"));
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::Fast);
                 assert!(witness.as_str().contains("textual-reflexivity"));
             }
@@ -1999,7 +1978,9 @@ mod tests {
         let d = DefaultLadderDispatcher::new();
         let v = d.dispatch(&obligation_with_text(LadderStrategy::Proof, "True"));
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::Proof);
                 assert!(witness.as_str().contains("top-constant"));
             }
@@ -2037,7 +2018,9 @@ mod tests {
         let d = DefaultLadderDispatcher::new();
         let v = d.dispatch(&obligation_with_text(LadderStrategy::Thorough, "x = x"));
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::Thorough);
                 assert!(witness.as_str().contains("textual-reflexivity"));
                 assert!(witness.as_str().contains("decreases/invariant/frame"));
@@ -2051,7 +2034,9 @@ mod tests {
         let d = DefaultLadderDispatcher::new();
         let v = d.dispatch(&obligation_with_text(LadderStrategy::Reliable, "True"));
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::Reliable);
                 assert!(witness.as_str().contains("top-constant"));
                 assert!(witness.as_str().contains("cross-solver agreement"));
@@ -2063,9 +2048,14 @@ mod tests {
     #[test]
     fn certified_strategy_admits_trivial_tautology() {
         let d = DefaultLadderDispatcher::new();
-        let v = d.dispatch(&obligation_with_text(LadderStrategy::Certified, "Path A x x"));
+        let v = d.dispatch(&obligation_with_text(
+            LadderStrategy::Certified,
+            "Path A x x",
+        ));
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::Certified);
                 assert!(witness.as_str().contains("reflexive-path"));
                 assert!(witness.as_str().contains("trivial cert"));
@@ -2110,7 +2100,9 @@ mod tests {
             "x = x",
         ));
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::CoherentStatic);
                 assert!(witness.as_str().contains("textual-reflexivity"));
                 assert!(witness.as_str().contains("vacuous α-cert"));
@@ -2127,7 +2119,9 @@ mod tests {
             "True",
         ));
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::CoherentRuntime);
                 assert!(witness.as_str().contains("ε-monitor"));
             }
@@ -2143,7 +2137,9 @@ mod tests {
             "Path A x x",
         ));
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::Coherent);
                 assert!(witness.as_str().contains("reflexive-path"));
                 assert!(witness.as_str().contains("α/ε bidirectional"));
@@ -2183,7 +2179,10 @@ mod tests {
     /// kernel's `infer` arm for `CoreTerm::Axiom` looks up the name
     /// in the registry and returns the registered type — so the
     /// name must be registered before the lookup fires.
-    fn registry_with(name: &str, ty: verum_kernel::CoreTerm) -> std::sync::Arc<verum_kernel::AxiomRegistry> {
+    fn registry_with(
+        name: &str,
+        ty: verum_kernel::CoreTerm,
+    ) -> std::sync::Arc<verum_kernel::AxiomRegistry> {
         let mut reg = verum_kernel::AxiomRegistry::new();
         let fw = verum_kernel::FrameworkId {
             framework: Text::from("verum"),
@@ -2225,7 +2224,9 @@ mod tests {
         .with_expected_type(type_zero());
         let v = DefaultLadderDispatcher::new().dispatch(&o);
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::Proof);
                 assert!(witness.as_str().contains("kernel-verify-full"));
             }
@@ -2238,12 +2239,8 @@ mod tests {
         // Unbound variable + empty registry: kernel must reject.
         let registry = std::sync::Arc::new(verum_kernel::AxiomRegistry::new());
         let term = verum_kernel::CoreTerm::Var(Text::from("nonexistent"));
-        let o = LadderObligation::text(
-            "thm.x",
-            LadderStrategy::Proof,
-            "irrelevant",
-        )
-        .with_core_term(term, registry);
+        let o = LadderObligation::text("thm.x", LadderStrategy::Proof, "irrelevant")
+            .with_core_term(term, registry);
         let v = DefaultLadderDispatcher::new().dispatch(&o);
         match v {
             LadderVerdict::Open { strategy, reason } => {
@@ -2261,7 +2258,9 @@ mod tests {
         let v = DefaultLadderDispatcher::new()
             .dispatch(&obligation_with_text(LadderStrategy::Proof, "True"));
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::Proof);
                 assert!(witness.as_str().contains("trivial-tautology"));
             }
@@ -2372,15 +2371,13 @@ mod tests {
         // Trivial α (textual reflexivity) + non-empty ε-claim
         // → CoherentStatic admits both sides.
         let claim = EpsilonClaim::symbolic("foo:42", "monitor_invariant_holds");
-        let o = LadderObligation::text(
-            "thm.coh",
-            LadderStrategy::CoherentStatic,
-            "x = x",
-        )
-        .with_epsilon_claim(claim);
+        let o = LadderObligation::text("thm.coh", LadderStrategy::CoherentStatic, "x = x")
+            .with_epsilon_claim(claim);
         let v = DefaultLadderDispatcher::new().dispatch(&o);
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::CoherentStatic);
                 let s = witness.as_str();
                 assert!(s.contains("α:"));
@@ -2394,12 +2391,8 @@ mod tests {
     #[test]
     fn coherent_static_rejects_with_empty_epsilon_claim() {
         let claim = EpsilonClaim::symbolic("foo:42", "");
-        let o = LadderObligation::text(
-            "thm.coh",
-            LadderStrategy::CoherentStatic,
-            "x = x",
-        )
-        .with_epsilon_claim(claim);
+        let o = LadderObligation::text("thm.coh", LadderStrategy::CoherentStatic, "x = x")
+            .with_epsilon_claim(claim);
         let v = DefaultLadderDispatcher::new().dispatch(&o);
         match v {
             LadderVerdict::Open { reason, .. } => {
@@ -2412,17 +2405,19 @@ mod tests {
     #[test]
     fn coherent_runtime_admits_with_runtime_monitor_flag() {
         let claim = EpsilonClaim::runtime("foo:42", "runtime_invariant");
-        let o = LadderObligation::text(
-            "thm.coh",
-            LadderStrategy::CoherentRuntime,
-            "True",
-        )
-        .with_epsilon_claim(claim);
+        let o = LadderObligation::text("thm.coh", LadderStrategy::CoherentRuntime, "True")
+            .with_epsilon_claim(claim);
         let v = DefaultLadderDispatcher::new().dispatch(&o);
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::CoherentRuntime);
-                assert!(witness.as_str().contains("epsilon-runtime-monitor-deferred"));
+                assert!(
+                    witness
+                        .as_str()
+                        .contains("epsilon-runtime-monitor-deferred")
+                );
             }
             other => panic!("expected Closed, got {:?}", other),
         }
@@ -2432,12 +2427,8 @@ mod tests {
     fn coherent_runtime_rejects_static_only_claim() {
         // CoherentRuntime requires runtime_monitor=true.
         let claim = EpsilonClaim::symbolic("foo:42", "static_invariant");
-        let o = LadderObligation::text(
-            "thm.coh",
-            LadderStrategy::CoherentRuntime,
-            "True",
-        )
-        .with_epsilon_claim(claim);
+        let o = LadderObligation::text("thm.coh", LadderStrategy::CoherentRuntime, "True")
+            .with_epsilon_claim(claim);
         let v = DefaultLadderDispatcher::new().dispatch(&o);
         match v {
             LadderVerdict::Open { reason, .. } => {
@@ -2454,16 +2445,14 @@ mod tests {
         let registry = registry_with("eps_axiom", type_zero());
         let claim = EpsilonClaim::symbolic("foo:42", "strict_check")
             .with_claim_term(axiom_term("eps_axiom", type_zero()));
-        let o = LadderObligation::text(
-            "thm.coh",
-            LadderStrategy::Coherent,
-            "True",
-        )
-        .with_core_term(axiom_term("eps_axiom", type_zero()), registry)
-        .with_epsilon_claim(claim);
+        let o = LadderObligation::text("thm.coh", LadderStrategy::Coherent, "True")
+            .with_core_term(axiom_term("eps_axiom", type_zero()), registry)
+            .with_epsilon_claim(claim);
         let v = DefaultLadderDispatcher::new().dispatch(&o);
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::Coherent);
                 let s = witness.as_str();
                 assert!(s.contains("α:"));
@@ -2479,16 +2468,16 @@ mod tests {
         // Coherent strict needs `epsilon_claim.claim_term` — symbolic
         // claim alone is insufficient.
         let claim = EpsilonClaim::symbolic("foo:42", "no_typed_claim");
-        let o = LadderObligation::text(
-            "thm.coh",
-            LadderStrategy::Coherent,
-            "True",
-        )
-        .with_epsilon_claim(claim);
+        let o = LadderObligation::text("thm.coh", LadderStrategy::Coherent, "True")
+            .with_epsilon_claim(claim);
         let v = DefaultLadderDispatcher::new().dispatch(&o);
         match v {
             LadderVerdict::Open { reason, .. } => {
-                assert!(reason.as_str().contains("requires `epsilon_claim.claim_term`"));
+                assert!(
+                    reason
+                        .as_str()
+                        .contains("requires `epsilon_claim.claim_term`")
+                );
             }
             other => panic!("expected Open, got {:?}", other),
         }
@@ -2498,8 +2487,10 @@ mod tests {
     fn coherent_falls_back_to_trivial_decider_without_claim() {
         // When no ε-claim is attached, the Coherent triplet falls
         // through to the trivial-decider for V0 back-compat.
-        let v = DefaultLadderDispatcher::new()
-            .dispatch(&obligation_with_text(LadderStrategy::CoherentStatic, "x = x"));
+        let v = DefaultLadderDispatcher::new().dispatch(&obligation_with_text(
+            LadderStrategy::CoherentStatic,
+            "x = x",
+        ));
         match v {
             LadderVerdict::Closed { witness, .. } => {
                 assert!(witness.as_str().contains("trivial-tautology"));
@@ -2519,7 +2510,9 @@ mod tests {
             .with_kernel_recheck_outcome(outcome);
         let v = DefaultLadderDispatcher::new().dispatch(&o);
         match v {
-            LadderVerdict::Closed { strategy, witness, .. } => {
+            LadderVerdict::Closed {
+                strategy, witness, ..
+            } => {
                 assert_eq!(strategy, LadderStrategy::Proof);
                 assert!(witness.as_str().contains("kernel-recheck-theorem"));
                 assert!(witness.as_str().contains("thm.x"));
@@ -2569,7 +2562,10 @@ mod tests {
             LadderVerdict::Closed { witness, .. } => {
                 assert!(witness.as_str().contains("kernel-recheck-theorem"));
             }
-            other => panic!("expected Closed (recheck takes precedence), got {:?}", other),
+            other => panic!(
+                "expected Closed (recheck takes precedence), got {:?}",
+                other
+            ),
         }
     }
 
@@ -2600,13 +2596,9 @@ mod tests {
         let registry = std::sync::Arc::new(verum_kernel::AxiomRegistry::new());
         let claim = EpsilonClaim::symbolic("foo:42", "valid_claim");
         // Unbound-var term forces α-rejection.
-        let o = LadderObligation::text(
-            "thm.coh",
-            LadderStrategy::CoherentStatic,
-            "irrelevant",
-        )
-        .with_core_term(verum_kernel::CoreTerm::Var(Text::from("nope")), registry)
-        .with_epsilon_claim(claim);
+        let o = LadderObligation::text("thm.coh", LadderStrategy::CoherentStatic, "irrelevant")
+            .with_core_term(verum_kernel::CoreTerm::Var(Text::from("nope")), registry)
+            .with_epsilon_claim(claim);
         let v = DefaultLadderDispatcher::new().dispatch(&o);
         match v {
             LadderVerdict::Open { reason, .. } => {
@@ -2661,8 +2653,7 @@ mod tests {
             match v {
                 LadderVerdict::Closed { witness, .. } => {
                     assert!(
-                        witness.as_str().contains("smt-")
-                            || witness.as_str().contains("trivial"),
+                        witness.as_str().contains("smt-") || witness.as_str().contains("trivial"),
                         "{:?}: witness should reflect SMT or trivial path; got `{}`",
                         strategy,
                         witness.as_str()
@@ -2680,8 +2671,7 @@ mod tests {
                     // SMT-error path or "transport failure" — also
                     // valid (means Z3 is unavailable in the runner).
                     assert!(
-                        note.as_str().contains("smt-error")
-                            || note.as_str().contains("transport"),
+                        note.as_str().contains("smt-error") || note.as_str().contains("transport"),
                         "{:?}: DispatchPending should reflect SMT-error; got `{}`",
                         strategy,
                         note.as_str()
@@ -2965,7 +2955,10 @@ mod tests {
         assert_eq!(violations[0].coarser_failed, LadderStrategy::Runtime);
         assert_eq!(violations[0].stricter_succeeded, LadderStrategy::Static);
         // Second violation: ComplexityTyped → Formal.
-        assert_eq!(violations[1].coarser_failed, LadderStrategy::ComplexityTyped);
+        assert_eq!(
+            violations[1].coarser_failed,
+            LadderStrategy::ComplexityTyped
+        );
         assert_eq!(violations[1].stricter_succeeded, LadderStrategy::Formal);
     }
 
@@ -2997,6 +2990,9 @@ mod tests {
         };
         assert_eq!(report.closed_count(), 2);
         assert_eq!(report.non_closed_count(), 1);
-        assert_eq!(report.closed_count() + report.non_closed_count(), report.steps.len());
+        assert_eq!(
+            report.closed_count() + report.non_closed_count(),
+            report.steps.len()
+        );
     }
 }

@@ -215,15 +215,9 @@ pub enum LockError {
         source: io::Error,
     },
     /// `version` field didn't match [`SCHEMA_VERSION`].
-    SchemaSkew {
-        found: u32,
-        expected: u32,
-    },
+    SchemaSkew { found: u32, expected: u32 },
     /// TOML parse failure on a syntactically broken lockfile.
-    ParseError {
-        path: PathBuf,
-        reason: String,
-    },
+    ParseError { path: PathBuf, reason: String },
     /// `self_integrity` didn't match the recomputed digest. Lockfile
     /// has been tampered with — caller must reject.
     SelfIntegrityFailure {
@@ -361,11 +355,12 @@ impl LockfileV3 {
                 path: tmp.clone(),
                 source,
             })?;
-            f.write_all(body.as_bytes()).map_err(|source| LockError::Io {
-                op: "write body",
-                path: tmp.clone(),
-                source,
-            })?;
+            f.write_all(body.as_bytes())
+                .map_err(|source| LockError::Io {
+                    op: "write body",
+                    path: tmp.clone(),
+                    source,
+                })?;
             f.sync_all().ok();
         }
         fs::rename(&tmp, path).map_err(|source| {
@@ -878,10 +873,7 @@ mod tests {
         for entry in fs::read_dir(path.parent().unwrap()).unwrap() {
             let name = entry.unwrap().file_name();
             let s = name.to_string_lossy();
-            assert!(
-                !s.contains(".lock.tmp."),
-                "leftover tempfile: {s}"
-            );
+            assert!(!s.contains(".lock.tmp."), "leftover tempfile: {s}");
         }
     }
 
@@ -898,8 +890,7 @@ mod tests {
                 blob_a,
                 None,
                 Meta {
-                    schema_version:
-                        crate::registry::content_store::META_SCHEMA_VERSION,
+                    schema_version: crate::registry::content_store::META_SCHEMA_VERSION,
                     name: "a".into(),
                     version: "1.0.0".into(),
                     source: "registry".into(),
@@ -914,8 +905,7 @@ mod tests {
                 blob_b,
                 None,
                 Meta {
-                    schema_version:
-                        crate::registry::content_store::META_SCHEMA_VERSION,
+                    schema_version: crate::registry::content_store::META_SCHEMA_VERSION,
                     name: "b".into(),
                     version: "1.0.0".into(),
                     source: "registry".into(),

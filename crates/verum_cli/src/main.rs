@@ -18,17 +18,17 @@ use std::process;
 use verum_common::{List, Text};
 
 mod cache;
+mod cog;
+mod cog_manager;
 mod commands;
 mod config;
 mod error;
 mod feature_overrides;
-mod script;
-mod tier;
-mod cog;
-mod cog_manager;
 pub mod registry;
 mod repl;
+mod script;
 mod templates;
+mod tier;
 mod ui;
 
 use error::{CliError, Result};
@@ -168,8 +168,11 @@ enum Commands {
         ///
 
         /// Legacy values "none", "proof" are aliases for "runtime" and "formal".
-        #[clap(long, value_name = "STRATEGY",
-               help = "Verification strategy: runtime|static|formal|fast|thorough|certified|synthesize")]
+        #[clap(
+            long,
+            value_name = "STRATEGY",
+            help = "Verification strategy: runtime|static|formal|fast|thorough|certified|synthesize"
+        )]
         verify: Option<Text>,
 
         /// Print SMT routing statistics after compilation.
@@ -235,7 +238,11 @@ enum Commands {
         /// flashes on launch, suitable for desktop applications.
         /// Ignored on non-Windows targets. Overrides the manifest
         /// `[build].windows_subsystem` setting if present.
-        #[clap(long, value_name = "MODE", help = "Windows subsystem: console|gui (Windows targets only)")]
+        #[clap(
+            long,
+            value_name = "MODE",
+            help = "Windows subsystem: console|gui (Windows targets only)"
+        )]
         windows_subsystem: Option<Text>,
 
         // Lint configuration options
@@ -1814,7 +1821,6 @@ enum Commands {
 
     // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
     // Use `verum info` with --stdlib flag for stdlib information if needed.
-
     /// Generate shell completion scripts for bash, zsh, fish, or PowerShell.
     ///
 
@@ -2439,7 +2445,9 @@ fn main() {
     // compiler data structures. Spawn on a thread with 16 MB stack.
     const STACK_SIZE: usize = 16 * 1024 * 1024;
     let builder = std::thread::Builder::new().stack_size(STACK_SIZE);
-    let handler = builder.spawn(main_inner).expect("failed to spawn main thread");
+    let handler = builder
+        .spawn(main_inner)
+        .expect("failed to spawn main thread");
     if let Err(e) = handler.join() {
         std::panic::resume_unwind(e);
     }
@@ -2709,7 +2717,9 @@ fn run_command(cli: Cli) -> Result<()> {
             //  (accepts interpret|aot|check; "check" is invalid
             //  for `run` and yields an error)
             //  3. default: interpreter
-            let tier_from_override = feature_overrides.tier.as_ref()
+            let tier_from_override = feature_overrides
+                .tier
+                .as_ref()
                 .map(|t| t.as_str().to_string());
             feature_overrides::install(feature_overrides);
 
@@ -2737,7 +2747,11 @@ fn run_command(cli: Cli) -> Result<()> {
             };
 
             let args_list: List<Text> = args.into_iter().map(|s| s.into()).collect();
-            let tier_label = if tier_num == Some(1) { "aot" } else { "interpreter" };
+            let tier_label = if tier_num == Some(1) {
+                "aot"
+            } else {
+                "interpreter"
+            };
 
             verum_error::crash::set_command("run");
             verum_error::crash::set_tier(tier_label);
@@ -2748,11 +2762,9 @@ fn run_command(cli: Cli) -> Result<()> {
             // identical parser, identical permission model, identical
             // exit-code semantics. The temp file is removed on drop.
             if let Some(expr) = eval {
-                let tmp = commands::file::synthesize_script_temp(
-                    &format!("print({});\n", expr),
-                    "eval",
-                )
-                .map_err(|e| CliError::Custom(format!("synthesize -e: {e}")))?;
+                let tmp =
+                    commands::file::synthesize_script_temp(&format!("print({});\n", expr), "eval")
+                        .map_err(|e| CliError::Custom(format!("synthesize -e: {e}")))?;
                 ui::status("Running", &format!("-e ({})", tier_label));
                 let result = commands::file::run_with_tier_and_flags(
                     tmp.path().to_str().expect("temp path is utf-8"),
@@ -2827,8 +2839,7 @@ fn run_command(cli: Cli) -> Result<()> {
         } => {
             let tier_override = feature_overrides.tier.clone();
             feature_overrides::install(feature_overrides);
-            let resolved =
-                tier::resolve(interp, aot, tier_override.as_ref(), tier::Tier::Aot)?;
+            let resolved = tier::resolve(interp, aot, tier_override.as_ref(), tier::Tier::Aot)?;
             let opts = commands::test::TestOptions {
                 filter,
                 release,
@@ -2863,8 +2874,7 @@ fn run_command(cli: Cli) -> Result<()> {
         } => {
             let tier_override = feature_overrides.tier.clone();
             feature_overrides::install(feature_overrides);
-            let resolved =
-                tier::resolve(interp, aot, tier_override.as_ref(), tier::Tier::Aot)?;
+            let resolved = tier::resolve(interp, aot, tier_override.as_ref(), tier::Tier::Aot)?;
             let opts = commands::bench::BenchOptions {
                 filter,
                 save_baseline,
@@ -2893,20 +2903,14 @@ fn run_command(cli: Cli) -> Result<()> {
                     ui::status("Checking", file_path.as_str());
                     commands::file::check(file_path.as_str(), false, parse_only)
                 }
-                PathTarget::Project => {
-                    commands::check::execute(workspace, false, false)
-                }
+                PathTarget::Project => commands::check::execute(workspace, false, false),
             }
         }
-        Commands::CheckProof { file } => {
-            commands::check_proof::execute(file.as_str())
-        }
-        Commands::ElaborateProof { file, output_dir } => {
-            commands::elaborate_proof::execute(
-                file.as_str(),
-                output_dir.as_ref().map(|s| s.as_str()),
-            )
-        }
+        Commands::CheckProof { file } => commands::check_proof::execute(file.as_str()),
+        Commands::ElaborateProof { file, output_dir } => commands::elaborate_proof::execute(
+            file.as_str(),
+            output_dir.as_ref().map(|s| s.as_str()),
+        ),
         Commands::Fmt {
             check,
             verbose,
@@ -3006,10 +3010,12 @@ fn run_command(cli: Cli) -> Result<()> {
                 .or_else(|| std::env::var("VERUM_LINT_PROFILE").ok());
             let severity_filter: Option<commands::lint::LintLevel> = match severity {
                 Some(level) => Some(commands::lint::LintLevel::parse(level.as_str()).ok_or_else(
-                    || CliError::InvalidArgument(format!(
-                        "unknown --severity `{}` (expected: error|warn|info|hint)",
-                        level
-                    )),
+                    || {
+                        CliError::InvalidArgument(format!(
+                            "unknown --severity `{}` (expected: error|warn|info|hint)",
+                            level
+                        ))
+                    },
                 )?),
                 None => None,
             };
@@ -3117,41 +3123,35 @@ fn run_command(cli: Cli) -> Result<()> {
             profile,
             export,
             no_color,
-        } => {
-            commands::playbook::execute(commands::playbook::PlaybookOptions {
-                file: file.as_ref().map(|s| s.as_str()),
-                tier,
-                vim_mode: vim,
-                preload: preload.as_ref().map(|s| s.as_str()),
-                tutorial,
-                profile,
-                export: export.as_ref().map(|s| s.as_str()),
-                no_color,
-            })
-        }
+        } => commands::playbook::execute(commands::playbook::PlaybookOptions {
+            file: file.as_ref().map(|s| s.as_str()),
+            tier,
+            vim_mode: vim,
+            preload: preload.as_ref().map(|s| s.as_str()),
+            tutorial,
+            profile,
+            export: export.as_ref().map(|s| s.as_str()),
+            no_color,
+        }),
         Commands::PlaybookConvert(convert_cmd) => match convert_cmd {
             PlaybookConvertCommands::ToScript {
                 input,
                 output,
                 include_outputs,
-            } => {
-                commands::playbook::export_to_script(
-                    input.as_str(),
-                    output.as_ref().map(|s| s.as_str()),
-                    include_outputs,
-                )
-            }
+            } => commands::playbook::export_to_script(
+                input.as_str(),
+                output.as_ref().map(|s| s.as_str()),
+                include_outputs,
+            ),
             PlaybookConvertCommands::FromScript { input, output } => {
                 commands::playbook::import_from_script(
                     input.as_str(),
                     output.as_ref().map(|s| s.as_str()),
                 )
             }
-        }
+        },
         Commands::Version { verbose } => commands::version::execute(verbose),
-        Commands::VbcVersion { archive, raw } => {
-            commands::vbc_version::execute(&archive, raw)
-        }
+        Commands::VbcVersion { archive, raw } => commands::vbc_version::execute(&archive, raw),
         Commands::Package(pkg_cmd) => match pkg_cmd {
             PackageCommands::Publish {
                 dry_run,
@@ -3270,9 +3270,7 @@ fn run_command(cli: Cli) -> Result<()> {
             // typed dispatcher and emit per-theorem verdicts. Honest
             // integration of #71's LadderDispatcher trait surface.
             if ladder {
-                return commands::verify_ladder::run_verify_ladder(
-                    ladder_format.as_str(),
-                );
+                return commands::verify_ladder::run_verify_ladder(ladder_format.as_str());
             }
             // --lsp-mode implies no human output; set an env var
             // the downstream report-renderer reads to switch from
@@ -3284,7 +3282,9 @@ fn run_command(cli: Cli) -> Result<()> {
                 // verify_cmd's report-renderer as a loose-coupling
                 // format toggle. Single-threaded context at CLI
                 // entry — no TOCTOU hazard.
-                unsafe { std::env::set_var("VERUM_LSP_MODE", "1"); }
+                unsafe {
+                    std::env::set_var("VERUM_LSP_MODE", "1");
+                }
             }
 
             // SMT debugging flags — propagated to the solver via
@@ -3302,14 +3302,13 @@ fn run_command(cli: Cli) -> Result<()> {
                 // SAFETY: single-threaded CLI entry; see --lsp-mode
                 // rationale above.
                 unsafe {
-                    std::env::set_var(
-                        "VERUM_DUMP_SMT_DIR",
-                        dir.display().to_string(),
-                    );
+                    std::env::set_var("VERUM_DUMP_SMT_DIR", dir.display().to_string());
                 }
             }
             if solver_protocol {
-                unsafe { std::env::set_var("VERUM_SOLVER_PROTOCOL", "1"); }
+                unsafe {
+                    std::env::set_var("VERUM_SOLVER_PROTOCOL", "1");
+                }
             }
             if let Some(ref smt_file) = check_smt_formula {
                 // --check-smt-formula short-circuits: read the
@@ -3318,11 +3317,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 // pipeline because the input is raw SMT-LIB — the
                 // Verum AST / type-checker / VC generator don't
                 // need to run.
-                return commands::smt_check::run(
-                    smt_file,
-                    solver.as_str(),
-                    timeout,
-                );
+                return commands::smt_check::run(smt_file, solver.as_str(), timeout);
             }
             // `--export` implies `--profile` — you can't dump a profile you
             // didn't collect. `--profile-obligation` also implies `--profile`
@@ -3351,10 +3346,7 @@ fn run_command(cli: Cli) -> Result<()> {
             // export path, not the solver selection path. For now,
             // record it in telemetry; the export wiring (task #65)
             // will read it from the session config when it lands.
-            tracing::debug!(
-                "smt_proof_preference = {}",
-                smt_proof_preference.as_str()
-            );
+            tracing::debug!("smt_proof_preference = {}", smt_proof_preference.as_str());
             let _ = smt_proof_preference;
 
             let budget_duration = match budget.as_deref() {
@@ -3362,11 +3354,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 Some(raw) => match commands::verify::parse_duration(raw) {
                     Ok(d) => Some(d),
                     Err(e) => {
-                        eprintln!(
-                            "{} invalid --budget: {}",
-                            "error:".red().bold(),
-                            e
-                        );
+                        eprintln!("{} invalid --budget: {}", "error:".red().bold(), e);
                         process::exit(2);
                     }
                 },
@@ -3429,56 +3417,58 @@ fn run_command(cli: Cli) -> Result<()> {
             llvm,
             all,
         } => commands::file::info(features, llvm, all),
-        Commands::Dap { transport, port, feature_overrides } => {
+        Commands::Dap {
+            transport,
+            port,
+            feature_overrides,
+        } => {
             feature_overrides::install(feature_overrides);
 
             // Gate on [debug].dap_enabled. Resolve from the project
             // manifest if present; otherwise defaults apply (enabled).
             // A missing manifest is not an error — `verum dap` can run
             // outside a Verum project (e.g. for stand-alone IDE use).
-            let (dap_enabled, default_port) =
-                match config::Manifest::find_manifest_dir().ok() {
-                    Some(dir) => {
-                        let path = config::Manifest::manifest_path(&dir);
-                        let mut m = config::Manifest::from_file(&path)
-                            .unwrap_or_else(|_| {
-                                config::create_default_manifest(
-                                    "scratch",
-                                    false,
-                                    config::LanguageProfile::Application,
-                                )
-                            });
-                        feature_overrides::apply_global(&mut m)?;
-                        // Surface inert DebugConfig fields not yet wired
-                        // through to the DAP server. `dap_enabled` and
-                        // `port` reach the dispatch logic below; the
-                        // remaining three (`step_granularity`,
-                        // `inspect_depth`, `show_erased_proofs`) flow
-                        // from the manifest into LanguageFeatures but
-                        // verum_dap doesn't consult them at session
-                        // setup. Trace the values at the dispatch entry
-                        // so embedders writing
-                        // `[debug].step_granularity = "instruction"`
-                        // see the value was observed at the CLI
-                        // boundary, gated on any non-default value.
-                        if m.debug.step_granularity.as_str() != "statement"
-                            || m.debug.inspect_depth != 8
-                            || m.debug.show_erased_proofs
-                        {
-                            tracing::debug!(
-                                "dap dispatch: step_granularity={:?}, inspect_depth={}, \
+            let (dap_enabled, default_port) = match config::Manifest::find_manifest_dir().ok() {
+                Some(dir) => {
+                    let path = config::Manifest::manifest_path(&dir);
+                    let mut m = config::Manifest::from_file(&path).unwrap_or_else(|_| {
+                        config::create_default_manifest(
+                            "scratch",
+                            false,
+                            config::LanguageProfile::Application,
+                        )
+                    });
+                    feature_overrides::apply_global(&mut m)?;
+                    // Surface inert DebugConfig fields not yet wired
+                    // through to the DAP server. `dap_enabled` and
+                    // `port` reach the dispatch logic below; the
+                    // remaining three (`step_granularity`,
+                    // `inspect_depth`, `show_erased_proofs`) flow
+                    // from the manifest into LanguageFeatures but
+                    // verum_dap doesn't consult them at session
+                    // setup. Trace the values at the dispatch entry
+                    // so embedders writing
+                    // `[debug].step_granularity = "instruction"`
+                    // see the value was observed at the CLI
+                    // boundary, gated on any non-default value.
+                    if m.debug.step_granularity.as_str() != "statement"
+                        || m.debug.inspect_depth != 8
+                        || m.debug.show_erased_proofs
+                    {
+                        tracing::debug!(
+                            "dap dispatch: step_granularity={:?}, inspect_depth={}, \
                                  show_erased_proofs={} — these fields land on the manifest \
                                  but verum_dap does not yet consult them at session setup; \
                                  forward-looking infra",
-                                m.debug.step_granularity.as_str(),
-                                m.debug.inspect_depth,
-                                m.debug.show_erased_proofs,
-                            );
-                        }
-                        (m.debug.dap_enabled, m.debug.port)
+                            m.debug.step_granularity.as_str(),
+                            m.debug.inspect_depth,
+                            m.debug.show_erased_proofs,
+                        );
                     }
-                    None => (true, 0),
-                };
+                    (m.debug.dap_enabled, m.debug.port)
+                }
+                None => (true, 0),
+            };
 
             if !dap_enabled {
                 return Err(CliError::Custom(
@@ -3511,7 +3501,11 @@ fn run_command(cli: Cli) -> Result<()> {
             };
             commands::dap::execute(transport_mode)
         }
-        Commands::Lsp { transport, port, feature_overrides } => {
+        Commands::Lsp {
+            transport,
+            port,
+            feature_overrides,
+        } => {
             feature_overrides::install(feature_overrides);
             let transport_mode = match transport.as_str() {
                 "stdio" => commands::lsp::Transport::Stdio,
@@ -3538,19 +3532,13 @@ fn run_command(cli: Cli) -> Result<()> {
             lemma,
             max,
             format,
-        } => {
-            commands::proof_draft::run_proof_draft(
-                &theorem, &goal, &lemma, max, &format,
-            )
-        }
+        } => commands::proof_draft::run_proof_draft(&theorem, &goal, &lemma, max, &format),
         Commands::ProofRepair {
             kind,
             field,
             max,
             format,
-        } => {
-            commands::proof_repair::run_proof_repair(&kind, &field, max, &format)
-        }
+        } => commands::proof_repair::run_proof_repair(&kind, &field, max, &format),
         Commands::ForeignImport {
             from,
             file,
@@ -3561,13 +3549,9 @@ fn run_command(cli: Cli) -> Result<()> {
             CubicalSub::Primitives { category, output } => {
                 commands::cubical::run_primitives(category.as_deref(), &output)
             }
-            CubicalSub::Explain { name, output } => {
-                commands::cubical::run_explain(&name, &output)
-            }
+            CubicalSub::Explain { name, output } => commands::cubical::run_explain(&name, &output),
             CubicalSub::Rules { output } => commands::cubical::run_rules(&output),
-            CubicalSub::Face { formula, output } => {
-                commands::cubical::run_face(&formula, &output)
-            }
+            CubicalSub::Face { formula, output } => commands::cubical::run_face(&formula, &output),
         },
         Commands::CogRegistry { sub } => match sub {
             CogRegistrySub::Publish {
@@ -3575,12 +3559,9 @@ fn run_command(cli: Cli) -> Result<()> {
                 root,
                 registry_id,
                 output,
-            } => commands::cog_registry::run_publish(
-                &manifest,
-                root.as_ref(),
-                &registry_id,
-                &output,
-            ),
+            } => {
+                commands::cog_registry::run_publish(&manifest, root.as_ref(), &registry_id, &output)
+            }
             CogRegistrySub::Lookup {
                 name,
                 version,
@@ -3632,9 +3613,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 mirror,
                 output,
             } => commands::cog_registry::run_consensus(&name, &version, &mirror, &output),
-            CogRegistrySub::SeedDemo { output } => {
-                commands::cog_registry::run_seed_demo(&output)
-            }
+            CogRegistrySub::SeedDemo { output } => commands::cog_registry::run_seed_demo(&output),
         },
         Commands::CertReplay { sub } => match sub {
             CertReplaySub::Replay {
@@ -3673,12 +3652,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 require_consensus,
                 &output,
             ),
-            CertReplaySub::Formats { output } => {
-                commands::cert_replay::run_formats(&output)
-            }
-            CertReplaySub::Backends { output } => {
-                commands::cert_replay::run_backends(&output)
-            }
+            CertReplaySub::Formats { output } => commands::cert_replay::run_formats(&output),
+            CertReplaySub::Backends { output } => commands::cert_replay::run_backends(&output),
         },
         Commands::Benchmark { sub } => match sub {
             BenchmarkSub::Run {
@@ -3797,9 +3772,7 @@ fn run_command(cli: Cli) -> Result<()> {
             TacticSub::List { format, category } => {
                 commands::tactic::run_list(&format, category.as_deref())
             }
-            TacticSub::Explain { name, format } => {
-                commands::tactic::run_explain(&name, &format)
-            }
+            TacticSub::Explain { name, format } => commands::tactic::run_explain(&name, &format),
             TacticSub::Laws { format } => commands::tactic::run_laws(&format),
         },
         Commands::Audit {
@@ -3851,11 +3824,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 "json" => commands::audit::AuditFormat::Json,
                 other => {
                     return Err(CliError::InvalidArgument(
-                        format!(
-                            "--format must be 'plain' or 'json', got '{}'",
-                            other
-                        )
-                        .into(),
+                        format!("--format must be 'plain' or 'json', got '{}'", other).into(),
                     ));
                 }
             };
@@ -3953,8 +3922,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 // per-theorem coord audit is
                 // default-on. Skip with --no-coord.
                 if !no_coord {
-                    let coord_result =
-                        commands::audit::audit_coord_with_format(output_format);
+                    let coord_result = commands::audit::audit_coord_with_format(output_format);
                     // Surface either failure; prefer the dep-audit
                     // error for backwards compatibility.
                     dep_result.and(coord_result)
@@ -3963,8 +3931,16 @@ fn run_command(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Commands::Export { to, output, with_provenance }
-        | Commands::ExportProofs { to, output, with_provenance } => {
+        Commands::Export {
+            to,
+            output,
+            with_provenance,
+        }
+        | Commands::ExportProofs {
+            to,
+            output,
+            with_provenance,
+        } => {
             let format = commands::export::ExportFormat::parse(&to)?;
             let options = commands::export::ExportOptions {
                 format,
@@ -3976,7 +3952,11 @@ fn run_command(cli: Cli) -> Result<()> {
             };
             commands::export::run(options)
         }
-        Commands::Import { from, input, output } => {
+        Commands::Import {
+            from,
+            input,
+            output,
+        } => {
             let format = commands::import::ImportFormat::parse(&from)?;
             commands::import::run(commands::import::ImportOptions {
                 format,
@@ -3985,10 +3965,7 @@ fn run_command(cli: Cli) -> Result<()> {
             })
         }
         Commands::Extract { input, output } => {
-            commands::extract::run(commands::extract::ExtractOptions {
-                input,
-                output,
-            })
+            commands::extract::run(commands::extract::ExtractOptions { input, output })
         }
         Commands::Tree { duplicates, depth } => {
             let options = commands::tree::TreeOptions {
@@ -4008,8 +3985,7 @@ fn run_command(cli: Cli) -> Result<()> {
         Commands::SmtInfo { json } => {
             #[cfg(feature = "verification")]
             {
-                commands::smt_info::execute(json)
-                    .map_err(|e| CliError::Custom(e.to_string()))
+                commands::smt_info::execute(json).map_err(|e| CliError::Custom(e.to_string()))
             }
             #[cfg(not(feature = "verification"))]
             {
@@ -4027,31 +4003,25 @@ fn run_command(cli: Cli) -> Result<()> {
         }
 
         Commands::SmtStats { json, reset } => {
-            commands::smt_stats::execute(json, reset)
-                .map_err(|e| CliError::Custom(e.to_string()))
+            commands::smt_stats::execute(json, reset).map_err(|e| CliError::Custom(e.to_string()))
         }
 
         Commands::Config { command } => match command {
-            ConfigCommands::Show { json, feature_overrides } => {
+            ConfigCommands::Show {
+                json,
+                feature_overrides,
+            } => {
                 feature_overrides::install(feature_overrides);
-                commands::config::execute(json)
-                    .map_err(|e| CliError::Custom(e.to_string()))
+                commands::config::execute(json).map_err(|e| CliError::Custom(e.to_string()))
             }
             ConfigCommands::Validate { feature_overrides } => {
                 feature_overrides::install(feature_overrides);
-                commands::config::validate()
-                    .map_err(|e| CliError::Custom(e.to_string()))
+                commands::config::validate().map_err(|e| CliError::Custom(e.to_string()))
             }
         },
         Commands::Completions { shell } => {
-            clap_complete::generate(
-                shell,
-                &mut Cli::command(),
-                "verum",
-                &mut std::io::stdout(),
-            );
+            clap_complete::generate(shell, &mut Cli::command(), "verum", &mut std::io::stdout());
             Ok(())
-        }
-        // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system
+        } // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system
     }
 }

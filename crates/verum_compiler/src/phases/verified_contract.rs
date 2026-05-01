@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 use verum_ast::Span;
-use verum_smt::{ContractSpec, ProofResult};
 use verum_common::{List, Text};
+use verum_smt::{ContractSpec, ProofResult};
 
 /// A contract that has been successfully verified by the SMT solver
 #[derive(Debug, Clone)]

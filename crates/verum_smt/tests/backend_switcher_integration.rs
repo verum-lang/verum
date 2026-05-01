@@ -31,11 +31,11 @@
 use verum_ast::expr::{BinOp, Expr, ExprKind};
 use verum_ast::literal::{Literal, LiteralKind};
 use verum_ast::span::Span;
+use verum_common::List;
 use verum_smt::backend_switcher::{
     BackendChoice, FallbackConfig, PortfolioConfig, PortfolioMode, SmtBackendSwitcher, SolveResult,
     SwitcherConfig,
 };
-use verum_common::List;
 
 /// Helper to create a simple boolean literal expression
 fn mk_bool_lit(value: bool) -> Expr {

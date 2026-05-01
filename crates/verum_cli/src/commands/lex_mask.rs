@@ -133,7 +133,10 @@ impl LexMask {
                 // is also raw (zero hashes) and is valid. We require
                 // either at least one hash OR `r"` immediately to
                 // disambiguate from an identifier starting with `r`.
-                if j < bytes.len() && bytes[j] == b'"' && (hashes > 0 || Self::is_word_boundary_left(bytes, i)) {
+                if j < bytes.len()
+                    && bytes[j] == b'"'
+                    && (hashes > 0 || Self::is_word_boundary_left(bytes, i))
+                {
                     let start = i;
                     let mut k = j + 1;
                     // Look for the closing `"` followed by `hashes` `#`s.
@@ -159,7 +162,9 @@ impl LexMask {
                 }
             }
             // ── f-string prefix: f"…" — content treated as String ──
-            if b == b'f' && i + 1 < bytes.len() && bytes[i + 1] == b'"'
+            if b == b'f'
+                && i + 1 < bytes.len()
+                && bytes[i + 1] == b'"'
                 && Self::is_word_boundary_left(bytes, i)
             {
                 let start = i;
@@ -257,7 +262,9 @@ impl LexMask {
         if end > self.classes.len() {
             return false;
         }
-        self.classes[start..end].iter().all(|c| *c == ByteClass::Code as u8)
+        self.classes[start..end]
+            .iter()
+            .all(|c| *c == ByteClass::Code as u8)
     }
 
     /// True iff every byte of `[start, end)` is code or comment
@@ -266,9 +273,9 @@ impl LexMask {
         if end > self.classes.len() {
             return false;
         }
-        self.classes[start..end].iter().all(|c| {
-            *c != ByteClass::String as u8 && *c != ByteClass::RawString as u8
-        })
+        self.classes[start..end]
+            .iter()
+            .all(|c| *c != ByteClass::String as u8 && *c != ByteClass::RawString as u8)
     }
 
     /// Fill `classes[start..end]` with the given class.
@@ -375,7 +382,12 @@ mod tests {
         let start = src.find("/*").unwrap();
         let end = src.rfind("*/").unwrap() + 2;
         for i in start..end {
-            assert_eq!(cls[i], ByteClass::BlockComment, "byte {i} ({}) should be BlockComment", &src[i..=i]);
+            assert_eq!(
+                cls[i],
+                ByteClass::BlockComment,
+                "byte {i} ({}) should be BlockComment",
+                &src[i..=i]
+            );
         }
         assert_eq!(cls[0], ByteClass::Code); // x
         assert_eq!(cls[end + 1], ByteClass::Code); // y (after space)
@@ -483,7 +495,11 @@ mod tests {
         let src = r#"route("hi")"#;
         let mask = LexMask::new(src);
         for i in 0..5 {
-            assert!(mask.is_code(i), "byte {i} (`{}`) should be code", &src[i..=i]);
+            assert!(
+                mask.is_code(i),
+                "byte {i} (`{}`) should be code",
+                &src[i..=i]
+            );
         }
         // But the "hi" inside is a String.
         let hi = src.find('"').unwrap();

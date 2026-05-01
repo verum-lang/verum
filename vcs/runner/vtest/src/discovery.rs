@@ -92,7 +92,8 @@ impl Default for DiscoveryConfig {
             "**/skip/**".to_string().into(),
             "**/wip/**".to_string().into(),
             "**/experimental/**".to_string().into(),
-        ].into();
+        ]
+        .into();
         Self {
             paths: vec![PathBuf::from("specs")].into(),
             pattern: "**/*.vr".to_string().into(),

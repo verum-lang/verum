@@ -96,10 +96,16 @@ fn report(label: &str, source: &str, expect_ok: bool) {
     let (ok, err_count, messages) = check(source);
     eprintln!("  [{}] ok={}  errors={}", label, ok, err_count);
     if !messages.is_empty() {
-        eprintln!("    first diag: {}", messages[0].chars().take(200).collect::<String>());
+        eprintln!(
+            "    first diag: {}",
+            messages[0].chars().take(200).collect::<String>()
+        );
     }
     if ok != expect_ok {
-        eprintln!("    >>> EXPECTATION MISMATCH: expected ok={}, got ok={}", expect_ok, ok);
+        eprintln!(
+            "    >>> EXPECTATION MISMATCH: expected ok={}, got ok={}",
+            expect_ok, ok
+        );
     }
 }
 
@@ -483,7 +489,10 @@ fn dependent_refinement_out_of_bounds_rejected() {
         "dependent refinement `i < len` must reject safe_get(5, 10): \
          10 is not < 5"
     );
-    assert!(err_count >= 1, "at least one E500 refinement diagnostic expected");
+    assert!(
+        err_count >= 1,
+        "at least one E500 refinement diagnostic expected"
+    );
 }
 
 /// Paired with the above: a negative index argument must also be rejected
@@ -505,7 +514,10 @@ fn dependent_refinement_negative_index_rejected() {
         !ok,
         "dependent refinement `i >= 0` must reject safe_get(5, -1)"
     );
-    assert!(err_count >= 1, "at least one E500 refinement diagnostic expected");
+    assert!(
+        err_count >= 1,
+        "at least one E500 refinement diagnostic expected"
+    );
 }
 
 /// Positive regression: calls that satisfy the dependent refinement

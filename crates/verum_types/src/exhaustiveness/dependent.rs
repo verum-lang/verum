@@ -35,16 +35,16 @@
 //! - Dependent pattern matching: patterns that refine types in branches, with coverage checking
 //! - Pattern exhaustiveness checking: ensuring match expressions cover all possible values
 
-use super::constructors::{get_type_constructors, Constructor, TypeConstructors};
-use super::matrix::{build_matrix, CoverageMatrix, PatternColumn};
-use super::witness::{generate_any_witness, Witness};
+use super::constructors::{Constructor, TypeConstructors, get_type_constructors};
 use super::diagnostics::ExhaustivenessWarning;
+use super::matrix::{CoverageMatrix, PatternColumn, build_matrix};
+use super::witness::{Witness, generate_any_witness};
 use super::{ExhaustivenessResult, find_redundant_patterns};
+use crate::TypeError;
 use crate::context::TypeEnv;
 use crate::dependent_match::{ConstructorRefinement, DependentPatternChecker, Motive};
 use crate::ty::{EqTerm, InductiveConstructor, Type, TypeVar};
 use crate::unify::Unifier;
-use crate::TypeError;
 use indexmap::IndexMap;
 use verum_ast::pattern::{MatchArm, Pattern, PatternKind};
 use verum_ast::span::Span;
@@ -411,10 +411,7 @@ impl<'a> DependentExhaustivenessChecker<'a> {
         // wire-up the field was inert — the warning was never
         // emitted regardless of the flag.
         let mut warnings: List<ExhaustivenessWarning> = List::new();
-        if all_guarded
-            && !matrix.rows.is_empty()
-            && self.config.warn_all_guarded
-        {
+        if all_guarded && !matrix.rows.is_empty() && self.config.warn_all_guarded {
             warnings.push(ExhaustivenessWarning::all_guarded(None));
         }
 
@@ -459,7 +456,8 @@ impl<'a> DependentExhaustivenessChecker<'a> {
 
         for ctor in possible_constructors {
             if !self.is_constructor_covered_by_matrix(matrix, ctor) {
-                let witness = super::witness::generate_witness_for_constructor(ctor, matrix, self.env);
+                let witness =
+                    super::witness::generate_witness_for_constructor(ctor, matrix, self.env);
                 uncovered.push(witness);
 
                 if uncovered.len() >= self.config.max_witnesses {
@@ -670,10 +668,7 @@ mod tests {
     fn test_index_incompatibility() {
         let env = TypeEnv::new();
         let ctors = Map::new();
-        let checker = DependentExhaustivenessChecker::new(
-            &env,
-            &ctors,
-        );
+        let checker = DependentExhaustivenessChecker::new(&env, &ctors);
 
         // Zero vs Succ should be incompatible
         let zero = Type::Generic {
@@ -710,11 +705,7 @@ mod tests {
                     use_smt_for_guards: smt,
                     ..DependentExhaustivenessConfig::default()
                 };
-                let checker = DependentExhaustivenessChecker::with_config(
-                    &env,
-                    &ctors,
-                    cfg,
-                );
+                let checker = DependentExhaustivenessChecker::with_config(&env, &ctors, cfg);
                 assert_eq!(checker.warn_all_guarded_enabled(), warn);
                 assert_eq!(checker.use_smt_for_guards_enabled(), smt);
             }
@@ -833,11 +824,17 @@ mod hou_strategy_tests {
 
     #[test]
     fn display_round_trips_canonical_names() {
-        assert_eq!(format!("{}", HouStrategy::MillerPatternFragment), "miller-pattern");
+        assert_eq!(
+            format!("{}", HouStrategy::MillerPatternFragment),
+            "miller-pattern"
+        );
         assert_eq!(
             format!("{}", HouStrategy::RestrictedHigherOrderMatching),
             "restricted-higher-order-matching"
         );
-        assert_eq!(format!("{}", HouStrategy::FullHigherOrderUnification), "full-hou");
+        assert_eq!(
+            format!("{}", HouStrategy::FullHigherOrderUnification),
+            "full-hou"
+        );
     }
 }

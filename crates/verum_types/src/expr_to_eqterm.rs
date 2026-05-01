@@ -92,10 +92,7 @@ fn literal_to_eq_term(lit: &Literal) -> EqTerm {
             if let Ok(v) = i64::try_from(n.value) {
                 EqTerm::Const(EqConst::Int(v))
             } else {
-                EqTerm::Const(EqConst::Named(Text::from(format!(
-                    "{}",
-                    n.value
-                ))))
+                EqTerm::Const(EqConst::Named(Text::from(format!("{}", n.value))))
             }
         }
         LiteralKind::Bool(b) => EqTerm::Const(EqConst::Bool(*b)),
@@ -106,9 +103,7 @@ fn literal_to_eq_term(lit: &Literal) -> EqTerm {
             };
             EqTerm::Const(EqConst::Named(raw))
         }
-        LiteralKind::Char(c) => {
-            EqTerm::Const(EqConst::Named(Text::from(c.to_string())))
-        }
+        LiteralKind::Char(c) => EqTerm::Const(EqConst::Named(Text::from(c.to_string()))),
         _ => EqTerm::Const(EqConst::Named(Text::from("<lit>"))),
     }
 }

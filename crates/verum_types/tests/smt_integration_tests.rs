@@ -42,9 +42,7 @@ use verum_types::{
 };
 // Z3Backend + check_subsumption_smt moved to verum_smt::refinement_backend
 // (2026-04-24 cycle-break). Use the renamed bridge type.
-use verum_smt::refinement_backend::{
-    RefinementZ3Backend as Z3Backend, check_subsumption_smt,
-};
+use verum_smt::refinement_backend::{RefinementZ3Backend as Z3Backend, check_subsumption_smt};
 
 // ==================== Helper Functions ====================
 

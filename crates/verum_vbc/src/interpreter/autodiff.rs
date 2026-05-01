@@ -51,8 +51,8 @@
 
 use std::collections::HashMap;
 
-use crate::instruction::{TensorReduceOp, TensorUnaryOp};
 use super::tensor::{DType, TensorHandle};
+use crate::instruction::{TensorReduceOp, TensorUnaryOp};
 
 /// Maximum number of nested gradient scopes.
 pub const MAX_GRAD_SCOPES: usize = 16;
@@ -278,7 +278,12 @@ impl CustomGradRegistry {
     ///
 
     /// Returns the assigned rule ID.
-    pub fn register_vjp(&mut self, forward_fn: u32, vjp_fn: u32, name: Option<String>) -> CustomRuleId {
+    pub fn register_vjp(
+        &mut self,
+        forward_fn: u32,
+        vjp_fn: u32,
+        name: Option<String>,
+    ) -> CustomRuleId {
         let id = CustomRuleId(self.next_rule_id);
         self.next_rule_id += 1;
 
@@ -299,7 +304,12 @@ impl CustomGradRegistry {
     ///
 
     /// Returns the assigned rule ID.
-    pub fn register_jvp(&mut self, forward_fn: u32, jvp_fn: u32, name: Option<String>) -> CustomRuleId {
+    pub fn register_jvp(
+        &mut self,
+        forward_fn: u32,
+        jvp_fn: u32,
+        name: Option<String>,
+    ) -> CustomRuleId {
         let id = CustomRuleId(self.next_rule_id);
         self.next_rule_id += 1;
 
@@ -856,7 +866,8 @@ impl GradientTape {
         vjp_fn: u32,
         name: &str,
     ) -> CustomRuleId {
-        self.custom_rules.register_vjp(forward_fn, vjp_fn, Some(name.to_string()))
+        self.custom_rules
+            .register_vjp(forward_fn, vjp_fn, Some(name.to_string()))
     }
 
     /// Registers a custom JVP rule for a function.
@@ -1094,7 +1105,9 @@ fn compute_vjp(
             }
             let x = get_saved_tensor(&entry.saved[0])?;
             // alpha is saved as a scalar tensor
-            let alpha_scalar = entry.saved.get(1)
+            let alpha_scalar = entry
+                .saved
+                .get(1)
                 .and_then(|s| get_saved_tensor(s))
                 .and_then(|t| t.get_scalar_f64())
                 .unwrap_or(0.01);
@@ -1117,7 +1130,8 @@ fn compute_vjp(
             let x = get_saved_tensor(&entry.saved[0])?;
 
             // 2/sqrt(pi)
-            let two_over_sqrt_pi = TensorHandle::full(&[], out_grad.dtype, std::f64::consts::FRAC_2_SQRT_PI)?;
+            let two_over_sqrt_pi =
+                TensorHandle::full(&[], out_grad.dtype, std::f64::consts::FRAC_2_SQRT_PI)?;
 
             // -x^2
             let x_sq = tensor_mul(x, x)?;
@@ -1264,7 +1278,8 @@ fn compute_vjp(
             let sum_dout = super::tensor::tensor_reduce(out_grad, None, TensorReduceOp::Sum)?;
 
             // softmax_i * sum_j(dout_j)
-            let broadcast_sum = broadcast_to(&sum_dout, &softmax_x.shape[..softmax_x.ndim as usize])?;
+            let broadcast_sum =
+                broadcast_to(&sum_dout, &softmax_x.shape[..softmax_x.ndim as usize])?;
             let softmax_sum = tensor_mul(softmax_x, &broadcast_sum)?;
 
             // dout_i - softmax_i * sum_j(dout_j)
@@ -1374,7 +1389,10 @@ fn compute_vjp(
                 super::tensor::tensor_reduce(&dout_softmax, None, TensorReduceOp::Sum)?;
 
             // dout_i - sum_j(dout_j * softmax_j)
-            let broadcast_sum = broadcast_to(&sum_dout_softmax, &softmax_x.shape[..softmax_x.ndim as usize])?;
+            let broadcast_sum = broadcast_to(
+                &sum_dout_softmax,
+                &softmax_x.shape[..softmax_x.ndim as usize],
+            )?;
             let diff = tensor_sub(out_grad, &broadcast_sum)?;
 
             // softmax_i * (dout_i - ...)
@@ -1419,7 +1437,6 @@ fn compute_vjp(
         // ====================================================================
         // Neural Network Operations VJP Rules
         // ====================================================================
-
         TapeOp::Conv2d => {
             // VJP for 2D convolution
             // Saved: [input, weight, stride, padding, dilation]
@@ -1613,9 +1630,10 @@ fn compute_vjp(
             let mut d_input = TensorHandle::zeros(orig_shape, out_grad.dtype)?;
             // Extract slice info from saved (simplified - assumes first dim)
             if !entry.saved.is_empty()
-                && let SavedValue::Scalar(start) = entry.saved[0] {
-                    slice_assign(&mut d_input, out_grad, start as usize)?;
-                }
+                && let SavedValue::Scalar(start) = entry.saved[0]
+            {
+                slice_assign(&mut d_input, out_grad, start as usize)?;
+            }
             Some(vec![d_input])
         }
 
@@ -1648,13 +1666,16 @@ fn compute_jvp(
     scope: &GradScope,
 ) -> Option<TensorHandle> {
     // Helper to get tangent or zeros if None (reserved for future use)
-    let _get_tangent_or_zeros = |idx: usize, dtype: DType, shape: &[usize]| -> Option<TensorHandle> {
-        if idx < input_tangents.len() {
-            input_tangents[idx].clone().or_else(|| TensorHandle::zeros(shape, dtype))
-        } else {
-            TensorHandle::zeros(shape, dtype)
-        }
-    };
+    let _get_tangent_or_zeros =
+        |idx: usize, dtype: DType, shape: &[usize]| -> Option<TensorHandle> {
+            if idx < input_tangents.len() {
+                input_tangents[idx]
+                    .clone()
+                    .or_else(|| TensorHandle::zeros(shape, dtype))
+            } else {
+                TensorHandle::zeros(shape, dtype)
+            }
+        };
 
     match entry.op {
         TapeOp::Add => {
@@ -1855,8 +1876,12 @@ fn compute_jvp(
             let da = input_tangents.first().and_then(|t| t.clone());
             let db = input_tangents.get(1).and_then(|t| t.clone());
 
-            let term1 = da.as_ref().and_then(|da| super::tensor::tensor_matmul(da, b));
-            let term2 = db.as_ref().and_then(|db| super::tensor::tensor_matmul(a, db));
+            let term1 = da
+                .as_ref()
+                .and_then(|da| super::tensor::tensor_matmul(da, b));
+            let term2 = db
+                .as_ref()
+                .and_then(|db| super::tensor::tensor_matmul(a, db));
 
             match (term1, term2) {
                 (Some(t1), Some(t2)) => tensor_add(&t1, &t2),
@@ -1960,7 +1985,8 @@ fn compute_jvp(
             let sum_s_dx = super::tensor::tensor_reduce(&s_dx, None, TensorReduceOp::Sum)?;
 
             // softmax_i * sum_j(d_x_j * softmax_j)
-            let broadcast_sum = broadcast_to(&sum_s_dx, &softmax_x.shape[..softmax_x.ndim as usize])?;
+            let broadcast_sum =
+                broadcast_to(&sum_s_dx, &softmax_x.shape[..softmax_x.ndim as usize])?;
             let s_sum = tensor_mul(softmax_x, &broadcast_sum)?;
 
             // d_out = s_dx - s_sum
@@ -2006,7 +2032,8 @@ fn compute_jvp(
             let exp_neg_x_sq = super::tensor::tensor_unop(&neg_x_sq, TensorUnaryOp::Exp)?;
 
             // 2/√π
-            let two_over_sqrt_pi = TensorHandle::full(&[], dx.dtype, std::f64::consts::FRAC_2_SQRT_PI)?;
+            let two_over_sqrt_pi =
+                TensorHandle::full(&[], dx.dtype, std::f64::consts::FRAC_2_SQRT_PI)?;
             let deriv = tensor_mul(&two_over_sqrt_pi, &exp_neg_x_sq)?;
             tensor_mul(&dx, &deriv)
         }
@@ -2150,7 +2177,6 @@ fn compute_jvp(
         // ====================================================================
         // Neural Network Operations JVP Rules
         // ====================================================================
-
         TapeOp::Conv2d => {
             // JVP for 2D convolution
             // d_output = conv2d(d_input, weight) + conv2d(input, d_weight)
@@ -2279,10 +2305,8 @@ fn compute_jvp(
 
         TapeOp::Concat => {
             // JVP for concat: concat the tangents
-            let tangents: Vec<&TensorHandle> = input_tangents
-                .iter()
-                .filter_map(|t| t.as_ref())
-                .collect();
+            let tangents: Vec<&TensorHandle> =
+                input_tangents.iter().filter_map(|t| t.as_ref()).collect();
 
             if tangents.is_empty() {
                 return None;
@@ -2853,11 +2877,7 @@ fn tensor_split(
 }
 
 /// Assign slice: dst[start:start+len] = src.
-fn slice_assign(
-    dst: &mut TensorHandle,
-    src: &TensorHandle,
-    start: usize,
-) -> Option<()> {
+fn slice_assign(dst: &mut TensorHandle, src: &TensorHandle, start: usize) -> Option<()> {
     let dst_data = dst.data.as_ref()?;
     let src_data = src.data.as_ref()?;
 
@@ -3145,7 +3165,8 @@ mod tests {
             &[id1, id2],
             id3,
             vec![SavedValue::Tensor(t1), SavedValue::Tensor(t2)],
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(tape.current_scope().unwrap().tape.len(), 1);
     }
@@ -3163,7 +3184,8 @@ mod tests {
         // Record some operations
         let t2 = TensorHandle::zeros(&[2, 3], DType::F32).unwrap();
         let id2 = tape.track_tensor(t2).unwrap();
-        tape.record_op(TapeOp::Add, &[id1, id2], id2, vec![]).unwrap();
+        tape.record_op(TapeOp::Add, &[id1, id2], id2, vec![])
+            .unwrap();
 
         assert_eq!(tape.current_scope().unwrap().tape.len(), 1);
 
@@ -3279,7 +3301,8 @@ mod tests {
             &[id1, id2],
             id3,
             vec![SavedValue::Tensor(t1), SavedValue::Tensor(t2)],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Run forward mode
         tape.backward().unwrap();
@@ -3315,7 +3338,8 @@ mod tests {
             &[id1, id2],
             id3,
             vec![SavedValue::Tensor(t1), SavedValue::Tensor(t2)],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Run forward mode
         tape.backward().unwrap();
@@ -3354,7 +3378,8 @@ mod tests {
             &[id_x, id_y],
             id_sum,
             vec![SavedValue::Tensor(x), SavedValue::Tensor(y)],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Record: final = sum * 2
         tape.record_op(
@@ -3362,7 +3387,8 @@ mod tests {
             &[id_sum, id_two],
             id_final,
             vec![SavedValue::Tensor(sum_result), SavedValue::Tensor(two)],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Run forward mode
         tape.backward().unwrap();
@@ -3395,7 +3421,8 @@ mod tests {
             &[id_x],
             id_exp,
             vec![SavedValue::Tensor(exp_x)],
-        ).unwrap();
+        )
+        .unwrap();
 
         tape.backward().unwrap();
 

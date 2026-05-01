@@ -261,14 +261,8 @@ pub fn compose_spans(first: &Span, second: &Span) -> Option<Span> {
             first.target.as_str(),
             second.apex.as_str()
         )),
-        w_leg: Text::from(format!(
-            "{} ∘ π_1",
-            first.w_leg.as_str()
-        )),
-        f_leg: Text::from(format!(
-            "{} ∘ π_2",
-            second.f_leg.as_str()
-        )),
+        w_leg: Text::from(format!("{} ∘ π_1", first.w_leg.as_str())),
+        f_leg: Text::from(format!("{} ∘ π_2", second.f_leg.as_str())),
     })
 }
 
@@ -313,8 +307,11 @@ mod tests {
                 4 => a.saturated = false,
                 _ => {}
             }
-            assert!(!a.all_satisfied(),
-                "Each Pronk axiom must be independently load-bearing (breaker={})", breaker);
+            assert!(
+                !a.all_satisfied(),
+                "Each Pronk axiom must be independently load-bearing (breaker={})",
+                breaker
+            );
         }
         // Restore for sanity.
         axioms = PronkAxioms::fully_satisfied();
@@ -355,9 +352,11 @@ mod tests {
     fn build_fails_when_any_axiom_breaks() {
         let c = sample_c();
         let mut axioms = PronkAxioms::fully_satisfied();
-        axioms.ore_like = false;  // BF4 fails — span construction is impossible.
-        assert!(build_bicat_of_fractions(&c, "W", axioms).is_none(),
-            "Pronk's construction requires every axiom");
+        axioms.ore_like = false; // BF4 fails — span construction is impossible.
+        assert!(
+            build_bicat_of_fractions(&c, "W", axioms).is_none(),
+            "Pronk's construction requires every axiom"
+        );
     }
 
     // ----- Span composition -----
@@ -375,8 +374,10 @@ mod tests {
     fn compose_spans_fails_on_mismatched_meeting_object() {
         let s1 = Span::new("s1", "X", "Y", "Y'", "w1", "f1");
         let s2 = Span::new("s2", "Z", "W", "Z'", "w2", "f2");
-        assert!(compose_spans(&s1, &s2).is_none(),
-            "Span composition demands meeting object Y = Z");
+        assert!(
+            compose_spans(&s1, &s2).is_none(),
+            "Span composition demands meeting object Y = Z"
+        );
     }
 
     #[test]
@@ -394,8 +395,10 @@ mod tests {
     fn universal_2_functor_witness() {
         let c = sample_c();
         let bicat = build_bicat_of_fractions(&c, "W", PronkAxioms::fully_satisfied()).unwrap();
-        assert!(universal_2_functor(&bicat),
-            "C → C[W^{{-1}}] is the universal 2-functor");
+        assert!(
+            universal_2_functor(&bicat),
+            "C → C[W^{{-1}}] is the universal 2-functor"
+        );
     }
 
     // ----- Diakrisis 16.10 chain integration -----
@@ -404,16 +407,10 @@ mod tests {
     fn diakrisis_16_10_ac_oc_duality_via_pronk() {
         // Diakrisis 16.10 builds the AC/OC duality classifier as
         // (LegitimateAbstraction)[(S-pop equivalences)^{-1}].
-        let la = InfinityCategory::at_canonical_universe(
-            "LegitimateAbstraction",
-            Ordinal::Finite(2),
-        );
-        let bicat = build_bicat_of_fractions(
-            &la,
-            "S-pop-eq",
-            PronkAxioms::fully_satisfied(),
-        )
-        .expect("Diakrisis 16.10 holds under Pronk axioms");
+        let la =
+            InfinityCategory::at_canonical_universe("LegitimateAbstraction", Ordinal::Finite(2));
+        let bicat = build_bicat_of_fractions(&la, "S-pop-eq", PronkAxioms::fully_satisfied())
+            .expect("Diakrisis 16.10 holds under Pronk axioms");
         assert!(universal_2_functor(&bicat));
         assert!(bicat.name.as_str().contains("[S-pop-eq^{-1}]"));
     }

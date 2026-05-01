@@ -18,7 +18,7 @@
 
 use std::path::PathBuf;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use verum_cli::commands::fmt::format_string;
 
 fn make_kloc_source() -> String {

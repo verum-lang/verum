@@ -1,12 +1,13 @@
+use verum_llvm_sys::LLVMTypeKind;
 use verum_llvm_sys::core::LLVMGetTypeKind;
 use verum_llvm_sys::prelude::LLVMTypeRef;
-use verum_llvm_sys::LLVMTypeKind;
 
 use crate::support::LLVMString;
-use crate::types::traits::AsTypeRef;
 use crate::types::MetadataType;
+use crate::types::traits::AsTypeRef;
 use crate::types::{
-    ArrayType, FloatType, FunctionType, IntType, PointerType, ScalableVectorType, StructType, VectorType, VoidType,
+    ArrayType, FloatType, FunctionType, IntType, PointerType, ScalableVectorType, StructType,
+    VectorType, VoidType,
 };
 use crate::values::{BasicValue, BasicValueEnum, IntValue};
 
@@ -253,21 +254,35 @@ impl<'ctx> AnyTypeEnum<'ctx> {
             | LLVMTypeKind::LLVMFP128TypeKind
             | LLVMTypeKind::LLVMPPC_FP128TypeKind
             | LLVMTypeKind::LLVMBFloatTypeKind => AnyTypeEnum::FloatType(FloatType::new(type_)),
-            LLVMTypeKind::LLVMLabelTypeKind => panic!("Unsupported LLVM type kind: Label (no AnyTypeEnum variant)"),
+            LLVMTypeKind::LLVMLabelTypeKind => {
+                panic!("Unsupported LLVM type kind: Label (no AnyTypeEnum variant)")
+            }
             LLVMTypeKind::LLVMIntegerTypeKind => AnyTypeEnum::IntType(IntType::new(type_)),
-            LLVMTypeKind::LLVMFunctionTypeKind => AnyTypeEnum::FunctionType(FunctionType::new(type_)),
+            LLVMTypeKind::LLVMFunctionTypeKind => {
+                AnyTypeEnum::FunctionType(FunctionType::new(type_))
+            }
             LLVMTypeKind::LLVMStructTypeKind => AnyTypeEnum::StructType(StructType::new(type_)),
             LLVMTypeKind::LLVMArrayTypeKind => AnyTypeEnum::ArrayType(ArrayType::new(type_)),
             LLVMTypeKind::LLVMPointerTypeKind => AnyTypeEnum::PointerType(PointerType::new(type_)),
             LLVMTypeKind::LLVMVectorTypeKind => AnyTypeEnum::VectorType(VectorType::new(type_)),
-            LLVMTypeKind::LLVMScalableVectorTypeKind => AnyTypeEnum::ScalableVectorType(ScalableVectorType::new(type_)),
+            LLVMTypeKind::LLVMScalableVectorTypeKind => {
+                AnyTypeEnum::ScalableVectorType(ScalableVectorType::new(type_))
+            }
             // Metadata is an LLVM internal type, not representable as AnyTypeEnum
-            LLVMTypeKind::LLVMMetadataTypeKind => panic!("Metadata type is not supported as AnyType."),
+            LLVMTypeKind::LLVMMetadataTypeKind => {
+                panic!("Metadata type is not supported as AnyType.")
+            }
 
             // LLVMX86_MMXTypeKind was removed in LLVM 20
-            LLVMTypeKind::LLVMX86_AMXTypeKind => panic!("Unsupported LLVM type kind: AMX (no AnyTypeEnum variant)"),
-            LLVMTypeKind::LLVMTokenTypeKind => panic!("Unsupported LLVM type kind: Token (no AnyTypeEnum variant)"),
-            LLVMTypeKind::LLVMTargetExtTypeKind => panic!("Unsupported LLVM type kind: TargetExt (no AnyTypeEnum variant)"),
+            LLVMTypeKind::LLVMX86_AMXTypeKind => {
+                panic!("Unsupported LLVM type kind: AMX (no AnyTypeEnum variant)")
+            }
+            LLVMTypeKind::LLVMTokenTypeKind => {
+                panic!("Unsupported LLVM type kind: Token (no AnyTypeEnum variant)")
+            }
+            LLVMTypeKind::LLVMTargetExtTypeKind => {
+                panic!("Unsupported LLVM type kind: TargetExt (no AnyTypeEnum variant)")
+            }
         }
     }
 
@@ -427,21 +442,27 @@ impl<'ctx> BasicTypeEnum<'ctx> {
             | LLVMTypeKind::LLVMBFloatTypeKind => BasicTypeEnum::FloatType(FloatType::new(type_)),
             LLVMTypeKind::LLVMIntegerTypeKind => BasicTypeEnum::IntType(IntType::new(type_)),
             LLVMTypeKind::LLVMStructTypeKind => BasicTypeEnum::StructType(StructType::new(type_)),
-            LLVMTypeKind::LLVMPointerTypeKind => BasicTypeEnum::PointerType(PointerType::new(type_)),
+            LLVMTypeKind::LLVMPointerTypeKind => {
+                BasicTypeEnum::PointerType(PointerType::new(type_))
+            }
             LLVMTypeKind::LLVMArrayTypeKind => BasicTypeEnum::ArrayType(ArrayType::new(type_)),
             LLVMTypeKind::LLVMVectorTypeKind => BasicTypeEnum::VectorType(VectorType::new(type_)),
             LLVMTypeKind::LLVMScalableVectorTypeKind => {
                 BasicTypeEnum::ScalableVectorType(ScalableVectorType::new(type_))
-            },
+            }
             LLVMTypeKind::LLVMMetadataTypeKind => panic!("Unsupported basic type: Metadata"),
             // LLVMX86_MMXTypeKind was removed in LLVM 20
             // see https://llvm.org/docs/LangRef.html#x86-amx-type
             LLVMTypeKind::LLVMX86_AMXTypeKind => unreachable!("Unsupported basic type: AMX"),
             LLVMTypeKind::LLVMLabelTypeKind => unreachable!("Unsupported basic type: Label"),
             LLVMTypeKind::LLVMVoidTypeKind => unreachable!("Unsupported basic type: VoidType"),
-            LLVMTypeKind::LLVMFunctionTypeKind => unreachable!("Unsupported basic type: FunctionType"),
+            LLVMTypeKind::LLVMFunctionTypeKind => {
+                unreachable!("Unsupported basic type: FunctionType")
+            }
             LLVMTypeKind::LLVMTokenTypeKind => unreachable!("Unsupported basic type: Token"),
-            LLVMTypeKind::LLVMTargetExtTypeKind => unreachable!("Unsupported basic type: TargetExt"),
+            LLVMTypeKind::LLVMTargetExtTypeKind => {
+                unreachable!("Unsupported basic type: TargetExt")
+            }
         }
     }
 

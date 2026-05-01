@@ -20,7 +20,10 @@ fn simple_predicate(block_id: usize) -> PathPredicate {
 fn conjunction_predicate(n: usize) -> PathPredicate {
     let mut pred = PathPredicate::BlockTrue(BlockId(1));
     for i in 2..=n {
-        pred = PathPredicate::And(Box::new(pred), Box::new(PathPredicate::BlockTrue(BlockId(i as u64))));
+        pred = PathPredicate::And(
+            Box::new(pred),
+            Box::new(PathPredicate::BlockTrue(BlockId(i as u64))),
+        );
     }
     pred
 }
@@ -29,7 +32,10 @@ fn conjunction_predicate(n: usize) -> PathPredicate {
 fn disjunction_predicate(n: usize) -> PathPredicate {
     let mut pred = PathPredicate::BlockTrue(BlockId(1));
     for i in 2..=n {
-        pred = PathPredicate::Or(Box::new(pred), Box::new(PathPredicate::BlockTrue(BlockId(i as u64))));
+        pred = PathPredicate::Or(
+            Box::new(pred),
+            Box::new(PathPredicate::BlockTrue(BlockId(i as u64))),
+        );
     }
     pred
 }

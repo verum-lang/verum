@@ -1073,7 +1073,12 @@ pub struct AstPath {
 impl AstPath {
     #[must_use]
     pub fn to_string(&self) -> Text {
-        let joined: String = self.segments.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+        let joined: String = self
+            .segments
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
         joined.into()
     }
 }

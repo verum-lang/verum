@@ -90,9 +90,7 @@ impl RefinementConstraint {
             RefinementConstraint::LessOrEqual(v) => {
                 IntervalSet::singleton(Interval::new(i128::MIN, *v))
             }
-            RefinementConstraint::Equal(v) => {
-                IntervalSet::singleton(Interval::singleton(*v))
-            }
+            RefinementConstraint::Equal(v) => IntervalSet::singleton(Interval::singleton(*v)),
             RefinementConstraint::InRange(start, end) => {
                 IntervalSet::singleton(Interval::new(*start, *end))
             }
@@ -211,22 +209,18 @@ fn extract_constraint_from_expr(expr: &Expr) -> Option<RefinementConstraint> {
                 _ => None,
             }
         }
-        ExprKind::Unary { op, expr: inner } => {
-            match op {
-                UnOp::Not => {
-                    let c = extract_constraint_from_expr(inner)?;
-                    Some(RefinementConstraint::Not(Box::new(c)))
-                }
-                _ => None,
+        ExprKind::Unary { op, expr: inner } => match op {
+            UnOp::Not => {
+                let c = extract_constraint_from_expr(inner)?;
+                Some(RefinementConstraint::Not(Box::new(c)))
             }
-        }
-        ExprKind::Literal(lit) => {
-            match &lit.kind {
-                LiteralKind::Bool(true) => Some(RefinementConstraint::True),
-                LiteralKind::Bool(false) => Some(RefinementConstraint::False),
-                _ => None,
-            }
-        }
+            _ => None,
+        },
+        ExprKind::Literal(lit) => match &lit.kind {
+            LiteralKind::Bool(true) => Some(RefinementConstraint::True),
+            LiteralKind::Bool(false) => Some(RefinementConstraint::False),
+            _ => None,
+        },
         ExprKind::Paren(inner) => extract_constraint_from_expr(inner),
         _ => None,
     }
@@ -237,19 +231,15 @@ fn extract_int_literal(expr: &Expr) -> Option<i128> {
     use verum_ast::literal::LiteralKind;
 
     match &expr.kind {
-        ExprKind::Literal(lit) => {
-            match &lit.kind {
-                LiteralKind::Int(int_lit) => Some(int_lit.value),
-                _ => None,
-            }
-        }
+        ExprKind::Literal(lit) => match &lit.kind {
+            LiteralKind::Int(int_lit) => Some(int_lit.value),
+            _ => None,
+        },
         ExprKind::Paren(inner) => extract_int_literal(inner),
-        ExprKind::Unary { op, expr: inner } => {
-            match op {
-                UnOp::Neg => extract_int_literal(inner).map(|n| -n),
-                _ => None,
-            }
-        }
+        ExprKind::Unary { op, expr: inner } => match op {
+            UnOp::Neg => extract_int_literal(inner).map(|n| -n),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -293,7 +283,10 @@ impl RefinementContext {
     }
 
     /// Filter constructors to only those possible under refinement
-    pub fn filter_constructors(&self, ctors: &super::constructors::TypeConstructors) -> List<Constructor> {
+    pub fn filter_constructors(
+        &self,
+        ctors: &super::constructors::TypeConstructors,
+    ) -> List<Constructor> {
         ctors
             .iter()
             .filter(|c| self.is_constructor_possible(c))
@@ -348,7 +341,9 @@ pub fn check_exhaustiveness_with_refinement(
     let mut uncovered = List::new();
 
     for ctor in possible_ctors.iter() {
-        let covered = patterns.iter().any(|p| pattern_covers_constructor(p, &ctor.name));
+        let covered = patterns
+            .iter()
+            .any(|p| pattern_covers_constructor(p, &ctor.name));
         if !covered {
             // Generate witness
             let witness = Witness::Constructor {
@@ -409,7 +404,11 @@ fn extract_covered_values(patterns: &[PatternColumn]) -> CoveredValues {
             PatternColumn::Literal(super::matrix::LiteralPattern::Int(n)) => {
                 result.literals.push(*n as i128);
             }
-            PatternColumn::Range { start, end, inclusive } => {
+            PatternColumn::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 let s = start.unwrap_or(i128::MIN);
                 let e = if *inclusive {
                     end.unwrap_or(i128::MAX)

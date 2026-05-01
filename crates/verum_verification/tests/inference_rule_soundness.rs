@@ -20,9 +20,9 @@
 //! returns `ValidationError::ValidationFailed { "unknown inference rule" }`
 //! when the name is unknown.
 
+use verum_ast::LiteralKind;
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::literal::Literal;
-use verum_ast::LiteralKind;
 use verum_ast::span::Span;
 use verum_common::{Heap, List};
 
@@ -94,11 +94,7 @@ fn registered_inference_rule_validates_when_arity_matches() {
     // dispatch path, not the rule's mathematical content.
     let mut schema_premises: List<Expr> = List::new();
     schema_premises.push(truth.clone());
-    validator.register_inference_rule(
-        "my_intro",
-        schema_premises,
-        truth.clone(),
-    );
+    validator.register_inference_rule("my_intro", schema_premises, truth.clone());
 
     let mut premises: List<Heap<ProofTerm>> = List::new();
     premises.push(axiom_premise());
@@ -126,11 +122,7 @@ fn registered_inference_rule_rejects_arity_mismatch() {
     let mut schema_premises: List<Expr> = List::new();
     schema_premises.push(truth.clone());
     schema_premises.push(truth.clone());
-    validator.register_inference_rule(
-        "two_arg_rule",
-        schema_premises,
-        truth.clone(),
-    );
+    validator.register_inference_rule("two_arg_rule", schema_premises, truth.clone());
 
     let mut premises: List<Heap<ProofTerm>> = List::new();
     premises.push(axiom_premise());
@@ -272,9 +264,10 @@ fn forall_elim_rejects_body_shape_mismatch() {
     // expected.
     let mut validator = ProofValidator::new();
     let body = Expr::new(
-        ExprKind::Path(verum_ast::ty::Path::single(
-            verum_ast::ty::Ident::new("p", Span::dummy()),
-        )),
+        ExprKind::Path(verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+            "p",
+            Span::dummy(),
+        ))),
         Span::dummy(),
     );
     let forall_premise = forall_with_body(body);
@@ -315,9 +308,10 @@ fn exists_intro_rejects_witness_shape_mismatch() {
     // reject.
     let mut validator = ProofValidator::new();
     let body = Expr::new(
-        ExprKind::Path(verum_ast::ty::Path::single(
-            verum_ast::ty::Ident::new("p", Span::dummy()),
-        )),
+        ExprKind::Path(verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+            "p",
+            Span::dummy(),
+        ))),
         Span::dummy(),
     );
     let exists_expected = exists_with_body(body);

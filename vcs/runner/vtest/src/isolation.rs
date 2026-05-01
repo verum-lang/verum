@@ -151,7 +151,8 @@ impl Default for IsolationConfig {
             "USER".to_string().into(),
             "LANG".to_string().into(),
             "LC_ALL".to_string().into(),
-        ].into();
+        ]
+        .into();
         Self {
             level: IsolationLevel::Process,
             temp_base: std::env::temp_dir().join("vtest"),
@@ -354,10 +355,13 @@ impl IsolatedContext {
         let elapsed_ms = self.start_time.elapsed().as_millis() as u64;
         if self.config.limits.max_cpu_time_ms > 0 && elapsed_ms > self.config.limits.max_cpu_time_ms
         {
-            return Err(IsolationError::ResourceLimitExceeded(format!(
-                "CPU time limit exceeded: {}ms > {}ms",
-                elapsed_ms, self.config.limits.max_cpu_time_ms
-            ).into()));
+            return Err(IsolationError::ResourceLimitExceeded(
+                format!(
+                    "CPU time limit exceeded: {}ms > {}ms",
+                    elapsed_ms, self.config.limits.max_cpu_time_ms
+                )
+                .into(),
+            ));
         }
 
         Ok(())
@@ -378,11 +382,14 @@ impl IsolatedContext {
             // Remove work directory and all contents
             if self.work_dir.exists() {
                 fs::remove_dir_all(&self.work_dir).await.map_err(|e| {
-                    IsolationError::CleanupError(format!(
-                        "Failed to remove work directory {}: {}",
-                        self.work_dir.display(),
-                        e
-                    ).into())
+                    IsolationError::CleanupError(
+                        format!(
+                            "Failed to remove work directory {}: {}",
+                            self.work_dir.display(),
+                            e
+                        )
+                        .into(),
+                    )
                 })?;
             }
         }
@@ -401,11 +408,14 @@ impl IsolatedContext {
             // Remove work directory and all contents
             if self.work_dir.exists() {
                 std::fs::remove_dir_all(&self.work_dir).map_err(|e| {
-                    IsolationError::CleanupError(format!(
-                        "Failed to remove work directory {}: {}",
-                        self.work_dir.display(),
-                        e
-                    ).into())
+                    IsolationError::CleanupError(
+                        format!(
+                            "Failed to remove work directory {}: {}",
+                            self.work_dir.display(),
+                            e
+                        )
+                        .into(),
+                    )
                 })?;
             }
         }
@@ -498,38 +508,53 @@ impl ResourceUsage {
     /// Check if usage exceeds limits.
     pub fn exceeds_limits(&self, limits: &ResourceLimits) -> Option<Text> {
         if limits.max_memory_bytes > 0 && self.peak_memory_bytes > limits.max_memory_bytes {
-            return Some(format!(
-                "Memory limit exceeded: {} > {}",
-                self.peak_memory_bytes, limits.max_memory_bytes
-            ).into());
+            return Some(
+                format!(
+                    "Memory limit exceeded: {} > {}",
+                    self.peak_memory_bytes, limits.max_memory_bytes
+                )
+                .into(),
+            );
         }
 
         if limits.max_cpu_time_ms > 0 && self.cpu_time_ms > limits.max_cpu_time_ms {
-            return Some(format!(
-                "CPU time limit exceeded: {}ms > {}ms",
-                self.cpu_time_ms, limits.max_cpu_time_ms
-            ).into());
+            return Some(
+                format!(
+                    "CPU time limit exceeded: {}ms > {}ms",
+                    self.cpu_time_ms, limits.max_cpu_time_ms
+                )
+                .into(),
+            );
         }
 
         if self.file_descriptors > limits.max_file_descriptors {
-            return Some(format!(
-                "File descriptor limit exceeded: {} > {}",
-                self.file_descriptors, limits.max_file_descriptors
-            ).into());
+            return Some(
+                format!(
+                    "File descriptor limit exceeded: {} > {}",
+                    self.file_descriptors, limits.max_file_descriptors
+                )
+                .into(),
+            );
         }
 
         if limits.max_output_bytes > 0 && self.output_bytes > limits.max_output_bytes {
-            return Some(format!(
-                "Output size limit exceeded: {} > {}",
-                self.output_bytes, limits.max_output_bytes
-            ).into());
+            return Some(
+                format!(
+                    "Output size limit exceeded: {} > {}",
+                    self.output_bytes, limits.max_output_bytes
+                )
+                .into(),
+            );
         }
 
         if self.processes_spawned > limits.max_processes {
-            return Some(format!(
-                "Process limit exceeded: {} > {}",
-                self.processes_spawned, limits.max_processes
-            ).into());
+            return Some(
+                format!(
+                    "Process limit exceeded: {} > {}",
+                    self.processes_spawned, limits.max_processes
+                )
+                .into(),
+            );
         }
 
         None

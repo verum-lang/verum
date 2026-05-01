@@ -15,8 +15,8 @@
 use std::fs;
 use std::path::Path;
 use verum_ast::FileId;
-use verum_lexer::Lexer;
 use verum_fast_parser::RecursiveParser;
+use verum_lexer::Lexer;
 
 fn parse_file(path: &Path) -> Result<(), String> {
     let source = fs::read_to_string(path)

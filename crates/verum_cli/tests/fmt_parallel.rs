@@ -26,9 +26,7 @@ fn make_fixture(name: &str, file_count: usize) -> PathBuf {
     for i in 0..file_count {
         std::fs::write(
             dir.join("src").join(format!("file_{i}.vr")),
-            format!(
-                "fn item_{i}() {{\n    let x = {i};\n}}\n\n\n\n\nfn item_{i}_b() {{}}\n"
-            ),
+            format!("fn item_{i}() {{\n    let x = {i};\n}}\n\n\n\n\nfn item_{i}_b() {{}}\n"),
         )
         .expect("file");
     }

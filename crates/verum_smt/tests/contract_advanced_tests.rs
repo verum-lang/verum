@@ -26,8 +26,8 @@
 use verum_ast::literal::IntLit;
 use verum_ast::{BinOp, Expr, ExprKind, Ident, Literal, LiteralKind, Path, Span, Type, TypeKind};
 use verum_common::Heap;
-use verum_smt::{Context, verify_frame_condition, verify_loop_invariant, verify_termination};
 use verum_common::Text;
+use verum_smt::{Context, verify_frame_condition, verify_loop_invariant, verify_termination};
 
 // Helper to create Int type
 fn int_type() -> Type {

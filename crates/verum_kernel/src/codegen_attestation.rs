@@ -268,86 +268,74 @@ pub fn manifest() -> Vec<PassAttestation> {
     vec![
         PassAttestation {
             pass: CodegenPassId::VbcLowering,
-            semantic_invariant:
-                "TypedAST → VBC bytecode preserves operational semantics under \
+            semantic_invariant: "TypedAST → VBC bytecode preserves operational semantics under \
                  the well-typed-program invariant"
-                    .to_string(),
-            proof_obligation:
-                "simulation theorem: for every well-typed AST term `e` and every \
+                .to_string(),
+            proof_obligation: "simulation theorem: for every well-typed AST term `e` and every \
                  evaluation context `K`, `K[e] ⇓ v` iff `lower(K)[lower(e)] ⇓ \
                  lower(v)` in the VBC operational semantics"
-                    .to_string(),
+                .to_string(),
             status: AttestationStatus::NotYetAttested,
         },
         PassAttestation {
             pass: CodegenPassId::SsaConstruction,
-            semantic_invariant:
-                "SSA construction preserves operational semantics: every \
+            semantic_invariant: "SSA construction preserves operational semantics: every \
                  reaching definition observable in the input program is \
                  observable in the SSA-formed program"
-                    .to_string(),
-            proof_obligation:
-                "simulation theorem: for every alloca site `a` lifted into an \
+                .to_string(),
+            proof_obligation: "simulation theorem: for every alloca site `a` lifted into an \
                  SSA value `v`, the loads dominated by `a`'s defining store \
                  evaluate to `store(v)` post-mem2reg"
-                    .to_string(),
+                .to_string(),
             status: AttestationStatus::NotYetAttested,
         },
         PassAttestation {
             pass: CodegenPassId::RegisterAllocation,
-            semantic_invariant:
-                "register allocation preserves observable behaviour: every \
+            semantic_invariant: "register allocation preserves observable behaviour: every \
                  virtual-register read returns the value that the SSA-form \
                  program would have computed"
-                    .to_string(),
-            proof_obligation:
-                "simulation theorem: the live-range/interval covering of every \
+                .to_string(),
+            proof_obligation: "simulation theorem: the live-range/interval covering of every \
                  virtual register agrees with the input dataflow at every \
                  program point"
-                    .to_string(),
+                .to_string(),
             status: AttestationStatus::NotYetAttested,
         },
         PassAttestation {
             pass: CodegenPassId::LinearScanRegalloc,
-            semantic_invariant:
-                "linear-scan regalloc preserves observable behaviour AND the \
+            semantic_invariant: "linear-scan regalloc preserves observable behaviour AND the \
                  live-range monotonicity invariant (Poletto-Sarkar 1999): no \
                  active interval is evicted while it is still live"
-                    .to_string(),
-            proof_obligation:
-                "simulation theorem (Poletto-Sarkar): given a strict total \
+                .to_string(),
+            proof_obligation: "simulation theorem (Poletto-Sarkar): given a strict total \
                  order on live-range start points, linear scan produces an \
                  allocation that agrees with the SSA dataflow AND respects \
                  the spilling discipline"
-                    .to_string(),
+                .to_string(),
             status: AttestationStatus::NotYetAttested,
         },
         PassAttestation {
             pass: CodegenPassId::LlvmEmission,
-            semantic_invariant:
-                "LLVM IR emission preserves operational semantics: the LLVM \
+            semantic_invariant: "LLVM IR emission preserves operational semantics: the LLVM \
                  module emitted is bisimilar to the input post-regalloc IR"
-                    .to_string(),
-            proof_obligation:
-                "simulation theorem: every Verum IR instruction `I` has a \
+                .to_string(),
+            proof_obligation: "simulation theorem: every Verum IR instruction `I` has a \
                  well-formed LLVM IR translation `tr(I)` such that `step(I) ⇒ \
                  step*(tr(I))` modulo LLVM-internal scheduling"
-                    .to_string(),
+                .to_string(),
             status: AttestationStatus::NotYetAttested,
         },
         PassAttestation {
             pass: CodegenPassId::MachineCodeEmission,
-            semantic_invariant:
-                "machine-code emission preserves observable behaviour: the \
+            semantic_invariant: "machine-code emission preserves observable behaviour: the \
                  emitted object code's I/O trace agrees with the LLVM IR's \
                  I/O trace under the host ABI"
-                    .to_string(),
-            proof_obligation:
-                "boundary attestation: this pass is delegated to LLVM's \
+                .to_string(),
+            proof_obligation: "boundary attestation: this pass is delegated to LLVM's \
                  backend, which is outside Verum's TCB.  The kernel-side \
                  obligation reduces to LLVM-version pinning + ABI conformance \
                  (cf. CompCert's external-call axiom)"
-                    .to_string(),
+                .to_string(),
             status: AttestationStatus::NotYetAttested,
         },
     ]
@@ -373,18 +361,12 @@ pub fn attested_count() -> usize {
 
 /// Number of passes currently in `Admitted_with_IOU` status.
 pub fn admitted_count() -> usize {
-    manifest()
-        .iter()
-        .filter(|p| p.status.is_admitted())
-        .count()
+    manifest().iter().filter(|p| p.status.is_admitted()).count()
 }
 
 /// Number of passes still pending — neither discharged nor admitted.
 pub fn pending_count() -> usize {
-    manifest()
-        .iter()
-        .filter(|p| p.status.is_pending())
-        .count()
+    manifest().iter().filter(|p| p.status.is_pending()).count()
 }
 
 // =============================================================================
@@ -404,8 +386,7 @@ mod tests {
 
     #[test]
     fn pass_ids_are_distinct() {
-        let ids: std::collections::BTreeSet<_> =
-            manifest().iter().map(|p| p.pass.tag()).collect();
+        let ids: std::collections::BTreeSet<_> = manifest().iter().map(|p| p.pass.tag()).collect();
         assert_eq!(ids.len(), manifest().len());
     }
 

@@ -88,12 +88,7 @@ fn import_coq_extracts_multiple_kinds() {
 fn import_lean_emits_skeleton() {
     let lean_src = "theorem add_comm : ∀ a b : Nat, a + b = b + a := by simp\n";
     let (_t, src) = write_temp_file(lean_src, "Algebra.lean");
-    let out = run(&[
-        "foreign-import",
-        "--from",
-        "lean4",
-        src.to_str().unwrap(),
-    ]);
+    let out = run(&["foreign-import", "--from", "lean4", src.to_str().unwrap()]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("@framework(lean_mathlib4"));
@@ -106,12 +101,7 @@ fn import_lean_emits_skeleton() {
 #[test]
 fn import_lean_alias_mathlib_works() {
     let (_t, src) = write_temp_file("theorem t : True := trivial\n", "src.lean");
-    let out = run(&[
-        "foreign-import",
-        "--from",
-        "mathlib",
-        src.to_str().unwrap(),
-    ]);
+    let out = run(&["foreign-import", "--from", "mathlib", src.to_str().unwrap()]);
     assert!(out.status.success());
 }
 
@@ -142,7 +132,11 @@ fn import_json_well_formed() {
         assert!(t.get("name").and_then(|v| v.as_str()).is_some());
         assert!(t.get("kind").and_then(|v| v.as_str()).is_some());
         assert!(t.get("line").and_then(|v| v.as_u64()).is_some());
-        assert!(t.get("framework_citation").and_then(|v| v.as_str()).is_some());
+        assert!(
+            t.get("framework_citation")
+                .and_then(|v| v.as_str())
+                .is_some()
+        );
     }
 }
 
@@ -201,12 +195,7 @@ fn import_writes_to_out_path() {
 #[test]
 fn import_rejects_unknown_system() {
     let (_t, src) = write_temp_file("anything\n", "src.txt");
-    let out = run(&[
-        "foreign-import",
-        "--from",
-        "garbage",
-        src.to_str().unwrap(),
-    ]);
+    let out = run(&["foreign-import", "--from", "garbage", src.to_str().unwrap()]);
     assert!(
         !out.status.success(),
         "unknown --from must produce non-zero exit"

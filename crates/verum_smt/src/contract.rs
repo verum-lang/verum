@@ -18,8 +18,8 @@ use crate::rsl_parser::{ContractSpec, RslParseError, RslParser};
 use crate::translate::{TranslationError, Translator};
 use std::time::Duration;
 use verum_ast::{Expr, LiteralKind, Span};
-use verum_common::{List, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{List, Maybe, Text};
 
 /// Result type for contract operations.
 pub type ContractResult<T> = Result<T, ContractError>;

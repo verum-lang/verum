@@ -4,7 +4,7 @@
 //! This module defines the intermediate representation for meta expressions,
 //! which are evaluated at compile time.
 
-use verum_ast::{expr::Expr, MetaValue};
+use verum_ast::{MetaValue, expr::Expr};
 use verum_common::{Heap, List, Maybe, Text};
 
 use super::pattern::MetaPattern;
@@ -83,10 +83,7 @@ pub enum MetaExpr {
     },
 
     /// Field access: expr.field
-    FieldAccess {
-        expr: Heap<MetaExpr>,
-        field: Text,
-    },
+    FieldAccess { expr: Heap<MetaExpr>, field: Text },
 
     /// Index: expr[index]
     Index {
@@ -115,10 +112,7 @@ pub enum MetaExpr {
     },
 
     /// Tuple index: expr.0
-    TupleIndex {
-        expr: Heap<MetaExpr>,
-        index: u32,
-    },
+    TupleIndex { expr: Heap<MetaExpr>, index: u32 },
 
     /// Record literal: Name { field: value, ... }
     Record {
@@ -137,9 +131,7 @@ pub enum MetaExpr {
     },
 
     /// Continue expression: continue 'label
-    Continue {
-        label: Maybe<Text>,
-    },
+    Continue { label: Maybe<Text> },
 
     /// Cast expression: expr as T
     Cast {
@@ -148,10 +140,7 @@ pub enum MetaExpr {
     },
 
     /// Variable assignment: name = value
-    Assign {
-        target: Text,
-        value: Heap<MetaExpr>,
-    },
+    Assign { target: Text, value: Heap<MetaExpr> },
 
     /// Array element assignment: name[index] = value
     AssignIndex {

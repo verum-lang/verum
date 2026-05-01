@@ -302,28 +302,31 @@ fn test_variant_with_forward_reference_payload() {
 
     let result_type = make_type_decl(
         "MyResult",
-        TypeDeclBody::Variant(vec![
-            Variant {
-                name: make_ident("Ok"),
-                generic_params: vec![].into(),
-                data: Some(VariantData::Tuple(vec![make_type_path("Value")].into())),
-                where_clause: verum_common::Maybe::None,
-                attributes: vec![].into(),
-                path_endpoints: None,
-                path_dim: 1,
-                span: Span::dummy(),
-            },
-            Variant {
-                name: make_ident("Err"),
-                generic_params: vec![].into(),
-                data: Some(VariantData::Tuple(vec![make_type_path("ErrorInfo")].into())),
-                where_clause: verum_common::Maybe::None,
-                attributes: vec![].into(),
-                path_endpoints: None,
-                path_dim: 1,
-                span: Span::dummy(),
-            },
-        ].into()),
+        TypeDeclBody::Variant(
+            vec![
+                Variant {
+                    name: make_ident("Ok"),
+                    generic_params: vec![].into(),
+                    data: Some(VariantData::Tuple(vec![make_type_path("Value")].into())),
+                    where_clause: verum_common::Maybe::None,
+                    attributes: vec![].into(),
+                    path_endpoints: None,
+                    path_dim: 1,
+                    span: Span::dummy(),
+                },
+                Variant {
+                    name: make_ident("Err"),
+                    generic_params: vec![].into(),
+                    data: Some(VariantData::Tuple(vec![make_type_path("ErrorInfo")].into())),
+                    where_clause: verum_common::Maybe::None,
+                    attributes: vec![].into(),
+                    path_endpoints: None,
+                    path_dim: 1,
+                    span: Span::dummy(),
+                },
+            ]
+            .into(),
+        ),
     );
 
     let value_type = make_type_decl("Value", make_record_body(vec![("data", "Int")]));

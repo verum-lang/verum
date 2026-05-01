@@ -6,9 +6,12 @@
 // &T (15-50ns runtime check) to &checked T (0ns, statically verified).
 // Target: complete escape analysis within <100ms for 10K LOC.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use verum_cbgr::{CbgrTier, CfgBuilder, DefSite, RefFlow, ReferenceTier, Span, TierStatistics, UseeSite, Tier0Reason};
+use verum_cbgr::{
+    CbgrTier, CfgBuilder, DefSite, RefFlow, ReferenceTier, Span, Tier0Reason, TierStatistics,
+    UseeSite,
+};
 
 /// Benchmark CFG builder for simple reference patterns
 fn bench_cfg_builder_simple(c: &mut Criterion) {

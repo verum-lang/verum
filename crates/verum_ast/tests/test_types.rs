@@ -19,11 +19,11 @@
 //! which are the core innovation of Verum.
 
 use proptest::prelude::*;
+use verum_ast::ContextList;
 use verum_ast::expr::{BinOp, Expr, ExprKind};
 use verum_ast::literal::Literal;
 use verum_ast::span::{FileId, Span};
 use verum_ast::ty::*;
-use verum_ast::ContextList;
 use verum_common::{Heap, List, Maybe, Text};
 
 /// Helper function to create a test span

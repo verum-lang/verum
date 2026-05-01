@@ -80,7 +80,10 @@ fn test_sigma_type_simple_positive_int() {
     // with `predicate.binding = Some(name)`.
     let ty = parse_type("x: Int where x > 0").unwrap();
     match ty.kind {
-        TypeKind::Refined { ref base, ref predicate } => {
+        TypeKind::Refined {
+            ref base,
+            ref predicate,
+        } => {
             let binder = match &predicate.binding {
                 verum_common::Maybe::Some(id) => id,
                 verum_common::Maybe::None => {

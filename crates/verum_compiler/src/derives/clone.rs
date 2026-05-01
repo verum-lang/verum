@@ -297,12 +297,7 @@ impl DeriveClone {
                 (pattern, body)
             };
 
-            arms.push(MatchArm::new(
-                pattern,
-                None,
-                Box::new(body_expr),
-                span,
-            ));
+            arms.push(MatchArm::new(pattern, None, Box::new(body_expr), span));
         }
 
         // Build the match expression: match self { ... }

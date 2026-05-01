@@ -60,8 +60,8 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -117,9 +117,7 @@ impl ClosureFingerprint {
             kernel_version: Text::from(kernel_version),
             signature_hash: Text::from(hex32(blake3::hash(signature).as_bytes())),
             body_hash: Text::from(hex32(blake3::hash(body).as_bytes())),
-            citations_hash: Text::from(hex32(
-                blake3::hash(citations_blob.as_bytes()).as_bytes(),
-            )),
+            citations_hash: Text::from(hex32(blake3::hash(citations_blob.as_bytes()).as_bytes())),
         }
     }
 
@@ -257,7 +255,7 @@ pub fn decide(
         None => {
             return CacheDecision::Recheck {
                 reason: RecheckReason::NoCacheEntry,
-            }
+            };
         }
     };
 
@@ -515,11 +513,7 @@ impl MemoryCacheStore {
 
 impl IncrementalCacheStore for MemoryCacheStore {
     fn get(&self, theorem_name: &str) -> Option<CacheEntry> {
-        self.entries
-            .lock()
-            .ok()?
-            .get(theorem_name)
-            .cloned()
+        self.entries.lock().ok()?.get(theorem_name).cloned()
     }
 
     fn put(&self, entry: &CacheEntry) -> Result<(), CacheError> {
@@ -657,13 +651,8 @@ impl IncrementalCacheStore for FilesystemCacheStore {
         let path = self.path_for(entry.theorem_name.as_str());
         let serialized = serde_json::to_vec_pretty(entry)
             .map_err(|e| CacheError::Parse(Text::from(format!("serialize: {}", e))))?;
-        std::fs::write(&path, serialized).map_err(|e| {
-            CacheError::Io(Text::from(format!(
-                "writing {}: {}",
-                path.display(),
-                e
-            )))
-        })
+        std::fs::write(&path, serialized)
+            .map_err(|e| CacheError::Io(Text::from(format!("writing {}: {}", path.display(), e))))
     }
 
     fn clear(&self) -> Result<usize, CacheError> {
@@ -679,11 +668,7 @@ impl IncrementalCacheStore for FilesystemCacheStore {
             let path = entry.path();
             if path.extension().map_or(false, |e| e == "json") {
                 std::fs::remove_file(&path).map_err(|e| {
-                    CacheError::Io(Text::from(format!(
-                        "removing {}: {}",
-                        path.display(),
-                        e
-                    )))
+                    CacheError::Io(Text::from(format!("removing {}: {}", path.display(), e)))
                 })?;
                 n += 1;
             }
@@ -770,12 +755,7 @@ mod tests {
         let b = ClosureFingerprint::compute("2.6.0", b"sig", b"body", &["c2", "c1"]);
         assert_eq!(a.citations_hash, b.citations_hash);
         // Duplicates are collapsed.
-        let c = ClosureFingerprint::compute(
-            "2.6.0",
-            b"sig",
-            b"body",
-            &["c1", "c2", "c1", "c2"],
-        );
+        let c = ClosureFingerprint::compute("2.6.0", b"sig", b"body", &["c1", "c2", "c1", "c2"]);
         assert_eq!(a.citations_hash, c.citations_hash);
     }
 
@@ -847,10 +827,11 @@ mod tests {
         let current_fp = fp_v("2.7.0");
         match decide(&store, "thm.x", &current_fp) {
             CacheDecision::Recheck {
-                reason: RecheckReason::KernelVersionChanged {
-                    cached_version,
-                    current_version,
-                },
+                reason:
+                    RecheckReason::KernelVersionChanged {
+                        cached_version,
+                        current_version,
+                    },
             } => {
                 assert_eq!(cached_version.as_str(), "2.6.0");
                 assert_eq!(current_version.as_str(), "2.7.0");
@@ -862,11 +843,9 @@ mod tests {
     #[test]
     fn decide_fingerprint_mismatch_when_body_changes() {
         let store = MemoryCacheStore::new();
-        let cached_fp =
-            ClosureFingerprint::compute("2.6.0", b"sig", b"body_v1", &["c"]);
+        let cached_fp = ClosureFingerprint::compute("2.6.0", b"sig", b"body_v1", &["c"]);
         store.put(&entry_ok("thm.x", cached_fp)).unwrap();
-        let current_fp =
-            ClosureFingerprint::compute("2.6.0", b"sig", b"body_v2", &["c"]);
+        let current_fp = ClosureFingerprint::compute("2.6.0", b"sig", b"body_v2", &["c"]);
         match decide(&store, "thm.x", &current_fp) {
             CacheDecision::Recheck {
                 reason:
@@ -1066,7 +1045,12 @@ mod tests {
         let pre = s.stats().size_bytes;
         s.put(&entry_ok("a", fp_v("2.6.0"))).unwrap();
         let post = s.stats().size_bytes;
-        assert!(post > pre, "size_bytes must grow after put: {} → {}", pre, post);
+        assert!(
+            post > pre,
+            "size_bytes must grow after put: {} → {}",
+            pre,
+            post
+        );
     }
 
     // ----- decide + FilesystemCacheStore end-to-end -----
@@ -1077,7 +1061,10 @@ mod tests {
         let s = FilesystemCacheStore::new(dir.path()).unwrap();
         let fp = fp_v("2.6.0");
         s.put(&entry_ok("thm.x", fp.clone())).unwrap();
-        assert!(matches!(decide(&s, "thm.x", &fp), CacheDecision::Skip { .. }));
+        assert!(matches!(
+            decide(&s, "thm.x", &fp),
+            CacheDecision::Skip { .. }
+        ));
         let new_fp = fp_v("2.7.0");
         assert!(matches!(
             decide(&s, "thm.x", &new_fp),
@@ -1242,9 +1229,7 @@ mod tests {
         }
         let s = FailingStore;
         let fp = fp_v("2.6.0");
-        let outcome = cached_check(&s, "thm.x", &fp, || CachedVerdict::Ok {
-            elapsed_ms: 5,
-        });
+        let outcome = cached_check(&s, "thm.x", &fp, || CachedVerdict::Ok { elapsed_ms: 5 });
         match outcome {
             CachedCheckOutcome::Miss {
                 verdict,

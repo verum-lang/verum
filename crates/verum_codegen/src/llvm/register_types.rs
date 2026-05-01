@@ -85,30 +85,20 @@ pub enum RegisterType {
         value: Option<Box<RegisterType>>,
     },
     /// Set<T> collection.
-    Set {
-        element: Option<Box<RegisterType>>,
-    },
+    Set { element: Option<Box<RegisterType>> },
     /// Deque<T> collection.
-    Deque {
-        element: Option<Box<RegisterType>>,
-    },
+    Deque { element: Option<Box<RegisterType>> },
     /// Channel<T>.
-    Channel {
-        element: Option<Box<RegisterType>>,
-    },
+    Channel { element: Option<Box<RegisterType>> },
     /// BTreeMap<K, V>.
     BTreeMap {
         key: Option<Box<RegisterType>>,
         value: Option<Box<RegisterType>>,
     },
     /// BTreeSet<T>.
-    BTreeSet {
-        element: Option<Box<RegisterType>>,
-    },
+    BTreeSet { element: Option<Box<RegisterType>> },
     /// BinaryHeap<T>.
-    BinaryHeap {
-        element: Option<Box<RegisterType>>,
-    },
+    BinaryHeap { element: Option<Box<RegisterType>> },
     /// Range (start..end or start..=end).
     Range {
         /// True if this is a flat (no header) range from NewRange.
@@ -141,44 +131,31 @@ pub enum RegisterType {
         size: u32,
     },
     /// Heap<T> — heap-allocated box.
-    Heap {
-        inner: Option<Box<RegisterType>>,
-    },
+    Heap { inner: Option<Box<RegisterType>> },
     /// Shared<T> — reference-counted.
-    Shared {
-        inner: Option<Box<RegisterType>>,
-    },
+    Shared { inner: Option<Box<RegisterType>> },
     /// AtomicInt / AtomicBool.
     Atomic,
     /// Generator handle.
     Generator,
     /// Slice {ptr, len}.
-    Slice {
-        element: Option<Box<RegisterType>>,
-    },
+    Slice { element: Option<Box<RegisterType>> },
     /// Text character iterator.
     TextIterator,
     /// Map key iterator.
     MapIterator,
     /// Custom user-defined iterator.
-    CustomIterator {
-        type_name: String,
-    },
+    CustomIterator { type_name: String },
     /// Function/closure type.
     Function {
         return_type: Option<Box<RegisterType>>,
     },
     /// Tuple type.
-    Tuple {
-        elements: Vec<RegisterType>,
-    },
+    Tuple { elements: Vec<RegisterType> },
     /// Raw pointer.
     Pointer,
     /// Inline struct within array (no object header).
-    InlineStruct {
-        type_name: String,
-        size: u32,
-    },
+    InlineStruct { type_name: String, size: u32 },
     /// Generic type parameter (compiled as ptr, value-as-pointer).
     GenericParam,
     /// Unknown type (fallback, treat as i64).
@@ -211,7 +188,13 @@ impl RegisterType {
     }
 
     pub fn is_compiled_text(&self) -> bool {
-        matches!(self, Self::Text { compiled_layout: true, .. })
+        matches!(
+            self,
+            Self::Text {
+                compiled_layout: true,
+                ..
+            }
+        )
     }
 
     pub fn is_list(&self) -> bool {
@@ -271,15 +254,30 @@ impl RegisterType {
     }
 
     pub fn is_maybe_text(&self) -> bool {
-        matches!(self, Self::Maybe { inner_is_text: true, .. })
+        matches!(
+            self,
+            Self::Maybe {
+                inner_is_text: true,
+                ..
+            }
+        )
     }
 
     pub fn is_maybe_ref(&self) -> bool {
-        matches!(self, Self::Maybe { inner_is_ref: true, .. })
+        matches!(
+            self,
+            Self::Maybe {
+                inner_is_ref: true,
+                ..
+            }
+        )
     }
 
     pub fn is_variant(&self) -> bool {
-        matches!(self, Self::Variant { .. } | Self::Maybe { .. } | Self::Result { .. })
+        matches!(
+            self,
+            Self::Variant { .. } | Self::Maybe { .. } | Self::Result { .. }
+        )
     }
 
     pub fn is_struct(&self) -> bool {
@@ -438,15 +436,11 @@ impl RegisterType {
         match ty {
             TypeRef::Concrete(id) => Self::from_type_id(*id),
 
-            TypeRef::Instantiated { base, args } => {
-                Self::from_instantiated(*base, args)
-            }
+            TypeRef::Instantiated { base, args } => Self::from_instantiated(*base, args),
 
             TypeRef::Generic(_) => Self::GenericParam,
 
-            TypeRef::Function {
-                return_type, ..
-            } => Self::Function {
+            TypeRef::Function { return_type, .. } => Self::Function {
                 return_type: Some(Box::new(Self::from_type_ref(return_type))),
             },
 
@@ -478,8 +472,14 @@ impl RegisterType {
         match id {
             TypeId::UNIT => Self::Unit,
             TypeId::BOOL => Self::Bool,
-            TypeId::INT | TypeId::U8 | TypeId::U16 | TypeId::U32 | TypeId::U64
-            | TypeId::I8 | TypeId::I16 | TypeId::I32 => Self::Int,
+            TypeId::INT
+            | TypeId::U8
+            | TypeId::U16
+            | TypeId::U32
+            | TypeId::U64
+            | TypeId::I8
+            | TypeId::I16
+            | TypeId::I32 => Self::Int,
             TypeId::FLOAT | TypeId::F32 => Self::Float,
             TypeId::TEXT => Self::Text {
                 owned: false,
@@ -534,9 +534,7 @@ impl RegisterType {
             },
             TypeId::MAYBE => {
                 let inner = args.first().map(|a| Box::new(Self::from_type_ref(a)));
-                let inner_is_text = inner
-                    .as_ref()
-                    .map_or(false, |i| i.is_text());
+                let inner_is_text = inner.as_ref().map_or(false, |i| i.is_text());
                 Self::Maybe {
                     inner,
                     inner_is_text,
@@ -781,26 +779,51 @@ impl RegisterTypeMap {
 
     /// Mark a text register as owned (allocated by Concat/ToString, needs freeing).
     pub fn mark_owned_text(&mut self, reg: u16) {
-        if let Some(RegisterType::Text { compiled_layout, .. }) = self.types.get(&reg) {
+        if let Some(RegisterType::Text {
+            compiled_layout, ..
+        }) = self.types.get(&reg)
+        {
             let cl = *compiled_layout;
-            self.types.insert(reg, RegisterType::Text { owned: true, compiled_layout: cl });
+            self.types.insert(
+                reg,
+                RegisterType::Text {
+                    owned: true,
+                    compiled_layout: cl,
+                },
+            );
         } else {
             // Register not yet marked as Text — set it as owned text with default layout
-            self.types.insert(reg, RegisterType::Text { owned: true, compiled_layout: false });
+            self.types.insert(
+                reg,
+                RegisterType::Text {
+                    owned: true,
+                    compiled_layout: false,
+                },
+            );
         }
     }
 
     /// Unmark a text register as owned (e.g., transferring ownership).
     pub fn unmark_owned_text(&mut self, reg: u16) {
-        if let Some(RegisterType::Text { compiled_layout, .. }) = self.types.get(&reg) {
+        if let Some(RegisterType::Text {
+            compiled_layout, ..
+        }) = self.types.get(&reg)
+        {
             let cl = *compiled_layout;
-            self.types.insert(reg, RegisterType::Text { owned: false, compiled_layout: cl });
+            self.types.insert(
+                reg,
+                RegisterType::Text {
+                    owned: false,
+                    compiled_layout: cl,
+                },
+            );
         }
     }
 
     /// Get all registers holding owned text (for cleanup at function exit).
     pub fn owned_text_registers(&self) -> Vec<u16> {
-        self.types.iter()
+        self.types
+            .iter()
             .filter(|(_, ty)| ty.is_owned_text())
             .map(|(&reg, _)| reg)
             .collect()
@@ -945,10 +968,22 @@ impl RegisterTypeMap {
 
     /// Mark a List register's elements as Text (List<Text>).
     pub fn mark_list_text_elements(&mut self, reg: u16) {
-        let text = Box::new(RegisterType::Text { owned: false, compiled_layout: false });
+        let text = Box::new(RegisterType::Text {
+            owned: false,
+            compiled_layout: false,
+        });
         match self.types.get_mut(&reg) {
-            Some(RegisterType::List { element, .. }) => { *element = Some(text); }
-            _ => { self.types.insert(reg, RegisterType::List { element: Some(text) }); }
+            Some(RegisterType::List { element, .. }) => {
+                *element = Some(text);
+            }
+            _ => {
+                self.types.insert(
+                    reg,
+                    RegisterType::List {
+                        element: Some(text),
+                    },
+                );
+            }
         }
     }
 
@@ -956,32 +991,67 @@ impl RegisterTypeMap {
     pub fn mark_map_list_values(&mut self, reg: u16) {
         let list = Box::new(RegisterType::List { element: None });
         match self.types.get_mut(&reg) {
-            Some(RegisterType::Map { value, .. }) => { *value = Some(list); }
-            _ => { self.types.insert(reg, RegisterType::Map { key: None, value: Some(list) }); }
+            Some(RegisterType::Map { value, .. }) => {
+                *value = Some(list);
+            }
+            _ => {
+                self.types.insert(
+                    reg,
+                    RegisterType::Map {
+                        key: None,
+                        value: Some(list),
+                    },
+                );
+            }
         }
     }
 
     /// Mark a Map register's values as Text (Map<K, Text>).
     pub fn mark_map_text_values(&mut self, reg: u16) {
-        let text = Box::new(RegisterType::Text { owned: false, compiled_layout: false });
+        let text = Box::new(RegisterType::Text {
+            owned: false,
+            compiled_layout: false,
+        });
         match self.types.get_mut(&reg) {
-            Some(RegisterType::Map { value, .. }) => { *value = Some(text); }
-            _ => { self.types.insert(reg, RegisterType::Map { key: None, value: Some(text) }); }
+            Some(RegisterType::Map { value, .. }) => {
+                *value = Some(text);
+            }
+            _ => {
+                self.types.insert(
+                    reg,
+                    RegisterType::Map {
+                        key: None,
+                        value: Some(text),
+                    },
+                );
+            }
         }
     }
 
     /// Mark a Maybe register's inner as Text (Maybe<Text>).
     pub fn mark_maybe_text_inner(&mut self, reg: u16) {
-        let text = Box::new(RegisterType::Text { owned: false, compiled_layout: false });
+        let text = Box::new(RegisterType::Text {
+            owned: false,
+            compiled_layout: false,
+        });
         match self.types.get_mut(&reg) {
-            Some(RegisterType::Maybe { inner, inner_is_text, .. }) => {
+            Some(RegisterType::Maybe {
+                inner,
+                inner_is_text,
+                ..
+            }) => {
                 *inner = Some(text);
                 *inner_is_text = true;
             }
             _ => {
-                self.types.insert(reg, RegisterType::Maybe {
-                    inner: Some(text), inner_is_text: true, inner_is_ref: false,
-                });
+                self.types.insert(
+                    reg,
+                    RegisterType::Maybe {
+                        inner: Some(text),
+                        inner_is_text: true,
+                        inner_is_ref: false,
+                    },
+                );
             }
         }
     }
@@ -989,11 +1059,18 @@ impl RegisterTypeMap {
     /// Mark a Maybe register's inner as a reference (Maybe<&T>).
     pub fn mark_maybe_ref_inner(&mut self, reg: u16) {
         match self.types.get_mut(&reg) {
-            Some(RegisterType::Maybe { inner_is_ref, .. }) => { *inner_is_ref = true; }
+            Some(RegisterType::Maybe { inner_is_ref, .. }) => {
+                *inner_is_ref = true;
+            }
             _ => {
-                self.types.insert(reg, RegisterType::Maybe {
-                    inner: None, inner_is_text: false, inner_is_ref: true,
-                });
+                self.types.insert(
+                    reg,
+                    RegisterType::Maybe {
+                        inner: None,
+                        inner_is_text: false,
+                        inner_is_ref: true,
+                    },
+                );
             }
         }
     }
@@ -1088,52 +1165,67 @@ impl MethodDispatchTable {
         // Channel methods → C runtime (thread safety requires C ABI)
         // ================================================================
         for method in &[
-            "send", "recv", "receive", "close", "len", "try_send",
-            "try_recv", "is_closed", "is_empty", "is_full",
+            "send",
+            "recv",
+            "receive",
+            "close",
+            "len",
+            "try_send",
+            "try_recv",
+            "is_closed",
+            "is_empty",
+            "is_full",
         ] {
-            self.register("Channel", method, MethodDispatchTarget::CRuntime {
-                symbol: match *method {
-                    "send" => "verum_chan_send",
-                    "recv" | "receive" => "verum_chan_recv",
-                    "close" => "verum_chan_close",
-                    "len" => "verum_chan_len",
-                    "try_send" => "verum_chan_try_send",
-                    "try_recv" => "verum_chan_try_recv",
-                    "is_closed" => "verum_chan_is_closed",
-                    "is_empty" => "verum_chan_is_empty",
-                    "is_full" => "verum_chan_is_full",
-                    _ => unreachable!(),
+            self.register(
+                "Channel",
+                method,
+                MethodDispatchTarget::CRuntime {
+                    symbol: match *method {
+                        "send" => "verum_chan_send",
+                        "recv" | "receive" => "verum_chan_recv",
+                        "close" => "verum_chan_close",
+                        "len" => "verum_chan_len",
+                        "try_send" => "verum_chan_try_send",
+                        "try_recv" => "verum_chan_try_recv",
+                        "is_closed" => "verum_chan_is_closed",
+                        "is_empty" => "verum_chan_is_empty",
+                        "is_full" => "verum_chan_is_full",
+                        _ => unreachable!(),
+                    },
                 },
-            });
+            );
         }
 
         // ================================================================
         // List methods → inline LLVM IR (performance + ABI compatibility)
         // ================================================================
         for method in &[
-            "contains", "index_of", "sort", "extend", "first", "last",
-            "clone", "clear", "join", "push", "insert", "remove",
-            "reverse", "swap",
+            "contains", "index_of", "sort", "extend", "first", "last", "clone", "clear", "join",
+            "push", "insert", "remove", "reverse", "swap",
         ] {
-            self.register("List", method, MethodDispatchTarget::InlineLlvm {
-                handler: match *method {
-                    "contains" => "list_contains",
-                    "index_of" => "list_index_of",
-                    "sort" => "list_sort",
-                    "extend" => "list_extend",
-                    "first" => "list_first",
-                    "last" => "list_last",
-                    "clone" => "list_clone",
-                    "clear" => "list_clear",
-                    "join" => "list_join",
-                    "push" => "list_push",
-                    "insert" => "list_insert",
-                    "remove" => "list_remove",
-                    "reverse" => "list_reverse",
-                    "swap" => "list_swap",
-                    _ => unreachable!(),
+            self.register(
+                "List",
+                method,
+                MethodDispatchTarget::InlineLlvm {
+                    handler: match *method {
+                        "contains" => "list_contains",
+                        "index_of" => "list_index_of",
+                        "sort" => "list_sort",
+                        "extend" => "list_extend",
+                        "first" => "list_first",
+                        "last" => "list_last",
+                        "clone" => "list_clone",
+                        "clear" => "list_clear",
+                        "join" => "list_join",
+                        "push" => "list_push",
+                        "insert" => "list_insert",
+                        "remove" => "list_remove",
+                        "reverse" => "list_reverse",
+                        "swap" => "list_swap",
+                        _ => unreachable!(),
+                    },
                 },
-            });
+            );
         }
 
         // ================================================================
@@ -1144,53 +1236,99 @@ impl MethodDispatchTable {
         ] {
             // These go through compiled text.vr but return Maybe<Int>,
             // while user code expects raw Int (-1 sentinel for not-found).
-            self.register("Text", method, MethodDispatchTarget::Compiled {
-                func_index: 0, // resolved at lookup time
-                needs_unwrap: true,
-            });
+            self.register(
+                "Text",
+                method,
+                MethodDispatchTarget::Compiled {
+                    func_index: 0, // resolved at lookup time
+                    needs_unwrap: true,
+                },
+            );
         }
 
         // ================================================================
         // AtomicInt/AtomicBool → inline LLVM atomics
         // ================================================================
         for method in &[
-            "new", "load", "store", "fetch_add", "fetch_sub", "fetch_and",
-            "fetch_or", "fetch_xor", "swap", "compare_exchange",
-            "increment", "decrement", "compare_and_swap",
+            "new",
+            "load",
+            "store",
+            "fetch_add",
+            "fetch_sub",
+            "fetch_and",
+            "fetch_or",
+            "fetch_xor",
+            "swap",
+            "compare_exchange",
+            "increment",
+            "decrement",
+            "compare_and_swap",
         ] {
-            self.register("AtomicInt", method, MethodDispatchTarget::InlineLlvm {
-                handler: "atomic_op",
-            });
-            self.register("AtomicBool", method, MethodDispatchTarget::InlineLlvm {
-                handler: "atomic_op",
-            });
+            self.register(
+                "AtomicInt",
+                method,
+                MethodDispatchTarget::InlineLlvm {
+                    handler: "atomic_op",
+                },
+            );
+            self.register(
+                "AtomicBool",
+                method,
+                MethodDispatchTarget::InlineLlvm {
+                    handler: "atomic_op",
+                },
+            );
         }
 
         // ================================================================
         // Synchronization primitives → C runtime
         // ================================================================
         for method in &[
-            "new", "try_acquire", "release", "acquire",
-            "try_acquire_many", "release_many", "add_permits",
-            "forget_permit", "available_permits", "max_permits",
+            "new",
+            "try_acquire",
+            "release",
+            "acquire",
+            "try_acquire_many",
+            "release_many",
+            "add_permits",
+            "forget_permit",
+            "available_permits",
+            "max_permits",
         ] {
-            self.register("Semaphore", method, MethodDispatchTarget::CRuntime {
-                symbol: "verum_sem_op",
-            });
+            self.register(
+                "Semaphore",
+                method,
+                MethodDispatchTarget::CRuntime {
+                    symbol: "verum_sem_op",
+                },
+            );
         }
 
         for method in &[
-            "new", "read", "write", "try_read", "try_write", "is_poisoned",
+            "new",
+            "read",
+            "write",
+            "try_read",
+            "try_write",
+            "is_poisoned",
         ] {
-            self.register("RwLock", method, MethodDispatchTarget::CRuntime {
-                symbol: "verum_rwlock_op",
-            });
+            self.register(
+                "RwLock",
+                method,
+                MethodDispatchTarget::CRuntime {
+                    symbol: "verum_rwlock_op",
+                },
+            );
         }
 
         for method in &["new", "call_once", "do_once", "is_completed"] {
-            self.register("Once", method, MethodDispatchTarget::CRuntime {
-                symbol: "verum_once_op",
-            });
+            self.register(
+                "Once",
+                method,
+                MethodDispatchTarget::CRuntime {
+                    symbol: "verum_once_op",
+                },
+            );
         }
     }
 
@@ -1261,10 +1399,13 @@ mod tests {
         assert!(map.is_list(3));
 
         // Test overwrite
-        map.set(1, RegisterType::Text {
-            owned: false,
-            compiled_layout: false,
-        });
+        map.set(
+            1,
+            RegisterType::Text {
+                owned: false,
+                compiled_layout: false,
+            },
+        );
         assert!(map.is_text(1));
         assert!(!map.is_list(1));
     }
@@ -1280,8 +1421,18 @@ mod tests {
 
     #[test]
     fn test_type_names() {
-        assert_eq!(RegisterType::List { element: None }.type_name(), Some("List"));
-        assert_eq!(RegisterType::Map { key: None, value: None }.type_name(), Some("Map"));
+        assert_eq!(
+            RegisterType::List { element: None }.type_name(),
+            Some("List")
+        );
+        assert_eq!(
+            RegisterType::Map {
+                key: None,
+                value: None
+            }
+            .type_name(),
+            Some("Map")
+        );
         assert_eq!(
             RegisterType::Struct {
                 type_name: "Point".to_string(),

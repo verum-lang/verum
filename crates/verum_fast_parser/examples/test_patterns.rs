@@ -1,7 +1,7 @@
 //! Simple script to test parser against VCS pattern tests
-use verum_fast_parser::FastParser;
-use verum_ast::span::FileId;
 use std::fs;
+use verum_ast::span::FileId;
+use verum_fast_parser::FastParser;
 
 fn extract_expected_error(content: &str) -> Option<String> {
     for line in content.lines() {
@@ -44,18 +44,30 @@ fn test_dir(dir: &str, test_type: &str) {
             match result {
                 Ok(_) => {
                     failed += 1;
-                    failed_tests.push(format!("  {}: expected error {:?}, got success", test_name, expected_error));
+                    failed_tests.push(format!(
+                        "  {}: expected error {:?}, got success",
+                        test_name, expected_error
+                    ));
                 }
                 Err(errors) => {
-                    let error_codes: Vec<String> = errors.iter().map(|e| {
-                        e.code.as_ref().map(|c| c.as_str().to_string()).unwrap_or_else(|| "E000".to_string())
-                    }).collect();
+                    let error_codes: Vec<String> = errors
+                        .iter()
+                        .map(|e| {
+                            e.code
+                                .as_ref()
+                                .map(|c| c.as_str().to_string())
+                                .unwrap_or_else(|| "E000".to_string())
+                        })
+                        .collect();
                     if let Some(expected) = &expected_error {
                         if error_codes.iter().any(|c| c == expected) {
                             passed += 1;
                         } else {
                             failed += 1;
-                            failed_tests.push(format!("  {}: expected {}, got {:?}", test_name, expected, error_codes));
+                            failed_tests.push(format!(
+                                "  {}: expected {}, got {:?}",
+                                test_name, expected, error_codes
+                            ));
                         }
                     } else {
                         passed += 1;
@@ -68,11 +80,17 @@ fn test_dir(dir: &str, test_type: &str) {
                 Ok(_) => passed += 1,
                 Err(errors) => {
                     failed += 1;
-                    let error_codes: Vec<String> = errors.iter().map(|e| {
-                        let code = e.code.as_ref().map(|c| c.as_str()).unwrap_or("E000");
-                        format!("{}: {:?}", code, e.kind)
-                    }).collect();
-                    failed_tests.push(format!("  {}: expected success, got {:?}", test_name, error_codes));
+                    let error_codes: Vec<String> = errors
+                        .iter()
+                        .map(|e| {
+                            let code = e.code.as_ref().map(|c| c.as_str()).unwrap_or("E000");
+                            format!("{}: {:?}", code, e.kind)
+                        })
+                        .collect();
+                    failed_tests.push(format!(
+                        "  {}: expected success, got {:?}",
+                        test_name, error_codes
+                    ));
                 }
             }
         }
@@ -80,7 +98,13 @@ fn test_dir(dir: &str, test_type: &str) {
 
     let total = passed + failed;
     if total > 0 {
-        println!("{} Tests: {}/{} passed ({:.1}%)", test_type, passed, total, (passed as f64 / total as f64) * 100.0);
+        println!(
+            "{} Tests: {}/{} passed ({:.1}%)",
+            test_type,
+            passed,
+            total,
+            (passed as f64 / total as f64) * 100.0
+        );
         if !failed_tests.is_empty() {
             for t in &failed_tests {
                 println!("{}", t);

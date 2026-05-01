@@ -243,10 +243,12 @@ fn test_is_refinement_diagnostic_by_code() {
 #[test]
 fn test_impact_levels() {
     // Test that all impact levels are distinct
-    let impacts = [FixImpact::Safe,
+    let impacts = [
+        FixImpact::Safe,
         FixImpact::Breaking,
         FixImpact::MaybeBreaking,
-        FixImpact::Unsafe];
+        FixImpact::Unsafe,
+    ];
 
     for (i, impact1) in impacts.iter().enumerate() {
         for (j, impact2) in impacts.iter().enumerate() {

@@ -16,8 +16,8 @@
 //! Per CLAUDE.md standards - tests in tests/ directory
 
 use verum_ast::Span;
-use verum_compiler::literal_parsers::parse_xml;
 use verum_common::Text;
+use verum_compiler::literal_parsers::parse_xml;
 
 #[test]
 fn test_parse_simple_xml() {

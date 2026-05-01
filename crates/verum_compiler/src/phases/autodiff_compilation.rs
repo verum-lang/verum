@@ -735,7 +735,7 @@ impl DerivativeGenerator {
             visibility: self.func.visibility.clone(),
             is_async: false,
             is_pure: false, // Generated VJP functions are not pure
-            is_meta: true, // VJP functions are meta functions
+            is_meta: true,  // VJP functions are meta functions
             stage_level: 1,
             is_generator: false,
             is_cofix: false,

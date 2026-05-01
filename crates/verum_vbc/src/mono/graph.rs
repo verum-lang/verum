@@ -19,8 +19,7 @@ use crate::types::TypeRef;
 // ============================================================================
 
 /// Source location for error messages and debugging.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct SourceLocation {
     /// File ID in the source map.
     pub file_id: u32,
@@ -29,7 +28,6 @@ pub struct SourceLocation {
     /// Byte offset end.
     pub end: u32,
 }
-
 
 // ============================================================================
 // Instantiation Request
@@ -56,11 +54,7 @@ impl Hash for InstantiationRequest {
 
 impl InstantiationRequest {
     /// Creates a new instantiation request.
-    pub fn new(
-        function_id: FunctionId,
-        type_args: Vec<TypeRef>,
-        source: SourceLocation,
-    ) -> Self {
+    pub fn new(function_id: FunctionId, type_args: Vec<TypeRef>, source: SourceLocation) -> Self {
         let hash = Self::compute_hash(function_id, &type_args);
         Self {
             function_id,
@@ -119,7 +113,10 @@ pub struct InstantiationKey {
 impl InstantiationKey {
     /// Creates a new key.
     pub fn new(function_id: FunctionId, type_args: Vec<TypeRef>) -> Self {
-        Self { function_id, type_args }
+        Self {
+            function_id,
+            type_args,
+        }
     }
 
     /// Computes a stable hash for caching.
@@ -150,7 +147,11 @@ pub fn type_ref_depth(type_ref: &TypeRef) -> usize {
         TypeRef::Instantiated { args, .. } => {
             1 + args.iter().map(type_ref_depth).max().unwrap_or(0)
         }
-        TypeRef::Function { params, return_type, .. } => {
+        TypeRef::Function {
+            params,
+            return_type,
+            ..
+        } => {
             let p = params.iter().map(type_ref_depth).max().unwrap_or(0);
             let r = type_ref_depth(return_type);
             1 + p.max(r)
@@ -179,7 +180,11 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
                 hash_type_ref(arg, hasher);
             }
         }
-        TypeRef::Function { params, return_type, contexts } => {
+        TypeRef::Function {
+            params,
+            return_type,
+            contexts,
+        } => {
             3u8.hash(hasher);
             params.len().hash(hasher);
             for param in params {
@@ -191,7 +196,11 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
                 ctx.0.hash(hasher);
             }
         }
-        TypeRef::Reference { inner, mutability, tier } => {
+        TypeRef::Reference {
+            inner,
+            mutability,
+            tier,
+        } => {
             4u8.hash(hasher);
             hash_type_ref(inner, hasher);
             (*mutability as u8).hash(hasher);
@@ -213,7 +222,12 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
             7u8.hash(hasher);
             hash_type_ref(element, hasher);
         }
-        TypeRef::Rank2Function { type_param_count, params, return_type, contexts } => {
+        TypeRef::Rank2Function {
+            type_param_count,
+            params,
+            return_type,
+            contexts,
+        } => {
             8u8.hash(hasher);
             type_param_count.hash(hasher);
             params.len().hash(hasher);
@@ -363,13 +377,21 @@ impl InstantiationGraph {
 
     /// Gets an instantiation by hash.
     pub fn get_by_hash(&self, hash: u64) -> Option<&InstantiationRequest> {
-        self.by_hash.get(&hash).map(|&idx| &self.instantiations[idx])
+        self.by_hash
+            .get(&hash)
+            .map(|&idx| &self.instantiations[idx])
     }
 
     /// Gets all instantiations for a function.
-    pub fn get_instantiations(&self, function_id: FunctionId) -> Option<Vec<&InstantiationRequest>> {
+    pub fn get_instantiations(
+        &self,
+        function_id: FunctionId,
+    ) -> Option<Vec<&InstantiationRequest>> {
         self.by_function.get(&function_id).map(|indices| {
-            indices.iter().map(|&idx| &self.instantiations[idx]).collect()
+            indices
+                .iter()
+                .map(|&idx| &self.instantiations[idx])
+                .collect()
         })
     }
 
@@ -389,7 +411,11 @@ impl InstantiationGraph {
     }
 
     /// Records a specialization by key.
-    pub fn record_specialization_by_key(&mut self, key: &InstantiationKey, specialized_fn: FunctionId) {
+    pub fn record_specialization_by_key(
+        &mut self,
+        key: &InstantiationKey,
+        specialized_fn: FunctionId,
+    ) {
         let hash = key.compute_hash();
         if let Some(&idx) = self.by_hash.get(&hash) {
             self.specialization_map.insert(idx, specialized_fn);
@@ -404,7 +430,8 @@ impl InstantiationGraph {
     /// Gets specialization by key.
     pub fn get_specialization_by_key(&self, key: &InstantiationKey) -> Option<FunctionId> {
         let hash = key.compute_hash();
-        self.by_hash.get(&hash)
+        self.by_hash
+            .get(&hash)
             .and_then(|&idx| self.specialization_map.get(&idx).copied())
     }
 
@@ -449,9 +476,7 @@ impl InstantiationGraph {
         }
 
         // Start with nodes that have no dependencies
-        let mut queue: Vec<usize> = (0..n)
-            .filter(|&i| in_degree[i] == 0)
-            .collect();
+        let mut queue: Vec<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
         let mut result = Vec::with_capacity(n);
 
         while let Some(node) = queue.pop() {
@@ -532,7 +557,11 @@ mod tests {
         let req2 = InstantiationRequest::new(
             FunctionId(1),
             vec![TypeRef::Concrete(TypeId::INT)],
-            SourceLocation { file_id: 1, start: 10, end: 20 },
+            SourceLocation {
+                file_id: 1,
+                start: 10,
+                end: 20,
+            },
         );
         let req3 = InstantiationRequest::new(
             FunctionId(1),
@@ -558,7 +587,11 @@ mod tests {
         let idx2 = graph.record_instantiation(
             FunctionId(1),
             vec![TypeRef::Concrete(TypeId::INT)],
-            SourceLocation { file_id: 1, start: 10, end: 20 },
+            SourceLocation {
+                file_id: 1,
+                start: 10,
+                end: 20,
+            },
         );
 
         // Should be deduplicated
@@ -662,10 +695,7 @@ mod tests {
 
         assert_eq!(graph.get_specialization(idx), Some(FunctionId(100)));
 
-        let key = InstantiationKey::new(
-            FunctionId(1),
-            vec![TypeRef::Concrete(TypeId::INT)],
-        );
+        let key = InstantiationKey::new(FunctionId(1), vec![TypeRef::Concrete(TypeId::INT)]);
         assert_eq!(graph.get_specialization_by_key(&key), Some(FunctionId(100)));
     }
 }

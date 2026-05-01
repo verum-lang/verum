@@ -9,16 +9,18 @@ use colored::Colorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use verum_ast::FileId;
-use verum_lexer::Lexer;
-use verum_fast_parser::VerumParser;
 use verum_common::{List, Text};
+use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 use verum_types::{TypeChecker, TypeContext};
 
 /// List all workspace members
 pub fn list() -> Result<()> {
     let config = Config::load(".")?;
 
-    let workspace = config.workspace.as_ref()
+    let workspace = config
+        .workspace
+        .as_ref()
         .ok_or_else(|| CliError::Custom("Not a workspace".into()))?;
     let members = &workspace.members;
 
@@ -74,7 +76,9 @@ pub fn list() -> Result<()> {
 pub fn build(release: bool, _jobs: Option<usize>) -> Result<()> {
     let config = Config::load(".")?;
 
-    let workspace = config.workspace.as_ref()
+    let workspace = config
+        .workspace
+        .as_ref()
         .ok_or_else(|| CliError::Custom("Not a workspace".into()))?;
     let members = &workspace.members;
 
@@ -176,7 +180,9 @@ pub fn build(release: bool, _jobs: Option<usize>) -> Result<()> {
 pub fn test(filter: Option<Text>, nocapture: bool) -> Result<()> {
     let config = Config::load(".")?;
 
-    let workspace = config.workspace.as_ref()
+    let workspace = config
+        .workspace
+        .as_ref()
         .ok_or_else(|| CliError::Custom("Not a workspace".into()))?;
     let members = &workspace.members;
 
@@ -289,10 +295,7 @@ pub fn test(filter: Option<Text>, nocapture: bool) -> Result<()> {
         ui::success("All workspace tests passed");
         Ok(())
     } else {
-        ui::error(&format!(
-            "Tests failed in {} packages:",
-            failed_cogs.len()
-        ));
+        ui::error(&format!("Tests failed in {} packages:", failed_cogs.len()));
         for pkg in &failed_cogs {
             println!("  - {}", pkg);
         }
@@ -307,7 +310,9 @@ pub fn test(filter: Option<Text>, nocapture: bool) -> Result<()> {
 pub fn check() -> Result<()> {
     let config = Config::load(".")?;
 
-    let workspace = config.workspace.as_ref()
+    let workspace = config
+        .workspace
+        .as_ref()
         .ok_or_else(|| CliError::Custom("Not a workspace".into()))?;
     let members = &workspace.members;
 
@@ -413,7 +418,9 @@ pub fn check() -> Result<()> {
 pub fn publish(dry_run: bool) -> Result<()> {
     let config = Config::load(".")?;
 
-    let workspace = config.workspace.as_ref()
+    let workspace = config
+        .workspace
+        .as_ref()
         .ok_or_else(|| CliError::Custom("Not a workspace".into()))?;
     let members = &workspace.members;
 
@@ -504,7 +511,9 @@ pub fn publish(dry_run: bool) -> Result<()> {
 pub fn clean(_all: bool) -> Result<()> {
     let config = Config::load(".")?;
 
-    let workspace = config.workspace.as_ref()
+    let workspace = config
+        .workspace
+        .as_ref()
         .ok_or_else(|| CliError::Custom("Not a workspace".into()))?;
     let members = &workspace.members;
 
@@ -623,10 +632,7 @@ fn publish_member_to_registry(member_path: &Path, _config: &Config) -> Result<()
 }
 
 /// Create a package tarball for a workspace member
-fn create_member_cog(
-    member_path: &Path,
-    manifest: &crate::config::Manifest,
-) -> Result<PathBuf> {
+fn create_member_cog(member_path: &Path, manifest: &crate::config::Manifest) -> Result<PathBuf> {
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
@@ -887,7 +893,10 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
     if let Ok(module) = parser.parse_module(lexer, file_id) {
         // AST-based test discovery
         let mut tests = List::new();
-        let module_name = file.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+        let module_name = file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
 
         for item in &module.items {
             if let ItemKind::Function(func) = &item.kind {
@@ -928,8 +937,14 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
             {
                 let is_ignored = line_trim.contains("ignore");
                 tests.push(Test {
-                    name: format!("{}.{}", file.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown"), name)
-                        .into(),
+                    name: format!(
+                        "{}.{}",
+                        file.file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("unknown"),
+                        name
+                    )
+                    .into(),
                     file: file.to_path_buf(),
                     ignored: is_ignored,
                 });
@@ -997,10 +1012,9 @@ pub fn add(path: Text) -> Result<()> {
     let config_path = PathBuf::from(".");
     let mut config = Config::load(&config_path)?;
 
-    let workspace = config.workspace.as_mut()
-        .ok_or_else(|| CliError::Custom(
-            "Not a workspace. Add [workspace] section to verum.toml first.".into(),
-        ))?;
+    let workspace = config.workspace.as_mut().ok_or_else(|| {
+        CliError::Custom("Not a workspace. Add [workspace] section to verum.toml first.".into())
+    })?;
 
     // Normalize the path
     let member_path = PathBuf::from(path.as_str());
@@ -1071,7 +1085,9 @@ pub fn remove(name: Text) -> Result<()> {
     let config_path = PathBuf::from(".");
     let mut config = Config::load(&config_path)?;
 
-    let workspace = config.workspace.as_mut()
+    let workspace = config
+        .workspace
+        .as_mut()
         .ok_or_else(|| CliError::Custom("Not a workspace".into()))?;
 
     // Find the member by name or path
@@ -1098,7 +1114,9 @@ pub fn remove(name: Text) -> Result<()> {
             let removed_member = workspace.members.remove(idx);
 
             if removed_member.is_empty() {
-                return Err(CliError::Custom("Internal error: failed to remove member".into()));
+                return Err(CliError::Custom(
+                    "Internal error: failed to remove member".into(),
+                ));
             }
 
             // Save the updated config
@@ -1123,7 +1141,9 @@ pub fn exec(command: Vec<String>) -> Result<()> {
         return Err(CliError::Custom("No command specified".into()));
     }
 
-    let workspace = config.workspace.as_ref()
+    let workspace = config
+        .workspace
+        .as_ref()
         .ok_or_else(|| CliError::Custom("Not a workspace".into()))?;
     let members = &workspace.members;
 

@@ -21,13 +21,13 @@
 //! └── HeapType<T> - Heap-allocated value (Box equivalent)
 //! ```
 
+use crate::mlir::error::{MlirError, Result};
+use verum_common::Text;
 use verum_mlir::{
     Context,
-    ir::{Type, TypeLike},
     ir::attribute::{IntegerAttribute, StringAttribute, TypeAttribute},
+    ir::{Type, TypeLike},
 };
-use verum_common::Text;
-use crate::mlir::error::{MlirError, Result};
 
 /// Reference tier for CBGR three-tier system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -178,8 +178,9 @@ impl VerumType {
     /// Convert to MLIR Type.
     pub fn to_mlir_type<'c>(&self, ctx: &'c Context) -> Result<Type<'c>> {
         let type_str = self.to_mlir_type_string();
-        Type::parse(ctx, type_str.as_str())
-            .ok_or_else(|| MlirError::type_translation(type_str.clone(), "failed to parse MLIR type"))
+        Type::parse(ctx, type_str.as_str()).ok_or_else(|| {
+            MlirError::type_translation(type_str.clone(), "failed to parse MLIR type")
+        })
     }
 
     /// Create Int type.
@@ -189,7 +190,10 @@ impl VerumType {
 
     /// Create i64 (default Int).
     pub fn i64() -> Self {
-        Self::Int { bits: 64, signed: true }
+        Self::Int {
+            bits: 64,
+            signed: true,
+        }
     }
 
     /// Create f64 (default Float).
@@ -259,9 +263,7 @@ impl RefType {
         match self.tier {
             RefTier::Managed => {
                 // ThinRef structure: { ptr, gen: i32, epoch_caps: i32 }
-                Text::from(format!(
-                    "!llvm.struct<(ptr, i32, i32)>",
-                ))
+                Text::from(format!("!llvm.struct<(ptr, i32, i32)>",))
             }
             RefTier::Checked | RefTier::Unsafe => {
                 // Just a pointer for checked/unsafe
@@ -471,7 +473,8 @@ impl TupleType {
             return Text::from("()");
         }
 
-        let elements_str: Vec<String> = self.elements
+        let elements_str: Vec<String> = self
+            .elements
             .iter()
             .map(|t| t.to_mlir_type_string().to_string())
             .collect();
@@ -521,18 +524,15 @@ impl FunctionType {
 
     /// Get MLIR type string.
     pub fn to_mlir_type_string(&self) -> Text {
-        let params_str: Vec<String> = self.params
+        let params_str: Vec<String> = self
+            .params
             .iter()
             .map(|t| t.to_mlir_type_string().to_string())
             .collect();
 
         let result_str = self.result.to_mlir_type_string();
 
-        Text::from(format!(
-            "({}) -> {}",
-            params_str.join(", "),
-            result_str
-        ))
+        Text::from(format!("({}) -> {}", params_str.join(", "), result_str))
     }
 }
 
@@ -557,7 +557,8 @@ impl RecordType {
 
     /// Get MLIR type string.
     pub fn to_mlir_type_string(&self) -> Text {
-        let fields_str: Vec<String> = self.fields
+        let fields_str: Vec<String> = self
+            .fields
             .iter()
             .map(|(_, t)| t.to_mlir_type_string().to_string())
             .collect();
@@ -622,10 +623,8 @@ impl<'c> TypeTranslator<'c> {
             }
 
             TypeKind::Tuple(elements) => {
-                let element_types: Result<Vec<_>> = elements
-                    .iter()
-                    .map(|e| self.translate(e))
-                    .collect();
+                let element_types: Result<Vec<_>> =
+                    elements.iter().map(|e| self.translate(e)).collect();
                 Ok(VerumType::Tuple(TupleType::new(element_types?)))
             }
 
@@ -639,15 +638,20 @@ impl<'c> TypeTranslator<'c> {
                 Ok(VerumType::List(ListType::new(elem_type)))
             }
 
-            TypeKind::Function { params, return_type, .. } => {
-                let param_types: Result<Vec<_>> = params
-                    .iter()
-                    .map(|p| self.translate(p))
-                    .collect();
+            TypeKind::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                let param_types: Result<Vec<_>> =
+                    params.iter().map(|p| self.translate(p)).collect();
 
                 let result_type = self.translate(return_type)?;
 
-                Ok(VerumType::Function(FunctionType::new(param_types?, result_type)))
+                Ok(VerumType::Function(FunctionType::new(
+                    param_types?,
+                    result_type,
+                )))
             }
 
             TypeKind::Generic { base, args } => {
@@ -659,9 +663,12 @@ impl<'c> TypeTranslator<'c> {
                             .map(|ident| ident.name.as_str())
                             .unwrap_or_else(|| {
                                 // For multi-segment paths, try to extract from last segment
-                                path.segments.last()
+                                path.segments
+                                    .last()
                                     .and_then(|seg| match seg {
-                                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+                                        verum_ast::ty::PathSegment::Name(ident) => {
+                                            Some(ident.name.as_str())
+                                        }
                                         _ => None,
                                     })
                                     .unwrap_or("unknown")
@@ -674,12 +681,14 @@ impl<'c> TypeTranslator<'c> {
 
             TypeKind::Inferred => {
                 // Placeholder for inferred types
-                Ok(VerumType::Opaque { name: Text::from("inferred") })
+                Ok(VerumType::Opaque {
+                    name: Text::from("inferred"),
+                })
             }
 
-            TypeKind::Never => {
-                Ok(VerumType::Opaque { name: Text::from("never") })
-            }
+            TypeKind::Never => Ok(VerumType::Opaque {
+                name: Text::from("never"),
+            }),
 
             TypeKind::Unit => Ok(VerumType::Unit),
 
@@ -716,7 +725,9 @@ impl<'c> TypeTranslator<'c> {
 
             "()" | "Unit" => Ok(VerumType::Unit),
 
-            _ => Ok(VerumType::Opaque { name: Text::from(name) }),
+            _ => Ok(VerumType::Opaque {
+                name: Text::from(name),
+            }),
         }
     }
 
@@ -790,7 +801,9 @@ impl<'c> TypeTranslator<'c> {
                 }
             }
 
-            _ => Ok(VerumType::Opaque { name: Text::from(base) }),
+            _ => Ok(VerumType::Opaque {
+                name: Text::from(base),
+            }),
         }
     }
 

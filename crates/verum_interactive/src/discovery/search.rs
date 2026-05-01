@@ -126,14 +126,16 @@ pub fn search(index: &DiscoveryIndex, query: &SearchQuery) -> Vec<SearchResult> 
     for doc in index.docs.values() {
         // Apply filters
         if let Some(kind) = query.kind_filter
-            && doc.kind != kind {
-                continue;
-            }
+            && doc.kind != kind
+        {
+            continue;
+        }
 
         if let Some(ref module) = query.module_filter
-            && !doc.module.starts_with(module) {
-                continue;
-            }
+            && !doc.module.starts_with(module)
+        {
+            continue;
+        }
 
         if !query.tag_filter.is_empty() {
             let has_all_tags = query.tag_filter.iter().all(|t| doc.tags.contains(t));
@@ -172,7 +174,11 @@ pub fn search(index: &DiscoveryIndex, query: &SearchQuery) -> Vec<SearchResult> 
     }
 
     // Sort by score descending
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Limit results
     results.truncate(query.limit);
@@ -294,9 +300,10 @@ impl DiscoveryIndex {
             for tag in &doc.tags {
                 for item_name in self.by_tag(tag) {
                     if item_name != name
-                        && let Some(similar_doc) = self.get_doc(item_name) {
-                            results.push(SearchResult::from_doc(similar_doc, 1.0));
-                        }
+                        && let Some(similar_doc) = self.get_doc(item_name)
+                    {
+                        results.push(SearchResult::from_doc(similar_doc, 1.0));
+                    }
                 }
             }
             results.truncate(limit);
@@ -324,10 +331,7 @@ mod tests {
     #[test]
     fn test_search_with_filter() {
         let index = DiscoveryIndex::standard_library();
-        let results = search(
-            &index,
-            &SearchQuery::new("tensor").kind(DocKind::Type),
-        );
+        let results = search(&index, &SearchQuery::new("tensor").kind(DocKind::Type));
 
         // Docs with Type filter should only return types
         let doc_results: Vec<_> = results
@@ -346,7 +350,11 @@ mod tests {
         let results = index.search("fibonacci");
 
         assert!(!results.is_empty());
-        assert!(results.iter().any(|r| matches!(r.kind, SearchResultKind::Example)));
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r.kind, SearchResultKind::Example))
+        );
     }
 
     #[test]

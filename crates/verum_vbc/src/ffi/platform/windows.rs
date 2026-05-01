@@ -7,7 +7,7 @@
 //! - `VirtualAlloc`/`VirtualFree` for executable memory
 
 use super::{FfiPlatform, FfiPlatformError, LibraryHandle};
-use std::ffi::{c_void, CString, OsStr};
+use std::ffi::{CString, OsStr, c_void};
 use std::os::windows::ffi::OsStrExt;
 use std::ptr;
 
@@ -47,7 +47,12 @@ unsafe extern "system" {
         nSize: DWORD,
         Arguments: *const c_void,
     ) -> DWORD;
-    fn VirtualAlloc(lpAddress: LPVOID, dwSize: SIZE_T, flAllocationType: DWORD, flProtect: DWORD) -> LPVOID;
+    fn VirtualAlloc(
+        lpAddress: LPVOID,
+        dwSize: SIZE_T,
+        flAllocationType: DWORD,
+        flProtect: DWORD,
+    ) -> LPVOID;
     fn VirtualFree(lpAddress: LPVOID, dwSize: SIZE_T, dwFreeType: DWORD) -> BOOL;
     fn LocalFree(hMem: LPVOID) -> LPVOID;
 }
@@ -79,7 +84,10 @@ impl WindowsPlatform {
 
     /// Convert a Rust string to a wide (UTF-16) null-terminated string.
     fn to_wide_string(s: &str) -> Vec<u16> {
-        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+        OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
     }
 
     /// Get a human-readable error message for a Windows error code.
@@ -372,7 +380,11 @@ mod tests {
 
         // Resolve a known symbol
         let symbol = platform.resolve_symbol(handle, "GetLastError");
-        assert!(symbol.is_ok(), "Failed to resolve GetLastError: {:?}", symbol);
+        assert!(
+            symbol.is_ok(),
+            "Failed to resolve GetLastError: {:?}",
+            symbol
+        );
 
         // Unload
         let result = unsafe { platform.unload_library(handle) };

@@ -30,7 +30,7 @@ use verum_common::{List, Text};
 use verum_smt::proof_term_unified::ProofTerm;
 use verum_verification::proof_validator::{ProofValidator, ValidationConfig, ValidationError};
 use verum_verification::tactic_evaluation::{
-    Goal, Hypothesis, HypothesisSource, TacticEvaluator, TacticError,
+    Goal, Hypothesis, HypothesisSource, TacticError, TacticEvaluator,
 };
 
 // =============================================================================
@@ -187,7 +187,11 @@ fn test_smt_prove_logical_conjunction() {
     let p2 = make_lt(make_int(3), make_int(4));
     let prop = make_and(p1, p2);
     let result = validator.prove_with_smt_for_test(&prop);
-    assert!(result.is_ok(), "SMT should prove (1<2) && (3<4): {:?}", result);
+    assert!(
+        result.is_ok(),
+        "SMT should prove (1<2) && (3<4): {:?}",
+        result
+    );
 }
 
 #[test]
@@ -198,7 +202,11 @@ fn test_smt_prove_logical_disjunction() {
     let p2 = make_lt(make_int(5), make_int(3)); // false
     let prop = make_or(p1, p2);
     let result = validator.prove_with_smt_for_test(&prop);
-    assert!(result.is_ok(), "SMT should prove (1<2) || (5<3): {:?}", result);
+    assert!(
+        result.is_ok(),
+        "SMT should prove (1<2) || (5<3): {:?}",
+        result
+    );
 }
 
 #[test]
@@ -209,7 +217,11 @@ fn test_smt_prove_implication() {
     let consequent = make_lt(make_int(0), make_int(2));
     let prop = make_imply(antecedent, consequent);
     let result = validator.prove_with_smt_for_test(&prop);
-    assert!(result.is_ok(), "SMT should prove (1<2) => (0<2): {:?}", result);
+    assert!(
+        result.is_ok(),
+        "SMT should prove (1<2) => (0<2): {:?}",
+        result
+    );
 }
 
 #[test]
@@ -231,7 +243,11 @@ fn test_smt_prove_with_hypotheses() {
     validator.register_hypothesis("h1", hyp_expr);
     let prop = make_ge(a.clone(), make_int(0));
     let result = validator.prove_with_smt_for_test(&prop);
-    assert!(result.is_ok(), "SMT should prove a>=0 given a>0: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "SMT should prove a>=0 given a>0: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -283,7 +299,11 @@ fn test_tactic_auto_proves_trivial() {
         // At minimum, reflexivity should work
         let mut evaluator2 = TacticEvaluator::with_goal(make_eq(make_int(1), make_int(1)));
         let ref_result = evaluator2.apply_tactic(&TacticExpr::Reflexivity);
-        assert!(ref_result.is_ok(), "Reflexivity should prove 1==1: {:?}", ref_result);
+        assert!(
+            ref_result.is_ok(),
+            "Reflexivity should prove 1==1: {:?}",
+            ref_result
+        );
     }
 }
 
@@ -296,7 +316,11 @@ fn test_tactic_smt_proves_arithmetic() {
         solver: None,
         timeout: verum_common::Maybe::Some(5000),
     });
-    assert!(result.is_ok(), "SMT tactic should prove 2+3==5: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "SMT tactic should prove 2+3==5: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -338,7 +362,11 @@ fn test_tactic_reflexivity_proves_identity() {
     let goal_expr = make_eq(x.clone(), x.clone());
     let mut evaluator = TacticEvaluator::with_goal(goal_expr);
     let result = evaluator.apply_tactic(&TacticExpr::Reflexivity);
-    assert!(result.is_ok(), "Reflexivity should prove x==x: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Reflexivity should prove x==x: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -349,10 +377,16 @@ fn test_tactic_assumption_from_hypothesis() {
     let mut evaluator = TacticEvaluator::with_goal(prop.clone());
 
     // Add hypothesis
-    evaluator.state_mut().add_global_hypothesis(make_hyp("h", prop));
+    evaluator
+        .state_mut()
+        .add_global_hypothesis(make_hyp("h", prop));
 
     let result = evaluator.apply_tactic(&TacticExpr::Assumption);
-    assert!(result.is_ok(), "Assumption should prove goal matching hypothesis: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Assumption should prove goal matching hypothesis: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -364,13 +398,19 @@ fn test_tactic_smt_with_hypotheses() {
     let goal = make_ge(x.clone(), make_int(0));
 
     let mut evaluator = TacticEvaluator::with_goal(goal);
-    evaluator.state_mut().add_global_hypothesis(make_hyp("h", hyp));
+    evaluator
+        .state_mut()
+        .add_global_hypothesis(make_hyp("h", hyp));
 
     let result = evaluator.apply_tactic(&TacticExpr::Smt {
         solver: None,
         timeout: verum_common::Maybe::Some(5000),
     });
-    assert!(result.is_ok(), "SMT should prove x>=0 given x>5: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "SMT should prove x>=0 given x>5: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -384,7 +424,10 @@ fn test_tactic_smt_counterexample_reporting() {
         solver: None,
         timeout: verum_common::Maybe::Some(5000),
     });
-    assert!(result.is_err(), "SMT should fail to prove x>0 unconditionally");
+    assert!(
+        result.is_err(),
+        "SMT should fail to prove x>0 unconditionally"
+    );
     if let Err(TacticError::Failed(msg)) = &result {
         assert!(
             msg.contains("counterexample"),
@@ -414,7 +457,11 @@ fn test_validate_reflexivity_proof_term() {
     let proof = ProofTerm::reflexivity(term.clone());
     let expected = make_eq(term.clone(), term.clone());
     let result = validator.validate(&proof, &expected);
-    assert!(result.is_ok(), "Reflexivity proof should validate: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Reflexivity proof should validate: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -447,7 +494,11 @@ fn test_validate_smt_proof_term() {
         smt_trace: verum_common::Maybe::None,
     };
     let result = validator.validate(&proof, &formula);
-    assert!(result.is_ok(), "SmtProof for 1==1 should validate: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "SmtProof for 1==1 should validate: {:?}",
+        result
+    );
 }
 
 // =============================================================================
@@ -462,7 +513,11 @@ fn test_smt_associativity_concrete() {
     let rhs = make_add(make_int(2), make_add(make_int(3), make_int(4)));
     let prop = make_eq(lhs, rhs);
     let result = validator.prove_with_smt_for_test(&prop);
-    assert!(result.is_ok(), "SMT should prove (2+3)+4 == 2+(3+4): {:?}", result);
+    assert!(
+        result.is_ok(),
+        "SMT should prove (2+3)+4 == 2+(3+4): {:?}",
+        result
+    );
 }
 
 #[test]
@@ -481,10 +536,17 @@ fn test_smt_distributivity_concrete() {
     // Prove: 2 * (3 + 4) == 2*3 + 2*4
     let mut validator = ProofValidator::new();
     let lhs = make_mul(make_int(2), make_add(make_int(3), make_int(4)));
-    let rhs = make_add(make_mul(make_int(2), make_int(3)), make_mul(make_int(2), make_int(4)));
+    let rhs = make_add(
+        make_mul(make_int(2), make_int(3)),
+        make_mul(make_int(2), make_int(4)),
+    );
     let prop = make_eq(lhs, rhs);
     let result = validator.prove_with_smt_for_test(&prop);
-    assert!(result.is_ok(), "SMT should prove 2*(3+4) == 2*3+2*4: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "SMT should prove 2*(3+4) == 2*3+2*4: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -497,7 +559,11 @@ fn test_smt_chain_of_inequalities() {
     let premises = make_and(p1, p2);
     let prop = make_imply(premises, conclusion);
     let result = validator.prove_with_smt_for_test(&prop);
-    assert!(result.is_ok(), "SMT should prove chain of inequalities: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "SMT should prove chain of inequalities: {:?}",
+        result
+    );
 }
 
 // =============================================================================
@@ -517,15 +583,16 @@ fn test_proof_obligation_creation_and_discharge() {
 
     // Create an obligation for a simple proposition
     let prop = make_eq(make_int(1), make_int(1));
-    let id = validator.create_obligation(
-        prop,
-        ObligationKind::Assertion,
-        verum_common::Maybe::None,
-    );
+    let id =
+        validator.create_obligation(prop, ObligationKind::Assertion, verum_common::Maybe::None);
 
     // Verify the obligation
     let result = validator.verify_obligation(id);
-    assert!(result.is_ok(), "Should discharge 1==1 obligation: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Should discharge 1==1 obligation: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -536,11 +603,8 @@ fn test_proof_obligation_fails_for_invalid() {
 
     // Create an obligation that cannot be proved
     let prop = make_eq(make_int(1), make_int(2));
-    let id = validator.create_obligation(
-        prop,
-        ObligationKind::Assertion,
-        verum_common::Maybe::None,
-    );
+    let id =
+        validator.create_obligation(prop, ObligationKind::Assertion, verum_common::Maybe::None);
 
     // Verify the obligation - should fail
     let result = validator.verify_obligation(id);
@@ -567,9 +631,16 @@ fn test_tactic_sequence_simp_then_smt() {
         lemmas: List::new(),
         at_target: verum_common::Maybe::None,
     });
-    assert!(result.is_ok(), "Simp should prove (0+3)+(0+4)==7: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Simp should prove (0+3)+(0+4)==7: {:?}",
+        result
+    );
     // Verify the goal is fully proven
-    assert!(evaluator.state().is_complete(), "Goal should be fully proven after simp");
+    assert!(
+        evaluator.state().is_complete(),
+        "Goal should be fully proven after simp"
+    );
 }
 
 #[test]
@@ -583,7 +654,11 @@ fn test_tactic_try_fallback() {
     let result = evaluator.apply_tactic(&tactic);
     // Try should not error even if the inner tactic fails
     // Since reflexivity should succeed here, it's ok
-    assert!(result.is_ok(), "Try(reflexivity) should succeed for 5==5: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Try(reflexivity) should succeed for 5==5: {:?}",
+        result
+    );
 }
 
 // =============================================================================
@@ -599,5 +674,8 @@ fn test_tactic_statistics_tracking() {
 
     let stats = evaluator.stats();
     assert!(stats.tactics_applied >= 1, "Should track applied tactics");
-    assert!(stats.successful_tactics >= 1, "Should track successful tactics");
+    assert!(
+        stats.successful_tactics >= 1,
+        "Should track successful tactics"
+    );
 }

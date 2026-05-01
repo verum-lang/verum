@@ -280,9 +280,9 @@ impl FieldLayout {
                 }
             }
             FieldLayout::Array { .. } => {
-                paths.push(FieldPath::from_components(vec![
-                    FieldComponent::ArrayElement,
-                ].into()));
+                paths.push(FieldPath::from_components(
+                    vec![FieldComponent::ArrayElement].into(),
+                ));
             }
             FieldLayout::Primitive | FieldLayout::Unknown => {
                 // No fields
@@ -588,7 +588,8 @@ impl TypeCacheStats {
             self.hit_rate * 100.0,
             self.misses,
             (1.0 - self.hit_rate) * 100.0
-        ).into()
+        )
+        .into()
     }
 }
 

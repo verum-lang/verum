@@ -14,7 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use verum_cli::commands::lint::{has_issue, lint_source, LintConfig, LintIssue};
+use verum_cli::commands::lint::{LintConfig, LintIssue, has_issue, lint_source};
 
 fn run(src: &str) -> Vec<LintIssue> {
     let path = Path::new("test_fixture.vr");
@@ -62,10 +62,7 @@ fn silent_with(rule: &str, src: &str, cfg: &LintConfig) {
     assert!(
         !has_issue(&issues, rule),
         "expected rule `{rule}` to be silent on:\n{src}\nactual: {:?}",
-        issues
-            .iter()
-            .filter(|i| i.rule == rule)
-            .collect::<Vec<_>>()
+        issues.iter().filter(|i| i.rule == rule).collect::<Vec<_>>()
     );
 }
 
@@ -147,7 +144,10 @@ fn empty_refinement_bound_fires() {
 
 #[test]
 fn empty_refinement_bound_silent_on_satisfiable() {
-    silent("empty-refinement-bound", "type Range is Int{ it > 0 && it < 100 };\n");
+    silent(
+        "empty-refinement-bound",
+        "type Range is Int{ it > 0 && it < 100 };\n",
+    );
 }
 
 #[test]
@@ -182,15 +182,15 @@ fn deprecated_syntax_silent_on_heap() {
 
 #[test]
 fn deprecated_syntax_fires_on_struct_keyword() {
-    fires(
-        "deprecated-syntax",
-        "struct Point { x: Int, y: Int }\n",
-    );
+    fires("deprecated-syntax", "struct Point { x: Int, y: Int }\n");
 }
 
 #[test]
 fn deprecated_syntax_fires_on_impl_keyword() {
-    fires("deprecated-syntax", "impl Point {\n    fn zero() -> Point {}\n}\n");
+    fires(
+        "deprecated-syntax",
+        "impl Point {\n    fn zero() -> Point {}\n}\n",
+    );
 }
 
 #[test]
@@ -252,7 +252,10 @@ fn missing_timeout_silent_with_timeout() {
 
 #[test]
 fn unbounded_channel_fires() {
-    fires("unbounded-channel", "fn main() { let ch = Channel.new(); }\n");
+    fires(
+        "unbounded-channel",
+        "fn main() { let ch = Channel.new(); }\n",
+    );
 }
 
 #[test]
@@ -375,13 +378,21 @@ fn max_match_arms_silent_on_few_arms() {
 #[test]
 fn public_must_have_doc_fires_when_enabled() {
     let cfg = doc_policy(true);
-    fires_with("public-must-have-doc", "public fn no_doc() -> Int { 0 }\n", &cfg);
+    fires_with(
+        "public-must-have-doc",
+        "public fn no_doc() -> Int { 0 }\n",
+        &cfg,
+    );
 }
 
 #[test]
 fn public_must_have_doc_silent_when_disabled() {
     let cfg = doc_policy(false);
-    silent_with("public-must-have-doc", "public fn no_doc() -> Int { 0 }\n", &cfg);
+    silent_with(
+        "public-must-have-doc",
+        "public fn no_doc() -> Int { 0 }\n",
+        &cfg,
+    );
 }
 
 #[test]
@@ -397,7 +408,11 @@ fn public_must_have_doc_silent_with_doc() {
 #[test]
 fn public_must_have_doc_silent_on_private() {
     let cfg = doc_policy(true);
-    silent_with("public-must-have-doc", "fn private_no_doc() -> Int { 0 }\n", &cfg);
+    silent_with(
+        "public-must-have-doc",
+        "fn private_no_doc() -> Int { 0 }\n",
+        &cfg,
+    );
 }
 
 // ============================================================
@@ -407,16 +422,17 @@ fn public_must_have_doc_silent_on_private() {
 #[test]
 fn custom_regex_rule_fires() {
     let mut cfg = make_config(&[]);
-    cfg.custom_rules.push(verum_cli::commands::lint::CustomLintRule {
-        name: "no-todo-issue-required".to_string(),
-        pattern: "TODO".to_string(),
-        message: "TODO without issue link".to_string(),
-        level: verum_cli::commands::lint::LintLevel::Warning,
-        paths: Vec::new(),
-        exclude: Vec::new(),
-        suggestion: None,
-        ast_match: None,
-    });
+    cfg.custom_rules
+        .push(verum_cli::commands::lint::CustomLintRule {
+            name: "no-todo-issue-required".to_string(),
+            pattern: "TODO".to_string(),
+            message: "TODO without issue link".to_string(),
+            level: verum_cli::commands::lint::LintLevel::Warning,
+            paths: Vec::new(),
+            exclude: Vec::new(),
+            suggestion: None,
+            ast_match: None,
+        });
     fires_with(
         "no-todo-issue-required",
         "fn x() {\n    // TODO: ship me\n}\n",
@@ -427,21 +443,22 @@ fn custom_regex_rule_fires() {
 #[test]
 fn custom_ast_method_call_rule_fires() {
     let mut cfg = make_config(&[]);
-    cfg.custom_rules.push(verum_cli::commands::lint::CustomLintRule {
-        name: "no-unwrap".to_string(),
-        pattern: String::new(),
-        message: "use ? instead of unwrap".to_string(),
-        level: verum_cli::commands::lint::LintLevel::Error,
-        paths: Vec::new(),
-        exclude: Vec::new(),
-        suggestion: None,
-        ast_match: Some(verum_cli::commands::lint::AstMatchSpec {
-            kind: "method_call".to_string(),
-            method: Some("unwrap".to_string()),
-            path: None,
-            name: None,
-        }),
-    });
+    cfg.custom_rules
+        .push(verum_cli::commands::lint::CustomLintRule {
+            name: "no-unwrap".to_string(),
+            pattern: String::new(),
+            message: "use ? instead of unwrap".to_string(),
+            level: verum_cli::commands::lint::LintLevel::Error,
+            paths: Vec::new(),
+            exclude: Vec::new(),
+            suggestion: None,
+            ast_match: Some(verum_cli::commands::lint::AstMatchSpec {
+                kind: "method_call".to_string(),
+                method: Some("unwrap".to_string()),
+                path: None,
+                name: None,
+            }),
+        });
     fires_with(
         "no-unwrap",
         "fn main() { let x: Maybe<Int> = Some(5); let y = x.unwrap(); }\n",
@@ -452,21 +469,22 @@ fn custom_ast_method_call_rule_fires() {
 #[test]
 fn custom_ast_unsafe_block_rule_fires() {
     let mut cfg = make_config(&[]);
-    cfg.custom_rules.push(verum_cli::commands::lint::CustomLintRule {
-        name: "no-unsafe".to_string(),
-        pattern: String::new(),
-        message: "no unsafe in this fixture".to_string(),
-        level: verum_cli::commands::lint::LintLevel::Error,
-        paths: Vec::new(),
-        exclude: Vec::new(),
-        suggestion: None,
-        ast_match: Some(verum_cli::commands::lint::AstMatchSpec {
-            kind: "unsafe_block".to_string(),
-            method: None,
-            path: None,
-            name: None,
-        }),
-    });
+    cfg.custom_rules
+        .push(verum_cli::commands::lint::CustomLintRule {
+            name: "no-unsafe".to_string(),
+            pattern: String::new(),
+            message: "no unsafe in this fixture".to_string(),
+            level: verum_cli::commands::lint::LintLevel::Error,
+            paths: Vec::new(),
+            exclude: Vec::new(),
+            suggestion: None,
+            ast_match: Some(verum_cli::commands::lint::AstMatchSpec {
+                kind: "unsafe_block".to_string(),
+                method: None,
+                path: None,
+                name: None,
+            }),
+        });
     fires_with(
         "no-unsafe",
         "fn main() { let x = unsafe { 42 }; print(x); }\n",

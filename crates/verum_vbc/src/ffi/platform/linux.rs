@@ -194,7 +194,9 @@ impl FfiPlatform for LinuxPlatform {
         if ptr == libc::MAP_FAILED {
             return Err(FfiPlatformError::AllocationFailed {
                 size,
-                reason: format!("mmap failed with errno {}", unsafe { *self.errno_location() }),
+                reason: format!("mmap failed with errno {}", unsafe {
+                    *self.errno_location()
+                }),
             });
         }
 

@@ -451,7 +451,8 @@ impl MetaContextValidator {
 
     /// Check if a name is a valid meta context or meta context group.
     pub fn is_valid_meta_context(&self, name: &str) -> bool {
-        self.valid_names.contains(&Text::from(name)) || self.valid_groups.contains(&Text::from(name))
+        self.valid_names.contains(&Text::from(name))
+            || self.valid_groups.contains(&Text::from(name))
     }
 
     /// Check if a name is a meta context group (not a single context).
@@ -565,9 +566,17 @@ impl InvalidMetaContextError {
         format!(
             "meta function `{}` uses runtime context{} {} which {} not available at compile-time",
             self.func_name,
-            if self.invalid_contexts.len() > 1 { "s" } else { "" },
+            if self.invalid_contexts.len() > 1 {
+                "s"
+            } else {
+                ""
+            },
             invalid,
-            if self.invalid_contexts.len() > 1 { "are" } else { "is" }
+            if self.invalid_contexts.len() > 1 {
+                "are"
+            } else {
+                "is"
+            }
         )
     }
 

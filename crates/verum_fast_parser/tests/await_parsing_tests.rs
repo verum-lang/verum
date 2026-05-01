@@ -273,8 +273,8 @@ fn test_complex_async_expression() {
         }
     "#;
 
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
     let file_id = FileId::new(0);
     let parser = VerumParser::new();
     let lexer = Lexer::new(source, file_id);

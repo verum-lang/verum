@@ -234,10 +234,7 @@ fn untagged_module_with_script_main_name_still_errors() {
     // Use plain (library-mode) parse; the function would have to be
     // user-written for this to happen.
     let module = parser
-        .parse_module_str(
-            "fn __verum_script_main() -> Int { 0 }\n",
-            fid(),
-        )
+        .parse_module_str("fn __verum_script_main() -> Int { 0 }\n", fid())
         .expect("parse should succeed");
     // Don't tag as script.
     assert!(!module.is_script());

@@ -238,9 +238,7 @@ impl<'a> Parser<'a> {
 
     fn skip_whitespace_and_comments(&mut self) {
         loop {
-            while self.pos < self.src.len()
-                && self.src[self.pos].is_ascii_whitespace()
-            {
+            while self.pos < self.src.len() && self.src[self.pos].is_ascii_whitespace() {
                 self.pos += 1;
             }
             if self.pos < self.src.len() && self.src[self.pos] == b';' {
@@ -340,9 +338,7 @@ pub const CVC5_ALETHE_KNOWN_RULES: &[&str] = &[
 pub fn is_known_rule(backend: &str, rule: &str) -> bool {
     match backend {
         "z3" => Z3_KNOWN_RULES.contains(&rule),
-        "cvc5" | "aletha" => {
-            CVC5_ALETHE_KNOWN_RULES.contains(&rule)
-        }
+        "cvc5" | "aletha" => CVC5_ALETHE_KNOWN_RULES.contains(&rule),
         _ => false,
     }
 }
@@ -428,9 +424,7 @@ pub fn replay_z3_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
                 Some(ProofNode::Atom(t)) => t.as_str(),
                 _ => {
                     return Err(KernelError::SmtReplayFailed {
-                        reason: Text::from(
-                            "proof-tree list starts with a non-atom head",
-                        ),
+                        reason: Text::from("proof-tree list starts with a non-atom head"),
                     });
                 }
             };
@@ -448,9 +442,7 @@ pub fn replay_z3_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
             construct_witness_for_rule(head, children)
         }
         ProofNode::Atom(_) => Err(KernelError::SmtReplayFailed {
-            reason: Text::from(
-                "proof tree must be a list, got a bare atom",
-            ),
+            reason: Text::from("proof tree must be a list, got a bare atom"),
         }),
     }
 }
@@ -546,10 +538,7 @@ fn construct_witness_for_rule(
             // threads the child witness as an argument to
             // the parent axiom.
             let child_witness = replay_z3_tree(child)?;
-            witness = CoreTerm::App(
-                Heap::new(witness),
-                Heap::new(child_witness),
-            );
+            witness = CoreTerm::App(Heap::new(witness), Heap::new(child_witness));
         }
         // Atom children: not replayed. They're expression
         // arguments, not proof sub-terms.
@@ -607,9 +596,7 @@ pub fn replay_aletha_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
                 Some(ProofNode::Atom(t)) => t.as_str(),
                 _ => {
                     return Err(KernelError::SmtReplayFailed {
-                        reason: Text::from(
-                            "proof-tree list starts with a non-atom head",
-                        ),
+                        reason: Text::from("proof-tree list starts with a non-atom head"),
                     });
                 }
             };
@@ -623,12 +610,8 @@ pub fn replay_aletha_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
                 // Find the `:rule` keyword and read the next
                 // atom. ALETHE conventions: `:rule` precedes
                 // the rule name.
-                extract_aletha_rule_name(children).ok_or_else(|| {
-                    KernelError::SmtReplayFailed {
-                        reason: Text::from(
-                            "ALETHE step missing :rule keyword",
-                        ),
-                    }
+                extract_aletha_rule_name(children).ok_or_else(|| KernelError::SmtReplayFailed {
+                    reason: Text::from("ALETHE step missing :rule keyword"),
                 })?
             } else {
                 head.to_string()
@@ -641,11 +624,8 @@ pub fn replay_aletha_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
                 });
             }
 
-            let rule_axiom = build_witness(
-                "aletha",
-                &rule,
-                "CVC5 ALETHE proof-tree replay (Phase 2)",
-            );
+            let rule_axiom =
+                build_witness("aletha", &rule, "CVC5 ALETHE proof-tree replay (Phase 2)");
 
             // Recurse into sub-proof children, same as the
             // Z3 path. ALETHE's step-node has :premises /
@@ -658,23 +638,18 @@ pub fn replay_aletha_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
                     continue;
                 }
                 if let ProofNode::List(sub_children) = child
-                    && let Some(ProofNode::Atom(head_atom)) =
-                        sub_children.iter().next()
-                        && is_known_rule("aletha", head_atom.as_str()) {
-                            let child_witness = replay_aletha_tree(child)?;
-                            witness = CoreTerm::App(
-                                Heap::new(witness),
-                                Heap::new(child_witness),
-                            );
-                        }
+                    && let Some(ProofNode::Atom(head_atom)) = sub_children.iter().next()
+                    && is_known_rule("aletha", head_atom.as_str())
+                {
+                    let child_witness = replay_aletha_tree(child)?;
+                    witness = CoreTerm::App(Heap::new(witness), Heap::new(child_witness));
+                }
             }
 
             Ok(witness)
         }
         ProofNode::Atom(_) => Err(KernelError::SmtReplayFailed {
-            reason: Text::from(
-                "proof tree must be a list, got a bare atom",
-            ),
+            reason: Text::from("proof tree must be a list, got a bare atom"),
         }),
     }
 }
@@ -687,9 +662,10 @@ fn extract_aletha_rule_name(children: &List<ProofNode>) -> Option<String> {
     while let Some(node) = iter.next() {
         if let ProofNode::Atom(t) = node
             && t.as_str() == ":rule"
-                && let Some(ProofNode::Atom(rule)) = iter.next() {
-                    return Some(rule.as_str().to_string());
-                }
+            && let Some(ProofNode::Atom(rule)) = iter.next()
+        {
+            return Some(rule.as_str().to_string());
+        }
     }
     None
 }
@@ -912,13 +888,13 @@ impl KernelRule {
     pub fn category(&self) -> Option<&'static str> {
         match self {
             // Quotient types.
-            KernelRule::KQuotForm
-            | KernelRule::KQuotIntro
-            | KernelRule::KQuotElim => Some("Quotient types"),
+            KernelRule::KQuotForm | KernelRule::KQuotIntro | KernelRule::KQuotElim => {
+                Some("Quotient types")
+            }
             // Cohesive modalities.
-            KernelRule::KShape
-            | KernelRule::KFlat
-            | KernelRule::KSharp => Some("Cohesive modalities"),
+            KernelRule::KShape | KernelRule::KFlat | KernelRule::KSharp => {
+                Some("Cohesive modalities")
+            }
             // Higher inductive types — dependent path-over.
             KernelRule::KPathOverForm => Some("Higher inductive types — dependent path-over"),
             // ε / α duality (modality coalgebra).
@@ -929,9 +905,9 @@ impl KernelRule {
             // OC / DC round-trip (translation framework).
             KernelRule::KRoundTrip => Some("OC / DC translation round-trip"),
             // Modal logic operators.
-            KernelRule::KModalBox
-            | KernelRule::KModalDiamond
-            | KernelRule::KModalBigAnd => Some("Modal logic operators"),
+            KernelRule::KModalBox | KernelRule::KModalDiamond | KernelRule::KModalBigAnd => {
+                Some("Modal logic operators")
+            }
             // Kernel-foundation rules — dependent type theory core.
             KernelRule::KUniv
             | KernelRule::KPiForm
@@ -948,9 +924,9 @@ impl KernelRule {
             | KernelRule::KTransp
             | KernelRule::KGlue => Some("Cubical type theory"),
             // Refinement subtyping.
-            KernelRule::KRefine
-            | KernelRule::KRefineIntro
-            | KernelRule::KRefineErase => Some("Refinement subtyping"),
+            KernelRule::KRefine | KernelRule::KRefineIntro | KernelRule::KRefineErase => {
+                Some("Refinement subtyping")
+            }
             KernelRule::KRefineOmega => Some("Refinement subtyping — transfinite modal-depth"),
             // Inductive types.
             KernelRule::KInductive => Some("Inductive type formation"),
@@ -965,7 +941,9 @@ impl KernelRule {
     }
 
     #[doc(hidden)]
-    #[deprecated(note = "Use `category()` for an abstract semantic label. Internal-spec citations have been removed from the public API.")]
+    #[deprecated(
+        note = "Use `category()` for an abstract semantic label. Internal-spec citations have been removed from the public API."
+    )]
     pub fn citation(&self) -> Option<&'static str> {
         self.category()
     }
@@ -1158,7 +1136,9 @@ fn inference_rule_and_premises(
     let rule = match term {
         CoreTerm::Var(_) => KernelRule::KVar,
         CoreTerm::Universe(_) => KernelRule::KUniv,
-        CoreTerm::Pi { domain, codomain, .. } => {
+        CoreTerm::Pi {
+            domain, codomain, ..
+        } => {
             if let Some(p) = record_inference(ctx, domain, axioms) {
                 premises.push(p);
             }
@@ -1227,7 +1207,12 @@ fn inference_rule_and_premises(
             }
             KernelRule::KPathTyForm
         }
-        CoreTerm::PathOver { motive, path, lhs, rhs } => {
+        CoreTerm::PathOver {
+            motive,
+            path,
+            lhs,
+            rhs,
+        } => {
             if let Some(p) = record_inference(ctx, motive, axioms) {
                 premises.push(p);
             }
@@ -1260,7 +1245,11 @@ fn inference_rule_and_premises(
             }
             KernelRule::KHComp
         }
-        CoreTerm::Transp { path, regular, value } => {
+        CoreTerm::Transp {
+            path,
+            regular,
+            value,
+        } => {
             if let Some(p) = record_inference(ctx, path, axioms) {
                 premises.push(p);
             }
@@ -1272,7 +1261,12 @@ fn inference_rule_and_premises(
             }
             KernelRule::KTransp
         }
-        CoreTerm::Glue { carrier, phi, fiber, equiv } => {
+        CoreTerm::Glue {
+            carrier,
+            phi,
+            fiber,
+            equiv,
+        } => {
             if let Some(p) = record_inference(ctx, carrier, axioms) {
                 premises.push(p);
             }
@@ -1287,7 +1281,9 @@ fn inference_rule_and_premises(
             }
             KernelRule::KGlue
         }
-        CoreTerm::Refine { base, predicate, .. } => {
+        CoreTerm::Refine {
+            base, predicate, ..
+        } => {
             if let Some(p) = record_inference(ctx, base, axioms) {
                 premises.push(p);
             }
@@ -1317,7 +1313,11 @@ fn inference_rule_and_premises(
             }
             KernelRule::KQuotIntro
         }
-        CoreTerm::QuotElim { scrutinee, motive, case } => {
+        CoreTerm::QuotElim {
+            scrutinee,
+            motive,
+            case,
+        } => {
             if let Some(p) = record_inference(ctx, scrutinee, axioms) {
                 premises.push(p);
             }
@@ -1337,7 +1337,11 @@ fn inference_rule_and_premises(
             }
             KernelRule::KInductive
         }
-        CoreTerm::Elim { scrutinee, motive, cases } => {
+        CoreTerm::Elim {
+            scrutinee,
+            motive,
+            cases,
+        } => {
             if let Some(p) = record_inference(ctx, scrutinee, axioms) {
                 premises.push(p);
             }
@@ -1557,9 +1561,7 @@ mod tests {
         let trace = "(fabricate_unsat (asserted x))";
         let tree = parse_sexpr(trace).unwrap();
         let names = collect_rule_names(&tree);
-        let all_known = names
-            .iter()
-            .all(|n| is_known_rule("z3", n.as_str()));
+        let all_known = names.iter().all(|n| is_known_rule("z3", n.as_str()));
         assert!(!all_known, "fabricated rule should be caught");
     }
 
@@ -1579,9 +1581,7 @@ mod tests {
         let trace = "(mp (asserted p1) (refl r1))";
         let tree = parse_sexpr(trace).unwrap();
         let names = collect_rule_names(&tree);
-        let all_known = names
-            .iter()
-            .all(|n| is_known_rule("z3", n.as_str()));
+        let all_known = names.iter().all(|n| is_known_rule("z3", n.as_str()));
         assert!(
             all_known,
             "every rule in trace should be known: {:?}",
@@ -1596,7 +1596,9 @@ mod tests {
         let tree = parse_sexpr("(asserted premise)").unwrap();
         let term = replay_z3_tree(&tree).unwrap();
         match term {
-            crate::CoreTerm::Axiom { name, framework, .. } => {
+            crate::CoreTerm::Axiom {
+                name, framework, ..
+            } => {
                 assert_eq!(name.as_str(), "z3_proof:asserted");
                 assert_eq!(framework.framework.as_str(), "z3:asserted");
             }
@@ -1611,10 +1613,7 @@ mod tests {
             let term = replay_z3_tree(&tree).unwrap();
             match term {
                 crate::CoreTerm::Axiom { framework, .. } => {
-                    assert_eq!(
-                        framework.framework.as_str(),
-                        format!("z3:{}", rule)
-                    );
+                    assert_eq!(framework.framework.as_str(), format!("z3:{}", rule));
                 }
                 other => panic!("expected Axiom for {}, got {:?}", rule, other),
             }
@@ -1700,10 +1699,7 @@ mod tests {
     fn replay_unknown_rule_rejected_by_allowlist() {
         let tree = parse_sexpr("(fabricate_unsat dummy)").unwrap();
         let err = replay_z3_tree(&tree).unwrap_err();
-        assert!(matches!(
-            err,
-            crate::KernelError::UnknownRule { .. }
-        ));
+        assert!(matches!(err, crate::KernelError::UnknownRule { .. }));
     }
 
     #[test]
@@ -1779,10 +1775,7 @@ mod tests {
         // allowlist check runs at every recursion level.
         let tree = parse_sexpr("(mp (fabricate x) (asserted y))").unwrap();
         let err = replay_z3_tree(&tree).unwrap_err();
-        assert!(matches!(
-            err,
-            crate::KernelError::UnknownRule { .. }
-        ));
+        assert!(matches!(err, crate::KernelError::UnknownRule { .. }));
     }
 
     // -- ALETHE replay ------------------------------------------------
@@ -1792,7 +1785,9 @@ mod tests {
         let tree = parse_sexpr("(resolution p1 p2)").unwrap();
         let term = replay_aletha_tree(&tree).unwrap();
         match term {
-            crate::CoreTerm::Axiom { name, framework, .. } => {
+            crate::CoreTerm::Axiom {
+                name, framework, ..
+            } => {
                 assert_eq!(name.as_str(), "aletha_proof:resolution");
                 assert_eq!(framework.framework.as_str(), "aletha:resolution");
             }
@@ -1832,10 +1827,7 @@ mod tests {
     fn replay_aletha_unknown_rule_rejected_by_allowlist() {
         let tree = parse_sexpr("(fabricate_rule dummy)").unwrap();
         let err = replay_aletha_tree(&tree).unwrap_err();
-        assert!(matches!(
-            err,
-            crate::KernelError::UnknownRule { .. }
-        ));
+        assert!(matches!(err, crate::KernelError::UnknownRule { .. }));
     }
 
     #[test]

@@ -123,8 +123,7 @@ pub trait SmtBackend: Send + Sync + Debug {
     fn check_sat(&mut self) -> Result<SatResult, Self::Error>;
 
     /// Check satisfiability with additional assumptions
-    fn check_sat_assuming(&mut self, assumptions: &[Self::Term])
-    -> Result<SatResult, Self::Error>;
+    fn check_sat_assuming(&mut self, assumptions: &[Self::Term]) -> Result<SatResult, Self::Error>;
 
     /// Get reason for unknown result
     fn get_reason_unknown(&self) -> Result<Maybe<Text>, Self::Error>;
@@ -201,12 +200,10 @@ pub trait SmtBackend: Send + Sync + Debug {
     fn mk_mul(&mut self, terms: &[Self::Term]) -> Result<Self::Term, Self::Error>;
 
     /// Create division
-    fn mk_div(&mut self, left: &Self::Term, right: &Self::Term)
-    -> Result<Self::Term, Self::Error>;
+    fn mk_div(&mut self, left: &Self::Term, right: &Self::Term) -> Result<Self::Term, Self::Error>;
 
     /// Create modulo
-    fn mk_mod(&mut self, left: &Self::Term, right: &Self::Term)
-    -> Result<Self::Term, Self::Error>;
+    fn mk_mod(&mut self, left: &Self::Term, right: &Self::Term) -> Result<Self::Term, Self::Error>;
 
     /// Create negation (unary minus)
     fn mk_neg(&mut self, term: &Self::Term) -> Result<Self::Term, Self::Error>;
@@ -262,12 +259,10 @@ pub trait SmtBackend: Send + Sync + Debug {
     ) -> Result<Self::Term, Self::Error>;
 
     /// Create bi-implication (iff, <=>)
-    fn mk_iff(&mut self, left: &Self::Term, right: &Self::Term)
-    -> Result<Self::Term, Self::Error>;
+    fn mk_iff(&mut self, left: &Self::Term, right: &Self::Term) -> Result<Self::Term, Self::Error>;
 
     /// Create exclusive or (XOR)
-    fn mk_xor(&mut self, left: &Self::Term, right: &Self::Term)
-    -> Result<Self::Term, Self::Error>;
+    fn mk_xor(&mut self, left: &Self::Term, right: &Self::Term) -> Result<Self::Term, Self::Error>;
 
     /// Create if-then-else (ternary conditional)
     fn mk_ite(

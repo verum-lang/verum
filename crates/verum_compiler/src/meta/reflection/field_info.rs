@@ -3,7 +3,7 @@
 
 //! Provides detailed field metadata for struct types, matching core/meta/reflection.vr FieldInfo.
 
-use verum_ast::{ty::Type, MetaValue};
+use verum_ast::{MetaValue, ty::Type};
 use verum_common::{List, Maybe, Text};
 
 use super::type_kind::{TypeKind, Visibility};

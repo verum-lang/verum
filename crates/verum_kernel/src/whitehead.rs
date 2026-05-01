@@ -310,16 +310,20 @@ mod tests {
                 PiLevelIso::new(Ordinal::Finite(1), true, "π_1"),
             ],
         );
-        assert!(!is_equivalence_via_whitehead(&crit),
-            "Incomplete level coverage must defeat Whitehead");
+        assert!(
+            !is_equivalence_via_whitehead(&crit),
+            "Incomplete level coverage must defeat Whitehead"
+        );
     }
 
     #[test]
     fn whitehead_rejects_empty_levels() {
         let m = InfinityMorphism::identity("X");
         let crit = WhiteheadCriterion::new(m, Ordinal::Finite(0), vec![]);
-        assert!(!is_equivalence_via_whitehead(&crit),
-            "Empty level family must not certify equivalence");
+        assert!(
+            !is_equivalence_via_whitehead(&crit),
+            "Empty level family must not certify equivalence"
+        );
     }
 
     // ----- Whitehead promotion -----
@@ -365,7 +369,10 @@ mod tests {
         assert_eq!(eq.level, Ordinal::Finite(4));
         assert!(eq.whitehead_witness);
         // Contract: trusted-base-shrinkage — no bridge admits.
-        assert_eq!(audit.admits().len(), 0,
-            "Whitehead-certified equivalences must add zero bridge admits");
+        assert_eq!(
+            audit.admits().len(),
+            0,
+            "Whitehead-certified equivalences must add zero bridge admits"
+        );
     }
 }

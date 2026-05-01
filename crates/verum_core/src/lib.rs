@@ -82,14 +82,14 @@ use verum_common::Text;
 use verum_common::span::Span;
 
 pub mod expr;
-pub mod ty;
-pub mod obligation;
 pub mod module;
+pub mod obligation;
+pub mod ty;
 
 pub use expr::IrExpr;
-pub use ty::IrType;
-pub use obligation::IrObligation;
 pub use module::{IrFunction, IrModule, IrTheorem, IrTypeDecl, IrVariantKind};
+pub use obligation::IrObligation;
+pub use ty::IrType;
 
 /// Errors raised by IR construction / projection.
 #[derive(Debug, Clone, Error, Serialize, Deserialize)]

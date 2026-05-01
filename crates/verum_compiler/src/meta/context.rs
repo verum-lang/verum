@@ -282,7 +282,7 @@ impl MetaContext {
             staged_enabled: true,
             stage_config: Map::new(),
             iteration_limit: 1_000_000,
-            recursion_limit: 50,  // Lower limit to prevent stack overflow in debug mode
+            recursion_limit: 50, // Lower limit to prevent stack overflow in debug mode
             current_recursion_depth: 0,
             memory_limit: 100 * 1024 * 1024, // 100 MB
             timeout_ms: 30_000,              // 30 seconds
@@ -393,10 +393,7 @@ impl MetaContext {
     ///
 
     /// Or use the `from_security_context` builder for one-shot construction.
-    pub fn apply_security_context(
-        &mut self,
-        sec: &crate::meta::contexts::SecurityContext,
-    ) {
+    pub fn apply_security_context(&mut self, sec: &crate::meta::contexts::SecurityContext) {
         let limits = sec.limits();
         self.recursion_limit = limits.recursion_limit;
         self.iteration_limit = limits.iteration_limit;
@@ -408,9 +405,7 @@ impl MetaContext {
     /// Build a fully-configured `MetaContext` directly from a
     /// `SecurityContext`. Equivalent to `MetaContext::new()` followed
     /// by `apply_security_context(sec)`.
-    pub fn from_security_context(
-        sec: &crate::meta::contexts::SecurityContext,
-    ) -> Self {
+    pub fn from_security_context(sec: &crate::meta::contexts::SecurityContext) -> Self {
         let mut ctx = Self::new();
         ctx.apply_security_context(sec);
         ctx
@@ -592,10 +587,7 @@ impl MetaContext {
     /// Used at the SINGLE construction site so each freshly-
     /// allocated value counts once — passthroughs (Variable
     /// lookup, function return) don't double-count.
-    pub fn track_allocation(
-        &mut self,
-        bytes: usize,
-    ) -> Result<(), super::error::MetaError> {
+    pub fn track_allocation(&mut self, bytes: usize) -> Result<(), super::error::MetaError> {
         self.memory_used = self.memory_used.saturating_add(bytes as u64);
         if self.peak_memory < self.memory_used {
             self.peak_memory = self.memory_used;
@@ -1005,15 +997,15 @@ mod tests {
         // to the MetaContext fields the evaluator + sandbox check.
         // Before the fix, set_limits was a silent no-op exposed only via
         // a tracing::debug!.
-        use crate::meta::contexts::SecurityContext;
         use crate::meta::contexts::ResourceLimits;
+        use crate::meta::contexts::SecurityContext;
 
         let mut sec = SecurityContext::new();
         sec.set_limits(ResourceLimits {
             iteration_limit: 7_777,
             recursion_limit: 13,
-            memory_limit:    42 * 1024 * 1024,
-            timeout_ms:      9_999,
+            memory_limit: 42 * 1024 * 1024,
+            timeout_ms: 9_999,
         });
 
         let mut meta = MetaContext::new();
@@ -1032,15 +1024,15 @@ mod tests {
 
     #[test]
     fn from_security_context_one_shot_construction() {
-        use crate::meta::contexts::SecurityContext;
         use crate::meta::contexts::ResourceLimits;
+        use crate::meta::contexts::SecurityContext;
 
         let mut sec = SecurityContext::new();
         sec.set_limits(ResourceLimits {
             iteration_limit: 100,
             recursion_limit: 5,
-            memory_limit:    1_024,
-            timeout_ms:      250,
+            memory_limit: 1_024,
+            timeout_ms: 250,
         });
 
         let meta = MetaContext::from_security_context(&sec);

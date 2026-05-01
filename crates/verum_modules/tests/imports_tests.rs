@@ -55,7 +55,8 @@ fn test_path_to_module_path_simple() {
             PathSegment::Name(Ident::new(Text::from("std"), span)),
             PathSegment::Name(Ident::new(Text::from("io"), span)),
             PathSegment::Name(Ident::new(Text::from("File"), span)),
-        ].into(),
+        ]
+        .into(),
         span,
     );
 
@@ -73,7 +74,8 @@ fn test_path_to_module_path_with_self() {
         vec![
             PathSegment::SelfValue,
             PathSegment::Name(Ident::new(Text::from("utils"), span)),
-        ].into(),
+        ]
+        .into(),
         span,
     );
 
@@ -91,7 +93,8 @@ fn test_path_to_module_path_with_super() {
         vec![
             PathSegment::Super,
             PathSegment::Name(Ident::new(Text::from("parent_module"), span)),
-        ].into(),
+        ]
+        .into(),
         span,
     );
 
@@ -110,7 +113,8 @@ fn test_path_to_module_path_with_crate() {
             PathSegment::Cog,
             PathSegment::Name(Ident::new(Text::from("core"), span)),
             PathSegment::Name(Ident::new(Text::from("types"), span)),
-        ].into(),
+        ]
+        .into(),
         span,
     );
 
@@ -129,7 +133,8 @@ fn test_path_last_segment_name() {
             PathSegment::Name(Ident::new(Text::from("std"), span)),
             PathSegment::Name(Ident::new(Text::from("collections"), span)),
             PathSegment::Name(Ident::new(Text::from("HashMap"), span)),
-        ].into(),
+        ]
+        .into(),
         span,
     );
 
@@ -160,7 +165,8 @@ fn test_path_parent() {
             PathSegment::Name(Ident::new(Text::from("std"), span)),
             PathSegment::Name(Ident::new(Text::from("io"), span)),
             PathSegment::Name(Ident::new(Text::from("File"), span)),
-        ].into(),
+        ]
+        .into(),
         span,
     );
 

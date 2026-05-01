@@ -31,7 +31,8 @@ impl From<Error> for VerumError {
                         reason: format!(
                             "verification timeout for: {} (after {:?})",
                             constraint, timeout
-                        ).into(),
+                        )
+                        .into(),
                         counterexample: None,
                     },
                     VerificationError::Translation(trans_err) => VerumError::Other {
@@ -49,7 +50,9 @@ impl From<Error> for VerumError {
             Error::Translation(trans_err) => VerumError::Other {
                 message: format!("SMT translation error: {}", trans_err).into(),
             },
-            Error::Unsupported(feature) => VerumError::UnsupportedSMT { feature: feature.into() },
+            Error::Unsupported(feature) => VerumError::UnsupportedSMT {
+                feature: feature.into(),
+            },
             Error::ContextError(msg) => VerumError::Other {
                 message: format!("Z3 context error: {}", msg).into(),
             },

@@ -34,15 +34,24 @@ fn main() {
     // Get LLVM configuration (llvm-config on Unix, llvm-config.exe on Windows)
     let llvm_config = if cfg!(windows) {
         let exe_path = llvm_dir.join("bin/llvm-config.exe");
-        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+        if exe_path.exists() {
+            exe_path
+        } else {
+            llvm_dir.join("bin/llvm-config")
+        }
     } else {
         llvm_dir.join("bin/llvm-config")
     };
     if !llvm_config.exists() {
-        let build_cmd = if cfg!(windows) { r#"cd llvm && .\build.bat"# } else { "cd llvm && ./build.sh" };
+        let build_cmd = if cfg!(windows) {
+            r#"cd llvm && .\build.bat"#
+        } else {
+            "cd llvm && ./build.sh"
+        };
         panic!(
             "llvm-config not found at {}. Run: {}",
-            llvm_config.display(), build_cmd
+            llvm_config.display(),
+            build_cmd
         );
     }
 
@@ -140,7 +149,11 @@ Alternatively, set VERUM_LLVM_DIR to override:
 fn verify_llvm_version(llvm_dir: &Path) {
     let llvm_config = if cfg!(windows) {
         let exe_path = llvm_dir.join("bin/llvm-config.exe");
-        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+        if exe_path.exists() {
+            exe_path
+        } else {
+            llvm_dir.join("bin/llvm-config")
+        }
     } else {
         llvm_dir.join("bin/llvm-config")
     };
@@ -204,7 +217,9 @@ fn build_c_library(llvm_config: &Path, include_dir: &Path) {
         }
         // Skip warning-level flags on MSVC — LLVM headers generate warnings
         // at -W4 level that block compilation when combined with /WX or strict modes.
-        if cfg!(target_env = "msvc") && (flag == "/WX" || flag.starts_with("-W") || flag.starts_with("/W")) {
+        if cfg!(target_env = "msvc")
+            && (flag == "/WX" || flag.starts_with("-W") || flag.starts_with("/W"))
+        {
             continue;
         }
         // Skip /EH flags — let cc-rs manage exception handling model

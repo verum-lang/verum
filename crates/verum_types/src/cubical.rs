@@ -82,10 +82,7 @@ pub enum CubicalTerm {
 
     /// Path lambda: `λ(i). body` — introduces a path by abstracting
     /// over a dimension variable.
-    PathLambda {
-        dim: DimVar,
-        body: Box<CubicalTerm>,
-    },
+    PathLambda { dim: DimVar, body: Box<CubicalTerm> },
 
     /// Path application: `path @ endpoint` — eliminates a path at a
     /// specific interval point.
@@ -173,9 +170,7 @@ impl CubicalTerm {
                 Box::new(p.subst_dim(var, endpoint)),
                 Box::new(q.subst_dim(var, endpoint)),
             ),
-            CubicalTerm::Ua(e) => {
-                CubicalTerm::Ua(Box::new(e.subst_dim(var, endpoint)))
-            }
+            CubicalTerm::Ua(e) => CubicalTerm::Ua(Box::new(e.subst_dim(var, endpoint))),
             CubicalTerm::EquivFwd { equiv, value } => CubicalTerm::EquivFwd {
                 equiv: Box::new(equiv.subst_dim(var, endpoint)),
                 value: Box::new(value.subst_dim(var, endpoint)),
@@ -287,9 +282,7 @@ impl CubicalTerm {
                     CubicalTerm::Value(v) if v.as_str() == "id_equiv"
                 ) =>
             {
-                CubicalTerm::Refl(Box::new(CubicalTerm::Value(Text::from(
-                    "Type",
-                ))))
+                CubicalTerm::Refl(Box::new(CubicalTerm::Value(Text::from("Type"))))
             }
 
             // No reduction applies — already in WHNF
@@ -360,19 +353,13 @@ mod tests {
     #[test]
     fn test_path_app_lambda_beta() {
         // (λi. body) @ i0 ↦ body[i := i0]
-        let term = path_app(
-            path_lam("i", dim("i")),
-            i0(),
-        );
+        let term = path_app(path_lam("i", dim("i")), i0());
         assert_eq!(term.whnf(), i0());
     }
 
     #[test]
     fn test_path_app_lambda_i1() {
-        let term = path_app(
-            path_lam("i", dim("i")),
-            i1(),
-        );
+        let term = path_app(path_lam("i", dim("i")), i1());
         assert_eq!(term.whnf(), i1());
     }
 
@@ -473,10 +460,7 @@ mod tests {
     fn test_ua_id_equiv_reduces_to_refl() {
         // ua(id_equiv) ↦ refl(Type)
         let term = ua(val("id_equiv"));
-        assert_eq!(
-            term.whnf(),
-            CubicalTerm::Refl(Box::new(val("Type")))
-        );
+        assert_eq!(term.whnf(), CubicalTerm::Refl(Box::new(val("Type"))));
     }
 
     #[test]

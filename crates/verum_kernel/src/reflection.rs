@@ -270,11 +270,7 @@ impl ReflectedJudgment {
     }
 
     /// Construct a reflected judgment with explicit context depth.
-    pub fn at_depth(
-        depth: usize,
-        term: ReflectedTerm,
-        expected_type: ReflectedTerm,
-    ) -> Self {
+    pub fn at_depth(depth: usize, term: ReflectedTerm, expected_type: ReflectedTerm) -> Self {
         Self {
             context_depth: depth,
             term,
@@ -532,16 +528,13 @@ fn debruijn_in_range(term: &ReflectedTerm, depth: usize) -> bool {
         ReflectedTerm::Var { index } => *index < depth,
         ReflectedTerm::Universe { .. } => true,
         ReflectedTerm::Pi { domain, body } => {
-            debruijn_in_range(domain, depth)
-                && debruijn_in_range(body, depth + 1)
+            debruijn_in_range(domain, depth) && debruijn_in_range(body, depth + 1)
         }
         ReflectedTerm::Lam { domain, body } => {
-            debruijn_in_range(domain, depth)
-                && debruijn_in_range(body, depth + 1)
+            debruijn_in_range(domain, depth) && debruijn_in_range(body, depth + 1)
         }
         ReflectedTerm::App { function, argument } => {
-            debruijn_in_range(function, depth)
-                && debruijn_in_range(argument, depth)
+            debruijn_in_range(function, depth) && debruijn_in_range(argument, depth)
         }
     }
 }
@@ -606,10 +599,7 @@ mod tests {
     #[test]
     fn roundtrip_polymorphic_identity() {
         // λ(A : Type). λ(x : A). x --- the polymorphic identity.
-        let poly_id = Term::lam(
-            Term::Universe(0),
-            Term::lam(Term::Var(0), Term::Var(0)),
-        );
+        let poly_id = Term::lam(Term::Universe(0), Term::lam(Term::Var(0), Term::Var(0)));
         roundtrip(poly_id);
     }
 
@@ -666,10 +656,7 @@ mod tests {
             domain: Box::new(ReflectedTerm::Universe { level: 0 }),
             body: Box::new(ReflectedTerm::Var { index: 0 }),
         };
-        let j = ReflectedJudgment::closed(
-            body,
-            ReflectedTerm::Universe { level: 0 },
-        );
+        let j = ReflectedJudgment::closed(body, ReflectedTerm::Universe { level: 0 });
         assert!(is_reflected_well_formed(&j));
     }
 
@@ -680,10 +667,7 @@ mod tests {
             domain: Box::new(ReflectedTerm::Universe { level: 0 }),
             body: Box::new(ReflectedTerm::Var { index: 3 }),
         };
-        let j = ReflectedJudgment::closed(
-            body,
-            ReflectedTerm::Universe { level: 0 },
-        );
+        let j = ReflectedJudgment::closed(body, ReflectedTerm::Universe { level: 0 });
         assert!(!is_reflected_well_formed(&j));
     }
 
@@ -694,8 +678,8 @@ mod tests {
     #[test]
     fn reflect_every_known_rule() {
         for name in KERNEL_RULE_NAMES {
-            let rule = reflect_kernel_rule(name)
-                .unwrap_or_else(|| panic!("rule {name} should reflect"));
+            let rule =
+                reflect_kernel_rule(name).unwrap_or_else(|| panic!("rule {name} should reflect"));
             assert_eq!(&rule.name, name);
         }
     }
@@ -713,19 +697,13 @@ mod tests {
         assert_eq!(reflect_kernel_rule("T-Var").unwrap().premises.len(), 0);
         assert_eq!(reflect_kernel_rule("T-Univ").unwrap().premises.len(), 0);
         // T-Pi-Form has two premises (domain + codomain typing).
-        assert_eq!(
-            reflect_kernel_rule("T-Pi-Form").unwrap().premises.len(),
-            2
-        );
+        assert_eq!(reflect_kernel_rule("T-Pi-Form").unwrap().premises.len(), 2);
         // The remaining three rules each have one premise in V0.
         assert_eq!(
             reflect_kernel_rule("T-Lam-Intro").unwrap().premises.len(),
             1
         );
-        assert_eq!(
-            reflect_kernel_rule("T-App-Elim").unwrap().premises.len(),
-            1
-        );
+        assert_eq!(reflect_kernel_rule("T-App-Elim").unwrap().premises.len(), 1);
         assert_eq!(reflect_kernel_rule("T-Conv").unwrap().premises.len(), 1);
     }
 
@@ -753,8 +731,7 @@ mod tests {
             },
         );
         let json = serde_json::to_string(&j).expect("serialise");
-        let back: ReflectedJudgment =
-            serde_json::from_str(&json).expect("deserialise");
+        let back: ReflectedJudgment = serde_json::from_str(&json).expect("deserialise");
         assert_eq!(j, back);
     }
 
@@ -763,8 +740,7 @@ mod tests {
         for name in KERNEL_RULE_NAMES {
             let rule = reflect_kernel_rule(name).unwrap();
             let json = serde_json::to_string(&rule).expect("serialise");
-            let back: ReflectedKernelRule =
-                serde_json::from_str(&json).expect("deserialise");
+            let back: ReflectedKernelRule = serde_json::from_str(&json).expect("deserialise");
             assert_eq!(rule, back);
         }
     }

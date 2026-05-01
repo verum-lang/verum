@@ -287,7 +287,10 @@ impl Transparency {
 
     /// Check if this mode allows referencing types from call site
     pub fn allows_type_reference(&self) -> bool {
-        matches!(self, Transparency::Transparent | Transparency::SemiTransparent)
+        matches!(
+            self,
+            Transparency::Transparent | Transparency::SemiTransparent
+        )
     }
 
     /// Check if this mode is fully hygienic
@@ -353,12 +356,24 @@ impl ExpansionInfo {
 
     /// Create a transparent expansion (like inline code)
     pub fn transparent(macro_name: Text, call_site: Span, def_site: Span, stage: u32) -> Self {
-        Self::new(macro_name, call_site, def_site, Transparency::Transparent, stage)
+        Self::new(
+            macro_name,
+            call_site,
+            def_site,
+            Transparency::Transparent,
+            stage,
+        )
     }
 
     /// Create a semi-transparent expansion (can see types)
     pub fn semi_transparent(macro_name: Text, call_site: Span, def_site: Span, stage: u32) -> Self {
-        Self::new(macro_name, call_site, def_site, Transparency::SemiTransparent, stage)
+        Self::new(
+            macro_name,
+            call_site,
+            def_site,
+            Transparency::SemiTransparent,
+            stage,
+        )
     }
 
     /// Create an opaque expansion (fully hygienic)
@@ -411,10 +426,7 @@ impl SyntaxContext {
     }
 
     /// Create a new syntax context for a macro expansion
-    pub fn for_expansion(
-        parent: &SyntaxContext,
-        expansion: ExpansionInfo,
-    ) -> Self {
+    pub fn for_expansion(parent: &SyntaxContext, expansion: ExpansionInfo) -> Self {
         let mut marks = parent.marks.clone();
         marks.add(expansion.mark);
 
@@ -875,20 +887,12 @@ mod tests {
     fn test_expansion_chain_format() {
         let root = SyntaxContext::root();
 
-        let exp1 = ExpansionInfo::opaque(
-            Text::from("macro_a"),
-            Span::default(),
-            Span::default(),
-            0,
-        );
+        let exp1 =
+            ExpansionInfo::opaque(Text::from("macro_a"), Span::default(), Span::default(), 0);
         let ctx1 = SyntaxContext::for_expansion(&root, exp1);
 
-        let exp2 = ExpansionInfo::opaque(
-            Text::from("macro_b"),
-            Span::default(),
-            Span::default(),
-            0,
-        );
+        let exp2 =
+            ExpansionInfo::opaque(Text::from("macro_b"), Span::default(), Span::default(), 0);
         let ctx2 = SyntaxContext::for_expansion(&ctx1, exp2);
 
         let chain = ctx2.format_expansion_chain();

@@ -245,7 +245,9 @@ pub trait RepairEngine {
 pub struct DefaultRepairEngine;
 
 impl DefaultRepairEngine {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     fn doc(suffix: &str) -> Text {
         Text::from(format!("https://docs.verum.lang/kernel/{}", suffix))
@@ -415,7 +417,11 @@ impl RepairEngine for DefaultRepairEngine {
         };
 
         // Rank: descending score; truncate to max_results.
-        out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        out.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         out.truncate(max_results);
         out
     }
@@ -441,7 +447,11 @@ impl CompositeRepairEngine {
 
 impl std::fmt::Debug for CompositeRepairEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CompositeRepairEngine {{ engines: <{}> }}", self.engines.len())
+        write!(
+            f,
+            "CompositeRepairEngine {{ engines: <{}> }}",
+            self.engines.len()
+        )
     }
 }
 
@@ -451,7 +461,11 @@ impl RepairEngine for CompositeRepairEngine {
         for e in &self.engines {
             all.extend(e.suggest(failure, max_results));
         }
-        all.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        all.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         all.truncate(max_results);
         all
     }
@@ -482,7 +496,9 @@ mod tests {
 
     // ----- DefaultRepairEngine — per failure kind -----
 
-    fn engine() -> DefaultRepairEngine { DefaultRepairEngine::new() }
+    fn engine() -> DefaultRepairEngine {
+        DefaultRepairEngine::new()
+    }
 
     #[test]
     fn refine_depth_violation_offers_two_paths() {
@@ -493,7 +509,13 @@ mod tests {
         let s = engine().suggest(&f, 5);
         assert_eq!(s.len(), 2);
         // The doc-link must point at the K-Refine page.
-        assert!(s[0].doc_link.as_ref().unwrap().as_str().contains("k-refine"));
+        assert!(
+            s[0].doc_link
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("k-refine")
+        );
     }
 
     #[test]
@@ -553,7 +575,9 @@ mod tests {
 
     #[test]
     fn composite_merges_and_reranks() {
-        let f = ProofFailureKind::UnboundName { name: Text::from("foo") };
+        let f = ProofFailureKind::UnboundName {
+            name: Text::from("foo"),
+        };
         let composite = CompositeRepairEngine::new(vec![
             Box::new(DefaultRepairEngine::new()),
             Box::new(DefaultRepairEngine::new()),
@@ -592,7 +616,9 @@ mod tests {
                 expected: Text::from("Int"),
                 actual: Text::from("Bool"),
             },
-            ProofFailureKind::UnboundName { name: Text::from("foo") },
+            ProofFailureKind::UnboundName {
+                name: Text::from("foo"),
+            },
             ProofFailureKind::ApplyMismatch {
                 lemma_name: Text::from("f"),
                 actual_conclusion: Text::from("A"),
@@ -605,7 +631,11 @@ mod tests {
         ];
         let e = engine();
         for k in &kinds {
-            assert!(!e.suggest(k, 5).is_empty(), "{:?} produced no suggestion", k);
+            assert!(
+                !e.suggest(k, 5).is_empty(),
+                "{:?} produced no suggestion",
+                k
+            );
         }
     }
 }

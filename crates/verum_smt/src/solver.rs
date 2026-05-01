@@ -23,8 +23,8 @@ use verum_ast::{
     span::Span,
     stmt::StmtKind,
 };
-use verum_common::{List, Map, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Text};
 
 use crate::option_to_maybe;
 use crate::z3_backend::{AdvancedResult, Z3Config, Z3ContextManager, Z3Solver};

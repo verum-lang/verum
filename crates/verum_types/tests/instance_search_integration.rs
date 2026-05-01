@@ -42,8 +42,14 @@ fn search_orthogonal_implementations() {
     let mut reg = InstanceRegistry::new();
     reg.register(cand("Monoid", "Z3", "a"));
     reg.register(cand("Monoid", "Nat4", "b"));
-    assert!(matches!(reg.search("Monoid", "Z3"), SearchResult::Unique(_)));
-    assert!(matches!(reg.search("Monoid", "Nat4"), SearchResult::Unique(_)));
+    assert!(matches!(
+        reg.search("Monoid", "Z3"),
+        SearchResult::Unique(_)
+    ));
+    assert!(matches!(
+        reg.search("Monoid", "Nat4"),
+        SearchResult::Unique(_)
+    ));
     assert_eq!(reg.search("Monoid", "F2"), SearchResult::NotFound);
 }
 
@@ -57,12 +63,14 @@ fn duplicate_implementation_is_ambiguous() {
     match reg.search("Monoid", "Int") {
         SearchResult::Ambiguous(cs) => {
             assert_eq!(cs.len(), 2);
-            assert!(cs
-                .iter()
-                .any(|c| c.source_location.as_str().contains("mod1")));
-            assert!(cs
-                .iter()
-                .any(|c| c.source_location.as_str().contains("mod2")));
+            assert!(
+                cs.iter()
+                    .any(|c| c.source_location.as_str().contains("mod1"))
+            );
+            assert!(
+                cs.iter()
+                    .any(|c| c.source_location.as_str().contains("mod2"))
+            );
         }
         other => panic!("expected Ambiguous, got {:?}", other),
     }

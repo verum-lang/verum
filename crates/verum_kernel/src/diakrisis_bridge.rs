@@ -140,9 +140,7 @@ impl BridgeId {
             Self::EpsMuTauWitness => {
                 "σ_α / π_α τ-witness for K-Eps-Mu naturality (Code_S + Perform_{ε_math})"
             }
-            Self::DrakeReflectionExtended => {
-                "extended Drake reflection beyond κ_2 (Lemma 131.L4)"
-            }
+            Self::DrakeReflectionExtended => "extended Drake reflection beyond κ_2 (Lemma 131.L4)",
         }
     }
 }
@@ -177,8 +175,15 @@ impl BridgeAudit {
     /// — the same bridge invoked from the same callsite logs once.
     pub fn record(&mut self, bridge: BridgeId, context: impl Into<Text>) {
         let ctx = context.into();
-        if !self.admits.iter().any(|a| a.bridge == bridge && a.context == ctx) {
-            self.admits.push(BridgeAdmit { bridge, context: ctx });
+        if !self
+            .admits
+            .iter()
+            .any(|a| a.bridge == bridge && a.context == ctx)
+        {
+            self.admits.push(BridgeAdmit {
+                bridge,
+                context: ctx,
+            });
         }
     }
 
@@ -196,8 +201,11 @@ impl BridgeAudit {
     /// Stable, sorted, deduplicated list of bridge IDs invoked.
     /// Used by audit reports.
     pub fn bridges(&self) -> List<&'static str> {
-        let mut names: Vec<&'static str> =
-            self.admits.iter().map(|a| a.bridge.as_audit_str()).collect();
+        let mut names: Vec<&'static str> = self
+            .admits
+            .iter()
+            .map(|a| a.bridge.as_audit_str())
+            .collect();
         names.sort();
         names.dedup();
         let mut out = List::new();
@@ -267,10 +275,7 @@ pub fn admit_eps_mu_tau_witness(
 /// K-Universe-Ascent invokes this when verifying ascents that
 /// reach an inaccessible κ_n with n ≥ 3, or that span more than
 /// one tier in a single step (κ_s → κ_t with t > s+1).
-pub fn admit_drake_reflection_extended(
-    audit: &mut BridgeAudit,
-    context: impl Into<Text>,
-) {
+pub fn admit_drake_reflection_extended(audit: &mut BridgeAudit, context: impl Into<Text>) {
     audit.record(BridgeId::DrakeReflectionExtended, context);
 }
 
@@ -368,10 +373,7 @@ mod tests {
             BridgeId::CohesiveAdjunctionUnitCounit.as_audit_str(),
             "diakrisis-14.3"
         );
-        assert_eq!(
-            BridgeId::EpsMuTauWitness.as_audit_str(),
-            "diakrisis-A-3"
-        );
+        assert_eq!(BridgeId::EpsMuTauWitness.as_audit_str(), "diakrisis-A-3");
         assert_eq!(
             BridgeId::DrakeReflectionExtended.as_audit_str(),
             "diakrisis-131.L4"
@@ -380,21 +382,31 @@ mod tests {
 
     #[test]
     fn bridge_id_descriptions_mention_diakrisis_terms() {
-        assert!(BridgeId::ConfluenceOfModalRewrite
-            .description()
-            .contains("modal"));
-        assert!(BridgeId::QuotientCanonicalRepresentative
-            .description()
-            .contains("Quotient"));
-        assert!(BridgeId::CohesiveAdjunctionUnitCounit
-            .description()
-            .contains("cohesive"));
-        assert!(BridgeId::EpsMuTauWitness
-            .description()
-            .contains("τ-witness"));
-        assert!(BridgeId::DrakeReflectionExtended
-            .description()
-            .contains("Drake"));
+        assert!(
+            BridgeId::ConfluenceOfModalRewrite
+                .description()
+                .contains("modal")
+        );
+        assert!(
+            BridgeId::QuotientCanonicalRepresentative
+                .description()
+                .contains("Quotient")
+        );
+        assert!(
+            BridgeId::CohesiveAdjunctionUnitCounit
+                .description()
+                .contains("cohesive")
+        );
+        assert!(
+            BridgeId::EpsMuTauWitness
+                .description()
+                .contains("τ-witness")
+        );
+        assert!(
+            BridgeId::DrakeReflectionExtended
+                .description()
+                .contains("Drake")
+        );
     }
 
     #[test]

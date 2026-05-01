@@ -61,7 +61,11 @@ public fn main() -> Int { 0 }
         String::from_utf8_lossy(&out.stderr)
     );
     let out_file = dir.join("extracted").join("plus_comm.vr");
-    assert!(out_file.exists(), "expected output file at {}", out_file.display());
+    assert!(
+        out_file.exists(),
+        "expected output file at {}",
+        out_file.display()
+    );
     let body = fs::read_to_string(&out_file).expect("read");
     assert!(body.contains("@extracted"));
     assert!(body.contains("public fn plus_comm"));
@@ -79,7 +83,11 @@ public fn main() -> Int { 0 }
 "#,
     );
     let out = run_verum(&["extract"], &dir);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let out_file = dir.join("extracted").join("yoneda.lean");
     assert!(out_file.exists());
     let body = fs::read_to_string(&out_file).expect("read");
@@ -101,7 +109,11 @@ public fn main() -> Int { 0 }
 "#,
     );
     let out = run_verum(&["extract"], &dir);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(dir.join("extracted").join("div_unique.vr").exists());
     assert!(dir.join("extracted").join("div_unique.v").exists());
 }
@@ -117,9 +129,12 @@ public fn main() -> Int { 0 }
 "#,
     );
     let out = run_verum(&["extract"], &dir);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
-    let body = fs::read_to_string(dir.join("extracted").join("div_witness.v"))
-        .expect("read");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let body = fs::read_to_string(dir.join("extracted").join("div_witness.v")).expect("read");
     assert!(body.contains("@extract_witness(coq)"));
 }
 
@@ -145,11 +160,12 @@ public fn solo() -> Bool { true }
 "#,
     );
     let input_path = dir.join("src").join("main.vr");
-    let out = run_verum(
-        &["extract", input_path.to_str().unwrap()],
-        &dir,
+    let out = run_verum(&["extract", input_path.to_str().unwrap()], &dir);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     assert!(dir.join("extracted").join("solo.vr").exists());
 }
 
@@ -172,8 +188,7 @@ public fn main() -> Int { 0 }
         "extract must succeed; stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let body = fs::read_to_string(dir.join("extracted").join("double.vr"))
-        .expect("read");
+    let body = fs::read_to_string(dir.join("extracted").join("double.vr")).expect("read");
     // Re-checkable extraction marker in the header.
     assert!(
         body.contains("re-checkable extraction"),
@@ -215,8 +230,7 @@ public fn main() -> Int { 0 }
     );
     let out = run_verum(&["extract"], &dir);
     assert!(out.status.success());
-    let body = fs::read_to_string(dir.join("extracted").join("double.ml"))
-        .expect("read");
+    let body = fs::read_to_string(dir.join("extracted").join("double.ml")).expect("read");
     // V12.2 marker present.
     assert!(
         body.contains("(lowered)"),
@@ -248,8 +262,7 @@ public fn main() -> Int { 0 }
     );
     let out = run_verum(&["extract"], &dir);
     assert!(out.status.success());
-    let body = fs::read_to_string(dir.join("extracted").join("yes.ml"))
-        .expect("read");
+    let body = fs::read_to_string(dir.join("extracted").join("yes.ml")).expect("read");
     assert!(
         body.contains("let yes () = true"),
         "must lower boolean literal; got:\n{}",
@@ -271,8 +284,7 @@ public fn main() -> Int { 0 }
     );
     let out = run_verum(&["extract"], &dir);
     assert!(out.status.success());
-    let body = fs::read_to_string(dir.join("extracted").join("power.ml"))
-        .expect("read");
+    let body = fs::read_to_string(dir.join("extracted").join("power.ml")).expect("read");
     // `**` (Pow) is not in the V12.2 OCaml lowerer's vocabulary,
     // so the fallback path fires.
     assert!(
@@ -294,8 +306,7 @@ public fn main() -> Int { 0 }
     );
     let out = run_verum(&["extract"], &dir);
     assert!(out.status.success());
-    let body = fs::read_to_string(dir.join("extracted").join("double.lean"))
-        .expect("read");
+    let body = fs::read_to_string(dir.join("extracted").join("double.lean")).expect("read");
     assert!(
         body.contains("(lowered)"),
         "Lean header must indicate V12.2; got:\n{}",
@@ -323,8 +334,7 @@ public fn main() -> Int { 0 }
     );
     let out = run_verum(&["extract"], &dir);
     assert!(out.status.success());
-    let body = fs::read_to_string(dir.join("extracted").join("cmp.lean"))
-        .expect("read");
+    let body = fs::read_to_string(dir.join("extracted").join("cmp.lean")).expect("read");
     assert!(
         body.contains("(a == b)"),
         "Lean must use double-equals for Decidable equality; got:\n{}",
@@ -345,8 +355,7 @@ public fn main() -> Int { 0 }
     );
     let out = run_verum(&["extract"], &dir);
     assert!(out.status.success());
-    let body = fs::read_to_string(dir.join("extracted").join("double.v"))
-        .expect("read");
+    let body = fs::read_to_string(dir.join("extracted").join("double.v")).expect("read");
     assert!(
         body.contains("(lowered)"),
         "Coq header must indicate V12.2; got:\n{}",
@@ -371,8 +380,7 @@ public fn main() -> Int { 0 }
     );
     let out = run_verum(&["extract"], &dir);
     assert!(out.status.success());
-    let body = fs::read_to_string(dir.join("extracted").join("both.v"))
-        .expect("read");
+    let body = fs::read_to_string(dir.join("extracted").join("both.v")).expect("read");
     // Coq Bool conjunction uses `andb` function, not `&&` infix.
     assert!(
         body.contains("(andb a b)"),
@@ -395,8 +403,7 @@ public fn main() -> Int { 0 }
     );
     let out = run_verum(&["extract"], &dir);
     assert!(out.status.success());
-    let body = fs::read_to_string(dir.join("extracted").join("mask.v"))
-        .expect("read");
+    let body = fs::read_to_string(dir.join("extracted").join("mask.v")).expect("read");
     // Extractor recognises that bitwise `&` has no Coq-side lowering
     // and emits a fallback `Definition ... := tt. (* body pending *)`
     // stub plus a `lowering pending` marker in the captured-body block.
@@ -416,14 +423,14 @@ public fn t() -> Bool { true }
 "#,
     );
     let custom = dir.join("artefacts").join("v1");
-    let out = run_verum(
-        &[
-            "extract",
-            "--output",
-            custom.to_str().unwrap(),
-        ],
-        &dir,
+    let out = run_verum(&["extract", "--output", custom.to_str().unwrap()], &dir);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
-    assert!(custom.join("t.vr").exists(), "custom output path must be honoured");
+    assert!(
+        custom.join("t.vr").exists(),
+        "custom output path must be honoured"
+    );
 }

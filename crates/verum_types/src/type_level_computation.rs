@@ -86,9 +86,8 @@ use verum_common::{List, Map, Maybe, Text};
 
 // Common type-level computation traits and types
 use verum_common::type_level::{
-    BackendCapabilities, ReductionStrategy, TypeLevelComputation,
-    TypeLevelConfig, TypeLevelResult,
-    TypeLevelError as CommonTypeLevelError,
+    BackendCapabilities, ReductionStrategy, TypeLevelComputation, TypeLevelConfig,
+    TypeLevelError as CommonTypeLevelError, TypeLevelResult,
 };
 
 /// Errors that can occur during type-level computation
@@ -149,9 +148,7 @@ impl From<TypeLevelError> for CommonTypeLevelError {
             TypeLevelError::MetaParameterError { message } => {
                 CommonTypeLevelError::MetaParameterError { message }
             }
-            TypeLevelError::MatchError { message } => {
-                CommonTypeLevelError::MatchError { message }
-            }
+            TypeLevelError::MatchError { message } => CommonTypeLevelError::MatchError { message },
             TypeLevelError::UniverseError { message } => {
                 CommonTypeLevelError::UniverseError { message }
             }
@@ -164,9 +161,9 @@ impl From<TypeLevelError> for CommonTypeLevelError {
                     .into(),
                 }
             }
-            TypeLevelError::ConstEvalError(e) => {
-                CommonTypeLevelError::ComputationFailed { message: e.to_string().into() }
-            }
+            TypeLevelError::ConstEvalError(e) => CommonTypeLevelError::ComputationFailed {
+                message: e.to_string().into(),
+            },
             TypeLevelError::Other(msg) => CommonTypeLevelError::Other(msg),
         }
     }
@@ -191,42 +188,34 @@ impl From<CommonTypeLevelError> for TypeLevelError {
             CommonTypeLevelError::MetaParameterError { message } => {
                 TypeLevelError::MetaParameterError { message }
             }
-            CommonTypeLevelError::MatchError { message } => {
-                TypeLevelError::MatchError { message }
-            }
+            CommonTypeLevelError::MatchError { message } => TypeLevelError::MatchError { message },
             CommonTypeLevelError::UniverseError { message } => {
                 TypeLevelError::UniverseError { message }
             }
             CommonTypeLevelError::NotAType => TypeLevelError::NotAType,
-            CommonTypeLevelError::MaxDepthExceeded(depth) => {
-                TypeLevelError::ComputationFailed {
-                    message: format!("max depth exceeded: {}", depth).into()
-                }
-            }
+            CommonTypeLevelError::MaxDepthExceeded(depth) => TypeLevelError::ComputationFailed {
+                message: format!("max depth exceeded: {}", depth).into(),
+            },
             CommonTypeLevelError::ArityMismatch { expected, got } => {
                 TypeLevelError::ApplicationError {
-                    message: format!("arity mismatch: expected {}, got {}", expected, got).into()
+                    message: format!("arity mismatch: expected {}, got {}", expected, got).into(),
                 }
             }
-            CommonTypeLevelError::InvalidTypeFunction(name) => {
-                TypeLevelError::ApplicationError {
-                    message: format!("invalid type function: {}", name).into()
-                }
-            }
+            CommonTypeLevelError::InvalidTypeFunction(name) => TypeLevelError::ApplicationError {
+                message: format!("invalid type function: {}", name).into(),
+            },
             CommonTypeLevelError::NonConstantArgument(msg) => {
                 TypeLevelError::ComputationFailed { message: msg }
             }
-            CommonTypeLevelError::SmtTimeout { timeout_ms } => {
-                TypeLevelError::ComputationFailed {
-                    message: format!("SMT timeout after {}ms", timeout_ms).into()
-                }
-            }
+            CommonTypeLevelError::SmtTimeout { timeout_ms } => TypeLevelError::ComputationFailed {
+                message: format!("SMT timeout after {}ms", timeout_ms).into(),
+            },
             CommonTypeLevelError::SmtError { message } => {
                 TypeLevelError::ComputationFailed { message }
             }
             CommonTypeLevelError::UnsupportedOperation { operation } => {
                 TypeLevelError::ComputationFailed {
-                    message: format!("unsupported operation: {}", operation).into()
+                    message: format!("unsupported operation: {}", operation).into(),
                 }
             }
             CommonTypeLevelError::Other(msg) => TypeLevelError::Other(msg),
@@ -936,7 +925,11 @@ impl TypeLevelEvaluator {
     ///
 
     /// Returns a list of (name, previous_value) tuples for proper scoping.
-    fn bind_pattern(&mut self, pattern: &Pattern, value: &ConstValue) -> Result<List<(Text, Option<ConstValue>)>> {
+    fn bind_pattern(
+        &mut self,
+        pattern: &Pattern,
+        value: &ConstValue,
+    ) -> Result<List<(Text, Option<ConstValue>)>> {
         let mut saved_bindings = List::new();
 
         match &pattern.kind {
@@ -1583,7 +1576,14 @@ pub mod equality {
                 op1 == op2 && exprs_structurally_equal(e1, e2)
             }
 
-            (Call { func: f1, args: a1, .. }, Call { func: f2, args: a2, .. }) => {
+            (
+                Call {
+                    func: f1, args: a1, ..
+                },
+                Call {
+                    func: f2, args: a2, ..
+                },
+            ) => {
                 exprs_structurally_equal(f1, f2)
                     && a1.len() == a2.len()
                     && a1
@@ -1955,7 +1955,10 @@ pub mod arithmetic_proofs {
     fn type_to_eq_term(ty: &Type) -> EqTerm {
         match ty {
             Type::Named { path, args } => {
-                let name = path.as_ident().map(|id| id.name.clone()).unwrap_or_default();
+                let name = path
+                    .as_ident()
+                    .map(|id| id.name.clone())
+                    .unwrap_or_default();
                 if args.is_empty() {
                     EqTerm::Var(name)
                 } else {
@@ -3317,7 +3320,11 @@ mod tests {
 
         let r2 = eval.apply_function(&"const_int".into(), &args).unwrap();
         assert_eq!(r2, Type::Int);
-        assert_eq!(eval.cache_size(), 1, "second identical call must hit cache (size unchanged)");
+        assert_eq!(
+            eval.cache_size(),
+            1,
+            "second identical call must hit cache (size unchanged)"
+        );
     }
 
     /// Pin: with `enable_cache = false`, apply_function neither
@@ -3339,11 +3346,19 @@ mod tests {
         let args: List<ConstValue> = List::new();
         let r1 = eval.apply_function(&"const_int".into(), &args).unwrap();
         assert_eq!(r1, Type::Int);
-        assert_eq!(eval.cache_size(), 0, "disabled cache must NOT store first call");
+        assert_eq!(
+            eval.cache_size(),
+            0,
+            "disabled cache must NOT store first call"
+        );
 
         let r2 = eval.apply_function(&"const_int".into(), &args).unwrap();
         assert_eq!(r2, Type::Int);
-        assert_eq!(eval.cache_size(), 0, "disabled cache must NOT store any call");
+        assert_eq!(
+            eval.cache_size(),
+            0,
+            "disabled cache must NOT store any call"
+        );
     }
 
     /// Pin: `configured_max_depth` mirrors the manifest stance

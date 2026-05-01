@@ -15,7 +15,7 @@
 //!  * `has_device_gpu_attr` — single-attribute predicate
 //!  (matches `@device(gpu)` and `@device(GPU)` shapes).
 
-use verum_ast::{decl::ItemKind, Module};
+use verum_ast::{Module, decl::ItemKind};
 use verum_common::{List, Maybe};
 
 use super::CompilationPipeline;

@@ -294,13 +294,16 @@ fn serialize_tokens_to_source(tokens: &List<Token>) -> String {
 
 /// Extract function call dependencies from a function declaration's body.
 fn extract_call_dependencies(func_decl: &verum_ast::decl::FunctionDecl) -> List<Text> {
-    use verum_ast::{Block, ConditionKind, Expr, ExprKind, StmtKind};
     use verum_ast::decl::FunctionBody;
+    use verum_ast::{Block, ConditionKind, Expr, ExprKind, StmtKind};
 
     fn deps_block(block: &Block, deps: &mut Set<Text>) {
         for stmt in block.stmts.iter() {
             match &stmt.kind {
-                StmtKind::Let { value: verum_common::Maybe::Some(expr), .. } => deps_expr(expr, deps),
+                StmtKind::Let {
+                    value: verum_common::Maybe::Some(expr),
+                    ..
+                } => deps_expr(expr, deps),
                 StmtKind::LetElse { value, .. } => deps_expr(value, deps),
                 StmtKind::Expr { expr, .. } => deps_expr(expr, deps),
                 StmtKind::Defer(expr) => deps_expr(expr, deps),
@@ -329,15 +332,25 @@ fn extract_call_dependencies(func_decl: &verum_ast::decl::FunctionDecl) -> List<
                     deps.insert(Text::from(format!("{}", path)));
                 }
                 deps_expr(func, deps);
-                for a in args.iter() { deps_expr(a, deps); }
+                for a in args.iter() {
+                    deps_expr(a, deps);
+                }
             }
-            ExprKind::MethodCall { receiver, method, args, .. } => {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
                 deps.insert(Text::from(method.name.as_str()));
                 deps_expr(receiver, deps);
-                for a in args.iter() { deps_expr(a, deps); }
+                for a in args.iter() {
+                    deps_expr(a, deps);
+                }
             }
             ExprKind::Binary { left, right, .. } | ExprKind::Pipeline { left, right } => {
-                deps_expr(left, deps); deps_expr(right, deps);
+                deps_expr(left, deps);
+                deps_expr(right, deps);
             }
             ExprKind::Unary { expr: inner, .. }
             | ExprKind::Field { expr: inner, .. }
@@ -346,7 +359,12 @@ fn extract_call_dependencies(func_decl: &verum_ast::decl::FunctionDecl) -> List<
             | ExprKind::Cast { expr: inner, .. }
             | ExprKind::Closure { body: inner, .. } => deps_expr(inner, deps),
             ExprKind::Block(block) => deps_block(block, deps),
-            ExprKind::If { condition, then_branch, else_branch, .. } => {
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 for c in condition.conditions.iter() {
                     match c {
                         ConditionKind::Expr(e) => deps_expr(e, deps),
@@ -354,28 +372,45 @@ fn extract_call_dependencies(func_decl: &verum_ast::decl::FunctionDecl) -> List<
                     }
                 }
                 deps_block(then_branch, deps);
-                if let verum_common::Maybe::Some(el) = else_branch { deps_expr(el, deps); }
+                if let verum_common::Maybe::Some(el) = else_branch {
+                    deps_expr(el, deps);
+                }
             }
-            ExprKind::Match { expr: scrutinee, arms, .. } => {
+            ExprKind::Match {
+                expr: scrutinee,
+                arms,
+                ..
+            } => {
                 deps_expr(scrutinee, deps);
                 for arm in arms.iter() {
                     deps_expr(&arm.body, deps);
-                    if let verum_common::Maybe::Some(g) = &arm.guard { deps_expr(g, deps); }
+                    if let verum_common::Maybe::Some(g) = &arm.guard {
+                        deps_expr(g, deps);
+                    }
                 }
             }
             ExprKind::Return(verum_common::Maybe::Some(inner)) => deps_expr(inner, deps),
-            ExprKind::Index { expr: base, index, .. } => {
-                deps_expr(base, deps); deps_expr(index, deps);
+            ExprKind::Index {
+                expr: base, index, ..
+            } => {
+                deps_expr(base, deps);
+                deps_expr(index, deps);
             }
             ExprKind::Tuple(elems) => {
-                for e in elems.iter() { deps_expr(e, deps); }
+                for e in elems.iter() {
+                    deps_expr(e, deps);
+                }
             }
-            ExprKind::While { condition, body, .. } => {
-                deps_expr(condition, deps); deps_block(body, deps);
+            ExprKind::While {
+                condition, body, ..
+            } => {
+                deps_expr(condition, deps);
+                deps_block(body, deps);
             }
             ExprKind::Loop { body, .. } => deps_block(body, deps),
             ExprKind::For { iter, body, .. } => {
-                deps_expr(iter, deps); deps_block(body, deps);
+                deps_expr(iter, deps);
+                deps_block(body, deps);
             }
             _ => {}
         }
@@ -400,14 +435,17 @@ fn extract_call_dependencies(func_decl: &verum_ast::decl::FunctionDecl) -> List<
 /// - `MacroCall` requires at least stage 1
 /// - `Lift` requires at least stage 1
 fn analyze_minimum_stage(func_decl: &verum_ast::decl::FunctionDecl) -> u32 {
-    use verum_ast::{Block, ConditionKind, Expr, ExprKind, StmtKind};
     use verum_ast::decl::FunctionBody;
+    use verum_ast::{Block, ConditionKind, Expr, ExprKind, StmtKind};
 
     fn stage_block(block: &Block) -> u32 {
         let mut max = 0u32;
         for stmt in block.stmts.iter() {
             let s = match &stmt.kind {
-                StmtKind::Let { value: verum_common::Maybe::Some(expr), .. } => stage_expr(expr),
+                StmtKind::Let {
+                    value: verum_common::Maybe::Some(expr),
+                    ..
+                } => stage_expr(expr),
                 StmtKind::LetElse { value, .. } => stage_expr(value),
                 StmtKind::Expr { expr, .. } => stage_expr(expr),
                 StmtKind::Defer(expr) => stage_expr(expr),
@@ -429,12 +467,16 @@ fn analyze_minimum_stage(func_decl: &verum_ast::decl::FunctionDecl) -> u32 {
             ExprKind::MacroCall { .. } => 1,
             ExprKind::Call { func, args, .. } => {
                 let mut m = stage_expr(func);
-                for a in args.iter() { m = m.max(stage_expr(a)); }
+                for a in args.iter() {
+                    m = m.max(stage_expr(a));
+                }
                 m
             }
             ExprKind::MethodCall { receiver, args, .. } => {
                 let mut m = stage_expr(receiver);
-                for a in args.iter() { m = m.max(stage_expr(a)); }
+                for a in args.iter() {
+                    m = m.max(stage_expr(a));
+                }
                 m
             }
             ExprKind::Binary { left, right, .. } | ExprKind::Pipeline { left, right } => {
@@ -447,7 +489,12 @@ fn analyze_minimum_stage(func_decl: &verum_ast::decl::FunctionDecl) -> u32 {
             | ExprKind::Cast { expr: inner, .. }
             | ExprKind::Closure { body: inner, .. } => stage_expr(inner),
             ExprKind::Block(block) => stage_block(block),
-            ExprKind::If { condition, then_branch, else_branch, .. } => {
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 let mut m = 0u32;
                 for c in condition.conditions.iter() {
                     match c {
@@ -456,20 +503,32 @@ fn analyze_minimum_stage(func_decl: &verum_ast::decl::FunctionDecl) -> u32 {
                     }
                 }
                 m = m.max(stage_block(then_branch));
-                if let verum_common::Maybe::Some(e) = else_branch { m = m.max(stage_expr(e)); }
+                if let verum_common::Maybe::Some(e) = else_branch {
+                    m = m.max(stage_expr(e));
+                }
                 m
             }
-            ExprKind::Match { expr: scrutinee, arms, .. } => {
+            ExprKind::Match {
+                expr: scrutinee,
+                arms,
+                ..
+            } => {
                 let mut m = stage_expr(scrutinee);
                 for arm in arms.iter() {
                     m = m.max(stage_expr(&arm.body));
-                    if let verum_common::Maybe::Some(g) = &arm.guard { m = m.max(stage_expr(g)); }
+                    if let verum_common::Maybe::Some(g) = &arm.guard {
+                        m = m.max(stage_expr(g));
+                    }
                 }
                 m
             }
             ExprKind::Return(verum_common::Maybe::Some(inner)) => stage_expr(inner),
-            ExprKind::Index { expr: base, index, .. } => stage_expr(base).max(stage_expr(index)),
-            ExprKind::While { condition, body, .. } => stage_expr(condition).max(stage_block(body)),
+            ExprKind::Index {
+                expr: base, index, ..
+            } => stage_expr(base).max(stage_expr(index)),
+            ExprKind::While {
+                condition, body, ..
+            } => stage_expr(condition).max(stage_block(body)),
             ExprKind::Loop { body, .. } => stage_block(body),
             ExprKind::For { iter, body, .. } => stage_expr(iter).max(stage_block(body)),
             _ => 0,
@@ -731,9 +790,7 @@ impl StageCache {
                 Some(current_hash) if current_hash != *recorded_hash => {
                     trace!(
                         "Dependency {} changed: {} -> {}",
-                        path,
-                        recorded_hash,
-                        current_hash
+                        path, recorded_hash, current_hash
                     );
                     return true;
                 }
@@ -825,7 +882,11 @@ impl StageCache {
     /// - (true, NoChange) - cache is fully valid, use cached results
     /// - (false, BodyOnly) - only bodies changed, may use partial cache
     /// - (false, Signature) - signatures changed, full re-execution needed
-    pub fn is_valid_fine_grained(&self, input_hash: u64, current_hashes: &ItemHashes) -> (bool, ChangeKind) {
+    pub fn is_valid_fine_grained(
+        &self,
+        input_hash: u64,
+        current_hashes: &ItemHashes,
+    ) -> (bool, ChangeKind) {
         // First check basic validity
         if !self.valid {
             return (false, ChangeKind::Signature);
@@ -1015,8 +1076,14 @@ impl StagedStats {
         let mut lines = Vec::new();
         lines.push(format!("Staged Compilation Statistics:"));
         lines.push(format!("  Stages processed: {}", self.stages_processed));
-        lines.push(format!("  Total meta executions: {}", self.total_meta_executions));
-        lines.push(format!("  Cache hit rate: {:.1}%", self.cache_hit_rate() * 100.0));
+        lines.push(format!(
+            "  Total meta executions: {}",
+            self.total_meta_executions
+        ));
+        lines.push(format!(
+            "  Cache hit rate: {:.1}%",
+            self.cache_hit_rate() * 100.0
+        ));
         lines.push(format!(
             "  Total time: {:.2}ms",
             self.total_time_ns as f64 / 1_000_000.0
@@ -1272,7 +1339,11 @@ impl StagedPipeline {
         info!(
             "Imported {} meta functions ({}) and {} macros from external registry{}",
             total_imported,
-            if stage_summary.is_empty() { "none".to_string() } else { stage_summary },
+            if stage_summary.is_empty() {
+                "none".to_string()
+            } else {
+                stage_summary
+            },
             macros_imported,
             if skipped_overflow > 0 {
                 format!(" (skipped {} overflow)", skipped_overflow)
@@ -1327,11 +1398,10 @@ impl StagedPipeline {
         }
 
         // Register in stage checker
-        if let Err(e) = self.stage_checker.register_function(
-            func.name.clone(),
-            func.stage,
-            func.span,
-        ) {
+        if let Err(e) =
+            self.stage_checker
+                .register_function(func.name.clone(), func.stage, func.span)
+        {
             // Convert stage error to diagnostic
             let diag = StagedMetaDiagnostics::new(&self.config.lint_config);
             let diagnostic = match e {
@@ -1341,7 +1411,12 @@ impl StagedPipeline {
                     function_name,
                     span,
                 } => diag.stage_overflow(used_stage, max_stage, &function_name, Some(span)),
-                _ => diag.stage_overflow(func.stage, self.config.max_stage, &func.name, Some(func.span)),
+                _ => diag.stage_overflow(
+                    func.stage,
+                    self.config.max_stage,
+                    &func.name,
+                    Some(func.span),
+                ),
             };
             self.diagnostics.push(diagnostic);
         }
@@ -1378,7 +1453,9 @@ impl StagedPipeline {
             let stage_start = std::time::Instant::now();
             current_module = self.execute_stage(stage, current_module)?;
             let stage_elapsed = stage_start.elapsed();
-            self.stats.stage_time_ns.insert(stage, stage_elapsed.as_nanos() as u64);
+            self.stats
+                .stage_time_ns
+                .insert(stage, stage_elapsed.as_nanos() as u64);
             self.stats.stages_processed += 1;
         }
 
@@ -1545,7 +1622,8 @@ impl StagedPipeline {
 
                 if !deps_changed {
                     // Use fine-grained item hash comparison
-                    let (cache_valid, change_kind) = cache.is_valid_fine_grained(input_hash, &item_hashes);
+                    let (cache_valid, change_kind) =
+                        cache.is_valid_fine_grained(input_hash, &item_hashes);
 
                     match (cache_valid, change_kind) {
                         (true, ChangeKind::NoChange) => {
@@ -1602,7 +1680,10 @@ impl StagedPipeline {
             let func_id = Text::from(format!("{}::{}", module_path, func_name));
             executed_func_ids.insert(func_id.clone());
 
-            if let Some(f) = self.functions.get_mut(&(module_path.clone(), func_name.clone())) {
+            if let Some(f) = self
+                .functions
+                .get_mut(&(module_path.clone(), func_name.clone()))
+            {
                 f.invocation_count += 1;
             }
 
@@ -1615,9 +1696,7 @@ impl StagedPipeline {
                             let token_count = token_stream.len();
                             trace!(
                                 "VBC execution of '{}::{}' produced {} tokens",
-                                module_path,
-                                func_name,
-                                token_count
+                                module_path, func_name, token_count
                             );
 
                             // Parse the generated TokenStream back into AST items
@@ -1673,9 +1752,7 @@ impl StagedPipeline {
                     // Serialize the token stream to source code for caching
                     let code = serialize_tokens_to_source(tokens);
                     // Serialize AST items to JSON for fast reloading without reparsing
-                    let serialized = serde_json::to_string(items.as_slice())
-                        .ok()
-                        .map(Text::from);
+                    let serialized = serde_json::to_string(items.as_slice()).ok().map(Text::from);
                     (code, *count, serialized)
                 }
                 None => (String::new(), 0, None),
@@ -1811,11 +1888,9 @@ impl StagedPipeline {
                                 new_items.push(item.clone());
 
                                 // Register generated meta functions for lower stages
-                                if let Err(e) = self.register_generated_function(
-                                    item,
-                                    &result_module,
-                                    stage,
-                                ) {
+                                if let Err(e) =
+                                    self.register_generated_function(item, &result_module, stage)
+                                {
                                     warn!(
                                         "Failed to register generated function from cache: {}",
                                         e
@@ -1860,7 +1935,12 @@ impl StagedPipeline {
 
     /// When a Stage N meta function generates code containing meta functions,
     /// those generated functions are registered for Stage N-1.
-    fn register_generated_function(&mut self, item: &Item, module: &Module, current_stage: u32) -> Result<()> {
+    fn register_generated_function(
+        &mut self,
+        item: &Item,
+        module: &Module,
+        current_stage: u32,
+    ) -> Result<()> {
         use verum_ast::decl::ItemKind;
 
         let module_path = Text::from(format!("module_{}", module.file_id.raw()));
@@ -1905,8 +1985,7 @@ impl StagedPipeline {
 
         for ((_, _), func) in self.functions.iter() {
             if func.stage > 0 && func.invocation_count == 0 && !func.is_generated {
-                if let Some(diagnostic) =
-                    diag.unused_stage(func.stage, &func.name, Some(func.span))
+                if let Some(diagnostic) = diag.unused_stage(func.stage, &func.name, Some(func.span))
                 {
                     self.diagnostics.push(diagnostic);
                 }
@@ -2046,9 +2125,10 @@ impl StagedPipeline {
 
     /// Get overall cache hit rate across all stages.
     pub fn cache_hit_rate(&self) -> f64 {
-        let (hits, misses): (u64, u64) = self.stage_caches.iter().fold((0, 0), |(h, m), c| {
-            (h + c.hit_count(), m + c.miss_count())
-        });
+        let (hits, misses): (u64, u64) = self
+            .stage_caches
+            .iter()
+            .fold((0, 0), |(h, m), c| (h + c.hit_count(), m + c.miss_count()));
         let total = hits + misses;
         if total == 0 {
             0.0
@@ -2087,7 +2167,10 @@ impl StagedPipeline {
                     if let Some(hashes) = cache.item_hashes() {
                         our_cache.set_item_hashes(hashes.clone());
                     }
-                    debug!("Pre-warmed cache for stage {} from previous compilation", stage);
+                    debug!(
+                        "Pre-warmed cache for stage {} from previous compilation",
+                        stage
+                    );
                 }
             }
         }
@@ -2193,7 +2276,13 @@ mod tests {
 
         // Verify all caches are valid
         for stage in 1..=3 {
-            assert!(pipeline.stage_caches.get(stage as usize).unwrap().is_valid_for(100 + stage as u64));
+            assert!(
+                pipeline
+                    .stage_caches
+                    .get(stage as usize)
+                    .unwrap()
+                    .is_valid_for(100 + stage as u64)
+            );
         }
 
         // Invalidate stage 2 - should also invalidate stage 1
@@ -2268,13 +2357,7 @@ mod tests {
         executed.insert(Text::from("module::func1"));
         executed.insert(Text::from("module::func2"));
 
-        cache.update_with_dependencies(
-            42,
-            Map::new(),
-            Set::new(),
-            Map::new(),
-            executed,
-        );
+        cache.update_with_dependencies(42, Map::new(), Set::new(), Map::new(), executed);
 
         assert!(cache.was_function_executed(&Text::from("module::func1")));
         assert!(cache.was_function_executed(&Text::from("module::func2")));
@@ -2549,16 +2632,19 @@ mod tests {
         cache.record_miss();
 
         let mut fragments = Map::new();
-        fragments.insert(Text::from("f1"), GeneratedFragment {
-            source_function: Text::from("f1"),
-            source_module: Text::from("m"),
-            generated_at_stage: 2,
-            target_stage: 1,
-            code: Text::from(""),
-            span: None,
-            serialized_items: None,
-            item_count: 0,
-        });
+        fragments.insert(
+            Text::from("f1"),
+            GeneratedFragment {
+                source_function: Text::from("f1"),
+                source_module: Text::from("m"),
+                generated_at_stage: 2,
+                target_stage: 1,
+                code: Text::from(""),
+                span: None,
+                serialized_items: None,
+                item_count: 0,
+            },
+        );
         cache.update(42, fragments);
 
         let stats = cache.statistics();
@@ -2714,9 +2800,7 @@ mod tests {
         let mut current_hashes = ItemHashes::new();
         current_hashes.add_function(
             "func".to_string(),
-            FunctionHashBuilder::new()
-                .with_name("func")
-                .finish(),
+            FunctionHashBuilder::new().with_name("func").finish(),
         );
 
         // Without cached hashes, should return Signature (needs full rebuild)
@@ -2810,12 +2894,13 @@ mod tests {
 
         // Without stage info in AST, should default to stage 1
         let stage1_registry = pipeline.registry_for_stage(1).unwrap();
-        let resolved = stage1_registry.resolve_meta_call(
-            &Text::from("default_mod"),
-            &Text::from("default_stage_fn"),
-        );
+        let resolved = stage1_registry
+            .resolve_meta_call(&Text::from("default_mod"), &Text::from("default_stage_fn"));
 
-        assert!(resolved.is_some(), "Meta function should default to stage 1");
+        assert!(
+            resolved.is_some(),
+            "Meta function should default to stage 1"
+        );
     }
 
     #[test]
@@ -2829,23 +2914,23 @@ mod tests {
 
         // Create external registry with a macro
         let mut external_registry = MetaRegistry::new();
-        external_registry.register_macro(
-            &Text::from("macro_mod"),
-            Text::from("test_derive"),
-            MacroKind::Derive,
-            Text::from("test_derive_impl"),
-            Span::dummy(),
-        ).unwrap();
+        external_registry
+            .register_macro(
+                &Text::from("macro_mod"),
+                Text::from("test_derive"),
+                MacroKind::Derive,
+                Text::from("test_derive_impl"),
+                Span::dummy(),
+            )
+            .unwrap();
 
         let module = create_test_module();
         pipeline.import_from_registry(&external_registry, &module);
 
         // Macros should be in stage 1 registry
         let stage1_registry = pipeline.registry_for_stage(1).unwrap();
-        let resolved = stage1_registry.resolve_macro(
-            &Text::from("macro_mod"),
-            &Text::from("test_derive"),
-        );
+        let resolved =
+            stage1_registry.resolve_macro(&Text::from("macro_mod"), &Text::from("test_derive"));
 
         assert!(resolved.is_some(), "Macro should be imported to stage 1");
         assert_eq!(resolved.unwrap().kind, MacroKind::Derive);
@@ -2868,20 +2953,22 @@ mod tests {
 
         // Verify it's there
         let stage1 = pipeline.registry_for_stage(1).unwrap();
-        assert!(stage1.resolve_meta_call(
-            &Text::from("clear_mod"),
-            &Text::from("will_be_cleared")
-        ).is_some());
+        assert!(
+            stage1
+                .resolve_meta_call(&Text::from("clear_mod"), &Text::from("will_be_cleared"))
+                .is_some()
+        );
 
         // Reset
         pipeline.reset();
 
         // Should be gone
         let stage1_after = pipeline.registry_for_stage(1).unwrap();
-        assert!(stage1_after.resolve_meta_call(
-            &Text::from("clear_mod"),
-            &Text::from("will_be_cleared")
-        ).is_none());
+        assert!(
+            stage1_after
+                .resolve_meta_call(&Text::from("clear_mod"), &Text::from("will_be_cleared"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -2908,10 +2995,8 @@ mod tests {
 
         // Verify each is resolvable
         for i in 0..5 {
-            let resolved = stage1_registry.resolve_meta_call(
-                &Text::from("multi_mod"),
-                &Text::from(format!("fn_{}", i)),
-            );
+            let resolved = stage1_registry
+                .resolve_meta_call(&Text::from("multi_mod"), &Text::from(format!("fn_{}", i)));
             assert!(resolved.is_some(), "Function fn_{} should be resolvable", i);
         }
     }
@@ -2944,10 +3029,8 @@ mod tests {
 
         // Verify metadata is preserved
         let stage1_registry = pipeline.registry_for_stage(1).unwrap();
-        let resolved = stage1_registry.resolve_meta_call(
-            &Text::from("meta_mod"),
-            &Text::from("async_transparent_fn"),
-        );
+        let resolved = stage1_registry
+            .resolve_meta_call(&Text::from("meta_mod"), &Text::from("async_transparent_fn"));
 
         assert!(resolved.is_some());
         let func = resolved.unwrap();

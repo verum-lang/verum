@@ -8,10 +8,10 @@
 pub use verum_ast;
 pub use verum_cbgr;
 pub use verum_codegen;
+pub use verum_common;
 pub use verum_diagnostics;
 pub use verum_lexer;
 pub use verum_parser;
-pub use verum_common;
 pub use verum_types;
 
 pub use serde;

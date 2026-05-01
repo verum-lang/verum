@@ -13,8 +13,8 @@
     unused_assignments
 )]
 use verum_ast::{ExprKind, FileId, ItemKind};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 #[test]
 fn test_tuple_index_parsing() {
@@ -78,10 +78,11 @@ fn find_tuple_index(stmts: &[verum_ast::Stmt]) -> bool {
         if let verum_ast::StmtKind::Let {
             value: Some(expr), ..
         } = &stmt.kind
-            && matches!(expr.kind, ExprKind::TupleIndex { .. }) {
-                println!("Found TupleIndex expression!");
-                return true;
-            }
+            && matches!(expr.kind, ExprKind::TupleIndex { .. })
+        {
+            println!("Found TupleIndex expression!");
+            return true;
+        }
     }
     false
 }

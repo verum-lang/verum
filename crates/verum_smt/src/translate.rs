@@ -81,9 +81,11 @@
 //! - **Array/Tensor access**: `arr[i]` → `Array::select(arr, i)`
 
 use crate::context::Context;
-use verum_ast::{BinOp, Expr, ExprKind, Literal, LiteralKind, Pattern, PatternKind, Type, TypeKind};
-use verum_common::{List, Map, Maybe, Text};
+use verum_ast::{
+    BinOp, Expr, ExprKind, Literal, LiteralKind, Pattern, PatternKind, Type, TypeKind,
+};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Text};
 use z3::ast::{
     Array, Ast, BV, Bool, Dynamic, Float, Int, Real, RoundingMode, String as Z3String,
     exists_const, forall_const,
@@ -340,9 +342,7 @@ pub struct Translator<'ctx> {
     /// otherwise every call defaults to `Int` and Z3 treats the
     /// reflection-axiom's declaration and the call-site's
     /// declaration as distinct (conflicting) symbols.
-    callee_signatures: std::cell::RefCell<
-        std::collections::HashMap<String, (Vec<String>, String)>,
-    >,
+    callee_signatures: std::cell::RefCell<std::collections::HashMap<String, (Vec<String>, String)>>,
 
     /// Variant-type registry — variant type name → constructor
     /// names. Used by the quantifier translator to emit
@@ -352,9 +352,7 @@ pub struct Translator<'ctx> {
     /// exhaustiveness hypothesis that's added at the theorem-param
     /// layer, and `forall c: T. P(c)` claims fail even when
     /// enumeration closes them.
-    variant_registry: std::cell::RefCell<
-        std::collections::HashMap<String, Vec<String>>,
-    >,
+    variant_registry: std::cell::RefCell<std::collections::HashMap<String, Vec<String>>>,
 }
 
 /// Build the canonical length-constant name for an expression.
@@ -428,9 +426,7 @@ impl<'ctx> Translator<'ctx> {
     }
 
     fn record_length_const(&self, name: &str) {
-        self.length_constants
-            .borrow_mut()
-            .insert(name.to_string());
+        self.length_constants.borrow_mut().insert(name.to_string());
     }
 
     /// Register a known user-function signature so the UF fallback
@@ -602,30 +598,23 @@ impl<'ctx> Translator<'ctx> {
         // for a pattern. Returns None when the pattern can't be
         // represented as a comparable expression (Record/Slice/etc.)
         // — in that case the arm is skipped.
-        fn pattern_as_test_expr(
-            pat: &verum_ast::pattern::Pattern,
-        ) -> Option<Expr> {
+        fn pattern_as_test_expr(pat: &verum_ast::pattern::Pattern) -> Option<Expr> {
             match &pat.kind {
-                PatternKind::Wildcard => None, // caller treats as always-matches
+                PatternKind::Wildcard => None,     // caller treats as always-matches
                 PatternKind::Ident { .. } => None, // binding-only, matches anything
-                PatternKind::Literal(lit) => Some(Expr::new(
-                    ExprKind::Literal(lit.clone()),
-                    pat.span,
-                )),
+                PatternKind::Literal(lit) => {
+                    Some(Expr::new(ExprKind::Literal(lit.clone()), pat.span))
+                }
                 PatternKind::Record { path, .. } => {
                     // Variant pattern — `Color.Red` gets parsed as a
                     // single-constructor record; use the path itself
                     // as the test value (it'll translate as an
                     // uninterpreted constant).
-                    Some(Expr::new(
-                        ExprKind::Path(path.clone()),
-                        pat.span,
-                    ))
+                    Some(Expr::new(ExprKind::Path(path.clone()), pat.span))
                 }
-                PatternKind::Variant { path, .. } => Some(Expr::new(
-                    ExprKind::Path(path.clone()),
-                    pat.span,
-                )),
+                PatternKind::Variant { path, .. } => {
+                    Some(Expr::new(ExprKind::Path(path.clone()), pat.span))
+                }
                 PatternKind::Paren(inner) => pattern_as_test_expr(inner),
                 _ => None,
             }
@@ -678,9 +667,7 @@ impl<'ctx> Translator<'ctx> {
             // first arm's sort as the target. We pick Int first,
             // Bool next, Real last — matching the sort lattice the
             // rest of the translator uses.
-            if let (Some(then_int), Some(else_int)) =
-                (body_dyn.as_int(), existing.as_int())
-            {
+            if let (Some(then_int), Some(else_int)) = (body_dyn.as_int(), existing.as_int()) {
                 let ite = cond_bool.ite(&then_int, &else_int);
                 chain = Some(Dynamic::from_ast(&ite));
             } else if let (Some(then_bool), Some(else_bool)) =
@@ -702,11 +689,7 @@ impl<'ctx> Translator<'ctx> {
                 chain = Some(Dynamic::from_ast(&Int::new_const(key.as_str())));
             }
         }
-        chain.ok_or_else(|| {
-            TranslationError::UnsupportedExpr(
-                "match with no arms".to_text(),
-            )
-        })
+        chain.ok_or_else(|| TranslationError::UnsupportedExpr("match with no arms".to_text()))
     }
 
     /// If `expr` is a single-segment path like `xs`, return the Int
@@ -939,9 +922,7 @@ impl<'ctx> Translator<'ctx> {
                 // and demand the result be Bool.
                 let d = self.translate_expr(expr)?;
                 d.as_bool().ok_or_else(|| {
-                    TranslationError::TypeMismatch(Text::from(
-                        "expected boolean expression",
-                    ))
+                    TranslationError::TypeMismatch(Text::from("expected boolean expression"))
                 })
             }
         }
@@ -964,10 +945,7 @@ impl<'ctx> Translator<'ctx> {
                 // const — safe because in that context the refinement
                 // isn't tied to any particular value.
                 if path.segments.len() == 1 {
-                    if matches!(
-                        &path.segments[0],
-                        verum_ast::PathSegment::SelfValue
-                    ) {
+                    if matches!(&path.segments[0], verum_ast::PathSegment::SelfValue) {
                         if let Maybe::Some(var) = self.bindings.get(&"it".to_text()) {
                             return Ok(var.clone());
                         }
@@ -1024,9 +1002,7 @@ impl<'ctx> Translator<'ctx> {
                         .segments
                         .iter()
                         .map(|s| match s {
-                            verum_ast::PathSegment::Name(id) => {
-                                id.name.as_str().to_string()
-                            }
+                            verum_ast::PathSegment::Name(id) => id.name.as_str().to_string(),
                             verum_ast::PathSegment::SelfValue => "self".to_string(),
                             verum_ast::PathSegment::Super => "super".to_string(),
                             verum_ast::PathSegment::Cog => "cog".to_string(),
@@ -1056,10 +1032,7 @@ impl<'ctx> Translator<'ctx> {
                         // Span-insensitive canonical key so `xs.len`
                         // produces the same Z3 symbol whenever it is
                         // referenced.
-                        let base_name = format!(
-                            "length_{}",
-                            verum_ast::pretty::format_expr(expr)
-                        );
+                        let base_name = format!("length_{}", verum_ast::pretty::format_expr(expr));
                         self.record_length_const(&base_name);
                         self.emit_concat_length_axioms(expr);
                         self.emit_array_literal_length_axioms(expr);
@@ -1118,7 +1091,9 @@ impl<'ctx> Translator<'ctx> {
                         if is_type_qualified {
                             let type_name = match &receiver_stripped.kind {
                                 ExprKind::Path(p) => match &p.segments[0] {
-                                    verum_ast::PathSegment::Name(id) => id.name.as_str().to_string(),
+                                    verum_ast::PathSegment::Name(id) => {
+                                        id.name.as_str().to_string()
+                                    }
                                     _ => String::new(),
                                 },
                                 _ => String::new(),
@@ -1152,10 +1127,8 @@ impl<'ctx> Translator<'ctx> {
                     "len" | "length" | "size" | "count" if args.is_empty() => {
                         // Same span-insensitivity fix as the field-
                         // access arm above.
-                        let base_name = format!(
-                            "length_{}",
-                            verum_ast::pretty::format_expr(receiver)
-                        );
+                        let base_name =
+                            format!("length_{}", verum_ast::pretty::format_expr(receiver));
                         self.record_length_const(&base_name);
                         self.emit_concat_length_axioms(receiver);
                         self.emit_array_literal_length_axioms(receiver);
@@ -1223,9 +1196,7 @@ impl<'ctx> Translator<'ctx> {
                                     verum_ast::pretty::format_expr(strip_paren(&args[0]))
                                 );
                                 let at_var = Int::new_const(at_key.as_str());
-                                self.pending_axioms
-                                    .borrow_mut()
-                                    .push(at_var.eq(&v_int));
+                                self.pending_axioms.borrow_mut().push(at_var.eq(&v_int));
                             }
                         }
                         // The value of the update expression itself is
@@ -1279,9 +1250,10 @@ impl<'ctx> Translator<'ctx> {
             // can only weaken the postcondition. Soundness preserved
             // because Z3 just doesn't learn the discharged claim
             // and falls back to a counterexample-driven failure.
-            ExprKind::Match { expr: scrutinee, arms } => {
-                self.translate_match(scrutinee, arms)
-            }
+            ExprKind::Match {
+                expr: scrutinee,
+                arms,
+            } => self.translate_match(scrutinee, arms),
 
             // Tuple-field access `p.0`, `p.1`, … . We don't use a Z3
             // tuple sort (see `translate_tuple` — tuples are encoded
@@ -1910,9 +1882,7 @@ impl<'ctx> Translator<'ctx> {
             let l = Int::new_const(left_len.as_str());
             let r = Int::new_const(right_len.as_str());
             let c = Int::new_const(concat_len.as_str());
-            self.pending_axioms
-                .borrow_mut()
-                .push(c.eq(&(l + r)));
+            self.pending_axioms.borrow_mut().push(c.eq(&(l + r)));
 
             // List identity axioms at the value level: `xs ++ []`
             // and `[] ++ xs` equal `xs` themselves, not just in
@@ -1928,9 +1898,7 @@ impl<'ctx> Translator<'ctx> {
                 &strip_paren(right).kind,
                 ExprKind::Array(verum_ast::expr::ArrayExpr::List(xs)) if xs.is_empty()
             );
-            let concat_val = Int::new_const(
-                format!("concat_val_{}", concat_len).as_str(),
-            );
+            let concat_val = Int::new_const(format!("concat_val_{}", concat_len).as_str());
             if left_is_empty {
                 // Assert the concat-value equals whatever Z3 symbol
                 // the non-empty operand translates to. For a bare
@@ -2032,9 +2000,7 @@ impl<'ctx> Translator<'ctx> {
             }
 
             // Fall through to Real or error
-            if let (Some(left_real), Some(right_real)) =
-                (left_z3.as_real(), right_z3.as_real())
-            {
+            if let (Some(left_real), Some(right_real)) = (left_z3.as_real(), right_z3.as_real()) {
                 self.translate_real_binop(op, &left_real, &right_real)
             } else if let (Some(left_bool), Some(right_bool)) =
                 (left_z3.as_bool(), right_z3.as_bool())
@@ -2649,23 +2615,18 @@ impl<'ctx> Translator<'ctx> {
                         // declaration. Without it, the two emit
                         // conflicting symbols and Z3 sees them as
                         // distinct uninterpreted functions.
-                        let (arg_sorts_vec, ret_sort) =
-                            if let Some((p, r)) = self
-                                .callee_signatures
-                                .borrow()
-                                .get(func_name)
-                                .cloned()
-                            {
-                                let ps: Vec<z3::Sort> =
-                                    p.iter().map(|n| Self::sort_from_name(n)).collect();
-                                (ps, Self::sort_from_name(&r))
-                            } else {
-                                // Default: Int → Int → … → Int
-                                let ps: Vec<z3::Sort> = (0..args.len())
-                                    .map(|_| z3::Sort::int())
-                                    .collect();
-                                (ps, z3::Sort::int())
-                            };
+                        let (arg_sorts_vec, ret_sort) = if let Some((p, r)) =
+                            self.callee_signatures.borrow().get(func_name).cloned()
+                        {
+                            let ps: Vec<z3::Sort> =
+                                p.iter().map(|n| Self::sort_from_name(n)).collect();
+                            (ps, Self::sort_from_name(&r))
+                        } else {
+                            // Default: Int → Int → … → Int
+                            let ps: Vec<z3::Sort> =
+                                (0..args.len()).map(|_| z3::Sort::int()).collect();
+                            (ps, z3::Sort::int())
+                        };
                         let decl = FuncDecl::new(
                             func_name,
                             arg_sorts_vec.iter().collect::<Vec<_>>().as_slice(),
@@ -2687,18 +2648,12 @@ impl<'ctx> Translator<'ctx> {
                                 z3_args.push(Dynamic::from_ast(&c));
                             } else {
                                 return Err(TranslationError::UnsupportedFunction(
-                                    format!(
-                                        "{} (unsupported argument sort)",
-                                        func_name
-                                    )
-                                    .into(),
+                                    format!("{} (unsupported argument sort)", func_name).into(),
                                 ));
                             }
                         }
-                        let arg_refs: Vec<&dyn z3::ast::Ast> = z3_args
-                            .iter()
-                            .map(|a| a as &dyn z3::ast::Ast)
-                            .collect();
+                        let arg_refs: Vec<&dyn z3::ast::Ast> =
+                            z3_args.iter().map(|a| a as &dyn z3::ast::Ast).collect();
                         let app = decl.apply(arg_refs.as_slice());
                         Ok(app)
                     }
@@ -2832,7 +2787,7 @@ impl<'ctx> Translator<'ctx> {
             _ => {
                 return Err(TranslationError::QuantifierError(
                     "quantifier binding must have type annotation or domain".to_text(),
-                ))
+                ));
             }
         };
 
@@ -3055,7 +3010,7 @@ impl<'ctx> Translator<'ctx> {
             _ => {
                 return Err(TranslationError::QuantifierError(
                     "quantifier binding must have type annotation or domain".to_text(),
-                ))
+                ));
             }
         };
 
@@ -3649,9 +3604,13 @@ impl<'ctx> Translator<'ctx> {
                 if let Some(ident) = path.as_ident() {
                     let tn = ident.as_str();
                     match tn {
-                        _ if verum_common::well_known_types::type_names::is_integer_type(tn) => Ok(Sort::int()),
+                        _ if verum_common::well_known_types::type_names::is_integer_type(tn) => {
+                            Ok(Sort::int())
+                        }
                         "Bool" => Ok(Sort::bool()),
-                        _ if verum_common::well_known_types::type_names::is_float_type(tn) => Ok(self.get_float_sort()),
+                        _ if verum_common::well_known_types::type_names::is_float_type(tn) => {
+                            Ok(self.get_float_sort())
+                        }
                         name => Err(TranslationError::UnsupportedType(Text::from(format!(
                             "unsupported element type: {}",
                             name
@@ -4062,9 +4021,7 @@ impl PatternTrigger {
 
     /// Check if this trigger references a specific bound variable
     pub fn references_var(&self, var_name: &str) -> bool {
-        self.bound_var_refs()
-            .iter()
-            .any(|v| v.as_str() == var_name)
+        self.bound_var_refs().iter().any(|v| v.as_str() == var_name)
     }
 
     /// Get the priority score for this trigger (higher = better pattern)
@@ -4118,8 +4075,7 @@ impl PatternTrigger {
         // covered variables — the others are left existentially
         // quantified, which often means the quantifier doesn't
         // actually fire.
-        let covered: std::collections::HashSet<&str> =
-            refs.iter().map(|t| t.as_str()).collect();
+        let covered: std::collections::HashSet<&str> = refs.iter().map(|t| t.as_str()).collect();
         let missing: Vec<Text> = bound_vars
             .iter()
             .filter(|v| !covered.contains(v.as_str()))
@@ -4184,9 +4140,9 @@ impl TriggerDiagnostic {
     /// Human-readable single-line summary.
     pub fn summary(&self) -> Text {
         match self {
-            Self::NoBoundVarsReferenced => Text::from(
-                "trigger references no bound variables — it will never fire",
-            ),
+            Self::NoBoundVarsReferenced => {
+                Text::from("trigger references no bound variables — it will never fire")
+            }
             Self::MissingBoundVars(missing) => Text::from(format!(
                 "trigger does not cover bound variable(s): {}",
                 missing
@@ -4475,9 +4431,7 @@ impl PatternExtractor {
                 for cond in condition.conditions.iter() {
                     match cond {
                         verum_ast::expr::ConditionKind::Expr(e) => self.visit_expr(e),
-                        verum_ast::expr::ConditionKind::Let { value, .. } => {
-                            self.visit_expr(value)
-                        }
+                        verum_ast::expr::ConditionKind::Let { value, .. } => self.visit_expr(value),
                     }
                 }
                 if let Some(expr) = &then_branch.expr {
@@ -4695,8 +4649,7 @@ impl<'ctx> Translator<'ctx> {
                 }
 
                 // Apply function
-                let z3_arg_refs: List<&dyn Ast> =
-                    z3_args.iter().map(|a| a as &dyn Ast).collect();
+                let z3_arg_refs: List<&dyn Ast> = z3_args.iter().map(|a| a as &dyn Ast).collect();
                 let app = func_decl.apply(&z3_arg_refs);
 
                 Ok(Some(Z3Pattern::new(&[&app])))
@@ -4727,8 +4680,7 @@ impl<'ctx> Translator<'ctx> {
                     z3_args.push(self.translate_pattern_arg(arg, z3_vars)?);
                 }
 
-                let z3_arg_refs: List<&dyn Ast> =
-                    z3_args.iter().map(|a| a as &dyn Ast).collect();
+                let z3_arg_refs: List<&dyn Ast> = z3_args.iter().map(|a| a as &dyn Ast).collect();
                 let app = func_decl.apply(&z3_arg_refs);
 
                 Ok(Some(Z3Pattern::new(&[&app])))
@@ -4758,8 +4710,7 @@ impl<'ctx> Translator<'ctx> {
                         &Sort::int(),
                     );
 
-                    let app =
-                        select_decl.apply(&[&base_z3 as &dyn Ast, &index_z3 as &dyn Ast]);
+                    let app = select_decl.apply(&[&base_z3 as &dyn Ast, &index_z3 as &dyn Ast]);
                     Ok(Some(Z3Pattern::new(&[&app])))
                 }
             }
@@ -4858,9 +4809,7 @@ impl<'ctx> Translator<'ctx> {
 
             ExprKind::Literal(lit) => self.translate_literal(lit),
 
-            ExprKind::Binary { op, left, right } => {
-                self.translate_binary_op(*op, left, right)
-            }
+            ExprKind::Binary { op, left, right } => self.translate_binary_op(*op, left, right),
 
             ExprKind::Unary { op, expr } => self.translate_unary_op(*op, expr),
 
@@ -4871,10 +4820,7 @@ impl<'ctx> Translator<'ctx> {
                 // arm above: pretty-print instead of Debug-format to
                 // strip spans and ensure a single Z3 symbol per
                 // distinct surface expression.
-                let expr_str = format!(
-                    "expr_{}",
-                    verum_ast::pretty::format_expr(expr)
-                );
+                let expr_str = format!("expr_{}", verum_ast::pretty::format_expr(expr));
                 let int_var = Int::new_const(expr_str.as_str());
                 Ok(Dynamic::from_ast(&int_var))
             }
@@ -4912,9 +4858,9 @@ impl<'ctx> Translator<'ctx> {
                 let other_refs = other.bound_var_refs();
 
                 // Check for overlap
-                let has_overlap = refs.iter().any(|r| {
-                    other_refs.iter().any(|o| r.as_str() == o.as_str())
-                });
+                let has_overlap = refs
+                    .iter()
+                    .any(|r| other_refs.iter().any(|o| r.as_str() == o.as_str()));
 
                 if has_overlap {
                     group.push(other.clone());
@@ -4988,8 +4934,7 @@ impl<'ctx> Translator<'ctx> {
                     z3_args.push(self.translate_pattern_arg(arg, z3_vars)?);
                 }
 
-                let z3_arg_refs: List<&dyn Ast> =
-                    z3_args.iter().map(|a| a as &dyn Ast).collect();
+                let z3_arg_refs: List<&dyn Ast> = z3_args.iter().map(|a| a as &dyn Ast).collect();
                 let app = func_decl.apply(&z3_arg_refs);
 
                 Ok(Some(app))
@@ -5018,8 +4963,7 @@ impl<'ctx> Translator<'ctx> {
                     z3_args.push(self.translate_pattern_arg(arg, z3_vars)?);
                 }
 
-                let z3_arg_refs: List<&dyn Ast> =
-                    z3_args.iter().map(|a| a as &dyn Ast).collect();
+                let z3_arg_refs: List<&dyn Ast> = z3_args.iter().map(|a| a as &dyn Ast).collect();
                 let app = func_decl.apply(&z3_arg_refs);
 
                 Ok(Some(app))
@@ -5167,8 +5111,7 @@ mod trigger_diagnostic_tests {
 
     #[test]
     fn diagnostic_summary_mentions_missing_variable_names() {
-        let diag =
-            TriggerDiagnostic::MissingBoundVars(vec![Text::from("a"), Text::from("b")]);
+        let diag = TriggerDiagnostic::MissingBoundVars(vec![Text::from("a"), Text::from("b")]);
         let msg = diag.summary();
         assert!(msg.as_str().contains("a"));
         assert!(msg.as_str().contains("b"));

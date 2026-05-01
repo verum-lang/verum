@@ -16,9 +16,9 @@ use verum_ast::expr::Expr;
 use verum_common::{List, Text};
 
 use verum_types::context::TypeEnv;
-use verum_types::exhaustiveness::diagnostics::{ExhaustivenessWarning};
+use verum_types::exhaustiveness::diagnostics::ExhaustivenessWarning;
 use verum_types::exhaustiveness::smt::{
-    GuardedPattern, GuardVerifier, SmtGuardConfig, SmtGuardResult, SmtValue, SmtWitness,
+    GuardVerifier, GuardedPattern, SmtGuardConfig, SmtGuardResult, SmtValue, SmtWitness,
 };
 use verum_types::ty::Type;
 
@@ -234,8 +234,8 @@ impl SmtGuardVerifier {
         let ctx_manager = Z3ContextManager::new(config);
 
         ctx_manager.with_config(|| {
-            use z3::Solver;
             use z3::SatResult;
+            use z3::Solver;
 
             let solver = Solver::new();
 
@@ -385,11 +385,7 @@ impl SmtGuardVerifier {
     /// `SmtGuardConfig.max_witnesses`); this single-shot variant
     /// is preserved as a focused fixture for the per-sort tests.
     #[cfg(test)]
-    fn get_model(
-        &self,
-        formula: &SmtFormula,
-        scrutinee_ty: &Type,
-    ) -> Option<SmtWitness> {
+    fn get_model(&self, formula: &SmtFormula, scrutinee_ty: &Type) -> Option<SmtWitness> {
         use crate::z3_backend::{Z3Config, Z3ContextManager};
 
         let mut config = Z3Config::default();
@@ -399,8 +395,8 @@ impl SmtGuardVerifier {
         let ctx_manager = Z3ContextManager::new(config);
 
         ctx_manager.with_config(|| {
-            use z3::Solver;
             use z3::SatResult;
+            use z3::Solver;
             use z3::ast::{Bool, Int};
 
             let solver = Solver::new();
@@ -439,10 +435,7 @@ impl SmtGuardVerifier {
                                     let z3_var = Bool::new_const(name.as_str());
                                     if let Some(value) = model.eval(&z3_var, true) {
                                         if let Some(b) = value.as_bool() {
-                                            bindings.insert(
-                                                name.clone(),
-                                                SmtValue::Bool(b),
-                                            );
+                                            bindings.insert(name.clone(), SmtValue::Bool(b));
                                         }
                                     }
                                 }
@@ -497,8 +490,8 @@ impl SmtGuardVerifier {
         let ctx_manager = Z3ContextManager::new(config);
 
         ctx_manager.with_config(|| {
-            use z3::Solver;
             use z3::SatResult;
+            use z3::Solver;
             use z3::ast::{Bool, Int};
 
             let solver = Solver::new();
@@ -541,8 +534,7 @@ impl SmtGuardVerifier {
                             let z3_var = Bool::new_const(name.as_str());
                             if let Some(value) = model.eval(&z3_var, true) {
                                 if let Some(b) = value.as_bool() {
-                                    bindings
-                                        .insert(name.clone(), SmtValue::Bool(b));
+                                    bindings.insert(name.clone(), SmtValue::Bool(b));
                                     let val_const = Bool::from_bool(b);
                                     block_clauses.push(z3_var.eq(&val_const));
                                 }
@@ -552,13 +544,9 @@ impl SmtGuardVerifier {
                             let z3_var = Int::new_const(name.as_str());
                             if let Some(value) = model.eval(&z3_var, true) {
                                 if let Some(int_val) = value.as_i64() {
-                                    bindings.insert(
-                                        name.clone(),
-                                        SmtValue::Int(int_val as i128),
-                                    );
+                                    bindings.insert(name.clone(), SmtValue::Int(int_val as i128));
                                     let val_const = Int::from_i64(int_val);
-                                    block_clauses
-                                        .push(z3_var.eq(&val_const));
+                                    block_clauses.push(z3_var.eq(&val_const));
                                 }
                             }
                         }
@@ -868,7 +856,9 @@ mod tests {
         let negation = SmtFormula::Not(Box::new(positive));
         let witness = verifier.get_model(&negation, &Type::Int);
         let witness = witness.expect("Int negation is SAT — get_model must surface it");
-        let value = witness.bindings.get(&Text::from("x"))
+        let value = witness
+            .bindings
+            .get(&Text::from("x"))
             .expect("witness must contain a binding for the formula's only Var");
         assert!(
             matches!(value, SmtValue::Int(_)),
@@ -891,7 +881,9 @@ mod tests {
         let negation = SmtFormula::Not(Box::new(formula));
         let witness = verifier.get_model(&negation, &Type::Bool);
         let witness = witness.expect("Bool negation is SAT — get_model must surface it");
-        let value = witness.bindings.get(&Text::from("flag"))
+        let value = witness
+            .bindings
+            .get(&Text::from("flag"))
             .expect("witness must contain a binding for the formula's only Var");
         assert!(
             matches!(value, SmtValue::Bool(_)),
@@ -927,11 +919,11 @@ mod tests {
         //  - uncovered_witnesses: at least one with `n` bound to
         //  a concrete non-positive integer
         //  - unknown_guards: empty (the guard MUST translate)
+        use std::sync::Arc;
         use verum_ast::expr::{BinOp, ExprKind};
         use verum_ast::literal::Literal;
         use verum_ast::span::Span;
         use verum_ast::ty::{Ident, Path};
-        use std::sync::Arc;
         use verum_types::exhaustiveness::PatternColumn;
 
         // Build the AST for `n > 0`: Binary(Gt, Path(n), Literal(0))
@@ -940,10 +932,7 @@ mod tests {
             ExprKind::Path(Path::single(Ident::new(Text::from("n"), span))),
             span,
         );
-        let zero = Expr::new(
-            ExprKind::Literal(Literal::int(0, span)),
-            span,
-        );
+        let zero = Expr::new(ExprKind::Literal(Literal::int(0, span)), span);
         let guard_expr = Expr::new(
             ExprKind::Binary {
                 op: BinOp::Gt,

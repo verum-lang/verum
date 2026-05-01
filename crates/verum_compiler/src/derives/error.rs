@@ -41,14 +41,16 @@
 
 use super::common::{DeriveContext, DeriveError as CommonDeriveError, VariantInfo};
 use super::{DeriveMacro, DeriveResult, ident_expr, self_ref, string_lit};
+use verum_ast::Span;
 use verum_ast::attr::{Attribute, AttributeListExt};
-use verum_ast::decl::{FunctionDecl, ImplDecl, ImplKind, ImplItem, ImplItemKind, Item, ItemKind, Visibility};
+use verum_ast::decl::{
+    FunctionDecl, ImplDecl, ImplItem, ImplItemKind, ImplKind, Item, ItemKind, Visibility,
+};
 use verum_ast::expr::{Block, Expr, ExprKind, FieldInit, UnOp};
 use verum_ast::pattern::{FieldPattern, MatchArm, Pattern, PatternKind, VariantPatternData};
 use verum_ast::ty::{GenericArg, Ident, Path, PathSegment, Type, TypeKind};
 use verum_common::well_known_types::type_names;
 use verum_common::{Heap, List, Maybe, Text};
-use verum_ast::Span;
 
 /// Error derive implementation
 pub struct DeriveError;
@@ -175,7 +177,8 @@ impl DeriveError {
                 vec![
                     PathSegment::SelfValue,
                     PathSegment::Name(Ident::new(variant_name, span)),
-                ].into(),
+                ]
+                .into(),
                 span,
             );
 
@@ -298,10 +301,7 @@ impl DeriveError {
 
         if type_info.variants.is_empty() {
             // Empty enum - return None
-            let none_expr = Expr::new(
-                ExprKind::Path(Path::single(Ident::new("None", span))),
-                span,
-            );
+            let none_expr = Expr::new(ExprKind::Path(Path::single(Ident::new("None", span))), span);
             return Ok(Block {
                 stmts: vec![].into(),
                 expr: Some(Box::new(none_expr)),
@@ -326,7 +326,8 @@ impl DeriveError {
                     vec![
                         PathSegment::SelfValue,
                         PathSegment::Name(Ident::new(variant_name, span)),
-                    ].into(),
+                    ]
+                    .into(),
                     span,
                 );
 
@@ -335,7 +336,8 @@ impl DeriveError {
                     name: Ident::new(field_name.as_str(), span),
                     pattern: Maybe::None,
                     span,
-                }].into();
+                }]
+                .into();
 
                 let pattern = Pattern::new(
                     PatternKind::Variant {
@@ -365,16 +367,18 @@ impl DeriveError {
                     span,
                 );
 
-                arms.push(MatchArm::new(pattern, Maybe::None, Heap::new(some_expr), span));
+                arms.push(MatchArm::new(
+                    pattern,
+                    Maybe::None,
+                    Heap::new(some_expr),
+                    span,
+                ));
             }
         }
 
         // If no source fields, just return None directly (avoid trivial match)
         if !has_source_variant {
-            let none_expr = Expr::new(
-                ExprKind::Path(Path::single(Ident::new("None", span))),
-                span,
-            );
+            let none_expr = Expr::new(ExprKind::Path(Path::single(Ident::new("None", span))), span);
             return Ok(Block {
                 stmts: vec![].into(),
                 expr: Some(Box::new(none_expr)),
@@ -384,11 +388,13 @@ impl DeriveError {
 
         // Add default arm: _ => None
         let wildcard_pattern = Pattern::new(PatternKind::Wildcard, span);
-        let none_expr = Expr::new(
-            ExprKind::Path(Path::single(Ident::new("None", span))),
+        let none_expr = Expr::new(ExprKind::Path(Path::single(Ident::new("None", span))), span);
+        arms.push(MatchArm::new(
+            wildcard_pattern,
+            Maybe::None,
+            Heap::new(none_expr),
             span,
-        );
-        arms.push(MatchArm::new(wildcard_pattern, Maybe::None, Heap::new(none_expr), span));
+        ));
 
         // Build match expression
         let match_expr = Expr::new(
@@ -429,12 +435,7 @@ impl DeriveError {
     }
 
     /// Create the source method declaration
-    fn create_source_method(
-        &self,
-        ctx: &DeriveContext,
-        body: Block,
-        span: Span,
-    ) -> FunctionDecl {
+    fn create_source_method(&self, ctx: &DeriveContext, body: Block, span: Span) -> FunctionDecl {
         // Return type: Maybe<&dyn Error>
         // Simplified as Maybe<&Error> for now
         let error_type = Type::new(
@@ -474,7 +475,12 @@ impl DeriveError {
         if let verum_ast::decl::TypeDeclBody::Variant(variants) = &ctx.type_decl.body {
             for variant in variants.iter() {
                 if variant.name.as_str() == variant_name {
-                    return variant.attributes.iter().cloned().collect::<Vec<_>>().into();
+                    return variant
+                        .attributes
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into();
                 }
             }
         }
@@ -482,7 +488,11 @@ impl DeriveError {
     }
 
     /// Find a field marked with @source in a variant
-    fn find_source_field(&self, ctx: &DeriveContext, variant: &VariantInfo) -> Option<(Text, usize)> {
+    fn find_source_field(
+        &self,
+        ctx: &DeriveContext,
+        variant: &VariantInfo,
+    ) -> Option<(Text, usize)> {
         // Look up variant in original type declaration to get field attributes
         if let verum_ast::decl::TypeDeclBody::Variant(variants) = &ctx.type_decl.body {
             for v in variants.iter() {
@@ -616,12 +626,11 @@ fn parse_format_template(template: &str, span: Span) -> (List<Text>, List<Expr>)
                 }
 
                 let is_ident_shaped = !ident.is_empty()
-                    && ident.chars().next().is_some_and(|c| {
-                        c.is_ascii_alphabetic() || c == '_'
-                    })
-                    && ident.chars().all(|c| {
-                        c.is_ascii_alphanumeric() || c == '_'
-                    });
+                    && ident
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    && ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
 
                 if closed && is_ident_shaped {
                     // Commit current text segment, push placeholder.
@@ -696,12 +705,8 @@ pub fn generate_from_impls(ctx: &DeriveContext) -> DeriveResult<List<Item>> {
                     // For tuple variants with single @source field
                     // (attributes would need to be on the variant itself)
                     if types.len() == 1 && v.attributes.has_attribute("source") {
-                        let from_impl = generate_from_impl_tuple(
-                            ctx,
-                            &variant.name,
-                            &types[0],
-                            span,
-                        );
+                        let from_impl =
+                            generate_from_impl_tuple(ctx, &variant.name, &types[0], span);
                         impls.push(from_impl);
                     }
                 }
@@ -728,7 +733,8 @@ fn generate_from_impl(
         vec![
             PathSegment::Name(Ident::new("Self", span)),
             PathSegment::Name(Ident::new(variant_name.as_str(), span)),
-        ].into(),
+        ]
+        .into(),
         span,
     );
 
@@ -740,7 +746,8 @@ fn generate_from_impl(
                 name: field_name.clone(),
                 value: Maybe::Some(value_ident),
                 span,
-            }].into(),
+            }]
+            .into(),
             base: Maybe::None,
         },
         span,
@@ -764,7 +771,13 @@ fn generate_from_impl(
     // Create impl block: implement From<FieldType> for SelfType
     let impl_decl = ImplDecl {
         is_unsafe: false,
-        generics: ctx.type_info.generics.iter().cloned().collect::<Vec<_>>().into(),
+        generics: ctx
+            .type_info
+            .generics
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
         kind: ImplKind::Protocol {
             protocol: Path::single(Ident::new("From", span)),
             protocol_args: vec![GenericArg::Type(field_type.clone())].into(),
@@ -778,7 +791,8 @@ fn generate_from_impl(
             visibility: Visibility::Public,
             kind: ImplItemKind::Function(from_method),
             span,
-        }].into(),
+        }]
+        .into(),
         span,
     };
 
@@ -800,7 +814,8 @@ fn generate_from_impl_tuple(
         vec![
             PathSegment::Name(Ident::new("Self", span)),
             PathSegment::Name(Ident::new(variant_name.as_str(), span)),
-        ].into(),
+        ]
+        .into(),
         span,
     );
 
@@ -831,7 +846,13 @@ fn generate_from_impl_tuple(
     // Create impl block
     let impl_decl = ImplDecl {
         is_unsafe: false,
-        generics: ctx.type_info.generics.iter().cloned().collect::<Vec<_>>().into(),
+        generics: ctx
+            .type_info
+            .generics
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
         kind: ImplKind::Protocol {
             protocol: Path::single(Ident::new("From", span)),
             protocol_args: vec![GenericArg::Type(field_type.clone())].into(),
@@ -845,7 +866,8 @@ fn generate_from_impl_tuple(
             visibility: Visibility::Public,
             kind: ImplItemKind::Function(from_method),
             span,
-        }].into(),
+        }]
+        .into(),
         span,
     };
 
@@ -855,7 +877,7 @@ fn generate_from_impl_tuple(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_ast::decl::{TypeDecl, TypeDeclBody, Variant, VariantData, RecordField, Visibility};
+    use verum_ast::decl::{RecordField, TypeDecl, TypeDeclBody, Variant, VariantData, Visibility};
 
     fn create_simple_error_enum() -> TypeDecl {
         let span = Span::default();
@@ -864,18 +886,13 @@ mod tests {
             name: Ident::new("MyError", span),
             generics: List::new(),
             attributes: List::new(),
-            body: TypeDeclBody::Variant(vec![
-                Variant::new(
-                    Ident::new("NotFound", span),
-                    Maybe::None,
-                    span,
-                ),
-                Variant::new(
-                    Ident::new("PermissionDenied", span),
-                    Maybe::None,
-                    span,
-                ),
-            ].into()),
+            body: TypeDeclBody::Variant(
+                vec![
+                    Variant::new(Ident::new("NotFound", span), Maybe::None, span),
+                    Variant::new(Ident::new("PermissionDenied", span), Maybe::None, span),
+                ]
+                .into(),
+            ),
             resource_modifier: None,
             generic_where_clause: None,
             meta_where_clause: None,
@@ -890,20 +907,22 @@ mod tests {
             name: Ident::new("AppError", span),
             generics: List::new(),
             attributes: List::new(),
-            body: TypeDeclBody::Variant(vec![
-                Variant::new(
+            body: TypeDeclBody::Variant(
+                vec![Variant::new(
                     Ident::new("IoError", span),
-                    Maybe::Some(VariantData::Record(vec![
-                        RecordField::new(
+                    Maybe::Some(VariantData::Record(
+                        vec![RecordField::new(
                             Visibility::Private,
                             Ident::new("message", span),
                             Type::text(span),
                             span,
-                        ),
-                    ].into())),
+                        )]
+                        .into(),
+                    )),
                     span,
-                ),
-            ].into()),
+                )]
+                .into(),
+            ),
             resource_modifier: None,
             generic_where_clause: None,
             meta_where_clause: None,
@@ -1049,11 +1068,7 @@ mod tests {
         // burden the elaborator pointlessly.
         let span = Span::default();
         let derive = DeriveError;
-        let expr = derive.generate_format_string(
-            &Text::from("plain message"),
-            &List::new(),
-            span,
-        );
+        let expr = derive.generate_format_string(&Text::from("plain message"), &List::new(), span);
         match &expr.kind {
             ExprKind::Literal(lit) => match &lit.kind {
                 verum_ast::LiteralKind::Text(s) => {
@@ -1071,13 +1086,13 @@ mod tests {
         // with handler "f" (matching the `f"..."` syntax in source).
         let span = Span::default();
         let derive = DeriveError;
-        let expr = derive.generate_format_string(
-            &Text::from("file: {path}"),
-            &List::new(),
-            span,
-        );
+        let expr = derive.generate_format_string(&Text::from("file: {path}"), &List::new(), span);
         match &expr.kind {
-            ExprKind::InterpolatedString { handler, parts, exprs } => {
+            ExprKind::InterpolatedString {
+                handler,
+                parts,
+                exprs,
+            } => {
                 assert_eq!(handler.as_str(), "f");
                 assert_eq!(parts_as_strs(parts), vec!["file: ", ""]);
                 assert_eq!(exprs.len(), 1);

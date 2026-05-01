@@ -69,22 +69,21 @@
 use crate::mlir::error::{MlirError, Result};
 use crate::mlir::jit::symbol_resolver::SymbolResolver;
 use dashmap::DashMap;
-use verum_mlir::ir::Module;
-use verum_mlir::ExecutionEngine;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::any::TypeId;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use verum_common::Text;
+use verum_mlir::ExecutionEngine;
+use verum_mlir::ir::Module;
 
 /// Process-wide reference instant for `object_dump_dir` filename
 /// timestamps. We use a relative-to-process-start nanosecond
 /// counter rather than wall-clock so dumps are reproducible
 /// within a single run and don't depend on system time skew.
-static JIT_DUMP_EPOCH: std::sync::OnceLock<instant::Instant> =
-    std::sync::OnceLock::new();
+static JIT_DUMP_EPOCH: std::sync::OnceLock<instant::Instant> = std::sync::OnceLock::new();
 
 fn jit_dump_epoch() -> &'static instant::Instant {
     JIT_DUMP_EPOCH.get_or_init(instant::Instant::now)
@@ -294,7 +293,8 @@ impl JitStats {
 
     /// Get cache hit rate.
     pub fn cache_hit_rate(&self) -> f64 {
-        let total = self.cache_hits.load(Ordering::Relaxed) + self.cache_misses.load(Ordering::Relaxed);
+        let total =
+            self.cache_hits.load(Ordering::Relaxed) + self.cache_misses.load(Ordering::Relaxed);
         if total == 0 {
             0.0
         } else {
@@ -363,7 +363,9 @@ macro_rules! impl_jit_arg {
     };
 }
 
-impl_jit_arg!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool, usize, isize);
+impl_jit_arg!(
+    i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool, usize, isize
+);
 
 // Implement for pointers
 unsafe impl<T> JitArg for *const T {
@@ -462,7 +464,9 @@ macro_rules! impl_jit_return {
     };
 }
 
-impl_jit_return!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool, usize, isize);
+impl_jit_return!(
+    i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool, usize, isize
+);
 
 impl<T> JitReturn for *const T {
     fn init() -> Self {
@@ -508,7 +512,9 @@ impl CallbackRegistry {
 
     /// Invoke a callback.
     pub fn invoke(&self, name: &str, args: &[*mut ()]) -> Result<*mut ()> {
-        self.stats.callback_invocations.fetch_add(1, Ordering::Relaxed);
+        self.stats
+            .callback_invocations
+            .fetch_add(1, Ordering::Relaxed);
 
         self.callbacks
             .get(&Text::from(name))
@@ -631,32 +637,35 @@ impl JitEngine {
             if let Err(e) = std::fs::create_dir_all(dump_path) {
                 tracing::warn!(
                     "JitConfig.object_dump_dir = {:?}: failed to create directory: {}",
-                    dump_dir, e
+                    dump_dir,
+                    e
                 );
             } else {
                 let ts_ns = instant::Instant::now()
                     .duration_since(*jit_dump_epoch())
                     .as_nanos();
-                let file_name =
-                    format!("verum_jit_module_{}.mlir", ts_ns);
+                let file_name = format!("verum_jit_module_{}.mlir", ts_ns);
                 let target = dump_path.join(file_name);
                 let ir_text = format!("{}", module.as_operation());
                 if let Err(e) = std::fs::write(&target, ir_text.as_bytes()) {
                     tracing::warn!(
                         "JitConfig.object_dump_dir = {:?}: failed to write {}: {}",
-                        dump_dir, target.display(), e
+                        dump_dir,
+                        target.display(),
+                        e
                     );
                 } else if config.verbose {
-                    tracing::info!(
-                        "JIT module dumped to {}",
-                        target.display()
-                    );
+                    tracing::info!("JIT module dumped to {}", target.display());
                 }
             }
         }
 
         // Prepare shared library paths
-        let lib_paths: Vec<&str> = config.shared_library_paths.iter().map(|s| s.as_str()).collect();
+        let lib_paths: Vec<&str> = config
+            .shared_library_paths
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
 
         // Surface inert JitConfig fields. `enable_debug_info`
         // (DWARF in JITted modules) and `enable_multithreading`
@@ -706,7 +715,9 @@ impl JitEngine {
 
         // Record compilation time
         let elapsed = start.elapsed();
-        stats.total_compilation_time_us.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+        stats
+            .total_compilation_time_us
+            .fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
         stats.compilations.fetch_add(1, Ordering::Relaxed);
 
         if jit_engine.config.verbose {
@@ -782,7 +793,9 @@ impl JitEngine {
             self.registered_symbols.insert(name, ptr);
         }
 
-        self.stats.symbol_resolutions.fetch_add(count as u64, Ordering::Relaxed);
+        self.stats
+            .symbol_resolutions
+            .fetch_add(count as u64, Ordering::Relaxed);
         Ok(count)
     }
 
@@ -843,7 +856,9 @@ impl JitEngine {
         let elapsed = start.elapsed();
         self.stats.invocations.fetch_add(1, Ordering::Relaxed);
         self.stats.function_calls.fetch_add(1, Ordering::Relaxed);
-        self.stats.total_invocation_time_us.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+        self.stats
+            .total_invocation_time_us
+            .fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
 
         Ok(result)
     }
@@ -869,7 +884,9 @@ impl JitEngine {
         let elapsed = start.elapsed();
         self.stats.invocations.fetch_add(1, Ordering::Relaxed);
         self.stats.function_calls.fetch_add(1, Ordering::Relaxed);
-        self.stats.total_invocation_time_us.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+        self.stats
+            .total_invocation_time_us
+            .fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
 
         Ok(())
     }
@@ -927,18 +944,20 @@ impl JitEngine {
         }
 
         unsafe {
-            self.engine
-                .invoke_packed(name, &mut packed)
-                .map_err(|e| MlirError::JitInvocationError {
+            self.engine.invoke_packed(name, &mut packed).map_err(|e| {
+                MlirError::JitInvocationError {
                     function: Text::from(name),
                     message: Text::from(format!("{:?}", e)),
-                })?;
+                }
+            })?;
         }
 
         let elapsed = start.elapsed();
         self.stats.invocations.fetch_add(1, Ordering::Relaxed);
         self.stats.function_calls.fetch_add(1, Ordering::Relaxed);
-        self.stats.total_invocation_time_us.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+        self.stats
+            .total_invocation_time_us
+            .fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
 
         Ok(result)
     }
@@ -955,18 +974,20 @@ impl JitEngine {
         }
 
         unsafe {
-            self.engine
-                .invoke_packed(name, &mut packed)
-                .map_err(|e| MlirError::JitInvocationError {
+            self.engine.invoke_packed(name, &mut packed).map_err(|e| {
+                MlirError::JitInvocationError {
                     function: Text::from(name),
                     message: Text::from(format!("{:?}", e)),
-                })?;
+                }
+            })?;
         }
 
         let elapsed = start.elapsed();
         self.stats.invocations.fetch_add(1, Ordering::Relaxed);
         self.stats.function_calls.fetch_add(1, Ordering::Relaxed);
-        self.stats.total_invocation_time_us.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+        self.stats
+            .total_invocation_time_us
+            .fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
 
         Ok(result)
     }
@@ -983,18 +1004,20 @@ impl JitEngine {
         }
 
         unsafe {
-            self.engine
-                .invoke_packed(name, &mut packed)
-                .map_err(|e| MlirError::JitInvocationError {
+            self.engine.invoke_packed(name, &mut packed).map_err(|e| {
+                MlirError::JitInvocationError {
                     function: Text::from(name),
                     message: Text::from(format!("{:?}", e)),
-                })?;
+                }
+            })?;
         }
 
         let elapsed = start.elapsed();
         self.stats.invocations.fetch_add(1, Ordering::Relaxed);
         self.stats.function_calls.fetch_add(1, Ordering::Relaxed);
-        self.stats.total_invocation_time_us.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+        self.stats
+            .total_invocation_time_us
+            .fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
 
         Ok(result)
     }
@@ -1021,30 +1044,36 @@ impl JitEngine {
         packed.extend_from_slice(args);
 
         unsafe {
-            self.engine
-                .invoke_packed(name, &mut packed)
-                .map_err(|e| MlirError::JitInvocationError {
+            self.engine.invoke_packed(name, &mut packed).map_err(|e| {
+                MlirError::JitInvocationError {
                     function: Text::from(name),
                     message: Text::from(format!("{:?}", e)),
-                })?;
+                }
+            })?;
         }
 
         let elapsed = start.elapsed();
         self.stats.invocations.fetch_add(1, Ordering::Relaxed);
         self.stats.function_calls.fetch_add(1, Ordering::Relaxed);
-        self.stats.total_invocation_time_us.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+        self.stats
+            .total_invocation_time_us
+            .fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
 
         Ok(result)
     }
 
     /// Dump the compiled module to an object file.
     pub fn dump_to_object_file(&self, path: impl AsRef<Path>) {
-        self.engine.dump_to_object_file(path.as_ref().to_str().unwrap_or("output.o"));
+        self.engine
+            .dump_to_object_file(path.as_ref().to_str().unwrap_or("output.o"));
     }
 
     /// Get function list (from registered symbols).
     pub fn functions(&self) -> Vec<Text> {
-        self.registered_symbols.iter().map(|e| e.key().clone()).collect()
+        self.registered_symbols
+            .iter()
+            .map(|e| e.key().clone())
+            .collect()
     }
 
     /// Check if a function is available.
@@ -1251,7 +1280,9 @@ mod tests {
     fn test_jit_stats() {
         let stats = JitStats::new();
         stats.compilations.fetch_add(5, Ordering::Relaxed);
-        stats.total_compilation_time_us.fetch_add(1000, Ordering::Relaxed);
+        stats
+            .total_compilation_time_us
+            .fetch_add(1000, Ordering::Relaxed);
 
         assert_eq!(stats.avg_compilation_time_us(), 200.0);
     }

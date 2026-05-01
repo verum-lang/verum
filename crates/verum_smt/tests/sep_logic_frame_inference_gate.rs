@@ -10,9 +10,7 @@
 //! reduction in encoder work on large heaps. The wiring makes
 //! the documented opt-out load-bearing.
 
-use verum_smt::separation_logic::{
-    SepAssertion, SepLogicConfig, SepLogicEncoder,
-};
+use verum_smt::separation_logic::{SepAssertion, SepLogicConfig, SepLogicEncoder};
 
 #[test]
 fn default_config_enables_frame_inference() {
@@ -43,10 +41,7 @@ fn frame_inference_skipped_when_disabled() {
     let encoder = SepLogicEncoder::new(cfg);
 
     let result = encoder.infer_frame(&SepAssertion::Emp, &SepAssertion::Emp);
-    assert!(
-        !result.success,
-        "infer_frame should fail when gate is off"
-    );
+    assert!(!result.success, "infer_frame should fail when gate is off");
     assert!(
         result.message.as_str().contains("enable_frame_inference"),
         "diagnostic should name the flag, got: {}",

@@ -169,9 +169,18 @@ public fn main() {}
     let out = run_verum(&["verify", "--ladder"], &dir);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("Verdict totals:"), "missing totals block: {stdout}");
-    assert!(stdout.contains("closed"), "missing closed counter: {stdout}");
-    assert!(stdout.contains("dispatch_pending"), "missing pending counter: {stdout}");
+    assert!(
+        stdout.contains("Verdict totals:"),
+        "missing totals block: {stdout}"
+    );
+    assert!(
+        stdout.contains("closed"),
+        "missing closed counter: {stdout}"
+    );
+    assert!(
+        stdout.contains("dispatch_pending"),
+        "missing pending counter: {stdout}"
+    );
     assert!(stdout.contains("total"), "missing total counter: {stdout}");
 }
 
@@ -244,10 +253,7 @@ theorem t_b()
 public fn main() {}
 "#,
     );
-    let out = run_verum(
-        &["verify", "--ladder", "--ladder-format", "json"],
-        &dir,
-    );
+    let out = run_verum(&["verify", "--ladder", "--ladder-format", "json"], &dir);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
 
@@ -260,7 +266,10 @@ public fn main() {}
 
     let totals = &parsed["totals"];
     assert_eq!(totals["closed"], 1, "one runtime theorem → 1 closed");
-    assert_eq!(totals["dispatch_pending"], 1, "one formal theorem → 1 pending");
+    assert_eq!(
+        totals["dispatch_pending"], 1,
+        "one formal theorem → 1 pending"
+    );
     assert_eq!(totals["open"], 0);
     assert_eq!(totals["timeout"], 0);
 
@@ -302,10 +311,7 @@ theorem t_c()
 public fn main() {}
 "#,
     );
-    let out = run_verum(
-        &["verify", "--ladder", "--ladder-format", "json"],
-        &dir,
-    );
+    let out = run_verum(&["verify", "--ladder", "--ladder-format", "json"], &dir);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
@@ -339,10 +345,7 @@ fn ladder_rejects_unknown_format() {
         r#"public fn main() {}
 "#,
     );
-    let out = run_verum(
-        &["verify", "--ladder", "--ladder-format", "yaml"],
-        &dir,
-    );
+    let out = run_verum(&["verify", "--ladder", "--ladder-format", "yaml"], &dir);
     assert!(
         !out.status.success(),
         "unknown --ladder-format must produce non-zero exit"
@@ -389,10 +392,7 @@ lemma l_a()
 public fn main() {}
 "#,
     );
-    let out = run_verum(
-        &["verify", "--ladder", "--ladder-format", "json"],
-        &dir,
-    );
+    let out = run_verum(&["verify", "--ladder", "--ladder-format", "json"], &dir);
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();

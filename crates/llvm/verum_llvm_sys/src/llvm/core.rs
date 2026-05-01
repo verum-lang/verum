@@ -484,7 +484,7 @@ unsafe extern "C" {
     pub fn LLVMPointerTypeIsOpaque(Ty: LLVMTypeRef) -> LLVMBool;
     /// Create an opaque pointer type in a context.
     pub fn LLVMPointerTypeInContext(C: LLVMContextRef, AddressSpace: ::libc::c_uint)
-        -> LLVMTypeRef;
+    -> LLVMTypeRef;
     pub fn LLVMGetPointerAddressSpace(PointerTy: LLVMTypeRef) -> ::libc::c_uint;
     pub fn LLVMVectorType(ElementType: LLVMTypeRef, ElementCount: ::libc::c_uint) -> LLVMTypeRef;
     /// Create a vector type that contains a defined type and has a scalable
@@ -1007,7 +1007,7 @@ unsafe extern "C" {
 
     pub fn LLVMAddAttributeAtIndex(F: LLVMValueRef, Idx: LLVMAttributeIndex, A: LLVMAttributeRef);
     pub fn LLVMGetAttributeCountAtIndex(F: LLVMValueRef, Idx: LLVMAttributeIndex)
-        -> ::libc::c_uint;
+    -> ::libc::c_uint;
     pub fn LLVMGetAttributesAtIndex(
         F: LLVMValueRef,
         Idx: LLVMAttributeIndex,
@@ -1220,7 +1220,7 @@ unsafe extern "C" {
         Name: *const ::libc::c_char,
     ) -> LLVMBasicBlockRef;
     pub fn LLVMAppendBasicBlock(Fn: LLVMValueRef, Name: *const ::libc::c_char)
-        -> LLVMBasicBlockRef;
+    -> LLVMBasicBlockRef;
     pub fn LLVMInsertBasicBlockInContext(
         C: LLVMContextRef,
         BB: LLVMBasicBlockRef,

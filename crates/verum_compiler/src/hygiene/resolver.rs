@@ -111,7 +111,11 @@ impl ScopeResolver {
             1 => Resolution::Bound(candidates.into_iter().next().unwrap()),
             _ => {
                 // Find the most specific binding (largest scope set)
-                let max_len = candidates.iter().map(|c| c.matched_scopes.len()).max().unwrap();
+                let max_len = candidates
+                    .iter()
+                    .map(|c| c.matched_scopes.len())
+                    .max()
+                    .unwrap();
                 let most_specific: List<_> = candidates
                     .into_iter()
                     .filter(|c| c.matched_scopes.len() == max_len)

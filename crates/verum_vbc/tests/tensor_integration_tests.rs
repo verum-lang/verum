@@ -4,21 +4,20 @@
 //! These tests verify end-to-end correctness of tensor operations,
 //! including dispatch, kernel execution, and memory management.
 
+use verum_vbc::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
 use verum_vbc::interpreter::kernel::{
-    device::{DeviceId, get_registry},
-    backend::{get_backend_registry, MemoryPool, CpuBackend},
-    get_capabilities, dispatch_binop,
+    backend::{CpuBackend, MemoryPool, get_backend_registry},
     broadcast_shapes, broadcast_to,
+    device::{DeviceId, get_registry},
+    dispatch_binop, get_capabilities,
 };
 use verum_vbc::interpreter::tensor::{
-    DType, TensorHandle, tensor_binop, tensor_unop, tensor_reduce, tensor_matmul,
-    tensor_reshape, tensor_transpose, tensor_clone, tensor_from_slice,
-    tensor_dot, tensor_outer, tensor_batch_matmul, tensor_topk, tensor_cumulative,
-    tensor_pool2d, tensor_conv2d, tensor_cmp, tensor_masked_fill,
-    tensor_layer_norm, tensor_batch_norm, tensor_rms_norm,
-    CumulativeOp, PoolOp, CompareOp,
+    CompareOp, CumulativeOp, DType, PoolOp, TensorHandle, tensor_batch_matmul, tensor_batch_norm,
+    tensor_binop, tensor_clone, tensor_cmp, tensor_conv2d, tensor_cumulative, tensor_dot,
+    tensor_from_slice, tensor_layer_norm, tensor_masked_fill, tensor_matmul, tensor_outer,
+    tensor_pool2d, tensor_reduce, tensor_reshape, tensor_rms_norm, tensor_topk, tensor_transpose,
+    tensor_unop,
 };
-use verum_vbc::instruction::{TensorBinaryOp, TensorUnaryOp, TensorReduceOp};
 
 // ============================================================================
 // Device Detection Tests
@@ -27,8 +26,14 @@ use verum_vbc::instruction::{TensorBinaryOp, TensorUnaryOp, TensorReduceOp};
 #[test]
 fn test_device_registry_initialization() {
     let registry = get_registry();
-    assert!(!registry.devices.is_empty(), "Should have at least one device");
-    assert!(registry.cpu_info().is_some(), "CPU info should be available");
+    assert!(
+        !registry.devices.is_empty(),
+        "Should have at least one device"
+    );
+    assert!(
+        registry.cpu_info().is_some(),
+        "CPU info should be available"
+    );
 }
 
 #[test]
@@ -84,7 +89,10 @@ fn test_memory_pool_allocation_deallocation() {
     }
 
     let stats = pool.stats();
-    assert!(stats.cache_misses >= sizes.len(), "Should have cache misses for new allocations");
+    assert!(
+        stats.cache_misses >= sizes.len(),
+        "Should have cache misses for new allocations"
+    );
 }
 
 #[test]
@@ -110,12 +118,7 @@ fn test_memory_pool_reuse() {
 
 #[test]
 fn test_tensor_zeros_creation() {
-    let shapes = vec![
-        vec![10],
-        vec![4, 4],
-        vec![2, 3, 4],
-        vec![2, 2, 2, 2],
-    ];
+    let shapes = vec![vec![10], vec![4, 4], vec![2, 3, 4], vec![2, 2, 2, 2]];
 
     for shape in shapes {
         let t = TensorHandle::zeros(&shape, DType::F32).unwrap();
@@ -329,7 +332,10 @@ fn test_tensor_transpose() {
 fn test_broadcast_shapes_compatible() {
     assert_eq!(broadcast_shapes(&[3, 1], &[1, 4]), Some(vec![3, 4]));
     assert_eq!(broadcast_shapes(&[2, 3, 4], &[3, 4]), Some(vec![2, 3, 4]));
-    assert_eq!(broadcast_shapes(&[5, 1, 4], &[1, 3, 1]), Some(vec![5, 3, 4]));
+    assert_eq!(
+        broadcast_shapes(&[5, 1, 4], &[1, 3, 1]),
+        Some(vec![5, 3, 4])
+    );
 }
 
 #[test]
@@ -611,16 +617,26 @@ fn test_tensor_reduce_i32_max_min() {
     let mut t = TensorHandle::zeros(&[4, 4], DType::I32).unwrap();
     let ptr = t.data_ptr_i32_mut();
     for i in 0..16 {
-        unsafe { *ptr.add(i) = (i + 1) as i32; }
+        unsafe {
+            *ptr.add(i) = (i + 1) as i32;
+        }
     }
 
     let max = tensor_reduce(&t, None, TensorReduceOp::Max).unwrap();
     let max_val = max.get_scalar_f64().unwrap();
-    assert!((max_val - 16.0).abs() < 1e-5, "Max should be 16, got {}", max_val);
+    assert!(
+        (max_val - 16.0).abs() < 1e-5,
+        "Max should be 16, got {}",
+        max_val
+    );
 
     let min = tensor_reduce(&t, None, TensorReduceOp::Min).unwrap();
     let min_val = min.get_scalar_f64().unwrap();
-    assert!((min_val - 1.0).abs() < 1e-5, "Min should be 1, got {}", min_val);
+    assert!(
+        (min_val - 1.0).abs() < 1e-5,
+        "Min should be 1, got {}",
+        min_val
+    );
 }
 
 #[test]
@@ -637,7 +653,9 @@ fn test_tensor_reduce_i32_mean() {
     let mut t = TensorHandle::zeros(&[4], DType::I32).unwrap();
     let ptr = t.data_ptr_i32_mut();
     for i in 0..4 {
-        unsafe { *ptr.add(i) = (i + 1) as i32; } // 1, 2, 3, 4
+        unsafe {
+            *ptr.add(i) = (i + 1) as i32;
+        } // 1, 2, 3, 4
     }
 
     let mean = tensor_reduce(&t, None, TensorReduceOp::Mean).unwrap();
@@ -728,7 +746,10 @@ fn test_tensor_reduce_integer_all_any() {
     }
     let not_all_result = tensor_reduce(&t_not_all, None, TensorReduceOp::All).unwrap();
     let not_all_val = not_all_result.get_scalar_f64().unwrap();
-    assert!((not_all_val - 0.0).abs() < 1e-5, "All of [1,0,1,1] should be 0");
+    assert!(
+        (not_all_val - 0.0).abs() < 1e-5,
+        "All of [1,0,1,1] should be 0"
+    );
 
     // Test Any
     let any_result = tensor_reduce(&t_not_all, None, TensorReduceOp::Any).unwrap();
@@ -739,7 +760,10 @@ fn test_tensor_reduce_integer_all_any() {
     let t_none = TensorHandle::zeros(&[4], DType::I32).unwrap();
     let none_result = tensor_reduce(&t_none, None, TensorReduceOp::Any).unwrap();
     let none_val = none_result.get_scalar_f64().unwrap();
-    assert!((none_val - 0.0).abs() < 1e-5, "Any of [0,0,0,0] should be 0");
+    assert!(
+        (none_val - 0.0).abs() < 1e-5,
+        "Any of [0,0,0,0] should be 0"
+    );
 }
 
 #[test]
@@ -758,13 +782,22 @@ fn test_tensor_reduce_integer_var_std() {
     let var = tensor_reduce(&t, None, TensorReduceOp::Var).unwrap();
     assert_eq!(var.dtype, DType::F64, "Variance should return F64");
     let var_val = var.get_scalar_f64().unwrap();
-    assert!((var_val - 0.75).abs() < 1e-5, "Expected variance 0.75, got {}", var_val);
+    assert!(
+        (var_val - 0.75).abs() < 1e-5,
+        "Expected variance 0.75, got {}",
+        var_val
+    );
 
     let std = tensor_reduce(&t, None, TensorReduceOp::Std).unwrap();
     assert_eq!(std.dtype, DType::F64, "Std should return F64");
     let std_val = std.get_scalar_f64().unwrap();
     let expected_std = 0.75f64.sqrt();
-    assert!((std_val - expected_std).abs() < 1e-5, "Expected std {}, got {}", expected_std, std_val);
+    assert!(
+        (std_val - expected_std).abs() < 1e-5,
+        "Expected std {}, got {}",
+        expected_std,
+        std_val
+    );
 }
 
 #[test]
@@ -782,7 +815,11 @@ fn test_tensor_reduce_integer_norm() {
     let norm = tensor_reduce(&t, None, TensorReduceOp::Norm).unwrap();
     assert_eq!(norm.dtype, DType::F64, "Norm should return F64");
     let norm_val = norm.get_scalar_f64().unwrap();
-    assert!((norm_val - 5.0).abs() < 1e-5, "Expected norm 5.0, got {}", norm_val);
+    assert!(
+        (norm_val - 5.0).abs() < 1e-5,
+        "Expected norm 5.0, got {}",
+        norm_val
+    );
 }
 
 // ============================================================================
@@ -828,7 +865,11 @@ fn test_tensor_nanmean() {
     // Global nanmean should be (1 + 3 + 5) / 3 = 3
     let result = nanmean_f32_scalar(&t, None, false).unwrap();
     let val = unsafe { *result.data_ptr_f32() };
-    assert!((val - 3.0).abs() < 1e-5, "Expected nanmean 3.0, got {}", val);
+    assert!(
+        (val - 3.0).abs() < 1e-5,
+        "Expected nanmean 3.0, got {}",
+        val
+    );
 }
 
 #[test]
@@ -892,9 +933,15 @@ fn test_tensor_lu_decomposition() {
     let mut a = TensorHandle::zeros(&[3, 3], DType::F64).unwrap();
     let ptr = a.data_ptr_f64_mut();
     unsafe {
-        *ptr.add(0) = 1.0; *ptr.add(1) = 2.0; *ptr.add(2) = 3.0;
-        *ptr.add(3) = 4.0; *ptr.add(4) = 5.0; *ptr.add(5) = 6.0;
-        *ptr.add(6) = 7.0; *ptr.add(7) = 8.0; *ptr.add(8) = 10.0;
+        *ptr.add(0) = 1.0;
+        *ptr.add(1) = 2.0;
+        *ptr.add(2) = 3.0;
+        *ptr.add(3) = 4.0;
+        *ptr.add(4) = 5.0;
+        *ptr.add(5) = 6.0;
+        *ptr.add(6) = 7.0;
+        *ptr.add(7) = 8.0;
+        *ptr.add(8) = 10.0;
     }
 
     let result = lu_f64_scalar(&a);
@@ -928,8 +975,10 @@ fn test_tensor_eig_symmetric() {
     let mut a = TensorHandle::zeros(&[2, 2], DType::F64).unwrap();
     let ptr = a.data_ptr_f64_mut();
     unsafe {
-        *ptr.add(0) = 3.0; *ptr.add(1) = 1.0;
-        *ptr.add(2) = 1.0; *ptr.add(3) = 3.0;
+        *ptr.add(0) = 3.0;
+        *ptr.add(1) = 1.0;
+        *ptr.add(2) = 1.0;
+        *ptr.add(3) = 3.0;
     }
 
     let result = eig_symmetric_f64_jacobi(&a);
@@ -944,8 +993,16 @@ fn test_tensor_eig_symmetric() {
     let ev_ptr = eigenvalues.data_ptr_f64();
     let (ev1, ev2) = unsafe { (*ev_ptr.add(0), *ev_ptr.add(1)) };
     let (min_ev, max_ev) = if ev1 < ev2 { (ev1, ev2) } else { (ev2, ev1) };
-    assert!((min_ev - 2.0).abs() < 1e-5, "Expected eigenvalue 2, got {}", min_ev);
-    assert!((max_ev - 4.0).abs() < 1e-5, "Expected eigenvalue 4, got {}", max_ev);
+    assert!(
+        (min_ev - 2.0).abs() < 1e-5,
+        "Expected eigenvalue 2, got {}",
+        min_ev
+    );
+    assert!(
+        (max_ev - 4.0).abs() < 1e-5,
+        "Expected eigenvalue 4, got {}",
+        max_ev
+    );
 }
 
 #[test]
@@ -959,9 +1016,15 @@ fn test_tensor_rank() {
     let mut a = TensorHandle::zeros(&[3, 3], DType::F64).unwrap();
     let ptr = a.data_ptr_f64_mut();
     unsafe {
-        *ptr.add(0) = 1.0; *ptr.add(1) = 2.0; *ptr.add(2) = 3.0;
-        *ptr.add(3) = 4.0; *ptr.add(4) = 5.0; *ptr.add(5) = 6.0;
-        *ptr.add(6) = 5.0; *ptr.add(7) = 7.0; *ptr.add(8) = 9.0;
+        *ptr.add(0) = 1.0;
+        *ptr.add(1) = 2.0;
+        *ptr.add(2) = 3.0;
+        *ptr.add(3) = 4.0;
+        *ptr.add(4) = 5.0;
+        *ptr.add(5) = 6.0;
+        *ptr.add(6) = 5.0;
+        *ptr.add(7) = 7.0;
+        *ptr.add(8) = 9.0;
     }
 
     // Use a reasonable tolerance for numerical SVD (1e-10 is too strict)
@@ -987,7 +1050,11 @@ fn test_tensor_cond() {
     let cond = cond_f64_scalar(&eye, 2);
     assert!(cond.is_some(), "Condition number should be computed");
     let cond_val = cond.unwrap();
-    assert!((cond_val - 1.0).abs() < 1e-5, "Expected cond(I) = 1, got {}", cond_val);
+    assert!(
+        (cond_val - 1.0).abs() < 1e-5,
+        "Expected cond(I) = 1, got {}",
+        cond_val
+    );
 }
 
 #[test]
@@ -1021,9 +1088,21 @@ fn test_tensor_general_eig() {
         }
     }
     evs.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    assert!((evs[0] - 2.0).abs() < 1e-3, "Expected eigenvalue 2, got {}", evs[0]);
-    assert!((evs[1] - 3.0).abs() < 1e-3, "Expected eigenvalue 3, got {}", evs[1]);
-    assert!((evs[2] - 5.0).abs() < 1e-3, "Expected eigenvalue 5, got {}", evs[2]);
+    assert!(
+        (evs[0] - 2.0).abs() < 1e-3,
+        "Expected eigenvalue 2, got {}",
+        evs[0]
+    );
+    assert!(
+        (evs[1] - 3.0).abs() < 1e-3,
+        "Expected eigenvalue 3, got {}",
+        evs[1]
+    );
+    assert!(
+        (evs[2] - 5.0).abs() < 1e-3,
+        "Expected eigenvalue 5, got {}",
+        evs[2]
+    );
 }
 
 // ============================================================================
@@ -1127,7 +1206,11 @@ fn test_tensor_contract() {
     let r_ptr = dot.data_ptr_f64();
     // Expected: 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
     unsafe {
-        assert!(((*r_ptr) - 32.0).abs() < 1e-10, "Dot product should be 32, got {}", *r_ptr);
+        assert!(
+            ((*r_ptr) - 32.0).abs() < 1e-10,
+            "Dot product should be 32, got {}",
+            *r_ptr
+        );
     }
 
     // Matrix multiplication: contract (2,3) x (3,2) along axis 1 and 0
@@ -1164,10 +1247,22 @@ fn test_tensor_contract() {
     unsafe {
         // Expected: [[1*1+2*2+3*3, 1*4+2*5+3*6], [4*1+5*2+6*3, 4*4+5*5+6*6]]
         //  = [[14, 32], [32, 77]]
-        assert!(((*mm_ptr.add(0)) - 14.0).abs() < 1e-10, "[0,0] should be 14");
-        assert!(((*mm_ptr.add(1)) - 32.0).abs() < 1e-10, "[0,1] should be 32");
-        assert!(((*mm_ptr.add(2)) - 32.0).abs() < 1e-10, "[1,0] should be 32");
-        assert!(((*mm_ptr.add(3)) - 77.0).abs() < 1e-10, "[1,1] should be 77");
+        assert!(
+            ((*mm_ptr.add(0)) - 14.0).abs() < 1e-10,
+            "[0,0] should be 14"
+        );
+        assert!(
+            ((*mm_ptr.add(1)) - 32.0).abs() < 1e-10,
+            "[0,1] should be 32"
+        );
+        assert!(
+            ((*mm_ptr.add(2)) - 32.0).abs() < 1e-10,
+            "[1,0] should be 32"
+        );
+        assert!(
+            ((*mm_ptr.add(3)) - 77.0).abs() < 1e-10,
+            "[1,1] should be 77"
+        );
     }
 }
 
@@ -1192,10 +1287,22 @@ fn test_tensor_matrix_power() {
     let a0 = result0.unwrap();
     let a0_ptr = a0.data_ptr_f64();
     unsafe {
-        assert!(((*a0_ptr.add(0)) - 1.0).abs() < 1e-10, "A^0[0,0] should be 1");
-        assert!(((*a0_ptr.add(1)) - 0.0).abs() < 1e-10, "A^0[0,1] should be 0");
-        assert!(((*a0_ptr.add(2)) - 0.0).abs() < 1e-10, "A^0[1,0] should be 0");
-        assert!(((*a0_ptr.add(3)) - 1.0).abs() < 1e-10, "A^0[1,1] should be 1");
+        assert!(
+            ((*a0_ptr.add(0)) - 1.0).abs() < 1e-10,
+            "A^0[0,0] should be 1"
+        );
+        assert!(
+            ((*a0_ptr.add(1)) - 0.0).abs() < 1e-10,
+            "A^0[0,1] should be 0"
+        );
+        assert!(
+            ((*a0_ptr.add(2)) - 0.0).abs() < 1e-10,
+            "A^0[1,0] should be 0"
+        );
+        assert!(
+            ((*a0_ptr.add(3)) - 1.0).abs() < 1e-10,
+            "A^0[1,1] should be 1"
+        );
     }
 
     // A^3 = [[1, 3], [0, 1]]
@@ -1204,10 +1311,22 @@ fn test_tensor_matrix_power() {
     let a3 = result3.unwrap();
     let a3_ptr = a3.data_ptr_f64();
     unsafe {
-        assert!(((*a3_ptr.add(0)) - 1.0).abs() < 1e-10, "A^3[0,0] should be 1");
-        assert!(((*a3_ptr.add(1)) - 3.0).abs() < 1e-10, "A^3[0,1] should be 3");
-        assert!(((*a3_ptr.add(2)) - 0.0).abs() < 1e-10, "A^3[1,0] should be 0");
-        assert!(((*a3_ptr.add(3)) - 1.0).abs() < 1e-10, "A^3[1,1] should be 1");
+        assert!(
+            ((*a3_ptr.add(0)) - 1.0).abs() < 1e-10,
+            "A^3[0,0] should be 1"
+        );
+        assert!(
+            ((*a3_ptr.add(1)) - 3.0).abs() < 1e-10,
+            "A^3[0,1] should be 3"
+        );
+        assert!(
+            ((*a3_ptr.add(2)) - 0.0).abs() < 1e-10,
+            "A^3[1,0] should be 0"
+        );
+        assert!(
+            ((*a3_ptr.add(3)) - 1.0).abs() < 1e-10,
+            "A^3[1,1] should be 1"
+        );
     }
 }
 
@@ -1236,11 +1355,27 @@ fn test_tensor_matrix_exponential() {
         // Tolerance is ~1% for Padé approximation numerical accuracy
         let e1 = std::f64::consts::E;
         let e2 = e1 * e1;
-        assert!(((*expd_ptr.add(0)) - e1).abs() < 0.1, "exp(D)[0,0] should be e ≈ {}, got {}", e1, *expd_ptr.add(0));
-        assert!(((*expd_ptr.add(3)) - e2).abs() < 0.1, "exp(D)[1,1] should be e^2 ≈ {}, got {}", e2, *expd_ptr.add(3));
+        assert!(
+            ((*expd_ptr.add(0)) - e1).abs() < 0.1,
+            "exp(D)[0,0] should be e ≈ {}, got {}",
+            e1,
+            *expd_ptr.add(0)
+        );
+        assert!(
+            ((*expd_ptr.add(3)) - e2).abs() < 0.1,
+            "exp(D)[1,1] should be e^2 ≈ {}, got {}",
+            e2,
+            *expd_ptr.add(3)
+        );
         // Off-diagonal should be near 0
-        assert!((*expd_ptr.add(1)).abs() < 0.1, "exp(D)[0,1] should be near 0");
-        assert!((*expd_ptr.add(2)).abs() < 0.1, "exp(D)[1,0] should be near 0");
+        assert!(
+            (*expd_ptr.add(1)).abs() < 0.1,
+            "exp(D)[0,1] should be near 0"
+        );
+        assert!(
+            (*expd_ptr.add(2)).abs() < 0.1,
+            "exp(D)[1,0] should be near 0"
+        );
     }
 
     // Test with identity: exp(I) = e*I
@@ -1256,8 +1391,14 @@ fn test_tensor_matrix_exponential() {
     let exp_zero_ptr = exp_zero.data_ptr_f64();
     unsafe {
         // exp(0) = I
-        assert!(((*exp_zero_ptr.add(0)) - 1.0).abs() < 0.01, "exp(0)[0,0] should be 1");
-        assert!(((*exp_zero_ptr.add(3)) - 1.0).abs() < 0.01, "exp(0)[1,1] should be 1");
+        assert!(
+            ((*exp_zero_ptr.add(0)) - 1.0).abs() < 0.01,
+            "exp(0)[0,0] should be 1"
+        );
+        assert!(
+            ((*exp_zero_ptr.add(3)) - 1.0).abs() < 0.01,
+            "exp(0)[1,1] should be 1"
+        );
     }
 }
 
@@ -1276,16 +1417,31 @@ fn test_tensor_matrix_logarithm() {
     }
 
     let result = dispatch_logm(&id);
-    assert!(result.is_some(), "Matrix logarithm should succeed for identity");
+    assert!(
+        result.is_some(),
+        "Matrix logarithm should succeed for identity"
+    );
 
     let logid = result.unwrap();
     let logid_ptr = logid.data_ptr_f64();
     unsafe {
         // log(I) should be close to zero matrix
-        assert!((*logid_ptr.add(0)).abs() < 0.01, "log(I)[0,0] should be near 0");
-        assert!((*logid_ptr.add(1)).abs() < 0.01, "log(I)[0,1] should be near 0");
-        assert!((*logid_ptr.add(2)).abs() < 0.01, "log(I)[1,0] should be near 0");
-        assert!((*logid_ptr.add(3)).abs() < 0.01, "log(I)[1,1] should be near 0");
+        assert!(
+            (*logid_ptr.add(0)).abs() < 0.01,
+            "log(I)[0,0] should be near 0"
+        );
+        assert!(
+            (*logid_ptr.add(1)).abs() < 0.01,
+            "log(I)[0,1] should be near 0"
+        );
+        assert!(
+            (*logid_ptr.add(2)).abs() < 0.01,
+            "log(I)[1,0] should be near 0"
+        );
+        assert!(
+            (*logid_ptr.add(3)).abs() < 0.01,
+            "log(I)[1,1] should be near 0"
+        );
     }
 
     // Test with e*I: log(e*I) = I
@@ -1306,10 +1462,24 @@ fn test_tensor_matrix_logarithm() {
     let logeid_ptr = logeid.data_ptr_f64();
     unsafe {
         // log(e*I) should be approximately I
-        assert!(((*logeid_ptr.add(0)) - 1.0).abs() < 0.1, "log(e*I)[0,0] should be near 1, got {}", *logeid_ptr.add(0));
-        assert!((*logeid_ptr.add(1)).abs() < 0.1, "log(e*I)[0,1] should be near 0");
-        assert!((*logeid_ptr.add(2)).abs() < 0.1, "log(e*I)[1,0] should be near 0");
-        assert!(((*logeid_ptr.add(3)) - 1.0).abs() < 0.1, "log(e*I)[1,1] should be near 1, got {}", *logeid_ptr.add(3));
+        assert!(
+            ((*logeid_ptr.add(0)) - 1.0).abs() < 0.1,
+            "log(e*I)[0,0] should be near 1, got {}",
+            *logeid_ptr.add(0)
+        );
+        assert!(
+            (*logeid_ptr.add(1)).abs() < 0.1,
+            "log(e*I)[0,1] should be near 0"
+        );
+        assert!(
+            (*logeid_ptr.add(2)).abs() < 0.1,
+            "log(e*I)[1,0] should be near 0"
+        );
+        assert!(
+            ((*logeid_ptr.add(3)) - 1.0).abs() < 0.1,
+            "log(e*I)[1,1] should be near 1, got {}",
+            *logeid_ptr.add(3)
+        );
     }
 }
 
@@ -1415,8 +1585,14 @@ fn test_tensor_flash_attention_causal() {
     unsafe {
         // With causal mask:
         // Position 0 can only attend to position 0 -> output is V[0] = [1, 0]
-        assert!(((*o_ptr.add(0)) - 1.0).abs() < 0.01, "Causal pos 0 should be [1, _]");
-        assert!((*o_ptr.add(1)).abs() < 0.01, "Causal pos 0 should be [_, 0]");
+        assert!(
+            ((*o_ptr.add(0)) - 1.0).abs() < 0.01,
+            "Causal pos 0 should be [1, _]"
+        );
+        assert!(
+            (*o_ptr.add(1)).abs() < 0.01,
+            "Causal pos 0 should be [_, 0]"
+        );
 
         // Position 1 can attend to [0, 1] -> weighted average
         // Position 2 can attend to [0, 1, 2] -> weighted average
@@ -1439,7 +1615,10 @@ fn test_tensor_flash_attention_multi_head() {
     let causal = false;
 
     let result = flash_attention(&query, &key, &value, scale, causal);
-    assert!(result.is_some(), "Multi-head flash attention should succeed");
+    assert!(
+        result.is_some(),
+        "Multi-head flash attention should succeed"
+    );
 
     let output = result.unwrap();
     assert_eq!(output.shape[0], 2);
@@ -1451,8 +1630,12 @@ fn test_tensor_flash_attention_multi_head() {
     let o_ptr = output.data_ptr_f32();
     unsafe {
         for i in 0..10 {
-            assert!(((*o_ptr.add(i)) - 0.5).abs() < 0.01,
-                "Uniform attention should output V values, got {} at {}", *o_ptr.add(i), i);
+            assert!(
+                ((*o_ptr.add(i)) - 0.5).abs() < 0.01,
+                "Uniform attention should output V values, got {} at {}",
+                *o_ptr.add(i),
+                i
+            );
         }
     }
 }

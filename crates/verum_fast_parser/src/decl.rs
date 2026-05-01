@@ -76,7 +76,9 @@ impl<'a> RecursiveParser<'a> {
                 match self.parse_stmt() {
                     Ok(stmt) => {
                         script_stmts.push(stmt);
-                        if self.is_aborted() { break; }
+                        if self.is_aborted() {
+                            break;
+                        }
                         continue;
                     }
                     Err(e) => {
@@ -85,7 +87,9 @@ impl<'a> RecursiveParser<'a> {
                         if self.stream.position() == pos_before && !self.stream.at_end() {
                             self.stream.advance();
                         }
-                        if self.is_aborted() { break; }
+                        if self.is_aborted() {
+                            break;
+                        }
                         continue;
                     }
                 }
@@ -104,7 +108,9 @@ impl<'a> RecursiveParser<'a> {
                     if self.script_mode && self.stream.position() == pos_before {
                         if let Ok(stmt) = self.parse_stmt() {
                             script_stmts.push(stmt);
-                            if self.is_aborted() { break; }
+                            if self.is_aborted() {
+                                break;
+                            }
                             continue;
                         }
                     }
@@ -212,10 +218,7 @@ impl<'a> RecursiveParser<'a> {
         first_stmt_span: Span,
     ) -> Item {
         // Span the wrapper across every statement we collected.
-        let last_span = stmts
-            .last()
-            .map(|s| s.span())
-            .unwrap_or(first_stmt_span);
+        let last_span = stmts.last().map(|s| s.span()).unwrap_or(first_stmt_span);
         let span = Span::new(first_stmt_span.start, last_span.end, self.file_id);
 
         // Tail-expression lift: if the final collected statement is an
@@ -224,7 +227,10 @@ impl<'a> RecursiveParser<'a> {
         let mut tail_expr: Maybe<verum_common::Heap<verum_ast::Expr>> = Maybe::None;
         if matches!(
             stmts.last().map(|s| &s.kind),
-            Some(verum_ast::StmtKind::Expr { has_semi: false, .. })
+            Some(verum_ast::StmtKind::Expr {
+                has_semi: false,
+                ..
+            })
         ) {
             if let Some(last) = stmts.pop() {
                 if let verum_ast::StmtKind::Expr { expr, .. } = last.kind {
@@ -389,7 +395,9 @@ impl<'a> RecursiveParser<'a> {
                 // Grammar: function_modifiers = [ 'pure' ] , [ meta_modifier ] , [ 'async' ] , [ 'unsafe' ]
                 // After async, valid tokens are: fn, unsafe, cofix, extern, or context
                 match self.stream.peek_nth(1).map(|t| &t.kind) {
-                    Some(TokenKind::Fn) | Some(TokenKind::Unsafe) | Some(TokenKind::Cofix)
+                    Some(TokenKind::Fn)
+                    | Some(TokenKind::Unsafe)
+                    | Some(TokenKind::Cofix)
                     | Some(TokenKind::Extern) => self.parse_function(attrs, vis),
                     Some(TokenKind::Context) => {
                         // async context Name
@@ -399,7 +407,10 @@ impl<'a> RecursiveParser<'a> {
                     // E034: Duplicate async modifier
                     Some(TokenKind::Async) => {
                         self.stream.advance(); // consume first 'async'
-                        Err(ParseError::duplicate_fn_modifier("async", self.stream.current_span()))
+                        Err(ParseError::duplicate_fn_modifier(
+                            "async",
+                            self.stream.current_span(),
+                        ))
                     }
                     _ => Err(ParseError::invalid_syntax(
                         "expected 'fn', 'unsafe', or 'context' after async keyword",
@@ -505,7 +516,13 @@ impl<'a> RecursiveParser<'a> {
             }
             // `active pattern` syntax: `active pattern Name(params) -> Type = expr;`
             // The `active` keyword prefix is optional syntactic sugar
-            Some(TokenKind::Ident(name)) if name.as_str() == "active" && matches!(self.stream.peek_nth_kind(1), Some(&TokenKind::ActivePattern)) => {
+            Some(TokenKind::Ident(name))
+                if name.as_str() == "active"
+                    && matches!(
+                        self.stream.peek_nth_kind(1),
+                        Some(&TokenKind::ActivePattern)
+                    ) =>
+            {
                 self.stream.advance(); // consume `active`
                 self.parse_pattern_decl(attrs, vis)
             }
@@ -582,27 +599,15 @@ impl<'a> RecursiveParser<'a> {
             }
             Some(TokenKind::Ident(name)) if name.as_str() == "impl" => {
                 let span = self.stream.current_span();
-                Err(ParseError::rust_keyword_used(
-                    "impl",
-                    "implement",
-                    span,
-                ))
+                Err(ParseError::rust_keyword_used("impl", "implement", span))
             }
             Some(TokenKind::Ident(name)) if name.as_str() == "use" => {
                 let span = self.stream.current_span();
-                Err(ParseError::rust_keyword_used(
-                    "use",
-                    "mount",
-                    span,
-                ))
+                Err(ParseError::rust_keyword_used("use", "mount", span))
             }
             Some(TokenKind::Ident(name)) if name.as_str() == "mod" => {
                 let span = self.stream.current_span();
-                Err(ParseError::rust_keyword_used(
-                    "mod",
-                    "module",
-                    span,
-                ))
+                Err(ParseError::rust_keyword_used("mod", "module", span))
             }
             _ => {
                 let span = self.stream.current_span();
@@ -624,7 +629,10 @@ impl<'a> RecursiveParser<'a> {
         let is_pure = self.stream.consume(&TokenKind::Pure).is_some();
         // E034: Check for duplicate pure modifier
         if is_pure && self.stream.check(&TokenKind::Pure) {
-            return Err(ParseError::duplicate_fn_modifier("pure", self.stream.current_span()));
+            return Err(ParseError::duplicate_fn_modifier(
+                "pure",
+                self.stream.current_span(),
+            ));
         }
 
         // Optional meta keyword with optional stage level: meta or meta(N)
@@ -635,7 +643,10 @@ impl<'a> RecursiveParser<'a> {
         let is_async = self.stream.consume(&TokenKind::Async).is_some();
         // E034: Check for duplicate async modifier
         if is_async && self.stream.check(&TokenKind::Async) {
-            return Err(ParseError::duplicate_fn_modifier("async", self.stream.current_span()));
+            return Err(ParseError::duplicate_fn_modifier(
+                "async",
+                self.stream.current_span(),
+            ));
         }
 
         // Optional cofix keyword (coinductive fixpoint)
@@ -646,7 +657,10 @@ impl<'a> RecursiveParser<'a> {
         let is_unsafe = self.stream.consume(&TokenKind::Unsafe).is_some();
         // E034: Check for duplicate unsafe modifier
         if is_unsafe && self.stream.check(&TokenKind::Unsafe) {
-            return Err(ParseError::duplicate_fn_modifier("unsafe", self.stream.current_span()));
+            return Err(ParseError::duplicate_fn_modifier(
+                "unsafe",
+                self.stream.current_span(),
+            ));
         }
 
         // Optional extern keyword with optional ABI
@@ -890,7 +904,10 @@ impl<'a> RecursiveParser<'a> {
                     if name.as_str() == "ghost" {
                         match self.stream.peek_nth_kind(2) {
                             // @ghost ensures/requires/invariant/decreases: skip @ghost prefix
-                            Some(&TokenKind::Ensures) | Some(&TokenKind::Requires) | Some(&TokenKind::Invariant) | Some(&TokenKind::Decreases) => {
+                            Some(&TokenKind::Ensures)
+                            | Some(&TokenKind::Requires)
+                            | Some(&TokenKind::Invariant)
+                            | Some(&TokenKind::Decreases) => {
                                 self.stream.advance(); // consume @
                                 self.stream.advance(); // consume ghost
                                 // Fall through to normal contract clause parsing
@@ -906,9 +923,17 @@ impl<'a> RecursiveParser<'a> {
                                 while depth > 0 {
                                     match self.stream.peek_kind() {
                                         None => break,
-                                        Some(TokenKind::LParen) => { depth += 1; self.stream.advance(); }
-                                        Some(TokenKind::RParen) => { depth -= 1; self.stream.advance(); }
-                                        _ => { self.stream.advance(); }
+                                        Some(TokenKind::LParen) => {
+                                            depth += 1;
+                                            self.stream.advance();
+                                        }
+                                        Some(TokenKind::RParen) => {
+                                            depth -= 1;
+                                            self.stream.advance();
+                                        }
+                                        _ => {
+                                            self.stream.advance();
+                                        }
                                     }
                                 }
                                 continue; // Continue to next contract clause
@@ -951,7 +976,9 @@ impl<'a> RecursiveParser<'a> {
                 }
                 // GRAMMAR: ensures_clause = 'where' , ensures_item , { ',' , ensures_item } ;
                 // Handle `where ensures EXPR` postcondition syntax
-                Some(TokenKind::Where) if self.stream.peek_nth(1).map(|t| &t.kind) == Some(&TokenKind::Ensures) => {
+                Some(TokenKind::Where)
+                    if self.stream.peek_nth(1).map(|t| &t.kind) == Some(&TokenKind::Ensures) =>
+                {
                     self.stream.advance(); // consume 'where'
                     // Now parse one or more ensures items (separated by comma)
                     loop {
@@ -990,7 +1017,9 @@ impl<'a> RecursiveParser<'a> {
                 Maybe::Some(FunctionBody::Block(self.parse_block()?))
             } else if self.stream.consume(&TokenKind::Eq).is_some() {
                 let expr = self.parse_expr()?;
-                if !self.is_block_form_expr_for_fn(&expr) || self.stream.check(&TokenKind::Semicolon) {
+                if !self.is_block_form_expr_for_fn(&expr)
+                    || self.stream.check(&TokenKind::Semicolon)
+                {
                     self.stream.expect(TokenKind::Semicolon)?;
                 }
                 Maybe::Some(FunctionBody::Expr(expr))
@@ -1202,12 +1231,12 @@ impl<'a> RecursiveParser<'a> {
                 visibility: vis,
                 is_async: false,
                 is_meta: false,
-                stage_level: 0,  // FFI functions are always runtime (stage 0)
+                stage_level: 0, // FFI functions are always runtime (stage 0)
                 is_pure: false,
                 is_generator: false,
                 is_cofix: false,
                 is_unsafe: false,
-                is_transparent: false,  // FFI functions cannot be transparent
+                is_transparent: false, // FFI functions cannot be transparent
                 extern_abi: abi.clone().or(Maybe::Some(Text::from("C"))),
                 is_variadic,
                 name: Ident::new(name, name_span),
@@ -1367,7 +1396,9 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse function parameters with variadic support: (x: Int, y: Float) or (x: Int, ...)
     /// Returns (params, is_variadic)
-    pub fn parse_function_params_with_variadic(&mut self) -> ParseResult<(Vec<FunctionParam>, bool)> {
+    pub fn parse_function_params_with_variadic(
+        &mut self,
+    ) -> ParseResult<(Vec<FunctionParam>, bool)> {
         self.stream.expect(TokenKind::LParen)?;
 
         if self.stream.check(&TokenKind::RParen) {
@@ -1540,7 +1571,10 @@ impl<'a> RecursiveParser<'a> {
         if let Some(TokenKind::Integer(_)) = self.stream.peek_kind() {
             // Check if this is a usage annotation (integer followed by self/ident/pattern)
             let next = self.stream.peek_nth(1).map(|t| &t.kind);
-            if matches!(next, Some(TokenKind::SelfValue) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)) {
+            if matches!(
+                next,
+                Some(TokenKind::SelfValue) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)
+            ) {
                 // Consume the usage annotation integer
                 self.stream.advance();
                 // Check for range: 0..1
@@ -1559,9 +1593,7 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.current_span(),
             ));
         }
-        if let Some(TokenKind::Float(_)) | Some(TokenKind::Text(_)) =
-            self.stream.peek_kind()
-        {
+        if let Some(TokenKind::Float(_)) | Some(TokenKind::Text(_)) = self.stream.peek_kind() {
             return Err(ParseError::invalid_fn_param(
                 "expected parameter pattern, found literal",
                 self.stream.current_span(),
@@ -1570,7 +1602,10 @@ impl<'a> RecursiveParser<'a> {
         // Handle `* param: Type` - unrestricted usage annotation
         if self.stream.check(&TokenKind::Star) {
             let next = self.stream.peek_nth(1).map(|t| &t.kind);
-            if matches!(next, Some(TokenKind::SelfValue) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)) {
+            if matches!(
+                next,
+                Some(TokenKind::SelfValue) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)
+            ) {
                 self.stream.advance(); // consume *
                 return self.parse_function_param();
             }
@@ -1737,7 +1772,9 @@ impl<'a> RecursiveParser<'a> {
             if is_negative {
                 return Err(ParseError::with_error_code(
                     ParseErrorKind::InvalidSyntax {
-                        message: "negative context cannot have an alias: `!Context as name` is not valid".into(),
+                        message:
+                            "negative context cannot have an alias: `!Context as name` is not valid"
+                                .into(),
                     },
                     self.stream.make_span(start_pos),
                     ErrorCode::UnexpectedToken,
@@ -1774,7 +1811,11 @@ impl<'a> RecursiveParser<'a> {
     /// Check if current position is named context: `name: Context`
     fn is_named_context(&self) -> bool {
         if let Some(TokenKind::Ident(_)) = self.stream.peek_kind() {
-            if let Some(Token { kind: TokenKind::Colon, .. }) = self.stream.peek_nth(1) {
+            if let Some(Token {
+                kind: TokenKind::Colon,
+                ..
+            }) = self.stream.peek_nth(1)
+            {
                 if let Some(tok) = self.stream.peek_nth(2) {
                     return !matches!(tok.kind, TokenKind::Colon);
                 }
@@ -1877,7 +1918,9 @@ impl<'a> RecursiveParser<'a> {
                 ExprKind::Field {
                     expr: Heap::new(Expr::new(
                         ExprKind::Path(verum_ast::ty::Path::new(
-                            List::from(vec![verum_ast::PathSegment::Name(verum_ast::ty::Ident::new(name.clone(), name_span))]),
+                            List::from(vec![verum_ast::PathSegment::Name(
+                                verum_ast::ty::Ident::new(name.clone(), name_span),
+                            )]),
                             name_span,
                         )),
                         name_span,
@@ -1898,7 +1941,9 @@ impl<'a> RecursiveParser<'a> {
                 ExprKind::Field {
                     expr: Heap::new(Expr::new(
                         ExprKind::Path(verum_ast::ty::Path::new(
-                            List::from(vec![verum_ast::PathSegment::Name(verum_ast::ty::Ident::new(name.clone(), name_span))]),
+                            List::from(vec![verum_ast::PathSegment::Name(
+                                verum_ast::ty::Ident::new(name.clone(), name_span),
+                            )]),
                             name_span,
                         )),
                         name_span,
@@ -1928,7 +1973,9 @@ impl<'a> RecursiveParser<'a> {
         let span = self.stream.make_span(start);
         Ok(Expr::new(
             ExprKind::Path(verum_ast::ty::Path::new(
-                List::from(vec![verum_ast::PathSegment::Name(verum_ast::ty::Ident::new(name, name_span))]),
+                List::from(vec![verum_ast::PathSegment::Name(
+                    verum_ast::ty::Ident::new(name, name_span),
+                )]),
                 name_span,
             )),
             span,
@@ -2027,8 +2074,9 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // E039: Invalid context - using [123]
-            if let Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_)) | Some(TokenKind::Text(_)) =
-                self.stream.peek_kind()
+            if let Some(TokenKind::Integer(_))
+            | Some(TokenKind::Float(_))
+            | Some(TokenKind::Text(_)) = self.stream.peek_kind()
             {
                 return Err(ParseError::invalid_using_clause(
                     "expected context name, found literal",
@@ -2050,8 +2098,9 @@ impl<'a> RecursiveParser<'a> {
             Ok(reqs)
         } else {
             // E039: Invalid context - using 123
-            if let Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_)) | Some(TokenKind::Text(_)) =
-                self.stream.peek_kind()
+            if let Some(TokenKind::Integer(_))
+            | Some(TokenKind::Float(_))
+            | Some(TokenKind::Text(_)) = self.stream.peek_kind()
             {
                 return Err(ParseError::invalid_using_clause(
                     "expected context name, found literal",
@@ -2148,7 +2197,6 @@ impl<'a> RecursiveParser<'a> {
         // Optional dependent type parameters: type Eq<T>(a: T, b: T) is ...
         // These are value-level parameters for indexed/dependent type families
         let _type_params = if self.stream.check(&TokenKind::LParen) {
-            
             self.parse_function_params()?
         } else {
             Vec::new()
@@ -2275,7 +2323,9 @@ impl<'a> RecursiveParser<'a> {
                 // Combine all predicates into one with && if there are multiple
                 let predicate = if predicates.len() == 1 {
                     // SAFETY: len() == 1 guarantees exactly one element
-                    predicates.into_iter().next()
+                    predicates
+                        .into_iter()
+                        .next()
                         .expect("predicates.len() == 1 guarantees one element")
                 } else {
                     use verum_ast::{BinOp, Expr, ExprKind};
@@ -2305,7 +2355,10 @@ impl<'a> RecursiveParser<'a> {
                 let base_type = match &body {
                     TypeDeclBody::Tuple(types) => {
                         let tuple_types: Vec<_> = types.iter().cloned().collect();
-                        Type::new(TypeKind::Tuple(tuple_types.into_iter().collect()), body_span)
+                        Type::new(
+                            TypeKind::Tuple(tuple_types.into_iter().collect()),
+                            body_span,
+                        )
                     }
                     TypeDeclBody::Alias(ty) => ty.clone(),
                     TypeDeclBody::Unit => Type::new(TypeKind::Unit, body_span),
@@ -2321,7 +2374,10 @@ impl<'a> RecursiveParser<'a> {
                         // Record types with value refinements:
                         // type OrderedRange is { start: Int, end: Int } where self.end >= self.start;
                         Type::new(
-                            TypeKind::Record { fields: fields.clone(), row_var: Maybe::None },
+                            TypeKind::Record {
+                                fields: fields.clone(),
+                                row_var: Maybe::None,
+                            },
                             body_span,
                         )
                     }
@@ -2399,7 +2455,10 @@ impl<'a> RecursiveParser<'a> {
         // the trailing semicolon is optional since the body ends with '}'.
         let is_block_form_body = matches!(
             &body,
-            TypeDeclBody::Protocol(_) | TypeDeclBody::Record(_) | TypeDeclBody::Inductive(_) | TypeDeclBody::Coinductive(_)
+            TypeDeclBody::Protocol(_)
+                | TypeDeclBody::Record(_)
+                | TypeDeclBody::Inductive(_)
+                | TypeDeclBody::Coinductive(_)
         );
         if !is_block_form_body || self.stream.check(&TokenKind::Semicolon) {
             self.stream.expect(TokenKind::Semicolon)?;
@@ -2415,12 +2474,18 @@ impl<'a> RecursiveParser<'a> {
                 // Consume trailing semicolon after where clause
                 self.stream.consume(&TokenKind::Semicolon);
 
-                let new_generic_preds: Vec<_> = trailing_where.predicates.iter()
+                let new_generic_preds: Vec<_> = trailing_where
+                    .predicates
+                    .iter()
                     .filter(|p| matches!(p.kind, WherePredicateKind::Type { .. }))
-                    .cloned().collect();
-                let new_meta_preds: Vec<_> = trailing_where.predicates.iter()
+                    .cloned()
+                    .collect();
+                let new_meta_preds: Vec<_> = trailing_where
+                    .predicates
+                    .iter()
                     .filter(|p| matches!(p.kind, WherePredicateKind::Meta { .. }))
-                    .cloned().collect();
+                    .cloned()
+                    .collect();
 
                 let merged_generic = if !new_generic_preds.is_empty() {
                     let new_wc = WhereClause {
@@ -2429,13 +2494,22 @@ impl<'a> RecursiveParser<'a> {
                     };
                     match generic_where {
                         Maybe::Some(existing) => {
-                            let combined: List<_> = existing.predicates.iter()
-                                .chain(new_wc.predicates.iter()).cloned().collect();
-                            Maybe::Some(WhereClause { predicates: combined, span: existing.span.merge(new_wc.span) })
+                            let combined: List<_> = existing
+                                .predicates
+                                .iter()
+                                .chain(new_wc.predicates.iter())
+                                .cloned()
+                                .collect();
+                            Maybe::Some(WhereClause {
+                                predicates: combined,
+                                span: existing.span.merge(new_wc.span),
+                            })
                         }
                         Maybe::None => Maybe::Some(new_wc),
                     }
-                } else { generic_where };
+                } else {
+                    generic_where
+                };
 
                 let merged_meta = if !new_meta_preds.is_empty() {
                     let new_wc = WhereClause {
@@ -2444,13 +2518,22 @@ impl<'a> RecursiveParser<'a> {
                     };
                     match meta_where {
                         Maybe::Some(existing) => {
-                            let combined: List<_> = existing.predicates.iter()
-                                .chain(new_wc.predicates.iter()).cloned().collect();
-                            Maybe::Some(WhereClause { predicates: combined, span: existing.span.merge(new_wc.span) })
+                            let combined: List<_> = existing
+                                .predicates
+                                .iter()
+                                .chain(new_wc.predicates.iter())
+                                .cloned()
+                                .collect();
+                            Maybe::Some(WhereClause {
+                                predicates: combined,
+                                span: existing.span.merge(new_wc.span),
+                            })
                         }
                         Maybe::None => Maybe::Some(new_wc),
                     }
-                } else { meta_where };
+                } else {
+                    meta_where
+                };
 
                 (merged_generic, merged_meta)
             } else {
@@ -2588,7 +2671,10 @@ impl<'a> RecursiveParser<'a> {
         // the trailing semicolon is optional since the body ends with '}'.
         let is_block_form_body = matches!(
             &body,
-            TypeDeclBody::Protocol(_) | TypeDeclBody::Record(_) | TypeDeclBody::Inductive(_) | TypeDeclBody::Coinductive(_)
+            TypeDeclBody::Protocol(_)
+                | TypeDeclBody::Record(_)
+                | TypeDeclBody::Inductive(_)
+                | TypeDeclBody::Coinductive(_)
         );
         if !is_block_form_body || self.stream.check(&TokenKind::Semicolon) {
             self.stream.expect(TokenKind::Semicolon)?;
@@ -2814,7 +2900,9 @@ impl<'a> RecursiveParser<'a> {
 
             // E051: Missing protocol brace - check if 'fn' or 'type' instead of '{'
             if self.stream.check(&TokenKind::Fn) || self.stream.check(&TokenKind::Type) {
-                return Err(ParseError::missing_protocol_brace(self.stream.current_span()));
+                return Err(ParseError::missing_protocol_brace(
+                    self.stream.current_span(),
+                ));
             }
 
             self.stream.expect(TokenKind::LBrace)?;
@@ -2865,7 +2953,8 @@ impl<'a> RecursiveParser<'a> {
         // Also: type Stream<A> is codata { head: A, tail: Stream<A> };
         // Spec: grammar/verum.ebnf - coinductive_def
         // Defined by destructors (observations) for infinite data structures.
-        let is_codata = matches!(self.stream.peek_kind(), Some(TokenKind::Ident(s)) if s == "codata");
+        let is_codata =
+            matches!(self.stream.peek_kind(), Some(TokenKind::Ident(s)) if s == "codata");
         if self.stream.consume(&TokenKind::Coinductive).is_some() || is_codata {
             if is_codata {
                 self.stream.advance(); // consume "codata" identifier
@@ -2877,7 +2966,10 @@ impl<'a> RecursiveParser<'a> {
             // coinductive uses protocol syntax: { fn head(&self) -> T; }
             let checkpoint = self.stream.position();
             let looks_like_record = matches!(
-                (self.stream.peek_kind(), self.stream.peek_nth(1).map(|t| &t.kind)),
+                (
+                    self.stream.peek_kind(),
+                    self.stream.peek_nth(1).map(|t| &t.kind)
+                ),
                 (Some(TokenKind::Ident(_)), Some(TokenKind::Colon))
             );
             self.stream.reset_to(checkpoint);
@@ -2992,16 +3084,24 @@ impl<'a> RecursiveParser<'a> {
                     Some(TokenKind::Ident(_)) => {
                         // Check for named predicate pattern: ident ':'
                         // Or bare field/variable followed by comparison/operator
-                        matches!(self.stream.peek_nth(1).map(|t| &t.kind),
+                        matches!(
+                            self.stream.peek_nth(1).map(|t| &t.kind),
                             Some(TokenKind::Colon)
-                            | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)
-                            | Some(TokenKind::Gt) | Some(TokenKind::Lt)
-                            | Some(TokenKind::EqEq) | Some(TokenKind::BangEq)
-                            | Some(TokenKind::Dot) | Some(TokenKind::LParen)
-                            | Some(TokenKind::Plus) | Some(TokenKind::Minus)
-                            | Some(TokenKind::Star) | Some(TokenKind::Slash)
-                            | Some(TokenKind::Percent)
-                            | Some(TokenKind::AmpersandAmpersand) | Some(TokenKind::PipePipe)
+                                | Some(TokenKind::GtEq)
+                                | Some(TokenKind::LtEq)
+                                | Some(TokenKind::Gt)
+                                | Some(TokenKind::Lt)
+                                | Some(TokenKind::EqEq)
+                                | Some(TokenKind::BangEq)
+                                | Some(TokenKind::Dot)
+                                | Some(TokenKind::LParen)
+                                | Some(TokenKind::Plus)
+                                | Some(TokenKind::Minus)
+                                | Some(TokenKind::Star)
+                                | Some(TokenKind::Slash)
+                                | Some(TokenKind::Percent)
+                                | Some(TokenKind::AmpersandAmpersand)
+                                | Some(TokenKind::PipePipe)
                         )
                     }
                     // Boolean literals as refinements: { true }
@@ -3019,7 +3119,10 @@ impl<'a> RecursiveParser<'a> {
 
                     // Create the base record type
                     let base_type = Type::new(
-                        TypeKind::Record { fields: fields.into_iter().collect(), row_var: Maybe::None },
+                        TypeKind::Record {
+                            fields: fields.into_iter().collect(),
+                            row_var: Maybe::None,
+                        },
                         record_span,
                     );
 
@@ -3057,7 +3160,10 @@ impl<'a> RecursiveParser<'a> {
             // Look ahead to check if this is a dependent pair: (name: Type, ...)
             // If we see Ident followed by Colon, it's a dependent pair
             let is_dependent_pair = matches!(
-                (self.stream.peek_kind(), self.stream.peek_nth(1).map(|t| &t.kind)),
+                (
+                    self.stream.peek_kind(),
+                    self.stream.peek_nth(1).map(|t| &t.kind)
+                ),
                 (Some(TokenKind::Ident(_)), Some(TokenKind::Colon))
             );
 
@@ -3106,7 +3212,10 @@ impl<'a> RecursiveParser<'a> {
                     // Named predicates: { n: n > 0 }
                     Some(TokenKind::Ident(_)) => {
                         // Check for named predicate pattern: ident ':'
-                        matches!(self.stream.peek_nth(1).map(|t| &t.kind), Some(TokenKind::Colon))
+                        matches!(
+                            self.stream.peek_nth(1).map(|t| &t.kind),
+                            Some(TokenKind::Colon)
+                        )
                     }
                     // Boolean literals as refinements: { true }
                     Some(TokenKind::True) | Some(TokenKind::False) => true,
@@ -3122,10 +3231,8 @@ impl<'a> RecursiveParser<'a> {
                     let predicate = self.parse_refinement_predicate()?;
 
                     // Create the base tuple type
-                    let base_type = Type::new(
-                        TypeKind::Tuple(types.into_iter().collect()),
-                        tuple_span,
-                    );
+                    let base_type =
+                        Type::new(TypeKind::Tuple(types.into_iter().collect()), tuple_span);
 
                     // Create the refined type
                     let refined_span = self.stream.make_span(start);
@@ -3276,8 +3383,11 @@ impl<'a> RecursiveParser<'a> {
             let next_after_is = self.stream.peek_nth(1).map(|t| t.kind.clone());
             let looks_like_repr = matches!(
                 next_after_is,
-                Some(TokenKind::LParen) | Some(TokenKind::Ident(_)) | Some(TokenKind::Bang)
-                | Some(TokenKind::LBracket) | Some(TokenKind::Ampersand)
+                Some(TokenKind::LParen)
+                    | Some(TokenKind::Ident(_))
+                    | Some(TokenKind::Bang)
+                    | Some(TokenKind::LBracket)
+                    | Some(TokenKind::Ampersand)
             );
             if looks_like_repr {
                 self.stream.advance(); // consume 'is'
@@ -3327,7 +3437,10 @@ impl<'a> RecursiveParser<'a> {
         let mut i = 0usize;
         loop {
             // Must start with `@`
-            if !matches!(self.stream.peek_nth(i).map(|t| &t.kind), Some(TokenKind::At)) {
+            if !matches!(
+                self.stream.peek_nth(i).map(|t| &t.kind),
+                Some(TokenKind::At)
+            ) {
                 break;
             }
             i += 1;
@@ -3337,7 +3450,10 @@ impl<'a> RecursiveParser<'a> {
             }
             i += 1;
             // Optional `(args)` — balanced-paren skip.
-            if matches!(self.stream.peek_nth(i).map(|t| &t.kind), Some(TokenKind::LParen)) {
+            if matches!(
+                self.stream.peek_nth(i).map(|t| &t.kind),
+                Some(TokenKind::LParen)
+            ) {
                 let mut depth = 1i32;
                 i += 1;
                 while depth > 0 {
@@ -3457,12 +3573,17 @@ impl<'a> RecursiveParser<'a> {
                                 //  or token 5 is an operator like >= < > + - etc.
 
                                 // Check for 'self' keyword at token 4 - indicates refinement
-                                if matches!(self.stream.peek_nth(4).map(|t| &t.kind), Some(TokenKind::SelfValue)) {
+                                if matches!(
+                                    self.stream.peek_nth(4).map(|t| &t.kind),
+                                    Some(TokenKind::SelfValue)
+                                ) {
                                     return false; // Named refinement with 'self'
                                 }
 
                                 // Check for "it" identifier at token 4 - indicates refinement
-                                if let Some(TokenKind::Ident(name)) = self.stream.peek_nth(4).map(|t| &t.kind) {
+                                if let Some(TokenKind::Ident(name)) =
+                                    self.stream.peek_nth(4).map(|t| &t.kind)
+                                {
                                     if name.as_str() == "it" {
                                         return false; // Named refinement with 'it'
                                     }
@@ -3496,11 +3617,17 @@ impl<'a> RecursiveParser<'a> {
                                 if let Some(tok5) = self.stream.peek_nth(5).map(|t| &t.kind) {
                                     match tok5 {
                                         // Always-refinement operators:
-                                        TokenKind::GtEq | TokenKind::LtEq | TokenKind::EqEq |
-                                        TokenKind::BangEq |
-                                        TokenKind::Plus | TokenKind::Minus | TokenKind::Star |
-                                        TokenKind::Slash | TokenKind::Percent |
-                                        TokenKind::AmpersandAmpersand | TokenKind::PipePipe => {
+                                        TokenKind::GtEq
+                                        | TokenKind::LtEq
+                                        | TokenKind::EqEq
+                                        | TokenKind::BangEq
+                                        | TokenKind::Plus
+                                        | TokenKind::Minus
+                                        | TokenKind::Star
+                                        | TokenKind::Slash
+                                        | TokenKind::Percent
+                                        | TokenKind::AmpersandAmpersand
+                                        | TokenKind::PipePipe => {
                                             return false; // Named refinement predicate
                                         }
                                         // Ambiguous — disambiguate on tok6:
@@ -3773,7 +3900,10 @@ impl<'a> RecursiveParser<'a> {
                 }
             }
             let where_span = self.stream.make_span(where_start);
-            Maybe::Some(WhereClause::new(predicates.into_iter().collect(), where_span))
+            Maybe::Some(WhereClause::new(
+                predicates.into_iter().collect(),
+                where_span,
+            ))
         } else {
             Maybe::None
         };
@@ -3786,10 +3916,7 @@ impl<'a> RecursiveParser<'a> {
         // up each). The dim is the max of the lhs / rhs nesting
         // depths plus 1 (since the range itself is one dimension).
         let path_dim: u32 = match &path_endpoints {
-            Maybe::Some((lhs, rhs)) => {
-                
-                path_endpoint_depth(lhs).max(path_endpoint_depth(rhs)) + 1
-            }
+            Maybe::Some((lhs, rhs)) => path_endpoint_depth(lhs).max(path_endpoint_depth(rhs)) + 1,
             Maybe::None => 1,
         };
         Ok(Variant {
@@ -3815,14 +3942,15 @@ impl<'a> RecursiveParser<'a> {
 
         // Check for comparison operator
         let op_kind = match self.stream.peek_kind() {
-            Some(TokenKind::EqEq) | Some(TokenKind::BangEq)
-            | Some(TokenKind::Lt) | Some(TokenKind::Gt)
-            | Some(TokenKind::LtEq) | Some(TokenKind::GtEq) => {
-                match self.stream.peek_kind().cloned() {
-                    Some(kind) => kind,
-                    None => return Ok(lhs),
-                }
-            }
+            Some(TokenKind::EqEq)
+            | Some(TokenKind::BangEq)
+            | Some(TokenKind::Lt)
+            | Some(TokenKind::Gt)
+            | Some(TokenKind::LtEq)
+            | Some(TokenKind::GtEq) => match self.stream.peek_kind().cloned() {
+                Some(kind) => kind,
+                None => return Ok(lhs),
+            },
             _ => return Ok(lhs),
         };
 
@@ -3881,7 +4009,11 @@ impl<'a> RecursiveParser<'a> {
         let is_ghost = if let Some(TokenKind::Ident(name)) = self.stream.peek_kind() {
             if name.as_str() == "ghost" {
                 // Peek ahead to see if this is `ghost name:` (ghost field) or `ghost:` (field named ghost)
-                if let Some(Token { kind: TokenKind::Ident(_), .. }) = self.stream.peek_nth(1) {
+                if let Some(Token {
+                    kind: TokenKind::Ident(_),
+                    ..
+                }) = self.stream.peek_nth(1)
+                {
                     self.stream.advance(); // consume `ghost`
                     true
                 } else {
@@ -4272,12 +4404,16 @@ impl<'a> RecursiveParser<'a> {
 
             // E052: Check for invalid parameter (literal)
             if self.stream.check(&TokenKind::LParen) {
-                if let Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_)) | Some(TokenKind::Text(_)) =
-                    self.stream.peek_nth(1).map(|t| &t.kind)
+                if let Some(TokenKind::Integer(_))
+                | Some(TokenKind::Float(_))
+                | Some(TokenKind::Text(_)) = self.stream.peek_nth(1).map(|t| &t.kind)
                 {
                     return Err(ParseError::invalid_protocol_method(
                         "invalid parameter: expected pattern, found literal",
-                        self.stream.peek_nth(1).map(|t| t.span).unwrap_or(self.stream.current_span()),
+                        self.stream
+                            .peek_nth(1)
+                            .map(|t| t.span)
+                            .unwrap_or(self.stream.current_span()),
                     ));
                 }
             }
@@ -4364,7 +4500,10 @@ impl<'a> RecursiveParser<'a> {
                         ensures.push(expr);
                     }
                     // Handle `where ensures EXPR` postcondition syntax
-                    Some(TokenKind::Where) if self.stream.peek_nth(1).map(|t| &t.kind) == Some(&TokenKind::Ensures) => {
+                    Some(TokenKind::Where)
+                        if self.stream.peek_nth(1).map(|t| &t.kind)
+                            == Some(&TokenKind::Ensures) =>
+                    {
                         self.stream.advance(); // consume 'where'
                         // Parse one or more ensures items (separated by comma)
                         loop {
@@ -4412,7 +4551,7 @@ impl<'a> RecursiveParser<'a> {
                 is_generator,
                 is_cofix: false,
                 is_unsafe,
-                is_transparent: false,  // Protocol methods cannot be transparent
+                is_transparent: false, // Protocol methods cannot be transparent
                 extern_abi: Maybe::None,
                 is_variadic: false,
                 name: Ident::new(name, name_span),
@@ -4523,7 +4662,9 @@ impl<'a> RecursiveParser<'a> {
 
         // E051: Missing protocol brace - check if 'fn' or 'type' instead of '{'
         if self.stream.check(&TokenKind::Fn) || self.stream.check(&TokenKind::Type) {
-            return Err(ParseError::missing_protocol_brace(self.stream.current_span()));
+            return Err(ParseError::missing_protocol_brace(
+                self.stream.current_span(),
+            ));
         }
 
         // Protocol items
@@ -4550,7 +4691,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse an implementation block.
     /// If `is_unsafe` is true, the 'unsafe' keyword has already been consumed.
-    fn parse_impl_with_unsafe(&mut self, attrs: Vec<Attribute>, is_unsafe: bool) -> ParseResult<Item> {
+    fn parse_impl_with_unsafe(
+        &mut self,
+        attrs: Vec<Attribute>,
+        is_unsafe: bool,
+    ) -> ParseResult<Item> {
         let start_pos = self.stream.position();
 
         // Validate impl attributes
@@ -4714,10 +4859,8 @@ impl<'a> RecursiveParser<'a> {
                     }
                     extract_path_segments(&base, &mut segments);
                     segments.push(PathSegment::Name(assoc));
-                    let path = Path::new(
-                        segments.into_iter().collect::<List<_>>(),
-                        first_type.span,
-                    );
+                    let path =
+                        Path::new(segments.into_iter().collect::<List<_>>(), first_type.span);
                     (path, List::new())
                 }
                 _ => {
@@ -4783,14 +4926,23 @@ impl<'a> RecursiveParser<'a> {
 
         // Skip 'default' contextual keyword (used for specialization: `default fn ...`)
         // 'default' is lexed as an identifier, not a keyword
-        if let Some(Token { kind: TokenKind::Ident(name), .. }) = self.stream.peek() {
+        if let Some(Token {
+            kind: TokenKind::Ident(name),
+            ..
+        }) = self.stream.peek()
+        {
             if name.as_str() == "default" {
                 // Check if followed by fn, type, const, async, unsafe, meta, pure
                 let next = self.stream.peek_nth_kind(1);
-                if matches!(next,
-                    Some(&TokenKind::Fn) | Some(&TokenKind::Type) | Some(&TokenKind::Const)
-                    | Some(&TokenKind::Async) | Some(&TokenKind::Unsafe)
-                    | Some(&TokenKind::Meta) | Some(&TokenKind::Pure)
+                if matches!(
+                    next,
+                    Some(&TokenKind::Fn)
+                        | Some(&TokenKind::Type)
+                        | Some(&TokenKind::Const)
+                        | Some(&TokenKind::Async)
+                        | Some(&TokenKind::Unsafe)
+                        | Some(&TokenKind::Meta)
+                        | Some(&TokenKind::Pure)
                 ) {
                     self.stream.advance(); // consume 'default'
                 }
@@ -4854,10 +5006,7 @@ impl<'a> RecursiveParser<'a> {
                     kind: ImplItemKind::Type {
                         name: Ident::new(name, name_span),
                         type_params,
-                        ty: verum_ast::ty::Type::new(
-                            verum_ast::ty::TypeKind::Unit,
-                            span,
-                        ),
+                        ty: verum_ast::ty::Type::new(verum_ast::ty::TypeKind::Unit, span),
                     },
                     span,
                 });
@@ -4942,8 +5091,9 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // E056: Literal instead of name - `fn 123`
-            if let Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_)) | Some(TokenKind::Text(_)) =
-                self.stream.peek_kind()
+            if let Some(TokenKind::Integer(_))
+            | Some(TokenKind::Float(_))
+            | Some(TokenKind::Text(_)) = self.stream.peek_kind()
             {
                 return Err(ParseError::invalid_impl_method(
                     "expected function name, found literal",
@@ -4957,8 +5107,9 @@ impl<'a> RecursiveParser<'a> {
 
             // E056: Missing parentheses - `fn name 123`
             if !self.stream.check(&TokenKind::LParen) && !self.stream.check(&TokenKind::Lt) {
-                if let Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_)) | Some(TokenKind::Text(_)) =
-                    self.stream.peek_kind()
+                if let Some(TokenKind::Integer(_))
+                | Some(TokenKind::Float(_))
+                | Some(TokenKind::Text(_)) = self.stream.peek_kind()
                 {
                     return Err(ParseError::invalid_impl_method(
                         "expected '(' after function name, found literal",
@@ -5318,7 +5469,10 @@ impl<'a> RecursiveParser<'a> {
                             profiles.push(profile);
                         }
                     }
-                    profile_attr = Some(verum_ast::attr::ProfileAttr::new(profiles.into(), attr.span));
+                    profile_attr = Some(verum_ast::attr::ProfileAttr::new(
+                        profiles.into(),
+                        attr.span,
+                    ));
                 }
             } else if attr.name.as_str() == "features" {
                 if let Some(args) = &attr.args {
@@ -5331,7 +5485,10 @@ impl<'a> RecursiveParser<'a> {
                             features.push(ident.name.clone());
                         }
                     }
-                    feature_attr = Some(verum_ast::attr::FeatureAttr::new(features.into(), attr.span));
+                    feature_attr = Some(verum_ast::attr::FeatureAttr::new(
+                        features.into(),
+                        attr.span,
+                    ));
                 }
             } else if attr.name.as_str() == "using" {
                 // Parse @using attribute: @using([Database, Logger]) or @using(Database)
@@ -5662,10 +5819,7 @@ impl<'a> RecursiveParser<'a> {
     /// rather than in the loader so a malformed mount becomes
     /// a parse error with a span that points at the literal
     /// path, not a deeper "module not found" diagnostic.
-    fn parse_file_mount_tree(
-        &mut self,
-        start_pos: usize,
-    ) -> ParseResult<MountTree> {
+    fn parse_file_mount_tree(&mut self, start_pos: usize) -> ParseResult<MountTree> {
         // Parser-time escape check: after the leading `./` /
         // `../` prefix, we track per-segment net depth in the
         // *body*. `..` segments inside the body that would
@@ -6197,7 +6351,10 @@ impl<'a> RecursiveParser<'a> {
 
     /// Also supports attributes on methods:
     /// - `@deprecated("Use X instead") fn old_method() -> T;`
-    fn parse_context_method_with_attrs(&mut self, attrs: Vec<Attribute>) -> ParseResult<FunctionDecl> {
+    fn parse_context_method_with_attrs(
+        &mut self,
+        attrs: Vec<Attribute>,
+    ) -> ParseResult<FunctionDecl> {
         let start_pos = self.stream.position();
 
         // Check for optional async keyword
@@ -6236,12 +6393,16 @@ impl<'a> RecursiveParser<'a> {
 
         // E060: Check for invalid parameter (literal)
         if self.stream.check(&TokenKind::LParen) {
-            if let Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_)) | Some(TokenKind::Text(_)) =
-                self.stream.peek_nth(1).map(|t| &t.kind)
+            if let Some(TokenKind::Integer(_))
+            | Some(TokenKind::Float(_))
+            | Some(TokenKind::Text(_)) = self.stream.peek_nth(1).map(|t| &t.kind)
             {
                 return Err(ParseError::invalid_context_method(
                     "invalid parameter: expected pattern, found literal",
-                    self.stream.peek_nth(1).map(|t| t.span).unwrap_or(self.stream.current_span()),
+                    self.stream
+                        .peek_nth(1)
+                        .map(|t| t.span)
+                        .unwrap_or(self.stream.current_span()),
                 ));
             }
         }
@@ -6281,12 +6442,12 @@ impl<'a> RecursiveParser<'a> {
             visibility: Visibility::Public,
             is_async,
             is_meta: false,
-            stage_level: 0,  // Closure signatures are runtime (stage 0)
+            stage_level: 0, // Closure signatures are runtime (stage 0)
             is_pure: false,
             is_generator: false,
             is_cofix: false,
             is_unsafe: false,
-            is_transparent: false,  // Closures cannot be transparent
+            is_transparent: false, // Closures cannot be transparent
             extern_abi: Maybe::None,
             is_variadic: false,
             name: Ident::new(name, name_span),
@@ -6472,11 +6633,7 @@ impl<'a> RecursiveParser<'a> {
     /// }
     /// layer AppLayer = DatabaseLayer + LoggingLayer;
     /// ```
-    fn parse_layer(
-        &mut self,
-        attrs: Vec<Attribute>,
-        vis: Visibility,
-    ) -> ParseResult<Item> {
+    fn parse_layer(&mut self, attrs: Vec<Attribute>, vis: Visibility) -> ParseResult<Item> {
         let start_pos = self.stream.position();
 
         // Consume 'layer' keyword
@@ -7644,7 +7801,10 @@ impl<'a> RecursiveParser<'a> {
         } else if self.stream.check(&TokenKind::Internal) {
             // Check if 'internal' is followed by ':' - if so, it's a field name, not visibility
             // e.g., `internal: Int` is a field named 'internal', not visibility + field
-            if matches!(self.stream.peek_nth(1).map(|t| &t.kind), Some(TokenKind::Colon)) {
+            if matches!(
+                self.stream.peek_nth(1).map(|t| &t.kind),
+                Some(TokenKind::Colon)
+            ) {
                 return Ok(Visibility::Private);
             }
             self.stream.advance();
@@ -7652,7 +7812,10 @@ impl<'a> RecursiveParser<'a> {
         } else if self.stream.check(&TokenKind::Protected) {
             // Check if 'protected' is followed by ':' - if so, it's a field name, not visibility
             // e.g., `protected: Int` is a field named 'protected', not visibility + field
-            if matches!(self.stream.peek_nth(1).map(|t| &t.kind), Some(TokenKind::Colon)) {
+            if matches!(
+                self.stream.peek_nth(1).map(|t| &t.kind),
+                Some(TokenKind::Colon)
+            ) {
                 return Ok(Visibility::Private);
             }
             self.stream.advance();
@@ -7935,7 +8098,13 @@ impl<'a> RecursiveParser<'a> {
                 // We need to put them back somehow... but that's complex.
                 // Instead, let's restructure: if there's no second (), it's just params
                 return self.finish_pattern_decl_simple(
-                    attrs, vis, name, name_span, generics, first_params.into_iter().collect(), start_pos,
+                    attrs,
+                    vis,
+                    name,
+                    name_span,
+                    generics,
+                    first_params.into_iter().collect(),
+                    start_pos,
                 );
             }
         } else {
@@ -7945,7 +8114,15 @@ impl<'a> RecursiveParser<'a> {
         // Pattern parameters (the value(s) being matched against)
         let params = self.parse_function_params()?;
 
-        self.finish_pattern_decl_simple(attrs, vis, name, name_span, generics, params.into_iter().collect(), start_pos)
+        self.finish_pattern_decl_simple(
+            attrs,
+            vis,
+            name,
+            name_span,
+            generics,
+            params.into_iter().collect(),
+            start_pos,
+        )
     }
 
     /// Finish parsing a pattern declaration after parameters are parsed.
@@ -7971,13 +8148,8 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::Semicolon)?;
 
         let span = self.stream.make_span(start_pos);
-        let mut decl = PatternDecl::new(
-            Ident::new(name, name_span),
-            params,
-            return_type,
-            body,
-            span,
-        );
+        let mut decl =
+            PatternDecl::new(Ident::new(name, name_span), params, return_type, body, span);
         decl.generics = generics;
         decl.visibility = vis;
         decl.attributes = attrs.into_iter().collect();
@@ -8035,13 +8207,16 @@ fn path_endpoint_depth(expr: &verum_ast::Expr) -> u32 {
 #[cfg(test)]
 mod path_endpoint_depth_tests {
     use super::path_endpoint_depth;
-    use verum_ast::{Expr, ExprKind, Path};
     use verum_ast::span::Span;
+    use verum_ast::{Expr, ExprKind, Path};
     use verum_common::{Heap, Maybe};
 
     fn var(name: &str) -> Expr {
         let span = Span::default();
-        Expr::path(Path::single(verum_ast::Ident::new(verum_common::Text::from(name), span)))
+        Expr::path(Path::single(verum_ast::Ident::new(
+            verum_common::Text::from(name),
+            span,
+        )))
     }
 
     fn range(lhs: Expr, rhs: Expr) -> Expr {

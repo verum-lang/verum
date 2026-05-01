@@ -21,9 +21,9 @@
 // operator precedence, and delimiter handling per the Verum lexical grammar.
 
 use verum_ast::span::FileId;
-use verum_lexer::{Lexer, Token, TokenKind};
-use verum_common::Text;
 use verum_common::Maybe;
+use verum_common::Text;
+use verum_lexer::{Lexer, Token, TokenKind};
 
 fn lex(source: &str) -> Vec<TokenKind> {
     let file_id = FileId::new(0);
@@ -101,32 +101,22 @@ fn test_composite_tagged_literals() {
 
     // Interval notation
     let tokens = lex_tokens(r#"interval#"[0, 100)""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "interval")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "interval"));
 
     // Mathematical expressions
     let tokens = lex_tokens(r#"mat#"[[1, 2], [3, 4]]""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "mat")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "mat"));
 
     let tokens = lex_tokens(r#"vec#"<1, 2, 3>""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "vec")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "vec"));
 
     // Chemical formulas
     let tokens = lex_tokens(r#"chem#"H2O""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "chem")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "chem"));
 
     // Musical notation
     let tokens = lex_tokens(r#"music#"Cmaj7""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "music")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "music"));
 }
 
 #[test]
@@ -135,44 +125,28 @@ fn test_semantic_tagged_literals() {
     // Tags: gql, rx, sql, url, email, json, xml, yaml (semantic_tag in grammar)
 
     let tokens = lex_tokens(r#"gql#"query { user { name } }""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "gql")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "gql"));
 
     let tokens = lex_tokens(r#"rx#"^[a-z]+$""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "rx")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "rx"));
 
     let tokens = lex_tokens(r#"sql#"SELECT * FROM users""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "sql")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "sql"));
 
     let tokens = lex_tokens(r#"url#"https://example.com""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "url")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "url"));
 
     let tokens = lex_tokens(r#"email#"user@example.com""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "email")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "email"));
 
     let tokens = lex_tokens(r#"json#"{"key": "value"}""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "json")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "json"));
 
     let tokens = lex_tokens(r#"xml#"<root><item/></root>""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "xml")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "xml"));
 
     let tokens = lex_tokens(r#"yaml#"key: value""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "yaml")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::TaggedLiteral(data) if data.tag == "yaml"));
 }
 
 #[test]
@@ -201,9 +175,7 @@ fn test_safe_interpolated_strings() {
 
     // SQL with safe interpolation
     let tokens = lex_tokens(r#"sql"SELECT * FROM users WHERE id = {user_id}""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::InterpolatedString(data) if data.prefix == "sql")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::InterpolatedString(data) if data.prefix == "sql"));
 
     // HTML with auto-escaping
     let tokens = lex_tokens(r#"html"<h1>{title}</h1>""#);
@@ -213,21 +185,15 @@ fn test_safe_interpolated_strings() {
 
     // URL with safe encoding
     let tokens = lex_tokens(r#"url"https://api.example.com/users?name={user_name}""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::InterpolatedString(data) if data.prefix == "url")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::InterpolatedString(data) if data.prefix == "url"));
 
     // GraphQL with interpolation
     let tokens = lex_tokens(r#"gql"query { user(id: {user_id}) { name } }""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::InterpolatedString(data) if data.prefix == "gql")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::InterpolatedString(data) if data.prefix == "gql"));
 
     // Format string
     let tokens = lex_tokens(r#"f"Hello {name}, you are {age} years old""#);
-    assert!(
-        matches!(&tokens[0].kind, TokenKind::InterpolatedString(data) if data.prefix == "f")
-    );
+    assert!(matches!(&tokens[0].kind, TokenKind::InterpolatedString(data) if data.prefix == "f"));
 }
 
 #[test]

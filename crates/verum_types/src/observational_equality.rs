@@ -117,7 +117,10 @@ impl OttValue {
         Self::Pair(Box::new(a), Box::new(b))
     }
 
-    pub fn function(name: impl Into<Text>, samples: impl IntoIterator<Item = (OttValue, OttValue)>) -> Self {
+    pub fn function(
+        name: impl Into<Text>,
+        samples: impl IntoIterator<Item = (OttValue, OttValue)>,
+    ) -> Self {
         Self::Function {
             name: name.into(),
             samples: samples.into_iter().collect(),
@@ -198,20 +201,16 @@ pub fn equal_at(ty: &OttType, lhs: &OttValue, rhs: &OttValue) -> EqResult {
         (
             OttType::Function(_, ret_ty),
             OttValue::Function {
-                samples: l_samples,
-                ..
+                samples: l_samples, ..
             },
             OttValue::Function {
-                samples: r_samples,
-                ..
+                samples: r_samples, ..
             },
         ) => {
             // Funext via finite sampling. Two functions are equal
             // iff every sampled input yields the same output.
             let mut goals = List::new();
-            for ((l_in, l_out), (r_in, r_out)) in
-                l_samples.iter().zip(r_samples.iter())
-            {
+            for ((l_in, l_out), (r_in, r_out)) in l_samples.iter().zip(r_samples.iter()) {
                 if l_in != r_in {
                     return EqResult::Stuck;
                 }
@@ -278,7 +277,11 @@ mod tests {
     #[test]
     fn bool_true_equals_true() {
         assert_eq!(
-            equal_at(&OttType::Bool, &OttValue::BoolLit(true), &OttValue::BoolLit(true)),
+            equal_at(
+                &OttType::Bool,
+                &OttValue::BoolLit(true),
+                &OttValue::BoolLit(true)
+            ),
             EqResult::True
         );
     }
@@ -286,7 +289,11 @@ mod tests {
     #[test]
     fn bool_true_does_not_equal_false() {
         assert_eq!(
-            equal_at(&OttType::Bool, &OttValue::BoolLit(true), &OttValue::BoolLit(false)),
+            equal_at(
+                &OttType::Bool,
+                &OttValue::BoolLit(true),
+                &OttValue::BoolLit(false)
+            ),
             EqResult::False
         );
     }
@@ -367,28 +374,16 @@ mod tests {
     #[test]
     fn function_funext_disagrees_on_one_input() {
         let ty = OttType::function(OttType::Nat, OttType::Bool);
-        let f = OttValue::function(
-            "f",
-            [(OttValue::NatLit(0), OttValue::BoolLit(true))],
-        );
-        let g = OttValue::function(
-            "g",
-            [(OttValue::NatLit(0), OttValue::BoolLit(false))],
-        );
+        let f = OttValue::function("f", [(OttValue::NatLit(0), OttValue::BoolLit(true))]);
+        let g = OttValue::function("g", [(OttValue::NatLit(0), OttValue::BoolLit(false))]);
         assert_eq!(decide(&ty, &f, &g), EqResult::False);
     }
 
     #[test]
     fn function_with_different_inputs_is_stuck() {
         let ty = OttType::function(OttType::Nat, OttType::Bool);
-        let f = OttValue::function(
-            "f",
-            [(OttValue::NatLit(0), OttValue::BoolLit(true))],
-        );
-        let g = OttValue::function(
-            "g",
-            [(OttValue::NatLit(99), OttValue::BoolLit(true))],
-        );
+        let f = OttValue::function("f", [(OttValue::NatLit(0), OttValue::BoolLit(true))]);
+        let g = OttValue::function("g", [(OttValue::NatLit(99), OttValue::BoolLit(true))]);
         // Different sample sets — finitary funext can't decide.
         assert_eq!(decide(&ty, &f, &g), EqResult::Stuck);
     }
@@ -396,10 +391,7 @@ mod tests {
     #[test]
     fn function_with_different_sample_lengths_is_stuck() {
         let ty = OttType::function(OttType::Nat, OttType::Bool);
-        let f = OttValue::function(
-            "f",
-            [(OttValue::NatLit(0), OttValue::BoolLit(true))],
-        );
+        let f = OttValue::function("f", [(OttValue::NatLit(0), OttValue::BoolLit(true))]);
         let g = OttValue::function(
             "g",
             [
@@ -435,10 +427,7 @@ mod tests {
 
     #[test]
     fn nested_product_recursively_decided() {
-        let ty = OttType::product(
-            OttType::product(OttType::Bool, OttType::Nat),
-            OttType::Unit,
-        );
+        let ty = OttType::product(OttType::product(OttType::Bool, OttType::Nat), OttType::Unit);
         let lhs = OttValue::pair(
             OttValue::pair(OttValue::BoolLit(true), OttValue::NatLit(3)),
             OttValue::UnitLit,
@@ -449,10 +438,7 @@ mod tests {
 
     #[test]
     fn nested_product_one_deep_difference_yields_false() {
-        let ty = OttType::product(
-            OttType::product(OttType::Bool, OttType::Nat),
-            OttType::Unit,
-        );
+        let ty = OttType::product(OttType::product(OttType::Bool, OttType::Nat), OttType::Unit);
         let lhs = OttValue::pair(
             OttValue::pair(OttValue::BoolLit(true), OttValue::NatLit(3)),
             OttValue::UnitLit,

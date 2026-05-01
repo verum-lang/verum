@@ -431,8 +431,16 @@ fn test_function_with_context_requirements() {
     let dummy_span = Span::dummy();
 
     let contexts = vec![
-        ContextRequirement::simple(Path::single(Ident::new("Database", dummy_span)), List::new(), dummy_span),
-        ContextRequirement::simple(Path::single(Ident::new("Logger", dummy_span)), List::new(), dummy_span),
+        ContextRequirement::simple(
+            Path::single(Ident::new("Database", dummy_span)),
+            List::new(),
+            dummy_span,
+        ),
+        ContextRequirement::simple(
+            Path::single(Ident::new("Logger", dummy_span)),
+            List::new(),
+            dummy_span,
+        ),
     ];
 
     let func = FunctionDecl {
@@ -476,8 +484,16 @@ fn test_complete_function_declaration() {
     let dummy_span = Span::dummy();
 
     let contexts = vec![
-        ContextRequirement::simple(Path::single(Ident::new("Database", dummy_span)), List::new(), dummy_span),
-        ContextRequirement::simple(Path::single(Ident::new("Logger", dummy_span)), List::new(), dummy_span),
+        ContextRequirement::simple(
+            Path::single(Ident::new("Database", dummy_span)),
+            List::new(),
+            dummy_span,
+        ),
+        ContextRequirement::simple(
+            Path::single(Ident::new("Logger", dummy_span)),
+            List::new(),
+            dummy_span,
+        ),
     ];
 
     let generic_where = WhereClause::new(

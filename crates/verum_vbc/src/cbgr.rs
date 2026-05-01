@@ -148,7 +148,9 @@ impl DereferenceCodegen {
     #[must_use]
     pub fn with_values(self, generation: u32, epoch: u16) -> Self {
         match self {
-            Self::InlineCbgrCheck { panic_on_failure, .. } => Self::InlineCbgrCheck {
+            Self::InlineCbgrCheck {
+                panic_on_failure, ..
+            } => Self::InlineCbgrCheck {
                 expected_generation: generation,
                 expected_epoch: epoch,
                 panic_on_failure,
@@ -277,7 +279,8 @@ impl CapabilityCheckCodegen {
     #[must_use]
     pub fn write_check() -> Self {
         Self::InlineCheck {
-            required_caps: RequiredCapability::Read.bit_mask() | RequiredCapability::Write.bit_mask(),
+            required_caps: RequiredCapability::Read.bit_mask()
+                | RequiredCapability::Write.bit_mask(),
             panic_on_failure: true,
         }
     }
@@ -504,7 +507,12 @@ mod tests {
         let filled = pending.with_values(42, 1);
         assert!(!filled.is_pending());
 
-        if let DereferenceCodegen::InlineCbgrCheck { expected_generation, expected_epoch, .. } = filled {
+        if let DereferenceCodegen::InlineCbgrCheck {
+            expected_generation,
+            expected_epoch,
+            ..
+        } = filled
+        {
             assert_eq!(expected_generation, 42);
             assert_eq!(expected_epoch, 1);
         } else {

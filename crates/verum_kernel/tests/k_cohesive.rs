@@ -17,11 +17,11 @@
 //!  ModalBox / ModalDiamond do.
 
 use verum_common::{Heap, Text};
+use verum_kernel::depth::{OrdinalDepth, m_depth_omega};
 use verum_kernel::{
-    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelError, UniverseLevel,
-    definitional_eq, infer, normalize,
+    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelError, UniverseLevel, definitional_eq,
+    infer, normalize,
 };
-use verum_kernel::depth::{m_depth_omega, OrdinalDepth};
 
 fn empty() -> (Context, AxiomRegistry) {
     (Context::new(), AxiomRegistry::new())
@@ -40,7 +40,8 @@ fn nat_axiom_ty() -> (CoreTerm, AxiomRegistry) {
         citation: Text::from("test"),
     };
     let ty = CoreTerm::Universe(UniverseLevel::Concrete(0));
-    reg.register(Text::from("Nat"), ty.clone(), fw.clone()).expect("Nat");
+    reg.register(Text::from("Nat"), ty.clone(), fw.clone())
+        .expect("Nat");
     let nat_ref = CoreTerm::Axiom {
         name: Text::from("Nat"),
         ty: Heap::new(ty),
@@ -63,9 +64,7 @@ fn shape_of_type_inhabits_same_universe() {
 
 #[test]
 fn shape_at_higher_universe_preserves_level() {
-    let term = CoreTerm::Shape(Heap::new(CoreTerm::Universe(
-        UniverseLevel::Concrete(2),
-    )));
+    let term = CoreTerm::Shape(Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(2))));
     let (_, reg) = empty();
     let ty = infer(&Context::new(), &term, &reg).expect("∫Type_2 typed");
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(3)));
@@ -118,9 +117,7 @@ fn sharp_of_type_inhabits_same_universe() {
 
 #[test]
 fn sharp_at_universe_2_lifts_to_3() {
-    let term = CoreTerm::Sharp(Heap::new(CoreTerm::Universe(
-        UniverseLevel::Concrete(2),
-    )));
+    let term = CoreTerm::Sharp(Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(2))));
     let (_, reg) = empty();
     let ty = infer(&Context::new(), &term, &reg).expect("♯Type_2 typed");
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(3)));
@@ -171,9 +168,9 @@ fn modal_depth_omega_sharp_increments_by_one() {
 #[test]
 fn nested_modalities_accumulate_depth() {
     // ♭(∫(♯ x)) — three modalities → depth 3.
-    let term = CoreTerm::Flat(Heap::new(CoreTerm::Shape(Heap::new(
-        CoreTerm::Sharp(Heap::new(CoreTerm::Var(Text::from("x")))),
-    ))));
+    let term = CoreTerm::Flat(Heap::new(CoreTerm::Shape(Heap::new(CoreTerm::Sharp(
+        Heap::new(CoreTerm::Var(Text::from("x"))),
+    )))));
     assert_eq!(m_depth_omega(&term), OrdinalDepth::finite(3));
 }
 
@@ -225,9 +222,7 @@ fn kernel_does_not_internally_collapse_flat_shape() {
     // kernel doesn't accidentally bake in a specific cohesive
     // model (cubical vs. simplicial vs. orbispace).
     let (nat_ref, _) = nat_axiom_ty();
-    let lhs = CoreTerm::Flat(Heap::new(CoreTerm::Shape(Heap::new(
-        nat_ref.clone(),
-    ))));
+    let lhs = CoreTerm::Flat(Heap::new(CoreTerm::Shape(Heap::new(nat_ref.clone()))));
     let rhs = nat_ref;
     assert!(!definitional_eq(&lhs, &rhs));
 }

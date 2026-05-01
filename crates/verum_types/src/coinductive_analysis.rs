@@ -73,9 +73,7 @@ pub enum ProductivityResult {
     /// All recursive calls are guarded — definition is productive.
     Productive,
     /// At least one recursive call is unguarded.
-    NonProductive {
-        unguarded_calls: List<Text>,
-    },
+    NonProductive { unguarded_calls: List<Text> },
 }
 
 impl ProductivityResult {
@@ -193,7 +191,9 @@ pub fn bisimilar_up_to(
         }
     }
 
-    BisimulationResult::Bisimilar { observed_depth: l.len() }
+    BisimulationResult::Bisimilar {
+        observed_depth: l.len(),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -395,10 +395,8 @@ mod tests {
     #[test]
     fn truncated_trace_yields_truncated_divergence() {
         let l = ObservationTrace::from_iter([Observation::new("a", "1")]);
-        let r = ObservationTrace::from_iter([
-            Observation::new("a", "1"),
-            Observation::new("b", "2"),
-        ]);
+        let r =
+            ObservationTrace::from_iter([Observation::new("a", "1"), Observation::new("b", "2")]);
         let result = bisimilar_up_to(&l, &r, 5);
         match result {
             BisimulationResult::Distinct { reason, .. } => {
@@ -424,10 +422,12 @@ mod tests {
     #[test]
     fn productivity_result_is_productive_method() {
         assert!(ProductivityResult::Productive.is_productive());
-        assert!(!ProductivityResult::NonProductive {
-            unguarded_calls: List::new(),
-        }
-        .is_productive());
+        assert!(
+            !ProductivityResult::NonProductive {
+                unguarded_calls: List::new(),
+            }
+            .is_productive()
+        );
     }
 
     #[test]

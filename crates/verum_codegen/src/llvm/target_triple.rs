@@ -50,7 +50,12 @@ pub fn target_is_linux(module: &Module<'_>) -> bool {
 pub fn target_is_darwin(module: &Module<'_>) -> bool {
     let s = module.get_triple();
     let t = s.as_str().to_string_lossy();
-    t.contains("darwin") || t.contains("apple") || t.contains("macos") || t.contains("ios") || t.contains("tvos") || t.contains("watchos")
+    t.contains("darwin")
+        || t.contains("apple")
+        || t.contains("macos")
+        || t.contains("ios")
+        || t.contains("tvos")
+        || t.contains("watchos")
 }
 
 /// Returns `true` when the LLVM module's target triple denotes Windows.

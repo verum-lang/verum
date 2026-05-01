@@ -193,10 +193,7 @@ pub fn build_epi_mono_factorisation(c: &InfinityCategory) -> FactorisationSystem
 
 /// Build the n-truncation factorisation system on an ∞-category
 /// (HTT 5.2.8.16): `(n-connected, n-truncated)`.
-pub fn build_n_truncation_factorisation(
-    c: &InfinityCategory,
-    n: Ordinal,
-) -> FactorisationSystem {
+pub fn build_n_truncation_factorisation(c: &InfinityCategory, n: Ordinal) -> FactorisationSystem {
     FactorisationSystem {
         name: Text::from(format!(
             "({}-connected, {}-truncated)_{}",
@@ -322,8 +319,10 @@ mod tests {
         let c = sample_c();
         let mut fs = build_epi_mono_factorisation(&c);
         fs.admits_factorisation = false;
-        assert!(factorise(&fs, "f", "X", "Y").is_none(),
-            "Pathological system must reject factorise");
+        assert!(
+            factorise(&fs, "f", "X", "Y").is_none(),
+            "Pathological system must reject factorise"
+        );
     }
 
     #[test]
@@ -360,10 +359,7 @@ mod tests {
     fn msfs_beta_step_5_epi_mono_factorisation() {
         // §6 β-part Step 5 admits via msfs_epi_mono_factorisation.
         // Promotion: invoke directly via build_epi_mono_factorisation.
-        let s_s = InfinityCategory::at_canonical_universe(
-            "S_S^global",
-            Ordinal::Finite(1),
-        );
+        let s_s = InfinityCategory::at_canonical_universe("S_S^global", Ordinal::Finite(1));
         let fs = build_epi_mono_factorisation(&s_s);
         assert!(fs.is_coherent());
         let fact = factorise(&fs, "syn_witness", "Syn(F)", "S_S^global").unwrap();

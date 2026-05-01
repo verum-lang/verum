@@ -70,10 +70,7 @@ pub fn solve_universe_constraints(
 
 /// Check whether a single constraint is satisfiable under the given
 /// substitution.
-pub fn check_constraint(
-    constraint: &UniverseConstraint,
-    subst: &UniverseSubstitution,
-) -> bool {
+pub fn check_constraint(constraint: &UniverseConstraint, subst: &UniverseSubstitution) -> bool {
     constraint.is_satisfied(subst)
 }
 
@@ -112,23 +109,19 @@ mod tests {
 
     #[test]
     fn test_solve_cumulativity() {
-        let result = solve_universe_constraints(&[
-            UniverseConstraint::StrictlyLess(
-                UniverseLevel::concrete(0),
-                UniverseLevel::concrete(1),
-            ),
-        ]);
+        let result = solve_universe_constraints(&[UniverseConstraint::StrictlyLess(
+            UniverseLevel::concrete(0),
+            UniverseLevel::concrete(1),
+        )]);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_solve_cycle_detection() {
-        let result = solve_universe_constraints(&[
-            UniverseConstraint::StrictlyLess(
-                UniverseLevel::concrete(1),
-                UniverseLevel::concrete(0),
-            ),
-        ]);
+        let result = solve_universe_constraints(&[UniverseConstraint::StrictlyLess(
+            UniverseLevel::concrete(1),
+            UniverseLevel::concrete(0),
+        )]);
         // 1 < 0 is unsatisfiable
         // (The solver may or may not detect this as an error depending
         // on implementation; the key is it doesn't loop forever.)
@@ -138,10 +131,8 @@ mod tests {
     #[test]
     fn test_check_constraint_satisfied() {
         let subst = UniverseSubstitution::new();
-        let c = UniverseConstraint::LessOrEqual(
-            UniverseLevel::concrete(0),
-            UniverseLevel::concrete(1),
-        );
+        let c =
+            UniverseConstraint::LessOrEqual(UniverseLevel::concrete(0), UniverseLevel::concrete(1));
         assert!(check_constraint(&c, &subst));
     }
 

@@ -86,9 +86,7 @@ pub fn execute(
 
     // Tier 1 (AOT) builds first then exec's the binary.
     match compilation_tier {
-        CompilationTier::Interpreter => {
-            run_vbc_interpreted(&manifest_dir, mode, &bin_name, &args)
-        }
+        CompilationTier::Interpreter => run_vbc_interpreted(&manifest_dir, mode, &bin_name, &args),
         CompilationTier::Aot => {
             // Build first (only the AOT path needs a binary on disk).
             super::build::execute(
@@ -96,25 +94,25 @@ pub fn execute(
                 None, // refs
                 None, // verify
                 release,
-                None,  // target
-                None,  // jobs
-                false, // keep_temps
-                false, // all_features
-                false, // no_default_features
-                None,  // features
-                false, // timings
-                None,  // lto
-                false, // static_link
-                false, // strip
-                false, // strip_debug
-                false, // emit_asm
-                false, // emit_llvm
-                false, // emit_bc
-                false, // emit_types
-                false, // emit_vbc
-                None,  // windows_subsystem_cli
-                false, // deny_warnings
-                false, // strict_intrinsics
+                None,       // target
+                None,       // jobs
+                false,      // keep_temps
+                false,      // all_features
+                false,      // no_default_features
+                None,       // features
+                false,      // timings
+                None,       // lto
+                false,      // static_link
+                false,      // strip
+                false,      // strip_debug
+                false,      // emit_asm
+                false,      // emit_llvm
+                false,      // emit_bc
+                false,      // emit_types
+                false,      // emit_vbc
+                None,       // windows_subsystem_cli
+                false,      // deny_warnings
+                false,      // strict_intrinsics
                 Vec::new(), // deny_lint
                 Vec::new(), // warn_lint
                 Vec::new(), // allow_lint
@@ -216,12 +214,7 @@ fn run_vbc_interpreted(
 }
 
 /// Run native executable (Tier 1: AOT)
-fn run_native(
-    manifest_dir: &PathBuf,
-    mode: &str,
-    bin_name: &Text,
-    args: &[Text],
-) -> Result<()> {
+fn run_native(manifest_dir: &PathBuf, mode: &str, bin_name: &Text, args: &[Text]) -> Result<()> {
     let exe_path = manifest_dir
         .join("target")
         .join(mode)

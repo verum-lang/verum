@@ -37,13 +37,13 @@
 //! Any change to these layouts must update BOTH this module AND the
 //! `memory_collections` GetE/SetE handlers in lockstep.
 
+use super::super::super::error::InterpreterResult;
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+use super::string_helpers::extract_string;
 use crate::interpreter::heap;
 use crate::interpreter::state::InterpreterState;
 use crate::types::TypeId;
 use crate::value::Value;
-use super::super::super::error::InterpreterResult;
-use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
-use super::string_helpers::extract_string;
 
 // ============================================================================
 // TypeId resolution
@@ -90,7 +90,9 @@ pub(super) fn alloc_record_n_fields(
     state.record_allocation();
     let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
     for (i, v) in fields.iter().enumerate() {
-        unsafe { *data_ptr.add(i) = *v; }
+        unsafe {
+            *data_ptr.add(i) = *v;
+        }
     }
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
@@ -136,7 +138,10 @@ pub(super) fn wrap_in_variant(
 /// shape from `method_dispatch::handle_call_method`'s empty-List
 /// path so script-side `bytes[i]` reads the actual byte rather than
 /// header bits.
-pub(super) fn alloc_byte_list(state: &mut InterpreterState, bytes: &[u8]) -> InterpreterResult<Value> {
+pub(super) fn alloc_byte_list(
+    state: &mut InterpreterState,
+    bytes: &[u8],
+) -> InterpreterResult<Value> {
     use heap::OBJECT_HEADER_SIZE;
     let len = bytes.len();
     let cap = if len < 16 { 16 } else { len };
@@ -145,9 +150,13 @@ pub(super) fn alloc_byte_list(state: &mut InterpreterState, bytes: &[u8]) -> Int
     let backing_data =
         unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
     for (i, b) in bytes.iter().enumerate() {
-        unsafe { *backing_data.add(i) = Value::from_i64(*b as i64); }
+        unsafe {
+            *backing_data.add(i) = Value::from_i64(*b as i64);
+        }
     }
-    let list = state.heap.alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
+    let list = state
+        .heap
+        .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();
     let data_ptr = unsafe { (list.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
     unsafe {
@@ -163,7 +172,9 @@ pub(super) fn alloc_byte_list(state: &mut InterpreterState, bytes: &[u8]) -> Int
 /// = packed bytes) or a `List<Byte>` Value-per-element backing.
 /// Empty Vec when the value isn't a byte container.
 pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base: u32) -> Vec<u8> {
-    let v = state.registers.get(caller_base, crate::instruction::Reg(reg));
+    let v = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(reg));
     let unwrapped = if is_cbgr_ref(&v) {
         let (abs_index, _) = decode_cbgr_ref(v.as_i64());
         state.registers.get_absolute(abs_index)
@@ -253,7 +264,9 @@ pub(super) fn write_into_byte_slice(v: Value, bytes: &[u8]) {
             return;
         }
         match fr.reserved {
-            1 => unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), fr.ptr(), n); },
+            1 => unsafe {
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), fr.ptr(), n);
+            },
             _ => {
                 let dst = fr.ptr() as *mut Value;
                 for i in 0..n {
@@ -280,9 +293,13 @@ pub(super) fn write_into_byte_slice(v: Value, bytes: &[u8]) {
                     let backing_data =
                         unsafe { backing.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     for i in 0..n {
-                        unsafe { *backing_data.add(i) = Value::from_i64(bytes[i] as i64); }
+                        unsafe {
+                            *backing_data.add(i) = Value::from_i64(bytes[i] as i64);
+                        }
                     }
-                    unsafe { *data_ptr = Value::from_i64(n as i64); }
+                    unsafe {
+                        *data_ptr = Value::from_i64(n as i64);
+                    }
                 }
             }
         }
@@ -298,7 +315,9 @@ pub(super) fn write_into_byte_slice(v: Value, bytes: &[u8]) {
 /// of `&self`/`&mut self`) and thin-ref auto-deref (heap-pointer-
 /// to-Value).
 pub(super) fn extract_text_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
-    let v = state.registers.get(caller_base, crate::instruction::Reg(reg));
+    let v = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(reg));
     let mut unwrapped = if is_cbgr_ref(&v) {
         let (abs_index, _) = decode_cbgr_ref(v.as_i64());
         state.registers.get_absolute(abs_index)

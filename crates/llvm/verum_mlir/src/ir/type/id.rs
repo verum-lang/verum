@@ -3,11 +3,11 @@
 mod allocator;
 
 pub use allocator::Allocator;
-use verum_mlir_sys::{MlirTypeID, mlirTypeIDCreate, mlirTypeIDEqual, mlirTypeIDHashValue};
 use std::{
     hash::{Hash, Hasher},
     marker::PhantomData,
 };
+use verum_mlir_sys::{MlirTypeID, mlirTypeIDCreate, mlirTypeIDEqual, mlirTypeIDHashValue};
 
 /// A type ID.
 #[derive(Clone, Copy, Debug)]

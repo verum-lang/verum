@@ -47,9 +47,7 @@ fn parser_emits_proof_body_term_for_proof_eq_expr() {
         .items
         .iter()
         .find_map(|item| match &item.kind {
-            ItemKind::Theorem(decl) if decl.name.name.as_str() == "use_trivial_lemma" => {
-                Some(decl)
-            }
+            ItemKind::Theorem(decl) if decl.name.name.as_str() == "use_trivial_lemma" => Some(decl),
             _ => None,
         })
         .expect("theorem use_trivial_lemma must parse");
@@ -79,9 +77,7 @@ fn lift_expr_to_core_handles_path_var_proof_body() {
         .items
         .iter()
         .find_map(|item| match &item.kind {
-            ItemKind::Theorem(decl) if decl.name.name.as_str() == "use_trivial_lemma" => {
-                Some(decl)
-            }
+            ItemKind::Theorem(decl) if decl.name.name.as_str() == "use_trivial_lemma" => Some(decl),
             _ => None,
         })
         .expect("theorem must parse");
@@ -96,8 +92,11 @@ fn lift_expr_to_core_handles_path_var_proof_body() {
     // a Var(trivial_lemma).
     match core {
         CoreTerm::Var(name) => {
-            assert_eq!(name.as_str(), "trivial_lemma",
-                "lift_expr_to_core must resolve the path's last segment");
+            assert_eq!(
+                name.as_str(),
+                "trivial_lemma",
+                "lift_expr_to_core must resolve the path's last segment"
+            );
         }
         other => panic!("expected Var(trivial_lemma), got {:?}", other),
     }
@@ -178,7 +177,10 @@ public theorem use_call()
         "lowered must mention arg: got {lowered:?}"
     );
     // Some App form must be present (parens) — rule out a flat Var emit.
-    assert!(lowered.contains('('), "lowered must contain App: {lowered:?}");
+    assert!(
+        lowered.contains('('),
+        "lowered must contain App: {lowered:?}"
+    );
 }
 
 #[test]
@@ -191,9 +193,7 @@ fn axioms_have_no_core_proof_term() {
         .items
         .iter()
         .find_map(|item| match &item.kind {
-            ItemKind::Axiom(decl) if decl.name.name.as_str() == "trivial_lemma" => {
-                Some(decl)
-            }
+            ItemKind::Axiom(decl) if decl.name.name.as_str() == "trivial_lemma" => Some(decl),
             _ => None,
         })
         .expect("axiom must parse");

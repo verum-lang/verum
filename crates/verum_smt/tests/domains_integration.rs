@@ -2,10 +2,10 @@
 
 use verum_smt::domains::{
     epistemic::{
-        epistemic_axioms, verify_invariants_preserved, EpistemicInvariant, EpistemicResult,
-        PartialTrace, ProjectiveMeasurement,
+        EpistemicInvariant, EpistemicResult, PartialTrace, ProjectiveMeasurement, epistemic_axioms,
+        verify_invariants_preserved,
     },
-    sheaf::{verify_descent, DescentProblem, DescentResult},
+    sheaf::{DescentProblem, DescentResult, verify_descent},
 };
 
 // ==================== Sheaf descent ====================
@@ -38,10 +38,7 @@ fn sheaf_missing_compatibility_blocks_descent() {
     let p = DescentProblem::new("c")
         .add_cover("f1", "s1")
         .add_cover("f2", "s2");
-    assert_eq!(
-        verify_descent(&p),
-        DescentResult::CompatibilityNotVerified
-    );
+    assert_eq!(verify_descent(&p), DescentResult::CompatibilityNotVerified);
 }
 
 #[test]

@@ -547,10 +547,22 @@ mod tests {
 
     #[test]
     fn test_delimiter_from_opening() {
-        assert_eq!(Delimiter::from_opening(TokenKind::LParen), Some(Delimiter::Paren));
-        assert_eq!(Delimiter::from_opening(TokenKind::LBracket), Some(Delimiter::Bracket));
-        assert_eq!(Delimiter::from_opening(TokenKind::LBrace), Some(Delimiter::Brace));
-        assert_eq!(Delimiter::from_opening(TokenKind::Lt), Some(Delimiter::Angle));
+        assert_eq!(
+            Delimiter::from_opening(TokenKind::LParen),
+            Some(Delimiter::Paren)
+        );
+        assert_eq!(
+            Delimiter::from_opening(TokenKind::LBracket),
+            Some(Delimiter::Bracket)
+        );
+        assert_eq!(
+            Delimiter::from_opening(TokenKind::LBrace),
+            Some(Delimiter::Brace)
+        );
+        assert_eq!(
+            Delimiter::from_opening(TokenKind::Lt),
+            Some(Delimiter::Angle)
+        );
         assert_eq!(Delimiter::from_opening(TokenKind::Plus), None);
     }
 

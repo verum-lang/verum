@@ -84,9 +84,7 @@ impl LintCache {
     /// `enabled` flag is the kill switch read from the CLI
     /// (`--no-cache`) or `[lint.cache].enabled = false`.
     pub fn new(target_dir: &Path, config: &LintConfig, enabled: bool) -> Self {
-        let bucket = target_dir
-            .join("lint-cache")
-            .join(config_hash(config));
+        let bucket = target_dir.join("lint-cache").join(config_hash(config));
         if enabled {
             // Best-effort directory creation. If the FS rejects us
             // we'll just miss every cache entry, which is correct
@@ -316,7 +314,8 @@ mod tests {
     fn config_hash_changes_with_severity_map() {
         let mut c1 = empty_config();
         let h_empty = config_hash(&c1);
-        c1.severity_map.insert("todo-in-code".into(), LintLevel::Error);
+        c1.severity_map
+            .insert("todo-in-code".into(), LintLevel::Error);
         let h_changed = config_hash(&c1);
         assert_ne!(h_empty, h_changed, "severity change must reshape the hash");
     }

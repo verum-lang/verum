@@ -67,15 +67,13 @@
 use anyhow::Result;
 use std::time::Instant;
 
-use verum_ast::ffi::{
-    CallingConvention, FFIBoundary, FFIFunction, MemoryEffects, Ownership,
-};
+use verum_ast::ffi::{CallingConvention, FFIBoundary, FFIFunction, MemoryEffects, Ownership};
 use verum_ast::ty::{Type, TypeKind};
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_common::{List, Set, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 
-use verum_ast::decl::FunctionParamKind;
 use verum_ast::Module;
+use verum_ast::decl::FunctionParamKind;
 
 use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
 use crate::profile_system::{Feature, Profile};
@@ -110,7 +108,9 @@ pub struct FfiValidationResult {
 
 impl FfiValidationResult {
     pub fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(|d| d.severity() == Severity::Error)
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity() == Severity::Error)
     }
 }
 
@@ -141,7 +141,10 @@ pub fn validate_module_ffi(module: &Module, _warn_only: bool) -> FfiValidationRe
                         if let FunctionParamKind::Regular { ref ty, .. } = param.kind {
                             let param_name = format!("{:?}", param.kind);
                             if let Err(diag) = validator.validate_ffi_safe_type_with_context(
-                                ty, Direction::Input, &param_name, FfiContext::ExternBlock,
+                                ty,
+                                Direction::Input,
+                                &param_name,
+                                FfiContext::ExternBlock,
                             ) {
                                 result.diagnostics.push(downgrade_to_warning(diag));
                             }
@@ -149,7 +152,10 @@ pub fn validate_module_ffi(module: &Module, _warn_only: bool) -> FfiValidationRe
                     }
                     if let verum_common::Maybe::Some(ref ret_ty) = func.return_type {
                         if let Err(diag) = validator.validate_ffi_safe_type_with_context(
-                            ret_ty, Direction::Output, "return value", FfiContext::ExternBlock,
+                            ret_ty,
+                            Direction::Output,
+                            "return value",
+                            FfiContext::ExternBlock,
                         ) {
                             result.diagnostics.push(downgrade_to_warning(diag));
                         }
@@ -163,19 +169,28 @@ pub fn validate_module_ffi(module: &Module, _warn_only: bool) -> FfiValidationRe
                     // ffi {} blocks: STRICT mode — errors, not warnings
                     for (param_name, param_type) in func.signature.params.iter() {
                         if let Err(diag) = validator.validate_ffi_safe_type_with_context(
-                            param_type, Direction::Input, param_name.name.as_str(), FfiContext::FfiBoundary,
+                            param_type,
+                            Direction::Input,
+                            param_name.name.as_str(),
+                            FfiContext::FfiBoundary,
                         ) {
                             result.diagnostics.push(diag);
                         }
                     }
                     if let Err(diag) = validator.validate_ffi_safe_type_with_context(
-                        &func.signature.return_type, Direction::Output, "return value", FfiContext::FfiBoundary,
+                        &func.signature.return_type,
+                        Direction::Output,
+                        "return value",
+                        FfiContext::FfiBoundary,
                     ) {
                         result.diagnostics.push(diag);
                     }
                     // Validate error protocol: Exception → warning per doc 20
                     // "emphasizes explicit error handling over exceptions"
-                    if matches!(func.error_protocol, verum_ast::ffi::ErrorProtocol::Exception) {
+                    if matches!(
+                        func.error_protocol,
+                        verum_ast::ffi::ErrorProtocol::Exception
+                    ) {
                         result.diagnostics.push(
                             DiagnosticBuilder::new(Severity::Warning)
                                 .message(format!(
@@ -582,10 +597,7 @@ impl FfiBoundaryPhase {
     /// Statistics are tracked in `self.stats`; the per-function/per-
     /// boundary result aggregates were vestigial (no caller read
     /// them, only the side-effect stats updates were observed).
-    fn process_boundaries(
-        &mut self,
-        boundaries: &[FFIBoundary],
-    ) -> Result<(), List<Diagnostic>> {
+    fn process_boundaries(&mut self, boundaries: &[FFIBoundary]) -> Result<(), List<Diagnostic>> {
         tracing::debug!("Processing {} FFI boundaries", boundaries.len());
 
         let mut diagnostics = Vec::new();
@@ -609,10 +621,7 @@ impl FfiBoundaryPhase {
     }
 
     /// Process a single FFI boundary
-    fn process_boundary(
-        &mut self,
-        boundary: &FFIBoundary,
-    ) -> Result<(), Vec<Diagnostic>> {
+    fn process_boundary(&mut self, boundary: &FFIBoundary) -> Result<(), Vec<Diagnostic>> {
         let mut diagnostics = Vec::new();
 
         // Process each FFI function in the boundary
@@ -1014,26 +1023,75 @@ impl FfiBoundaryValidator {
 
     /// Context-aware FFI type safety validation.
     pub fn validate_ffi_safe_type_with_context(
-        &self, ty: &Type, direction: Direction, context: &str, ffi_context: FfiContext,
+        &self,
+        ty: &Type,
+        direction: Direction,
+        context: &str,
+        ffi_context: FfiContext,
     ) -> Result<(), Diagnostic> {
         match &ty.kind {
-            TypeKind::Bool | TypeKind::Int | TypeKind::Float | TypeKind::Char | TypeKind::Unit => Ok(()),
-            TypeKind::Pointer { inner, .. } => self.validate_ffi_safe_type_with_context(inner, direction, context, ffi_context),
+            TypeKind::Bool | TypeKind::Int | TypeKind::Float | TypeKind::Char | TypeKind::Unit => {
+                Ok(())
+            }
+            TypeKind::Pointer { inner, .. } => {
+                self.validate_ffi_safe_type_with_context(inner, direction, context, ffi_context)
+            }
             TypeKind::Reference { mutable, inner: _ } => match ffi_context {
-                FfiContext::ExternBlock => { tracing::debug!("FFI: &{}T in extern block treated as raw pointer", if *mutable { "mut " } else { "" }); Ok(()) }
-                FfiContext::FfiBoundary | FfiContext::CallSite => Err(DiagnosticBuilder::new(Severity::Error)
-                    .message(format!("CBGR reference cannot cross FFI boundary in {}", context))
-                    .help("Convert to raw pointer or use &unsafe T".to_string()).build()),
+                FfiContext::ExternBlock => {
+                    tracing::debug!(
+                        "FFI: &{}T in extern block treated as raw pointer",
+                        if *mutable { "mut " } else { "" }
+                    );
+                    Ok(())
+                }
+                FfiContext::FfiBoundary | FfiContext::CallSite => {
+                    Err(DiagnosticBuilder::new(Severity::Error)
+                        .message(format!(
+                            "CBGR reference cannot cross FFI boundary in {}",
+                            context
+                        ))
+                        .help("Convert to raw pointer or use &unsafe T".to_string())
+                        .build())
+                }
             },
             TypeKind::CheckedReference { .. } => Err(DiagnosticBuilder::new(Severity::Error)
-                .message(format!("Checked reference cannot cross FFI boundary in {}", context)).build()),
-            TypeKind::UnsafeReference { inner, .. } => self.validate_ffi_safe_type_with_context(inner, direction, context, ffi_context),
-            TypeKind::Function { params, return_type, .. } => {
-                for param in params { self.validate_ffi_safe_type_with_context(param, Direction::Input, "function pointer parameter", ffi_context)?; }
-                self.validate_ffi_safe_type_with_context(return_type, Direction::Output, "function pointer return", ffi_context)
+                .message(format!(
+                    "Checked reference cannot cross FFI boundary in {}",
+                    context
+                ))
+                .build()),
+            TypeKind::UnsafeReference { inner, .. } => {
+                self.validate_ffi_safe_type_with_context(inner, direction, context, ffi_context)
+            }
+            TypeKind::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                for param in params {
+                    self.validate_ffi_safe_type_with_context(
+                        param,
+                        Direction::Input,
+                        "function pointer parameter",
+                        ffi_context,
+                    )?;
+                }
+                self.validate_ffi_safe_type_with_context(
+                    return_type,
+                    Direction::Output,
+                    "function pointer return",
+                    ffi_context,
+                )
             }
             TypeKind::Array { element, size } => {
-                if size.is_none() { return Err(DiagnosticBuilder::new(Severity::Error).message(format!("Array without size cannot cross FFI boundary in {}", context)).build()); }
+                if size.is_none() {
+                    return Err(DiagnosticBuilder::new(Severity::Error)
+                        .message(format!(
+                            "Array without size cannot cross FFI boundary in {}",
+                            context
+                        ))
+                        .build());
+                }
                 self.validate_ffi_safe_type_with_context(element, direction, context, ffi_context)
             }
             TypeKind::Path(path) => {
@@ -1066,12 +1124,36 @@ impl FfiBoundaryValidator {
                     _ => Ok(()),
                 }
             }
-            TypeKind::Refined { base, .. } => self.validate_ffi_safe_type_with_context(base, direction, context, ffi_context),
-            TypeKind::Slice(_) => Err(DiagnosticBuilder::new(Severity::Error).message(format!("Slice type cannot cross FFI boundary in {}", context)).build()),
-            TypeKind::Tuple(_) => Err(DiagnosticBuilder::new(Severity::Error).message(format!("Tuple type cannot cross FFI boundary in {}", context)).build()),
-            TypeKind::Generic { .. } => Err(DiagnosticBuilder::new(Severity::Error).message(format!("Generic type cannot cross FFI boundary in {}", context)).build()),
-            TypeKind::DynProtocol { .. } => Err(DiagnosticBuilder::new(Severity::Error).message(format!("Protocol object cannot cross FFI boundary in {}", context)).build()),
-            _ => Err(DiagnosticBuilder::new(Severity::Error).message(format!("Type not FFI-safe in {}", context)).build()),
+            TypeKind::Refined { base, .. } => {
+                self.validate_ffi_safe_type_with_context(base, direction, context, ffi_context)
+            }
+            TypeKind::Slice(_) => Err(DiagnosticBuilder::new(Severity::Error)
+                .message(format!(
+                    "Slice type cannot cross FFI boundary in {}",
+                    context
+                ))
+                .build()),
+            TypeKind::Tuple(_) => Err(DiagnosticBuilder::new(Severity::Error)
+                .message(format!(
+                    "Tuple type cannot cross FFI boundary in {}",
+                    context
+                ))
+                .build()),
+            TypeKind::Generic { .. } => Err(DiagnosticBuilder::new(Severity::Error)
+                .message(format!(
+                    "Generic type cannot cross FFI boundary in {}",
+                    context
+                ))
+                .build()),
+            TypeKind::DynProtocol { .. } => Err(DiagnosticBuilder::new(Severity::Error)
+                .message(format!(
+                    "Protocol object cannot cross FFI boundary in {}",
+                    context
+                ))
+                .build()),
+            _ => Err(DiagnosticBuilder::new(Severity::Error)
+                .message(format!("Type not FFI-safe in {}", context))
+                .build()),
         }
     }
 
@@ -1276,7 +1358,10 @@ impl Marshaller {
             TypeKind::Path(path)
                 if path
                     .as_ident()
-                    .map(|i| verum_common::well_known_types::WellKnownType::Text.matches(i.as_str()) || i.as_str() == "String")
+                    .map(|i| {
+                        verum_common::well_known_types::WellKnownType::Text.matches(i.as_str())
+                            || i.as_str() == "String"
+                    })
                     .unwrap_or(false) =>
             {
                 Ok(format!(
@@ -1560,7 +1645,6 @@ impl Marshaller {
         code
     }
 
-
     /// Format type for Verum (high-level)
     fn format_type_verum(&self, ty: &Type) -> String {
         match &ty.kind {
@@ -1717,5 +1801,3 @@ struct SafetyStats {
     functions_analyzed: usize,
     cbgr_violations: usize,
 }
-
-

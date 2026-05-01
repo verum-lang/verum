@@ -26,23 +26,22 @@ use std::collections::HashMap;
 
 use verum_mlir::{
     Context, Error as MlirError,
+    dialect::{arith, func},
     ir::{
-        Block, Location, Module, Region, Type, Value,
+        Block, BlockLike, Location, Module, Region, RegionLike, Type, Value,
         attribute::{
-            DenseI64ArrayAttribute, FloatAttribute, IntegerAttribute,
-            StringAttribute, TypeAttribute,
+            DenseI64ArrayAttribute, FloatAttribute, IntegerAttribute, StringAttribute,
+            TypeAttribute,
         },
         operation::{Operation, OperationBuilder, OperationLike},
         r#type::{FunctionType, IntegerType, MemRefType, RankedTensorType},
-        BlockLike, RegionLike,
     },
-    dialect::{arith, func},
 };
 
 use verum_vbc::{
     instruction::{
-        BinaryFloatOp, BinaryIntOp, Instruction, Reg,
-        TensorBinaryOp, TensorDType, TensorReduceOp, TensorUnaryOp,
+        BinaryFloatOp, BinaryIntOp, Instruction, Reg, TensorBinaryOp, TensorDType, TensorReduceOp,
+        TensorUnaryOp,
     },
     module::VbcModule,
 };
@@ -81,22 +80,24 @@ pub enum VbcMlirError {
 impl std::fmt::Display for VbcMlirError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnsupportedInstruction { opcode, name } =>
-                write!(f, "Unsupported GPU instruction: {} (0x{:02X})", name, opcode),
-            Self::TypeConversionFailed { vbc_type, reason } =>
-                write!(f, "Type conversion failed for {}: {}", vbc_type, reason),
-            Self::MlirBuildFailed { op, reason } =>
-                write!(f, "MLIR operation {} build failed: {}", op, reason),
-            Self::FunctionNotFound { id } =>
-                write!(f, "Function not found: {}", id),
-            Self::RegisterNotFound { reg } =>
-                write!(f, "Register r{} not found in value map", reg),
-            Self::GpuTargetNotAvailable { target } =>
-                write!(f, "GPU target not available: {}", target),
-            Self::InvalidTensorShape { reason } =>
-                write!(f, "Invalid tensor shape: {}", reason),
-            Self::InternalMlirError(msg) =>
-                write!(f, "Internal MLIR error: {}", msg),
+            Self::UnsupportedInstruction { opcode, name } => write!(
+                f,
+                "Unsupported GPU instruction: {} (0x{:02X})",
+                name, opcode
+            ),
+            Self::TypeConversionFailed { vbc_type, reason } => {
+                write!(f, "Type conversion failed for {}: {}", vbc_type, reason)
+            }
+            Self::MlirBuildFailed { op, reason } => {
+                write!(f, "MLIR operation {} build failed: {}", op, reason)
+            }
+            Self::FunctionNotFound { id } => write!(f, "Function not found: {}", id),
+            Self::RegisterNotFound { reg } => write!(f, "Register r{} not found in value map", reg),
+            Self::GpuTargetNotAvailable { target } => {
+                write!(f, "GPU target not available: {}", target)
+            }
+            Self::InvalidTensorShape { reason } => write!(f, "Invalid tensor shape: {}", reason),
+            Self::InternalMlirError(msg) => write!(f, "Internal MLIR error: {}", msg),
         }
     }
 }
@@ -196,12 +197,23 @@ impl Default for GpuLoweringConfig {
 }
 
 impl GpuLoweringConfig {
-    pub fn cuda() -> Self { Self::default() }
+    pub fn cuda() -> Self {
+        Self::default()
+    }
     pub fn rocm() -> Self {
-        Self { target: GpuTarget::Rocm, max_shared_memory: 64 * 1024, ..Default::default() }
+        Self {
+            target: GpuTarget::Rocm,
+            max_shared_memory: 64 * 1024,
+            ..Default::default()
+        }
     }
     pub fn vulkan() -> Self {
-        Self { target: GpuTarget::Vulkan, enable_tensor_cores: false, max_shared_memory: 32 * 1024, ..Default::default() }
+        Self {
+            target: GpuTarget::Vulkan,
+            enable_tensor_cores: false,
+            max_shared_memory: 32 * 1024,
+            ..Default::default()
+        }
     }
 }
 
@@ -222,8 +234,11 @@ pub struct GpuLoweringStats {
 
 impl GpuLoweringStats {
     pub fn tensor_op_ratio(&self) -> f64 {
-        if self.instructions_processed == 0 { 0.0 }
-        else { self.tensor_ops as f64 / self.instructions_processed as f64 }
+        if self.instructions_processed == 0 {
+            0.0
+        } else {
+            self.tensor_ops as f64 / self.instructions_processed as f64
+        }
     }
 }
 
@@ -274,19 +289,34 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                  there to make them load-bearing."
             );
         }
-        Self { context, config, stats: GpuLoweringStats::default(), value_map: HashMap::new() }
+        Self {
+            context,
+            config,
+            stats: GpuLoweringStats::default(),
+            value_map: HashMap::new(),
+        }
     }
 
-    pub fn config(&self) -> &GpuLoweringConfig { &self.config }
-    pub fn stats(&self) -> &GpuLoweringStats { &self.stats }
+    pub fn config(&self) -> &GpuLoweringConfig {
+        &self.config
+    }
+    pub fn stats(&self) -> &GpuLoweringStats {
+        &self.stats
+    }
 
     // =========================================================================
     // Type helpers
     // =========================================================================
 
-    fn i64_type(&self) -> Type<'ctx> { IntegerType::new(self.context, 64).into() }
-    fn f64_type(&self) -> Type<'ctx> { Type::float64(self.context) }
-    fn index_type(&self) -> Type<'ctx> { Type::index(self.context) }
+    fn i64_type(&self) -> Type<'ctx> {
+        IntegerType::new(self.context, 64).into()
+    }
+    fn f64_type(&self) -> Type<'ctx> {
+        Type::float64(self.context)
+    }
+    fn index_type(&self) -> Type<'ctx> {
+        Type::index(self.context)
+    }
 
     fn dynamic_2d_tensor(&self, elem: Type<'ctx>) -> Type<'ctx> {
         RankedTensorType::new(&[DYNAMIC, DYNAMIC], elem, None).into()
@@ -312,9 +342,9 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
             TensorDType::I64 | TensorDType::U64 => IntegerType::new(self.context, 64).into(),
             TensorDType::I32 | TensorDType::U32 => IntegerType::new(self.context, 32).into(),
             TensorDType::I16 | TensorDType::U16 => IntegerType::new(self.context, 16).into(),
-            TensorDType::I8  | TensorDType::U8  => IntegerType::new(self.context, 8).into(),
+            TensorDType::I8 | TensorDType::U8 => IntegerType::new(self.context, 8).into(),
             TensorDType::Bool => IntegerType::new(self.context, 1).into(),
-            TensorDType::Complex64  => Type::float32(self.context),
+            TensorDType::Complex64 => Type::float32(self.context),
             TensorDType::Complex128 => Type::float64(self.context),
         }
     }
@@ -323,18 +353,30 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
     // Value map helpers
     // =========================================================================
 
-    fn get_value(&self, block: &Block<'ctx>, reg: Reg, location: Location<'ctx>) -> Value<'ctx, 'ctx> {
+    fn get_value(
+        &self,
+        block: &Block<'ctx>,
+        reg: Reg,
+        location: Location<'ctx>,
+    ) -> Value<'ctx, 'ctx> {
         if let Some(v) = self.value_map.get(&reg.0) {
             *v
         } else {
             let op = block.append_operation(arith::constant(
-                self.context, IntegerAttribute::new(self.i64_type(), 0).into(), location,
+                self.context,
+                IntegerAttribute::new(self.i64_type(), 0).into(),
+                location,
             ));
             op.result(0).unwrap().into()
         }
     }
 
-    fn get_index_value(&self, block: &Block<'ctx>, reg: Reg, location: Location<'ctx>) -> Value<'ctx, 'ctx> {
+    fn get_index_value(
+        &self,
+        block: &Block<'ctx>,
+        reg: Reg,
+        location: Location<'ctx>,
+    ) -> Value<'ctx, 'ctx> {
         let val = self.get_value(block, reg, location);
         let cast_op = block.append_operation(
             OperationBuilder::new("arith.index_cast", location)
@@ -355,14 +397,25 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
     // =========================================================================
 
     fn build_and_store(
-        &mut self, block: &Block<'ctx>, dst: Reg, op_name: &str,
-        operands: &[Value<'ctx, 'ctx>], result_types: &[Type<'ctx>], location: Location<'ctx>,
+        &mut self,
+        block: &Block<'ctx>,
+        dst: Reg,
+        op_name: &str,
+        operands: &[Value<'ctx, 'ctx>],
+        result_types: &[Type<'ctx>],
+        location: Location<'ctx>,
     ) -> Result<()> {
         let op = OperationBuilder::new(op_name, location)
-            .add_operands(operands).add_results(result_types).build()
-            .map_err(|e| VbcMlirError::MlirBuildFailed { op: op_name.into(), reason: format!("{:?}", e) })?;
+            .add_operands(operands)
+            .add_results(result_types)
+            .build()
+            .map_err(|e| VbcMlirError::MlirBuildFailed {
+                op: op_name.into(),
+                reason: format!("{:?}", e),
+            })?;
         let result = op.result(0).map_err(|_| VbcMlirError::MlirBuildFailed {
-            op: op_name.into(), reason: "no result".into(),
+            op: op_name.into(),
+            reason: "no result".into(),
         })?;
         block.append_operation(op);
         self.set_value(dst, result.into());
@@ -370,12 +423,19 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
     }
 
     fn build_void(
-        &self, block: &Block<'ctx>, op_name: &str,
-        operands: &[Value<'ctx, 'ctx>], location: Location<'ctx>,
+        &self,
+        block: &Block<'ctx>,
+        op_name: &str,
+        operands: &[Value<'ctx, 'ctx>],
+        location: Location<'ctx>,
     ) -> Result<()> {
         let op = OperationBuilder::new(op_name, location)
-            .add_operands(operands).build()
-            .map_err(|e| VbcMlirError::MlirBuildFailed { op: op_name.into(), reason: format!("{:?}", e) })?;
+            .add_operands(operands)
+            .build()
+            .map_err(|e| VbcMlirError::MlirBuildFailed {
+                op: op_name.into(),
+                reason: format!("{:?}", e),
+            })?;
         block.append_operation(op);
         Ok(())
     }
@@ -396,8 +456,10 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
     }
 
     fn lower_function(
-        &mut self, func_id: u32,
-        func_desc: &verum_vbc::module::FunctionDescriptor, module: &VbcModule,
+        &mut self,
+        func_id: u32,
+        func_desc: &verum_vbc::module::FunctionDescriptor,
+        module: &VbcModule,
     ) -> Result<Operation<'ctx>> {
         let location = Location::unknown(self.context);
         let name = module.strings.get(func_desc.name).unwrap_or("unknown");
@@ -416,10 +478,12 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
         let mut offset = 0;
         while offset < bytecode.len() {
             let start_offset = offset;
-            let instr = verum_vbc::bytecode::decode_instruction(bytecode, &mut offset)
-                .map_err(|e| VbcMlirError::UnsupportedInstruction {
-                    opcode: bytecode.get(start_offset).copied().unwrap_or(0),
-                    name: format!("decode error: {:?}", e),
+            let instr =
+                verum_vbc::bytecode::decode_instruction(bytecode, &mut offset).map_err(|e| {
+                    VbcMlirError::UnsupportedInstruction {
+                        opcode: bytecode.get(start_offset).copied().unwrap_or(0),
+                        name: format!("decode error: {:?}", e),
+                    }
                 })?;
             self.lower_instruction(&entry_block, &instr, location)?;
             self.stats.instructions_processed += 1;
@@ -427,16 +491,23 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
 
         if entry_block.terminator().is_none() {
             let zero = entry_block.append_operation(arith::constant(
-                self.context, IntegerAttribute::new(i64_type, 0).into(), location,
+                self.context,
+                IntegerAttribute::new(i64_type, 0).into(),
+                location,
             ));
-            entry_block.append_operation(func::r#return(&[zero.result(0).unwrap().into()], location));
+            entry_block
+                .append_operation(func::r#return(&[zero.result(0).unwrap().into()], location));
         }
 
         let region = Region::new();
         region.append_block(entry_block);
         let func_op = func::func(
-            self.context, StringAttribute::new(self.context, name),
-            TypeAttribute::new(func_type.into()), region, &[], location,
+            self.context,
+            StringAttribute::new(self.context, name),
+            TypeAttribute::new(func_type.into()),
+            region,
+            &[],
+            location,
         );
         Ok(func_op)
     }
@@ -445,14 +516,29 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
     // Instruction Dispatch
     // =========================================================================
 
-    fn lower_instruction(&mut self, block: &Block<'ctx>, instr: &Instruction, location: Location<'ctx>) -> Result<()> {
+    fn lower_instruction(
+        &mut self,
+        block: &Block<'ctx>,
+        instr: &Instruction,
+        location: Location<'ctx>,
+    ) -> Result<()> {
         match instr {
             // Tensor Creation
             Instruction::TensorNew { dst, dtype, dims } => {
                 let elem_type = self.tensor_dtype_to_mlir(*dtype);
                 let result_type = self.dynamic_nd_tensor(dims.len(), elem_type);
-                let dim_vals: Vec<Value> = dims.iter().map(|r| self.get_index_value(block, *r, location)).collect();
-                self.build_and_store(block, *dst, "tensor.empty", &dim_vals, &[result_type], location)?;
+                let dim_vals: Vec<Value> = dims
+                    .iter()
+                    .map(|r| self.get_index_value(block, *r, location))
+                    .collect();
+                self.build_and_store(
+                    block,
+                    *dst,
+                    "tensor.empty",
+                    &dim_vals,
+                    &[result_type],
+                    location,
+                )?;
                 self.stats.tensor_ops += 1;
             }
 
@@ -461,26 +547,45 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                 let lhs = self.get_value(block, *a, location);
                 let rhs = self.get_value(block, *b, location);
                 let op_name = match op {
-                    TensorBinaryOp::Add => "arith.addf", TensorBinaryOp::Sub => "arith.subf",
-                    TensorBinaryOp::Mul => "arith.mulf", TensorBinaryOp::Div => "arith.divf",
-                    TensorBinaryOp::Pow => "math.powf",  TensorBinaryOp::Mod => "arith.remf",
-                    TensorBinaryOp::Min => "arith.minimumf", TensorBinaryOp::Max => "arith.maximumf",
+                    TensorBinaryOp::Add => "arith.addf",
+                    TensorBinaryOp::Sub => "arith.subf",
+                    TensorBinaryOp::Mul => "arith.mulf",
+                    TensorBinaryOp::Div => "arith.divf",
+                    TensorBinaryOp::Pow => "math.powf",
+                    TensorBinaryOp::Mod => "arith.remf",
+                    TensorBinaryOp::Min => "arith.minimumf",
+                    TensorBinaryOp::Max => "arith.maximumf",
                 };
-                self.build_and_store(block, *dst, op_name, &[lhs, rhs], &[self.f64_type()], location)?;
+                self.build_and_store(
+                    block,
+                    *dst,
+                    op_name,
+                    &[lhs, rhs],
+                    &[self.f64_type()],
+                    location,
+                )?;
                 self.stats.tensor_ops += 1;
             }
 
             Instruction::TensorUnop { op, dst, src } => {
                 let operand = self.get_value(block, *src, location);
                 let op_name = match op {
-                    TensorUnaryOp::Neg => "arith.negf", TensorUnaryOp::Abs => "math.absf",
-                    TensorUnaryOp::Sqrt => "math.sqrt", TensorUnaryOp::Exp => "math.exp",
-                    TensorUnaryOp::Log => "math.log",   TensorUnaryOp::Sin => "math.sin",
-                    TensorUnaryOp::Cos => "math.cos",   TensorUnaryOp::Tan => "math.tan",
-                    TensorUnaryOp::Tanh => "math.tanh", TensorUnaryOp::Floor => "math.floor",
-                    TensorUnaryOp::Ceil => "math.ceil",  TensorUnaryOp::Round => "math.roundeven",
-                    TensorUnaryOp::Rsqrt => "math.rsqrt", TensorUnaryOp::Erf => "math.erf",
-                    TensorUnaryOp::Log2 => "math.log2",  TensorUnaryOp::Sign => "math.copysign",
+                    TensorUnaryOp::Neg => "arith.negf",
+                    TensorUnaryOp::Abs => "math.absf",
+                    TensorUnaryOp::Sqrt => "math.sqrt",
+                    TensorUnaryOp::Exp => "math.exp",
+                    TensorUnaryOp::Log => "math.log",
+                    TensorUnaryOp::Sin => "math.sin",
+                    TensorUnaryOp::Cos => "math.cos",
+                    TensorUnaryOp::Tan => "math.tan",
+                    TensorUnaryOp::Tanh => "math.tanh",
+                    TensorUnaryOp::Floor => "math.floor",
+                    TensorUnaryOp::Ceil => "math.ceil",
+                    TensorUnaryOp::Round => "math.roundeven",
+                    TensorUnaryOp::Rsqrt => "math.rsqrt",
+                    TensorUnaryOp::Erf => "math.erf",
+                    TensorUnaryOp::Log2 => "math.log2",
+                    TensorUnaryOp::Sign => "math.copysign",
                     TensorUnaryOp::Sigmoid => "verum.tensor.sigmoid",
                     TensorUnaryOp::Relu => "verum.tensor.relu",
                     TensorUnaryOp::Gelu => "verum.tensor.gelu",
@@ -488,7 +593,14 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                     TensorUnaryOp::Softplus => "verum.tensor.softplus",
                     TensorUnaryOp::Mish => "verum.tensor.mish",
                 };
-                self.build_and_store(block, *dst, op_name, &[operand], &[self.f64_type()], location)?;
+                self.build_and_store(
+                    block,
+                    *dst,
+                    op_name,
+                    &[operand],
+                    &[self.f64_type()],
+                    location,
+                )?;
                 self.stats.tensor_ops += 1;
             }
 
@@ -500,30 +612,60 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                 let out_type = self.dynamic_2d_tensor(elem);
                 // tensor.empty → linalg.fill → linalg.matmul
                 let empty_op = block.append_operation(
-                    OperationBuilder::new("tensor.empty", location).add_results(&[out_type]).build()
-                        .map_err(|e| VbcMlirError::MlirBuildFailed { op: "tensor.empty".into(), reason: format!("{:?}", e) })?,
+                    OperationBuilder::new("tensor.empty", location)
+                        .add_results(&[out_type])
+                        .build()
+                        .map_err(|e| VbcMlirError::MlirBuildFailed {
+                            op: "tensor.empty".into(),
+                            reason: format!("{:?}", e),
+                        })?,
                 );
                 let empty_tensor: Value = empty_op.result(0).unwrap().into();
                 let zero = block.append_operation(arith::constant(
-                    self.context, FloatAttribute::new(self.context, elem, 0.0).into(), location,
+                    self.context,
+                    FloatAttribute::new(self.context, elem, 0.0).into(),
+                    location,
                 ));
                 let zero_val: Value = zero.result(0).unwrap().into();
                 let fill_op = block.append_operation(
                     OperationBuilder::new("linalg.fill", location)
-                        .add_operands(&[zero_val, empty_tensor]).add_results(&[out_type]).build()
-                        .map_err(|e| VbcMlirError::MlirBuildFailed { op: "linalg.fill".into(), reason: format!("{:?}", e) })?,
+                        .add_operands(&[zero_val, empty_tensor])
+                        .add_results(&[out_type])
+                        .build()
+                        .map_err(|e| VbcMlirError::MlirBuildFailed {
+                            op: "linalg.fill".into(),
+                            reason: format!("{:?}", e),
+                        })?,
                 );
                 let filled: Value = fill_op.result(0).unwrap().into();
-                self.build_and_store(block, *dst, "linalg.matmul", &[lhs, rhs, filled], &[out_type], location)?;
+                self.build_and_store(
+                    block,
+                    *dst,
+                    "linalg.matmul",
+                    &[lhs, rhs, filled],
+                    &[out_type],
+                    location,
+                )?;
                 self.stats.tensor_ops += 1;
-                if self.config.enable_tensor_cores { self.stats.tensor_core_ops += 1; }
+                if self.config.enable_tensor_cores {
+                    self.stats.tensor_core_ops += 1;
+                }
             }
 
             // Tensor Reduction
-            Instruction::TensorReduce { op, dst, src, axes, keepdim } => {
+            Instruction::TensorReduce {
+                op,
+                dst,
+                src,
+                axes,
+                keepdim,
+            } => {
                 let input = self.get_value(block, *src, location);
                 let op_name = match op {
-                    TensorReduceOp::Sum | TensorReduceOp::Prod | TensorReduceOp::Max | TensorReduceOp::Min => "linalg.reduce",
+                    TensorReduceOp::Sum
+                    | TensorReduceOp::Prod
+                    | TensorReduceOp::Max
+                    | TensorReduceOp::Min => "linalg.reduce",
                     TensorReduceOp::Mean => "verum.tensor.reduce_mean",
                     TensorReduceOp::Var => "verum.tensor.reduce_var",
                     TensorReduceOp::Std => "verum.tensor.reduce_std",
@@ -534,34 +676,59 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                 };
                 let axes_i64: Vec<i64> = axes.iter().map(|a| *a as i64).collect();
                 let mlir_op = OperationBuilder::new(op_name, location)
-                    .add_operands(&[input]).add_results(&[self.f64_type()])
+                    .add_operands(&[input])
+                    .add_results(&[self.f64_type()])
                     .add_attributes(&[(
                         verum_mlir::ir::Identifier::new(self.context, "dimensions"),
                         DenseI64ArrayAttribute::new(self.context, &axes_i64).into(),
-                    )]).build()
-                    .map_err(|e| VbcMlirError::MlirBuildFailed { op: op_name.into(), reason: format!("{:?}", e) })?;
-                let result = mlir_op.result(0).map_err(|_| VbcMlirError::MlirBuildFailed {
-                    op: op_name.into(), reason: "no result".into(),
-                })?;
+                    )])
+                    .build()
+                    .map_err(|e| VbcMlirError::MlirBuildFailed {
+                        op: op_name.into(),
+                        reason: format!("{:?}", e),
+                    })?;
+                let result = mlir_op
+                    .result(0)
+                    .map_err(|_| VbcMlirError::MlirBuildFailed {
+                        op: op_name.into(),
+                        reason: "no result".into(),
+                    })?;
                 block.append_operation(mlir_op);
                 self.set_value(*dst, result.into());
                 self.stats.tensor_ops += 1;
             }
 
             // GPU Operations
-            Instruction::GpuLaunch { kernel_id, grid, block: blk, shared_mem, stream, args } => {
+            Instruction::GpuLaunch {
+                kernel_id,
+                grid,
+                block: blk,
+                shared_mem,
+                stream,
+                args,
+            } => {
                 let mut operands = Vec::with_capacity(6 + args.len());
-                for r in grid { operands.push(self.get_index_value(block, *r, location)); }
-                for r in blk  { operands.push(self.get_index_value(block, *r, location)); }
-                for r in args { operands.push(self.get_value(block, *r, location)); }
+                for r in grid {
+                    operands.push(self.get_index_value(block, *r, location));
+                }
+                for r in blk {
+                    operands.push(self.get_index_value(block, *r, location));
+                }
+                for r in args {
+                    operands.push(self.get_value(block, *r, location));
+                }
                 let kernel_name = format!("kernel_{}", kernel_id);
                 let mlir_op = OperationBuilder::new("gpu.launch_func", location)
                     .add_operands(&operands)
                     .add_attributes(&[(
                         verum_mlir::ir::Identifier::new(self.context, "kernel"),
                         StringAttribute::new(self.context, &kernel_name).into(),
-                    )]).build()
-                    .map_err(|e| VbcMlirError::MlirBuildFailed { op: "gpu.launch_func".into(), reason: format!("{:?}", e) })?;
+                    )])
+                    .build()
+                    .map_err(|e| VbcMlirError::MlirBuildFailed {
+                        op: "gpu.launch_func".into(),
+                        reason: format!("{:?}", e),
+                    })?;
                 block.append_operation(mlir_op);
                 self.stats.kernel_launches += 1;
             }
@@ -571,7 +738,11 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                 self.build_void(block, "gpu.wait", &[s], location)?;
             }
 
-            Instruction::GpuMemcpy { dst, src, direction } => {
+            Instruction::GpuMemcpy {
+                dst,
+                src,
+                direction,
+            } => {
                 let d = self.get_value(block, *dst, location);
                 let s = self.get_value(block, *src, location);
                 self.build_void(block, "gpu.memcpy", &[d, s], location)?;
@@ -581,21 +752,46 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
             Instruction::GpuAlloc { dst, size, device } => {
                 let size_val = self.get_index_value(block, *size, location);
                 let memref_type = self.gpu_memref_2d(self.f64_type());
-                self.build_and_store(block, *dst, "gpu.alloc", &[size_val], &[memref_type], location)?;
+                self.build_and_store(
+                    block,
+                    *dst,
+                    "gpu.alloc",
+                    &[size_val],
+                    &[memref_type],
+                    location,
+                )?;
             }
 
             // GPU Streams/Events — no-ops or simple wiring
-            Instruction::GpuStreamCreate { dst } =>
-                { self.build_and_store(block, *dst, "gpu.create_stream", &[], &[self.i64_type()], location)?; }
-            Instruction::GpuStreamDestroy { .. } | Instruction::GpuEventDestroy { .. }
-            | Instruction::GpuEventRecord { .. } | Instruction::GpuPrefetch { .. } => {}
+            Instruction::GpuStreamCreate { dst } => {
+                self.build_and_store(
+                    block,
+                    *dst,
+                    "gpu.create_stream",
+                    &[],
+                    &[self.i64_type()],
+                    location,
+                )?;
+            }
+            Instruction::GpuStreamDestroy { .. }
+            | Instruction::GpuEventDestroy { .. }
+            | Instruction::GpuEventRecord { .. }
+            | Instruction::GpuPrefetch { .. } => {}
             Instruction::GpuStreamWaitEvent { stream, event } => {
                 let s = self.get_value(block, *stream, location);
                 let e = self.get_value(block, *event, location);
                 self.build_void(block, "gpu.wait", &[s, e], location)?;
             }
-            Instruction::GpuEventCreate { dst } =>
-                { self.build_and_store(block, *dst, "gpu.create_event", &[], &[self.i64_type()], location)?; }
+            Instruction::GpuEventCreate { dst } => {
+                self.build_and_store(
+                    block,
+                    *dst,
+                    "gpu.create_event",
+                    &[],
+                    &[self.i64_type()],
+                    location,
+                )?;
+            }
             Instruction::GpuEventSynchronize { event } => {
                 let e = self.get_value(block, *event, location);
                 self.build_void(block, "gpu.wait", &[e], location)?;
@@ -612,36 +808,61 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
             }
 
             // Flash Attention
-            Instruction::TensorFlashAttention { dst, q, k, v, mask, scale, causal } => {
+            Instruction::TensorFlashAttention {
+                dst,
+                q,
+                k,
+                v,
+                mask,
+                scale,
+                causal,
+            } => {
                 let mut operands = vec![
                     self.get_value(block, *q, location),
                     self.get_value(block, *k, location),
                     self.get_value(block, *v, location),
                     self.get_value(block, *scale, location),
                 ];
-                if let Some(m) = mask { operands.push(self.get_value(block, *m, location)); }
+                if let Some(m) = mask {
+                    operands.push(self.get_value(block, *m, location));
+                }
                 let result_type = self.dynamic_2d_tensor(self.f64_type());
-                self.build_and_store(block, *dst, "verum.tensor.flash_attention", &operands, &[result_type], location)?;
+                self.build_and_store(
+                    block,
+                    *dst,
+                    "verum.tensor.flash_attention",
+                    &operands,
+                    &[result_type],
+                    location,
+                )?;
                 self.stats.tensor_ops += 1;
-                if self.config.enable_tensor_cores { self.stats.tensor_core_ops += 1; }
+                if self.config.enable_tensor_cores {
+                    self.stats.tensor_core_ops += 1;
+                }
             }
 
             // Scalar pass-through (hybrid CPU+GPU)
             Instruction::LoadSmallI { dst, value } => {
                 let op = block.append_operation(arith::constant(
-                    self.context, IntegerAttribute::new(self.i64_type(), *value as i64).into(), location,
+                    self.context,
+                    IntegerAttribute::new(self.i64_type(), *value as i64).into(),
+                    location,
                 ));
                 self.set_value(*dst, op.result(0).unwrap().into());
             }
             Instruction::LoadI { dst, value } => {
                 let op = block.append_operation(arith::constant(
-                    self.context, IntegerAttribute::new(self.i64_type(), *value).into(), location,
+                    self.context,
+                    IntegerAttribute::new(self.i64_type(), *value).into(),
+                    location,
                 ));
                 self.set_value(*dst, op.result(0).unwrap().into());
             }
             Instruction::LoadF { dst, value } => {
                 let op = block.append_operation(arith::constant(
-                    self.context, FloatAttribute::new(self.context, self.f64_type(), *value).into(), location,
+                    self.context,
+                    FloatAttribute::new(self.context, self.f64_type(), *value).into(),
+                    location,
                 ));
                 self.set_value(*dst, op.result(0).unwrap().into());
             }
@@ -653,22 +874,43 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                 let lhs = self.get_value(block, *a, location);
                 let rhs = self.get_value(block, *b, location);
                 let op_name = match op {
-                    BinaryIntOp::Add => "arith.addi", BinaryIntOp::Sub => "arith.subi",
-                    BinaryIntOp::Mul => "arith.muli", BinaryIntOp::Div => "arith.divsi",
-                    BinaryIntOp::Mod => "arith.remsi", BinaryIntOp::Pow => "math.ipowi",
-                    BinaryIntOp::UDiv => "arith.divui", BinaryIntOp::UMod => "arith.remui",
+                    BinaryIntOp::Add => "arith.addi",
+                    BinaryIntOp::Sub => "arith.subi",
+                    BinaryIntOp::Mul => "arith.muli",
+                    BinaryIntOp::Div => "arith.divsi",
+                    BinaryIntOp::Mod => "arith.remsi",
+                    BinaryIntOp::Pow => "math.ipowi",
+                    BinaryIntOp::UDiv => "arith.divui",
+                    BinaryIntOp::UMod => "arith.remui",
                 };
-                self.build_and_store(block, *dst, op_name, &[lhs, rhs], &[self.i64_type()], location)?;
+                self.build_and_store(
+                    block,
+                    *dst,
+                    op_name,
+                    &[lhs, rhs],
+                    &[self.i64_type()],
+                    location,
+                )?;
             }
             Instruction::BinaryF { op, dst, a, b } => {
                 let lhs = self.get_value(block, *a, location);
                 let rhs = self.get_value(block, *b, location);
                 let op_name = match op {
-                    BinaryFloatOp::Add => "arith.addf", BinaryFloatOp::Sub => "arith.subf",
-                    BinaryFloatOp::Mul => "arith.mulf", BinaryFloatOp::Div => "arith.divf",
-                    BinaryFloatOp::Pow => "math.powf",  BinaryFloatOp::Mod => "arith.remf",
+                    BinaryFloatOp::Add => "arith.addf",
+                    BinaryFloatOp::Sub => "arith.subf",
+                    BinaryFloatOp::Mul => "arith.mulf",
+                    BinaryFloatOp::Div => "arith.divf",
+                    BinaryFloatOp::Pow => "math.powf",
+                    BinaryFloatOp::Mod => "arith.remf",
                 };
-                self.build_and_store(block, *dst, op_name, &[lhs, rhs], &[self.f64_type()], location)?;
+                self.build_and_store(
+                    block,
+                    *dst,
+                    op_name,
+                    &[lhs, rhs],
+                    &[self.f64_type()],
+                    location,
+                )?;
             }
             Instruction::Ret { value } => {
                 let val = self.get_value(block, *value, location);

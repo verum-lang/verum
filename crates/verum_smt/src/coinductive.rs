@@ -37,8 +37,8 @@
 
 use crate::verify::VerificationError;
 use verum_ast::{ContextList, Expr, ExprKind, Type, TypeKind};
-use verum_common::{Heap, List, Map, Maybe, Set, Text};
 use verum_common::ToText;
+use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
 // ==================== Type Registry ====================
 
@@ -382,7 +382,8 @@ impl CoinductiveChecker {
 
     /// Register a function definition for name resolution
     pub fn register_function(&mut self, name: Text, is_corecursive: bool) {
-        self.function_defs.insert(name, FunctionDef { is_corecursive });
+        self.function_defs
+            .insert(name, FunctionDef { is_corecursive });
     }
 
     /// Get the type registry
@@ -1117,9 +1118,13 @@ impl CoinductiveChecker {
 
                 // bisim(tail(x), tail(y)) => bisim(x, y)
                 // This is the coinductive rule
-                let premise = bisim_decl.apply(&[&tail_x, &tail_y]).as_bool()
+                let premise = bisim_decl
+                    .apply(&[&tail_x, &tail_y])
+                    .as_bool()
                     .ok_or_else(|| VerificationError::SolverError("bisim apply not bool".into()))?;
-                let conclusion = bisim_decl.apply(&[&x, &y]).as_bool()
+                let conclusion = bisim_decl
+                    .apply(&[&x, &y])
+                    .as_bool()
                     .ok_or_else(|| VerificationError::SolverError("bisim apply not bool".into()))?;
                 let rule = premise.implies(&conclusion);
 
@@ -1145,12 +1150,16 @@ impl CoinductiveChecker {
                 let head_y = head_func.apply(&[&y]);
 
                 // head(x) == head(y) => bisim(x, y)
-                let head_x_int = head_x.as_int()
+                let head_x_int = head_x
+                    .as_int()
                     .ok_or_else(|| VerificationError::SolverError("head apply not int".into()))?;
-                let head_y_int = head_y.as_int()
+                let head_y_int = head_y
+                    .as_int()
                     .ok_or_else(|| VerificationError::SolverError("head apply not int".into()))?;
                 let premise = head_x_int.eq(&head_y_int);
-                let conclusion = bisim_decl.apply(&[&x, &y]).as_bool()
+                let conclusion = bisim_decl
+                    .apply(&[&x, &y])
+                    .as_bool()
                     .ok_or_else(|| VerificationError::SolverError("bisim apply not bool".into()))?;
                 let rule = premise.implies(&conclusion);
 
@@ -1166,7 +1175,9 @@ impl CoinductiveChecker {
 
         // Query: is bisimulation reflexive? bisim(x, x) should hold for all x
         let x = z3::ast::Int::new_const("test_x");
-        let reflexivity = bisim_decl.apply(&[&x, &x]).as_bool()
+        let reflexivity = bisim_decl
+            .apply(&[&x, &x])
+            .as_bool()
             .ok_or_else(|| VerificationError::SolverError("bisim reflexivity not bool".into()))?;
 
         // Use the engine to check reflexivity
@@ -1268,10 +1279,13 @@ pub fn colist_type(element_type: Type) -> CoinductiveType {
     };
 
     let pair_type = Type::new(
-        TypeKind::Tuple(vec![
-            element_type.clone(),
-            Type::new(TypeKind::Path(colist_path), verum_ast::span::Span::dummy()),
-        ].into()),
+        TypeKind::Tuple(
+            vec![
+                element_type.clone(),
+                Type::new(TypeKind::Path(colist_path), verum_ast::span::Span::dummy()),
+            ]
+            .into(),
+        ),
         verum_ast::span::Span::dummy(),
     );
 
@@ -1333,10 +1347,13 @@ pub fn process_type(input_type: Type, output_type: Type) -> CoinductiveType {
     };
 
     let pair_type = Type::new(
-        TypeKind::Tuple(vec![
-            output_type.clone(),
-            Type::new(TypeKind::Path(process_path), verum_ast::span::Span::dummy()),
-        ].into()),
+        TypeKind::Tuple(
+            vec![
+                output_type.clone(),
+                Type::new(TypeKind::Path(process_path), verum_ast::span::Span::dummy()),
+            ]
+            .into(),
+        ),
         verum_ast::span::Span::dummy(),
     );
 
@@ -2212,7 +2229,8 @@ pub fn rose_tree_type(element_type: Type) -> CoinductiveType {
             args: vec![verum_ast::ty::GenericArg::Type(Type::new(
                 TypeKind::Path(rose_tree_path),
                 verum_ast::span::Span::dummy(),
-            ))].into(),
+            ))]
+            .into(),
         },
         verum_ast::span::Span::dummy(),
     );
@@ -2253,13 +2271,16 @@ pub fn lazy_list_type(element_type: Type) -> CoinductiveType {
     };
 
     let pair_type = Type::new(
-        TypeKind::Tuple(vec![
-            element_type.clone(),
-            Type::new(
-                TypeKind::Path(lazy_list_path),
-                verum_ast::span::Span::dummy(),
-            ),
-        ].into()),
+        TypeKind::Tuple(
+            vec![
+                element_type.clone(),
+                Type::new(
+                    TypeKind::Path(lazy_list_path),
+                    verum_ast::span::Span::dummy(),
+                ),
+            ]
+            .into(),
+        ),
         verum_ast::span::Span::dummy(),
     );
 

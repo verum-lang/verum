@@ -154,7 +154,8 @@ fn interpreter_runs_weft_hello_world_without_bind() {
     assert!(
         out.status.success(),
         "verum run (interpreter) failed:\nstdout:\n{}\nstderr:\n{}",
-        stdout, stderr,
+        stdout,
+        stderr,
     );
     let combined = format!("{}{}", stdout, stderr);
     assert!(
@@ -182,7 +183,8 @@ fn aot_runs_weft_hello_world_without_bind() {
     assert!(
         out.status.success(),
         "verum run --aot failed:\nstdout:\n{}\nstderr:\n{}",
-        stdout, stderr,
+        stdout,
+        stderr,
     );
     let combined = format!("{}{}", stdout, stderr);
     assert!(

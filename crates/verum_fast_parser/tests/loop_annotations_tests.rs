@@ -310,7 +310,10 @@ fn test_nested_loops_with_invariants() {
             invariants,
             decreases: _,
         } => {
-            assert!(!invariants.is_empty(), "Expected outer loop to have invariant");
+            assert!(
+                !invariants.is_empty(),
+                "Expected outer loop to have invariant"
+            );
 
             // Check inner loop
             if let Maybe::Some(first_stmt) = body.stmts.first() {
@@ -406,7 +409,10 @@ fn test_loop_invariant_with_method_call() {
             body: _,
             invariants,
         } => {
-            assert!(!invariants.is_empty(), "Expected invariant with method calls");
+            assert!(
+                !invariants.is_empty(),
+                "Expected invariant with method calls"
+            );
         }
         _ => panic!("Expected Loop expression, got {:?}", expr.kind),
     }

@@ -307,9 +307,7 @@ impl CliError {
 
             CliError::VerificationFailed(_) => "verification",
 
-            CliError::Io(_)
-            | CliError::NotifyError(_)
-            | CliError::WalkdirError(_) => "io",
+            CliError::Io(_) | CliError::NotifyError(_) | CliError::WalkdirError(_) => "io",
 
             CliError::ConfigParse(_) | CliError::ConfigSerialize(_) => "config",
 
@@ -400,13 +398,9 @@ impl From<CliError> for verum_error::unified::VerumError {
                 line,
                 col,
                 message,
-            } => VerumError::ParseErrors(vec![format!(
-                "{}:{}:{}: {}",
-                file.display(),
-                line,
-                col,
-                message
-            ).into()].into()),
+            } => VerumError::ParseErrors(
+                vec![format!("{}:{}:{}: {}", file.display(), line, col, message).into()].into(),
+            ),
             CliError::TypeError(msg) => VerumError::TypeMismatch {
                 expected: "unknown".into(),
                 actual: msg.into(),
@@ -437,9 +431,12 @@ impl From<CliError> for verum_error::unified::VerumError {
                 message: format!(
                     "version conflict: {} requires {}, but {} was found",
                     package, required, found
-                ).into(),
+                )
+                .into(),
             },
-            CliError::Network(msg) => VerumError::NetworkError { message: msg.into() },
+            CliError::Network(msg) => VerumError::NetworkError {
+                message: msg.into(),
+            },
             CliError::Registry(msg) => VerumError::NetworkError {
                 message: format!("registry error: {}", msg).into(),
             },
@@ -465,7 +462,9 @@ impl From<CliError> for verum_error::unified::VerumError {
                 reason: msg.into(),
                 counterexample: None,
             },
-            CliError::RuntimeError(msg) => VerumError::ExecutionError { message: msg.into() },
+            CliError::RuntimeError(msg) => VerumError::ExecutionError {
+                message: msg.into(),
+            },
             CliError::ProfilingFailed(msg) => VerumError::Other {
                 message: format!("profiling failed: {}", msg).into(),
             },
@@ -482,7 +481,8 @@ impl From<CliError> for verum_error::unified::VerumError {
                     feature.as_str(),
                     planned_version.as_str(),
                     workaround.as_str()
-                ).into(),
+                )
+                .into(),
             },
             CliError::GitError(msg) => VerumError::Other {
                 message: format!("git error: {}", msg).into(),
@@ -490,7 +490,9 @@ impl From<CliError> for verum_error::unified::VerumError {
             CliError::DirtyWorkingDirectory(msg) => VerumError::Other {
                 message: format!("dirty working directory: {}", msg).into(),
             },
-            CliError::Custom(msg) => VerumError::Other { message: msg.into() },
+            CliError::Custom(msg) => VerumError::Other {
+                message: msg.into(),
+            },
         }
     }
 }

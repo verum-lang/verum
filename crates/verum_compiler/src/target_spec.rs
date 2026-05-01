@@ -73,7 +73,11 @@ impl TargetSpec {
         let parts: Vec<&str> = triple.split('-').collect();
 
         let arch_str = parts.first().copied().unwrap_or("").to_string();
-        let arch = if arch_str.is_empty() { host.arch.as_str().to_string() } else { arch_str.clone() };
+        let arch = if arch_str.is_empty() {
+            host.arch.as_str().to_string()
+        } else {
+            arch_str.clone()
+        };
 
         // OS is parts[2] for 3-component triples; for 4+ it's parts[2]
         // (vendor is parts[1]). For 2-component triples like
@@ -109,20 +113,40 @@ impl TargetSpec {
     /// macros at compile time so the host's identity is captured
     /// once, deterministically.
     pub fn host() -> Self {
-        let os = if cfg!(target_os = "macos") { "macos" }
-            else if cfg!(target_os = "linux") { "linux" }
-            else if cfg!(target_os = "windows") { "windows" }
-            else if cfg!(target_os = "wasi") { "wasi" }
-            else { "unknown" };
+        let os = if cfg!(target_os = "macos") {
+            "macos"
+        } else if cfg!(target_os = "linux") {
+            "linux"
+        } else if cfg!(target_os = "windows") {
+            "windows"
+        } else if cfg!(target_os = "wasi") {
+            "wasi"
+        } else {
+            "unknown"
+        };
 
-        let arch = if cfg!(target_arch = "x86_64") { "x86_64" }
-            else if cfg!(target_arch = "aarch64") { "aarch64" }
-            else if cfg!(target_arch = "riscv64") { "riscv64" }
-            else if cfg!(target_arch = "wasm32") { "wasm32" }
-            else { "unknown" };
+        let arch = if cfg!(target_arch = "x86_64") {
+            "x86_64"
+        } else if cfg!(target_arch = "aarch64") {
+            "aarch64"
+        } else if cfg!(target_arch = "riscv64") {
+            "riscv64"
+        } else if cfg!(target_arch = "wasm32") {
+            "wasm32"
+        } else {
+            "unknown"
+        };
 
-        let pointer_width = if cfg!(target_pointer_width = "64") { "64" } else { "32" };
-        let endian = if cfg!(target_endian = "little") { "little" } else { "big" };
+        let pointer_width = if cfg!(target_pointer_width = "64") {
+            "64"
+        } else {
+            "32"
+        };
+        let endian = if cfg!(target_endian = "little") {
+            "little"
+        } else {
+            "big"
+        };
 
         Self {
             os: Text::from(os),
@@ -162,18 +186,17 @@ impl TargetSpec {
 
 fn pointer_width_for_arch(arch: &str) -> &'static str {
     match arch {
-        "x86_64" | "aarch64" | "riscv64" | "powerpc64" | "powerpc64le"
-        | "s390x" | "mips64" | "mips64el" | "wasm64" | "loongarch64" => "64",
-        "i386" | "i486" | "i586" | "i686" | "arm" | "armv7" | "thumbv7em"
-        | "riscv32" | "powerpc" | "mips" | "mipsel" | "wasm32" => "32",
+        "x86_64" | "aarch64" | "riscv64" | "powerpc64" | "powerpc64le" | "s390x" | "mips64"
+        | "mips64el" | "wasm64" | "loongarch64" => "64",
+        "i386" | "i486" | "i586" | "i686" | "arm" | "armv7" | "thumbv7em" | "riscv32"
+        | "powerpc" | "mips" | "mipsel" | "wasm32" => "32",
         _ => "64", // Conservative default: assume 64-bit if unknown.
     }
 }
 
 fn endian_for_arch(arch: &str) -> &'static str {
     match arch {
-        "powerpc" | "powerpc64" | "s390x" | "mips" | "mips64" | "sparc"
-        | "sparc64" => "big",
+        "powerpc" | "powerpc64" | "s390x" | "mips" | "mips64" | "sparc" | "sparc64" => "big",
         _ => "little",
     }
 }
@@ -240,8 +263,14 @@ mod tests {
     #[test]
     fn matches_predicate_target_pointer_width() {
         let s = TargetSpec::parse_triple("riscv32-unknown-linux");
-        assert_eq!(s.matches_predicate("target_pointer_width", "32"), Some(true));
-        assert_eq!(s.matches_predicate("target_pointer_width", "64"), Some(false));
+        assert_eq!(
+            s.matches_predicate("target_pointer_width", "32"),
+            Some(true)
+        );
+        assert_eq!(
+            s.matches_predicate("target_pointer_width", "64"),
+            Some(false)
+        );
     }
 
     #[test]

@@ -21,8 +21,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::green::{GreenChild, GreenNode, GreenToken, TextRange, TextSize};
 use crate::SyntaxKind;
+use crate::green::{GreenChild, GreenNode, GreenToken, TextRange, TextSize};
 
 /// Red node - provides parent pointers and absolute positions.
 ///
@@ -138,18 +138,25 @@ impl SyntaxNode {
     /// Iterate over children (both nodes and tokens).
     pub fn children(&self) -> impl Iterator<Item = SyntaxElement> + '_ {
         let mut offset = self.offset;
-        self.green.children().iter().enumerate().map(move |(i, child)| {
-            let child_offset = offset;
-            offset += child.width();
-            match child {
-                GreenChild::Node(n) => {
-                    SyntaxElement::Node(SyntaxNode::new_child(n.clone(), self, i, child_offset))
+        self.green
+            .children()
+            .iter()
+            .enumerate()
+            .map(move |(i, child)| {
+                let child_offset = offset;
+                offset += child.width();
+                match child {
+                    GreenChild::Node(n) => {
+                        SyntaxElement::Node(SyntaxNode::new_child(n.clone(), self, i, child_offset))
+                    }
+                    GreenChild::Token(t) => SyntaxElement::Token(SyntaxToken::new(
+                        t.clone(),
+                        self.clone(),
+                        i,
+                        child_offset,
+                    )),
                 }
-                GreenChild::Token(t) => {
-                    SyntaxElement::Token(SyntaxToken::new(t.clone(), self.clone(), i, child_offset))
-                }
-            }
-        })
+            })
     }
 
     /// Iterate over child nodes only.
@@ -167,12 +174,18 @@ impl SyntaxNode {
         let offset = self.green.child_offset(index)?;
         let child = self.green.child(index)?;
         Some(match child {
-            GreenChild::Node(n) => {
-                SyntaxElement::Node(SyntaxNode::new_child(n.clone(), self, index, self.offset + offset))
-            }
-            GreenChild::Token(t) => {
-                SyntaxElement::Token(SyntaxToken::new(t.clone(), self.clone(), index, self.offset + offset))
-            }
+            GreenChild::Node(n) => SyntaxElement::Node(SyntaxNode::new_child(
+                n.clone(),
+                self,
+                index,
+                self.offset + offset,
+            )),
+            GreenChild::Token(t) => SyntaxElement::Token(SyntaxToken::new(
+                t.clone(),
+                self.clone(),
+                index,
+                self.offset + offset,
+            )),
         })
     }
 
@@ -367,13 +380,30 @@ impl fmt::Debug for SyntaxNode {
 
 impl fmt::Display for SyntaxNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn display_tree(f: &mut fmt::Formatter<'_>, node: &SyntaxNode, indent: usize) -> fmt::Result {
-            writeln!(f, "{}{:?}@{}", "  ".repeat(indent), node.kind(), node.text_range())?;
+        fn display_tree(
+            f: &mut fmt::Formatter<'_>,
+            node: &SyntaxNode,
+            indent: usize,
+        ) -> fmt::Result {
+            writeln!(
+                f,
+                "{}{:?}@{}",
+                "  ".repeat(indent),
+                node.kind(),
+                node.text_range()
+            )?;
             for child in node.children() {
                 match child {
                     SyntaxElement::Node(n) => display_tree(f, &n, indent + 1)?,
                     SyntaxElement::Token(t) => {
-                        writeln!(f, "{}{:?}@{} {:?}", "  ".repeat(indent + 1), t.kind(), t.text_range(), t.text())?;
+                        writeln!(
+                            f,
+                            "{}{:?}@{} {:?}",
+                            "  ".repeat(indent + 1),
+                            t.kind(),
+                            t.text_range(),
+                            t.text()
+                        )?;
                     }
                 }
             }

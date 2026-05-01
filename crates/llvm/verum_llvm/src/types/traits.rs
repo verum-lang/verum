@@ -2,17 +2,17 @@ use verum_llvm_sys::prelude::LLVMTypeRef;
 
 use std::fmt::Debug;
 
+use crate::AddressSpace;
 use crate::support::LLVMString;
 use crate::types::enums::{AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum};
 use crate::types::{
-    ArrayType, FloatType, FunctionType, IntType, PointerType, ScalableVectorType, StructType, Type, VectorType,
-    VoidType,
+    ArrayType, FloatType, FunctionType, IntType, PointerType, ScalableVectorType, StructType, Type,
+    VectorType, VoidType,
 };
 use crate::values::{
-    FloatMathValue, FloatValue, IntMathValue, IntValue, PointerMathValue, PointerValue, ScalableVectorValue,
-    VectorValue,
+    FloatMathValue, FloatValue, IntMathValue, IntValue, PointerMathValue, PointerValue,
+    ScalableVectorValue, VectorValue,
 };
-use crate::AddressSpace;
 
 /// Accessor to the inner LLVM type reference
 pub unsafe trait AsTypeRef {
@@ -64,7 +64,11 @@ pub unsafe trait BasicType<'ctx>: AnyType<'ctx> {
     /// let int_basic_type = int.as_basic_type_enum();
     /// assert_eq!(int_basic_type.fn_type(&[], false), int.fn_type(&[], false));
     /// ```
-    fn fn_type(&self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    fn fn_type(
+        &self,
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+        is_var_args: bool,
+    ) -> FunctionType<'ctx> {
         unsafe { Type::new(self.as_type_ref()).fn_type(param_types, is_var_args) }
     }
 

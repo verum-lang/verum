@@ -34,21 +34,25 @@
 //! - GATs: associated types with their own type parameters for lending iterators and monadic patterns
 //! - Protocol system: method resolution, default impls, associated types, protocol objects
 
+use crate::TypeError;
 use crate::protocol::{ProtocolChecker, ProtocolError, ProtocolImpl};
 use crate::ty::{Substitution, SubstitutionExt, Type, TypeVar};
-use crate::TypeError;
 use thiserror::Error;
 use verum_ast::span::Span;
 use verum_ast::ty::Path;
-use verum_common::{List, Map, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Text};
 
 /// Errors that can occur during projection resolution
 #[derive(Debug, Error, Clone)]
 pub enum ProjectionError {
     /// Type does not implement the required protocol
     #[error("Cannot resolve associated type: type `{ty}` does not implement protocol `{protocol}`")]
-    TypeDoesNotImplementProtocol { ty: Text, protocol: Text, span: Span },
+    TypeDoesNotImplementProtocol {
+        ty: Text,
+        protocol: Text,
+        span: Span,
+    },
 
     /// Associated type not found in protocol
     #[error("Protocol `{protocol}` has no associated type named `{assoc_name}`")]
@@ -59,7 +63,9 @@ pub enum ProjectionError {
     },
 
     /// Associated type not specified in implementation
-    #[error("Implementation of `{protocol}` for `{ty}` does not specify associated type `{assoc_name}`")]
+    #[error(
+        "Implementation of `{protocol}` for `{ty}` does not specify associated type `{assoc_name}`"
+    )]
     AssociatedTypeNotSpecified {
         protocol: Text,
         ty: Text,
@@ -68,7 +74,9 @@ pub enum ProjectionError {
     },
 
     /// Ambiguous associated type: multiple implementations could apply
-    #[error("Ambiguous associated type: type `{ty}` has multiple implementations that could provide `{assoc_name}`")]
+    #[error(
+        "Ambiguous associated type: type `{ty}` has multiple implementations that could provide `{assoc_name}`"
+    )]
     AmbiguousAssociatedType {
         ty: Text,
         assoc_name: Text,
@@ -94,7 +102,9 @@ pub enum ProjectionError {
     },
 
     /// Associated type bound not satisfied
-    #[error("Associated type `{assoc_name}` does not satisfy bound `{bound}` in projection `{projection}`")]
+    #[error(
+        "Associated type `{assoc_name}` does not satisfy bound `{bound}` in projection `{projection}`"
+    )]
     AssociatedTypeBoundNotSatisfied {
         projection: Text,
         assoc_name: Text,
@@ -107,11 +117,7 @@ impl From<ProjectionError> for TypeError {
     fn from(err: ProjectionError) -> Self {
         match err {
             ProjectionError::TypeDoesNotImplementProtocol { ty, protocol, span } => {
-                TypeError::ProtocolNotSatisfied {
-                    ty,
-                    protocol,
-                    span,
-                }
+                TypeError::ProtocolNotSatisfied { ty, protocol, span }
             }
             ProjectionError::AssociatedTypeNotFound {
                 protocol,
@@ -311,7 +317,10 @@ impl<'a> ProjectionResolver<'a> {
     /// * `Ok(ProjectionResult::Resolved(ty))` - Successfully resolved to concrete type
     /// * `Ok(ProjectionResult::Deferred(proj))` - Base type not yet resolved
     /// * `Err(ProjectionError)` - Resolution failed
-    pub fn resolve_projection(&self, projection: &Projection) -> Result<ProjectionResult, ProjectionError> {
+    pub fn resolve_projection(
+        &self,
+        projection: &Projection,
+    ) -> Result<ProjectionResult, ProjectionError> {
         // Apply current substitution to base type
         let base = projection.base.apply_subst(&self.substitution);
 
@@ -422,7 +431,9 @@ impl<'a> ProjectionResolver<'a> {
                     .as_ident()
                     .map(|i| i.name.clone())
                     .unwrap_or_else(|| "?".into());
-                if let Option::Some(protocol_def) = self.protocol_checker.get_protocol(&protocol_name) {
+                if let Option::Some(protocol_def) =
+                    self.protocol_checker.get_protocol(&protocol_name)
+                {
                     if let Some(assoc_type_def) = protocol_def.associated_types.get(assoc_name) {
                         if let Option::Some(ref default_ty) = assoc_type_def.default {
                             candidates.push((impl_, default_ty.clone()));
@@ -558,10 +569,11 @@ impl<'a> ProjectionResolver<'a> {
                 type_params,
                 properties,
             } => {
-                let normalized_params = params
-                    .iter()
-                    .map(|p| self.normalize(p))
-                    .collect::<Result<List<_>, _>>()?;
+                let normalized_params = params.iter().map(|p| self.normalize(p)).collect::<Result<
+                    List<_>,
+                    _,
+                >>(
+                )?;
                 let normalized_return = self.normalize(return_type)?;
 
                 Ok(Type::Function {
@@ -751,7 +763,11 @@ pub fn parse_projection(ty: &Type, span: Span) -> Option<Projection> {
                         args: args.clone(),
                     };
                     // INVARIANT: parts.len() >= 2 checked above, so last() always succeeds
-                    let assoc_name = parts.last().expect("parts verified non-empty").to_string().into();
+                    let assoc_name = parts
+                        .last()
+                        .expect("parts verified non-empty")
+                        .to_string()
+                        .into();
                     return Some(Projection::new(base, assoc_name, span));
                 }
             } else if name.contains("::") {
@@ -762,7 +778,11 @@ pub fn parse_projection(ty: &Type, span: Span) -> Option<Projection> {
                         args: args.clone(),
                     };
                     // INVARIANT: parts.len() >= 2 checked above, so last() always succeeds
-                    let assoc_name = parts.last().expect("parts verified non-empty").to_string().into();
+                    let assoc_name = parts
+                        .last()
+                        .expect("parts verified non-empty")
+                        .to_string()
+                        .into();
                     return Some(Projection::new(base, assoc_name, span));
                 }
             }

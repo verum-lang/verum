@@ -34,7 +34,7 @@ use std::time::Instant;
 use anyhow::{Context as AnyhowContext, Result};
 use tracing::{debug, info, warn};
 
-use verum_ast::{decl::ItemKind, FileId, Module};
+use verum_ast::{FileId, Module, decl::ItemKind};
 use verum_common::{List, Map, Text};
 use verum_diagnostics::DiagnosticBuilder;
 use verum_fast_parser::VerumParser;
@@ -153,7 +153,10 @@ impl<'s> CompilationPipeline<'s> {
         // The embedded archive API: crate::embedded_stdlib::get_embedded_stdlib()
         let (stdlib_path, workspace_root_for_cache) = match &self.build_mode {
             BuildMode::StdlibBootstrap { config } => {
-                debug!("StdlibBootstrap mode: using configured path {:?}", config.stdlib_path);
+                debug!(
+                    "StdlibBootstrap mode: using configured path {:?}",
+                    config.stdlib_path
+                );
                 (config.stdlib_path.clone(), None)
             }
             BuildMode::Normal => {
@@ -260,7 +263,9 @@ impl<'s> CompilationPipeline<'s> {
                     {
                         let cache = global_stdlib_registry_cache();
                         let mut guard = cache.write().unwrap_or_else(|poisoned| {
-                            tracing::warn!("stdlib registry cache RwLock poisoned during write, recovering");
+                            tracing::warn!(
+                                "stdlib registry cache RwLock poisoned during write, recovering"
+                            );
                             poisoned.into_inner()
                         });
                         if guard.is_none() {
@@ -304,7 +309,10 @@ impl<'s> CompilationPipeline<'s> {
                 return Ok(());
             }
 
-            info!("Parsing {} stdlib module(s) (first load, parallel)...", stdlib_files.len());
+            info!(
+                "Parsing {} stdlib module(s) (first load, parallel)...",
+                stdlib_files.len()
+            );
 
             // Phase 1: Read all files and compute module paths (parallelizable I/O)
             use rayon::prelude::*;
@@ -351,12 +359,24 @@ impl<'s> CompilationPipeline<'s> {
             // Phase 2: Parse modules (must be sequential due to shared parser state)
             let mut entries = Vec::with_capacity(file_data.len());
             for (module_path_str, source_text, file_path) in &file_data {
-                match self.parse_stdlib_module(module_path_str, &Text::from(source_text.clone()), file_path) {
+                match self.parse_stdlib_module(
+                    module_path_str,
+                    &Text::from(source_text.clone()),
+                    file_path,
+                ) {
                     Ok(module) => {
-                        entries.push((module_path_str.clone(), module, Text::from(source_text.clone())));
+                        entries.push((
+                            module_path_str.clone(),
+                            module,
+                            Text::from(source_text.clone()),
+                        ));
                     }
                     Err(e) => {
-                        debug!("Failed to parse stdlib module {}: {:?}", module_path_str.as_str(), e);
+                        debug!(
+                            "Failed to parse stdlib module {}: {:?}",
+                            module_path_str.as_str(),
+                            e
+                        );
                     }
                 }
             }
@@ -387,7 +407,9 @@ impl<'s> CompilationPipeline<'s> {
             let module_registry = self.session.module_registry();
             let module_id = module_registry.read().allocate_id();
 
-            let file_id = module.items.first()
+            let file_id = module
+                .items
+                .first()
                 .map(|item| item.span.file_id)
                 .unwrap_or(FileId::new(0));
 
@@ -403,16 +425,26 @@ impl<'s> CompilationPipeline<'s> {
                 Ok(export_table) => {
                     let export_count = export_table.len();
                     module_info.exports = export_table;
-                    debug!("{} has {} items, {} exports", module_path_str.as_str(), item_count, export_count);
+                    debug!(
+                        "{} has {} items, {} exports",
+                        module_path_str.as_str(),
+                        item_count,
+                        export_count
+                    );
                 }
                 Err(e) => {
-                    debug!("Failed to extract exports from {}: {:?}", module_path_str.as_str(), e);
+                    debug!(
+                        "Failed to extract exports from {}: {:?}",
+                        module_path_str.as_str(),
+                        e
+                    );
                 }
             }
 
             module_registry.write().register(module_info);
             self.register_inline_modules(module, &module_path, file_id);
-            self.modules.insert(module_path_str.clone(), Arc::new(module.clone()));
+            self.modules
+                .insert(module_path_str.clone(), Arc::new(module.clone()));
         }
 
         // After all modules are loaded, resolve re-exports in two phases:
@@ -450,7 +482,10 @@ impl<'s> CompilationPipeline<'s> {
                 iteration += 1;
                 match resolve_glob_reexports(&mut guard) {
                     Ok(resolved_count) => {
-                        debug!("Glob re-export iteration {}: resolved {} exports", iteration, resolved_count);
+                        debug!(
+                            "Glob re-export iteration {}: resolved {} exports",
+                            iteration, resolved_count
+                        );
                         if resolved_count == 0 || iteration >= 10 {
                             break;
                         }
@@ -569,8 +604,10 @@ impl<'s> CompilationPipeline<'s> {
             );
 
             for file_path in &cog_files {
-                let stem =
-                    file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+                let stem = file_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown");
                 let module_path_str = {
                     let rel = file_path
                         .parent()
@@ -641,13 +678,11 @@ impl<'s> CompilationPipeline<'s> {
                         module_registry.write().register(module_info);
                         self.register_inline_modules(&module, &module_path, file_id);
                         let module_rc = Arc::new(module);
-                        self.modules.insert(module_path_str.clone(), module_rc.clone());
+                        self.modules
+                            .insert(module_path_str.clone(), module_rc.clone());
                         self.project_modules
                             .insert(module_path_str.clone(), module_rc);
-                        debug!(
-                            "Loaded external-cog module: {}",
-                            module_path_str.as_str()
-                        );
+                        debug!("Loaded external-cog module: {}", module_path_str.as_str());
                     }
                     Err(e) => {
                         debug!(
@@ -696,7 +731,11 @@ impl<'s> CompilationPipeline<'s> {
             .unwrap_or("project")
             .to_string();
 
-        info!("Detected multi-file project '{}' in {}", project_prefix, input_dir.display());
+        info!(
+            "Detected multi-file project '{}' in {}",
+            project_prefix,
+            input_dir.display()
+        );
 
         // Discover all .vr files in the project directory (recursive)
         let canonical_input = input_path.canonicalize().ok();
@@ -721,14 +760,18 @@ impl<'s> CompilationPipeline<'s> {
 
         // Parse and register each project module
         for file_path in &project_files {
-            let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+            let stem = file_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
             // Build dotted module path from relative directory components
             // e.g. project_dir/sub/foo.vr -> "project.sub.foo"
             //  project_dir/sub/mod.vr -> "project.sub"
             //  project_dir/foo.vr -> "project.foo"
             //  project_dir/mod.vr -> "project"
             let module_path_str = {
-                let rel = file_path.parent()
+                let rel = file_path
+                    .parent()
                     .and_then(|p| p.strip_prefix(&input_dir).ok())
                     .unwrap_or(std::path::Path::new(""));
                 let mut parts = vec![project_prefix.clone()];
@@ -776,18 +819,28 @@ impl<'s> CompilationPipeline<'s> {
             let source_text = match std::fs::read_to_string(file_path) {
                 Ok(s) => s,
                 Err(e) => {
-                    debug!("Failed to read project module {}: {:?}", module_path_str.as_str(), e);
+                    debug!(
+                        "Failed to read project module {}: {:?}",
+                        module_path_str.as_str(),
+                        e
+                    );
                     continue;
                 }
             };
 
-            match self.parse_stdlib_module(&module_path_str, &Text::from(source_text.clone()), file_path) {
+            match self.parse_stdlib_module(
+                &module_path_str,
+                &Text::from(source_text.clone()),
+                file_path,
+            ) {
                 Ok(module) => {
                     let module_path = ModulePath::from_str(module_path_str.as_str());
                     let module_registry = self.session.module_registry();
                     let module_id = module_registry.read().allocate_id();
 
-                    let file_id = module.items.first()
+                    let file_id = module
+                        .items
+                        .first()
                         .map(|item| item.span.file_id)
                         .unwrap_or(FileId::new(0));
 
@@ -814,8 +867,7 @@ impl<'s> CompilationPipeline<'s> {
                     // the build.
                     let header_warnings =
                         verum_modules::loader::validate_module_headers_against_filesystem(
-                            file_path,
-                            &module,
+                            file_path, &module,
                         );
                     for warning in &header_warnings {
                         let diag = verum_diagnostics::DiagnosticBuilder::warning()
@@ -829,13 +881,19 @@ impl<'s> CompilationPipeline<'s> {
                     module_registry.write().register(module_info);
                     self.register_inline_modules(&module, &module_path, file_id);
                     let module_rc = Arc::new(module);
-                    self.modules.insert(module_path_str.clone(), module_rc.clone());
+                    self.modules
+                        .insert(module_path_str.clone(), module_rc.clone());
                     // Also store in project_modules so they survive self.modules.clear()
-                    self.project_modules.insert(module_path_str.clone(), module_rc);
+                    self.project_modules
+                        .insert(module_path_str.clone(), module_rc);
                     debug!("Loaded project module: {}", module_path_str.as_str());
                 }
                 Err(e) => {
-                    debug!("Failed to parse project module {}: {:?}", module_path_str.as_str(), e);
+                    debug!(
+                        "Failed to parse project module {}: {:?}",
+                        module_path_str.as_str(),
+                        e
+                    );
                 }
             }
         }
@@ -901,8 +959,8 @@ impl<'s> CompilationPipeline<'s> {
         module_path: &ModulePath,
     ) -> verum_modules::exports::ExportTable {
         use verum_ast::ItemKind;
-        use verum_modules::exports::{ExportTable, ExportedItem, ExportKind};
         use verum_ast::Visibility;
+        use verum_modules::exports::{ExportKind, ExportTable, ExportedItem};
 
         let mut export_table = ExportTable::new();
         export_table.set_module_id(module_id);
@@ -911,41 +969,69 @@ impl<'s> CompilationPipeline<'s> {
         for item in &module.items {
             let result = match &item.kind {
                 ItemKind::Function(func) => {
-                    let kind = if func.is_meta { ExportKind::Meta } else { ExportKind::Function };
+                    let kind = if func.is_meta {
+                        ExportKind::Meta
+                    } else {
+                        ExportKind::Function
+                    };
                     export_table.add_export(ExportedItem::new(
-                        func.name.name.as_str(), kind, Visibility::Public, module_id, item.span,
+                        func.name.name.as_str(),
+                        kind,
+                        Visibility::Public,
+                        module_id,
+                        item.span,
                     ))
                 }
                 ItemKind::Type(type_decl) => {
                     let _ = export_table.add_export(ExportedItem::new(
-                        type_decl.name.name.as_str(), ExportKind::Type, Visibility::Public, module_id, item.span,
+                        type_decl.name.name.as_str(),
+                        ExportKind::Type,
+                        Visibility::Public,
+                        module_id,
+                        item.span,
                     ));
                     // Also export variant constructors
                     if let verum_ast::decl::TypeDeclBody::Variant(variants) = &type_decl.body {
                         for variant in variants {
                             let _ = export_table.add_export(ExportedItem::new(
-                                variant.name.name.as_str(), ExportKind::Function, Visibility::Public, module_id, variant.span,
+                                variant.name.name.as_str(),
+                                ExportKind::Function,
+                                Visibility::Public,
+                                module_id,
+                                variant.span,
                             ));
                         }
                     }
                     Ok(())
                 }
                 ItemKind::Protocol(proto) => {
-                    let kind = if proto.is_context { ExportKind::Context } else { ExportKind::Protocol };
+                    let kind = if proto.is_context {
+                        ExportKind::Context
+                    } else {
+                        ExportKind::Protocol
+                    };
                     export_table.add_export(ExportedItem::new(
-                        proto.name.name.as_str(), kind, Visibility::Public, module_id, item.span,
+                        proto.name.name.as_str(),
+                        kind,
+                        Visibility::Public,
+                        module_id,
+                        item.span,
                     ))
                 }
-                ItemKind::Const(const_decl) => {
-                    export_table.add_export(ExportedItem::new(
-                        const_decl.name.name.as_str(), ExportKind::Const, Visibility::Public, module_id, item.span,
-                    ))
-                }
-                ItemKind::Static(static_decl) => {
-                    export_table.add_export(ExportedItem::new(
-                        static_decl.name.name.as_str(), ExportKind::Const, Visibility::Public, module_id, item.span,
-                    ))
-                }
+                ItemKind::Const(const_decl) => export_table.add_export(ExportedItem::new(
+                    const_decl.name.name.as_str(),
+                    ExportKind::Const,
+                    Visibility::Public,
+                    module_id,
+                    item.span,
+                )),
+                ItemKind::Static(static_decl) => export_table.add_export(ExportedItem::new(
+                    static_decl.name.name.as_str(),
+                    ExportKind::Const,
+                    Visibility::Public,
+                    module_id,
+                    item.span,
+                )),
                 _ => Ok(()), // Skip impl blocks, modules, imports, etc.
             };
             if let Err(e) = result {
@@ -1077,8 +1163,10 @@ impl<'s> CompilationPipeline<'s> {
                             module_info.exports = export_table;
                         }
                         Err(e) => {
-                            debug!("Failed to extract exports from inline module {}: {:?}",
-                                child_path_str, e);
+                            debug!(
+                                "Failed to extract exports from inline module {}: {:?}",
+                                child_path_str, e
+                            );
                         }
                     }
 
@@ -1177,11 +1265,10 @@ impl<'s> CompilationPipeline<'s> {
         // inline-vs-filesystem overlaps for files that don't go
         // through phase_parse (e.g. multi-source registration in
         // run_full_compilation).
-        let header_warnings =
-            verum_modules::loader::validate_module_headers_against_filesystem(
-                &PathBuf::from(path.as_str()),
-                &module,
-            );
+        let header_warnings = verum_modules::loader::validate_module_headers_against_filesystem(
+            &PathBuf::from(path.as_str()),
+            &module,
+        );
         for warning in header_warnings {
             let diag = DiagnosticBuilder::warning()
                 .code(warning.code())

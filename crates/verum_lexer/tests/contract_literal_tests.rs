@@ -22,8 +22,8 @@
 // NOTE: r#"..."# syntax removed in simplified literal architecture
 
 use verum_ast::span::FileId;
-use verum_lexer::{Lexer, TokenKind};
 use verum_common::Text;
+use verum_lexer::{Lexer, TokenKind};
 
 /// Helper to lex a single token (excluding EOF)
 fn lex_single(source: &str) -> TokenKind {
@@ -331,10 +331,7 @@ fn test_contract_raw_string_literal() {
 
     match token {
         TokenKind::ContractLiteral(content) => {
-            assert_eq!(
-                content,
-                Text::from("requires x > 0 && (x + y) < MAX")
-            );
+            assert_eq!(content, Text::from("requires x > 0 && (x + y) < MAX"));
         }
         _ => panic!("Expected ContractLiteral, got {:?}", token),
     }

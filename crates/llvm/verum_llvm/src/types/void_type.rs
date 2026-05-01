@@ -86,7 +86,11 @@ impl<'ctx> VoidType<'ctx> {
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// ```
-    pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type(
+        self,
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+        is_var_args: bool,
+    ) -> FunctionType<'ctx> {
         self.void_type.fn_type(param_types, is_var_args)
     }
 

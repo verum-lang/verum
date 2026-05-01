@@ -225,8 +225,8 @@ impl CodegenIntegration {
 use crate::hoare_logic::{Command, HoareTriple, WPError};
 use crate::vcgen::{Formula, SmtBinOp, SmtExpr, SmtUnOp, Variable};
 use crate::vcgen::{VCResult, VerificationCondition};
-use verum_smt::context::Context as SmtContext;
 use verum_common::{Map, Text};
+use verum_smt::context::Context as SmtContext;
 
 /// Hoare logic verification using Z3 SMT solver
 ///

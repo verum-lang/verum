@@ -59,7 +59,11 @@ fn generate_complex_program(lines: usize) -> Vec<Expr> {
             2 => make_binary(BinOp::Mul, make_int_literal(i as i128), make_int_literal(2)),
             _ => make_binary(
                 BinOp::Sub,
-                make_binary(BinOp::Add, make_int_literal(i as i128), make_int_literal(10)),
+                make_binary(
+                    BinOp::Add,
+                    make_int_literal(i as i128),
+                    make_int_literal(10),
+                ),
                 make_int_literal(5),
             ),
         })

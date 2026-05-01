@@ -20,8 +20,8 @@
 
 use verum_ast::ty::TypeBoundKind;
 use verum_ast::{FileId, TypeKind, WhereClause, WherePredicateKind};
-use verum_lexer::Lexer;
 use verum_fast_parser::RecursiveParser;
+use verum_lexer::Lexer;
 
 fn parse_where_clause(input: &str) -> WhereClause {
     let file_id = FileId::new(0);

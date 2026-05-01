@@ -31,8 +31,8 @@
 //! defend against use-after-free regardless of how the hazard
 //! list is structured.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 
 use verum_common::cbgr::{CbgrErrorCode, CbgrHeader};

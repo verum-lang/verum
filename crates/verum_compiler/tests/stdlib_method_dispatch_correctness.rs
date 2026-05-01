@@ -114,9 +114,8 @@ fn assert_dispatch_panic(scenario: &str, fixture: &std::path::Path) {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn result_unwrap_on_err_panics() {
-    let fixture = workspace_root().join(
-        "vcs/specs/L0-critical/_codegen_regressions/result_unwrap_err_receiver_narrow.vr",
-    );
+    let fixture = workspace_root()
+        .join("vcs/specs/L0-critical/_codegen_regressions/result_unwrap_err_receiver_narrow.vr");
     assert_dispatch_panic("Result.unwrap on Err", &fixture);
 }
 
@@ -127,8 +126,7 @@ fn result_unwrap_on_err_panics() {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn maybe_unwrap_on_none_panics() {
-    let fixture = workspace_root().join(
-        "vcs/specs/L0-critical/_codegen_regressions/maybe_unwrap_none_panics.vr",
-    );
+    let fixture = workspace_root()
+        .join("vcs/specs/L0-critical/_codegen_regressions/maybe_unwrap_none_panics.vr");
     assert_dispatch_panic("Maybe.unwrap on None", &fixture);
 }

@@ -28,8 +28,8 @@
 // Tests the complete Verum literal system as defined in the lexical grammar.
 
 use verum_ast::span::FileId;
-use verum_lexer::{Lexer, TokenKind};
 use verum_common::Text;
+use verum_lexer::{Lexer, TokenKind};
 
 /// Helper to tokenize a string and extract token kinds.
 fn tokenize(source: &str) -> Vec<TokenKind> {

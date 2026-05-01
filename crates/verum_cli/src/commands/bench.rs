@@ -167,7 +167,9 @@ pub fn execute(opts: BenchOptions) -> Result<()> {
     if benches.is_empty() {
         if !quiet {
             ui::warn("No benchmark functions found in src/ tests/ benches/");
-            ui::info("Mark a function with @bench (optionally @bench(group)) or name it fn bench_*");
+            ui::info(
+                "Mark a function with @bench (optionally @bench(group)) or name it fn bench_*",
+            );
         }
         return emit_results(&opts, &[]);
     }
@@ -285,7 +287,11 @@ fn discover_benchmarks(filter: Option<&Text>) -> Result<Vec<BenchFunc>> {
             continue;
         }
         scanned = true;
-        for entry in WalkDir::new(&p).follow_links(false).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(&p)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             let path = entry.path();
             if !path.is_file() {
                 continue;
@@ -455,8 +461,8 @@ fn contains_main_fn(src: &str) -> bool {
 
 fn prepare_interpret(file: &Path, funcs: &[BenchFunc]) -> Result<CompiledFile> {
     use verum_ast::{FileId, Module};
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
     use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 
     let src = fs::read_to_string(file)
@@ -465,7 +471,11 @@ fn prepare_interpret(file: &Path, funcs: &[BenchFunc]) -> Result<CompiledFile> {
     let parser = VerumParser::new();
     let lexer = Lexer::new(&src, fid);
     let module_ast: Module = parser.parse_module(lexer, fid).map_err(|errs| {
-        let joined = errs.iter().map(|e| format!("{}", e)).collect::<Vec<_>>().join("\n");
+        let joined = errs
+            .iter()
+            .map(|e| format!("{}", e))
+            .collect::<Vec<_>>()
+            .join("\n");
         CliError::CompilationFailed(format!("parse {}: {}", file.display(), joined))
     })?;
 
@@ -528,9 +538,9 @@ fn run_bench_interpret(
         CompiledFile::Interpret { module, func_ids } => (module, func_ids),
         _ => return Err(CliError::RuntimeError("compiled artifact mismatch".into())),
     };
-    let fid = *func_ids.get(&func.name).ok_or_else(|| {
-        CliError::RuntimeError(format!("bench fn `{}` not mapped", func.name))
-    })?;
+    let fid = *func_ids
+        .get(&func.name)
+        .ok_or_else(|| CliError::RuntimeError(format!("bench fn `{}` not mapped", func.name)))?;
 
     // Single interpreter instance reused across samples so we're not
     // re-paying state-construction overhead each iteration. Each call
@@ -599,11 +609,7 @@ fn run_bench_aot(
     // Each bench fn gets its own driver file and its own binary.
     let target_dir = PathBuf::from("target/bench/drivers");
     fs::create_dir_all(&target_dir).map_err(|e| {
-        CliError::CompilationFailed(format!(
-            "mkdir {}: {}",
-            target_dir.display(),
-            e
-        ))
+        CliError::CompilationFailed(format!("mkdir {}: {}", target_dir.display(), e))
     })?;
     let driver_path = target_dir.join(format!("{}.vr", func.name));
     let driver_source = format!(
@@ -873,8 +879,10 @@ fn print_table(results: &[BenchResult]) {
     );
     println!("  {}", "-".repeat(102));
     for r in results {
-        let outl = r.outliers.low_mild + r.outliers.high_mild
-            + r.outliers.low_severe + r.outliers.high_severe;
+        let outl = r.outliers.low_mild
+            + r.outliers.high_mild
+            + r.outliers.low_severe
+            + r.outliers.high_severe;
         let tier = match r.tier.as_str() {
             "aot" => "aot".green().to_string(),
             _ => "interp".cyan().to_string(),
@@ -904,10 +912,14 @@ fn print_json(results: &[BenchResult]) -> Result<()> {
 }
 
 fn print_csv(results: &[BenchResult]) {
-    println!("name,tier,group,n,median_ns,mean_ns,stddev_ns,mad_ns,min_ns,max_ns,ci95_lo_ns,ci95_hi_ns,outliers_total");
+    println!(
+        "name,tier,group,n,median_ns,mean_ns,stddev_ns,mad_ns,min_ns,max_ns,ci95_lo_ns,ci95_hi_ns,outliers_total"
+    );
     for r in results {
-        let outl = r.outliers.low_mild + r.outliers.high_mild
-            + r.outliers.low_severe + r.outliers.high_severe;
+        let outl = r.outliers.low_mild
+            + r.outliers.high_mild
+            + r.outliers.low_severe
+            + r.outliers.high_severe;
         println!(
             "{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
             csv_escape(&r.name),
@@ -939,8 +951,10 @@ fn print_markdown(results: &[BenchResult]) {
     println!("| Benchmark | Tier | Median | Mean | ±CI95 | Min | n | Outliers |");
     println!("|-----------|------|--------|------|-------|-----|---|----------|");
     for r in results {
-        let outl = r.outliers.low_mild + r.outliers.high_mild
-            + r.outliers.low_severe + r.outliers.high_severe;
+        let outl = r.outliers.low_mild
+            + r.outliers.high_mild
+            + r.outliers.low_severe
+            + r.outliers.high_severe;
         println!(
             "| `{}` | {} | {} | {} | ±{:.1}% | {} | {} | {} |",
             r.name,
@@ -1000,9 +1014,8 @@ fn baseline_dir() -> PathBuf {
 
 fn save_baseline_file(name: &str, results: &[BenchResult]) -> Result<()> {
     let dir = baseline_dir();
-    fs::create_dir_all(&dir).map_err(|e| {
-        CliError::Custom(format!("mkdir {}: {}", dir.display(), e))
-    })?;
+    fs::create_dir_all(&dir)
+        .map_err(|e| CliError::Custom(format!("mkdir {}: {}", dir.display(), e)))?;
     let path = dir.join(format!("{}.json", name));
     let baseline = Baseline {
         timestamp: chrono::Utc::now().to_rfc3339(),
@@ -1026,11 +1039,7 @@ fn load_baseline(name: &str) -> Option<Baseline> {
 /// A change is flagged only when the point estimate (median) moved by
 /// more than `noise_threshold_pct` AND the CI95 ranges don't overlap
 /// (simple but robust "are they distinguishable" test).
-fn print_baseline_comparison(
-    current: &[BenchResult],
-    baseline: &[BenchResult],
-    noise_pct: f64,
-) {
+fn print_baseline_comparison(current: &[BenchResult], baseline: &[BenchResult], noise_pct: f64) {
     println!("{}", "Baseline Comparison:".bold());
     println!();
     println!(
@@ -1041,8 +1050,7 @@ fn print_baseline_comparison(
         "Change".bold(),
     );
     println!("  {}", "-".repeat(80));
-    let map: HashMap<&str, &BenchResult> =
-        baseline.iter().map(|b| (b.name.as_str(), b)).collect();
+    let map: HashMap<&str, &BenchResult> = baseline.iter().map(|b| (b.name.as_str(), b)).collect();
     for cur in current {
         if let Some(base) = map.get(cur.name.as_str()) {
             let pct = ((cur.median_ns - base.median_ns) / base.median_ns) * 100.0;
@@ -1087,7 +1095,10 @@ mod tests {
         assert_eq!(parse_fn_name("fn foo() {").as_deref(), Some("foo"));
         assert_eq!(parse_fn_name("pub fn foo() {").as_deref(), Some("foo"));
         assert_eq!(parse_fn_name("public fn foo() {").as_deref(), Some("foo"));
-        assert_eq!(parse_fn_name("private fn foo_bar() {").as_deref(), Some("foo_bar"));
+        assert_eq!(
+            parse_fn_name("private fn foo_bar() {").as_deref(),
+            Some("foo_bar")
+        );
         assert_eq!(parse_fn_name("let x = 1;"), None);
     }
 
@@ -1124,7 +1135,9 @@ mod tests {
             "x".into(),
             None,
             "interpret".into(),
-            vec![100.0, 102.0, 99.0, 101.0, 300.0, 98.0, 103.0, 97.0, 100.0, 101.0],
+            vec![
+                100.0, 102.0, 99.0, 101.0, 300.0, 98.0, 103.0, 97.0, 100.0, 101.0,
+            ],
         );
         // Median near 100.5
         assert!(r.median_ns > 99.0 && r.median_ns < 102.0);

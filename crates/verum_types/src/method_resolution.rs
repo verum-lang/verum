@@ -49,10 +49,10 @@
 //! // -> Returns MethodResolution with protocol source
 //! ```
 
-use verum_ast::decl::ImplDecl;
 use verum_ast::Span;
-use verum_common::{List, Map, Maybe, Text};
+use verum_ast::decl::ImplDecl;
 use verum_common::well_known_types::WellKnownType as WKT;
+use verum_common::{List, Map, Maybe, Text};
 
 use crate::context::TypeScheme;
 use crate::ty::Type;
@@ -206,11 +206,7 @@ impl std::fmt::Display for MethodError {
                 candidates,
                 ..
             } => {
-                write!(
-                    f,
-                    "ambiguous method '{}', could be from: ",
-                    method_name
-                )?;
+                write!(f, "ambiguous method '{}', could be from: ", method_name)?;
                 for (i, c) in candidates.iter().enumerate() {
                     if i > 0 {
                         write!(f, " or ")?;
@@ -562,21 +558,21 @@ impl MethodResolver for DefaultMethodResolver {
 
     fn register_inherent_impl(&mut self, type_name: &str, impl_block: &ImplDecl) {
         let type_text = Text::from(type_name);
-        let methods = self
-            .inherent_impls
-            .entry(type_text)
-            .or_default();
+        let methods = self.inherent_impls.entry(type_text).or_default();
 
         for item in &impl_block.items {
             if let verum_ast::decl::ImplItemKind::Function(func) = &item.kind {
                 let method_name = Text::from(func.name.name.as_str());
                 let method_type = function_decl_to_type(func);
                 let (receiver_kind, requires_mut) = receiver_info_from_decl(func);
-                methods.insert(method_name, StoredMethod {
-                    signature: TypeScheme::mono(method_type),
-                    receiver_kind,
-                    requires_mut,
-                });
+                methods.insert(
+                    method_name,
+                    StoredMethod {
+                        signature: TypeScheme::mono(method_type),
+                        receiver_kind,
+                        requires_mut,
+                    },
+                );
             }
         }
     }
@@ -595,15 +591,17 @@ impl MethodResolver for DefaultMethodResolver {
                 let method_name = Text::from(func.name.name.as_str());
                 let method_type = function_decl_to_type(func);
                 let (receiver_kind, requires_mut) = receiver_info_from_decl(func);
-                methods.insert(method_name, StoredMethod {
-                    signature: TypeScheme::mono(method_type),
-                    receiver_kind,
-                    requires_mut,
-                });
+                methods.insert(
+                    method_name,
+                    StoredMethod {
+                        signature: TypeScheme::mono(method_type),
+                        receiver_kind,
+                        requires_mut,
+                    },
+                );
             }
         }
     }
-
 }
 
 /// Determine the receiver kind and mutability from a function declaration's parameters.
@@ -641,13 +639,17 @@ fn receiver_info_from_decl(func: &verum_ast::decl::FunctionDecl) -> (ReceiverKin
 
 /// Convert a function declaration to a Type::Function
 fn function_decl_to_type(func: &verum_ast::decl::FunctionDecl) -> Type {
-    let params: List<Type> = func.params.iter().filter_map(|p| {
-        if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-            Some(convert_simple_ast_type(ty))
-        } else {
-            None // Skip self params
-        }
-    }).collect();
+    let params: List<Type> = func
+        .params
+        .iter()
+        .filter_map(|p| {
+            if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
+                Some(convert_simple_ast_type(ty))
+            } else {
+                None // Skip self params
+            }
+        })
+        .collect();
 
     let return_type = match &func.return_type {
         verum_common::Maybe::Some(ty) => convert_simple_ast_type(ty),
@@ -666,8 +668,8 @@ fn function_decl_to_type(func: &verum_ast::decl::FunctionDecl) -> Type {
 /// Convert an AST type to a simple internal Type.
 /// Handles common cases; complex types fall back to Type::Unknown.
 fn convert_simple_ast_type(ast_ty: &verum_ast::ty::Type) -> Type {
-    use verum_ast::ty::TypeKind;
     use verum_ast::ty::PathSegment;
+    use verum_ast::ty::TypeKind;
 
     match &ast_ty.kind {
         TypeKind::Path(path) => {
@@ -704,28 +706,30 @@ fn convert_simple_ast_type(ast_ty: &verum_ast::ty::Type) -> Type {
         TypeKind::Generic { base, args } => {
             // Generic type like List<T>, Map<K,V>, etc.
             let base_type = convert_simple_ast_type(base);
-            let converted_args: List<Type> = args.iter().filter_map(|a| {
-                if let verum_ast::ty::GenericArg::Type(t) = a {
-                    Some(convert_simple_ast_type(t))
-                } else {
-                    None
-                }
-            }).collect();
+            let converted_args: List<Type> = args
+                .iter()
+                .filter_map(|a| {
+                    if let verum_ast::ty::GenericArg::Type(t) = a {
+                        Some(convert_simple_ast_type(t))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             match base_type {
-                Type::Named { path, .. } => Type::Named { path, args: converted_args },
+                Type::Named { path, .. } => Type::Named {
+                    path,
+                    args: converted_args,
+                },
                 // Base type resolved to non-Named (e.g., primitive); can't attach generic args
                 _ => Type::Unknown,
             }
         }
-        TypeKind::Reference { mutable, inner } => {
-            Type::Reference {
-                mutable: *mutable,
-                inner: Box::new(convert_simple_ast_type(inner)),
-            }
-        }
-        TypeKind::Tuple(elems) => {
-            Type::Tuple(elems.iter().map(convert_simple_ast_type).collect())
-        }
+        TypeKind::Reference { mutable, inner } => Type::Reference {
+            mutable: *mutable,
+            inner: Box::new(convert_simple_ast_type(inner)),
+        },
+        TypeKind::Tuple(elems) => Type::Tuple(elems.iter().map(convert_simple_ast_type).collect()),
         TypeKind::Unit => Type::Unit,
         TypeKind::Never => Type::Never,
         TypeKind::Int => Type::Int,
@@ -779,15 +783,9 @@ fn type_name_from_type(ty: &Type) -> Text {
                 "Tuple".into()
             }
         }
-        Type::Array { element, .. } => {
-            format!("Array<{}>", type_name_from_type(element)).into()
-        }
-        Type::Slice { element } => {
-            format!("Slice<{}>", type_name_from_type(element)).into()
-        }
-        Type::Future { output } => {
-            format!("Future<{}>", type_name_from_type(output)).into()
-        }
+        Type::Array { element, .. } => format!("Array<{}>", type_name_from_type(element)).into(),
+        Type::Slice { element } => format!("Slice<{}>", type_name_from_type(element)).into(),
+        Type::Future { output } => format!("Future<{}>", type_name_from_type(output)).into(),
         // Refined types delegate to their base type for method resolution
         Type::Refined { base, .. } => type_name_from_type(base),
         // Sigma types delegate to their base type

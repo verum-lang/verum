@@ -84,10 +84,7 @@ fn errdefer_does_not_affect_normal_path_wp() {
     // Block A: a single errdefer over `buf` — normal-path WP must
     // ignore it, leaving WP = postcondition.
     let cleanup = ident_expr("buf");
-    let block_with_errdefer = block(
-        List::from(vec![errdefer_stmt(cleanup)]),
-        Some(int_lit(0)),
-    );
+    let block_with_errdefer = block(List::from(vec![errdefer_stmt(cleanup)]), Some(int_lit(0)));
 
     // Block B: empty block returning the same value.
     let block_empty = block(List::new(), Some(int_lit(0)));
@@ -123,10 +120,7 @@ fn defer_still_threads_cleanup_through_normal_path() {
     // Block A: a single defer (NOT errdefer) — should propagate the
     // cleanup expression's WP through.
     let cleanup = ident_expr("buf");
-    let block_with_defer = block(
-        List::from(vec![defer_stmt(cleanup)]),
-        Some(int_lit(0)),
-    );
+    let block_with_defer = block(List::from(vec![defer_stmt(cleanup)]), Some(int_lit(0)));
 
     // For defer the WP path is exercised; we just confirm it succeeds
     // (full equational check would require building the equivalent

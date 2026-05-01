@@ -32,8 +32,8 @@
 use crate::verify::VerificationError;
 use verum_ast::RefinementPredicate;
 use verum_ast::{BinOp, Expr, ExprKind, Pattern, Type, TypeKind, UnOp};
-use verum_common::{List, Map, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Text};
 
 // Re-export common types from verum_common::type_level
 pub use verum_common::type_level::ReductionStrategy;
@@ -1244,9 +1244,7 @@ impl TypeLevelEvaluator {
                 // Division by zero returns 0 in type-level computation
                 left.checked_div(right).unwrap_or(0) as i64
             }
-            BinOp::Rem => {
-                left.checked_rem(right).unwrap_or(0) as i64
-            }
+            BinOp::Rem => left.checked_rem(right).unwrap_or(0) as i64,
             BinOp::Pow => {
                 // Compute power with overflow protection
                 if right > 63 {
@@ -1904,12 +1902,10 @@ fn exprs_equal(e1: &Expr, e2: &Expr) -> bool {
         // Function calls
         (
             ExprKind::Call {
-                func: f1,
-                args: a1, ..
+                func: f1, args: a1, ..
             },
             ExprKind::Call {
-                func: f2,
-                args: a2, ..
+                func: f2, args: a2, ..
             },
         ) => {
             exprs_equal(f1, f2)
@@ -2742,8 +2738,6 @@ mod tests {
 
     #[test]
     fn test_register_and_call_user_type_function() {
-        
-
         let mut eval = TypeLevelEvaluator::new();
 
         // Register a simple type function: fn const_int() -> Type = i32

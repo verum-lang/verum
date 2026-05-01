@@ -5,8 +5,8 @@
 
 use crate::error::{CliError, Result};
 use verum_verification::benchmark::{
-    mock_runner_for, BenchmarkMetric, BenchmarkResult, BenchmarkRunner, BenchmarkSuite,
-    BenchmarkSystem, ComparisonMatrix,
+    BenchmarkMetric, BenchmarkResult, BenchmarkRunner, BenchmarkSuite, BenchmarkSystem,
+    ComparisonMatrix, mock_runner_for,
 };
 
 fn parse_system(s: &str) -> Result<BenchmarkSystem> {
@@ -58,19 +58,14 @@ fn build_suite(name: &str, theorems: &[String]) -> Result<BenchmarkSuite> {
 /// Run the suite against a single system (mock runner). V1
 /// production runners that call out to the real tools plug in via
 /// the same trait without changing this dispatch.
-pub fn run_run(
-    system: &str,
-    suite_name: &str,
-    theorems: &[String],
-    format: &str,
-) -> Result<()> {
+pub fn run_run(system: &str, suite_name: &str, theorems: &[String], format: &str) -> Result<()> {
     validate_format(format)?;
     let sys = parse_system(system)?;
     let suite = build_suite(suite_name, theorems)?;
     let runner = mock_runner_for(sys);
-    let results = runner.run(&suite).map_err(|e| {
-        CliError::VerificationFailed(format!("benchmark.{}: {}", sys.name(), e))
-    })?;
+    let results = runner
+        .run(&suite)
+        .map_err(|e| CliError::VerificationFailed(format!("benchmark.{}: {}", sys.name(), e)))?;
     emit_results(&results, format)?;
     Ok(())
 }
@@ -89,7 +84,10 @@ pub fn run_compare(
     let parsed_systems: Vec<BenchmarkSystem> = if systems.is_empty() {
         BenchmarkSystem::all().to_vec()
     } else {
-        systems.iter().map(|s| parse_system(s)).collect::<Result<Vec<_>>>()?
+        systems
+            .iter()
+            .map(|s| parse_system(s))
+            .collect::<Result<Vec<_>>>()?
     };
 
     let mut matrix = ComparisonMatrix::new(suite.name.as_str().to_string());
@@ -187,10 +185,7 @@ pub fn run_metrics(format: &str) -> Result<()> {
 fn emit_results(results: &[BenchmarkResult], format: &str) -> Result<()> {
     match format {
         "plain" => {
-            println!(
-                "Benchmark transcript ({} result(s)):",
-                results.len()
-            );
+            println!("Benchmark transcript ({} result(s)):", results.len());
             println!();
             for r in results {
                 println!(
@@ -210,10 +205,7 @@ fn emit_results(results: &[BenchmarkResult], format: &str) -> Result<()> {
             println!("{}", body);
         }
         "markdown" => {
-            println!(
-                "# Benchmark transcript ({} result(s))\n",
-                results.len()
-            );
+            println!("# Benchmark transcript ({} result(s))\n", results.len());
             println!("| System | Theorem | Metric | Value |");
             println!("|---|---|---|---|");
             for r in results {
@@ -251,16 +243,14 @@ fn emit_matrix_plain(m: &ComparisonMatrix) {
     println!("Comparison matrix — suite: `{}`", m.suite.as_str());
     println!();
     let metrics: Vec<BenchmarkMetric> = {
-        let mut s: std::collections::BTreeSet<BenchmarkMetric> =
-            std::collections::BTreeSet::new();
+        let mut s: std::collections::BTreeSet<BenchmarkMetric> = std::collections::BTreeSet::new();
         for (mt, _) in m.by_metric_and_system.keys() {
             s.insert(*mt);
         }
         s.into_iter().collect()
     };
     let systems: Vec<BenchmarkSystem> = {
-        let mut s: std::collections::BTreeSet<BenchmarkSystem> =
-            std::collections::BTreeSet::new();
+        let mut s: std::collections::BTreeSet<BenchmarkSystem> = std::collections::BTreeSet::new();
         for (_, sys) in m.by_metric_and_system.keys() {
             s.insert(*sys);
         }
@@ -287,10 +277,7 @@ fn emit_matrix_plain(m: &ComparisonMatrix) {
             }
         }
         let leader = m.leader(*metric);
-        print!(
-            " {:>10}",
-            leader.map(|s| s.name()).unwrap_or("—")
-        );
+        print!(" {:>10}", leader.map(|s| s.name()).unwrap_or("—"));
         println!();
     }
 }
@@ -345,8 +332,7 @@ fn emit_matrix_json(m: &ComparisonMatrix, raw_results: &[BenchmarkResult]) {
 fn emit_matrix_csv(m: &ComparisonMatrix) {
     println!("metric,system,value,is_leader");
     let metrics: Vec<BenchmarkMetric> = {
-        let mut s: std::collections::BTreeSet<BenchmarkMetric> =
-            std::collections::BTreeSet::new();
+        let mut s: std::collections::BTreeSet<BenchmarkMetric> = std::collections::BTreeSet::new();
         for (mt, _) in m.by_metric_and_system.keys() {
             s.insert(*mt);
         }
@@ -475,12 +461,7 @@ mod tests {
 
     #[test]
     fn run_run_emits_smoke() {
-        let r = run_run(
-            "verum",
-            "suite",
-            &["thm1".into(), "thm2".into()],
-            "plain",
-        );
+        let r = run_run("verum", "suite", &["thm1".into(), "thm2".into()], "plain");
         assert!(r.is_ok());
     }
 
@@ -497,12 +478,7 @@ mod tests {
     fn run_compare_no_systems_runs_all() {
         // Empty systems list → run all 5. Smoke test only — we
         // can't easily capture stdout in unit tests.
-        let r = run_compare(
-            &[],
-            "suite",
-            &["thm1".into()],
-            "plain",
-        );
+        let r = run_compare(&[], "suite", &["thm1".into()], "plain");
         assert!(r.is_ok());
     }
 

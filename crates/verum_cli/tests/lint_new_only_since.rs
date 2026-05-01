@@ -68,7 +68,14 @@ fn new_only_since_reports_only_new_issues() {
     run_git(&dir, &["commit", "-q", "-m", "v2"]);
 
     let out = Command::new(binary())
-        .args(["lint", "--no-cache", "--format", "json", "--new-only-since", "v1"])
+        .args([
+            "lint",
+            "--no-cache",
+            "--format",
+            "json",
+            "--new-only-since",
+            "v1",
+        ])
         .current_dir(&dir)
         .output()
         .expect("lint --new-only-since spawn");
@@ -81,12 +88,10 @@ fn new_only_since_reports_only_new_issues() {
         .iter()
         .filter(|l| l.contains("FIXME") || l.contains("\"line\":3"))
         .count();
-    let todo_count = lines
-        .iter()
-        .filter(|l| l.contains("\"line\":2"))
-        .count();
+    let todo_count = lines.iter().filter(|l| l.contains("\"line\":2")).count();
     assert_eq!(
-        fixme_count, 1,
+        fixme_count,
+        1,
         "expected FIXME issue in --new-only-since output, got {} lines:\n{stdout}",
         lines.len()
     );
@@ -111,19 +116,20 @@ fn new_only_since_silent_when_nothing_new() {
     // No second commit.
 
     let out = Command::new(binary())
-        .args(["lint", "--no-cache", "--format", "json", "--new-only-since", "v1"])
+        .args([
+            "lint",
+            "--no-cache",
+            "--format",
+            "json",
+            "--new-only-since",
+            "v1",
+        ])
         .current_dir(&dir)
         .output()
         .expect("lint spawn");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let count = stdout.lines().filter(|l| !l.is_empty()).count();
-    assert_eq!(
-        count, 0,
-        "no new commits → no new issues, got:\n{stdout}"
-    );
-    assert!(
-        out.status.success(),
-        "exit 0 when there are no new issues"
-    );
+    assert_eq!(count, 0, "no new commits → no new issues, got:\n{stdout}");
+    assert!(out.status.success(), "exit 0 when there are no new issues");
     let _ = std::fs::remove_dir_all(&dir);
 }

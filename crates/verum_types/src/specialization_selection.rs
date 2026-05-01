@@ -57,10 +57,10 @@
 use thiserror::Error;
 use verum_ast::span::Span;
 use verum_ast::ty::{Path, PathSegment, TypeBound, TypeBoundKind};
-use verum_common::{List, Map, Maybe, Set, Text};
-use verum_common::well_known_types::WellKnownType as WKT;
-use verum_common::well_known_types::WellKnownProtocol as WKP;
 use verum_common::primitive_implements_protocol;
+use verum_common::well_known_types::WellKnownProtocol as WKP;
+use verum_common::well_known_types::WellKnownType as WKT;
+use verum_common::{List, Map, Maybe, Set, Text};
 
 use crate::TypeError;
 use crate::advanced_protocols::{SpecializationInfo, SpecializationLattice};
@@ -601,11 +601,8 @@ impl SpecializationSelector {
             // Concrete named types: check for implementation
             Type::Named { path, args } => {
                 // Check if there's an implementation of the protocol for this type
-                let type_implements = self.concrete_type_implements_protocol(
-                    ty,
-                    &protocol_name,
-                    protocol_checker,
-                );
+                let type_implements =
+                    self.concrete_type_implements_protocol(ty, &protocol_name, protocol_checker);
 
                 if type_implements {
                     NegativeBoundResult::Violated
@@ -669,11 +666,8 @@ impl SpecializationSelector {
                     }
                 }
                 // All elements checked - check the tuple type itself
-                let type_implements = self.concrete_type_implements_protocol(
-                    ty,
-                    &protocol_name,
-                    protocol_checker,
-                );
+                let type_implements =
+                    self.concrete_type_implements_protocol(ty, &protocol_name, protocol_checker);
                 if type_implements {
                     NegativeBoundResult::Violated
                 } else {
@@ -697,9 +691,7 @@ impl SpecializationSelector {
             }
 
             // Slice types: similar to arrays
-            Type::Slice { element } => {
-                self.check_negative_bound(element, bound, protocol_checker)
-            }
+            Type::Slice { element } => self.check_negative_bound(element, bound, protocol_checker),
 
             // Never type: implements everything vacuously
             Type::Never => NegativeBoundResult::Violated,
@@ -719,8 +711,7 @@ impl SpecializationSelector {
             // Future types
             Type::Future { .. } => {
                 // Futures typically implement specific async protocols
-                if WKP::from_name(protocol_name.as_str())
-                    .is_some_and(|p| matches!(p, WKP::Future))
+                if WKP::from_name(protocol_name.as_str()).is_some_and(|p| matches!(p, WKP::Future))
                 {
                     NegativeBoundResult::Violated
                 } else {
@@ -729,9 +720,7 @@ impl SpecializationSelector {
             }
 
             // Refinement types: check base type
-            Type::Refined { base, .. } => {
-                self.check_negative_bound(base, bound, protocol_checker)
-            }
+            Type::Refined { base, .. } => self.check_negative_bound(base, bound, protocol_checker),
 
             // Existential types: unknown until opened
             Type::Exists { .. } => NegativeBoundResult::Unknown,
@@ -1626,10 +1615,9 @@ impl CoherenceChecker {
             (Type::Var(v1), Type::Var(v2)) => v1 == v2,
 
             // Same named type with same name (for generic parameters)
-            (
-                Type::Named { path: p1, args: a1 },
-                Type::Named { path: p2, args: a2 },
-            ) => p1 == p2 && a1 == a2,
+            (Type::Named { path: p1, args: a1 }, Type::Named { path: p2, args: a2 }) => {
+                p1 == p2 && a1 == a2
+            }
 
             // Generic types with same name
             (Type::Generic { name: n1, .. }, Type::Generic { name: n2, .. }) => n1 == n2,
@@ -1786,8 +1774,7 @@ impl ProtocolCheckerExt for ProtocolChecker {
                     Some(name) => name,
                     None => return false,
                 };
-                primitive_implements_protocol(type_name, protocol_name.as_str())
-                    .unwrap_or(false)
+                primitive_implements_protocol(type_name, protocol_name.as_str()).unwrap_or(false)
             }
         }
     }
@@ -1867,10 +1854,7 @@ mod tests {
         WhereClause { ty, bounds }
     }
 
-    fn make_impl(
-        for_type: Type,
-        where_clauses: List<WhereClause>,
-    ) -> ProtocolImpl {
+    fn make_impl(for_type: Type, where_clauses: List<WhereClause>) -> ProtocolImpl {
         ProtocolImpl {
             protocol: Path::single(Ident::new("DeepClone", make_span())),
             protocol_args: List::new(),
@@ -1890,7 +1874,10 @@ mod tests {
 
     #[test]
     fn test_negative_bound_result_variants() {
-        assert_ne!(NegativeBoundResult::Satisfied, NegativeBoundResult::Violated);
+        assert_ne!(
+            NegativeBoundResult::Satisfied,
+            NegativeBoundResult::Violated
+        );
         assert_ne!(NegativeBoundResult::Satisfied, NegativeBoundResult::Unknown);
         assert_ne!(NegativeBoundResult::Violated, NegativeBoundResult::Unknown);
     }
@@ -1949,7 +1936,7 @@ mod tests {
         let checker = CoherenceChecker::new();
 
         let copy_positive = make_copy_bound(false); // T: Copy
-        let copy_negative = make_copy_bound(true);  // T: !Copy
+        let copy_negative = make_copy_bound(true); // T: !Copy
 
         // Copy and !Copy are complementary
         assert!(checker.are_complementary_bounds(&copy_positive, &copy_negative));
@@ -1960,7 +1947,7 @@ mod tests {
     fn test_non_complementary_bounds() {
         let checker = CoherenceChecker::new();
 
-        let copy_positive = make_copy_bound(false);  // T: Copy
+        let copy_positive = make_copy_bound(false); // T: Copy
         let clone_negative = make_clone_bound(true); // T: !Clone
 
         // Copy and !Clone are NOT complementary (different protocols)

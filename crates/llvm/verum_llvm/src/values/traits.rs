@@ -1,19 +1,19 @@
 use verum_llvm_sys::core::LLVMIsConstant;
 use verum_llvm_sys::prelude::LLVMValueRef;
 
-
 use verum_llvm_sys::core::LLVMIsPoison;
 
 use std::fmt::Debug;
 
 use crate::support::LLVMString;
 use crate::types::{
-    FloatMathType, FloatType, IntMathType, IntType, PointerMathType, PointerType, ScalableVectorType, VectorType,
+    FloatMathType, FloatType, IntMathType, IntType, PointerMathType, PointerType,
+    ScalableVectorType, VectorType,
 };
 use crate::values::{
-    AggregateValueEnum, AnyValueEnum, ArrayValue, BasicValueEnum, BasicValueUse, CallSiteValue, FloatValue,
-    FunctionValue, GlobalValue, InstructionValue, IntValue, PhiValue, PointerValue, ScalableVectorValue, StructValue,
-    Value, VectorValue,
+    AggregateValueEnum, AnyValueEnum, ArrayValue, BasicValueEnum, BasicValueUse, CallSiteValue,
+    FloatValue, FunctionValue, GlobalValue, InstructionValue, IntValue, PhiValue, PointerValue,
+    ScalableVectorValue, StructValue, Value, VectorValue,
 };
 
 use super::{BasicMetadataValueEnum, MetadataValue};

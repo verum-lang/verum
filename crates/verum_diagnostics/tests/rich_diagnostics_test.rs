@@ -16,7 +16,8 @@
 
 use verum_diagnostics::{
     ColorScheme, Diagnostic, DiagnosticBuilder, GlyphSet, RichRenderConfig, RichRenderer,
-    SnippetExtractor, Span, Text, get_explanation, list_error_codes, render_explanation, search_errors,
+    SnippetExtractor, Span, Text, get_explanation, list_error_codes, render_explanation,
+    search_errors,
 };
 
 /// Create a test span

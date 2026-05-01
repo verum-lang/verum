@@ -96,7 +96,9 @@ fn example_tensor_shape() {
 fn example_full_tensor_type() {
     println!("Example 4: Full Tensor Type");
     println!("Code: Tensor<Float, [2, 3]>");
-    println!("Tensor types: Tensor<T, Shape: meta [usize]> with compile-time shape tracking for N-dimensional arrays\n");
+    println!(
+        "Tensor types: Tensor<T, Shape: meta [usize]> with compile-time shape tracking for N-dimensional arrays\n"
+    );
 
     // Create Shape: meta [usize]
     let shape_ty = Type::array(Type::Int, Some(2)); // [usize; 2] for [2, 3]

@@ -21,10 +21,10 @@ use std::sync::Arc;
 use std::time::Instant;
 use tower_lsp::lsp_types::*;
 use verum_ast::{FileId, Module};
+use verum_common::List;
 use verum_diagnostics::Diagnostic;
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
-use verum_common::List;
 
 use crate::incremental::IncrementalState;
 

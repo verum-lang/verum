@@ -206,11 +206,8 @@ impl Protocol {
     pub fn depth(&self) -> usize {
         match self {
             Protocol::End => 0,
-            Protocol::Send { rest, .. } | Protocol::Recv { rest, .. } => {
-                1 + rest.depth()
-            }
-            Protocol::Offer { left, right }
-            | Protocol::Select { left, right } => {
+            Protocol::Send { rest, .. } | Protocol::Recv { rest, .. } => 1 + rest.depth(),
+            Protocol::Offer { left, right } | Protocol::Select { left, right } => {
                 1 + left.depth().max(right.depth())
             }
         }
@@ -241,9 +238,7 @@ impl Protocol {
                     })
                 }
             }
-            (Protocol::Offer { left, right }, Action::OfferLeft) => {
-                Ok(*left.clone())
-            }
+            (Protocol::Offer { left, right }, Action::OfferLeft) => Ok(*left.clone()),
             (Protocol::Offer { left, right }, Action::OfferRight) => {
                 let _ = left;
                 Ok(*right.clone())
@@ -423,7 +418,7 @@ mod tests {
     fn depth_counts_longest_branch() {
         let p = Protocol::offer(
             Protocol::send("A", Protocol::send("B", Protocol::end())), // depth 2
-            Protocol::recv("C", Protocol::end()),                       // depth 1
+            Protocol::recv("C", Protocol::end()),                      // depth 1
         );
         assert_eq!(p.depth(), 3); // 1 for the offer + max(2, 1)
     }
@@ -433,20 +428,14 @@ mod tests {
         let p = echo_client();
         let after = p.step(&Action::send("Int")).unwrap();
         // Remaining protocol: recv Int, then end.
-        assert_eq!(
-            after,
-            Protocol::recv("Int", Protocol::end())
-        );
+        assert_eq!(after, Protocol::recv("Int", Protocol::end()));
     }
 
     #[test]
     fn step_recv_advances() {
         let p = echo_server();
         let after = p.step(&Action::recv("Int")).unwrap();
-        assert_eq!(
-            after,
-            Protocol::send("Int", Protocol::end())
-        );
+        assert_eq!(after, Protocol::send("Int", Protocol::end()));
     }
 
     #[test]
@@ -506,10 +495,7 @@ mod tests {
         // send Int, recv Bool, send Text, end
         let p = Protocol::send(
             "Int",
-            Protocol::recv(
-                "Bool",
-                Protocol::send("Text", Protocol::end()),
-            ),
+            Protocol::recv("Bool", Protocol::send("Text", Protocol::end())),
         );
 
         let s1 = p.step(&Action::send("Int")).unwrap();

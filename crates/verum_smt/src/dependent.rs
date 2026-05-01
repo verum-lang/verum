@@ -35,8 +35,8 @@ use z3::ast::{Bool, Dynamic};
 
 use verum_ast::expr::ConditionKind;
 use verum_ast::{BinOp, ContextList, Expr, ExprKind, Type, TypeKind};
-use verum_common::{Heap, List, Map, Maybe, Set, Text};
 use verum_common::ToText;
+use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
 use crate::option_to_maybe;
 use crate::translate::Translator;
@@ -194,18 +194,25 @@ impl PiType {
             // Capability-restricted type: check base type for name references
             TypeKind::CapabilityRestricted { base, .. } => self.type_references_name(base, name),
             // Record types: check all field types for name references
-            TypeKind::Record { fields, .. } => {
-                fields.iter().any(|f| self.type_references_name(&f.ty, name))
-            }
+            TypeKind::Record { fields, .. } => fields
+                .iter()
+                .any(|f| self.type_references_name(&f.ty, name)),
             // Path equality type: check the carrier type for name references
-            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => self.type_references_name(carrier, name),
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
+                self.type_references_name(carrier, name)
+            }
             // Dependent type application `T<A>(v..)`: check the carrier
             // and each value index for references to the bound name.
-            TypeKind::DependentApp { carrier, value_args } => {
+            TypeKind::DependentApp {
+                carrier,
+                value_args,
+            } => {
                 if self.type_references_name(carrier, name) {
                     return true;
                 }
-                value_args.iter().any(|v| self.expr_references_name(v, name))
+                value_args
+                    .iter()
+                    .any(|v| self.expr_references_name(v, name))
             }
             // Primitive types, inferred types, Never, and Unknown don't reference names
             TypeKind::Unit
@@ -949,7 +956,9 @@ impl DependentTypeBackend {
                 let var = Int::new_const(name);
                 Ok(Dynamic::from_ast(&var))
             }
-            TypeKind::Reference { .. } | TypeKind::Pointer { .. } | TypeKind::VolatilePointer { .. } => {
+            TypeKind::Reference { .. }
+            | TypeKind::Pointer { .. }
+            | TypeKind::VolatilePointer { .. } => {
                 // References and pointers are modeled as addresses (Int)
                 let var = Int::new_const(name);
                 Ok(Dynamic::from_ast(&var))
@@ -1001,8 +1010,10 @@ impl DependentTypeBackend {
                 let var = Int::new_const(name);
                 Ok(Dynamic::from_ast(&var))
             }
-            TypeKind::Unknown | TypeKind::Universe { .. }
-            | TypeKind::Meta { .. } | TypeKind::TypeLambda { .. } => {
+            TypeKind::Unknown
+            | TypeKind::Universe { .. }
+            | TypeKind::Meta { .. }
+            | TypeKind::TypeLambda { .. } => {
                 // Unknown/Universe/Meta/TypeLambda type - model as uninterpreted Int for SMT purposes
                 let var = Int::new_const(name);
                 Ok(Dynamic::from_ast(&var))
@@ -1045,7 +1056,9 @@ impl DependentTypeBackend {
                 Ok(())
             }
             // Path equality type: well-formed if carrier is well-formed
-            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => self.check_type_well_formed(carrier, translator),
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
+                self.check_type_well_formed(carrier, translator)
+            }
             // All other type kinds are assumed well-formed for now
             TypeKind::Char
             | TypeKind::Text
@@ -1140,24 +1153,20 @@ impl DependentTypeBackend {
                     .unwrap_or(0);
                 base_depth.max(args_depth)
             }
-            TypeKind::Qualified { self_ty: base, .. } => {
-                self.compute_quantifier_depth(base)
-            }
+            TypeKind::Qualified { self_ty: base, .. } => self.compute_quantifier_depth(base),
             TypeKind::Tensor { element, .. } => self.compute_quantifier_depth(element),
             // Existential types - compute depth from bounds' equality types
-            TypeKind::Existential { bounds, .. } => {
-                bounds
-                    .iter()
-                    .filter_map(|bound| {
-                        if let verum_ast::ty::TypeBoundKind::Equality(ty) = &bound.kind {
-                            Some(self.compute_quantifier_depth(ty))
-                        } else {
-                            None
-                        }
-                    })
-                    .max()
-                    .unwrap_or(0)
-            }
+            TypeKind::Existential { bounds, .. } => bounds
+                .iter()
+                .filter_map(|bound| {
+                    if let verum_ast::ty::TypeBoundKind::Equality(ty) = &bound.kind {
+                        Some(self.compute_quantifier_depth(ty))
+                    } else {
+                        None
+                    }
+                })
+                .max()
+                .unwrap_or(0),
             // Associated types - compute depth from base
             TypeKind::AssociatedType { base, .. } => self.compute_quantifier_depth(base),
             // Capability-restricted types - compute depth from base
@@ -1169,7 +1178,9 @@ impl DependentTypeBackend {
                 .max()
                 .unwrap_or(0),
             // Path equality type: depth comes from carrier
-            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => self.compute_quantifier_depth(carrier),
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
+                self.compute_quantifier_depth(carrier)
+            }
             // Primitive types and inferred types have depth 0
             TypeKind::Unit
             | TypeKind::Bool
@@ -1525,9 +1536,7 @@ impl DependentTypeBackend {
             DependentGoal::Pi(pi) => self.verify_pi_type(pi, translator),
             DependentGoal::Sigma(sigma) => self.verify_sigma_type(sigma, translator),
             DependentGoal::Equality(eq) => self.verify_equality(eq, translator),
-            DependentGoal::Fin { value, bound } => {
-                self.verify_fin_type(value, bound, translator)
-            }
+            DependentGoal::Fin { value, bound } => self.verify_fin_type(value, bound, translator),
         }
     }
 }
@@ -1606,10 +1615,7 @@ impl TypeDependencyGraph {
         self.edges.entry(from).or_default().push(to);
 
         // Add reverse edge
-        self.reverse_edges
-            .entry(to)
-            .or_default()
-            .push(from);
+        self.reverse_edges.entry(to).or_default().push(from);
     }
 
     /// Collect all dependencies from a type recursively
@@ -2248,10 +2254,7 @@ impl QuantifierHandler {
     /// Trigger patterns guide Z3's E-matching algorithm for quantifier
     /// instantiation, crucial for performance.
     pub fn add_pattern(&mut self, quantifier: Text, pattern: TriggerPattern) {
-        self.patterns
-            .entry(quantifier)
-            .or_default()
-            .push(pattern);
+        self.patterns.entry(quantifier).or_default().push(pattern);
     }
 
     /// Get patterns for a quantifier
@@ -3179,11 +3182,8 @@ impl InductiveType {
             span,
         );
 
-        let motive_binding = verum_ast::expr::QuantifierBinding::typed(
-            motive_pattern,
-            motive_type,
-            span,
-        );
+        let motive_binding =
+            verum_ast::expr::QuantifierBinding::typed(motive_pattern, motive_type, span);
 
         let quantified = Expr::new(
             ExprKind::Forall {
@@ -3428,7 +3428,9 @@ impl InductiveType {
                 Ok(())
             }
             // Path equality type: check carrier for positivity
-            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => self.check_positivity_in_type(carrier, positive),
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
+                self.check_positivity_in_type(carrier, positive)
+            }
             // DynProtocol, primitives, inferred, Never, Unknown, and Universe don't affect positivity
             TypeKind::DynProtocol { .. }
             | TypeKind::Unit
@@ -3966,9 +3968,7 @@ mod finalize_tests {
     #[test]
     fn finalize_is_idempotent() {
         let once = InductiveType::new(Text::from("Nat")).finalize();
-        let twice = InductiveType::new(Text::from("Nat"))
-            .finalize()
-            .finalize();
+        let twice = InductiveType::new(Text::from("Nat")).finalize().finalize();
         // Check by serialised Debug form since Expr PartialEq
         // doesn't ship.
         let once_ind = format!("{:?}", once.induction_principle);

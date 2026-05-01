@@ -26,8 +26,8 @@ fn main() {
 
 #[cfg(feature = "cvc5")]
 use verum_smt::{
-    BackendChoice, BackendFallbackConfig, BackendPortfolioConfig, PortfolioMode,
-    SmtBackendSwitcher, SmtConfig, BackendValidationConfig,
+    BackendChoice, BackendFallbackConfig, BackendPortfolioConfig, BackendValidationConfig,
+    PortfolioMode, SmtBackendSwitcher, SmtConfig,
 };
 
 #[cfg(feature = "cvc5")]

@@ -10,7 +10,7 @@ use quote::quote;
 use syn::fold::Fold;
 use syn::parse::{Parse, ParseStream, Result};
 use syn::parse_macro_input;
-use syn::{parse_quote, Arm, Attribute, Ident, PatPath, Path, Variant};
+use syn::{Arm, Attribute, Ident, PatPath, Path, Variant, parse_quote};
 
 // ============================================================================
 // #[llvm_enum] macro
@@ -105,8 +105,10 @@ impl Fold for EnumVariants {
         if let Meta::List(meta) = &attr.meta
             && let Ok(Meta::Path(name)) = meta.parse_args()
         {
-            self.variants
-                .push(EnumVariant::with_name(&variant, name.get_ident().unwrap().clone()));
+            self.variants.push(EnumVariant::with_name(
+                &variant,
+                name.get_ident().unwrap().clone(),
+            ));
             variant
                 .attrs
                 .retain(|attr| !attr.path().is_ident("llvm_variant"));

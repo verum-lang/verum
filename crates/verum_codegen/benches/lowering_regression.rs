@@ -12,9 +12,9 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 use verum_codegen::llvm::vbc_lowering::{LoweringConfig, VbcToLlvmLowering};
+use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::module::VbcModule;
-use verum_fast_parser::Parser;
 
 // ============================================================================
 // Program Generators
@@ -43,9 +43,7 @@ fn generate_reference_heavy_program(n: usize) -> String {
 
     // Type definitions
     for i in 0..n {
-        src.push_str(&format!(
-            "type Data{i} is {{ value: Int, tag: Int }};\n\n"
-        ));
+        src.push_str(&format!("type Data{i} is {{ value: Int, tag: Int }};\n\n"));
     }
 
     // Functions that create and use references (CBGR-relevant)
@@ -89,10 +87,7 @@ fn generate_nested_control_flow(depth: usize, funcs: usize) -> String {
                 threshold = d * 10 + f
             ));
         }
-        src.push_str(&format!(
-            "{indent}x\n",
-            indent = "    ".repeat(depth + 1)
-        ));
+        src.push_str(&format!("{indent}x\n", indent = "    ".repeat(depth + 1)));
         for d in (0..depth).rev() {
             src.push_str(&format!(
                 "{indent}}} else {{ {val} }}\n",
@@ -112,7 +107,9 @@ fn source_to_vbc_module(source: &str) -> VbcModule {
     let module = parser.parse_module().expect("parse should succeed");
     let config = CodegenConfig::new("bench_module");
     let mut codegen = VbcCodegen::with_config(config);
-    codegen.compile_module(&module).expect("VBC codegen should succeed")
+    codegen
+        .compile_module(&module)
+        .expect("VBC codegen should succeed")
 }
 
 // ============================================================================
@@ -129,18 +126,15 @@ fn bench_llvm_lowering(c: &mut Criterion) {
     let func_count = vbc_20.functions.len();
 
     group.throughput(Throughput::Elements(func_count as u64));
-    group.bench_function(
-        BenchmarkId::new("20_functions", func_count),
-        |b| {
-            b.iter(|| {
-                let llvm_ctx = verum_llvm::context::Context::create();
-                let config = LoweringConfig::new("bench_20");
-                let mut lowering = VbcToLlvmLowering::new(&llvm_ctx, config);
-                let result = lowering.lower_module(&vbc_20);
-                black_box(result)
-            });
-        },
-    );
+    group.bench_function(BenchmarkId::new("20_functions", func_count), |b| {
+        b.iter(|| {
+            let llvm_ctx = verum_llvm::context::Context::create();
+            let config = LoweringConfig::new("bench_20");
+            let mut lowering = VbcToLlvmLowering::new(&llvm_ctx, config);
+            let result = lowering.lower_module(&vbc_20);
+            black_box(result)
+        });
+    });
 
     // Scaling: lowering at different sizes
     for &n in &[5, 10, 20, 50] {
@@ -149,18 +143,14 @@ fn bench_llvm_lowering(c: &mut Criterion) {
         let fcount = vbc.functions.len();
 
         group.throughput(Throughput::Elements(fcount as u64));
-        group.bench_with_input(
-            BenchmarkId::new("scale_funcs", n),
-            &vbc,
-            |b, vbc_module| {
-                b.iter(|| {
-                    let llvm_ctx = verum_llvm::context::Context::create();
-                    let config = LoweringConfig::new("bench_scale");
-                    let mut lowering = VbcToLlvmLowering::new(&llvm_ctx, config);
-                    black_box(lowering.lower_module(vbc_module))
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("scale_funcs", n), &vbc, |b, vbc_module| {
+            b.iter(|| {
+                let llvm_ctx = verum_llvm::context::Context::create();
+                let config = LoweringConfig::new("bench_scale");
+                let mut lowering = VbcToLlvmLowering::new(&llvm_ctx, config);
+                black_box(lowering.lower_module(vbc_module))
+            });
+        });
     }
 
     // Nested control flow stress test
@@ -192,20 +182,17 @@ fn bench_cbgr_escape_analysis(c: &mut Criterion) {
     let ref_loc = ref_src.lines().count();
 
     group.throughput(Throughput::Elements(ref_loc as u64));
-    group.bench_function(
-        BenchmarkId::new("20_types_ref_heavy", ref_loc),
-        |b| {
-            b.iter(|| {
-                // Parse + VBC codegen (includes CBGR tier annotations)
-                let mut parser = Parser::new(&ref_src);
-                let module = parser.parse_module().expect("parse should succeed");
-                let config = CodegenConfig::new("cbgr_bench");
-                let mut codegen = VbcCodegen::with_config(config);
-                let vbc = codegen.compile_module(&module);
-                black_box(vbc)
-            });
-        },
-    );
+    group.bench_function(BenchmarkId::new("20_types_ref_heavy", ref_loc), |b| {
+        b.iter(|| {
+            // Parse + VBC codegen (includes CBGR tier annotations)
+            let mut parser = Parser::new(&ref_src);
+            let module = parser.parse_module().expect("parse should succeed");
+            let config = CodegenConfig::new("cbgr_bench");
+            let mut codegen = VbcCodegen::with_config(config);
+            let vbc = codegen.compile_module(&module);
+            black_box(vbc)
+        });
+    });
 
     // Scaling: escape analysis at different program sizes
     for &n in &[5, 10, 20, 40] {
@@ -213,19 +200,15 @@ fn bench_cbgr_escape_analysis(c: &mut Criterion) {
         let lines = src.lines().count();
         group.throughput(Throughput::Elements(lines as u64));
 
-        group.bench_with_input(
-            BenchmarkId::new("scale_types", n),
-            &src,
-            |b, source| {
-                b.iter(|| {
-                    let mut parser = Parser::new(source);
-                    let module = parser.parse_module().expect("parse");
-                    let config = CodegenConfig::new("cbgr_scale");
-                    let mut codegen = VbcCodegen::with_config(config);
-                    black_box(codegen.compile_module(&module))
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("scale_types", n), &src, |b, source| {
+            b.iter(|| {
+                let mut parser = Parser::new(source);
+                let module = parser.parse_module().expect("parse");
+                let config = CodegenConfig::new("cbgr_scale");
+                let mut codegen = VbcCodegen::with_config(config);
+                black_box(codegen.compile_module(&module))
+            });
+        });
     }
 
     // Measure VBC module construction overhead (baseline without LLVM)
@@ -252,17 +235,8 @@ fn bench_cbgr_escape_analysis(c: &mut Criterion) {
 // Benchmark Groups
 // ============================================================================
 
-criterion_group!(
-    lowering_regression,
-    bench_llvm_lowering
-);
+criterion_group!(lowering_regression, bench_llvm_lowering);
 
-criterion_group!(
-    cbgr_regression,
-    bench_cbgr_escape_analysis
-);
+criterion_group!(cbgr_regression, bench_cbgr_escape_analysis);
 
-criterion_main!(
-    lowering_regression,
-    cbgr_regression
-);
+criterion_main!(lowering_regression, cbgr_regression);

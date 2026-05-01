@@ -141,7 +141,10 @@ fn test_map_comprehension_with_filter() {
 
     // Should have for clause and if clause
     assert_eq!(clauses.len(), 2);
-    assert!(matches!(&clauses[0].kind, ComprehensionClauseKind::For { .. }));
+    assert!(matches!(
+        &clauses[0].kind,
+        ComprehensionClauseKind::For { .. }
+    ));
     assert!(matches!(&clauses[1].kind, ComprehensionClauseKind::If(_)));
 }
 
@@ -154,7 +157,10 @@ fn test_map_comprehension_with_let_binding() {
 
     // Should have for clause and let clause
     assert_eq!(clauses.len(), 2);
-    assert!(matches!(&clauses[0].kind, ComprehensionClauseKind::For { .. }));
+    assert!(matches!(
+        &clauses[0].kind,
+        ComprehensionClauseKind::For { .. }
+    ));
     assert!(matches!(
         &clauses[1].kind,
         ComprehensionClauseKind::Let { .. }
@@ -170,8 +176,14 @@ fn test_map_comprehension_with_multiple_clauses() {
 
     // Should have: for, for, if, let
     assert_eq!(clauses.len(), 4);
-    assert!(matches!(&clauses[0].kind, ComprehensionClauseKind::For { .. }));
-    assert!(matches!(&clauses[1].kind, ComprehensionClauseKind::For { .. }));
+    assert!(matches!(
+        &clauses[0].kind,
+        ComprehensionClauseKind::For { .. }
+    ));
+    assert!(matches!(
+        &clauses[1].kind,
+        ComprehensionClauseKind::For { .. }
+    ));
     assert!(matches!(&clauses[2].kind, ComprehensionClauseKind::If(_)));
     assert!(matches!(
         &clauses[3].kind,
@@ -250,7 +262,10 @@ fn test_set_comprehension_with_filter() {
 
     // Should have for and if clauses
     assert_eq!(clauses.len(), 2);
-    assert!(matches!(&clauses[0].kind, ComprehensionClauseKind::For { .. }));
+    assert!(matches!(
+        &clauses[0].kind,
+        ComprehensionClauseKind::For { .. }
+    ));
     assert!(matches!(&clauses[1].kind, ComprehensionClauseKind::If(_)));
 }
 
@@ -263,7 +278,10 @@ fn test_set_comprehension_with_let_binding() {
 
     // Should have for and let clauses
     assert_eq!(clauses.len(), 2);
-    assert!(matches!(&clauses[0].kind, ComprehensionClauseKind::For { .. }));
+    assert!(matches!(
+        &clauses[0].kind,
+        ComprehensionClauseKind::For { .. }
+    ));
     assert!(matches!(
         &clauses[1].kind,
         ComprehensionClauseKind::Let { .. }
@@ -295,8 +313,14 @@ fn test_set_comprehension_nested_for() {
 
     // Should have two for clauses
     assert_eq!(clauses.len(), 2);
-    assert!(matches!(&clauses[0].kind, ComprehensionClauseKind::For { .. }));
-    assert!(matches!(&clauses[1].kind, ComprehensionClauseKind::For { .. }));
+    assert!(matches!(
+        &clauses[0].kind,
+        ComprehensionClauseKind::For { .. }
+    ));
+    assert!(matches!(
+        &clauses[1].kind,
+        ComprehensionClauseKind::For { .. }
+    ));
 }
 
 #[test]
@@ -353,7 +377,10 @@ fn test_generator_with_filter() {
 
     // Should have for and if clauses
     assert_eq!(clauses.len(), 2);
-    assert!(matches!(&clauses[0].kind, ComprehensionClauseKind::For { .. }));
+    assert!(matches!(
+        &clauses[0].kind,
+        ComprehensionClauseKind::For { .. }
+    ));
     assert!(matches!(&clauses[1].kind, ComprehensionClauseKind::If(_)));
 }
 
@@ -409,8 +436,12 @@ fn test_map_literal_vs_map_comprehension() {
     assert!(matches!(literal.kind, ExprKind::MapLiteral { .. }));
 
     // Map comprehension (has 'for')
-    let comprehension = parse_expr("{k: v for (k, v) in items}").expect("Should parse map comprehension");
-    assert!(matches!(comprehension.kind, ExprKind::MapComprehension { .. }));
+    let comprehension =
+        parse_expr("{k: v for (k, v) in items}").expect("Should parse map comprehension");
+    assert!(matches!(
+        comprehension.kind,
+        ExprKind::MapComprehension { .. }
+    ));
 }
 
 #[test]

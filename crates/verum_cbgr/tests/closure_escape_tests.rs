@@ -94,8 +94,10 @@ fn create_closure_cfg() -> ControlFlowGraph {
         definitions: vec![DefSite {
             block: entry,
             reference: RefId(1),
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![].into(),
         call_sites: vec![].into(),
         has_await_point: false,
@@ -113,13 +115,17 @@ fn create_closure_cfg() -> ControlFlowGraph {
         definitions: vec![DefSite {
             block: closure_block,
             reference: RefId(2), // Closure reference
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![UseeSite {
             block: closure_block,
             reference: RefId(1), // Captured reference
-            is_mutable: false, span: None,
-        }].into(),
+            is_mutable: false,
+            span: None,
+        }]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,
@@ -138,8 +144,10 @@ fn create_closure_cfg() -> ControlFlowGraph {
         uses: vec![UseeSite {
             block: call_block,
             reference: RefId(2), // Use closure
-            is_mutable: false, span: None,
-        }].into(),
+            is_mutable: false,
+            span: None,
+        }]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,
@@ -186,8 +194,10 @@ fn create_immediate_call_cfg() -> ControlFlowGraph {
         definitions: vec![DefSite {
             block: entry,
             reference: RefId(1),
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![].into(),
         call_sites: vec![].into(),
         has_await_point: false,
@@ -205,20 +215,25 @@ fn create_immediate_call_cfg() -> ControlFlowGraph {
         definitions: vec![DefSite {
             block: closure_block,
             reference: RefId(2), // Closure
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![
             UseeSite {
                 block: closure_block,
                 reference: RefId(1), // Captured
-                is_mutable: false, span: None,
+                is_mutable: false,
+                span: None,
             },
             UseeSite {
                 block: closure_block,
                 reference: RefId(2), // Immediate call
-                is_mutable: false, span: None,
+                is_mutable: false,
+                span: None,
             },
-        ].into(),
+        ]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,
@@ -448,8 +463,10 @@ fn test_heap_storage_escape() {
         definitions: vec![DefSite {
             block: entry,
             reference: RefId(1), // Reference
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![].into(),
         call_sites: vec![].into(),
         has_await_point: false,
@@ -469,12 +486,15 @@ fn test_heap_storage_escape() {
             reference: RefId(2),       // Closure
             is_stack_allocated: false, // Heap-allocated
             span: None,
-        }].into(),
+        }]
+        .into(),
         uses: vec![UseeSite {
             block: closure_block,
             reference: RefId(1),
-            is_mutable: false, span: None,
-        }].into(),
+            is_mutable: false,
+            span: None,
+        }]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,
@@ -495,7 +515,8 @@ fn test_heap_storage_escape() {
             reference: RefId(2),
             is_mutable: true, // Mutable use = store
             span: None,
-        }].into(),
+        }]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,
@@ -562,8 +583,10 @@ fn test_return_closure_escape() {
         definitions: vec![DefSite {
             block: entry,
             reference: RefId(1),
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![].into(),
         call_sites: vec![].into(),
         has_await_point: false,
@@ -580,13 +603,17 @@ fn test_return_closure_escape() {
         definitions: vec![DefSite {
             block: closure_block,
             reference: RefId(2),
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![UseeSite {
             block: closure_block,
             reference: RefId(1),
-            is_mutable: false, span: None,
-        }].into(),
+            is_mutable: false,
+            span: None,
+        }]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,
@@ -605,8 +632,10 @@ fn test_return_closure_escape() {
         uses: vec![UseeSite {
             block: exit,
             reference: RefId(2), // Closure used in exit = return
-            is_mutable: false, span: None,
-        }].into(),
+            is_mutable: false,
+            span: None,
+        }]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,
@@ -694,8 +723,10 @@ fn test_nested_closures() {
         definitions: vec![DefSite {
             block: entry,
             reference: RefId(1), // Original reference
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![].into(),
         call_sites: vec![].into(),
         has_await_point: false,
@@ -713,13 +744,17 @@ fn test_nested_closures() {
         definitions: vec![DefSite {
             block: outer_closure,
             reference: RefId(2), // Outer closure
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![UseeSite {
             block: outer_closure,
             reference: RefId(1),
-            is_mutable: false, span: None,
-        }].into(),
+            is_mutable: false,
+            span: None,
+        }]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,
@@ -737,13 +772,17 @@ fn test_nested_closures() {
         definitions: vec![DefSite {
             block: inner_closure,
             reference: RefId(3), // Inner closure
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![UseeSite {
             block: inner_closure,
             reference: RefId(2), // Captures outer closure
-            is_mutable: false, span: None,
-        }].into(),
+            is_mutable: false,
+            span: None,
+        }]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,
@@ -871,19 +910,23 @@ fn test_closure_with_multiple_captures() {
             DefSite {
                 block: entry,
                 reference: RefId(1),
-                is_stack_allocated: true, span: None,
+                is_stack_allocated: true,
+                span: None,
             },
             DefSite {
                 block: entry,
                 reference: RefId(2),
-                is_stack_allocated: true, span: None,
+                is_stack_allocated: true,
+                span: None,
             },
             DefSite {
                 block: entry,
                 reference: RefId(3),
-                is_stack_allocated: true, span: None,
+                is_stack_allocated: true,
+                span: None,
             },
-        ].into(),
+        ]
+        .into(),
         uses: vec![].into(),
         call_sites: vec![].into(),
         has_await_point: false,
@@ -900,25 +943,31 @@ fn test_closure_with_multiple_captures() {
         definitions: vec![DefSite {
             block: closure_block,
             reference: RefId(4), // Closure
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![
             UseeSite {
                 block: closure_block,
                 reference: RefId(1),
-                is_mutable: false, span: None,
+                is_mutable: false,
+                span: None,
             },
             UseeSite {
                 block: closure_block,
                 reference: RefId(2),
-                is_mutable: false, span: None,
+                is_mutable: false,
+                span: None,
             },
             UseeSite {
                 block: closure_block,
                 reference: RefId(3),
-                is_mutable: true, span: None,
+                is_mutable: true,
+                span: None,
             },
-        ].into(),
+        ]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,

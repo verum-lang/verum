@@ -122,7 +122,8 @@ impl MetaEvalMetrics {
 
     /// Record memory allocation
     pub fn record_allocation(&self, bytes: usize) {
-        self.memory_allocated.fetch_add(bytes as u64, Ordering::Relaxed);
+        self.memory_allocated
+            .fetch_add(bytes as u64, Ordering::Relaxed);
     }
 
     /// Record an error
@@ -192,11 +193,7 @@ impl MetaEvalMetrics {
             .iter()
             .map(|(name, count)| {
                 let total_time = times.get(name).copied().unwrap_or(0);
-                let avg_time = if *count > 0 {
-                    total_time / count
-                } else {
-                    0
-                };
+                let avg_time = if *count > 0 { total_time / count } else { 0 };
                 BuiltinStats {
                     name: name.clone(),
                     call_count: *count,

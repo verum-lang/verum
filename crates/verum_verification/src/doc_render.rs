@@ -171,11 +171,7 @@ pub struct DocItem {
 impl DocItem {
     /// Convenient constructor for the common case (no proof steps,
     /// no citations, no framework markers). Mostly used in tests.
-    pub fn new(
-        kind: DocItemKind,
-        name: impl Into<Text>,
-        signature: impl Into<Text>,
-    ) -> Self {
+    pub fn new(kind: DocItemKind, name: impl Into<Text>, signature: impl Into<Text>) -> Self {
         Self {
             kind,
             name: name.into(),
@@ -274,8 +270,7 @@ impl DocCorpus {
     /// appear as the `name` of some other corpus item; otherwise
     /// it's a dangling reference.
     pub fn validate_cross_refs(&self) -> Vec<BrokenRef> {
-        let known: BTreeSet<&str> =
-            self.items.iter().map(|i| i.name.as_str()).collect();
+        let known: BTreeSet<&str> = self.items.iter().map(|i| i.name.as_str()).collect();
         let mut broken = Vec::new();
         for it in &self.items {
             for c in &it.citations {
@@ -374,10 +369,7 @@ pub fn collect_proof_citations(
 /// name (bare, last-segment form) the auto-paper pipeline knows
 /// about. Pass the result into [`collect_proof_citations`].
 pub fn build_citation_allowlist(items: &[DocItem]) -> BTreeSet<String> {
-    items
-        .iter()
-        .map(|i| i.name.as_str().to_string())
-        .collect()
+    items.iter().map(|i| i.name.as_str().to_string()).collect()
 }
 
 struct CitationVisitor {
@@ -533,9 +525,7 @@ impl CitationVisitor {
                     self.visit_tactic(t);
                 }
             }
-            TacticExpr::AllGoals(inner) | TacticExpr::Focus(inner) => {
-                self.visit_tactic(inner)
-            }
+            TacticExpr::AllGoals(inner) | TacticExpr::Focus(inner) => self.visit_tactic(inner),
             TacticExpr::Named { name, args, .. } => {
                 self.record_ident_str(name.name.as_str());
                 for a in args.iter() {
@@ -693,18 +683,10 @@ impl std::error::Error for RenderError {}
 pub trait DocRenderer: std::fmt::Debug + Send + Sync {
     /// Render a full corpus as a single document (with header,
     /// table of contents, every item).
-    fn render_corpus(
-        &self,
-        corpus: &DocCorpus,
-        format: RenderFormat,
-    ) -> Result<Text, RenderError>;
+    fn render_corpus(&self, corpus: &DocCorpus, format: RenderFormat) -> Result<Text, RenderError>;
 
     /// Render a single item as a standalone fragment (no header).
-    fn render_item(
-        &self,
-        item: &DocItem,
-        format: RenderFormat,
-    ) -> Result<Text, RenderError>;
+    fn render_item(&self, item: &DocItem, format: RenderFormat) -> Result<Text, RenderError>;
 }
 
 // =============================================================================
@@ -721,11 +703,7 @@ impl DefaultDocRenderer {
 }
 
 impl DocRenderer for DefaultDocRenderer {
-    fn render_corpus(
-        &self,
-        corpus: &DocCorpus,
-        format: RenderFormat,
-    ) -> Result<Text, RenderError> {
+    fn render_corpus(&self, corpus: &DocCorpus, format: RenderFormat) -> Result<Text, RenderError> {
         match format {
             RenderFormat::Markdown => Ok(render_corpus_md(corpus)),
             RenderFormat::Latex => Ok(render_corpus_tex(corpus)),
@@ -733,11 +711,7 @@ impl DocRenderer for DefaultDocRenderer {
         }
     }
 
-    fn render_item(
-        &self,
-        item: &DocItem,
-        format: RenderFormat,
-    ) -> Result<Text, RenderError> {
+    fn render_item(&self, item: &DocItem, format: RenderFormat) -> Result<Text, RenderError> {
         match format {
             RenderFormat::Markdown => Ok(render_item_md(item)),
             RenderFormat::Latex => Ok(render_item_tex(item)),
@@ -803,11 +777,7 @@ fn render_item_md(item: &DocItem) -> Text {
     if !item.proof_steps.is_empty() {
         s.push_str("**Proof:**\n\n");
         for (i, step) in item.proof_steps.iter().enumerate() {
-            s.push_str(&format!(
-                "{}. `{}`\n",
-                i + 1,
-                md_escape(step.as_str())
-            ));
+            s.push_str(&format!("{}. `{}`\n", i + 1, md_escape(step.as_str())));
         }
         s.push('\n');
     }
@@ -1074,11 +1044,7 @@ mod tests {
     use super::*;
 
     fn item_thm(name: &str) -> DocItem {
-        let mut it = DocItem::new(
-            DocItemKind::Theorem,
-            name,
-            format!("{}() -> Bool", name),
-        );
+        let mut it = DocItem::new(DocItemKind::Theorem, name, format!("{}() -> Bool", name));
         it.docstring = Text::from(format!("Docstring for {}.", name));
         it.ensures = vec![Text::from("a + b == b + a")];
         it.proof_steps = vec![Text::from("intro"), Text::from("apply auto")];
@@ -1240,8 +1206,7 @@ mod tests {
     fn render_item_md_includes_closure_hash_when_set() {
         let r = DefaultDocRenderer::new();
         let mut it = item_thm("foo");
-        it.closure_hash =
-            Some(Text::from("00112233445566778899aabbccddeeff".to_string()));
+        it.closure_hash = Some(Text::from("00112233445566778899aabbccddeeff".to_string()));
         let s = r.render_item(&it, RenderFormat::Markdown).unwrap();
         assert!(s.as_str().contains("Closure hash"));
         assert!(s.as_str().contains("00112233"));

@@ -109,7 +109,11 @@ impl FunctionInfo {
 
     /// Get function signature as string
     pub fn signature(&self) -> Text {
-        let params: Vec<String> = self.params.iter().map(|p| p.declaration().to_string()).collect();
+        let params: Vec<String> = self
+            .params
+            .iter()
+            .map(|p| p.declaration().to_string())
+            .collect();
 
         let mut sig = format!("fn {}", self.name.as_str());
 

@@ -26,8 +26,8 @@
 // 4. All additional keywords from the specification are implemented
 
 use logos::Logos;
-use verum_lexer::token::TokenKind;
 use verum_common::Text;
+use verum_lexer::token::TokenKind;
 
 // ============================================================================
 // Basic Context Keyword Recognition

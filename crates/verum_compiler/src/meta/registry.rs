@@ -698,10 +698,8 @@ mod tests {
         assert!(result.is_ok());
 
         // Should be resolvable
-        let resolved = registry.resolve_meta_call(
-            &Text::from("test_module"),
-            &Text::from("test_fn"),
-        );
+        let resolved =
+            registry.resolve_meta_call(&Text::from("test_module"), &Text::from("test_fn"));
         assert!(resolved.is_some());
         assert_eq!(resolved.unwrap().name.as_str(), "test_fn");
     }
@@ -739,14 +737,10 @@ mod tests {
         assert!(registry.register_meta_fn_direct(meta_fn2).is_ok());
 
         // Both should be resolvable in their respective modules
-        let resolved_a = registry.resolve_meta_call(
-            &Text::from("module_a"),
-            &Text::from("same_name"),
-        );
-        let resolved_b = registry.resolve_meta_call(
-            &Text::from("module_b"),
-            &Text::from("same_name"),
-        );
+        let resolved_a =
+            registry.resolve_meta_call(&Text::from("module_a"), &Text::from("same_name"));
+        let resolved_b =
+            registry.resolve_meta_call(&Text::from("module_b"), &Text::from("same_name"));
 
         assert!(resolved_a.is_some());
         assert!(resolved_b.is_some());
@@ -760,10 +754,7 @@ mod tests {
 
         // Register multiple functions directly
         for i in 0..5 {
-            let meta_fn = make_test_meta_function(
-                &format!("fn_{}", i),
-                "bulk_module",
-            );
+            let meta_fn = make_test_meta_function(&format!("fn_{}", i), "bulk_module");
             registry.register_meta_fn_direct(meta_fn).unwrap();
         }
 

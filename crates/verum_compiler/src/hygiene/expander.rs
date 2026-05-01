@@ -21,11 +21,11 @@
 use verum_ast::{Expr, Span};
 use verum_common::{List, Map, Maybe, Text};
 
+use super::HygieneContext;
 use super::marks::ScopeMark;
 use super::scope::{BindingInfo, BindingKind, HygienicIdent, ScopeId, ScopeSet};
 use super::syntax_context::{Mark, MarkSet, SyntaxContext};
 use super::violations::{HygieneViolation, HygieneViolations};
-use super::HygieneContext;
 
 /// Configuration for quote expansion
 #[derive(Debug, Clone)]
@@ -220,10 +220,15 @@ impl ConstValue {
                 }
             }
             // AST nodes cannot be converted to simple ConstValue
-            MetaValue::Expr(_) | MetaValue::Type(_) | MetaValue::Pattern(_)
-            | MetaValue::Item(_) | MetaValue::Items(_) => Maybe::None,
+            MetaValue::Expr(_)
+            | MetaValue::Type(_)
+            | MetaValue::Pattern(_)
+            | MetaValue::Item(_)
+            | MetaValue::Items(_) => Maybe::None,
             // Other complex types
-            MetaValue::Bytes(_) | MetaValue::Maybe(_) | MetaValue::Map(_) | MetaValue::Set(_) => Maybe::None,
+            MetaValue::Bytes(_) | MetaValue::Maybe(_) | MetaValue::Map(_) | MetaValue::Set(_) => {
+                Maybe::None
+            }
         }
     }
 
@@ -649,12 +654,7 @@ impl QuoteExpander {
 
     /// Internal: append a debug event when (and only when) the
     /// `debug_bindings` gate is on.
-    fn record_debug_event(
-        &mut self,
-        kind: DebugBindingEventKind,
-        name: Text,
-        span: Span,
-    ) {
+    fn record_debug_event(&mut self, kind: DebugBindingEventKind, name: Text, span: Span) {
         if !self.config.debug_bindings {
             return;
         }
@@ -679,7 +679,11 @@ impl QuoteExpander {
     ///
 
     /// Creates a fresh mark and pushes a new quote scope.
-    pub fn enter_quote(&mut self, target_stage: u32, span: Span) -> Result<ScopeMark, HygieneViolation> {
+    pub fn enter_quote(
+        &mut self,
+        target_stage: u32,
+        span: Span,
+    ) -> Result<ScopeMark, HygieneViolation> {
         // Check max depth
         if self.depth >= self.config.max_depth {
             return Err(HygieneViolation::InvalidQuoteSyntax {
@@ -698,20 +702,13 @@ impl QuoteExpander {
         self.quote_scope = Maybe::Some(scope_id);
 
         // Create call site mark
-        let call_mark = ScopeMark::quote(
-            self.context.current_scopes().len() as u64,
-            target_stage,
-        );
+        let call_mark = ScopeMark::quote(self.context.current_scopes().len() as u64, target_stage);
         self.call_site_mark = Maybe::Some(call_mark);
 
         // Push new binding frame
         self.binding_stack.push(Map::new());
 
-        self.record_debug_event(
-            DebugBindingEventKind::EnterQuote,
-            Text::from(""),
-            span,
-        );
+        self.record_debug_event(DebugBindingEventKind::EnterQuote, Text::from(""), span);
 
         Ok(call_mark)
     }
@@ -775,11 +772,7 @@ impl QuoteExpander {
         // Also register in the hygiene context
         self.context.add_binding(name.clone(), binding);
 
-        self.record_debug_event(
-            DebugBindingEventKind::Binding(kind),
-            name,
-            span,
-        );
+        self.record_debug_event(DebugBindingEventKind::Binding(kind), name, span);
 
         ident
     }
@@ -790,11 +783,7 @@ impl QuoteExpander {
     /// Verifies that the reference is hygienic.
     pub fn process_reference(&mut self, name: &Text, span: Span) -> HygienicIdent {
         let scopes = self.context.current_scopes();
-        self.record_debug_event(
-            DebugBindingEventKind::Reference,
-            name.clone(),
-            span,
-        );
+        self.record_debug_event(DebugBindingEventKind::Reference, name.clone(), span);
         HygienicIdent::new(name.clone(), scopes, span)
     }
 
@@ -816,12 +805,12 @@ impl QuoteExpander {
     ///
 
     /// For `$name` or `${expr}` splices.
-    pub fn splice_value(&mut self, name: &Text, span: Span) -> Result<SpliceResult, HygieneViolation> {
-        self.record_debug_event(
-            DebugBindingEventKind::Splice,
-            name.clone(),
-            span,
-        );
+    pub fn splice_value(
+        &mut self,
+        name: &Text,
+        span: Span,
+    ) -> Result<SpliceResult, HygieneViolation> {
+        self.record_debug_event(DebugBindingEventKind::Splice, name.clone(), span);
 
         // Look up the binding
         let binding = self.lookup_binding(name);
@@ -872,7 +861,11 @@ impl QuoteExpander {
     ///
 
     /// For `${expr}` splices that need evaluation.
-    pub fn splice_expr(&mut self, expr: Expr, _span: Span) -> Result<SpliceResult, HygieneViolation> {
+    pub fn splice_expr(
+        &mut self,
+        expr: Expr,
+        _span: Span,
+    ) -> Result<SpliceResult, HygieneViolation> {
         // Mark the expression with call-site scopes
         let marked_expr = self.apply_call_site_marks_to_expr(expr);
         Ok(SpliceResult::Expr(Box::new(marked_expr)))
@@ -909,16 +902,8 @@ impl QuoteExpander {
     ///  }
     /// }
     /// ```
-    pub fn lift_value(
-        &mut self,
-        expr: &Expr,
-        span: Span,
-    ) -> Result<LiftedValue, HygieneViolation> {
-        self.record_debug_event(
-            DebugBindingEventKind::Lift,
-            Text::from(""),
-            span,
-        );
+    pub fn lift_value(&mut self, expr: &Expr, span: Span) -> Result<LiftedValue, HygieneViolation> {
+        self.record_debug_event(DebugBindingEventKind::Lift, Text::from(""), span);
 
         // Verify we're in a quote context
         if !self.in_quote() {
@@ -958,10 +943,7 @@ impl QuoteExpander {
                     // deferred-eval shape. Now the strict flag has
                     // actual teeth.
                     let v = HygieneViolation::InvalidQuoteSyntax {
-                        message: Text::from(format!(
-                            "lift evaluation failed: {}",
-                            err_msg
-                        )),
+                        message: Text::from(format!("lift evaluation failed: {}", err_msg)),
                         span,
                     };
                     if self.config.strict_mode {
@@ -996,11 +978,9 @@ impl QuoteExpander {
         span: Span,
     ) -> Result<verum_ast::MetaValue, HygieneViolation> {
         if let Maybe::Some(ref evaluator) = self.lift_evaluator {
-            evaluator(expr).map_err(|err_msg| {
-                HygieneViolation::InvalidQuoteSyntax {
-                    message: Text::from(format!("lift evaluation failed: {}", err_msg)),
-                    span,
-                }
+            evaluator(expr).map_err(|err_msg| HygieneViolation::InvalidQuoteSyntax {
+                message: Text::from(format!("lift evaluation failed: {}", err_msg)),
+                span,
             })
         } else {
             Err(HygieneViolation::InvalidQuoteSyntax {
@@ -1074,11 +1054,8 @@ impl QuoteExpander {
         });
 
         // Create a repetition expander for this specific repetition
-        let mut rep_expander = RepetitionExpander::new(
-            pattern_name.clone(),
-            self.context.current_scopes(),
-            span,
-        );
+        let mut rep_expander =
+            RepetitionExpander::new(pattern_name.clone(), self.context.current_scopes(), span);
 
         // The expanded result
         let result = rep_expander.expand_body(body, self)?;
@@ -1272,19 +1249,30 @@ impl QuoteExpander {
                 expr: Heap::new(self.apply_mark_to_expr(*inner, mark)),
             },
 
-            ExprKind::Call { func, type_args, args } => ExprKind::Call {
+            ExprKind::Call {
+                func,
+                type_args,
+                args,
+            } => ExprKind::Call {
                 func: Heap::new(self.apply_mark_to_expr(*func, mark)),
                 type_args,
-                args: args.into_iter()
+                args: args
+                    .into_iter()
                     .map(|arg| self.apply_mark_to_expr(arg, mark))
                     .collect(),
             },
 
-            ExprKind::MethodCall { receiver, method, type_args, args } => ExprKind::MethodCall {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                type_args,
+                args,
+            } => ExprKind::MethodCall {
                 receiver: Heap::new(self.apply_mark_to_expr(*receiver, mark)),
                 method,
                 type_args,
-                args: args.into_iter()
+                args: args
+                    .into_iter()
                     .map(|arg| self.apply_mark_to_expr(arg, mark))
                     .collect(),
             },
@@ -1300,12 +1288,17 @@ impl QuoteExpander {
             },
 
             ExprKind::Tuple(elements) => ExprKind::Tuple(
-                elements.into_iter()
+                elements
+                    .into_iter()
                     .map(|e| self.apply_mark_to_expr(e, mark))
-                    .collect()
+                    .collect(),
             ),
 
-            ExprKind::If { condition, then_branch, else_branch } => ExprKind::If {
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => ExprKind::If {
                 condition,
                 then_branch: self.apply_mark_to_block(then_branch, mark),
                 else_branch: match else_branch {
@@ -1316,23 +1309,26 @@ impl QuoteExpander {
 
             ExprKind::Block(block) => ExprKind::Block(self.apply_mark_to_block(block, mark)),
 
-            ExprKind::Return(value) => ExprKind::Return(
-                match value {
-                    Maybe::Some(e) => Maybe::Some(Heap::new(self.apply_mark_to_expr(*e, mark))),
-                    Maybe::None => Maybe::None,
-                }
-            ),
+            ExprKind::Return(value) => ExprKind::Return(match value {
+                Maybe::Some(e) => Maybe::Some(Heap::new(self.apply_mark_to_expr(*e, mark))),
+                Maybe::None => Maybe::None,
+            }),
 
-            ExprKind::Closure { async_, move_, params, contexts, return_type, body } => {
-                ExprKind::Closure {
-                    async_,
-                    move_,
-                    params,
-                    contexts,
-                    return_type,
-                    body: Heap::new(self.apply_mark_to_expr(*body, mark)),
-                }
-            }
+            ExprKind::Closure {
+                async_,
+                move_,
+                params,
+                contexts,
+                return_type,
+                body,
+            } => ExprKind::Closure {
+                async_,
+                move_,
+                params,
+                contexts,
+                return_type,
+                body: Heap::new(self.apply_mark_to_expr(*body, mark)),
+            },
 
             // For expression kinds that don't contain sub-expressions, return as-is
             ExprKind::Literal(_) => expr.kind,
@@ -1351,11 +1347,17 @@ impl QuoteExpander {
     }
 
     /// Apply a mark to all expressions in a block
-    fn apply_mark_to_block(&self, block: verum_ast::expr::Block, mark: Mark) -> verum_ast::expr::Block {
+    fn apply_mark_to_block(
+        &self,
+        block: verum_ast::expr::Block,
+        mark: Mark,
+    ) -> verum_ast::expr::Block {
         use verum_common::Heap;
 
         verum_ast::expr::Block {
-            stmts: block.stmts.into_iter()
+            stmts: block
+                .stmts
+                .into_iter()
                 .map(|stmt| self.apply_mark_to_stmt(stmt, mark))
                 .collect(),
             expr: match block.expr {
@@ -1910,11 +1912,8 @@ mod tests {
 
     #[test]
     fn test_repetition_expander_creation() {
-        let expander = RepetitionExpander::new(
-            Text::from("item"),
-            ScopeSet::new(),
-            Span::default(),
-        );
+        let expander =
+            RepetitionExpander::new(Text::from("item"), ScopeSet::new(), Span::default());
 
         assert!(expander.is_pattern_var(&Text::from("item")));
         assert!(!expander.is_pattern_var(&Text::from("other")));
@@ -1936,11 +1935,8 @@ mod tests {
 
     #[test]
     fn test_repetition_single_iteration() {
-        let mut expander = RepetitionExpander::new(
-            Text::from("x"),
-            ScopeSet::new(),
-            Span::default(),
-        );
+        let mut expander =
+            RepetitionExpander::new(Text::from("x"), ScopeSet::new(), Span::default());
 
         // Create a simple body with the pattern variable
         let mut body = TokenStream::new();
@@ -1967,16 +1963,16 @@ mod tests {
 
     #[test]
     fn test_repetition_multiple_iterations() {
-        let mut expander = RepetitionExpander::new(
-            Text::from("item"),
-            ScopeSet::new(),
-            Span::default(),
-        );
+        let mut expander =
+            RepetitionExpander::new(Text::from("item"), ScopeSet::new(), Span::default());
 
         // Create body
         let mut body = TokenStream::new();
         body.push(Token {
-            kind: TokenKind::Ident(HygienicIdent::unhygienic(Text::from("item"), Span::default())),
+            kind: TokenKind::Ident(HygienicIdent::unhygienic(
+                Text::from("item"),
+                Span::default(),
+            )),
             span: Span::default(),
             scopes: ScopeSet::new(),
             marks: MarkSet::new(),
@@ -1984,7 +1980,8 @@ mod tests {
 
         // Expand multiple iterations
         for i in 0..3 {
-            let element = HygienicIdent::unhygienic(Text::from(format!("field_{}", i)), Span::default());
+            let element =
+                HygienicIdent::unhygienic(Text::from(format!("field_{}", i)), Span::default());
             let _ = expander.expand_iteration(&body, &[element], i);
         }
 
@@ -1997,11 +1994,8 @@ mod tests {
 
     #[test]
     fn test_repetition_hygiene_isolation() {
-        let mut expander = RepetitionExpander::new(
-            Text::from("x"),
-            ScopeSet::new(),
-            Span::default(),
-        );
+        let mut expander =
+            RepetitionExpander::new(Text::from("x"), ScopeSet::new(), Span::default());
 
         let mut body = TokenStream::new();
         body.push(Token {
@@ -2023,8 +2017,10 @@ mod tests {
         let idents2 = result2.collect_idents();
 
         // The identifiers should have different scopes (different iteration marks)
-        assert!(!idents1[0].scopes.is_subset_of(&idents2[0].scopes) ||
-                !idents2[0].scopes.is_subset_of(&idents1[0].scopes));
+        assert!(
+            !idents1[0].scopes.is_subset_of(&idents2[0].scopes)
+                || !idents2[0].scopes.is_subset_of(&idents1[0].scopes)
+        );
     }
 
     #[test]
@@ -2037,11 +2033,9 @@ mod tests {
             marks: MarkSet::new(),
         });
 
-        let mut expander = RepetitionExpander::new(
-            Text::from("x"),
-            ScopeSet::new(),
-            Span::default(),
-        ).with_separator(sep);
+        let mut expander =
+            RepetitionExpander::new(Text::from("x"), ScopeSet::new(), Span::default())
+                .with_separator(sep);
 
         let mut body = TokenStream::new();
         body.push(Token {
@@ -2182,7 +2176,10 @@ mod tests {
         stage0.add_binding(Text::from("meta_var"), binding);
 
         // Stage 1 binding should NOT be visible at stage 0
-        assert!(matches!(stage0.resolve(&Text::from("meta_var")), Maybe::None));
+        assert!(matches!(
+            stage0.resolve(&Text::from("meta_var")),
+            Maybe::None
+        ));
     }
 
     #[test]
@@ -2194,11 +2191,7 @@ mod tests {
         expander.enter_quote(0, Span::default()).unwrap();
 
         // Escaping to a lower stage should work
-        let result = expander.stage_escape(
-            0,
-            &make_test_expr(),
-            Span::default(),
-        );
+        let result = expander.stage_escape(0, &make_test_expr(), Span::default());
         assert!(result.is_ok());
     }
 
@@ -2283,9 +2276,7 @@ mod tests {
         assert!(!expander.has_lift_evaluator());
 
         // Set a simple evaluator that always returns Int(42)
-        expander.set_lift_evaluator(Box::new(|_expr| {
-            Ok(verum_ast::MetaValue::Int(42))
-        }));
+        expander.set_lift_evaluator(Box::new(|_expr| Ok(verum_ast::MetaValue::Int(42))));
 
         assert!(expander.has_lift_evaluator());
     }
@@ -2294,9 +2285,7 @@ mod tests {
     fn test_lift_with_evaluator_success() {
         let context = HygieneContext::new();
         let mut expander = QuoteExpander::with_default_config(context)
-            .with_lift_evaluator(Box::new(|_expr| {
-                Ok(verum_ast::MetaValue::Int(100))
-            }));
+            .with_lift_evaluator(Box::new(|_expr| Ok(verum_ast::MetaValue::Int(100))));
 
         expander.enter_quote(0, Span::default()).unwrap();
 
@@ -2304,7 +2293,10 @@ mod tests {
         assert!(result.is_ok());
 
         let lifted = result.unwrap();
-        assert!(matches!(lifted.const_value, Maybe::Some(ConstValue::Int(100))));
+        assert!(matches!(
+            lifted.const_value,
+            Maybe::Some(ConstValue::Int(100))
+        ));
         assert!(matches!(lifted.ty, Maybe::Some(ref t) if t.as_str() == "Int"));
     }
 
@@ -2312,9 +2304,7 @@ mod tests {
     fn test_lift_with_evaluator_float() {
         let context = HygieneContext::new();
         let mut expander = QuoteExpander::with_default_config(context)
-            .with_lift_evaluator(Box::new(|_expr| {
-                Ok(verum_ast::MetaValue::Float(2.5))
-            }));
+            .with_lift_evaluator(Box::new(|_expr| Ok(verum_ast::MetaValue::Float(2.5))));
 
         expander.enter_quote(0, Span::default()).unwrap();
 
@@ -2332,8 +2322,8 @@ mod tests {
     #[test]
     fn test_lift_with_evaluator_text() {
         let context = HygieneContext::new();
-        let mut expander = QuoteExpander::with_default_config(context)
-            .with_lift_evaluator(Box::new(|_expr| {
+        let mut expander =
+            QuoteExpander::with_default_config(context).with_lift_evaluator(Box::new(|_expr| {
                 Ok(verum_ast::MetaValue::Text(Text::from("hello")))
             }));
 
@@ -2343,16 +2333,16 @@ mod tests {
         assert!(result.is_ok());
 
         let lifted = result.unwrap();
-        assert!(matches!(lifted.const_value, Maybe::Some(ConstValue::Text(ref t)) if t.as_str() == "hello"));
+        assert!(
+            matches!(lifted.const_value, Maybe::Some(ConstValue::Text(ref t)) if t.as_str() == "hello")
+        );
     }
 
     #[test]
     fn test_lift_with_evaluator_bool() {
         let context = HygieneContext::new();
         let mut expander = QuoteExpander::with_default_config(context)
-            .with_lift_evaluator(Box::new(|_expr| {
-                Ok(verum_ast::MetaValue::Bool(true))
-            }));
+            .with_lift_evaluator(Box::new(|_expr| Ok(verum_ast::MetaValue::Bool(true))));
 
         expander.enter_quote(0, Span::default()).unwrap();
 
@@ -2360,7 +2350,10 @@ mod tests {
         assert!(result.is_ok());
 
         let lifted = result.unwrap();
-        assert!(matches!(lifted.const_value, Maybe::Some(ConstValue::Bool(true))));
+        assert!(matches!(
+            lifted.const_value,
+            Maybe::Some(ConstValue::Bool(true))
+        ));
     }
 
     #[test]
@@ -2376,9 +2369,7 @@ mod tests {
             ..ExpansionConfig::default()
         };
         let mut expander = QuoteExpander::new(context, lenient)
-            .with_lift_evaluator(Box::new(|_expr| {
-                Err(Text::from("evaluation error"))
-            }));
+            .with_lift_evaluator(Box::new(|_expr| Err(Text::from("evaluation error"))));
 
         expander.enter_quote(0, Span::default()).unwrap();
 
@@ -2403,9 +2394,7 @@ mod tests {
         // regression to the inert-field state is caught.
         let context = HygieneContext::new();
         let mut expander = QuoteExpander::with_default_config(context)
-            .with_lift_evaluator(Box::new(|_expr| {
-                Err(Text::from("evaluation error"))
-            }));
+            .with_lift_evaluator(Box::new(|_expr| Err(Text::from("evaluation error"))));
 
         expander.enter_quote(0, Span::default()).unwrap();
 
@@ -2452,9 +2441,7 @@ mod tests {
     fn test_evaluate_lift_raw_success() {
         let context = HygieneContext::new();
         let expander = QuoteExpander::with_default_config(context)
-            .with_lift_evaluator(Box::new(|_expr| {
-                Ok(verum_ast::MetaValue::Int(999))
-            }));
+            .with_lift_evaluator(Box::new(|_expr| Ok(verum_ast::MetaValue::Int(999))));
 
         let result = expander.evaluate_lift_raw(&make_test_expr(), Span::default());
         assert!(result.is_ok());
@@ -2468,7 +2455,10 @@ mod tests {
 
         let result = expander.evaluate_lift_raw(&make_test_expr(), Span::default());
         assert!(result.is_err());
-        assert!(matches!(result, Err(HygieneViolation::InvalidQuoteSyntax { .. })));
+        assert!(matches!(
+            result,
+            Err(HygieneViolation::InvalidQuoteSyntax { .. })
+        ));
     }
 
     #[test]
@@ -2494,11 +2484,11 @@ mod tests {
         );
 
         // Test array conversion
-        let arr = MetaValue::Array(vec![
-            MetaValue::Int(1),
-            MetaValue::Int(2),
-            MetaValue::Int(3),
-        ].into_iter().collect());
+        let arr = MetaValue::Array(
+            vec![MetaValue::Int(1), MetaValue::Int(2), MetaValue::Int(3)]
+                .into_iter()
+                .collect(),
+        );
         let converted = ConstValue::from_meta_value(&arr);
         assert!(matches!(converted, Maybe::Some(ConstValue::Array(_))));
 
@@ -2513,7 +2503,10 @@ mod tests {
         assert_eq!(ConstValue::Float(0.0).type_name().as_str(), "Float");
         assert_eq!(ConstValue::Bool(true).type_name().as_str(), "Bool");
         assert_eq!(ConstValue::Char('x').type_name().as_str(), "Char");
-        assert_eq!(ConstValue::Text(Text::from("")).type_name().as_str(), "Text");
+        assert_eq!(
+            ConstValue::Text(Text::from("")).type_name().as_str(),
+            "Text"
+        );
         assert_eq!(ConstValue::Unit.type_name().as_str(), "()");
         assert_eq!(ConstValue::Array(List::new()).type_name().as_str(), "Array");
         assert_eq!(ConstValue::Tuple(List::new()).type_name().as_str(), "Tuple");
@@ -2620,12 +2613,7 @@ mod tests {
             BindingKind::Function,
             BindingKind::Type,
         ] {
-            expander.process_binding(
-                Text::from("n"),
-                Span::default(),
-                kind,
-                false,
-            );
+            expander.process_binding(Text::from("n"), Span::default(), kind, false);
         }
 
         let recorded: Vec<BindingKind> = expander

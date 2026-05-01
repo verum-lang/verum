@@ -1,5 +1,6 @@
 use verum_llvm_sys::core::{
-    LLVMGetMDNodeNumOperands, LLVMGetMDNodeOperands, LLVMGetMDString, LLVMIsAMDNode, LLVMIsAMDString,
+    LLVMGetMDNodeNumOperands, LLVMGetMDNodeOperands, LLVMGetMDString, LLVMIsAMDNode,
+    LLVMIsAMDString,
 };
 use verum_llvm_sys::prelude::LLVMValueRef;
 
@@ -109,7 +110,8 @@ impl<'ctx> MetadataValue<'ctx> {
     }
 
     pub fn replace_all_uses_with(self, other: &MetadataValue<'ctx>) {
-        self.metadata_value.replace_all_uses_with(other.as_value_ref())
+        self.metadata_value
+            .replace_all_uses_with(other.as_value_ref())
     }
 }
 

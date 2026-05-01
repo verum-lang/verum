@@ -32,9 +32,9 @@
 
 use crate::{Result, TypeError};
 use verum_ast::{decl::ContextDecl, span::Span};
+use verum_common::ToText;
 #[allow(unused_imports)]
 use verum_common::{List, Map, Maybe, Set, Text};
-use verum_common::ToText;
 
 /// A context requirement in a function signature.
 ///
@@ -142,11 +142,15 @@ impl ContextSet {
     }
 
     pub fn contains(&self, name: &str) -> bool {
-        self.contexts.iter().any(|c| c.name.as_str() == name && !c.is_negative)
+        self.contexts
+            .iter()
+            .any(|c| c.name.as_str() == name && !c.is_negative)
     }
 
     pub fn contains_full_path(&self, path: &str) -> bool {
-        self.contexts.iter().any(|c| c.full_path().as_str() == path && !c.is_negative)
+        self.contexts
+            .iter()
+            .any(|c| c.full_path().as_str() == path && !c.is_negative)
     }
 
     pub fn union(&self, other: &ContextSet) -> ContextSet {
@@ -187,7 +191,9 @@ impl ContextSet {
 
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     pub fn is_excluded(&self, name: &str) -> bool {
-        self.contexts.iter().any(|c| c.name.as_str() == name && c.is_negative)
+        self.contexts
+            .iter()
+            .any(|c| c.name.as_str() == name && c.is_negative)
     }
 
     /// Get all positive (required) contexts
@@ -214,7 +220,8 @@ impl ContextSet {
             Err(format!(
                 "Context '{}' is explicitly excluded (`!{}`). Cannot use it.",
                 context_name, context_name
-            ).into())
+            )
+            .into())
         } else {
             Ok(())
         }
@@ -435,13 +442,16 @@ impl CallGraph {
     /// Add a function to the call graph
     pub fn add_function(&mut self, name: impl Into<Text>, contexts: ContextSet, span: Span) {
         let name = name.into();
-        self.functions.insert(name.clone(), CallGraphNode {
-            name,
-            callees: List::new(),
-            callers: List::new(),
-            contexts,
-            span,
-        });
+        self.functions.insert(
+            name.clone(),
+            CallGraphNode {
+                name,
+                callees: List::new(),
+                callers: List::new(),
+                contexts,
+                span,
+            },
+        );
     }
 
     /// Register a call from one function to another
@@ -581,7 +591,9 @@ impl ContextChecker {
         let decl = match self.declarations.get(&name) {
             Some(d) => d.clone(),
             None => {
-                if self.lenient { return Ok(()); }
+                if self.lenient {
+                    return Ok(());
+                }
                 return Err(TypeError::UndefinedContext {
                     name: name.as_str().to_text(),
                     span,
@@ -625,7 +637,9 @@ impl ContextChecker {
         method_name: &str,
         span: Span,
     ) -> Result<()> {
-        if self.lenient { return Ok(()); }
+        if self.lenient {
+            return Ok(());
+        }
         // Check if context is available
         if !self.is_available(context_name) {
             return Err(TypeError::MissingContext {
@@ -897,7 +911,9 @@ impl ContextChecker {
         provided_contexts: &ContextSet,
         call_span: Span,
     ) -> Result<()> {
-        if self.lenient { return Ok(()); }
+        if self.lenient {
+            return Ok(());
+        }
         // Check each required context individually
         for required in required_contexts.iter() {
             let context_name = required.name.as_str();
@@ -1227,17 +1243,15 @@ impl ContextChecker {
 
     /// `Ok(())` if all negative constraints are satisfied, or an error
     /// with the violation path
-    pub fn verify_transitive_negative_contexts(
-        &self,
-        function_name: &str,
-    ) -> Result<()> {
+    pub fn verify_transitive_negative_contexts(&self, function_name: &str) -> Result<()> {
         let func_info = match self.function_registry.get(&Text::from(function_name)) {
             Some(info) => info.clone(),
             None => return Ok(()), // Unknown function
         };
 
         // Get excluded contexts from the function
-        let excluded: List<Text> = func_info.required_contexts
+        let excluded: List<Text> = func_info
+            .required_contexts
             .negative_contexts()
             .map(|c| c.name.clone())
             .collect();
@@ -1281,7 +1295,10 @@ impl ContextChecker {
             if let Some(callee_info) = self.function_registry.get(callee_name) {
                 // Check if callee uses any excluded contexts
                 for excluded_ctx in excluded {
-                    if callee_info.required_contexts.contains(excluded_ctx.as_str()) {
+                    if callee_info
+                        .required_contexts
+                        .contains(excluded_ctx.as_str())
+                    {
                         // Found a violation!
                         let path_str = call_path
                             .iter()
@@ -1291,11 +1308,7 @@ impl ContextChecker {
 
                         return Err(TypeError::TransitiveNegativeContextViolation {
                             excluded_context: excluded_ctx.clone(),
-                            callee: format!(
-                                "{} (via: {})",
-                                callee_name,
-                                path_str
-                            ).into(),
+                            callee: format!("{} (via: {})", callee_name, path_str).into(),
                             span: callee_info.span,
                         });
                     }
@@ -1381,10 +1394,7 @@ impl ContextChecker {
         visited.insert(Text::from(function_name));
 
         // Convert excluded paths to Text for comparison
-        let excluded_names: List<Text> = excluded
-            .iter()
-            .map(path_to_text)
-            .collect();
+        let excluded_names: List<Text> = excluded.iter().map(path_to_text).collect();
 
         // Check all callees transitively with detailed tracking
         let mut call_chain = List::new();
@@ -1482,7 +1492,8 @@ impl ContextChecker {
         for (name, info) in self.function_registry.iter() {
             for callee_name in &info.callees {
                 // Get call site info if available, otherwise create default
-                let call_site = info.call_sites
+                let call_site = info
+                    .call_sites
                     .get(callee_name)
                     .cloned()
                     .unwrap_or_else(|| CallSiteInfo {
@@ -1592,8 +1603,7 @@ impl TransitiveViolationInfo {
             if step.uses_context {
                 msg.push_str(&format!(
                     "{}-> {}() at line {}\n{}   uses {}\n",
-                    indent, step.function_name, step.line,
-                    indent, self.excluded_context
+                    indent, step.function_name, step.line, indent, self.excluded_context
                 ));
             } else {
                 msg.push_str(&format!(
@@ -1609,7 +1619,8 @@ impl TransitiveViolationInfo {
     /// Convert to a TypeError for integration with the type checking pipeline
     pub fn to_type_error(&self) -> TypeError {
         // Build call chain string for the error message
-        let call_chain_str = self.call_chain
+        let call_chain_str = self
+            .call_chain
             .iter()
             .map(|step| format!("{}() at line {}", step.function_name, step.line))
             .collect::<Vec<_>>()
@@ -1617,10 +1628,7 @@ impl TransitiveViolationInfo {
 
         TypeError::TransitiveNegativeContextViolation {
             excluded_context: self.excluded_context.clone(),
-            callee: format!(
-                "transitive call chain: {}",
-                call_chain_str
-            ).into(),
+            callee: format!("transitive call chain: {}", call_chain_str).into(),
             span: self.declaration_span,
         }
     }
@@ -1680,7 +1688,12 @@ fn collect_context_accesses_recursive(
 
     match &expr.kind {
         // Method call: could be Context.method(...) or expr.method(...)
-        ExprKind::MethodCall { receiver, method, args, .. } => {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
             // Check if receiver is a context path (capitalized identifier)
             if let ExprKind::Path(path) = &receiver.kind {
                 if path.segments.len() == 1 {
@@ -1704,7 +1717,10 @@ fn collect_context_accesses_recursive(
         }
 
         // Field access: Context.field or expr.field
-        ExprKind::Field { expr: inner_expr, field } => {
+        ExprKind::Field {
+            expr: inner_expr,
+            field,
+        } => {
             // Check if expr is a context path
             if let ExprKind::Path(path) = &inner_expr.kind {
                 if path.segments.len() == 1 {
@@ -1752,12 +1768,18 @@ fn collect_context_accesses_recursive(
         }
 
         // If expression
-        ExprKind::If { condition, then_branch, else_branch } => {
+        ExprKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             // Check conditions (can be multiple with `let` bindings)
             for cond in condition.conditions.iter() {
                 match cond {
                     ConditionKind::Expr(e) => collect_context_accesses_recursive(e, accesses),
-                    ConditionKind::Let { value, .. } => collect_context_accesses_recursive(value, accesses),
+                    ConditionKind::Let { value, .. } => {
+                        collect_context_accesses_recursive(value, accesses)
+                    }
                 }
             }
             collect_context_accesses_in_block(then_branch, accesses);
@@ -1767,7 +1789,10 @@ fn collect_context_accesses_recursive(
         }
 
         // Match expression
-        ExprKind::Match { expr: scrutinee, arms } => {
+        ExprKind::Match {
+            expr: scrutinee,
+            arms,
+        } => {
             collect_context_accesses_recursive(scrutinee, accesses);
             for arm in arms.iter() {
                 if let Some(guard) = &arm.guard {
@@ -1781,7 +1806,9 @@ fn collect_context_accesses_recursive(
         ExprKind::Loop { body, .. } => {
             collect_context_accesses_in_block(body, accesses);
         }
-        ExprKind::While { condition, body, .. } => {
+        ExprKind::While {
+            condition, body, ..
+        } => {
             collect_context_accesses_recursive(condition, accesses);
             collect_context_accesses_in_block(body, accesses);
         }
@@ -1817,19 +1844,17 @@ fn collect_context_accesses_recursive(
         }
 
         // Array
-        ExprKind::Array(arr_expr) => {
-            match arr_expr {
-                ArrayExpr::List(elements) => {
-                    for elem in elements.iter() {
-                        collect_context_accesses_recursive(elem, accesses);
-                    }
-                }
-                ArrayExpr::Repeat { value, count } => {
-                    collect_context_accesses_recursive(value, accesses);
-                    collect_context_accesses_recursive(count, accesses);
+        ExprKind::Array(arr_expr) => match arr_expr {
+            ArrayExpr::List(elements) => {
+                for elem in elements.iter() {
+                    collect_context_accesses_recursive(elem, accesses);
                 }
             }
-        }
+            ArrayExpr::Repeat { value, count } => {
+                collect_context_accesses_recursive(value, accesses);
+                collect_context_accesses_recursive(count, accesses);
+            }
+        },
 
         // Index
         ExprKind::Index { expr: base, index } => {
@@ -1891,13 +1916,20 @@ fn collect_context_accesses_recursive(
         }
 
         // TryFinally
-        ExprKind::TryFinally { try_block, finally_block } => {
+        ExprKind::TryFinally {
+            try_block,
+            finally_block,
+        } => {
             collect_context_accesses_recursive(try_block, accesses);
             collect_context_accesses_recursive(finally_block, accesses);
         }
 
         // TryRecoverFinally
-        ExprKind::TryRecoverFinally { try_block, recover, finally_block } => {
+        ExprKind::TryRecoverFinally {
+            try_block,
+            recover,
+            finally_block,
+        } => {
             collect_context_accesses_recursive(try_block, accesses);
             match recover {
                 verum_ast::expr::RecoverBody::MatchArms { arms, .. } => {
@@ -1921,7 +1953,10 @@ fn collect_context_accesses_recursive(
         }
 
         // Comprehension
-        ExprKind::Comprehension { expr: inner, clauses } => {
+        ExprKind::Comprehension {
+            expr: inner,
+            clauses,
+        } => {
             collect_context_accesses_recursive(inner, accesses);
             for clause in clauses.iter() {
                 match &clause.kind {
@@ -2005,7 +2040,9 @@ fn collect_context_accesses_in_stmt(
                 collect_context_accesses_recursive(expr, accesses);
             }
         }
-        StmtKind::LetElse { value, else_block, .. } => {
+        StmtKind::LetElse {
+            value, else_block, ..
+        } => {
             collect_context_accesses_recursive(value, accesses);
             collect_context_accesses_in_block(else_block, accesses);
         }
@@ -2334,17 +2371,12 @@ impl ModuleAliasRegistry {
 ///
 
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts
-pub fn validate_module_aliases(
-    functions: &[verum_ast::decl::FunctionDecl],
-) -> Result<()> {
+pub fn validate_module_aliases(functions: &[verum_ast::decl::FunctionDecl]) -> Result<()> {
     let mut registry = ModuleAliasRegistry::new();
 
     // Register all aliases from all functions
     for func in functions {
-        registry.register_function_aliases(
-            func.name.name.as_str(),
-            &func.contexts,
-        );
+        registry.register_function_aliases(func.name.name.as_str(), &func.contexts);
     }
 
     // Validate the module

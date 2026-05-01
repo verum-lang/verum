@@ -186,9 +186,7 @@ pub fn expr_to_smtlib(expr: &Expr) -> SmtResult {
             })
         }
 
-        ExprKind::Tuple(elements) if elements.len() == 1 => {
-            expr_to_smtlib(&elements[0])
-        }
+        ExprKind::Tuple(elements) if elements.len() == 1 => expr_to_smtlib(&elements[0]),
 
         _ => Err(SmtTranslateError::UnsupportedExpr {
             description: format!("{:?}", std::mem::discriminant(&expr.kind)),
@@ -243,9 +241,7 @@ pub fn type_to_sort(ty: &verum_ast::ty::Type) -> String {
 
 /// Extract parameter names from a function's parameter list.
 /// Returns `(name, sort)` pairs suitable for `ReflectedFunction`.
-pub fn extract_params(
-    func: &verum_ast::FunctionDecl,
-) -> Vec<(String, String)> {
+pub fn extract_params(func: &verum_ast::FunctionDecl) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for p in func.params.iter() {
         if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &p.kind {
@@ -350,10 +346,7 @@ mod tests {
 
     fn bool_expr(b: bool) -> Expr {
         Expr {
-            kind: ExprKind::Literal(Literal::new(
-                verum_ast::literal::LiteralKind::Bool(b),
-                sp(),
-            )),
+            kind: ExprKind::Literal(Literal::new(verum_ast::literal::LiteralKind::Bool(b), sp())),
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
@@ -461,10 +454,7 @@ mod tests {
         // (a + b) * c
         let sum = binop(BinOp::Add, var_expr("a"), var_expr("b"));
         let product = binop(BinOp::Mul, sum, var_expr("c"));
-        assert_eq!(
-            expr_to_smtlib(&product).unwrap(),
-            "(* (+ a b) c)"
-        );
+        assert_eq!(expr_to_smtlib(&product).unwrap(), "(* (+ a b) c)");
     }
 
     #[test]

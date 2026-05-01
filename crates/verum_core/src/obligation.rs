@@ -8,8 +8,8 @@
 //! dispatch (in `verum_smt`).
 
 use serde::{Deserialize, Serialize};
-use verum_common::{List, Maybe, Text};
 use verum_common::span::Span;
+use verum_common::{List, Maybe, Text};
 
 use crate::expr::IrExpr;
 

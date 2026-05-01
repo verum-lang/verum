@@ -70,9 +70,7 @@ pub fn check_smtlib_string(
     }
 
     match solver {
-        "z3" | "auto" | "portfolio" | "capability" => {
-            Ok(check_via_z3(content, timeout_s))
-        }
+        "z3" | "auto" | "portfolio" | "capability" => Ok(check_via_z3(content, timeout_s)),
         "cvc5" => Err(CheckError::UnsupportedSolver(
             "cvc5 (parser library not linked; use --solver=z3)".to_string(),
         )),
@@ -82,7 +80,7 @@ pub fn check_smtlib_string(
 
 fn check_via_z3(content: &str, timeout_s: u64) -> CheckVerdict {
     use crate::solver_diagnostics;
-    use z3::{with_z3_config, Config, Solver};
+    use z3::{Config, Solver, with_z3_config};
 
     // Protocol trace + query dump on the VERUM_SOLVER_PROTOCOL /
     // VERUM_DUMP_SMT_DIR side channels. Both are no-ops when

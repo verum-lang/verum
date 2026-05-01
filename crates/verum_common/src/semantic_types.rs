@@ -1712,7 +1712,12 @@ impl AsRef<[u8]> for List<u8> {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(feature = "serde", serde(bound = "K: serde::Serialize + serde::de::DeserializeOwned + Eq + Hash, V: serde::Serialize + serde::de::DeserializeOwned"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(
+        bound = "K: serde::Serialize + serde::de::DeserializeOwned + Eq + Hash, V: serde::Serialize + serde::de::DeserializeOwned"
+    )
+)]
 pub struct Map<K, V> {
     inner: HashMap<K, V>,
 }
@@ -2103,7 +2108,10 @@ impl<'a, K, V> IntoIterator for &'a mut Map<K, V> {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(feature = "serde", serde(bound = "T: serde::Serialize + serde::de::DeserializeOwned + Eq + Hash"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound = "T: serde::Serialize + serde::de::DeserializeOwned + Eq + Hash")
+)]
 pub struct Set<T> {
     inner: HashSet<T>,
 }
@@ -2351,7 +2359,12 @@ impl<'a, T> IntoIterator for &'a Set<T> {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(feature = "serde", serde(bound = "K: serde::Serialize + serde::de::DeserializeOwned + Ord, V: serde::Serialize + serde::de::DeserializeOwned"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(
+        bound = "K: serde::Serialize + serde::de::DeserializeOwned + Ord, V: serde::Serialize + serde::de::DeserializeOwned"
+    )
+)]
 pub struct OrderedMap<K, V> {
     inner: BTreeMap<K, V>,
 }
@@ -2542,7 +2555,10 @@ impl<'a, K, V> IntoIterator for &'a mut OrderedMap<K, V> {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(feature = "serde", serde(bound = "T: serde::Serialize + serde::de::DeserializeOwned + Ord"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound = "T: serde::Serialize + serde::de::DeserializeOwned + Ord")
+)]
 pub struct OrderedSet<T> {
     inner: BTreeSet<T>,
 }

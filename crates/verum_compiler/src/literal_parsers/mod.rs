@@ -39,7 +39,7 @@ pub use interval::parse_interval;
 pub use json::parse_json;
 pub use matrix::parse_matrix;
 pub use regex::parse_regex;
-pub use sql::{parse_sql, SqlDialect};
+pub use sql::{SqlDialect, parse_sql};
 pub use uri::parse_uri;
 pub use uuid::parse_uuid;
 pub use xml::parse_xml;

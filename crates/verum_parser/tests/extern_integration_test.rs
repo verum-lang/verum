@@ -98,12 +98,13 @@ public extern fn libc_exit(code: Int);
     // Verify no function has a body
     for item in &module.items {
         if let ItemKind::Function(func) = &item.kind
-            && func.extern_abi.is_some() {
-                assert!(
-                    func.body.is_none(),
-                    "Extern function {} should not have a body",
-                    func.name.name
-                );
-            }
+            && func.extern_abi.is_some()
+        {
+            assert!(
+                func.body.is_none(),
+                "Extern function {} should not have a body",
+                func.name.name
+            );
+        }
     }
 }

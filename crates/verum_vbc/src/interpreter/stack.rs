@@ -15,9 +15,9 @@
 //! The default stack limit is 1024 frames, which is sufficient for most
 //! programs while preventing stack overflow attacks.
 
+use super::error::{InterpreterError, InterpreterResult};
 use crate::instruction::Reg;
 use crate::module::FunctionId;
-use super::error::{InterpreterError, InterpreterResult};
 
 /// Default maximum call stack depth.
 pub const DEFAULT_MAX_DEPTH: usize = 1024;
@@ -132,7 +132,10 @@ impl CallStack {
 
         // Calculate new base (after previous frame's registers)
         let (reg_base, caller_base) = if let Some(current) = self.frames.last() {
-            (current.reg_base + current.reg_count as u32, current.reg_base)
+            (
+                current.reg_base + current.reg_count as u32,
+                current.reg_base,
+            )
         } else {
             (0, 0)
         };
@@ -307,7 +310,10 @@ mod tests {
 
         // Fourth push should fail
         let result = stack.push_frame(FunctionId(3), 4, 0, Reg(0));
-        assert!(matches!(result, Err(InterpreterError::StackOverflow { .. })));
+        assert!(matches!(
+            result,
+            Err(InterpreterError::StackOverflow { .. })
+        ));
     }
 
     #[test]

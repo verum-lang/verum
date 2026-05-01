@@ -46,21 +46,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use verum_common::Text;
+use verum_llvm::AddressSpace;
 use verum_llvm::attributes::{Attribute, AttributeLoc};
 use verum_llvm::context::Context;
+use verum_llvm::debug_info::{
+    AsDIScope, DICompileUnit, DIFile, DIFlags, DIFlagsConstants, DILocalVariable, DIScope,
+    DISubprogram, DIType, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder,
+};
 use verum_llvm::module::{Linkage, Module};
 use verum_llvm::values::{BasicValueEnum, FunctionValue};
-use verum_llvm::AddressSpace;
-use verum_llvm::debug_info::{
-    DebugInfoBuilder, DICompileUnit, DIFile, DISubprogram, DIFlags, DIFlagsConstants,
-    DWARFSourceLanguage, DWARFEmissionKind, DIScope, AsDIScope, DIType, DILocalVariable,
-};
 use verum_vbc::instruction::Instruction;
-use verum_vbc::module::{CallingConvention, FunctionDescriptor, InlineHint, OptLevel, OptimizationHints, VbcFunction, VbcModule};
+use verum_vbc::module::{
+    CallingConvention, FunctionDescriptor, InlineHint, OptLevel, OptimizationHints, VbcFunction,
+    VbcModule,
+};
 use verum_vbc::types::{TypeId, TypeRef};
 
 use super::context::FunctionContext;
-use super::error::{LlvmLoweringError, Result, BuildExt, OptionExt};
+use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
 use super::instruction::lower_instruction;
 use super::types::{RefTier, TypeLowering};
 use super::well_known_types::{WellKnownType as WKT, WellKnownTypeExt as _};
@@ -354,10 +357,7 @@ impl LoweringConfig {
     /// Each non-zero field flows into a `__verum_runtime_*` LLVM
     /// global at codegen time and reaches stdlib code through
     /// the `verum_get_runtime_*` getter functions.
-    pub fn with_runtime_bridge(
-        mut self,
-        bridge: super::platform_ir::RuntimeBridgeValues,
-    ) -> Self {
+    pub fn with_runtime_bridge(mut self, bridge: super::platform_ir::RuntimeBridgeValues) -> Self {
         self.runtime_bridge = bridge;
         self
     }
@@ -510,10 +510,13 @@ pub(crate) fn is_primitive_type_name(name: &str) -> bool {
     use verum_common::well_known_types::type_names;
     type_names::is_primitive_value_type(name)
         || type_names::is_numeric_type(name)
-        || matches!(name, "Never"
+        || matches!(
+            name,
+            "Never"
             // Legacy short aliases used in some code paths
             | "I8" | "I16" | "I32" | "U8" | "U16" | "U32" | "U64" | "I128" | "U128"
-            | "F32" | "Usize" | "Isize")
+            | "F32" | "Usize" | "Isize"
+        )
 }
 
 /// Main VBC → LLVM IR lowering context.
@@ -591,7 +594,8 @@ fn coerce_to_bool<'ctx>(
         }
         BasicValueEnum::PointerValue(pv) => {
             // ptr != null → true
-            let as_int = ctx.builder()
+            let as_int = ctx
+                .builder()
                 .build_ptr_to_int(pv, i64_type, &format!("{}_p2i", name))
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             ctx.builder()
@@ -612,7 +616,8 @@ fn coerce_to_bool<'ctx>(
                 // Empty struct → false
                 return Ok(bool_type.const_int(0, false));
             }
-            let field0 = ctx.builder()
+            let field0 = ctx
+                .builder()
                 .build_extract_value(sv, 0, &format!("{}_f0", name))
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             coerce_to_bool(ctx, field0, name)
@@ -646,22 +651,21 @@ fn coerce_to_i64_for_switch<'ctx>(
                     .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
             }
         }
-        BasicValueEnum::PointerValue(pv) => {
-            ctx.builder()
-                .build_ptr_to_int(pv, i64_type, name)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
-        }
-        BasicValueEnum::FloatValue(fv) => {
-            ctx.builder()
-                .build_bit_cast(fv, i64_type, name)
-                .map(|v| v.into_int_value())
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
-        }
+        BasicValueEnum::PointerValue(pv) => ctx
+            .builder()
+            .build_ptr_to_int(pv, i64_type, name)
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string())),
+        BasicValueEnum::FloatValue(fv) => ctx
+            .builder()
+            .build_bit_cast(fv, i64_type, name)
+            .map(|v| v.into_int_value())
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string())),
         BasicValueEnum::StructValue(sv) => {
             if sv.get_type().count_fields() == 0 {
                 return Ok(i64_type.const_zero());
             }
-            let field0 = ctx.builder()
+            let field0 = ctx
+                .builder()
                 .build_extract_value(sv, 0, &format!("{}_f0", name))
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             coerce_to_i64_for_switch(ctx, field0, name)
@@ -752,17 +756,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let filename = config.module_name.as_str();
             let directory = ".";
             let (db, cu) = module.create_debug_info_builder(
-                true, // allow_unresolved — needed for forward references
+                true,                   // allow_unresolved — needed for forward references
                 DWARFSourceLanguage::C, // Closest to Verum's ABI (LLVM has no "Verum" language)
                 filename,
                 directory,
                 "verum compiler v0.4.0", // producer
-                config.opt_level > 0, // is_optimized
-                "", // flags
-                0,  // runtime_ver
-                "", // split_name
+                config.opt_level > 0,    // is_optimized
+                "",                      // flags
+                0,                       // runtime_ver
+                "",                      // split_name
                 DWARFEmissionKind::Full,
-                0,  // dwo_id
+                0,     // dwo_id
                 false, // split_debug_inlining
                 false, // debug_info_for_profiling
                 "",    // sysroot
@@ -862,9 +866,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         self.declare_functions(vbc_module)?;
 
         // Phase 1.5: Build function name index for O(1) lookups
-        self.func_name_index = Some(std::sync::Arc::new(
-            super::context::FuncNameIndex::build(vbc_module)
-        ));
+        self.func_name_index = Some(std::sync::Arc::new(super::context::FuncNameIndex::build(
+            vbc_module,
+        )));
 
         // Phase 1.6: Create coverage counter array if coverage is enabled.
         // Global array: i64[N] where N = number of functions.
@@ -873,12 +877,16 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let i64_type = self.context.i64_type();
             let num_funcs = vbc_module.functions.len() as u32;
             let array_type = i64_type.array_type(num_funcs.max(1));
-            let global = self.module.add_global(array_type, None, "__verum_coverage_counters");
+            let global = self
+                .module
+                .add_global(array_type, None, "__verum_coverage_counters");
             global.set_initializer(&array_type.const_zero());
             global.set_linkage(Linkage::Internal);
 
             // Also store the function count for the report
-            let count_global = self.module.add_global(i64_type, None, "__verum_coverage_func_count");
+            let count_global =
+                self.module
+                    .add_global(i64_type, None, "__verum_coverage_func_count");
             count_global.set_initializer(&i64_type.const_int(num_funcs as u64, false));
             count_global.set_linkage(Linkage::Internal);
         }
@@ -900,10 +908,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // and the Phase 3.6 safety net stubs it with `return 0` — masking
         // the user's program logic. Bisect 2026-04-26: `mount core.*; fn main() -> Int { 7 }`
         // returned exit=0 instead of 7 due to this.
-        let mut lowered_llvm_fns: std::collections::HashMap<(String, usize), usize> = std::collections::HashMap::new();
+        let mut lowered_llvm_fns: std::collections::HashMap<(String, usize), usize> =
+            std::collections::HashMap::new();
 
         // First pass: collect (name, arity) pairs that have multiple bodies.
-        let mut body_count: std::collections::HashMap<(String, usize), usize> = std::collections::HashMap::new();
+        let mut body_count: std::collections::HashMap<(String, usize), usize> =
+            std::collections::HashMap::new();
         for func_desc in &vbc_module.functions {
             if func_desc.instructions.is_some() {
                 let name = vbc_module.strings.get(func_desc.name).unwrap_or("");
@@ -946,10 +956,21 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     }
                 }
 
-                let is_tracked = func_name == "parallel_map" || func_name == "execute_with_retry" || func_name == "any_of" || func_name == "heap_sort";
+                let is_tracked = func_name == "parallel_map"
+                    || func_name == "execute_with_retry"
+                    || func_name == "any_of"
+                    || func_name == "heap_sort";
                 if is_tracked {
-                    let bb_count = self.functions.get(&func_desc.id.0).map_or(0, |f| f.count_basic_blocks());
-                    tracing::debug!("[LOWER] {} id={} blocks_before={}", func_name, func_desc.id.0, bb_count);
+                    let bb_count = self
+                        .functions
+                        .get(&func_desc.id.0)
+                        .map_or(0, |f| f.count_basic_blocks());
+                    tracing::debug!(
+                        "[LOWER] {} id={} blocks_before={}",
+                        func_name,
+                        func_desc.id.0,
+                        bb_count
+                    );
                 }
                 // VERUM_AOT_TRACE_LOWER=1: print every function name to
                 // stderr before lowering. Survives panics and SIGABRT
@@ -963,7 +984,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 if let Err(e) = self.lower_vbc_function(vbc_module, &vbc_func) {
                     // Stdlib functions may fail to lower (e.g. methods using
                     // unimplemented intrinsics). Skip gracefully.
-                    if is_tracked { tracing::debug!("[LOWER] {} FAILED: {:?}", func_name, e); }
+                    if is_tracked {
+                        tracing::debug!("[LOWER] {} FAILED: {:?}", func_name, e);
+                    }
                     tracing::warn!("Skipping function '{}': {:?}", func_name, e);
 
                     // **Extern-function preservation gate** (#15 Failure 2
@@ -1061,33 +1084,52 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     continue;
                 }
                 if is_tracked {
-                    let bb_count = self.functions.get(&func_desc.id.0).map_or(0, |f| f.count_basic_blocks());
+                    let bb_count = self
+                        .functions
+                        .get(&func_desc.id.0)
+                        .map_or(0, |f| f.count_basic_blocks());
                     tracing::debug!("[LOWER] {} blocks_after={}", func_name, bb_count);
                 }
                 // Track parallel_map blocks
                 if func_desc.id.0 == 37 {
                     if let Some(pm) = self.module.get_function("parallel_map") {
-                        tracing::debug!("[BEFORE-MAIN] parallel_map blocks={}", pm.count_basic_blocks());
+                        tracing::debug!(
+                            "[BEFORE-MAIN] parallel_map blocks={}",
+                            pm.count_basic_blocks()
+                        );
                     }
                 }
                 if func_desc.id.0 == 36 || func_desc.id.0 == 37 {
-                    let fn_name_llvm = self.functions.get(&func_desc.id.0)
+                    let fn_name_llvm = self
+                        .functions
+                        .get(&func_desc.id.0)
                         .map(|f| f.get_name().to_string_lossy().to_string())
                         .unwrap_or_default();
-                    tracing::debug!("[LOWER-DETAIL] id={} vbc_name='{}' llvm_name='{}'", func_desc.id.0, func_name, fn_name_llvm);
+                    tracing::debug!(
+                        "[LOWER-DETAIL] id={} vbc_name='{}' llvm_name='{}'",
+                        func_desc.id.0,
+                        func_name,
+                        fn_name_llvm
+                    );
                 }
             }
         }
 
         if let Some(f) = self.module.get_function("parallel_map") {
-            tracing::debug!("[POST-PHASE2-LOOP] parallel_map blocks={}", f.count_basic_blocks());
+            tracing::debug!(
+                "[POST-PHASE2-LOOP] parallel_map blocks={}",
+                f.count_basic_blocks()
+            );
         }
 
         // Phase 3: Emit global constructors/destructors
         self.emit_global_ctors_dtors(vbc_module)?;
 
         if let Some(f) = self.module.get_function("parallel_map") {
-            tracing::debug!("[POST-CTORS] parallel_map blocks={}", f.count_basic_blocks());
+            tracing::debug!(
+                "[POST-CTORS] parallel_map blocks={}",
+                f.count_basic_blocks()
+            );
         }
 
         // Debug: dump IR to file after phase 2 (before cleanup passes)
@@ -1098,21 +1140,30 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
         // Debug: check before cleanup
         if let Some(f) = self.module.get_function("parallel_map") {
-            tracing::debug!("[PRE-CLEANUP] parallel_map blocks={}", f.count_basic_blocks());
+            tracing::debug!(
+                "[PRE-CLEANUP] parallel_map blocks={}",
+                f.count_basic_blocks()
+            );
         }
 
         // Phase 3.5: Remove known-invalid functions by name pattern.
         self.remove_known_invalid_functions();
 
         if let Some(f) = self.module.get_function("parallel_map") {
-            tracing::debug!("[POST-KNOWN-INVALID] parallel_map blocks={}", f.count_basic_blocks());
+            tracing::debug!(
+                "[POST-KNOWN-INVALID] parallel_map blocks={}",
+                f.count_basic_blocks()
+            );
         }
 
         // Phase 3.55: Remove self-recursive functions from broken @cfg dispatch
         self.remove_self_recursive_functions();
 
         if let Some(f) = self.module.get_function("parallel_map") {
-            tracing::debug!("[POST-SELF-RECURSIVE] parallel_map blocks={}", f.count_basic_blocks());
+            tracing::debug!(
+                "[POST-SELF-RECURSIVE] parallel_map blocks={}",
+                f.count_basic_blocks()
+            );
         }
 
         // Phase 3.6: Emit LLVM IR runtime functions
@@ -1128,14 +1179,20 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let trace = std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some();
 
             let runtime = super::runtime::RuntimeLowering::new(self.context);
-            if trace { eprintln!("[aot-runtime-stage] emit_text_ir_functions"); }
+            if trace {
+                eprintln!("[aot-runtime-stage] emit_text_ir_functions");
+            }
             runtime.emit_text_ir_functions(&self.module)?;
-            if trace { eprintln!("[aot-runtime-stage] emit_misc_ir_functions"); }
+            if trace {
+                eprintln!("[aot-runtime-stage] emit_misc_ir_functions");
+            }
             runtime.emit_misc_ir_functions(&self.module)?;
 
             // Emit platform-native runtime functions as LLVM IR.
             // These shadow C runtime functions for full LTO optimization.
-            if trace { eprintln!("[aot-runtime-stage] emit_platform_functions"); }
+            if trace {
+                eprintln!("[aot-runtime-stage] emit_platform_functions");
+            }
             // Thread `[runtime].panic` from the manifest through to
             // the platform-IR emitter — it drives the body shape of
             // `verum_panic` (Unwind: route through
@@ -1151,16 +1208,22 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
             // Emit tensor runtime functions as LLVM IR.
             // Replaces verum_tensor.c — uses LLVM intrinsics for math (native HW speed).
-            if trace { eprintln!("[aot-runtime-stage] emit_tensor_functions"); }
+            if trace {
+                eprintln!("[aot-runtime-stage] emit_tensor_functions");
+            }
             let tensor = super::tensor_ir::TensorIR::new(self.context);
             tensor.emit_tensor_functions(&self.module)?;
 
             // Emit Metal GPU runtime functions as LLVM IR.
             // Replaces verum_metal.m — uses ObjC runtime calls via objc_msgSend.
-            if trace { eprintln!("[aot-runtime-stage] emit_metal_functions"); }
+            if trace {
+                eprintln!("[aot-runtime-stage] emit_metal_functions");
+            }
             let metal = super::metal_ir::MetalIR::new(self.context);
             metal.emit_metal_functions(&self.module)?;
-            if trace { eprintln!("[aot-runtime-stage] all_done"); }
+            if trace {
+                eprintln!("[aot-runtime-stage] all_done");
+            }
         }
 
         // Phase 3.6 (#106 Path A.2): final-pass safety net — for any
@@ -1208,7 +1271,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // Conservative allow-list of libc symbols that MUST be
             // resolved by ld at link time, not stubbed here.
             fn is_libc_extern(name: &str) -> bool {
-                matches!(name,
+                matches!(
+                    name,
                     // process control
                     "exit" | "_exit" | "_Exit" | "abort" | "_abort"
                     // memory
@@ -1491,8 +1555,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Forward declare all functions in the module.
     fn declare_functions(&mut self, vbc_module: &VbcModule) -> Result<()> {
-        use verum_vbc::types::TypeRef;
         use verum_vbc::types::TypeId;
+        use verum_vbc::types::TypeRef;
 
         for func_desc in &vbc_module.functions {
             // Determine effective return type:
@@ -1504,7 +1568,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 TypeRef::Concrete(TypeId::UNIT) => {
                     match func_desc.instructions.as_ref() {
                         Some(instrs) => {
-                            let has_value_return = instrs.iter().any(|i| matches!(i, Instruction::Ret { .. }));
+                            let has_value_return =
+                                instrs.iter().any(|i| matches!(i, Instruction::Ret { .. }));
                             if has_value_return {
                                 TypeRef::Concrete(TypeId::INT)
                             } else {
@@ -1520,10 +1585,20 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 TypeRef::Concrete(tid) => {
                     // Check if type is a known primitive
                     match *tid {
-                        TypeId::INT | TypeId::FLOAT | TypeId::BOOL | TypeId::TEXT |
-                        TypeId::PTR | TypeId::NEVER | TypeId::U8 | TypeId::I8 |
-                        TypeId::U16 | TypeId::I16 | TypeId::U32 | TypeId::I32 |
-                        TypeId::U64 | TypeId::F32 => func_desc.return_type.clone(),
+                        TypeId::INT
+                        | TypeId::FLOAT
+                        | TypeId::BOOL
+                        | TypeId::TEXT
+                        | TypeId::PTR
+                        | TypeId::NEVER
+                        | TypeId::U8
+                        | TypeId::I8
+                        | TypeId::U16
+                        | TypeId::I16
+                        | TypeId::U32
+                        | TypeId::I32
+                        | TypeId::U64
+                        | TypeId::F32 => func_desc.return_type.clone(),
                         _ => {
                             // User-defined type — represent as i64 (heap pointer)
                             TypeRef::Concrete(TypeId::INT)
@@ -1549,36 +1624,49 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // so force ALL their params to INT regardless of semantic type. The original
             // type info in func_desc.params is still used for register marking below.
             let is_spawn_func = raw_name.contains("$spawn$");
-            let effective_params: Vec<verum_vbc::module::ParamDescriptor> = func_desc.params.iter().map(|p| {
-                let eff_type = if is_spawn_func {
-                    TypeRef::Concrete(TypeId::INT)
-                } else {
-                    match &p.type_ref {
-                        TypeRef::Concrete(tid) => {
-                            match *tid {
-                                TypeId::INT | TypeId::FLOAT | TypeId::BOOL | TypeId::TEXT |
-                                TypeId::PTR | TypeId::NEVER | TypeId::U8 | TypeId::I8 |
-                                TypeId::U16 | TypeId::I16 | TypeId::U32 | TypeId::I32 |
-                                TypeId::U64 | TypeId::F32 => p.type_ref.clone(),
-                                // UNIT and user-defined types → i64 (heap pointer representation)
-                                _ => TypeRef::Concrete(TypeId::INT),
+            let effective_params: Vec<verum_vbc::module::ParamDescriptor> = func_desc
+                .params
+                .iter()
+                .map(|p| {
+                    let eff_type = if is_spawn_func {
+                        TypeRef::Concrete(TypeId::INT)
+                    } else {
+                        match &p.type_ref {
+                            TypeRef::Concrete(tid) => {
+                                match *tid {
+                                    TypeId::INT
+                                    | TypeId::FLOAT
+                                    | TypeId::BOOL
+                                    | TypeId::TEXT
+                                    | TypeId::PTR
+                                    | TypeId::NEVER
+                                    | TypeId::U8
+                                    | TypeId::I8
+                                    | TypeId::U16
+                                    | TypeId::I16
+                                    | TypeId::U32
+                                    | TypeId::I32
+                                    | TypeId::U64
+                                    | TypeId::F32 => p.type_ref.clone(),
+                                    // UNIT and user-defined types → i64 (heap pointer representation)
+                                    _ => TypeRef::Concrete(TypeId::INT),
+                                }
                             }
+                            _ => TypeRef::Concrete(TypeId::INT),
                         }
-                        _ => TypeRef::Concrete(TypeId::INT),
+                    };
+                    verum_vbc::module::ParamDescriptor {
+                        name: p.name,
+                        type_ref: eff_type,
+                        is_mut: p.is_mut,
+                        default: p.default,
                     }
-                };
-                verum_vbc::module::ParamDescriptor {
-                    name: p.name,
-                    type_ref: eff_type,
-                    is_mut: p.is_mut,
-                    default: p.default,
-                }
-            }).collect();
+                })
+                .collect();
 
-            let fn_type = self.types.lower_function_type(
-                &effective_params,
-                &effective_return_type,
-            )?;
+            let fn_type = self
+                .types
+                .lower_function_type(&effective_params, &effective_return_type)?;
 
             // Rename "main" to "verum_main" so the C runtime entry point can call it
             let func_name = if raw_name == "main" {
@@ -1659,7 +1747,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // Type prefix) can be safely inlined into each other.
             // Mark stdlib functions noinline to prevent mixed ABI issues when inlining.
             let is_stdlib = func_desc.func_id_base != 0
-                || (raw_name.contains('.') && raw_name.chars().next().map_or(false, |c| c.is_uppercase()));
+                || (raw_name.contains('.')
+                    && raw_name.chars().next().map_or(false, |c| c.is_uppercase()));
             if is_stdlib && func_desc.optimization_hints.inline_hint.is_none() {
                 // noinline: prevent cross-ABI inlining.
                 let noinline_kind_id = Attribute::get_named_enum_kind_id("noinline");
@@ -1700,11 +1789,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
     /// - @optimize(size) -> `optsize`
     /// - @target_feature -> `target-features` string attribute
     /// - @target_cpu -> `target-cpu` string attribute
-    fn apply_optimization_hints(
-        &self,
-        llvm_fn: FunctionValue<'ctx>,
-        hints: &OptimizationHints,
-    ) {
+    fn apply_optimization_hints(&self, llvm_fn: FunctionValue<'ctx>, hints: &OptimizationHints) {
         // --- Inline hints ---
         match hints.inline_hint {
             Some(InlineHint::Always) => {
@@ -1850,7 +1935,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
         // --- Target features ---
         if let Some(ref features) = hints.target_features {
-            let attr = self.context.create_string_attribute("target-features", features);
+            let attr = self
+                .context
+                .create_string_attribute("target-features", features);
             llvm_fn.add_attribute(AttributeLoc::Function, attr);
         }
 
@@ -1862,23 +1949,15 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
     }
 
     /// Lower a single VBC function to LLVM IR.
-    fn lower_vbc_function(
-        &mut self,
-        vbc_module: &VbcModule,
-        vbc_func: &VbcFunction,
-    ) -> Result<()> {
+    fn lower_vbc_function(&mut self, vbc_module: &VbcModule, vbc_func: &VbcFunction) -> Result<()> {
         let func_id = vbc_func.descriptor.id.0;
-        let llvm_fn = self
-            .functions
-            .get(&func_id)
-            .copied()
-            .ok_or_else(|| {
-                let name = vbc_module
-                    .strings
-                    .get(vbc_func.descriptor.name)
-                    .unwrap_or("<unknown>");
-                LlvmLoweringError::MissingFunction(Text::from(name))
-            })?;
+        let llvm_fn = self.functions.get(&func_id).copied().ok_or_else(|| {
+            let name = vbc_module
+                .strings
+                .get(vbc_func.descriptor.name)
+                .unwrap_or("<unknown>");
+            LlvmLoweringError::MissingFunction(Text::from(name))
+        })?;
 
         // Set calling convention based on function descriptor
         let calling_convention = &vbc_func.descriptor.calling_convention;
@@ -2026,9 +2105,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 *file,
                 1, // line_no — will be refined when source maps are populated
                 subroutine_type,
-                true,  // is_local_to_unit
-                true,  // is_definition
-                1,     // scope_line
+                true, // is_local_to_unit
+                true, // is_definition
+                1,    // scope_line
                 DIFlags::PUBLIC,
                 self.config.opt_level > 0,
             );
@@ -2042,8 +2121,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Emit DILocalVariable for each parameter and local variable from
         // FunctionDescriptor.debug_variables. This enables `info locals` and
         // `frame variable` in LLDB/GDB.
-        if let (Some(db), Some(file), Some(scope)) =
-            (&self.dibuilder, &self.di_file, di_func_scope)
+        if let (Some(db), Some(file), Some(scope)) = (&self.dibuilder, &self.di_file, di_func_scope)
         {
             // Create i64 base type for all VBC values (VBC is unityped i64)
             if let Ok(i64_di_type) = db.create_basic_type("i64", 64, 0x05, DIFlags::PUBLIC) {
@@ -2051,10 +2129,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 let entry_block = llvm_fn.get_first_basic_block();
 
                 for dv in &vbc_func.descriptor.debug_variables {
-                    let var_name = vbc_module
-                        .strings
-                        .get(dv.name)
-                        .unwrap_or("<unnamed>");
+                    let var_name = vbc_module.strings.get(dv.name).unwrap_or("<unnamed>");
 
                     if dv.is_parameter && dv.arg_index > 0 {
                         // Create DW_TAG_formal_parameter
@@ -2079,10 +2154,13 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                 None,
                             );
                             // Get parameter value (LLVM param index is 0-based)
-                            if let Some(param_val) = llvm_fn.get_nth_param((dv.arg_index - 1) as u32) {
+                            if let Some(param_val) =
+                                llvm_fn.get_nth_param((dv.arg_index - 1) as u32)
+                            {
                                 let _ptr_type = self.context.ptr_type(AddressSpace::default());
                                 let alloca = ctx.builder().build_alloca(
-                                    param_val.get_type(), &format!("{}.addr", var_name)
+                                    param_val.get_type(),
+                                    &format!("{}.addr", var_name),
                                 );
                                 if let Ok(alloca_val) = alloca {
                                     let _ = ctx.builder().build_store(alloca_val, param_val);
@@ -2106,7 +2184,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             di_type,
                             true, // always_preserve
                             DIFlags::PUBLIC,
-                            64,   // align_in_bits
+                            64, // align_in_bits
                         );
 
                         // Note: We associate local variables with their allocas
@@ -2160,7 +2238,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Compute basic block boundaries by scanning for jump targets.
         // VBC uses relative instruction offsets in Jmp/JmpNot/JmpIf instructions.
         // We create an LLVM basic block at each jump target instruction index.
-        let mut block_target_indices: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        let mut block_target_indices: std::collections::BTreeSet<usize> =
+            std::collections::BTreeSet::new();
         block_target_indices.insert(0); // Entry block always exists
 
         // Track whether instruction 0 is an explicit jump target from another instruction.
@@ -2173,27 +2252,39 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // VBC offset semantics: target = pc + offset (instruction index based)
                     let target = (pc as i64 + *offset as i64) as usize;
                     block_target_indices.insert(target);
-                    if target == 0 { entry_is_jump_target = true; }
+                    if target == 0 {
+                        entry_is_jump_target = true;
+                    }
                     // The instruction after the jump is also a block start (dead code or merge point)
                     block_target_indices.insert(pc + 1);
                 }
                 Instruction::JmpNot { offset, .. } | Instruction::JmpIf { offset, .. } => {
                     let target = (pc as i64 + *offset as i64) as usize;
                     block_target_indices.insert(target);
-                    if target == 0 { entry_is_jump_target = true; }
+                    if target == 0 {
+                        entry_is_jump_target = true;
+                    }
                     // Fallthrough is always the next instruction
                     block_target_indices.insert(pc + 1);
                 }
-                Instruction::Switch { default_offset, cases, .. } => {
+                Instruction::Switch {
+                    default_offset,
+                    cases,
+                    ..
+                } => {
                     // Default case target
                     let default_target = (pc as i64 + *default_offset as i64) as usize;
                     block_target_indices.insert(default_target);
-                    if default_target == 0 { entry_is_jump_target = true; }
+                    if default_target == 0 {
+                        entry_is_jump_target = true;
+                    }
                     // Each case target
                     for (_case_val, case_offset) in cases.iter() {
                         let target = (pc as i64 + *case_offset as i64) as usize;
                         block_target_indices.insert(target);
-                        if target == 0 { entry_is_jump_target = true; }
+                        if target == 0 {
+                            entry_is_jump_target = true;
+                        }
                     }
                     // Instruction after switch is also a block start
                     block_target_indices.insert(pc + 1);
@@ -2202,12 +2293,15 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // Exception handler starts at pc + handler_offset
                     let target = (pc as i64 + *handler_offset as i64) as usize;
                     block_target_indices.insert(target);
-                    if target == 0 { entry_is_jump_target = true; }
+                    if target == 0 {
+                        entry_is_jump_target = true;
+                    }
                     // TryBegin is a branch (setjmp returns 0 or non-zero), so
                     // fallthrough (try body) needs its own block
                     block_target_indices.insert(pc + 1);
                 }
-                Instruction::Ret { .. } | Instruction::RetV
+                Instruction::Ret { .. }
+                | Instruction::RetV
                 | Instruction::TailCall { .. }
                 | Instruction::Unreachable
                 | Instruction::Panic { .. }
@@ -2240,7 +2334,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         }
 
         for (block_id, _) in block_starts.iter().enumerate() {
-            ctx.create_block(block_id as u32 + block_id_offset, &format!("block_{}", block_id));
+            ctx.create_block(
+                block_id as u32 + block_id_offset,
+                &format!("block_{}", block_id),
+            );
         }
 
         // Enable alloca-based registers for multi-block functions.
@@ -2269,7 +2366,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     builder.position_at_end(entry);
                     // SAFETY: GEP into the coverage counters global array at byte_offset = func_idx * 8; the array is sized for all functions in the module
                     if let Ok(counter_ptr) = unsafe {
-                        builder.build_gep(i8_type, ptr, &[i64_type.const_int(byte_offset, false)], "cov_ptr")
+                        builder.build_gep(
+                            i8_type,
+                            ptr,
+                            &[i64_type.const_int(byte_offset, false)],
+                            "cov_ptr",
+                        )
                     } {
                         let _ = builder.build_atomicrmw(
                             verum_llvm::AtomicRMWBinOp::Add,
@@ -2286,8 +2388,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Closure functions use env_ptr convention: fn(env_ptr, user_arg0, arg1, ...)
         // VBC register layout for closures: [captures...][user_args...]
         // We detect closures by the "$closure$" naming convention.
-        let is_closure = func_name.contains("$closure$")
-            && !vbc_func.descriptor.params.is_empty();
+        let is_closure = func_name.contains("$closure$") && !vbc_func.descriptor.params.is_empty();
         if is_closure {
             let capture_count = vbc_func.descriptor.max_stack as usize;
 
@@ -2344,7 +2445,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     TypeRef::Reference { inner, .. } => inner.as_ref(),
                     other => other,
                 };
-                let is_text = matches!(effective_type, TypeRef::Concrete(tid) if *tid == TypeId::TEXT);
+                let is_text =
+                    matches!(effective_type, TypeRef::Concrete(tid) if *tid == TypeId::TEXT);
                 let is_list = matches!(effective_type,
                     TypeRef::Concrete(tid) if *tid == TypeId::LIST
                 ) || matches!(effective_type,
@@ -2367,7 +2469,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     TypeRef::Instantiated { base, .. } if *base == TypeId::CHANNEL
                 );
 
-                if is_text { ctx.mark_text_register(reg); }
+                if is_text {
+                    ctx.mark_text_register(reg);
+                }
                 if is_list {
                     ctx.mark_list_register(reg);
                     if let TypeRef::Instantiated { args, .. } = effective_type {
@@ -2376,10 +2480,18 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         }
                     }
                 }
-                if is_map { ctx.mark_map_register(reg); }
-                if is_float { ctx.mark_float_register(reg); }
-                if is_bool { ctx.mark_bool_register(reg); }
-                if is_chan { ctx.mark_chan_register(reg); }
+                if is_map {
+                    ctx.mark_map_register(reg);
+                }
+                if is_float {
+                    ctx.mark_float_register(reg);
+                }
+                if is_bool {
+                    ctx.mark_bool_register(reg);
+                }
+                if is_chan {
+                    ctx.mark_chan_register(reg);
+                }
             }
         } else {
             // Regular function: straightforward parameter mapping
@@ -2457,23 +2569,49 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 let self_type = &func_name[..dot_pos];
                 // Check if this is an instance method by verifying the first parameter
                 // is self (TypeId(0) in VBC for &self params).
-                let first_param_type = vbc_func.descriptor.params.first().map(|p| p.type_ref.clone());
-                let is_instance_method = first_param_type.as_ref()
-                    .map_or(false, |tr| matches!(tr, TypeRef::Concrete(tid) if tid.0 == 0));
+                let first_param_type = vbc_func
+                    .descriptor
+                    .params
+                    .first()
+                    .map(|p| p.type_ref.clone());
+                let is_instance_method = first_param_type.as_ref().map_or(
+                    false,
+                    |tr| matches!(tr, TypeRef::Concrete(tid) if tid.0 == 0),
+                );
                 if is_instance_method {
                     ctx.set_obj_register_type(0, self_type.to_string());
                     // Mark self register for type-specific dispatch (flat layout, etc.)
                     match self_type {
-                        tn::TEXT => { ctx.mark_text_register(0); }
-                        tn::LIST => { ctx.mark_list_register(0); }
-                        tn::MAP => { ctx.mark_map_register(0); }
-                        tn::SET => { ctx.mark_set_register(0); }
-                        tn::DEQUE => { ctx.mark_deque_register(0); }
-                        tn::CHANNEL => { ctx.mark_chan_register(0); }
-                        "BTreeMap" => { ctx.mark_btreemap_register(0); }
-                        "BTreeSet" => { ctx.mark_btreeset_register(0); }
-                        "BinaryHeap" => { ctx.mark_binaryheap_register(0); }
-                        "AtomicInt" | "AtomicBool" => { ctx.mark_atomic_int_register(0); }
+                        tn::TEXT => {
+                            ctx.mark_text_register(0);
+                        }
+                        tn::LIST => {
+                            ctx.mark_list_register(0);
+                        }
+                        tn::MAP => {
+                            ctx.mark_map_register(0);
+                        }
+                        tn::SET => {
+                            ctx.mark_set_register(0);
+                        }
+                        tn::DEQUE => {
+                            ctx.mark_deque_register(0);
+                        }
+                        tn::CHANNEL => {
+                            ctx.mark_chan_register(0);
+                        }
+                        "BTreeMap" => {
+                            ctx.mark_btreemap_register(0);
+                        }
+                        "BTreeSet" => {
+                            ctx.mark_btreeset_register(0);
+                        }
+                        "BinaryHeap" => {
+                            ctx.mark_binaryheap_register(0);
+                        }
+                        "AtomicInt" | "AtomicBool" => {
+                            ctx.mark_atomic_int_register(0);
+                        }
                         _ => {}
                     }
                 } else {
@@ -2495,10 +2633,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     }
                     TypeRef::Instantiated { base, args } if *base == TypeId::LIST => {
                         // List<U8> / List<I8> used as byte slice representation
-                        let is_byte_list = args.len() == 1 && matches!(
-                            &args[0],
-                            TypeRef::Concrete(tid) if *tid == TypeId::U8 || *tid == TypeId::I8
-                        );
+                        let is_byte_list = args.len() == 1
+                            && matches!(
+                                &args[0],
+                                TypeRef::Concrete(tid) if *tid == TypeId::U8 || *tid == TypeId::I8
+                            );
                         if is_byte_list {
                             ctx.mark_slice_register(reg);
                         } else {
@@ -2550,7 +2689,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         // Strip Reference, then check for Heap wrapper
                         let mut unwrapped = inner.as_ref();
                         if let TypeRef::Instantiated { base, args } = unwrapped {
-                            if *base == TypeId::HEAP || vbc_module.get_type_name(*base).map_or(false, |n| WKT::Heap.matches(&n)) {
+                            if *base == TypeId::HEAP
+                                || vbc_module
+                                    .get_type_name(*base)
+                                    .map_or(false, |n| WKT::Heap.matches(&n))
+                            {
                                 if let Some(inner_arg) = args.first() {
                                     unwrapped = inner_arg;
                                 }
@@ -2576,7 +2719,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         }
                     }
                     // Heap<T> wrapper without reference: unwrap to find inner type
-                    TypeRef::Instantiated { base, args } if *base == TypeId::HEAP || vbc_module.get_type_name(*base).map_or(false, |n| WKT::Heap.matches(&n)) => {
+                    TypeRef::Instantiated { base, args }
+                        if *base == TypeId::HEAP
+                            || vbc_module
+                                .get_type_name(*base)
+                                .map_or(false, |n| WKT::Heap.matches(&n)) =>
+                    {
                         if let Some(inner) = args.first() {
                             match inner {
                                 TypeRef::Concrete(tid) => {
@@ -2586,7 +2734,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                         }
                                     }
                                 }
-                                TypeRef::Instantiated { base: inner_base, .. } => {
+                                TypeRef::Instantiated {
+                                    base: inner_base, ..
+                                } => {
                                     if let Some(type_name) = vbc_module.get_type_name(*inner_base) {
                                         if !is_primitive_type_name(&type_name) {
                                             ctx.set_obj_register_type(reg, type_name);
@@ -2601,20 +2751,45 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // PTR is excluded: Instantiated { base: PTR, args } means &Struct<K,V>,
                     // which must fall through to the specialized PTR handler below.
                     TypeRef::Instantiated { base, .. }
-                        if *base != TypeId::HEAP && *base != TypeId::PTR && !vbc_module.get_type_name(*base).map_or(false, |n| WKT::Heap.matches(&n)) =>
+                        if *base != TypeId::HEAP
+                            && *base != TypeId::PTR
+                            && !vbc_module
+                                .get_type_name(*base)
+                                .map_or(false, |n| WKT::Heap.matches(&n)) =>
                     {
                         if let Some(type_name) = vbc_module.get_type_name(*base) {
                             match type_name.as_str() {
-                                "BTreeMap" => { ctx.mark_btreemap_register(reg); }
-                                "BTreeSet" => { ctx.mark_btreeset_register(reg); }
-                                "BinaryHeap" => { ctx.mark_binaryheap_register(reg); }
-                                tn::MAP => { ctx.mark_map_register(reg); }
-                                tn::SET => { ctx.mark_set_register(reg); }
-                                tn::DEQUE => { ctx.mark_deque_register(reg); }
-                                tn::LIST => { ctx.mark_list_register(reg); }
-                                tn::CHANNEL => { ctx.mark_chan_register(reg); }
-                                "AtomicInt" | "AtomicBool" => { ctx.mark_atomic_int_register(reg); ctx.set_obj_register_type(reg, type_name); }
-                                _ => { ctx.set_obj_register_type(reg, type_name); }
+                                "BTreeMap" => {
+                                    ctx.mark_btreemap_register(reg);
+                                }
+                                "BTreeSet" => {
+                                    ctx.mark_btreeset_register(reg);
+                                }
+                                "BinaryHeap" => {
+                                    ctx.mark_binaryheap_register(reg);
+                                }
+                                tn::MAP => {
+                                    ctx.mark_map_register(reg);
+                                }
+                                tn::SET => {
+                                    ctx.mark_set_register(reg);
+                                }
+                                tn::DEQUE => {
+                                    ctx.mark_deque_register(reg);
+                                }
+                                tn::LIST => {
+                                    ctx.mark_list_register(reg);
+                                }
+                                tn::CHANNEL => {
+                                    ctx.mark_chan_register(reg);
+                                }
+                                "AtomicInt" | "AtomicBool" => {
+                                    ctx.mark_atomic_int_register(reg);
+                                    ctx.set_obj_register_type(reg, type_name);
+                                }
+                                _ => {
+                                    ctx.set_obj_register_type(reg, type_name);
+                                }
                             }
                         }
                     }
@@ -2626,7 +2801,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     TypeRef::Instantiated { base, args } if *base == TypeId::PTR => {
                         if let Some(inner) = args.first() {
                             let inner_id = match inner {
-                                TypeRef::Instantiated { base: inner_base, .. } => Some(*inner_base),
+                                TypeRef::Instantiated {
+                                    base: inner_base, ..
+                                } => Some(*inner_base),
                                 TypeRef::Concrete(tid) => Some(*tid),
                                 _ => None,
                             };
@@ -2647,7 +2824,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                     // prefix root (e.g., "BTree" from "BTreeMap" matches "BTreeNode")
                                     let prefix_root = if prefix.len() >= 5 {
                                         // Use a reasonable prefix: "BTree" from "BTreeMap", "Binary" from "BinaryHeap"
-                                        let end = prefix.char_indices()
+                                        let end = prefix
+                                            .char_indices()
                                             .skip(1)
                                             .find(|(_, c)| c.is_uppercase())
                                             .map(|(i, _)| i)
@@ -2660,7 +2838,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                     // and is NOT the same as the receiver type (prefix).
                                     for td in &vbc_module.types {
                                         let tname = vbc_module.get_string(td.name).unwrap_or("");
-                                        if tname.starts_with(prefix_root) && tname != prefix
+                                        if tname.starts_with(prefix_root)
+                                            && tname != prefix
                                             && td.kind == verum_vbc::types::TypeKind::Record
                                             && !td.fields.is_empty()
                                         {
@@ -2675,8 +2854,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                     // If no "Node" type found, try any matching struct
                                     if !resolved {
                                         for td in &vbc_module.types {
-                                            let tname = vbc_module.get_string(td.name).unwrap_or("");
-                                            if tname.starts_with(prefix_root) && tname != prefix
+                                            let tname =
+                                                vbc_module.get_string(td.name).unwrap_or("");
+                                            if tname.starts_with(prefix_root)
+                                                && tname != prefix
                                                 && td.kind == verum_vbc::types::TypeKind::Record
                                                 && !td.fields.is_empty()
                                             {
@@ -2752,7 +2933,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                 reg_types.insert(dst.0, t);
                             }
                         }
-                        Instruction::GetF { dst, obj, field_idx } => {
+                        Instruction::GetF {
+                            dst,
+                            obj,
+                            field_idx,
+                        } => {
                             if let Some(obj_type) = reg_types.get(&obj.0) {
                                 let type_id = match obj_type {
                                     TypeRef::Concrete(tid) => Some(*tid),
@@ -2761,10 +2946,13 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                 if let Some(tid) = type_id {
                                     let type_name_opt = vbc_module.get_type_name(tid);
                                     for type_desc in &vbc_module.types {
-                                        let tname = vbc_module.get_string(type_desc.name).unwrap_or("");
+                                        let tname =
+                                            vbc_module.get_string(type_desc.name).unwrap_or("");
                                         if let Some(ref n) = type_name_opt {
                                             if n == tname {
-                                                if let Some(field) = type_desc.fields.get(*field_idx as usize) {
+                                                if let Some(field) =
+                                                    type_desc.fields.get(*field_idx as usize)
+                                                {
                                                     reg_types.insert(dst.0, field.type_ref.clone());
                                                 }
                                                 break;
@@ -2778,7 +2966,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             // Track function return types so AsVar can propagate inner types
                             if let Some(func) = vbc_module.functions.get(*func_id as usize) {
                                 let ret = &func.return_type;
-                                if !matches!(ret, TypeRef::Concrete(tid) if *tid == TypeId::UNIT || *tid == TypeId::INT || *tid == TypeId::FLOAT || *tid == TypeId::BOOL) {
+                                if !matches!(ret, TypeRef::Concrete(tid) if *tid == TypeId::UNIT || *tid == TypeId::INT || *tid == TypeId::FLOAT || *tid == TypeId::BOOL)
+                                {
                                     reg_types.insert(dst.0, ret.clone());
                                 }
                             }
@@ -2834,7 +3023,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 // Check fixpoint
                 if reg_types.len() == prev_count && iteration > 0 {
                     if debug {
-                        tracing::debug!("[PREPASS] fn {} fixpoint at iteration {}", func_name, iteration);
+                        tracing::debug!(
+                            "[PREPASS] fn {} fixpoint at iteration {}",
+                            func_name,
+                            iteration
+                        );
                     }
                     break;
                 }
@@ -2842,7 +3035,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
             // Debug: dump inferred types (VERUM_DEBUG_PREPASS=1)
             if debug {
-                tracing::debug!("[PREPASS] fn {} fixpoint - {} register types inferred", func_name, reg_types.len());
+                tracing::debug!(
+                    "[PREPASS] fn {} fixpoint - {} register types inferred",
+                    func_name,
+                    reg_types.len()
+                );
             }
 
             // Flow-sensitive pass: track register types in instruction order to handle
@@ -2855,7 +3052,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 // Sticky set: registers that were EVER a list. Unlike flow_types which
                 // gets overwritten through dead branches (register reuse), this set only
                 // grows. Used for Len instruction override when flow_types was polluted.
-                let mut ever_list_regs: std::collections::HashSet<u16> = std::collections::HashSet::new();
+                let mut ever_list_regs: std::collections::HashSet<u16> =
+                    std::collections::HashSet::new();
                 // Seed with parameter types
                 for (i, p) in vbc_func.descriptor.params.iter().enumerate() {
                     flow_types.insert(i as u16, p.type_ref.clone());
@@ -2878,7 +3076,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                 }
                             }
                         }
-                        Instruction::GetF { dst, obj, field_idx } => {
+                        Instruction::GetF {
+                            dst,
+                            obj,
+                            field_idx,
+                        } => {
                             if let Some(obj_type) = flow_types.get(&obj.0) {
                                 let type_id = match obj_type {
                                     TypeRef::Concrete(tid) => Some(*tid),
@@ -2887,10 +3089,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                 if let Some(tid) = type_id {
                                     if let Some(type_name) = vbc_module.get_type_name(tid) {
                                         for type_desc in &vbc_module.types {
-                                            let tname = vbc_module.get_string(type_desc.name).unwrap_or("");
+                                            let tname =
+                                                vbc_module.get_string(type_desc.name).unwrap_or("");
                                             if tname == type_name {
-                                                if let Some(field) = type_desc.fields.get(*field_idx as usize) {
-                                                    flow_types.insert(dst.0, field.type_ref.clone());
+                                                if let Some(field) =
+                                                    type_desc.fields.get(*field_idx as usize)
+                                                {
+                                                    flow_types
+                                                        .insert(dst.0, field.type_ref.clone());
                                                 }
                                                 break;
                                             }
@@ -2903,7 +3109,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             if let Some(vtype) = flow_types.get(&variant.0).cloned() {
                                 match &vtype {
                                     TypeRef::Instantiated { base, args } => {
-                                        if (*base == TypeId::MAYBE || *base == TypeId::RESULT) && !args.is_empty() {
+                                        if (*base == TypeId::MAYBE || *base == TypeId::RESULT)
+                                            && !args.is_empty()
+                                        {
                                             flow_types.insert(dst.0, args[0].clone());
                                         }
                                     }
@@ -2922,7 +3130,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             if let Some(vtype) = flow_types.get(&value.0).cloned() {
                                 match &vtype {
                                     TypeRef::Instantiated { base, args } => {
-                                        if (*base == TypeId::MAYBE || *base == TypeId::RESULT) && !args.is_empty() {
+                                        if (*base == TypeId::MAYBE || *base == TypeId::RESULT)
+                                            && !args.is_empty()
+                                        {
                                             flow_types.insert(dst.0, args[0].clone());
                                         }
                                     }
@@ -2938,7 +3148,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             }
                         }
                         Instruction::Call { dst, func_id, .. } => {
-                            if let Some(func) = vbc_module.get_function(verum_vbc::module::FunctionId(*func_id)) {
+                            if let Some(func) =
+                                vbc_module.get_function(verum_vbc::module::FunctionId(*func_id))
+                            {
                                 let ret = func.return_type.clone();
                                 let is_list = matches!(&ret,
                                     TypeRef::Concrete(tid) if *tid == TypeId::LIST)
@@ -2954,7 +3166,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             let is_list_now = flow_types.get(&arr.0).map_or(false, |arr_type| {
                                 matches!(arr_type,
                                     TypeRef::Concrete(tid) if *tid == TypeId::LIST)
-                                || matches!(arr_type,
+                                    || matches!(arr_type,
                                     TypeRef::Instantiated { base, .. } if *base == TypeId::LIST)
                             });
                             let was_ever_list = ever_list_regs.contains(&arr.0);
@@ -3001,48 +3213,70 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             for instr in &vbc_func.instructions {
                 match instr {
                     Instruction::NewRange { dst, .. } => {
-                        ctx.reg_types_mut().set(dst.0, super::register_types::RegisterType::Range { flat: true });
+                        ctx.reg_types_mut().set(
+                            dst.0,
+                            super::register_types::RegisterType::Range { flat: true },
+                        );
                     }
-                    Instruction::BinaryF { dst, .. } | Instruction::UnaryF { dst, .. }
+                    Instruction::BinaryF { dst, .. }
+                    | Instruction::UnaryF { dst, .. }
                     | Instruction::CvtIF { dst, .. } => {
-                        ctx.reg_types_mut().set(dst.0, super::register_types::RegisterType::Float);
+                        ctx.reg_types_mut()
+                            .set(dst.0, super::register_types::RegisterType::Float);
                     }
-                    Instruction::CmpI { dst, .. } | Instruction::CmpF { dst, .. }
+                    Instruction::CmpI { dst, .. }
+                    | Instruction::CmpF { dst, .. }
                     | Instruction::IsVar { dst, .. } => {
-                        ctx.reg_types_mut().set(dst.0, super::register_types::RegisterType::Bool);
+                        ctx.reg_types_mut()
+                            .set(dst.0, super::register_types::RegisterType::Bool);
                     }
                     Instruction::LoadTrue { dst } | Instruction::LoadFalse { dst } => {
-                        ctx.reg_types_mut().set(dst.0, super::register_types::RegisterType::Bool);
+                        ctx.reg_types_mut()
+                            .set(dst.0, super::register_types::RegisterType::Bool);
                     }
                     Instruction::Concat { dst, .. } => {
-                        ctx.reg_types_mut().set(dst.0, super::register_types::RegisterType::Text {
-                            owned: true,
-                            compiled_layout: false,
-                        });
+                        ctx.reg_types_mut().set(
+                            dst.0,
+                            super::register_types::RegisterType::Text {
+                                owned: true,
+                                compiled_layout: false,
+                            },
+                        );
                     }
                     Instruction::ToString { dst, .. } => {
-                        ctx.reg_types_mut().set(dst.0, super::register_types::RegisterType::Text {
-                            owned: true,
-                            compiled_layout: false,
-                        });
+                        ctx.reg_types_mut().set(
+                            dst.0,
+                            super::register_types::RegisterType::Text {
+                                owned: true,
+                                compiled_layout: false,
+                            },
+                        );
                     }
                     Instruction::NewList { dst } => {
-                        ctx.reg_types_mut().set(dst.0, super::register_types::RegisterType::List { element: None });
+                        ctx.reg_types_mut().set(
+                            dst.0,
+                            super::register_types::RegisterType::List { element: None },
+                        );
                     }
                     Instruction::LoadK { dst, const_id } => {
                         if let Some(c) = vbc_module.constants.get(*const_id as usize) {
                             match c {
                                 verum_vbc::module::Constant::Float(_) => {
-                                    ctx.reg_types_mut().set(dst.0, super::register_types::RegisterType::Float);
+                                    ctx.reg_types_mut()
+                                        .set(dst.0, super::register_types::RegisterType::Float);
                                 }
                                 verum_vbc::module::Constant::String(_) => {
-                                    ctx.reg_types_mut().set(dst.0, super::register_types::RegisterType::Text {
-                                        owned: false,
-                                        compiled_layout: false,
-                                    });
+                                    ctx.reg_types_mut().set(
+                                        dst.0,
+                                        super::register_types::RegisterType::Text {
+                                            owned: false,
+                                            compiled_layout: false,
+                                        },
+                                    );
                                 }
                                 verum_vbc::module::Constant::Int(_) => {
-                                    ctx.reg_types_mut().set(dst.0, super::register_types::RegisterType::Int);
+                                    ctx.reg_types_mut()
+                                        .set(dst.0, super::register_types::RegisterType::Int);
                                 }
                                 _ => {}
                             }
@@ -3056,7 +3290,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Pre-scan: mark registers used as BinaryF/UnaryF/CmpF operands as float.
         // This ensures GetVariantData-extracted float fields are known before ToString.
         // Also propagate through Mov chains so that source registers of float operands are marked.
-        let mut float_regs_from_prescan: std::collections::HashSet<u16> = std::collections::HashSet::new();
+        let mut float_regs_from_prescan: std::collections::HashSet<u16> =
+            std::collections::HashSet::new();
         for instr in vbc_func.instructions.iter() {
             match instr {
                 Instruction::BinaryF { a, b, dst, .. } => {
@@ -3112,7 +3347,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let mut text_regs: std::collections::HashSet<u16> = std::collections::HashSet::new();
             for instr in vbc_func.instructions.iter() {
                 match instr {
-                    Instruction::Concat { dst, .. } | Instruction::ToString { dst, .. } | Instruction::CharToStr { dst, .. } => {
+                    Instruction::Concat { dst, .. }
+                    | Instruction::ToString { dst, .. }
+                    | Instruction::CharToStr { dst, .. } => {
                         text_regs.insert(dst.0);
                     }
                     Instruction::LoadK { dst, const_id } => {
@@ -3152,9 +3389,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // anchor. When the function has no fusable chains the plan's
         // sets are empty and the loop behaves identically to before.
         // Tracked under #91-2 / #96.
-        let fusion_plan = crate::passes::tensor_fusion::FusionPlan::build(
-            &vbc_func.instructions,
-        );
+        let fusion_plan = crate::passes::tensor_fusion::FusionPlan::build(&vbc_func.instructions);
         if !fusion_plan.chains.is_empty() {
             tracing::debug!(
                 "[fusion] fn '{}': {} fusable chains, {} instructions absorbed",
@@ -3201,12 +3436,19 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     let target_pc = (instr_idx as i64 + *offset as i64) as usize;
                     let fallthrough_pc = instr_idx + 1;
 
-                    let target_block_id = instr_to_block.get(&target_pc)
-                        .ok_or_else(|| LlvmLoweringError::MissingBlock(
-                            Text::from(format!("target_pc_{}", target_pc))))?;
-                    let fallthrough_block_id = instr_to_block.get(&fallthrough_pc)
-                        .ok_or_else(|| LlvmLoweringError::MissingBlock(
-                            Text::from(format!("fallthrough_pc_{}", fallthrough_pc))))?;
+                    let target_block_id = instr_to_block.get(&target_pc).ok_or_else(|| {
+                        LlvmLoweringError::MissingBlock(Text::from(format!(
+                            "target_pc_{}",
+                            target_pc
+                        )))
+                    })?;
+                    let fallthrough_block_id =
+                        instr_to_block.get(&fallthrough_pc).ok_or_else(|| {
+                            LlvmLoweringError::MissingBlock(Text::from(format!(
+                                "fallthrough_pc_{}",
+                                fallthrough_pc
+                            )))
+                        })?;
 
                     let target_block = ctx.get_block(*target_block_id)?;
                     let fallthrough_block = ctx.get_block(*fallthrough_block_id)?;
@@ -3222,12 +3464,19 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     let target_pc = (instr_idx as i64 + *offset as i64) as usize;
                     let fallthrough_pc = instr_idx + 1;
 
-                    let target_block_id = instr_to_block.get(&target_pc)
-                        .ok_or_else(|| LlvmLoweringError::MissingBlock(
-                            Text::from(format!("target_pc_{}", target_pc))))?;
-                    let fallthrough_block_id = instr_to_block.get(&fallthrough_pc)
-                        .ok_or_else(|| LlvmLoweringError::MissingBlock(
-                            Text::from(format!("fallthrough_pc_{}", fallthrough_pc))))?;
+                    let target_block_id = instr_to_block.get(&target_pc).ok_or_else(|| {
+                        LlvmLoweringError::MissingBlock(Text::from(format!(
+                            "target_pc_{}",
+                            target_pc
+                        )))
+                    })?;
+                    let fallthrough_block_id =
+                        instr_to_block.get(&fallthrough_pc).ok_or_else(|| {
+                            LlvmLoweringError::MissingBlock(Text::from(format!(
+                                "fallthrough_pc_{}",
+                                fallthrough_pc
+                            )))
+                        })?;
 
                     let target_block = ctx.get_block(*target_block_id)?;
                     let fallthrough_block = ctx.get_block(*fallthrough_block_id)?;
@@ -3237,15 +3486,22 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         .build_conditional_branch(cond_val, target_block, fallthrough_block)
                         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
                 }
-                Instruction::Switch { value, default_offset, cases } => {
+                Instruction::Switch {
+                    value,
+                    default_offset,
+                    cases,
+                } => {
                     let raw_val = ctx.get_register(value.0)?;
                     let switch_val = coerce_to_i64_for_switch(&ctx, raw_val, "switch_val")?;
 
                     // Resolve default block
                     let default_pc = (instr_idx as i64 + *default_offset as i64) as usize;
-                    let default_block_id = instr_to_block.get(&default_pc)
-                        .ok_or_else(|| LlvmLoweringError::MissingBlock(
-                            Text::from(format!("switch_default_pc_{}", default_pc))))?;
+                    let default_block_id = instr_to_block.get(&default_pc).ok_or_else(|| {
+                        LlvmLoweringError::MissingBlock(Text::from(format!(
+                            "switch_default_pc_{}",
+                            default_pc
+                        )))
+                    })?;
                     let default_block = ctx.get_block(*default_block_id)?;
 
                     // Build case list for LLVM switch
@@ -3254,7 +3510,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         let target_pc = (instr_idx as i64 + *case_offset as i64) as usize;
                         if let Some(&target_block_id) = instr_to_block.get(&target_pc) {
                             if let Ok(target_block) = ctx.get_block(target_block_id) {
-                                let case_const = ctx.types().i64_type().const_int(*case_val as u64, false);
+                                let case_const =
+                                    ctx.types().i64_type().const_int(*case_val as u64, false);
                                 llvm_cases.push((case_const, target_block));
                             }
                         }
@@ -3272,12 +3529,19 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     let handler_pc = (instr_idx as i64 + *handler_offset as i64) as usize;
                     let fallthrough_pc = instr_idx + 1;
 
-                    let handler_block_id = instr_to_block.get(&handler_pc)
-                        .ok_or_else(|| LlvmLoweringError::MissingBlock(
-                            Text::from(format!("try_handler_pc_{}", handler_pc))))?;
-                    let fallthrough_block_id = instr_to_block.get(&fallthrough_pc)
-                        .ok_or_else(|| LlvmLoweringError::MissingBlock(
-                            Text::from(format!("try_fallthrough_pc_{}", fallthrough_pc))))?;
+                    let handler_block_id = instr_to_block.get(&handler_pc).ok_or_else(|| {
+                        LlvmLoweringError::MissingBlock(Text::from(format!(
+                            "try_handler_pc_{}",
+                            handler_pc
+                        )))
+                    })?;
+                    let fallthrough_block_id =
+                        instr_to_block.get(&fallthrough_pc).ok_or_else(|| {
+                            LlvmLoweringError::MissingBlock(Text::from(format!(
+                                "try_fallthrough_pc_{}",
+                                fallthrough_pc
+                            )))
+                        })?;
 
                     let handler_block = ctx.get_block(*handler_block_id)?;
                     let fallthrough_block = ctx.get_block(*fallthrough_block_id)?;
@@ -3295,10 +3559,13 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     let i32_type = ctx.types().context().i32_type();
 
                     // Declare verum_exception_push() -> ptr
-                    let push_fn = module.get_function("verum_exception_push").unwrap_or_else(|| {
-                        let fn_type = ptr_type.fn_type(&[], false);
-                        module.add_function("verum_exception_push", fn_type, None)
-                    });
+                    let push_fn =
+                        module
+                            .get_function("verum_exception_push")
+                            .unwrap_or_else(|| {
+                                let fn_type = ptr_type.fn_type(&[], false);
+                                module.add_function("verum_exception_push", fn_type, None)
+                            });
 
                     // Declare setjmp(jmp_buf*) -> i32.
                     //
@@ -3327,7 +3594,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     });
 
                     // Call verum_exception_push() to get jmp_buf pointer
-                    let jmp_buf_ptr = ctx.builder()
+                    let jmp_buf_ptr = ctx
+                        .builder()
                         .build_call(push_fn, &[], "exception_push")
                         .or_llvm_err()?
                         .try_as_basic_value()
@@ -3335,7 +3603,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         .or_internal("exception_push returned void")?;
 
                     // Call setjmp(jmp_buf_ptr) → 0 if normal, non-zero if thrown
-                    let setjmp_result = ctx.builder()
+                    let setjmp_result = ctx
+                        .builder()
                         .build_call(setjmp_fn, &[jmp_buf_ptr.into()], "setjmp_result")
                         .or_llvm_err()?
                         .try_as_basic_value()
@@ -3344,7 +3613,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         .into_int_value();
 
                     // Compare setjmp result with 0
-                    let is_exception = ctx.builder()
+                    let is_exception = ctx
+                        .builder()
                         .build_int_compare(
                             verum_llvm::IntPredicate::NE,
                             setjmp_result,
@@ -3369,9 +3639,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         let loc = db.create_debug_location(
                             self.context,
                             (instr_idx + 1) as u32, // line (1-based, instruction index as proxy)
-                            0,                        // column
+                            0,                      // column
                             scope,
-                            None,                     // inlined_at
+                            None, // inlined_at
                         );
                         ctx.builder().set_current_debug_location(loc);
                     }
@@ -3383,10 +3653,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // dead code block so subsequent instructions don't pollute
                     // the terminated block.
                     if ctx.current_block_has_terminator() {
-                        let dead_block = ctx.llvm_context().append_basic_block(
-                            llvm_fn,
-                            &format!("dead_after_{}", instr_idx),
-                        );
+                        let dead_block = ctx
+                            .llvm_context()
+                            .append_basic_block(llvm_fn, &format!("dead_after_{}", instr_idx));
                         ctx.position_at_end(dead_block);
                     }
                 }
@@ -3466,7 +3735,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 if SKIP_PATTERNS.iter().any(|p| name.contains(p)) {
                     removed.push(name);
                     // SAFETY: Deleting an LLVM function that was determined to be dead (unused after linking); module integrity is maintained
-                    unsafe { f.delete(); }
+                    unsafe {
+                        f.delete();
+                    }
                 }
             }
             func = next;
@@ -3503,43 +3774,113 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         }
 
         // pthread mutex functions (used by Mutex.vr)
-        declare_fn!("pthread_mutex_init", i32_type, &[ptr_type.into(), ptr_type.into()], false);
+        declare_fn!(
+            "pthread_mutex_init",
+            i32_type,
+            &[ptr_type.into(), ptr_type.into()],
+            false
+        );
         declare_fn!("pthread_mutex_lock", i32_type, &[ptr_type.into()], false);
         declare_fn!("pthread_mutex_trylock", i32_type, &[ptr_type.into()], false);
         declare_fn!("pthread_mutex_unlock", i32_type, &[ptr_type.into()], false);
         declare_fn!("pthread_mutex_destroy", i32_type, &[ptr_type.into()], false);
 
         // pthread condition variable functions (used by Condvar.vr)
-        declare_fn!("pthread_cond_init", i32_type, &[ptr_type.into(), ptr_type.into()], false);
-        declare_fn!("pthread_cond_wait", i32_type, &[ptr_type.into(), ptr_type.into()], false);
-        declare_fn!("pthread_cond_timedwait", i32_type, &[ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
+        declare_fn!(
+            "pthread_cond_init",
+            i32_type,
+            &[ptr_type.into(), ptr_type.into()],
+            false
+        );
+        declare_fn!(
+            "pthread_cond_wait",
+            i32_type,
+            &[ptr_type.into(), ptr_type.into()],
+            false
+        );
+        declare_fn!(
+            "pthread_cond_timedwait",
+            i32_type,
+            &[ptr_type.into(), ptr_type.into(), ptr_type.into()],
+            false
+        );
         declare_fn!("pthread_cond_signal", i32_type, &[ptr_type.into()], false);
-        declare_fn!("pthread_cond_broadcast", i32_type, &[ptr_type.into()], false);
+        declare_fn!(
+            "pthread_cond_broadcast",
+            i32_type,
+            &[ptr_type.into()],
+            false
+        );
         declare_fn!("pthread_cond_destroy", i32_type, &[ptr_type.into()], false);
 
         // pthread thread functions — i64 Verum ABI to match platform_ir.rs
-        declare_fn!("pthread_create", i64_type, &[ptr_type.into(), ptr_type.into(), ptr_type.into(), ptr_type.into()], false);
-        declare_fn!("pthread_join", i64_type, &[ptr_type.into(), ptr_type.into()], false);
+        declare_fn!(
+            "pthread_create",
+            i64_type,
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                ptr_type.into(),
+                ptr_type.into()
+            ],
+            false
+        );
+        declare_fn!(
+            "pthread_join",
+            i64_type,
+            &[ptr_type.into(), ptr_type.into()],
+            false
+        );
         declare_fn!("pthread_detach", i64_type, &[i64_type.into()], false);
 
         // pthread rwlock functions (used by RwLock.vr)
-        declare_fn!("pthread_rwlock_init", i32_type, &[ptr_type.into(), ptr_type.into()], false);
+        declare_fn!(
+            "pthread_rwlock_init",
+            i32_type,
+            &[ptr_type.into(), ptr_type.into()],
+            false
+        );
         declare_fn!("pthread_rwlock_rdlock", i32_type, &[ptr_type.into()], false);
         declare_fn!("pthread_rwlock_wrlock", i32_type, &[ptr_type.into()], false);
         declare_fn!("pthread_rwlock_unlock", i32_type, &[ptr_type.into()], false);
-        declare_fn!("pthread_rwlock_destroy", i32_type, &[ptr_type.into()], false);
+        declare_fn!(
+            "pthread_rwlock_destroy",
+            i32_type,
+            &[ptr_type.into()],
+            false
+        );
 
         // pthread once functions (used by Once.vr)
-        declare_fn!("pthread_once", i32_type, &[ptr_type.into(), ptr_type.into()], false);
+        declare_fn!(
+            "pthread_once",
+            i32_type,
+            &[ptr_type.into(), ptr_type.into()],
+            false
+        );
 
         // pthread key (TLS) functions
-        declare_fn!("pthread_key_create", i32_type, &[ptr_type.into(), ptr_type.into()], false);
+        declare_fn!(
+            "pthread_key_create",
+            i32_type,
+            &[ptr_type.into(), ptr_type.into()],
+            false
+        );
         declare_fn!("pthread_getspecific", ptr_type, &[i32_type.into()], false);
-        declare_fn!("pthread_setspecific", i32_type, &[i32_type.into(), ptr_type.into()], false);
+        declare_fn!(
+            "pthread_setspecific",
+            i32_type,
+            &[i32_type.into(), ptr_type.into()],
+            false
+        );
 
         // POSIX semaphore (used by Semaphore.vr)
         // macOS uses dispatch_semaphore, Linux uses sem_t
-        declare_fn!("sem_init", i32_type, &[ptr_type.into(), i32_type.into(), i32_type.into()], false);
+        declare_fn!(
+            "sem_init",
+            i32_type,
+            &[ptr_type.into(), i32_type.into(), i32_type.into()],
+            false
+        );
         declare_fn!("sem_wait", i32_type, &[ptr_type.into()], false);
         declare_fn!("sem_post", i32_type, &[ptr_type.into()], false);
         declare_fn!("sem_destroy", i32_type, &[ptr_type.into()], false);
@@ -3548,13 +3889,38 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         declare_fn!("pipe", i32_type, &[ptr_type.into()], false);
         declare_fn!("fork", i64_type, &[], false);
         declare_fn!("dup2", i64_type, &[i64_type.into(), i64_type.into()], false);
-        declare_fn!("execvp", i64_type, &[ptr_type.into(), ptr_type.into()], false);
-        declare_fn!("waitpid", i64_type, &[i64_type.into(), ptr_type.into(), i64_type.into()], false);
+        declare_fn!(
+            "execvp",
+            i64_type,
+            &[ptr_type.into(), ptr_type.into()],
+            false
+        );
+        declare_fn!(
+            "waitpid",
+            i64_type,
+            &[i64_type.into(), ptr_type.into(), i64_type.into()],
+            false
+        );
 
         // Memory functions
-        declare_fn!("memset", ptr_type, &[ptr_type.into(), i32_type.into(), i64_type.into()], false);
-        declare_fn!("memcpy", ptr_type, &[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
-        declare_fn!("memmove", ptr_type, &[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
+        declare_fn!(
+            "memset",
+            ptr_type,
+            &[ptr_type.into(), i32_type.into(), i64_type.into()],
+            false
+        );
+        declare_fn!(
+            "memcpy",
+            ptr_type,
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+            false
+        );
+        declare_fn!(
+            "memmove",
+            ptr_type,
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+            false
+        );
         declare_fn!("free", ctx.void_type(), &[ptr_type.into()], false);
     }
 
@@ -3583,15 +3949,18 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // Only touch functions that have bodies AND are in the
             // skip set or marked as arity-collided.
             let fn_name = f.get_name().to_string_lossy().to_string();
-            let is_skip_body = self.skip_body_func_ids.iter().any(|&id| {
-                self.functions.get(&id).map(|fv| *fv == f).unwrap_or(false)
-            });
+            let is_skip_body = self
+                .skip_body_func_ids
+                .iter()
+                .any(|&id| self.functions.get(&id).map(|fv| *fv == f).unwrap_or(false));
 
             if is_skip_body && f.count_basic_blocks() > 0 {
                 // Remove all existing basic blocks — their instructions
                 // contain null Type references that crash LLVM codegen.
                 while let Some(bb) = f.get_first_basic_block() {
-                    unsafe { bb.delete().ok(); }
+                    unsafe {
+                        bb.delete().ok();
+                    }
                 }
                 // Replace with a trivial return stub. `unreachable`
                 // causes LLVM to emit a trap instruction which still
@@ -3650,7 +4019,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 if f.count_basic_blocks() > 0 {
                     tracing::info!("Removing broken @cfg-dispatch function: {}", name);
                     // SAFETY: Deleting a function with broken CFG from platform-conditional compilation; the function body is malformed and must not reach the LLVM verifier
-                    unsafe { f.delete(); }
+                    unsafe {
+                        f.delete();
+                    }
                 }
             }
         }
@@ -3740,7 +4111,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         if !vbc_module.global_ctors.is_empty() {
             let void_type = self.context.void_type();
             let init_fn_type = void_type.fn_type(&[], false);
-            let init_fn = self.module.add_function("__verum_static_init", init_fn_type, None);
+            let init_fn = self
+                .module
+                .add_function("__verum_static_init", init_fn_type, None);
 
             let entry_bb = self.context.append_basic_block(init_fn, "entry");
             builder.position_at_end(entry_bb);
@@ -3752,40 +4125,58 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // to instance methods (with &self param). Skip those to avoid
                     // "incorrect number of arguments" LLVM verification failures.
                     if target_fn.count_params() == 0 {
-                        builder.build_call(target_fn, &[], "init_result")
-                            .map_err(|e| LlvmLoweringError::llvm_error(format!("global ctor call: {}", e)))?;
+                        builder
+                            .build_call(target_fn, &[], "init_result")
+                            .map_err(|e| {
+                                LlvmLoweringError::llvm_error(format!("global ctor call: {}", e))
+                            })?;
                     }
                 }
             }
 
-            builder.build_return(None)
+            builder
+                .build_return(None)
                 .map_err(|e| LlvmLoweringError::llvm_error(format!("global ctor return: {}", e)))?;
 
-            super::symbols::add_global_ctor(&self.module, init_fn, super::symbols::DEFAULT_CTOR_DTOR_PRIORITY)
-                .map_err(|e| LlvmLoweringError::llvm_error(format!("emit global ctor: {}", e)))?;
+            super::symbols::add_global_ctor(
+                &self.module,
+                init_fn,
+                super::symbols::DEFAULT_CTOR_DTOR_PRIORITY,
+            )
+            .map_err(|e| LlvmLoweringError::llvm_error(format!("emit global ctor: {}", e)))?;
         }
 
         // Emit global destructors (same pattern)
         if !vbc_module.global_dtors.is_empty() {
             let void_type = self.context.void_type();
             let dtor_fn_type = void_type.fn_type(&[], false);
-            let dtor_fn = self.module.add_function("__verum_static_fini", dtor_fn_type, None);
+            let dtor_fn = self
+                .module
+                .add_function("__verum_static_fini", dtor_fn_type, None);
 
             let entry_bb = self.context.append_basic_block(dtor_fn, "entry");
             builder.position_at_end(entry_bb);
 
             for (func_id, _priority) in &vbc_module.global_dtors {
                 if let Some(target_fn) = self.functions.get(&func_id.0).copied() {
-                    builder.build_call(target_fn, &[], "fini_result")
-                        .map_err(|e| LlvmLoweringError::llvm_error(format!("global dtor call: {}", e)))?;
+                    builder
+                        .build_call(target_fn, &[], "fini_result")
+                        .map_err(|e| {
+                            LlvmLoweringError::llvm_error(format!("global dtor call: {}", e))
+                        })?;
                 }
             }
 
-            builder.build_return(None)
+            builder
+                .build_return(None)
                 .map_err(|e| LlvmLoweringError::llvm_error(format!("global dtor return: {}", e)))?;
 
-            super::symbols::add_global_dtor(&self.module, dtor_fn, super::symbols::DEFAULT_CTOR_DTOR_PRIORITY)
-                .map_err(|e| LlvmLoweringError::llvm_error(format!("emit global dtor: {}", e)))?;
+            super::symbols::add_global_dtor(
+                &self.module,
+                dtor_fn,
+                super::symbols::DEFAULT_CTOR_DTOR_PRIORITY,
+            )
+            .map_err(|e| LlvmLoweringError::llvm_error(format!("emit global dtor: {}", e)))?;
         }
 
         Ok(())
@@ -3834,13 +4225,28 @@ mod tests {
 
         // Test all calling conventions map to expected LLVM values
         assert_eq!(to_llvm_calling_convention(&CallingConvention::C), C);
-        assert_eq!(to_llvm_calling_convention(&CallingConvention::Stdcall), X86_STDCALL);
-        assert_eq!(to_llvm_calling_convention(&CallingConvention::Fastcall), X86_FASTCALL);
-        assert_eq!(to_llvm_calling_convention(&CallingConvention::SysV64), X86_64_SYSV);
+        assert_eq!(
+            to_llvm_calling_convention(&CallingConvention::Stdcall),
+            X86_STDCALL
+        );
+        assert_eq!(
+            to_llvm_calling_convention(&CallingConvention::Fastcall),
+            X86_FASTCALL
+        );
+        assert_eq!(
+            to_llvm_calling_convention(&CallingConvention::SysV64),
+            X86_64_SYSV
+        );
         assert_eq!(to_llvm_calling_convention(&CallingConvention::Win64), WIN64);
-        assert_eq!(to_llvm_calling_convention(&CallingConvention::ArmAapcs), ARM_AAPCS);
+        assert_eq!(
+            to_llvm_calling_convention(&CallingConvention::ArmAapcs),
+            ARM_AAPCS
+        );
         assert_eq!(to_llvm_calling_convention(&CallingConvention::Arm64), C); // ARM64 uses default C
-        assert_eq!(to_llvm_calling_convention(&CallingConvention::Interrupt), X86_INTR);
+        assert_eq!(
+            to_llvm_calling_convention(&CallingConvention::Interrupt),
+            X86_INTR
+        );
         assert_eq!(to_llvm_calling_convention(&CallingConvention::Naked), C); // Naked uses C + attribute
     }
 

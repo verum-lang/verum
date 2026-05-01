@@ -16,10 +16,10 @@
 
 use std::path::PathBuf;
 use std::time::Duration;
+use verum_common::Text;
 use verum_compiler::verification_profiler::{
     CacheStatistics, FileLocation, SmtSolver, VerificationProfiler,
 };
-use verum_common::Text;
 use verum_smt::{ProofResult, VerificationCost, VerificationError, VerifyMode};
 
 fn cost(name: &str, duration: Duration, succeeded: bool) -> VerificationCost {

@@ -198,7 +198,10 @@ mod tests {
 
         let id = generator.generate("foo");
         assert!(SuffixHygieneGenerator::is_hygienic(id.as_str()));
-        assert_eq!(SuffixHygieneGenerator::base_name(id.as_str()).as_str(), "foo");
+        assert_eq!(
+            SuffixHygieneGenerator::base_name(id.as_str()).as_str(),
+            "foo"
+        );
     }
 
     #[test]

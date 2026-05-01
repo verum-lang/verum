@@ -60,7 +60,7 @@
 //! Phase 7.5: Final linking. Links object files with libverum_std.a,
 //! applies LTO optimization, produces final executable binary.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
@@ -311,11 +311,7 @@ impl LinkingConfig {
     /// `subsystem_flag` must be `"CONSOLE"` (default CLI app) or
     /// `"WINDOWS"` (Win32 GUI app, no console window). See
     /// `verum_codegen::link::NoLibcConfig::windows_with_subsystem`.
-    pub fn with_no_libc_subsystem(
-        mut self,
-        platform: Platform,
-        subsystem_flag: &str,
-    ) -> Self {
+    pub fn with_no_libc_subsystem(mut self, platform: Platform, subsystem_flag: &str) -> Self {
         self.no_libc_config = Some(if matches!(platform, Platform::Windows) {
             NoLibcConfig::windows_with_subsystem(subsystem_flag)
         } else {
@@ -706,7 +702,6 @@ pub struct FinalLinker {
 
     /// Symbol table for tracking external symbols
     symbol_table: SymbolTable,
-
 }
 
 impl FinalLinker {
@@ -1238,12 +1233,8 @@ impl FinalLinker {
 
         // Step 5: System linking
         match self.config.output_kind {
-            OutputKind::SharedLibrary => {
-                self.link_shared_library(&native_obj)
-            }
-            OutputKind::Executable => {
-                self.system_link_direct(std::slice::from_ref(&native_obj))
-            }
+            OutputKind::SharedLibrary => self.link_shared_library(&native_obj),
+            OutputKind::Executable => self.system_link_direct(std::slice::from_ref(&native_obj)),
             _ => {
                 // Static library and object file are handled earlier
                 unreachable!(

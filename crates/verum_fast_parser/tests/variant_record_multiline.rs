@@ -1,15 +1,21 @@
 #![allow(dead_code, unused_imports, unused_variables)]
 use verum_ast::FileId;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse(source: &str) -> Result<(), String> {
     let file_id = FileId::new(0);
     let lexer = Lexer::new(source, file_id);
     let parser = VerumParser::new();
-    parser.parse_module(lexer, file_id).map(|_| ()).map_err(|e| {
-        e.into_iter().map(|err| format!("{:?}", err)).collect::<Vec<_>>().join("\n")
-    })
+    parser
+        .parse_module(lexer, file_id)
+        .map(|_| ())
+        .map_err(|e| {
+            e.into_iter()
+                .map(|err| format!("{:?}", err))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
 }
 
 #[test]
@@ -26,6 +32,8 @@ public type CoalescedPacket is
                      spin_bit: Bool, key_phase: Bool };
     "#;
     let r = parse(src);
-    if let Err(e) = &r { eprintln!("{}", e); }
+    if let Err(e) = &r {
+        eprintln!("{}", e);
+    }
     assert!(r.is_ok());
 }

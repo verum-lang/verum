@@ -44,9 +44,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use verum_ast::cfg::TargetConfig;
 use verum_common::List;
 use verum_diagnostics::Diagnostic;
-use verum_ast::cfg::TargetConfig;
 
 use crate::api::{CompilationError, CompilationErrorKind};
 use crate::module_utils;
@@ -158,7 +158,9 @@ pub struct StdlibModule {
 /// The submodule path is derived from the file name:
 /// - "core/memory.vr" -> "core.memory"
 /// - "core/mod.vr" -> "core" (mod.vr exports to parent module)
-pub fn build_export_index(all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)]) -> ModuleExportsIndex {
+pub fn build_export_index(
+    all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
+) -> ModuleExportsIndex {
     let mut index: ModuleExportsIndex = HashMap::new();
 
     for (module_name, ast_modules) in all_modules {
@@ -168,7 +170,9 @@ pub fn build_export_index(all_modules: &[(String, Vec<(PathBuf, verum_ast::Modul
             let submodule_path = module_utils::derive_submodule_path(module_name, file_path);
 
             // Collect exports from this AST module
-            let exports = index.entry(submodule_path.clone()).or_insert_with(HashSet::new);
+            let exports = index
+                .entry(submodule_path.clone())
+                .or_insert_with(HashSet::new);
 
             for item in &ast_module.items {
                 match &item.kind {
@@ -233,7 +237,9 @@ pub fn build_export_index(all_modules: &[(String, Vec<(PathBuf, verum_ast::Modul
             // Also add exports to the parent module for mod.vr files
             // This allows imports like `.memory.Heap` to work when memory/mod.vr exports Heap
             if file_path.file_name().map_or(false, |n| n == "mod.vr") {
-                let parent_exports = index.entry(module_name.clone()).or_insert_with(HashSet::new);
+                let parent_exports = index
+                    .entry(module_name.clone())
+                    .or_insert_with(HashSet::new);
                 for item in &ast_module.items {
                     match &item.kind {
                         verum_ast::ItemKind::Function(func) => {
@@ -463,7 +469,9 @@ fn validate_import_tree(
         MountTreeKind::Path(path) => {
             // Single import like `.memory.size_of`
             // is_prefix=false because the last segment is the item name
-            if let Some((module_path, Some(item_name))) = resolve_import_path(path, current_module, false) {
+            if let Some((module_path, Some(item_name))) =
+                resolve_import_path(path, current_module, false)
+            {
                 // Check if module exists
                 if let Some(exports) = export_index.get(&module_path) {
                     // Check if item exists in module
@@ -480,24 +488,14 @@ fn validate_import_tree(
                             .cloned()
                             .collect();
 
-                        errors.push((
-                            module_path,
-                            item_name,
-                            similar.join(", "),
-                            tree.span,
-                        ));
+                        errors.push((module_path, item_name, similar.join(", "), tree.span));
                     }
                 } else {
                     // Module doesn't exist in export index - check if it's a platform-specific
                     // module that wasn't compiled for the current target
                     if module_utils::should_compile_module_for_target(&module_path, target) {
                         // Module should exist but doesn't - report error
-                        errors.push((
-                            module_path.clone(),
-                            item_name,
-                            String::new(),
-                            tree.span,
-                        ));
+                        errors.push((module_path.clone(), item_name, String::new(), tree.span));
                     }
                     // If module is platform-specific and not for current target, skip error
                 }
@@ -529,8 +527,10 @@ fn validate_import_tree(
                                     let similar: Vec<String> = exports
                                         .iter()
                                         .filter(|name| {
-                                            name.starts_with(&item_name[..item_name.len().clamp(1, 3)])
-                                                || item_name.starts_with(&name[..name.len().clamp(1, 3)])
+                                            name.starts_with(
+                                                &item_name[..item_name.len().clamp(1, 3)],
+                                            ) || item_name
+                                                .starts_with(&name[..name.len().clamp(1, 3)])
                                         })
                                         .take(3)
                                         .cloned()
@@ -545,7 +545,10 @@ fn validate_import_tree(
                                 }
                             } else {
                                 // Module doesn't exist in export index - check if platform-specific
-                                if module_utils::should_compile_module_for_target(&module_path, target) {
+                                if module_utils::should_compile_module_for_target(
+                                    &module_path,
+                                    target,
+                                ) {
                                     errors.push((
                                         module_path.clone(),
                                         item_name,
@@ -671,11 +674,14 @@ impl StdlibModuleResolver {
                 }
             });
 
-            self.modules.insert(module_name.clone(), StdlibModule {
-                name: module_name,
-                source_files: vr_files,
-                dependencies: Vec::new(), // Will be resolved later
-            });
+            self.modules.insert(
+                module_name.clone(),
+                StdlibModule {
+                    name: module_name,
+                    source_files: vr_files,
+                    dependencies: Vec::new(), // Will be resolved later
+                },
+            );
         }
 
         // Process subdirectories
@@ -733,7 +739,15 @@ impl StdlibModuleResolver {
             ("core.sys.darwin", vec!["core.sys"]),
             ("core.sys.windows", vec!["core.sys"]),
             // mem module depends only on sys.* for mmap/VirtualAlloc (NOT core/sync)
-            ("core.mem", vec!["core.sys", "core.sys.linux", "core.sys.darwin", "core.sys.windows"]),
+            (
+                "core.mem",
+                vec![
+                    "core.sys",
+                    "core.sys.linux",
+                    "core.sys.darwin",
+                    "core.sys.windows",
+                ],
+            ),
             // base depends on core AND core.mem because core/base/memory.vr
             // imports cbgr_alloc / cbgr_alloc_zeroed / cbgr_dealloc / cbgr_realloc
             // from core.mem.allocator (line 21 of memory.vr). Without this
@@ -750,13 +764,39 @@ impl StdlibModuleResolver {
             // sync depends on base
             ("core.sync", vec!["core.base"]),
             // text imports sys_write from sys.*
-            ("core.text", vec!["core.base", "core.sys.linux", "core.sys.darwin", "core.sys.windows"]),
+            (
+                "core.text",
+                vec![
+                    "core.base",
+                    "core.sys.linux",
+                    "core.sys.darwin",
+                    "core.sys.windows",
+                ],
+            ),
             // collections uses base and text
             ("core.collections", vec!["core.base", "core.text"]),
             // io uses sys.* for file operations
-            ("core.io", vec!["core.base", "core.text", "core.collections", "core.sys.linux", "core.sys.darwin", "core.sys.windows"]),
+            (
+                "core.io",
+                vec![
+                    "core.base",
+                    "core.text",
+                    "core.collections",
+                    "core.sys.linux",
+                    "core.sys.darwin",
+                    "core.sys.windows",
+                ],
+            ),
             // time depends on sys submodules for monotonic_nanos, realtime_nanos, etc.
-            ("core.time", vec!["core.base", "core.sys.linux", "core.sys.darwin", "core.sys.windows"]),
+            (
+                "core.time",
+                vec![
+                    "core.base",
+                    "core.sys.linux",
+                    "core.sys.darwin",
+                    "core.sys.windows",
+                ],
+            ),
             // intrinsics is low-level
             ("core.intrinsics", vec!["core"]),
             // simd depends on base types and intrinsics
@@ -764,15 +804,54 @@ impl StdlibModuleResolver {
             // math depends on base, simd for optimized operations
             ("core.math", vec!["core.base", "core.simd"]),
             // async depends on sys for io_engine
-            ("core.async", vec!["core.base", "core.collections", "core.io", "core.sync", "core.time", "core.sys"]),
+            (
+                "core.async",
+                vec![
+                    "core.base",
+                    "core.collections",
+                    "core.io",
+                    "core.sync",
+                    "core.time",
+                    "core.sys",
+                ],
+            ),
             // runtime depends on base, mem, sync for thread/task management
-            ("core.runtime", vec!["core.base", "core.mem", "core.sync", "core.time", "core.sys", "core.async"]),
+            (
+                "core.runtime",
+                vec![
+                    "core.base",
+                    "core.mem",
+                    "core.sync",
+                    "core.time",
+                    "core.sys",
+                    "core.async",
+                ],
+            ),
             // term depends on sys, io, text, collections, sync, time (Layer 3.5)
-            ("core.term", vec!["core.base", "core.text", "core.collections", "core.io", "core.sync", "core.time", "core.sys", "core.sys.linux", "core.sys.darwin", "core.sys.windows"]),
-            ("core.net", vec!["core.base", "core.io", "core.async", "core.sys"]),
+            (
+                "core.term",
+                vec![
+                    "core.base",
+                    "core.text",
+                    "core.collections",
+                    "core.io",
+                    "core.sync",
+                    "core.time",
+                    "core.sys",
+                    "core.sys.linux",
+                    "core.sys.darwin",
+                    "core.sys.windows",
+                ],
+            ),
+            (
+                "core.net",
+                vec!["core.base", "core.io", "core.async", "core.sys"],
+            ),
             ("core.meta", vec!["core.base"]),
             ("core.cognitive", vec!["core.base", "core.collections"]),
-        ].into_iter().collect();
+        ]
+        .into_iter()
+        .collect();
 
         // Update dependencies, filtering platform-specific modules based on target
         for (name, deps) in known_deps {
@@ -828,7 +907,13 @@ impl StdlibModuleResolver {
 
         let module_names: Vec<String> = self.modules.keys().cloned().collect();
         for name in &module_names {
-            visit(name, &self.modules, &mut visited, &mut temp_mark, &mut order)?;
+            visit(
+                name,
+                &self.modules,
+                &mut visited,
+                &mut temp_mark,
+                &mut order,
+            )?;
         }
 
         self.compilation_order = order;

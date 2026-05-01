@@ -26,11 +26,11 @@ use std::time::{Duration, Instant};
 
 use z3::{
     Config, Context, DeclKind, Goal, Model, Optimize, Probe, SatResult, Solver, Tactic,
-    ast::{Ast, Bool, Dynamic, Int, BV},
+    ast::{Ast, BV, Bool, Dynamic, Int},
 };
 
-use verum_common::{Heap, List, Map, Maybe, Set, Text};
 use verum_common::ToText;
+use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
 #[allow(unused_imports)]
 use crate::advanced_model::{
@@ -39,8 +39,7 @@ use crate::advanced_model::{
 use crate::goal_analysis::{GoalAnalyzer, SatResult as GoalSatResult};
 use crate::option_to_maybe;
 use crate::tactics::{
-    FormulaGoalAnalyzer, TacticCombinator, auto_select_tactic_cached_for_goal,
-    global_tactic_cache,
+    FormulaGoalAnalyzer, TacticCombinator, auto_select_tactic_cached_for_goal, global_tactic_cache,
 };
 
 // ==================== Core Types ====================
@@ -161,7 +160,11 @@ impl Z3ContextManager {
         // constructed inside `with_config` honours the policy.
         z3::set_global_param(
             "smt.core.minimize",
-            if self.config.minimize_cores { "true" } else { "false" },
+            if self.config.minimize_cores {
+                "true"
+            } else {
+                "false"
+            },
         );
 
         // Wire `enable_mbqi`: Z3's `smt.mbqi` (model-based
@@ -172,7 +175,11 @@ impl Z3ContextManager {
         // benchmarking or when MBQI's nondeterminism is undesired.
         z3::set_global_param(
             "smt.mbqi",
-            if self.config.enable_mbqi { "true" } else { "false" },
+            if self.config.enable_mbqi {
+                "true"
+            } else {
+                "false"
+            },
         );
 
         // Wire `enable_patterns`: Z3's `smt.ematching` controls
@@ -181,7 +188,11 @@ impl Z3ContextManager {
         // MBQI-only when quantifiers are present.
         z3::set_global_param(
             "smt.ematching",
-            if self.config.enable_patterns { "true" } else { "false" },
+            if self.config.enable_patterns {
+                "true"
+            } else {
+                "false"
+            },
         );
 
         // Wire `num_workers`: Z3's parallel-threads cap is
@@ -194,10 +205,7 @@ impl Z3ContextManager {
         // system default pass 0 explicitly).
         if self.config.num_workers > 0 {
             z3::set_global_param("parallel.enable", "true");
-            z3::set_global_param(
-                "parallel.threads.max",
-                &self.config.num_workers.to_string(),
-            );
+            z3::set_global_param("parallel.threads.max", &self.config.num_workers.to_string());
         }
 
         z3::with_z3_config(&cfg, f)
@@ -274,10 +282,7 @@ impl<'ctx> Z3Solver<'ctx> {
         // enabled. `Bool` implements Display via z3-rs's SMT-LIB
         // serialisation, so the log line is directly replayable.
         // No-op when the env var is unset.
-        crate::solver_diagnostics::log_send(&format!(
-            "(assert {})",
-            formula
-        ));
+        crate::solver_diagnostics::log_send(&format!("(assert {})", formula));
         self.solver.assert(formula);
     }
 
@@ -1950,12 +1955,8 @@ impl ProofCache {
     pub fn insert(&mut self, constraint: Text, witness: ProofWitness) {
         if self.cache.len() >= self.max_size {
             let num_to_remove = (self.max_size / 4).max(1);
-            let keys_to_remove: List<Text> = self
-                .cache
-                .keys()
-                .take(num_to_remove)
-                .cloned()
-                .collect();
+            let keys_to_remove: List<Text> =
+                self.cache.keys().take(num_to_remove).cloned().collect();
             for key in keys_to_remove {
                 self.cache.remove(&key);
             }
@@ -2770,11 +2771,20 @@ mod tests {
         let cfg = Z3Config::default();
         assert!(cfg.enable_proofs, "default enable_proofs must stay true");
         assert!(cfg.minimize_cores, "default minimize_cores must stay true");
-        assert!(!cfg.enable_interpolation, "default enable_interpolation stays false");
+        assert!(
+            !cfg.enable_interpolation,
+            "default enable_interpolation stays false"
+        );
         assert!(cfg.enable_mbqi, "default enable_mbqi must stay true");
-        assert!(cfg.enable_patterns, "default enable_patterns must stay true");
+        assert!(
+            cfg.enable_patterns,
+            "default enable_patterns must stay true"
+        );
         assert!(cfg.auto_tactics, "default auto_tactics must stay true");
-        assert!(cfg.num_workers > 0, "default num_workers must be nonzero (num_cpus default)");
+        assert!(
+            cfg.num_workers > 0,
+            "default num_workers must be nonzero (num_cpus default)"
+        );
     }
 
     #[test]

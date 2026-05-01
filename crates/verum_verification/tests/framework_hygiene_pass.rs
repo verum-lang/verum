@@ -98,10 +98,7 @@ fn clean_module_with_framework_passes_r1() {
 
 #[test]
 fn brand_prefix_axiom_name_warns_r1() {
-    let axiom = axiom_with_attrs(
-        "diakrisis_classify",
-        vec![framework_attr("diakrisis")],
-    );
+    let axiom = axiom_with_attrs("diakrisis_classify", vec![framework_attr("diakrisis")]);
     let module = module_with(vec![ItemKind::Axiom(axiom)]);
     let mut pass = HygieneRecheckPass::new();
     let mut ctx = VerificationContext::new();
@@ -137,11 +134,7 @@ fn r3_fires_when_two_corpora_each_have_five_axioms() {
     let result = pass.run(&module, &mut ctx).expect("pass runs");
     // R3 is Error ⇒ pass fails.
     assert!(!result.success);
-    let r3_count = pass
-        .diagnostics()
-        .iter()
-        .filter(|d| d.rule == "R3")
-        .count();
+    let r3_count = pass.diagnostics().iter().filter(|d| d.rule == "R3").count();
     assert_eq!(r3_count, 1);
     assert_eq!(pass.error_count(), 1);
 }
@@ -266,10 +259,7 @@ fn r1_fires_on_impl_method_with_brand_prefix_name() {
     // implement Foo {
     //  @framework(diakrisis, "...") fn diakrisis_step() {}
     // }
-    let bad_method = make_function_with_attrs(
-        "diakrisis_step",
-        vec![framework_attr("diakrisis")],
-    );
+    let bad_method = make_function_with_attrs("diakrisis_step", vec![framework_attr("diakrisis")]);
     let impl_decl = impl_block_with(vec![impl_function_item(bad_method)]);
     let module = module_with(vec![ItemKind::Impl(impl_decl)]);
     let mut pass = HygieneRecheckPass::new();
@@ -277,11 +267,7 @@ fn r1_fires_on_impl_method_with_brand_prefix_name() {
     let result = pass.run(&module, &mut ctx).expect("pass runs");
     // R1 is Warning ⇒ pass still succeeds.
     assert!(result.success);
-    let r1_count = pass
-        .diagnostics()
-        .iter()
-        .filter(|d| d.rule == "R1")
-        .count();
+    let r1_count = pass.diagnostics().iter().filter(|d| d.rule == "R1").count();
     assert_eq!(r1_count, 1);
     assert!(
         pass.diagnostics()[0]
@@ -310,12 +296,11 @@ fn r3_fires_on_impl_methods_constituting_two_corpora() {
     let mut pass = HygieneRecheckPass::new();
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
-    assert!(!result.success, "R3 must error on two impl-resident corpora");
-    let r3_count = pass
-        .diagnostics()
-        .iter()
-        .filter(|d| d.rule == "R3")
-        .count();
+    assert!(
+        !result.success,
+        "R3 must error on two impl-resident corpora"
+    );
+    let r3_count = pass.diagnostics().iter().filter(|d| d.rule == "R3").count();
     assert_eq!(r3_count, 1);
 }
 
@@ -327,23 +312,13 @@ fn r4_uip_plus_univalence_rejected_via_hygiene_pass() {
     // the pass returns success == false (fail-fast in the
     // pipeline).
     let uip_axiom = axiom_with_attrs("uip_axiom", vec![framework_attr("uip")]);
-    let ua_axiom = axiom_with_attrs(
-        "univalence_axiom",
-        vec![framework_attr("univalence")],
-    );
-    let module = module_with(vec![
-        ItemKind::Axiom(uip_axiom),
-        ItemKind::Axiom(ua_axiom),
-    ]);
+    let ua_axiom = axiom_with_attrs("univalence_axiom", vec![framework_attr("univalence")]);
+    let module = module_with(vec![ItemKind::Axiom(uip_axiom), ItemKind::Axiom(ua_axiom)]);
     let mut pass = HygieneRecheckPass::new();
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
     assert!(!result.success, "uip ⊥ univalence must fail-fast");
-    let r4_count = pass
-        .diagnostics()
-        .iter()
-        .filter(|d| d.rule == "R4")
-        .count();
+    let r4_count = pass.diagnostics().iter().filter(|d| d.rule == "R4").count();
     assert_eq!(r4_count, 1);
     let r4 = pass.diagnostics().iter().find(|d| d.rule == "R4").unwrap();
     assert_eq!(r4.severity, HygieneSeverity::Error);
@@ -363,11 +338,7 @@ fn r4_compatible_corpora_pass_clean() {
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
     assert!(result.success);
-    let r4_count = pass
-        .diagnostics()
-        .iter()
-        .filter(|d| d.rule == "R4")
-        .count();
+    let r4_count = pass.diagnostics().iter().filter(|d| d.rule == "R4").count();
     assert_eq!(r4_count, 0);
 }
 
@@ -393,13 +364,19 @@ fn r3_threshold_lowered_to_two_fires_with_two_axioms_each() {
     let mut default_pass = HygieneRecheckPass::new();
     let mut ctx = VerificationContext::new();
     let res_default = default_pass.run(&module, &mut ctx).expect("pass runs");
-    assert!(res_default.success, "with default threshold (5), neither corpus qualifies");
+    assert!(
+        res_default.success,
+        "with default threshold (5), neither corpus qualifies"
+    );
 
     // Second: lowered threshold (2) — BOTH corpora qualify ⇒ R3 fires.
     let mut strict_pass = HygieneRecheckPass::with_meta_classifier_threshold(2);
     let mut ctx2 = VerificationContext::new();
     let res_strict = strict_pass.run(&module, &mut ctx2).expect("pass runs");
-    assert!(!res_strict.success, "with lowered threshold (2), R3 must fire");
+    assert!(
+        !res_strict.success,
+        "with lowered threshold (2), R3 must fire"
+    );
     assert_eq!(strict_pass.error_count(), 1);
 }
 
@@ -431,7 +408,10 @@ fn r3_threshold_raised_above_qualifying_count_silences_alert() {
     let mut high_pass = HygieneRecheckPass::with_meta_classifier_threshold(100);
     let mut ctx2 = VerificationContext::new();
     let res_high = high_pass.run(&module, &mut ctx2).expect("pass runs");
-    assert!(res_high.success, "raising threshold above corpus size silences R3");
+    assert!(
+        res_high.success,
+        "raising threshold above corpus size silences R3"
+    );
 }
 
 #[test]
@@ -471,16 +451,12 @@ fn b8_designated_meta_classifier_alone_does_not_fire_r3() {
         vec![framework_attr("actic")],
     )));
     let module = module_with(items);
-    let mut pass = HygieneRecheckPass::new()
-        .with_designated_meta_classifier(Text::from("diakrisis"));
+    let mut pass =
+        HygieneRecheckPass::new().with_designated_meta_classifier(Text::from("diakrisis"));
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
     assert!(result.success, "designated alone reaching threshold is OK");
-    let r3_count = pass
-        .diagnostics()
-        .iter()
-        .filter(|d| d.rule == "R3")
-        .count();
+    let r3_count = pass.diagnostics().iter().filter(|d| d.rule == "R3").count();
     assert_eq!(r3_count, 0);
 }
 
@@ -507,11 +483,14 @@ fn b8_designated_corpus_filtered_out_two_others_at_threshold_fires() {
         )));
     }
     let module = module_with(items);
-    let mut pass = HygieneRecheckPass::new()
-        .with_designated_meta_classifier(Text::from("diakrisis"));
+    let mut pass =
+        HygieneRecheckPass::new().with_designated_meta_classifier(Text::from("diakrisis"));
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
-    assert!(!result.success, "two non-designated corpora at threshold must fire R3");
+    assert!(
+        !result.success,
+        "two non-designated corpora at threshold must fire R3"
+    );
     let r3_diags: Vec<_> = pass
         .diagnostics()
         .iter()
@@ -553,8 +532,8 @@ fn b8_designated_corpus_filtered_other_alone_at_threshold_quiet() {
         )));
     }
     let module = module_with(items);
-    let mut pass = HygieneRecheckPass::new()
-        .with_designated_meta_classifier(Text::from("diakrisis"));
+    let mut pass =
+        HygieneRecheckPass::new().with_designated_meta_classifier(Text::from("diakrisis"));
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
     assert!(
@@ -583,5 +562,8 @@ fn b8_no_designation_falls_back_to_pre_v8_behaviour() {
     assert!(pass.designated_meta_classifier().is_none());
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
-    assert!(!result.success, "no designation → original |>= 2| rule applies");
+    assert!(
+        !result.success,
+        "no designation → original |>= 2| rule applies"
+    );
 }

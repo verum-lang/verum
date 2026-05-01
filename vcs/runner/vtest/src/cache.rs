@@ -299,7 +299,9 @@ impl TestCache {
 
         // Check compiler version
         if entry.compiler_version != self.config.compiler_version {
-            return Err(CacheError::Miss("Compiler version changed".to_string().into()));
+            return Err(CacheError::Miss(
+                "Compiler version changed".to_string().into(),
+            ));
         }
 
         // Check config hash
@@ -331,7 +333,11 @@ impl TestCache {
         // Generate result file name
         let result_hash = Self::hash_string(&result_json);
         let result_filename: Text = format!("{}.json", &result_hash.as_str()[..16]).into();
-        let result_path = self.config.cache_dir.join("results").join(result_filename.as_str());
+        let result_path = self
+            .config
+            .cache_dir
+            .join("results")
+            .join(result_filename.as_str());
 
         // Write result file
         let mut file = fs::File::create(&result_path)?;

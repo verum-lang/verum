@@ -44,10 +44,7 @@ impl MetaType {
     /// Check if this type is a primitive meta type
     #[inline]
     pub fn is_primitive(&self) -> bool {
-        matches!(
-            self,
-            MetaType::Integer | MetaType::Text | MetaType::Bool
-        )
+        matches!(self, MetaType::Integer | MetaType::Text | MetaType::Bool)
     }
 
     /// Check if this type accepts any value

@@ -36,9 +36,9 @@
 //! ```
 
 use crate::TypeError;
-use verum_ast::span::Span;
-use verum_common::{Map, Maybe, Set, Text, List};
 use std::sync::atomic::{AtomicU64, Ordering};
+use verum_ast::span::Span;
+use verum_common::{List, Map, Maybe, Set, Text};
 
 /// Global counter for unique reference IDs
 static REF_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -152,7 +152,8 @@ impl CaptureSet {
 
     /// Get the capture mode for a variable
     pub fn capture_mode(&self, var: &str) -> Option<CaptureMode> {
-        self.captures.iter()
+        self.captures
+            .iter()
             .find(|c| c.target.as_str() == var)
             .map(|c| c.mode)
     }
@@ -226,7 +227,6 @@ pub struct BorrowTracker {
     ref_id_to_holder: Map<RefId, Text>,
 
     // ==================== Closure Capture Tracking ====================
-
     /// Active closure captures: closure_id -> CaptureSet
     /// Tracks what each closure in the current scope captures
     closure_captures: Map<RefId, CaptureSet>,
@@ -236,7 +236,6 @@ pub struct BorrowTracker {
     captured_by: Map<Text, List<(RefId, CaptureMode)>>,
 
     // ==================== Iterator Tracking ====================
-
     /// Active iterators: iter_var -> ActiveIterator
     active_iterators: Map<Text, ActiveIterator>,
 
@@ -244,7 +243,6 @@ pub struct BorrowTracker {
     iterated_collections: Map<Text, RefId>,
 
     // ==================== Async Tracking ====================
-
     /// Current async scope depth (0 = not in async)
     async_scope_depth: usize,
 
@@ -256,7 +254,6 @@ pub struct BorrowTracker {
 
     // ==================== Two-Phase Borrow Tracking ====================
     // Memory layout and reference representation: ThinRef (16 bytes) for sized types, FatRef (24 bytes) for unsized types — .6 - Two-phase borrows
-
     /// Variables with pending two-phase borrows.
     /// During argument evaluation, these allow additional immutable borrows.
     /// When the method call actually executes, they become full mutable borrows.
@@ -264,14 +261,12 @@ pub struct BorrowTracker {
 
     // ==================== NLL Last Borrow Tracking ====================
     // Spec: L0-critical/reference_system/access_rules/ref_scope_valid
-
     /// The most recently created borrow (RefId, target, is_mutable).
     /// Used to link variables to borrows in let statements.
     last_borrow: Option<(RefId, Text, bool)>,
 
     // ==================== Current Closure Context ====================
     // Spec: L0-critical/reference_system/access_rules/ref_closure_capture
-
     /// Stack of closure IDs we're currently inside.
     /// Used to distinguish between code inside vs outside a closure.
     closure_scope_stack: List<RefId>,
@@ -336,7 +331,11 @@ impl BorrowTracker {
     }
 
     /// Create an immutable borrow of a variable
-    pub fn borrow_immut(&mut self, target: impl Into<Text>, span: Span) -> Result<RefId, TypeError> {
+    pub fn borrow_immut(
+        &mut self,
+        target: impl Into<Text>,
+        span: Span,
+    ) -> Result<RefId, TypeError> {
         let target = target.into();
 
         // Check: no active mutable borrows of this target
@@ -507,7 +506,11 @@ impl BorrowTracker {
     /// Unlike `borrow_mut`, this releases field borrows first to simulate NLL.
     /// This is used when passing `&mut whole_struct` to a function, where
     /// field borrows should end at the call site.
-    pub fn borrow_mut_for_call(&mut self, target: impl Into<Text>, span: Span) -> Result<RefId, TypeError> {
+    pub fn borrow_mut_for_call(
+        &mut self,
+        target: impl Into<Text>,
+        span: Span,
+    ) -> Result<RefId, TypeError> {
         let target = target.into();
 
         // NLL: Release field borrows before checking - they end at function call
@@ -549,7 +552,8 @@ impl BorrowTracker {
                 }
             }
             if !kept_borrows.is_empty() {
-                self.active_immut_borrows.insert(target.clone(), kept_borrows);
+                self.active_immut_borrows
+                    .insert(target.clone(), kept_borrows);
             }
         }
 
@@ -765,7 +769,8 @@ impl BorrowTracker {
     /// NLL: Get the borrow held by a variable, if any.
     pub fn get_held_borrow(&self, holder: &str) -> Option<&Borrow> {
         let holder_text = Text::from(holder);
-        self.ref_holders.get(&holder_text)
+        self.ref_holders
+            .get(&holder_text)
             .and_then(|ref_id| self.ref_to_borrow.get(ref_id))
     }
 
@@ -784,7 +789,9 @@ impl BorrowTracker {
     /// This implements lazy NLL release without requiring full liveness analysis.
     pub fn nll_release_expired_borrows_for(&mut self, target: &Text) {
         // Collect holder variables that hold borrows on this target
-        let holders_to_release: List<Text> = self.ref_holders.iter()
+        let holders_to_release: List<Text> = self
+            .ref_holders
+            .iter()
             .filter_map(|(holder, ref_id)| {
                 if let Some(borrow) = self.ref_to_borrow.get(ref_id) {
                     if &borrow.target == target {
@@ -866,9 +873,7 @@ impl BorrowTracker {
     /// Field borrows are only checked within the same statement.
     pub fn clear_field_borrows(&mut self) {
         // Collect all field borrow ref IDs first
-        let field_ref_ids: List<RefId> = self.field_borrows.values()
-            .map(|b| b.id)
-            .collect();
+        let field_ref_ids: List<RefId> = self.field_borrows.values().map(|b| b.id).collect();
 
         // Clear the field borrows map
         self.field_borrows = Map::new();
@@ -897,7 +902,8 @@ impl BorrowTracker {
     /// Check if a variable has an active mutable borrow
     pub fn has_mutable_borrow(&self, target: &str) -> bool {
         let target = Text::from(target);
-        self.active_mut_borrows.get(&target)
+        self.active_mut_borrows
+            .get(&target)
             .map(|list| !list.is_empty())
             .unwrap_or(false)
     }
@@ -905,7 +911,8 @@ impl BorrowTracker {
     /// Check if a variable has active immutable borrows
     pub fn has_immutable_borrows(&self, target: &str) -> bool {
         let target = Text::from(target);
-        self.active_immut_borrows.get(&target)
+        self.active_immut_borrows
+            .get(&target)
             .map(|list| !list.is_empty())
             .unwrap_or(false)
     }
@@ -913,7 +920,8 @@ impl BorrowTracker {
     /// Get the span of an existing mutable borrow (for error messages)
     pub fn get_mutable_borrow_span(&self, target: &str) -> Option<Span> {
         let target = Text::from(target);
-        self.active_mut_borrows.get(&target)
+        self.active_mut_borrows
+            .get(&target)
             .and_then(|list| list.first())
             .map(|b| b.span)
     }
@@ -921,7 +929,8 @@ impl BorrowTracker {
     /// Get the span of an existing immutable borrow (for error messages)
     pub fn get_immutable_borrow_span(&self, target: &str) -> Option<Span> {
         let target = Text::from(target);
-        self.active_immut_borrows.get(&target)
+        self.active_immut_borrows
+            .get(&target)
             .and_then(|list| list.first())
             .map(|b| b.span)
     }
@@ -1059,21 +1068,15 @@ impl BorrowTracker {
 
         // Add to appropriate active borrows map
         if is_mutable {
-            let mut_list = self.active_mut_borrows
-                .entry(target)
-                .or_default();
+            let mut_list = self.active_mut_borrows.entry(target).or_default();
             mut_list.push(borrow);
         } else {
-            let immut_list = self.active_immut_borrows
-                .entry(target)
-                .or_default();
+            let immut_list = self.active_immut_borrows.entry(target).or_default();
             immut_list.push(borrow);
         }
 
         // Track by scope for cleanup
-        let scope_borrows = self.borrows_by_scope
-            .entry(scope_depth)
-            .or_default();
+        let scope_borrows = self.borrows_by_scope.entry(scope_depth).or_default();
         scope_borrows.push(ref_id);
     }
 
@@ -1084,9 +1087,7 @@ impl BorrowTracker {
         self.ref_to_borrow.insert(ref_id, borrow.clone());
         self.field_borrows.insert(field_key, borrow);
 
-        let scope_borrows = self.borrows_by_scope
-            .entry(scope_depth)
-            .or_default();
+        let scope_borrows = self.borrows_by_scope.entry(scope_depth).or_default();
         scope_borrows.push(ref_id);
     }
 
@@ -1124,7 +1125,8 @@ impl BorrowTracker {
     /// Register a new closure and begin tracking its captures
     pub fn enter_closure(&mut self, is_move: bool) -> RefId {
         let closure_id = RefId::new();
-        self.closure_captures.insert(closure_id, CaptureSet::new(is_move));
+        self.closure_captures
+            .insert(closure_id, CaptureSet::new(is_move));
         // Track that we're inside this closure
         self.closure_scope_stack.push(closure_id);
         closure_id
@@ -1149,7 +1151,8 @@ impl BorrowTracker {
                     return Err(TypeError::MoveWhileBorrowed {
                         var: target.clone(),
                         move_span: span,
-                        borrow_span: self.get_mutable_borrow_span(&target)
+                        borrow_span: self
+                            .get_mutable_borrow_span(&target)
                             .or_else(|| self.get_immutable_borrow_span(&target))
                             .unwrap_or(span),
                     });
@@ -1197,7 +1200,9 @@ impl BorrowTracker {
         }
 
         // Register the capture in the closure's capture set
-        let is_move_closure = self.closure_captures.get(&closure_id)
+        let is_move_closure = self
+            .closure_captures
+            .get(&closure_id)
             .map(|cs| cs.is_move)
             .unwrap_or(false);
 
@@ -1291,7 +1296,8 @@ impl BorrowTracker {
 
     /// Get capture mode for a variable by a specific closure
     pub fn get_capture_mode(&self, closure_id: RefId, target: &str) -> Option<CaptureMode> {
-        self.closure_captures.get(&closure_id)
+        self.closure_captures
+            .get(&closure_id)
             .and_then(|cs| cs.capture_mode(target))
     }
 
@@ -1325,7 +1331,9 @@ impl BorrowTracker {
         // For mutable iterators, check no existing iterators on same collection
         if is_mutable {
             if let Some(existing_iter_id) = self.iterated_collections.get(&collection) {
-                if let Some(existing_iter) = self.active_iterators.values()
+                if let Some(existing_iter) = self
+                    .active_iterators
+                    .values()
                     .find(|it| it.id == *existing_iter_id)
                 {
                     return Err(TypeError::Other(Text::from(format!(
@@ -1398,7 +1406,8 @@ impl BorrowTracker {
         if self.async_scope_depth > 0 {
             self.async_scope_depth -= 1;
             // Clear async borrows for this scope
-            self.async_borrows.retain(|ab| ab.async_scope < self.async_scope_depth);
+            self.async_borrows
+                .retain(|ab| ab.async_scope < self.async_scope_depth);
         }
     }
 
@@ -1456,7 +1465,12 @@ impl BorrowTracker {
     // Escape analysis: compiler proves reference safety at compile time, enabling promotion from &T to &checked T (zero cost) — Thread safety
 
     /// Check if sharing a borrow would violate thread safety
-    pub fn check_thread_safety(&self, target: &str, needs_send: bool, needs_sync: bool) -> Result<(), TypeError> {
+    pub fn check_thread_safety(
+        &self,
+        target: &str,
+        needs_send: bool,
+        needs_sync: bool,
+    ) -> Result<(), TypeError> {
         // If we have a mutable borrow and need Sync, that's an error
         // (mutable borrows aren't Sync)
         if needs_sync {
@@ -1597,7 +1611,11 @@ mod tests {
         assert!(tracker.borrow_field_mut("point", "x", dummy_span()).is_ok());
 
         // Same field again should fail
-        assert!(tracker.borrow_field_mut("point", "x", dummy_span()).is_err());
+        assert!(
+            tracker
+                .borrow_field_mut("point", "x", dummy_span())
+                .is_err()
+        );
     }
 
     #[test]

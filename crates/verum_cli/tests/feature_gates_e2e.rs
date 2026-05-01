@@ -161,7 +161,11 @@ fn enum_typo_suggests_correct_value() {
     let out = verum(&["config", "show"], &dir);
     assert!(!out.status.success(), "invalid config must exit non-zero");
     let err = stderr(&out);
-    assert!(err.contains("verum.toml"), "error must cite verum.toml:\n{}", err);
+    assert!(
+        err.contains("verum.toml"),
+        "error must cite verum.toml:\n{}",
+        err
+    );
     assert!(
         err.contains("[runtime].cbgr_mode"),
         "error must cite the section.field path:\n{}",
@@ -306,7 +310,13 @@ fn dap_disabled_via_z_override_refuses_to_start() {
     write_manifest(&dir, "");
 
     let out = verum(
-        &["dap", "--transport", "stdio", "-Z", "debug.dap_enabled=false"],
+        &[
+            "dap",
+            "--transport",
+            "stdio",
+            "-Z",
+            "debug.dap_enabled=false",
+        ],
         &dir,
     );
     assert!(
@@ -616,7 +626,11 @@ fn config_validate_ok_on_valid_manifest() {
     let (_tmp, dir) = project("validate-ok");
     write_manifest(&dir, "");
     let out = verum(&["config", "validate"], &dir);
-    assert!(out.status.success(), "valid manifest should pass. stderr:\n{}", stderr(&out));
+    assert!(
+        out.status.success(),
+        "valid manifest should pass. stderr:\n{}",
+        stderr(&out)
+    );
     assert!(stdout(&out).contains("valid"), "success message expected");
 }
 

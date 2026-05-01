@@ -79,8 +79,8 @@ use verum_ast::{
     stmt::StmtKind,
     ty::TypeKind,
 };
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_common::{ConstValue, List, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_types::const_eval::ConstEvaluator;
 
 use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
@@ -1377,11 +1377,9 @@ impl LoweringContext {
             ConstValue::Unit => MirConstant::Unit,
             ConstValue::Maybe(maybe) => match maybe {
                 verum_common::Maybe::None => MirConstant::Unit,
-                verum_common::Maybe::Some(v) => {
-                    MirConstant::Tuple(verum_common::List::from(vec![
-                        self.const_value_to_mir_constant(v),
-                    ]))
-                }
+                verum_common::Maybe::Some(v) => MirConstant::Tuple(verum_common::List::from(vec![
+                    self.const_value_to_mir_constant(v),
+                ])),
             },
             // Convert Map to array of (key, value) tuples for MIR
             ConstValue::Map(map) => {
@@ -1398,10 +1396,8 @@ impl LoweringContext {
             }
             // Convert Set to array of strings for MIR
             ConstValue::Set(set) => {
-                let mir_elements: List<MirConstant> = set
-                    .iter()
-                    .map(|s| MirConstant::String(s.clone()))
-                    .collect();
+                let mir_elements: List<MirConstant> =
+                    set.iter().map(|s| MirConstant::String(s.clone())).collect();
                 MirConstant::Array(mir_elements)
             }
         }
@@ -2335,10 +2331,7 @@ impl LoweringContext {
                     None => MirType::Infer,
                 };
 
-                if let PatternKind::Ident {
-                    name, ..
-                } = &pattern.kind
-                {
+                if let PatternKind::Ident { name, .. } = &pattern.kind {
                     let local = self.new_local(name.name.clone(), local_ty, LocalKind::Var);
 
                     self.push_statement(current_block, MirStatement::StorageLive(local));
@@ -2979,7 +2972,10 @@ impl LoweringContext {
                     MirStatement::Assign(
                         Place::return_place(),
                         Rvalue::Aggregate(
-                            AggregateKind::Variant(verum_common::well_known_types::type_names::RESULT.into(), 1), // Err variant
+                            AggregateKind::Variant(
+                                verum_common::well_known_types::type_names::RESULT.into(),
+                                1,
+                            ), // Err variant
                             List::from(vec![Operand::Move(
                                 Place::local(inner_temp).with_downcast(1).with_field(0),
                             )]),
@@ -3005,7 +3001,10 @@ impl LoweringContext {
                     MirStatement::Assign(
                         dest,
                         Rvalue::Aggregate(
-                            AggregateKind::Variant(verum_common::well_known_types::type_names::RESULT.into(), 0), // Ok variant
+                            AggregateKind::Variant(
+                                verum_common::well_known_types::type_names::RESULT.into(),
+                                0,
+                            ), // Ok variant
                             List::from(vec![Operand::Move(Place::local(inner_temp))]),
                         ),
                     ),
@@ -3286,10 +3285,7 @@ impl LoweringContext {
                 Ok(join_block)
             }
 
-            ExprKind::TryRecover {
-                try_block,
-                recover,
-            } => {
+            ExprKind::TryRecover { try_block, recover } => {
                 // try { ... } recover { pattern => expr, ... }
                 // Execute try_block, and if it returns Err, match against recover arms
                 let try_temp = self.new_temp(MirType::Infer);
@@ -3378,7 +3374,8 @@ impl LoweringContext {
                                 Place::local(err_temp),
                                 arm_blocks[i],
                             )?;
-                            let arm_exit = self.lower_expr(&arm.body, arm_blocks[i], dest.clone())?;
+                            let arm_exit =
+                                self.lower_expr(&arm.body, arm_blocks[i], dest.clone())?;
                             self.pop_scope(arm_exit);
                             self.set_terminator(arm_exit, Terminator::Goto(join_block));
                         }
@@ -3531,8 +3528,11 @@ impl LoweringContext {
                                 Place::local(err_temp),
                                 arm_blocks[i],
                             )?;
-                            let arm_exit =
-                                self.lower_expr(&arm.body, arm_blocks[i], Place::local(result_temp))?;
+                            let arm_exit = self.lower_expr(
+                                &arm.body,
+                                arm_blocks[i],
+                                Place::local(result_temp),
+                            )?;
                             self.pop_scope(arm_exit);
                             self.set_terminator(arm_exit, Terminator::Goto(after_recover));
                         }
@@ -3548,7 +3548,8 @@ impl LoweringContext {
                             Place::local(err_temp),
                             closure_block,
                         )?;
-                        let body_exit = self.lower_expr(body, closure_block, Place::local(result_temp))?;
+                        let body_exit =
+                            self.lower_expr(body, closure_block, Place::local(result_temp))?;
                         self.pop_scope(body_exit);
                         self.set_terminator(body_exit, Terminator::Goto(after_recover));
                     }
@@ -3587,7 +3588,9 @@ impl LoweringContext {
             ExprKind::Comprehension { expr, clauses } => {
                 // List comprehension: [x * 2 for x in list if x > 0]
                 // Lower to: create list, iterate, filter, map, collect
-                let list_temp = self.new_temp(MirType::Named(verum_common::well_known_types::type_names::LIST.into()));
+                let list_temp = self.new_temp(MirType::Named(
+                    verum_common::well_known_types::type_names::LIST.into(),
+                ));
                 self.push_statement(current_block, MirStatement::StorageLive(list_temp));
 
                 // Initialize empty list
@@ -3960,7 +3963,9 @@ impl LoweringContext {
             } => {
                 // Map comprehension: {k: v for (k, v) in pairs if condition}
                 // Lower to: create Map, iterate source, insert key-value pairs
-                let map_temp = self.new_temp(MirType::Named(verum_common::well_known_types::type_names::MAP.into()));
+                let map_temp = self.new_temp(MirType::Named(
+                    verum_common::well_known_types::type_names::MAP.into(),
+                ));
                 self.push_statement(current_block, MirStatement::StorageLive(map_temp));
 
                 // Initialize empty map
@@ -4138,7 +4143,9 @@ impl LoweringContext {
             ExprKind::SetComprehension { expr, clauses } => {
                 // Set comprehension: set{x for x in items if condition}
                 // Lower to: create Set, iterate source, insert elements
-                let set_temp = self.new_temp(MirType::Named(verum_common::well_known_types::type_names::SET.into()));
+                let set_temp = self.new_temp(MirType::Named(
+                    verum_common::well_known_types::type_names::SET.into(),
+                ));
                 self.push_statement(current_block, MirStatement::StorageLive(set_temp));
 
                 // Initialize empty set
@@ -4545,7 +4552,9 @@ impl LoweringContext {
 
             ExprKind::MapLiteral { entries } => {
                 // { "key": value, "key2": value2 }
-                let map_temp = self.new_temp(MirType::Named(verum_common::well_known_types::type_names::MAP.into()));
+                let map_temp = self.new_temp(MirType::Named(
+                    verum_common::well_known_types::type_names::MAP.into(),
+                ));
                 self.push_statement(current_block, MirStatement::StorageLive(map_temp));
 
                 // Initialize empty map
@@ -4553,7 +4562,12 @@ impl LoweringContext {
                     current_block,
                     MirStatement::Assign(
                         Place::local(map_temp),
-                        Rvalue::Aggregate(AggregateKind::Struct(verum_common::well_known_types::type_names::MAP.into()), List::new()),
+                        Rvalue::Aggregate(
+                            AggregateKind::Struct(
+                                verum_common::well_known_types::type_names::MAP.into(),
+                            ),
+                            List::new(),
+                        ),
                     ),
                 );
 
@@ -4599,7 +4613,9 @@ impl LoweringContext {
 
             ExprKind::SetLiteral { elements } => {
                 // { 1, 2, 3 }
-                let set_temp = self.new_temp(MirType::Named(verum_common::well_known_types::type_names::SET.into()));
+                let set_temp = self.new_temp(MirType::Named(
+                    verum_common::well_known_types::type_names::SET.into(),
+                ));
                 self.push_statement(current_block, MirStatement::StorageLive(set_temp));
 
                 // Initialize empty set
@@ -4607,7 +4623,12 @@ impl LoweringContext {
                     current_block,
                     MirStatement::Assign(
                         Place::local(set_temp),
-                        Rvalue::Aggregate(AggregateKind::Struct(verum_common::well_known_types::type_names::SET.into()), List::new()),
+                        Rvalue::Aggregate(
+                            AggregateKind::Struct(
+                                verum_common::well_known_types::type_names::SET.into(),
+                            ),
+                            List::new(),
+                        ),
                     ),
                 );
 
@@ -4985,7 +5006,11 @@ impl LoweringContext {
                         MirType::Infer
                     };
                     let param = self.new_temp(param_ty);
-                    let _ = self.lower_pattern_binding(&binding.pattern, Place::local(param), current_block)?;
+                    let _ = self.lower_pattern_binding(
+                        &binding.pattern,
+                        Place::local(param),
+                        current_block,
+                    )?;
                 }
 
                 let body_temp = self.new_temp(MirType::Bool);
@@ -5018,7 +5043,11 @@ impl LoweringContext {
                         MirType::Infer
                     };
                     let param = self.new_temp(param_ty);
-                    let _ = self.lower_pattern_binding(&binding.pattern, Place::local(param), current_block)?;
+                    let _ = self.lower_pattern_binding(
+                        &binding.pattern,
+                        Place::local(param),
+                        current_block,
+                    )?;
                 }
 
                 let body_temp = self.new_temp(MirType::Bool);
@@ -5151,7 +5180,10 @@ impl LoweringContext {
                     MirStatement::Assign(
                         Place::return_place(),
                         Rvalue::Aggregate(
-                            AggregateKind::Variant(verum_common::well_known_types::type_names::RESULT.into(), 1), // Err variant
+                            AggregateKind::Variant(
+                                verum_common::well_known_types::type_names::RESULT.into(),
+                                1,
+                            ), // Err variant
                             List::from(vec![Operand::Move(Place::local(error_temp))]),
                         ),
                     ),
@@ -5204,12 +5236,19 @@ impl LoweringContext {
             // The select compiles to a state machine with polling semantics.
             // For biased select, arms are checked in order (earlier = higher priority).
             // For fair select, implementation may randomize or round-robin.
-            ExprKind::Select { biased, arms, span: _ } => {
+            ExprKind::Select {
+                biased,
+                arms,
+                span: _,
+            } => {
                 // Handle empty select (should be caught by type checker, but be defensive)
                 if arms.is_empty() {
                     self.push_statement(
                         current_block,
-                        MirStatement::Assign(dest, Rvalue::Use(Operand::Constant(MirConstant::Unit))),
+                        MirStatement::Assign(
+                            dest,
+                            Rvalue::Use(Operand::Constant(MirConstant::Unit)),
+                        ),
                     );
                     return Ok(current_block);
                 }
@@ -5366,7 +5405,10 @@ impl LoweringContext {
                         // Drop all other futures (cancellation)
                         for (j, &other_temp) in future_temps.iter().enumerate() {
                             if j != i && other_temp.0 != 0 && !arms[j].is_else() {
-                                self.push_statement(body_exit, MirStatement::Drop(Place::local(other_temp)));
+                                self.push_statement(
+                                    body_exit,
+                                    MirStatement::Drop(Place::local(other_temp)),
+                                );
                             }
                         }
 
@@ -5389,7 +5431,10 @@ impl LoweringContext {
                             // Drop all futures
                             for (j, &other_temp) in future_temps.iter().enumerate() {
                                 if other_temp.0 != 0 && !arms[j].is_else() {
-                                    self.push_statement(body_exit, MirStatement::Drop(Place::local(other_temp)));
+                                    self.push_statement(
+                                        body_exit,
+                                        MirStatement::Drop(Place::local(other_temp)),
+                                    );
                                 }
                             }
 
@@ -5429,7 +5474,11 @@ impl LoweringContext {
 
             // This uses the same pattern matching infrastructure as `match` but
             // doesn't bind any variables (we only care about match success).
-            ExprKind::Is { expr: inner, pattern, negated } => {
+            ExprKind::Is {
+                expr: inner,
+                pattern,
+                negated,
+            } => {
                 // Evaluate the expression to test
                 let scrut_temp = self.new_temp(MirType::Infer);
                 let eval_block = self.lower_expr(inner, current_block, Place::local(scrut_temp))?;
@@ -5438,7 +5487,8 @@ impl LoweringContext {
                 // lower_pattern_test returns a LocalId holding bool indicating match
                 // Note: We create a temporary scope to prevent bindings from escaping
                 self.push_scope();
-                let match_result = self.lower_pattern_test(pattern, Place::local(scrut_temp), eval_block)?;
+                let match_result =
+                    self.lower_pattern_test(pattern, Place::local(scrut_temp), eval_block)?;
                 self.pop_scope(eval_block);
 
                 // If negated (!is), invert the result
@@ -5480,7 +5530,10 @@ impl LoweringContext {
                 // If we reach here, assign true (the check passed during type checking)
                 self.push_statement(
                     current_block,
-                    MirStatement::Assign(dest, Rvalue::Use(Operand::Constant(MirConstant::Bool(true)))),
+                    MirStatement::Assign(
+                        dest,
+                        Rvalue::Use(Operand::Constant(MirConstant::Bool(true))),
+                    ),
                 );
                 Ok(current_block)
             }
@@ -5489,7 +5542,10 @@ impl LoweringContext {
                 // Meta-functions (@file, @line, @const, etc.) should be evaluated at compile-time
                 // If we reach MIR lowering, it means the meta-function wasn't expanded
                 Err(DiagnosticBuilder::new(Severity::Error)
-                    .message(format!("Meta-function @{} should be expanded before MIR lowering", name.name))
+                    .message(format!(
+                        "Meta-function @{} should be expanded before MIR lowering",
+                        name.name
+                    ))
                     .build())
             }
 
@@ -5584,7 +5640,9 @@ impl LoweringContext {
                     current,
                     Terminator::Call {
                         destination: Place::local(nursery_handle),
-                        func: Operand::Constant(MirConstant::Function("runtime::nursery_create".into())),
+                        func: Operand::Constant(MirConstant::Function(
+                            "runtime::nursery_create".into(),
+                        )),
                         args: List::from(create_args),
                         success_block: create_success,
                         unwind_block: create_unwind,
@@ -5613,7 +5671,9 @@ impl LoweringContext {
                     body_block,
                     Terminator::Call {
                         destination: Place::local(await_result),
-                        func: Operand::Constant(MirConstant::Function("runtime::nursery_await_all".into())),
+                        func: Operand::Constant(MirConstant::Function(
+                            "runtime::nursery_await_all".into(),
+                        )),
                         args: List::from(vec![Operand::Copy(Place::local(nursery_handle))]),
                         success_block: await_success,
                         unwind_block: await_unwind,
@@ -5657,7 +5717,11 @@ impl LoweringContext {
                     if let verum_common::Maybe::Some(cancel_block) = on_cancel {
                         self.push_scope();
                         let cancel_dest = self.new_temp(MirType::Infer);
-                        error_exit = self.lower_block_iterative(cancel_block, error_block, Place::local(cancel_dest))?;
+                        error_exit = self.lower_block_iterative(
+                            cancel_block,
+                            error_block,
+                            Place::local(cancel_dest),
+                        )?;
                         self.pop_scope(error_exit);
                     }
 
@@ -5672,7 +5736,9 @@ impl LoweringContext {
                             error_exit,
                             Terminator::Call {
                                 destination: Place::local(error_val),
-                                func: Operand::Constant(MirConstant::Function("runtime::nursery_get_error".into())),
+                                func: Operand::Constant(MirConstant::Function(
+                                    "runtime::nursery_get_error".into(),
+                                )),
                                 args: List::from(vec![Operand::Copy(Place::local(nursery_handle))]),
                                 success_block: get_err_success,
                                 unwind_block: get_err_unwind,
@@ -5725,20 +5791,20 @@ impl LoweringContext {
                                         Place::local(error_val),
                                         arm_blocks[i],
                                     )?;
-                                    let arm_exit = self.lower_expr(
-                                        &arm.body,
-                                        arm_blocks[i],
-                                        dest.clone(),
-                                    )?;
+                                    let arm_exit =
+                                        self.lower_expr(&arm.body, arm_blocks[i], dest.clone())?;
                                     self.pop_scope(arm_exit);
                                     self.set_terminator(arm_exit, Terminator::Goto(recover_join));
                                 }
 
                                 error_exit = recover_join;
                             }
-                            RecoverBody::Closure { body: closure_body, .. } => {
+                            RecoverBody::Closure {
+                                body: closure_body, ..
+                            } => {
                                 // Lower closure body with error value as implicit argument
-                                error_exit = self.lower_expr(closure_body, get_err_success, dest.clone())?;
+                                error_exit =
+                                    self.lower_expr(closure_body, get_err_success, dest.clone())?;
                             }
                         }
                     }
@@ -5757,7 +5823,9 @@ impl LoweringContext {
                     join_block,
                     Terminator::Call {
                         destination: dest.clone(),
-                        func: Operand::Constant(MirConstant::Function("runtime::nursery_destroy".into())),
+                        func: Operand::Constant(MirConstant::Function(
+                            "runtime::nursery_destroy".into(),
+                        )),
                         args: List::from(vec![Operand::Move(Place::local(nursery_handle))]),
                         success_block: destroy_success,
                         unwind_block: destroy_unwind,
@@ -5769,7 +5837,10 @@ impl LoweringContext {
                 if body.expr.is_none() && !has_error_handler {
                     self.push_statement(
                         destroy_success,
-                        MirStatement::Assign(dest, Rvalue::Use(Operand::Constant(MirConstant::Unit))),
+                        MirStatement::Assign(
+                            dest,
+                            Rvalue::Use(Operand::Constant(MirConstant::Unit)),
+                        ),
                     );
                 }
 
@@ -5799,7 +5870,10 @@ impl LoweringContext {
                                 current_block,
                                 MirStatement::Assign(
                                     Place::local(empty_array),
-                                    Rvalue::Aggregate(AggregateKind::Array(MirType::Infer), List::new()),
+                                    Rvalue::Aggregate(
+                                        AggregateKind::Array(MirType::Infer),
+                                        List::new(),
+                                    ),
                                 ),
                             );
                             // Wrap in iterator (runtime handles this)
@@ -5863,15 +5937,24 @@ impl LoweringContext {
                         Ok(block)
                     }
 
-                    StreamLiteralKind::Range { start, end, inclusive } => {
+                    StreamLiteralKind::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
                         // Range-based stream: stream[0..100] or stream[0..]
                         let start_temp = self.new_temp(MirType::Int);
-                        let block1 = self.lower_expr(start, current_block, Place::local(start_temp))?;
+                        let block1 =
+                            self.lower_expr(start, current_block, Place::local(start_temp))?;
 
-                        let (block2, end_operand) = if let verum_common::Maybe::Some(end_expr) = end {
+                        let (block2, end_operand) = if let verum_common::Maybe::Some(end_expr) = end
+                        {
                             let end_temp = self.new_temp(MirType::Int);
                             let b = self.lower_expr(end_expr, block1, Place::local(end_temp))?;
-                            (b, verum_common::Maybe::Some(Operand::Move(Place::local(end_temp))))
+                            (
+                                b,
+                                verum_common::Maybe::Some(Operand::Move(Place::local(end_temp))),
+                            )
                         } else {
                             // Infinite range: stream[0..]
                             (block1, verum_common::Maybe::None)
@@ -5900,7 +5983,10 @@ impl LoweringContext {
                             block2,
                             MirStatement::Assign(
                                 dest,
-                                Rvalue::Aggregate(AggregateKind::Generator(generator_name.into()), operands),
+                                Rvalue::Aggregate(
+                                    AggregateKind::Generator(generator_name.into()),
+                                    operands,
+                                ),
                             ),
                         );
 
@@ -5912,7 +5998,11 @@ impl LoweringContext {
             // Phase 5: Inline Assembly
             // At MIR level, inline assembly is represented as a terminator
             // that will be handled by the LLVM backend (or error at VBC tier)
-            ExprKind::InlineAsm { template, operands, options } => {
+            ExprKind::InlineAsm {
+                template,
+                operands,
+                options,
+            } => {
                 // Lower each operand expression and categorize into inputs/outputs
                 let mut inputs = List::new();
                 let mut outputs = List::new();
@@ -5924,9 +6014,14 @@ impl LoweringContext {
                         verum_ast::expr::AsmOperandKind::In { constraint, expr } => {
                             let temp = self.new_temp(MirType::Infer);
                             block = self.lower_expr(expr, block, Place::local(temp))?;
-                            inputs.push((constraint.constraint.clone(), Operand::Move(Place::local(temp))));
+                            inputs.push((
+                                constraint.constraint.clone(),
+                                Operand::Move(Place::local(temp)),
+                            ));
                         }
-                        verum_ast::expr::AsmOperandKind::Out { constraint, place, .. } => {
+                        verum_ast::expr::AsmOperandKind::Out {
+                            constraint, place, ..
+                        } => {
                             let temp = self.new_temp(MirType::Infer);
                             block = self.lower_expr(place, block, Place::local(temp))?;
                             outputs.push((constraint.constraint.clone(), Place::local(temp)));
@@ -5935,14 +6030,25 @@ impl LoweringContext {
                             // InOut is both input and output to the same place
                             let temp = self.new_temp(MirType::Infer);
                             block = self.lower_expr(place, block, Place::local(temp))?;
-                            inputs.push((constraint.constraint.clone(), Operand::Copy(Place::local(temp))));
+                            inputs.push((
+                                constraint.constraint.clone(),
+                                Operand::Copy(Place::local(temp)),
+                            ));
                             outputs.push((constraint.constraint.clone(), Place::local(temp)));
                         }
-                        verum_ast::expr::AsmOperandKind::InLateOut { constraint, in_expr, out_place, .. } => {
+                        verum_ast::expr::AsmOperandKind::InLateOut {
+                            constraint,
+                            in_expr,
+                            out_place,
+                            ..
+                        } => {
                             // Input from one expr, output to different place
                             let in_temp = self.new_temp(MirType::Infer);
                             block = self.lower_expr(in_expr, block, Place::local(in_temp))?;
-                            inputs.push((constraint.constraint.clone(), Operand::Move(Place::local(in_temp))));
+                            inputs.push((
+                                constraint.constraint.clone(),
+                                Operand::Move(Place::local(in_temp)),
+                            ));
                             let out_temp = self.new_temp(MirType::Infer);
                             block = self.lower_expr(out_place, block, Place::local(out_temp))?;
                             outputs.push((constraint.constraint.clone(), Place::local(out_temp)));
@@ -5955,14 +6061,21 @@ impl LoweringContext {
                         }
                         verum_ast::expr::AsmOperandKind::Sym { path } => {
                             // Symbol operands are handled by codegen
-                            let sym_name = path.segments.iter()
+                            let sym_name = path
+                                .segments
+                                .iter()
                                 .map(|s| match s {
-                                    verum_ast::ty::PathSegment::Name(ident) => ident.name.to_string(),
+                                    verum_ast::ty::PathSegment::Name(ident) => {
+                                        ident.name.to_string()
+                                    }
                                     _ => "_".to_string(),
                                 })
                                 .collect::<Vec<_>>()
                                 .join("::");
-                            inputs.push((Text::from("s"), Operand::Constant(MirConstant::Function(sym_name.into()))));
+                            inputs.push((
+                                Text::from("s"),
+                                Operand::Constant(MirConstant::Function(sym_name.into())),
+                            ));
                         }
                         verum_ast::expr::AsmOperandKind::Clobber { reg } => {
                             clobbers.push(reg.clone());
@@ -6021,18 +6134,21 @@ impl LoweringContext {
                 if *op == verum_ast::BinOp::Assign {
                     // Simple assignment: (a, b) = expr
                     // Lower pattern binding using the existing pattern matching infrastructure
-                    let _binding_local = self.lower_pattern_binding(pattern, Place::local(value_temp), block)?;
+                    let _binding_local =
+                        self.lower_pattern_binding(pattern, Place::local(value_temp), block)?;
                 } else {
                     // Compound assignment: (a, b) += (da, db)
                     // Each pattern element must be an existing variable that gets updated
-                    self.lower_compound_destructuring(pattern, Place::local(value_temp), op, block)?;
+                    self.lower_compound_destructuring(
+                        pattern,
+                        Place::local(value_temp),
+                        op,
+                        block,
+                    )?;
                 }
 
                 // Assignment doesn't produce a value, assign unit to dest
-                self.push_statement(
-                    block,
-                    MirStatement::Assign(dest, Rvalue::NullConstant),
-                );
+                self.push_statement(block, MirStatement::Assign(dest, Rvalue::NullConstant));
 
                 Ok(block)
             }
@@ -6047,9 +6163,7 @@ impl LoweringContext {
             }
 
             // Named arguments - lower the value expression
-            ExprKind::NamedArg { value, .. } => {
-                self.lower_expr(value, current_block, dest)
-            }
+            ExprKind::NamedArg { value, .. } => self.lower_expr(value, current_block, dest),
 
             // Copattern body: coinductive value definition via observations.
             // In MIR, lower the copattern body as an opaque aggregate —
@@ -6749,11 +6863,7 @@ impl LoweringContext {
             let body_block = if let Some(guard) = arm.guard.as_ref() {
                 // Lower guard
                 let guard_temp = self.new_temp(MirType::Bool);
-                let guard_block = self.lower_expr(
-                    guard,
-                    arm_block,
-                    Place::local(guard_temp),
-                )?;
+                let guard_block = self.lower_expr(guard, arm_block, Place::local(guard_temp))?;
 
                 let guard_pass = self.new_block();
                 let guard_fail = self.new_block();
@@ -7194,10 +7304,7 @@ impl LoweringContext {
                     None => MirType::Infer,
                 };
 
-                if let PatternKind::Ident {
-                    name, ..
-                } = &pattern.kind
-                {
+                if let PatternKind::Ident { name, .. } = &pattern.kind {
                     let local = self.new_local(name.name.clone(), local_ty, LocalKind::Var);
 
                     // Mark storage live
@@ -7366,10 +7473,7 @@ impl LoweringContext {
                     self.lower_expr(scope_block, block, Place::local(block_result))?;
 
                 // 4. Emit ContextUnprovide after block completes
-                self.push_statement(
-                    after_block,
-                    MirStatement::ContextUnprovide { context_name },
-                );
+                self.push_statement(after_block, MirStatement::ContextUnprovide { context_name });
 
                 Ok(after_block)
             }
@@ -7404,9 +7508,7 @@ impl LoweringContext {
                 Ok(result)
             }
 
-            PatternKind::Ident {
-                name, ..
-            } => {
+            PatternKind::Ident { name, .. } => {
                 // Bind name to source
                 let local = self.new_local(name.name.clone(), MirType::Infer, LocalKind::Var);
                 self.push_statement(block, MirStatement::StorageLive(local));
@@ -8009,7 +8111,8 @@ impl LoweringContext {
             PatternKind::Paren(inner) => {
                 // Parenthesized pattern: unwrap and match inner
                 self.lower_pattern_binding(inner, source, block)
-            }            PatternKind::View {
+            }
+            PatternKind::View {
                 view_function,
                 pattern: inner,
             } => {
@@ -8052,7 +8155,11 @@ impl LoweringContext {
                 self.lower_pattern_binding(inner, Place::local(view_temp), success_block)
             }
 
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 // Active pattern: call the pattern function and branch on its result.
                 //
 
@@ -8084,7 +8191,8 @@ impl LoweringContext {
                 let mut param_block = block;
                 for param_expr in params.iter() {
                     let param_temp = self.new_temp(MirType::Infer);
-                    param_block = self.lower_expr(param_expr, param_block, Place::local(param_temp))?;
+                    param_block =
+                        self.lower_expr(param_expr, param_block, Place::local(param_temp))?;
                     call_args.push(Operand::Copy(Place::local(param_temp)));
                 }
 
@@ -8268,7 +8376,10 @@ impl LoweringContext {
                 let type_tag = self.new_temp(MirType::Int);
                 self.push_statement(
                     block,
-                    MirStatement::Assign(Place::local(type_tag), Rvalue::Discriminant(source.clone())),
+                    MirStatement::Assign(
+                        Place::local(type_tag),
+                        Rvalue::Discriminant(source.clone()),
+                    ),
                 );
 
                 // Get the expected type tag for the test type by treating type name as a path
@@ -8300,7 +8411,8 @@ impl LoweringContext {
                 );
 
                 // Create the binding variable with the narrowed type
-                let local = self.new_local(binding.name.clone(), target_type.clone(), LocalKind::Var);
+                let local =
+                    self.new_local(binding.name.clone(), target_type.clone(), LocalKind::Var);
                 self.push_statement(block, MirStatement::StorageLive(local));
 
                 // Cast the source to the target type and assign to binding
@@ -8318,7 +8430,10 @@ impl LoweringContext {
                 Ok(result)
             }
 
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream pattern: stream[first, second, ...rest]
                 // Matches elements from an iterator/generator and optionally binds the rest.
                 //
@@ -8355,7 +8470,8 @@ impl LoweringContext {
                     );
 
                     // Recursively bind the element pattern
-                    let pat_result = self.lower_pattern_binding(pat, Place::local(elem_temp), block)?;
+                    let pat_result =
+                        self.lower_pattern_binding(pat, Place::local(elem_temp), block)?;
 
                     // Combine with result: result = result && pat_result
                     let and_temp = self.new_temp(MirType::Bool);
@@ -8383,11 +8499,8 @@ impl LoweringContext {
                 if let verum_common::Maybe::Some(rest_ident) = rest {
                     // The remaining iterator is bound to the rest variable
                     // After consuming head elements, the iterator position is advanced
-                    let local = self.new_local(
-                        rest_ident.name.clone(),
-                        MirType::Infer,
-                        LocalKind::Var,
-                    );
+                    let local =
+                        self.new_local(rest_ident.name.clone(), MirType::Infer, LocalKind::Var);
                     self.push_statement(block, MirStatement::StorageLive(local));
                     self.push_statement(
                         block,
@@ -8487,7 +8600,12 @@ impl LoweringContext {
                             Rvalue::Use(Operand::Copy(source.clone().with_field(i))),
                         ),
                     );
-                    self.lower_compound_destructuring_element(pat, Place::local(elem_temp), &bin_op, block)?;
+                    self.lower_compound_destructuring_element(
+                        pat,
+                        Place::local(elem_temp),
+                        &bin_op,
+                        block,
+                    )?;
                 }
                 Ok(())
             }
@@ -8576,7 +8694,10 @@ impl LoweringContext {
                 // Store result back to variable
                 self.push_statement(
                     block,
-                    MirStatement::Assign(var_place, Rvalue::Use(Operand::Move(Place::local(result_temp)))),
+                    MirStatement::Assign(
+                        var_place,
+                        Rvalue::Use(Operand::Move(Place::local(result_temp))),
+                    ),
                 );
 
                 Ok(())
@@ -8836,7 +8957,11 @@ impl LoweringContext {
                 Ok(result)
             }
 
-            PatternKind::Range { start, end, inclusive } => {
+            PatternKind::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 // Test if value is within range (Range uses Literals)
                 let mut result = self.new_temp(MirType::Bool);
                 self.push_statement(
@@ -8962,7 +9087,10 @@ impl LoweringContext {
                 let type_tag = self.new_temp(MirType::Int);
                 self.push_statement(
                     block,
-                    MirStatement::Assign(Place::local(type_tag), Rvalue::Discriminant(source.clone())),
+                    MirStatement::Assign(
+                        Place::local(type_tag),
+                        Rvalue::Discriminant(source.clone()),
+                    ),
                 );
 
                 // Get the expected type tag for the test type by treating type name as a path

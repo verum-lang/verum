@@ -228,13 +228,24 @@ impl std::fmt::Display for CacheError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io { op, path, source } => {
-                write!(f, "script-cache {op} failed on {}: {source}", path.display())
+                write!(
+                    f,
+                    "script-cache {op} failed on {}: {source}",
+                    path.display()
+                )
             }
             Self::InvalidKey { name } => {
-                write!(f, "script-cache: directory name {name:?} is not a valid 64-char blake3 hex digest")
+                write!(
+                    f,
+                    "script-cache: directory name {name:?} is not a valid 64-char blake3 hex digest"
+                )
             }
             Self::InvalidMeta { path, reason } => {
-                write!(f, "script-cache: meta.toml at {} is invalid: {reason}", path.display())
+                write!(
+                    f,
+                    "script-cache: meta.toml at {} is invalid: {reason}",
+                    path.display()
+                )
             }
         }
     }
@@ -388,7 +399,8 @@ impl ScriptCache {
             last_accessed_at: now,
             vbc_len: vbc.len() as u64,
         };
-        let meta_str = toml::to_string(&meta).expect("CacheMeta serialise — pure data, never fails");
+        let meta_str =
+            toml::to_string(&meta).expect("CacheMeta serialise — pure data, never fails");
         let meta_path = tmp.join("meta.toml");
         atomic_write_string(&meta_path, &meta_str)
             .map_err(io_err("write meta.toml", &meta_path))?;
@@ -504,10 +516,7 @@ impl ScriptCache {
         }
         // Sort oldest-access first so we evict from the front.
         entries.sort_by_key(|(_, m)| m.last_accessed_at);
-        let mut total: u64 = entries
-            .iter()
-            .map(|(_, m)| m.vbc_len + 256)
-            .sum();
+        let mut total: u64 = entries.iter().map(|(_, m)| m.vbc_len + 256).sum();
         let mut evicted = 0usize;
         for (key, meta) in entries {
             if total <= max_bytes {
@@ -823,15 +832,13 @@ mod tests {
         cache.store(key, b"v", "p", 1, "0.6.0").unwrap();
         // Manually backdate the last-access time.
         let meta_path = cache.entry_dir(key).join("meta.toml");
-        let mut meta: CacheMeta =
-            toml::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap();
+        let mut meta: CacheMeta = toml::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap();
         let backdated = 1u64;
         meta.last_accessed_at = backdated;
         fs::write(&meta_path, toml::to_string(&meta).unwrap()).unwrap();
         // Lookup must refresh.
         let _ = cache.lookup(key).unwrap().expect("hit");
-        let after: CacheMeta =
-            toml::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap();
+        let after: CacheMeta = toml::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap();
         assert!(
             after.last_accessed_at > backdated,
             "lookup should refresh last_accessed_at: {} -> {}",

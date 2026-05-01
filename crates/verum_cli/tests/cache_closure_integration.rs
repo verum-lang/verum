@@ -53,14 +53,7 @@ fn run(args: &[&str]) -> std::process::Output {
 #[test]
 fn cache_stat_empty_cache_reports_zero_entries() {
     let (_t, root) = fresh_root();
-    let out = run(&[
-        "cache-closure",
-        "stat",
-        "--root",
-        &root,
-        "--format",
-        "json",
-    ]);
+    let out = run(&["cache-closure", "stat", "--root", &root, "--format", "json"]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
@@ -72,14 +65,7 @@ fn cache_stat_empty_cache_reports_zero_entries() {
 #[test]
 fn cache_list_empty_cache_succeeds() {
     let (_t, root) = fresh_root();
-    let out = run(&[
-        "cache-closure",
-        "list",
-        "--root",
-        &root,
-        "--format",
-        "json",
-    ]);
+    let out = run(&["cache-closure", "list", "--root", &root, "--format", "json"]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
@@ -284,13 +270,7 @@ fn cache_decide_kernel_version_drift_changes_hash() {
 #[test]
 fn cache_get_missing_theorem_errors() {
     let (_t, root) = fresh_root();
-    let out = run(&[
-        "cache-closure",
-        "get",
-        "thm.absent",
-        "--root",
-        &root,
-    ]);
+    let out = run(&["cache-closure", "get", "thm.absent", "--root", &root]);
     assert!(
         !out.status.success(),
         "get on missing theorem must produce non-zero exit"
@@ -325,28 +305,14 @@ fn cache_clear_empty_succeeds() {
 #[test]
 fn cache_stat_rejects_unknown_format() {
     let (_t, root) = fresh_root();
-    let out = run(&[
-        "cache-closure",
-        "stat",
-        "--root",
-        &root,
-        "--format",
-        "yaml",
-    ]);
+    let out = run(&["cache-closure", "stat", "--root", &root, "--format", "yaml"]);
     assert!(!out.status.success());
 }
 
 #[test]
 fn cache_list_rejects_unknown_format() {
     let (_t, root) = fresh_root();
-    let out = run(&[
-        "cache-closure",
-        "list",
-        "--root",
-        &root,
-        "--format",
-        "yaml",
-    ]);
+    let out = run(&["cache-closure", "list", "--root", &root, "--format", "yaml"]);
     assert!(!out.status.success());
 }
 
@@ -396,24 +362,10 @@ fn cache_stat_entries_matches_list_count_after_decides() {
         ]);
         assert!(out.status.success());
     }
-    let stat_out = run(&[
-        "cache-closure",
-        "stat",
-        "--root",
-        &root,
-        "--format",
-        "json",
-    ]);
+    let stat_out = run(&["cache-closure", "stat", "--root", &root, "--format", "json"]);
     let stat: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&stat_out.stdout)).unwrap();
-    let list_out = run(&[
-        "cache-closure",
-        "list",
-        "--root",
-        &root,
-        "--format",
-        "json",
-    ]);
+    let list_out = run(&["cache-closure", "list", "--root", &root, "--format", "json"]);
     let list: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&list_out.stdout)).unwrap();
     assert_eq!(stat["entries"], list["count"]);

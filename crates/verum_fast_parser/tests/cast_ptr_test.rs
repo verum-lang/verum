@@ -219,7 +219,10 @@ theorem test(n: Int)
     match parser.parse_module() {
         Ok(_) => println!("test_theorem_forall_literal_cmp_in_negation: SUCCESS"),
         Err(e) => {
-            println!("test_theorem_forall_literal_cmp_in_negation: ERROR: {:?}", e);
+            println!(
+                "test_theorem_forall_literal_cmp_in_negation: ERROR: {:?}",
+                e
+            );
             panic!("test_theorem_forall_literal_cmp_in_negation failed");
         }
     }
@@ -426,7 +429,7 @@ fn test_cast_to_ptr_simple() {
     let file_id = FileId::new(0);
     let lexer = Lexer::new(content, file_id);
     let tokens = lexer.tokenize().unwrap();
-    
+
     let mut parser = RecursiveParser::new(&tokens, file_id);
     match parser.parse_module() {
         Ok(_) => println!("test_cast_to_ptr_simple: SUCCESS"),
@@ -459,7 +462,7 @@ fn test_cast_to_ptr() {
     let file_id = FileId::new(0);
     let lexer = Lexer::new(content, file_id);
     let tokens = lexer.tokenize().unwrap();
-    
+
     let mut parser = RecursiveParser::new(&tokens, file_id);
     match parser.parse_module() {
         Ok(_) => println!("test_cast_to_ptr: SUCCESS"),
@@ -474,12 +477,12 @@ fn test_cast_in_block_alone() {
     let file_id = FileId::new(0);
     let lexer = Lexer::new(content, file_id);
     let tokens = lexer.tokenize().unwrap();
-    
+
     println!("Tokens for let statement:");
     for (i, token) in tokens.iter().enumerate() {
         println!("  {}: {:?}", i, token.kind);
     }
-    
+
     // Try to parse just an expression
     let mut parser = RecursiveParser::new(&tokens, file_id);
     // First consume 'let x ='
@@ -504,13 +507,16 @@ fn test_lift_parsing() {
 
     let mut parser = RecursiveParser::new(&tokens, file_id);
     let expr = parser.parse_expr().expect("Should parse lift");
-    
+
     match &expr.kind {
         verum_ast::ExprKind::Lift { expr: _ } => {
             println!("Correctly parsed as Lift with inner expr");
         }
         other => {
-            panic!("Expected ExprKind::Lift, got {:?}", std::mem::discriminant(other));
+            panic!(
+                "Expected ExprKind::Lift, got {:?}",
+                std::mem::discriminant(other)
+            );
         }
     }
 }
@@ -534,9 +540,9 @@ meta fn bad_lift(val: Int) -> Int {
 
     let mut parser = RecursiveParser::new(&tokens, file_id);
     let item = parser.parse_item().expect("Should parse meta fn");
-    
+
     println!("Parsed item: {:?}", std::mem::discriminant(&item.kind));
-    
+
     if let verum_ast::ItemKind::Function(func) = &item.kind {
         if let verum_common::Maybe::Some(body) = &func.body {
             println!("Function body: {:?}", std::mem::discriminant(body));
@@ -544,23 +550,38 @@ meta fn bad_lift(val: Int) -> Int {
             // Check if the body is a Block containing a Lift
             if let verum_ast::FunctionBody::Block(block) = body {
                 if let verum_common::Maybe::Some(tail) = &block.expr {
-                    println!("Block tail expr kind: {:?}", std::mem::discriminant(&tail.kind));
+                    println!(
+                        "Block tail expr kind: {:?}",
+                        std::mem::discriminant(&tail.kind)
+                    );
                     if let verum_ast::ExprKind::Lift { expr: inner } = &tail.kind {
-                        println!("Inner lift expr kind: {:?}", std::mem::discriminant(&inner.kind));
+                        println!(
+                            "Inner lift expr kind: {:?}",
+                            std::mem::discriminant(&inner.kind)
+                        );
                         println!("SUCCESS: Body correctly has Lift as tail expression");
                     } else {
-                        panic!("Expected Lift in tail, got {:?}", std::mem::discriminant(&tail.kind));
+                        panic!(
+                            "Expected Lift in tail, got {:?}",
+                            std::mem::discriminant(&tail.kind)
+                        );
                     }
                 } else {
                     panic!("Block has no tail expression");
                 }
             } else {
-                panic!("Expected Block body, got {:?}", std::mem::discriminant(body));
+                panic!(
+                    "Expected Block body, got {:?}",
+                    std::mem::discriminant(body)
+                );
             }
         } else {
             panic!("Function has no body");
         }
     } else {
-        panic!("Expected Function, got {:?}", std::mem::discriminant(&item.kind));
+        panic!(
+            "Expected Function, got {:?}",
+            std::mem::discriminant(&item.kind)
+        );
     }
 }

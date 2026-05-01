@@ -16,8 +16,8 @@
 //! Per CLAUDE.md standards - tests in tests/ directory
 
 use verum_ast::Span;
-use verum_compiler::literal_parsers::parse_uri;
 use verum_common::Text;
+use verum_compiler::literal_parsers::parse_uri;
 
 #[test]
 fn test_parse_https_url() {

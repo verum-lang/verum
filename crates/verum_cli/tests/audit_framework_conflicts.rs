@@ -92,10 +92,7 @@ public fn main() {}
 "#,
     );
     let out = run_verum(&["audit", "--framework-conflicts"], &dir);
-    assert!(
-        !out.status.success(),
-        "conflict must produce non-zero exit"
-    );
+    assert!(!out.status.success(), "conflict must produce non-zero exit");
     let combined = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),

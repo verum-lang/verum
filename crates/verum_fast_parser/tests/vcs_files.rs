@@ -5,7 +5,9 @@ use verum_lexer::Lexer;
 fn parse_content(_name: &str, content: &str) -> Result<(), String> {
     let file_id = FileId::new(0);
     let lexer = Lexer::new(content, file_id);
-    let tokens = lexer.tokenize().map_err(|e| format!("LEXER ERROR: {:?}", e))?;
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| format!("LEXER ERROR: {:?}", e))?;
     let mut parser = RecursiveParser::new(&tokens, file_id);
     match parser.parse_module() {
         Ok(_) => Ok(()),
@@ -14,7 +16,11 @@ fn parse_content(_name: &str, content: &str) -> Result<(), String> {
             let error_start: usize = e.span.start as usize;
             let start: usize = error_start.saturating_sub(100);
             let end: usize = (error_start + 100).min(content.len());
-            eprintln!("Error at position {}, context: '{}'", error_start, &content[start..end]);
+            eprintln!(
+                "Error at position {}, context: '{}'",
+                error_start,
+                &content[start..end]
+            );
             eprintln!("Tokens around error:");
             for (i, tok) in tokens.iter().enumerate() {
                 let tok_start: usize = tok.span.start as usize;
@@ -319,7 +325,9 @@ fn test_closures_vr() {
 
 #[test]
 fn test_select_expression_comprehensive_vr() {
-    let content = include_str!("../../../vcs/specs/L0-critical/parser/expressions/async/select_expression.vr");
+    let content = include_str!(
+        "../../../vcs/specs/L0-critical/parser/expressions/async/select_expression.vr"
+    );
     match parse_content("select_expression.vr", content) {
         Ok(_) => println!("SUCCESS"),
         Err(e) => panic!("{}", e),
@@ -595,7 +603,7 @@ fn test_debug_token_stream() {
         println!("{:?}", tok);
     }
     println!("=== End tokens ===\n");
-    
+
     // Now try parsing
     let mut parser = verum_fast_parser::RecursiveParser::new(&tokens, file_id);
     match parser.parse_module() {
@@ -642,7 +650,9 @@ fn test_where_clauses_vr() {
 
 #[test]
 fn test_recursive_descent_patterns_vr() {
-    let content = include_str!("../../../vcs/specs/parser/success/self-hosting/recursive_descent_patterns.vr");
+    let content = include_str!(
+        "../../../vcs/specs/parser/success/self-hosting/recursive_descent_patterns.vr"
+    );
     match parse_content("recursive_descent_patterns.vr", content) {
         Ok(_) => println!("SUCCESS"),
         Err(e) => panic!("{}", e),
@@ -675,7 +685,8 @@ fn test_match_path_pattern() {
     }
 
     // Test: record pattern then let statement
-    let content3 = r#"fn test() { match x { Some(Token { kind: If, .. }) => { let y = 1; }, _ => {} } }"#;
+    let content3 =
+        r#"fn test() { match x { Some(Token { kind: If, .. }) => { let y = 1; }, _ => {} } }"#;
     match parse_content("record_then_let", content3) {
         Ok(_) => println!("record_then_let: SUCCESS"),
         Err(e) => panic!("record_then_let: {}", e),
@@ -716,7 +727,8 @@ fn test_context_protocols_vr() {
 
 #[test]
 fn test_function_type_advanced_contexts_vr() {
-    let content = include_str!("../../../vcs/specs/parser/success/types/function_type_advanced_contexts.vr");
+    let content =
+        include_str!("../../../vcs/specs/parser/success/types/function_type_advanced_contexts.vr");
     match parse_content("types/function_type_advanced_contexts.vr", content) {
         Ok(_) => println!("SUCCESS"),
         Err(e) => panic!("{}", e),
@@ -728,7 +740,8 @@ fn test_function_type_advanced_contexts_vr() {
 
 #[test]
 fn test_ffi_declarations_vr() {
-    let content = include_str!("../../../vcs/specs/parser/success/declarations/ffi_declarations.vr");
+    let content =
+        include_str!("../../../vcs/specs/parser/success/declarations/ffi_declarations.vr");
     match parse_content("declarations/ffi_declarations.vr", content) {
         Ok(_) => println!("SUCCESS"),
         Err(e) => panic!("{}", e),
@@ -814,4 +827,3 @@ fn test_refinement_syntax() {
         Err(e) => println!("named_ref: {}", e),
     }
 }
-

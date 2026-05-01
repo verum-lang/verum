@@ -19,7 +19,9 @@ use verum_ast::{FileId, ItemKind, TypeDeclBody};
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 
-fn parse_source(source: &str) -> Result<Vec<verum_ast::Item>, verum_common::List<verum_fast_parser::ParseError>> {
+fn parse_source(
+    source: &str,
+) -> Result<Vec<verum_ast::Item>, verum_common::List<verum_fast_parser::ParseError>> {
     let file_id = FileId::new(0);
     let lexer = Lexer::new(source, file_id);
     let parser = VerumParser::new();

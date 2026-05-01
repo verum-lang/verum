@@ -148,54 +148,52 @@ pub use verum_mlir;
 
 // Re-export MLIR types for direct usage
 pub use mlir::{
+    CbgrEliminationPass,
+    CbgrEliminationStats,
+    ContextMonomorphizationPass,
+    GpuLoweringConfig,
+    GpuLoweringStats,
+    GpuTarget,
+    MlirCodegen,
+    MlirConfig,
     // Context and config
-    MlirContext, MlirCodegen, MlirConfig,
+    MlirContext,
     MlirError,
 
-    // Dialect
-    VerumDialect,
+    PassConfig,
+    // Passes
+    PassPipeline,
+    RefinementPropagationPass,
+    VbcMlirError,
 
     // VBC → MLIR lowering (GPU path) - primary API
-    VbcToMlirGpuLowering, GpuLoweringConfig, GpuLoweringStats, GpuTarget, VbcMlirError,
-
-    // Passes
-    PassPipeline, PassConfig,
-    CbgrEliminationPass, CbgrEliminationStats,
-    ContextMonomorphizationPass,
-    RefinementPropagationPass,
+    VbcToMlirGpuLowering,
+    // Dialect
+    VerumDialect,
 };
 
 // Re-export dialect types
 pub use mlir::dialect::{
     ops::{
-        CbgrAllocOp, CbgrCheckOp, CbgrDerefOp, CbgrDropOp,
-        ContextGetOp, ContextProvideOp,
-        SpawnOp, AwaitOp, SelectOp,
-        RefinementCheckOp,
-        ListNewOp, ListPushOp, ListGetOp,
+        AwaitOp, CbgrAllocOp, CbgrCheckOp, CbgrDerefOp, CbgrDropOp, ContextGetOp, ContextProvideOp,
+        ListGetOp, ListNewOp, ListPushOp, RefinementCheckOp, SelectOp, SpawnOp,
     },
     types::{
-        VerumType, RefType, RefTier,
-        ListType, MapType, SetType, TextType, MaybeType,
-        FutureType, ContextType,
+        ContextType, FutureType, ListType, MapType, MaybeType, RefTier, RefType, SetType, TextType,
+        VerumType,
     },
 };
 
 // Re-export JIT
 #[cfg(feature = "jit")]
 pub use mlir::jit::{
-    JitEngine, JitConfig, JitStats, JitStatsSummary, JitCompiler,
-    JitArg, JitArgs, JitReturn, CompiledFunction,
-    CallbackRegistry, JitCallback,
-    SymbolResolver, SymbolResolverStats, SymbolInfo, SymbolMetadata,
-    SymbolCategory, FfiType,
-    IncrementalCache, CacheConfig, CacheEntry, CacheOptions,
-    CacheStats, CacheStatsSummary, DependencyTracker,
-    ContentHash, ContentHasher,
-    ReplSession, ReplConfig, SessionId, EvalResult, Binding,
-    HistoryEntry, ReplCommand, SessionStats, SessionStatsSummary,
-    HotReloader, HotReloadConfig, HotFunction, FunctionVersion,
-    HotReloadStats, HotReloadStatsSummary, SignatureHasher,
+    Binding, CacheConfig, CacheEntry, CacheOptions, CacheStats, CacheStatsSummary,
+    CallbackRegistry, CompiledFunction, ContentHash, ContentHasher, DependencyTracker, EvalResult,
+    FfiType, FunctionVersion, HistoryEntry, HotFunction, HotReloadConfig, HotReloadStats,
+    HotReloadStatsSummary, HotReloader, IncrementalCache, JitArg, JitArgs, JitCallback,
+    JitCompiler, JitConfig, JitEngine, JitReturn, JitStats, JitStatsSummary, ReplCommand,
+    ReplConfig, ReplSession, SessionId, SessionStats, SessionStatsSummary, SignatureHasher,
+    SymbolCategory, SymbolInfo, SymbolMetadata, SymbolResolver, SymbolResolverStats,
 };
 
 // Re-export AOT
@@ -204,36 +202,45 @@ pub use mlir::aot::{AotCompiler, AotConfig};
 
 // Re-export LLVM-based VBC lowering (CPU path)
 pub use llvm::{
-    // Main entry point
-    VbcToLlvmLowering,
-    LoweringConfig as LlvmLoweringConfig,
-    LoweringStats as LlvmLoweringStats,
-    // Error types
-    LlvmLoweringError,
-    // Type lowering
-    TypeLowering as LlvmTypeLowering,
-    RefTier as LlvmRefTier,
     // CBGR lowering
     CbgrLowering as LlvmCbgrLowering,
     CbgrStats as LlvmCbgrStats,
     // Function context
     FunctionContext as LlvmFunctionContext,
+    // Error types
+    LlvmLoweringError,
+    LoweringConfig as LlvmLoweringConfig,
+    LoweringStats as LlvmLoweringStats,
+    RefTier as LlvmRefTier,
+    // Type lowering
+    TypeLowering as LlvmTypeLowering,
+    // Main entry point
+    VbcToLlvmLowering,
 };
 
 // Re-export linking types (V-LLSI no-libc linking)
 pub use link::{
-    // Session builder
-    LinkSession, PreparedLink, LinkOutput,
+    InputFile,
     // Configuration
-    LinkConfig, OutputFormat, InputFile,
-    // LTO
-    LtoConfig, LtoMode, ThinLtoCache,
-    // Platform-specific no-libc linking
-    Platform, NoLibcConfig,
+    LinkConfig,
     // Errors
-    LinkError, LinkResult,
+    LinkError,
+    LinkOutput,
+    LinkResult,
+    // Session builder
+    LinkSession,
     // Linker flavor
-    LinkerFlavor, LinkerResult,
+    LinkerFlavor,
+    LinkerResult,
+    // LTO
+    LtoConfig,
+    LtoMode,
+    NoLibcConfig,
+    OutputFormat,
+    // Platform-specific no-libc linking
+    Platform,
+    PreparedLink,
+    ThinLtoCache,
 };
 
 // Type aliases for backward compatibility with older code

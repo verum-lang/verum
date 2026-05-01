@@ -27,13 +27,13 @@ use verum_ast::{
     literal::{IntLit, Literal, LiteralKind},
     span::Span,
 };
+use verum_common::{List, Map, Maybe};
 use verum_smt::proof_term_unified::ProofTerm;
 use verum_smt::{
     ComplexityThresholds, CounterExample, CounterExampleCategorizer, CounterExampleValue,
     FailureCategory, ProofExporter, ProofExtractor, ProofMinimizer, SmtCheckMode, SmtLibExporter,
     StrategySelector, TacticKind,
 };
-use verum_common::{List, Map, Maybe};
 
 // ==================== Test Helpers ====================
 

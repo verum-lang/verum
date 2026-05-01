@@ -20,7 +20,9 @@ pub enum VbcError {
     InvalidMagic([u8; 4]),
 
     /// Unsupported VBC version.
-    #[error("unsupported VBC version: {major}.{minor} (supported: {supported_major}.{supported_minor})")]
+    #[error(
+        "unsupported VBC version: {major}.{minor} (supported: {supported_major}.{supported_minor})"
+    )]
     UnsupportedVersion {
         /// File major version.
         major: u16,
@@ -68,7 +70,9 @@ pub enum VbcError {
     /// `Vec::with_capacity` allocations before any entry is read.
     /// Each module-level table (types / functions / constants /
     /// specializations) carries its own architectural upper bound.
-    #[error("table '{field}' count {count} exceeds maximum {max} — refusing memory-amplification request")]
+    #[error(
+        "table '{field}' count {count} exceeds maximum {max} — refusing memory-amplification request"
+    )]
     TableTooLarge {
         /// Header field name (e.g. `type_table_count`).
         field: &'static str,
@@ -114,7 +118,9 @@ pub enum VbcError {
     InvalidFunctionId(u32),
 
     /// Invalid bytecode offset for function.
-    #[error("function {func:?} bytecode offset {offset:#x} exceeds bytecode section size {size:#x}")]
+    #[error(
+        "function {func:?} bytecode offset {offset:#x} exceeds bytecode section size {size:#x}"
+    )]
     InvalidBytecodeOffset {
         /// Function ID.
         func: FunctionId,

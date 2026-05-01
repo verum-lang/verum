@@ -127,8 +127,7 @@ fn walk_into(tracked: &HashSet<Text>, expr: &Expr, out: &mut UsageMap) {
         }
 
         ExprKind::Block(block) => {
-            *out = std::mem::take(out)
-                .merge_sequential(walk_block_into(tracked, block));
+            *out = std::mem::take(out).merge_sequential(walk_block_into(tracked, block));
         }
 
         ExprKind::Closure { params, body, .. } => {
@@ -145,11 +144,12 @@ fn walk_into(tracked: &HashSet<Text>, expr: &Expr, out: &mut UsageMap) {
             }
         }
 
-        ExprKind::Field { expr: receiver, .. } => {
-            walk_into(tracked, receiver, out)
-        }
+        ExprKind::Field { expr: receiver, .. } => walk_into(tracked, receiver, out),
 
-        ExprKind::Index { expr: receiver, index } => {
+        ExprKind::Index {
+            expr: receiver,
+            index,
+        } => {
             walk_into(tracked, receiver, out);
             walk_into(tracked, index, out);
         }
@@ -169,10 +169,7 @@ fn walk_into(tracked: &HashSet<Text>, expr: &Expr, out: &mut UsageMap) {
     }
 }
 
-fn walk_block_into(
-    tracked: &HashSet<Text>,
-    block: &verum_ast::expr::Block,
-) -> UsageMap {
+fn walk_block_into(tracked: &HashSet<Text>, block: &verum_ast::expr::Block) -> UsageMap {
     let mut acc = UsageMap::new();
     let mut active = tracked.clone();
     for stmt in block.stmts.iter() {
@@ -196,7 +193,9 @@ fn walk_block_into(
 fn pattern_binders(pat: &verum_ast::pattern::Pattern, out: &mut Vec<Text>) {
     use verum_ast::pattern::PatternKind;
     match &pat.kind {
-        PatternKind::Ident { name, subpattern, .. } => {
+        PatternKind::Ident {
+            name, subpattern, ..
+        } => {
             out.push(Text::from(name.name.as_str()));
             if let verum_common::Maybe::Some(sub) = subpattern {
                 pattern_binders(sub, out);
@@ -219,10 +218,7 @@ fn strip_pattern_binders(set: &mut HashSet<Text>, pat: &verum_ast::pattern::Patt
     }
 }
 
-fn remove_pattern_binders(
-    set: &HashSet<Text>,
-    pat: &verum_ast::pattern::Pattern,
-) -> HashSet<Text> {
+fn remove_pattern_binders(set: &HashSet<Text>, pat: &verum_ast::pattern::Pattern) -> HashSet<Text> {
     let mut clone = set.clone();
     strip_pattern_binders(&mut clone, pat);
     clone

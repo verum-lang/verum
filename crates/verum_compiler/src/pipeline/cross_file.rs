@@ -34,7 +34,7 @@ use std::time::Instant;
 use anyhow::{Context as AnyhowContext, Result};
 use tracing::{debug, info, warn};
 
-use verum_ast::{decl::ItemKind, FileId, Module, SourceFile};
+use verum_ast::{FileId, Module, SourceFile, decl::ItemKind};
 use verum_common::{List, Map, Maybe, Shared, Text};
 use verum_diagnostics::{DiagnosticBuilder, Severity};
 use verum_fast_parser::VerumParser;
@@ -44,13 +44,11 @@ use verum_types::TypeChecker;
 
 use crate::phases::type_error_to_diagnostic;
 
-use super::{macros::MacroExpander, should_parse_as_script, CompilationPipeline};
+use super::{CompilationPipeline, macros::MacroExpander, should_parse_as_script};
 
 impl<'s> CompilationPipeline<'s> {
-
     /// Expand macros in a module (Pass 2)
     pub(super) fn expand_module(&mut self, path: &Text, module: &mut Module) -> Result<()> {
-
         debug!("Expanding macros in module: {}", path.as_str());
 
         // Create a macro expander visitor
@@ -108,7 +106,11 @@ impl<'s> CompilationPipeline<'s> {
 
         // Propagate first error if any expansions failed
         if let Some((macro_name, error)) = expansion_errors.into_iter().next() {
-            return Err(anyhow::anyhow!("Macro expansion failed for '{}': {}", macro_name, error));
+            return Err(anyhow::anyhow!(
+                "Macro expansion failed for '{}': {}",
+                macro_name,
+                error
+            ));
         }
 
         Ok(())
@@ -216,7 +218,8 @@ impl<'s> CompilationPipeline<'s> {
                     // "core.*" and "std.*" are canonical prefixes; bare module names
                     // (e.g., "sys.*", "io.*") are shorthand for "core.sys.*", "core.io.*".
                     let first_segment = import_path.split('.').next().unwrap_or("");
-                    let is_stdlib_import = matches!(first_segment,
+                    let is_stdlib_import = matches!(
+                        first_segment,
                         "std" | "core"
                         | "sys" | "mem" | "base" | "intrinsics" | "simd" | "math"
                         | "text" | "collections"
@@ -249,7 +252,11 @@ impl<'s> CompilationPipeline<'s> {
                             workspace_root.join("stdlib")
                         };
                         if !stdlib_dir.exists() {
-                            debug!("Stdlib directory not found at {:?} or {:?}", workspace_root.join("core"), workspace_root.join("stdlib"));
+                            debug!(
+                                "Stdlib directory not found at {:?} or {:?}",
+                                workspace_root.join("core"),
+                                workspace_root.join("stdlib")
+                            );
                             continue;
                         }
                         // Strip stdlib prefixes for file path resolution
@@ -339,7 +346,8 @@ impl<'s> CompilationPipeline<'s> {
 
                             // Apply @cfg conditional compilation filtering
                             let cfg_evaluator = self.session.cfg_evaluator();
-                            imported_module.items = cfg_evaluator.filter_items(&imported_module.items);
+                            imported_module.items =
+                                cfg_evaluator.filter_items(&imported_module.items);
 
                             // Header validation at the
                             // import-on-demand parse path. The
@@ -428,10 +436,8 @@ impl<'s> CompilationPipeline<'s> {
                             if !is_stdlib_import {
                                 let module_key = Text::from(resolved_path.as_str());
                                 if !self.project_modules.contains_key(&module_key) {
-                                    self.project_modules.insert(
-                                        module_key,
-                                        Arc::new(imported_module.clone()),
-                                    );
+                                    self.project_modules
+                                        .insert(module_key, Arc::new(imported_module.clone()));
                                 }
                             }
 
@@ -781,7 +787,10 @@ impl<'s> CompilationPipeline<'s> {
         // Use the input file's stem as the cog identifier (stable for
         // single-file builds). Manifest-based builds can override this
         // later via TypeChecker::set_current_cog directly.
-        let cog_name = self.session.options().input
+        let cog_name = self
+            .session
+            .options()
+            .input
             .file_stem()
             .and_then(|s| s.to_str())
             .map(verum_common::Text::from)
@@ -854,14 +863,18 @@ impl<'s> CompilationPipeline<'s> {
             // Sort for deterministic iteration (self.modules is a HashMap):
             // shallower module keys come first so top-level stdlib functions beat
             // nested-module helpers when short names collide.
-            let mut stdlib_entries: Vec<_> = self.modules.iter()
+            let mut stdlib_entries: Vec<_> = self
+                .modules
+                .iter()
                 .filter(|(k, _)| k.as_str().starts_with("core"))
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             stdlib_entries.sort_by(|(a, _), (b, _)| {
                 let depth_a = a.as_str().matches('.').count();
                 let depth_b = b.as_str().matches('.').count();
-                depth_a.cmp(&depth_b).then_with(|| a.as_str().cmp(b.as_str()))
+                depth_a
+                    .cmp(&depth_b)
+                    .then_with(|| a.as_str().cmp(b.as_str()))
             });
 
             // Preserve the user-file module path so we can restore it after
@@ -870,7 +883,10 @@ impl<'s> CompilationPipeline<'s> {
 
             if !stdlib_entries.is_empty() {
                 if self.stdlib_metadata.is_none() {
-                    debug!("analyze_module: Registering {} stdlib modules into type checker", stdlib_entries.len());
+                    debug!(
+                        "analyze_module: Registering {} stdlib modules into type checker",
+                        stdlib_entries.len()
+                    );
 
                     // Pass S0a: Register all stdlib type names (module-scoped so
                     // fully-qualified `{mod}.{name}` keys are populated for
@@ -886,7 +902,9 @@ impl<'s> CompilationPipeline<'s> {
                         checker.set_current_module_path(module_path.clone());
                         for item in &stdlib_mod.items {
                             if let ItemKind::Type(type_decl) = &item.kind {
-                                if let Err(e) = checker.resolve_type_definition(type_decl, &mut resolution_stack) {
+                                if let Err(e) = checker
+                                    .resolve_type_definition(type_decl, &mut resolution_stack)
+                                {
                                     debug!("Stdlib type resolution error: {:?}", e);
                                 }
                             }
@@ -923,7 +941,10 @@ impl<'s> CompilationPipeline<'s> {
                 // Pass S3: ALWAYS register stdlib impl blocks (this registers methods
                 // in inherent_methods). This must run even when metadata IS available,
                 // because metadata doesn't populate inherent_methods from implement blocks.
-                debug!("analyze_module: Registering stdlib impl blocks ({} modules)", stdlib_entries.len());
+                debug!(
+                    "analyze_module: Registering stdlib impl blocks ({} modules)",
+                    stdlib_entries.len()
+                );
                 for (module_path, stdlib_mod) in &stdlib_entries {
                     checker.set_current_module_path(module_path.clone());
                     for item in &stdlib_mod.items {
@@ -1011,16 +1032,21 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         // Enable lenient context validation for files with @test annotations.
-        let has_test_annotation = module.items.iter().any(|item| {
-            item.attributes.iter().any(|attr| attr.is_named("test"))
-        }) || module.items.first().and_then(|item| {
-            self.session.get_source(item.span.file_id)
-        }).map(|sf| {
-            sf.source.as_str().lines().take(10).any(|line| {
-                let trimmed = line.trim();
-                trimmed.starts_with("// @test:") || trimmed.starts_with("// @test ")
-            })
-        }).unwrap_or(false);
+        let has_test_annotation = module
+            .items
+            .iter()
+            .any(|item| item.attributes.iter().any(|attr| attr.is_named("test")))
+            || module
+                .items
+                .first()
+                .and_then(|item| self.session.get_source(item.span.file_id))
+                .map(|sf| {
+                    sf.source.as_str().lines().take(10).any(|line| {
+                        let trimmed = line.trim();
+                        trimmed.starts_with("// @test:") || trimmed.starts_with("// @test ")
+                    })
+                })
+                .unwrap_or(false);
         if has_test_annotation {
             checker.context_resolver_mut().set_lenient_contexts(true);
         }
@@ -1038,7 +1064,6 @@ impl<'s> CompilationPipeline<'s> {
 
         Ok(())
     }
-
 
     // ==================== COMPILATION PHASES ====================
 
@@ -1090,8 +1115,10 @@ impl<'s> CompilationPipeline<'s> {
             return Ok((*cached).clone());
         }
 
-        let source: Shared<SourceFile> =
-            self.session.get_source(file_id).context("Source file not found")?;
+        let source: Shared<SourceFile> = self
+            .session
+            .get_source(file_id)
+            .context("Source file not found")?;
 
         // Lexing + Parsing (combined via parser)
         let start = Instant::now();
@@ -1116,8 +1143,8 @@ impl<'s> CompilationPipeline<'s> {
             // Convert parser errors to diagnostics
             let error_count = errors.len();
             for error in errors.iter() {
-                let mut builder = DiagnosticBuilder::error()
-                    .message(format!("Parse error: {}", error));
+                let mut builder =
+                    DiagnosticBuilder::error().message(format!("Parse error: {}", error));
                 // Include error code if present (e.g., M401 for splice outside quote)
                 if let Some(ref code) = error.code {
                     builder = builder.code(code.clone());
@@ -1150,11 +1177,9 @@ impl<'s> CompilationPipeline<'s> {
         // existing `foo/` directory). Non-blocking warnings — the
         // user fixes the dangling decl and re-runs.
         if let Some(ref file_path) = source.path {
-            let warnings =
-                verum_modules::loader::validate_module_headers_against_filesystem(
-                    file_path,
-                    &module,
-                );
+            let warnings = verum_modules::loader::validate_module_headers_against_filesystem(
+                file_path, &module,
+            );
             for warning in warnings {
                 let diag = DiagnosticBuilder::warning()
                     .code(warning.code())
@@ -1219,5 +1244,4 @@ impl<'s> CompilationPipeline<'s> {
     ) -> verum_cbgr::analysis::ControlFlowGraph {
         self.build_function_cfg(func)
     }
-
 }

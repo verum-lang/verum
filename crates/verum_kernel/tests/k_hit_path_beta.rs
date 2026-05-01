@@ -22,12 +22,15 @@
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
-    ConstructorSig, CoreTerm, InductiveRegistry, PathCtorSig,
-    RegisteredInductive, normalize_with_inductives,
+    ConstructorSig, CoreTerm, InductiveRegistry, PathCtorSig, RegisteredInductive,
+    normalize_with_inductives,
 };
 
 fn nullary(name: &str) -> ConstructorSig {
-    ConstructorSig { name: Text::from(name), arg_types: List::new() }
+    ConstructorSig {
+        name: Text::from(name),
+        arg_types: List::new(),
+    }
 }
 
 fn var(name: &str) -> CoreTerm {

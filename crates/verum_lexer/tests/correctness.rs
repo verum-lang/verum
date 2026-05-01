@@ -249,7 +249,12 @@ fn test_integer_literal_values() {
         let tokens: Vec<Token> = lexer.map(|r| r.unwrap()).collect();
 
         if let TokenKind::Integer(lit) = &tokens[0].kind {
-            assert_eq!(lit.as_i64().unwrap(), expected, "Failed for input: {}", input);
+            assert_eq!(
+                lit.as_i64().unwrap(),
+                expected,
+                "Failed for input: {}",
+                input
+            );
         } else {
             panic!("Expected Integer for input: {}", input);
         }

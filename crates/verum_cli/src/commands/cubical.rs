@@ -53,10 +53,7 @@ pub fn run_primitives(category: Option<&str>, output: &str) -> Result<()> {
                 }
             );
             println!();
-            println!(
-                "  {:<14} {:<14} {}",
-                "Name", "Category", "Semantics"
-            );
+            println!("  {:<14} {:<14} {}", "Name", "Category", "Semantics");
             println!(
                 "  {:<14} {:<14} {}",
                 "─".repeat(14),
@@ -126,7 +123,11 @@ pub fn run_explain(name: &str, output: &str) -> Result<()> {
     })?;
     match output {
         "plain" => {
-            println!("{} — {} category", entry.primitive.name(), entry.category.name());
+            println!(
+                "{} — {} category",
+                entry.primitive.name(),
+                entry.category.name()
+            );
             println!("{}", "─".repeat(40));
             println!();
             println!("Signature : {}", entry.signature.as_str());
@@ -141,7 +142,9 @@ pub fn run_explain(name: &str, output: &str) -> Result<()> {
                 println!("Computation rules:");
                 let all_rules = catalog.computation_rules();
                 for rule_name in &entry.computation_rules {
-                    let rule = all_rules.iter().find(|r| r.name.as_str() == rule_name.as_str());
+                    let rule = all_rules
+                        .iter()
+                        .find(|r| r.name.as_str() == rule_name.as_str());
                     match rule {
                         Some(r) => {
                             println!("  • {}", r.name.as_str());
@@ -176,8 +179,9 @@ pub fn run_explain(name: &str, output: &str) -> Result<()> {
                 println!("**Computation rules:**\n");
                 let all_rules = catalog.computation_rules();
                 for rule_name in &entry.computation_rules {
-                    if let Some(r) =
-                        all_rules.iter().find(|r| r.name.as_str() == rule_name.as_str())
+                    if let Some(r) = all_rules
+                        .iter()
+                        .find(|r| r.name.as_str() == rule_name.as_str())
                     {
                         println!(
                             "- `{}` — `{}` ↪ `{}`",
@@ -259,10 +263,7 @@ pub fn run_face(formula: &str, output: &str) -> Result<()> {
         ));
     }
     let parsed = FaceFormula::parse(formula).map_err(|e| {
-        CliError::InvalidArgument(format!(
-            "face formula parse error: {}",
-            e.as_str()
-        ))
+        CliError::InvalidArgument(format!("face formula parse error: {}", e.as_str()))
     })?;
     let canonical = parsed.render();
     let vars: Vec<String> = parsed
@@ -287,10 +288,7 @@ pub fn run_face(formula: &str, output: &str) -> Result<()> {
         "json" => {
             let mut out = String::from("{\n");
             out.push_str("  \"schema_version\": 1,\n");
-            out.push_str(&format!(
-                "  \"input\": \"{}\",\n",
-                json_escape(formula)
-            ));
+            out.push_str(&format!("  \"input\": \"{}\",\n", json_escape(formula)));
             out.push_str(&format!(
                 "  \"canonical\": \"{}\",\n",
                 json_escape(canonical.as_str())

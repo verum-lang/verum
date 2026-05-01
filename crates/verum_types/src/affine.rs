@@ -55,8 +55,8 @@ use crate::TypeError;
 use crate::ty::Type;
 use verum_ast::decl::ResourceModifier;
 use verum_ast::span::Span;
-use verum_common::{List, Map, Maybe, Set, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Set, Text};
 
 // ============================================================================
 // Resource Kinds
@@ -460,7 +460,12 @@ impl AffineTracker {
 
     /// This is called when accessing `container.field` where `field` is an affine type.
     /// The field is marked as moved, preventing subsequent use of the whole struct.
-    pub fn use_field_value(&mut self, var_name: &str, field_name: &str, span: Span) -> Result<(), TypeError> {
+    pub fn use_field_value(
+        &mut self,
+        var_name: &str,
+        field_name: &str,
+        span: Span,
+    ) -> Result<(), TypeError> {
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             // Check if the whole struct has been consumed
             if binding.is_consumed {
@@ -563,7 +568,12 @@ impl AffineTracker {
 
     /// This is called when accessing `tuple.N` where the element at index N is an affine type.
     /// The index is marked as moved, preventing subsequent use of the whole tuple.
-    pub fn use_index_value(&mut self, var_name: &str, index: usize, span: Span) -> Result<(), TypeError> {
+    pub fn use_index_value(
+        &mut self,
+        var_name: &str,
+        index: usize,
+        span: Span,
+    ) -> Result<(), TypeError> {
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             // Check if the whole tuple has been consumed
             if binding.is_consumed {

@@ -80,7 +80,6 @@ pub const KNOWN_INCOMPATIBLE_PAIRS: &[IncompatiblePair] = &[
         reason: "UIP contradicts univalence — paths in Type are equivalences",
         citation: "HoTT Book 2013, Theorem 7.2.1 + Awodey-Bauer 2004",
     },
-
     // Impredicative Prop + classical LEM + univalence ⊥
     // (Coquand 1990 paradox). The combination of any two is fine;
     // all three together derive `False` via Coquand's classical
@@ -91,7 +90,6 @@ pub const KNOWN_INCOMPATIBLE_PAIRS: &[IncompatiblePair] = &[
         reason: "Coquand 1990 paradox — impredicative Prop + classical LEM + univalence is inconsistent",
         citation: "Coquand T. 1990. The paradox of trees in Type Theory; HoTT Book 2013, §3.2",
     },
-
     // Anti-classical + classical LEM. Anti-classical packages
     // postulate `¬LEM` (e.g. for constructive analysis foundations);
     // importing alongside classical_lem yields `False`.
@@ -101,7 +99,6 @@ pub const KNOWN_INCOMPATIBLE_PAIRS: &[IncompatiblePair] = &[
         reason: "anti-classical postulates ¬LEM; classical_lem postulates LEM",
         citation: "Bishop E. 1967. Foundations of Constructive Analysis; ¬LEM ∧ LEM ⊢ ⊥",
     },
-
     // K-axiom (intensional MLTT) + univalence. K is a generalisation
     // of UIP for inductive types; the same incompatibility applies.
     IncompatiblePair {
@@ -137,10 +134,7 @@ pub fn audit_framework_set(corpora: &[Text]) -> Vec<HygieneDiagnostic> {
                 severity: HygieneSeverity::Error,
                 message: Text::from(format!(
                     "framework conflict: {} ⊥ {} — {} ({})",
-                    pair.framework_a,
-                    pair.framework_b,
-                    pair.reason,
-                    pair.citation,
+                    pair.framework_a, pair.framework_b, pair.reason, pair.citation,
                 )),
             });
         }
@@ -196,10 +190,7 @@ mod tests {
 
     #[test]
     fn anti_classical_plus_classical_lem_rejected() {
-        let corpora = vec![
-            Text::from("anti_classical"),
-            Text::from("classical_lem"),
-        ];
+        let corpora = vec![Text::from("anti_classical"), Text::from("classical_lem")];
         let diagnostics = audit_framework_set(&corpora);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].severity, HygieneSeverity::Error);
@@ -257,10 +248,8 @@ mod tests {
         // No duplicates (treating (a,b) == (b,a)).
         for (i, p1) in KNOWN_INCOMPATIBLE_PAIRS.iter().enumerate() {
             for p2 in &KNOWN_INCOMPATIBLE_PAIRS[i + 1..] {
-                let same = (p1.framework_a == p2.framework_a
-                    && p1.framework_b == p2.framework_b)
-                    || (p1.framework_a == p2.framework_b
-                        && p1.framework_b == p2.framework_a);
+                let same = (p1.framework_a == p2.framework_a && p1.framework_b == p2.framework_b)
+                    || (p1.framework_a == p2.framework_b && p1.framework_b == p2.framework_a);
                 assert!(
                     !same,
                     "duplicate conflict entry: ({}, {})",

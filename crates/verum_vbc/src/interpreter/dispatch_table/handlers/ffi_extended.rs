@@ -2,6 +2,12 @@
 //! Note: Many variables are only used under specific `#[cfg]` feature/platform gates.
 #![allow(unreachable_code, unused_variables)]
 
+use super::super::super::error::{InterpreterError, InterpreterResult};
+use super::super::super::state::InterpreterState;
+use super::super::DispatchResult;
+use super::bytecode_io::*;
+use super::method_dispatch::{monotonic_nanos_shared, realtime_nanos_shared};
+use super::string_helpers::*;
 #[allow(unused_imports)]
 use crate::instruction::{FfiSubOpcode, Reg};
 #[allow(unused_imports)]
@@ -10,12 +16,6 @@ use crate::module::FfiSymbolId;
 use crate::types::StringId;
 use crate::types::TypeId;
 use crate::value::Value;
-use super::super::super::error::{InterpreterError, InterpreterResult};
-use super::super::super::state::InterpreterState;
-use super::super::DispatchResult;
-use super::bytecode_io::*;
-use super::string_helpers::*;
-use super::method_dispatch::{monotonic_nanos_shared, realtime_nanos_shared};
 
 /// FFI symbol → permission scope mapping for the script-mode
 /// permission router. The interpreter's `RequiresPermission` flag
@@ -41,57 +41,47 @@ fn ffi_symbol_permission_scope(
         // because exit-on-deny is the user-visible failure shape
         // and `permissions = ["run"]` reads naturally as "may
         // change process state".
-        "_exit" | "exit" | "_Exit" | "exit_group" | "ExitProcess"
-        | "abort" | "_abort" | "raise" | "kill" | "killpg"
-        | "fork" | "vfork" | "execve" | "execv" | "execvp" | "execvpe"
-        | "posix_spawn" | "posix_spawnp" | "CreateProcessA" | "CreateProcessW"
+        "_exit" | "exit" | "_Exit" | "exit_group" | "ExitProcess" | "abort" | "_abort"
+        | "raise" | "kill" | "killpg" | "fork" | "vfork" | "execve" | "execv" | "execvp"
+        | "execvpe" | "posix_spawn" | "posix_spawnp" | "CreateProcessA" | "CreateProcessW"
         | "TerminateProcess" => Some(PermissionScope::Process),
 
         // Filesystem read/write/metadata.
-        "open" | "openat" | "creat" | "fopen" | "fopen64" | "freopen"
-        | "read" | "pread" | "pread64" | "readv" | "preadv"
-        | "write" | "pwrite" | "pwrite64" | "writev" | "pwritev"
-        | "unlink" | "unlinkat" | "remove" | "rename" | "renameat"
-        | "mkdir" | "mkdirat" | "rmdir"
-        | "stat" | "stat64" | "lstat" | "lstat64" | "fstat" | "fstat64"
-        | "fstatat" | "access" | "faccessat"
-        | "chmod" | "fchmod" | "fchmodat" | "chown" | "fchown" | "fchownat"
-        | "link" | "linkat" | "symlink" | "symlinkat" | "readlink" | "readlinkat"
-        | "truncate" | "ftruncate" | "truncate64" | "ftruncate64"
-        | "CreateFileA" | "CreateFileW" | "DeleteFileA" | "DeleteFileW"
-        | "ReadFile" | "WriteFile" | "MoveFileA" | "MoveFileW"
-        | "CreateDirectoryA" | "CreateDirectoryW" | "RemoveDirectoryA"
-        | "RemoveDirectoryW" => Some(PermissionScope::FileSystem),
+        "open" | "openat" | "creat" | "fopen" | "fopen64" | "freopen" | "read" | "pread"
+        | "pread64" | "readv" | "preadv" | "write" | "pwrite" | "pwrite64" | "writev"
+        | "pwritev" | "unlink" | "unlinkat" | "remove" | "rename" | "renameat" | "mkdir"
+        | "mkdirat" | "rmdir" | "stat" | "stat64" | "lstat" | "lstat64" | "fstat" | "fstat64"
+        | "fstatat" | "access" | "faccessat" | "chmod" | "fchmod" | "fchmodat" | "chown"
+        | "fchown" | "fchownat" | "link" | "linkat" | "symlink" | "symlinkat" | "readlink"
+        | "readlinkat" | "truncate" | "ftruncate" | "truncate64" | "ftruncate64"
+        | "CreateFileA" | "CreateFileW" | "DeleteFileA" | "DeleteFileW" | "ReadFile"
+        | "WriteFile" | "MoveFileA" | "MoveFileW" | "CreateDirectoryA" | "CreateDirectoryW"
+        | "RemoveDirectoryA" | "RemoveDirectoryW" => Some(PermissionScope::FileSystem),
 
         // Network — sockets, DNS, send/recv.
-        "socket" | "bind" | "listen" | "accept" | "accept4"
-        | "connect" | "shutdown"
-        | "send" | "sendto" | "sendmsg" | "sendfile"
-        | "recv" | "recvfrom" | "recvmsg"
-        | "getaddrinfo" | "getnameinfo" | "gethostbyname" | "gethostbyaddr"
-        | "getsockopt" | "setsockopt" | "getsockname" | "getpeername"
-        | "WSAStartup" | "WSACleanup" | "WSASocketA" | "WSASocketW"
-        | "WSAConnect" | "WSASend" | "WSARecv" => Some(PermissionScope::Network),
+        "socket" | "bind" | "listen" | "accept" | "accept4" | "connect" | "shutdown" | "send"
+        | "sendto" | "sendmsg" | "sendfile" | "recv" | "recvfrom" | "recvmsg" | "getaddrinfo"
+        | "getnameinfo" | "gethostbyname" | "gethostbyaddr" | "getsockopt" | "setsockopt"
+        | "getsockname" | "getpeername" | "WSAStartup" | "WSACleanup" | "WSASocketA"
+        | "WSASocketW" | "WSAConnect" | "WSASend" | "WSARecv" => Some(PermissionScope::Network),
 
         // Memory primitives that bypass CBGR (raw mmap / brk / VirtualAlloc).
-        "mmap" | "mmap64" | "munmap" | "mprotect" | "madvise" | "mlock"
-        | "munlock" | "brk" | "sbrk"
-        | "VirtualAlloc" | "VirtualFree" | "VirtualProtect"
-        | "vm_allocate" | "vm_deallocate" | "mach_vm_allocate"
-        | "mach_vm_deallocate" => Some(PermissionScope::Memory),
+        "mmap" | "mmap64" | "munmap" | "mprotect" | "madvise" | "mlock" | "munlock" | "brk"
+        | "sbrk" | "VirtualAlloc" | "VirtualFree" | "VirtualProtect" | "vm_allocate"
+        | "vm_deallocate" | "mach_vm_allocate" | "mach_vm_deallocate" => {
+            Some(PermissionScope::Memory)
+        }
 
         // Cryptographic primitives that touch kernel RNG.
-        "getentropy" | "getrandom" | "arc4random" | "arc4random_buf"
-        | "RAND_bytes" | "BCryptGenRandom" | "RtlGenRandom" => {
-            Some(PermissionScope::Cryptography)
-        }
+        "getentropy" | "getrandom" | "arc4random" | "arc4random_buf" | "RAND_bytes"
+        | "BCryptGenRandom" | "RtlGenRandom" => Some(PermissionScope::Cryptography),
 
         // Privileged time mutation. Observational time
         // (`gettimeofday`, `clock_gettime`) is intentionally NOT
         // gated — reading the clock is not a security boundary;
         // setting it is.
-        "settimeofday" | "clock_settime" | "stime" | "adjtime"
-        | "SetSystemTime" | "SetLocalTime" => Some(PermissionScope::Time),
+        "settimeofday" | "clock_settime" | "stime" | "adjtime" | "SetSystemTime"
+        | "SetLocalTime" => Some(PermissionScope::Time),
 
         // Environment variable mutation as the script-level
         // boundary. Reading is unrestricted; setting could
@@ -99,10 +89,12 @@ fn ffi_symbol_permission_scope(
         // Mapped to Process so a script-level `permissions =
         // ["run"]` grant covers it (changing env affects child
         // execve behaviour).
-        "setenv" | "unsetenv" | "putenv" | "clearenv"
-        | "SetEnvironmentVariableA" | "SetEnvironmentVariableW" => {
-            Some(PermissionScope::Process)
-        }
+        "setenv"
+        | "unsetenv"
+        | "putenv"
+        | "clearenv"
+        | "SetEnvironmentVariableA"
+        | "SetEnvironmentVariableW" => Some(PermissionScope::Process),
 
         _ => None,
     }
@@ -118,10 +110,7 @@ fn ffi_symbol_permission_scope(
 
 /// Stdio is flushed before the panic so the user sees any prior
 /// `print(...)` output even when the script terminates abruptly.
-fn check_ffi_permission(
-    state: &mut InterpreterState,
-    symbol_idx: u32,
-) -> InterpreterResult<()> {
+fn check_ffi_permission(state: &mut InterpreterState, symbol_idx: u32) -> InterpreterResult<()> {
     // Resolve symbol name into an owned String so the immutable
     // borrow on `state.module` ends before the mutable
     // `check_permission` call below. Hot-path cost: one heap
@@ -161,14 +150,15 @@ fn check_ffi_permission(
 /// (`CMemcpy`, `CMemset`, `CMemmove`, `CMemcmp`).
 const MAX_FFI_ALLOCATION_SIZE: usize = 1 << 30; // 1 GiB
 
-
 // Extended opcode handlers
 
 /// FfiExtended (0xBC) - FFI and memory operations.
 ///
 
 /// Handles FFI calling conventions, memory operations, and byte array allocation.
-pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_ffi_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
     let sub_op = FfiSubOpcode::from_byte(sub_op_byte);
 
@@ -190,7 +180,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // would read/write arbitrary memory or cause denial-of-service.
             if size_raw < 0 || (size_raw as u64) > MAX_FFI_ALLOCATION_SIZE as u64 {
                 return Err(InterpreterError::InvalidOperand {
-                    message: format!("CMemcpy: size {} exceeds maximum {} or is negative", size_raw, MAX_FFI_ALLOCATION_SIZE),
+                    message: format!(
+                        "CMemcpy: size {} exceeds maximum {} or is negative",
+                        size_raw, MAX_FFI_ALLOCATION_SIZE
+                    ),
                 });
             }
             let size = size_raw as usize;
@@ -221,7 +214,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // memory regions beyond the legitimate allocation.
             if size_raw < 0 || (size_raw as u64) > MAX_FFI_ALLOCATION_SIZE as u64 {
                 return Err(InterpreterError::InvalidOperand {
-                    message: format!("CMemset: size {} exceeds maximum {} or is negative", size_raw, MAX_FFI_ALLOCATION_SIZE),
+                    message: format!(
+                        "CMemset: size {} exceeds maximum {} or is negative",
+                        size_raw, MAX_FFI_ALLOCATION_SIZE
+                    ),
                 });
             }
             let size = size_raw as usize;
@@ -300,7 +296,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // and cap at MAX_FFI_ALLOCATION_SIZE to prevent oversized copies.
             if size_raw < 0 || (size_raw as u64) > MAX_FFI_ALLOCATION_SIZE as u64 {
                 return Err(InterpreterError::InvalidOperand {
-                    message: format!("CMemmove: size {} exceeds maximum {} or is negative", size_raw, MAX_FFI_ALLOCATION_SIZE),
+                    message: format!(
+                        "CMemmove: size {} exceeds maximum {} or is negative",
+                        size_raw, MAX_FFI_ALLOCATION_SIZE
+                    ),
                 });
             }
             let size = size_raw as usize;
@@ -331,7 +330,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // from arbitrary memory (which would be a buffer over-read).
             if size_raw < 0 || (size_raw as u64) > MAX_FFI_ALLOCATION_SIZE as u64 {
                 return Err(InterpreterError::InvalidOperand {
-                    message: format!("CMemcmp: size {} exceeds maximum {} or is negative", size_raw, MAX_FFI_ALLOCATION_SIZE),
+                    message: format!(
+                        "CMemcmp: size {} exceeds maximum {} or is negative",
+                        size_raw, MAX_FFI_ALLOCATION_SIZE
+                    ),
                 });
             }
             let size = size_raw as usize;
@@ -573,12 +575,18 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // Compute element address: base + header + (idx * elem_size) with overflow checks
             let idx_usize = idx as usize;
             let offset = idx_usize.checked_mul(elem_size).ok_or({
-                InterpreterError::IndexOutOfBounds { index: idx, length: 0 }
+                InterpreterError::IndexOutOfBounds {
+                    index: idx,
+                    length: 0,
+                }
             })?;
             let total_offset = super::super::super::heap::OBJECT_HEADER_SIZE
                 .checked_add(offset)
                 .ok_or({
-                    InterpreterError::IndexOutOfBounds { index: idx, length: 0 }
+                    InterpreterError::IndexOutOfBounds {
+                        index: idx,
+                        length: 0,
+                    }
                 })?;
             // SAFETY: `total_offset` was produced by checked arithmetic, so it
             // cannot wrap. `arr_ptr` is non-null and points to a live typed
@@ -605,7 +613,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             let count_val = state.get_reg(count_reg).as_i64();
             if count_val < 0 {
                 return Err(InterpreterError::InvalidOperand {
-                    message: format!("NewTypedArray: expected non-negative count, got {}", count_val),
+                    message: format!(
+                        "NewTypedArray: expected non-negative count, got {}",
+                        count_val
+                    ),
                 });
             }
             let count = count_val as usize;
@@ -782,13 +793,15 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // default for unsigned raw I/O, which is the vastly common case.
             let value = unsafe {
                 match size {
-                    1 => *ptr as i64,                                                 // u8 → i64 (zero-extend)
-                    2 => std::ptr::read_unaligned(ptr as *const u16) as i64,          // u16 → i64
-                    4 => std::ptr::read_unaligned(ptr as *const u32) as i64,          // u32 → i64
-                    8 => std::ptr::read_unaligned(ptr as *const i64),                 // 8 bytes fill the slot
-                    _ => return Err(InterpreterError::InvalidOperand {
-                        message: format!("invalid deref size: {}", size),
-                    }),
+                    1 => *ptr as i64,                                        // u8 → i64 (zero-extend)
+                    2 => std::ptr::read_unaligned(ptr as *const u16) as i64, // u16 → i64
+                    4 => std::ptr::read_unaligned(ptr as *const u32) as i64, // u32 → i64
+                    8 => std::ptr::read_unaligned(ptr as *const i64), // 8 bytes fill the slot
+                    _ => {
+                        return Err(InterpreterError::InvalidOperand {
+                            message: format!("invalid deref size: {}", size),
+                        });
+                    }
                 }
             };
             state.set_reg(dst, Value::from_i64(value));
@@ -835,13 +848,15 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // handles arbitrary alignment.
             let value = unsafe {
                 match size {
-                    1 => *(ptr as *const i8) as i64,                                    // i8 → i64 (sign-extend)
-                    2 => std::ptr::read_unaligned(ptr as *const i16) as i64,            // i16 → i64 (sign-extend)
-                    4 => std::ptr::read_unaligned(ptr as *const i32) as i64,            // i32 → i64 (sign-extend)
-                    8 => std::ptr::read_unaligned(ptr as *const i64),                   // 8 bytes fill the slot
-                    _ => return Err(InterpreterError::InvalidOperand {
-                        message: format!("invalid signed deref size: {}", size),
-                    }),
+                    1 => *(ptr as *const i8) as i64, // i8 → i64 (sign-extend)
+                    2 => std::ptr::read_unaligned(ptr as *const i16) as i64, // i16 → i64 (sign-extend)
+                    4 => std::ptr::read_unaligned(ptr as *const i32) as i64, // i32 → i64 (sign-extend)
+                    8 => std::ptr::read_unaligned(ptr as *const i64), // 8 bytes fill the slot
+                    _ => {
+                        return Err(InterpreterError::InvalidOperand {
+                            message: format!("invalid signed deref size: {}", size),
+                        });
+                    }
                 }
             };
             state.set_reg(dst, Value::from_i64(value));
@@ -862,7 +877,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 val.as_ptr()
             } else {
                 return Err(InterpreterError::InvalidOperand {
-                    message: format!("DerefMutRaw requires pointer-tagged value, got integer: {}", val.as_i64()),
+                    message: format!(
+                        "DerefMutRaw requires pointer-tagged value, got integer: {}",
+                        val.as_i64()
+                    ),
                 });
             };
             if ptr.is_null() {
@@ -917,9 +935,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                         // round-trip through the raw-pointer storage.
                         std::ptr::write_unaligned(ptr as *mut u64, val_value.bits());
                     }
-                    _ => return Err(InterpreterError::InvalidOperand {
-                        message: format!("invalid deref size: {}", size),
-                    }),
+                    _ => {
+                        return Err(InterpreterError::InvalidOperand {
+                            message: format!("invalid deref size: {}", size),
+                        });
+                    }
                 }
             }
             Ok(DispatchResult::Continue)
@@ -1043,10 +1063,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             if size == 0 {
                 state.set_reg(dst, Value::from_ptr(std::ptr::null_mut::<u8>()));
             } else {
-                let layout = std::alloc::Layout::from_size_align(size, 8)
-                    .map_err(|_| InterpreterError::InvalidOperand {
+                let layout = std::alloc::Layout::from_size_align(size, 8).map_err(|_| {
+                    InterpreterError::InvalidOperand {
                         message: format!("invalid allocation size: {}", size),
-                    })?;
+                    }
+                })?;
                 // SAFETY: `layout` has a non-zero `size` (the `size == 0` path
                 // is handled above) and a valid alignment, so `alloc_zeroed`
                 // satisfies its precondition. A null return is tolerated by
@@ -1065,10 +1086,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             let size = state.get_reg(size_reg).as_i64() as usize;
 
             if !ptr.is_null() && size > 0 {
-                let layout = std::alloc::Layout::from_size_align(size, 8)
-                    .map_err(|_| InterpreterError::InvalidOperand {
+                let layout = std::alloc::Layout::from_size_align(size, 8).map_err(|_| {
+                    InterpreterError::InvalidOperand {
                         message: format!("invalid deallocation size: {}", size),
-                    })?;
+                    }
+                })?;
                 // SAFETY: Caller warrants that `ptr` was returned from a
                 // previous `CAlloc` with the same `size`/alignment, and is not
                 // deallocated twice. We null-checked `ptr` and rejected
@@ -1269,18 +1291,19 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 // in VBC originate from `state.heap.alloc()`, whose objects
                 // begin with `ObjectHeader`. The borrow is read-only and does
                 // not outlive the enclosing block.
-                let header = unsafe { &*(arr_ptr as *const super::super::super::heap::ObjectHeader) };
+                let header =
+                    unsafe { &*(arr_ptr as *const super::super::super::heap::ObjectHeader) };
                 let header_size = header.size as usize;
 
                 // Determine element size in bytes
                 let elem_size: usize = match element_type {
-                    0x01 => 1,  // i8/u8
-                    0x02 => 2,  // i16/u16
-                    0x03 => 4,  // i32/u32
-                    0x04 => 8,  // i64/u64
-                    0x05 => 4,  // f32
-                    0x06 => 8,  // f64
-                    _ => 8,     // default i64
+                    0x01 => 1, // i8/u8
+                    0x02 => 2, // i16/u16
+                    0x03 => 4, // i32/u32
+                    0x04 => 8, // i64/u64
+                    0x05 => 4, // f32
+                    0x06 => 8, // f64
+                    _ => 8,    // default i64
                 };
 
                 // Calculate element count based on array type
@@ -1290,7 +1313,9 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                     // inline after the header. `arr_ptr` points to a live List
                     // allocation (verified via `type_id == LIST`), so adding
                     // OBJECT_HEADER_SIZE lands on the `len` slot.
-                    let data_ptr = unsafe { arr_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let data_ptr = unsafe {
+                        arr_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
                     // SAFETY: `data_ptr` is aligned and points to the
                     // initialized `len` slot of the List header.
                     (unsafe { (*data_ptr).as_i64() }) as usize
@@ -1352,22 +1377,28 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                         // offset and the match-arm cast.
                         unsafe {
                             match element_type {
-                                0x01 => { // i8
+                                0x01 => {
+                                    // i8
                                     *(buffer.add(i) as *mut i8) = elem.as_i64() as i8;
                                 }
-                                0x02 => { // i16
+                                0x02 => {
+                                    // i16
                                     *(buffer.add(i * 2) as *mut i16) = elem.as_i64() as i16;
                                 }
-                                0x03 => { // i32
+                                0x03 => {
+                                    // i32
                                     *(buffer.add(i * 4) as *mut i32) = elem.as_i64() as i32;
                                 }
-                                0x04 => { // i64
+                                0x04 => {
+                                    // i64
                                     *(buffer.add(i * 8) as *mut i64) = elem.as_i64();
                                 }
-                                0x05 => { // f32
+                                0x05 => {
+                                    // f32
                                     *(buffer.add(i * 4) as *mut f32) = elem.as_f64() as f32;
                                 }
-                                0x06 => { // f64
+                                0x06 => {
+                                    // f64
                                     *(buffer.add(i * 8) as *mut f64) = elem.as_f64();
                                 }
                                 _ => {
@@ -1379,14 +1410,16 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 }
 
                 // Store buffer for cleanup/writeback
-                state.ffi_array_buffers.push(super::super::super::state::FfiArrayBuffer {
-                    buffer,
-                    layout,
-                    array_obj_ptr: arr_ptr,
-                    count,
-                    element_type,
-                    is_mutable,
-                });
+                state
+                    .ffi_array_buffers
+                    .push(super::super::super::state::FfiArrayBuffer {
+                        buffer,
+                        layout,
+                        array_obj_ptr: arr_ptr,
+                        count,
+                        element_type,
+                        is_mutable,
+                    });
 
                 // Set dst register to the buffer pointer
                 state.set_reg(dst_reg, Value::from_ptr(buffer));
@@ -1418,7 +1451,8 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 let ffi_runtime = state.get_or_create_ffi_runtime()?;
 
                 // Create the trampoline using the existing infrastructure
-                let code_ptr = ffi_runtime.create_callback_from_symbol(&module, fn_id, signature_idx)
+                let code_ptr = ffi_runtime
+                    .create_callback_from_symbol(&module, fn_id, signature_idx)
                     .map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
 
                 state.set_reg(dst_reg, Value::from_ptr(code_ptr as *mut u8));
@@ -1483,20 +1517,23 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 
                 let ffi_runtime = state.get_or_create_ffi_runtime()?;
                 // Load libraries (idempotent)
-                ffi_runtime.load_module_libraries(&module)
+                ffi_runtime
+                    .load_module_libraries(&module)
                     .map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
 
                 // Pre-call: clear errno for error-protocol functions
                 {
                     if let Some(sym) = module.get_ffi_symbol(symbol_id)
-                        && matches!(sym.error_protocol,
+                        && matches!(
+                            sym.error_protocol,
                             crate::module::ErrorProtocol::NegOneErrno
-                            | crate::module::ErrorProtocol::NullErrno
-                            | crate::module::ErrorProtocol::ReturnCodePattern
-                            | crate::module::ErrorProtocol::SentinelWithErrno
-                        ) {
-                            ffi_runtime.clear_errno();
-                        }
+                                | crate::module::ErrorProtocol::NullErrno
+                                | crate::module::ErrorProtocol::ReturnCodePattern
+                                | crate::module::ErrorProtocol::SentinelWithErrno
+                        )
+                    {
+                        ffi_runtime.clear_errno();
+                    }
                 }
 
                 // Call the FFI function
@@ -1514,67 +1551,82 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                         &source_reg_map,
                         &mut ret_value,
                     )
-                }.map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
+                }
+                .map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
 
                 // If return type is a struct, convert raw C buffer to Verum heap object
                 if let Some(sym) = module.get_ffi_symbol(symbol_id)
                     && matches!(sym.signature.return_type, crate::module::CType::StructValue)
-                        && let Some(layout_idx) = sym.signature.return_layout_idx {
-                            let layout = &module.ffi_layouts[layout_idx as usize];
-                            let c_buf_ptr = ret_value.as_ptr::<u8>();
-                            if !c_buf_ptr.is_null() {
-                                // Determine number of Value slots needed
-                                let max_field_idx = layout.fields.iter()
-                                    .map(|f| f.name.0 as usize)
-                                    .max()
-                                    .unwrap_or(0);
-                                let slot_count = max_field_idx + 1;
-                                let type_id = layout.verum_type.unwrap_or(crate::types::TypeId::UNIT);
-                                let obj = state.heap.alloc(type_id, slot_count * std::mem::size_of::<Value>())?;
-                                state.record_allocation();
+                    && let Some(layout_idx) = sym.signature.return_layout_idx
+                {
+                    let layout = &module.ffi_layouts[layout_idx as usize];
+                    let c_buf_ptr = ret_value.as_ptr::<u8>();
+                    if !c_buf_ptr.is_null() {
+                        // Determine number of Value slots needed
+                        let max_field_idx = layout
+                            .fields
+                            .iter()
+                            .map(|f| f.name.0 as usize)
+                            .max()
+                            .unwrap_or(0);
+                        let slot_count = max_field_idx + 1;
+                        let type_id = layout.verum_type.unwrap_or(crate::types::TypeId::UNIT);
+                        let obj = state
+                            .heap
+                            .alloc(type_id, slot_count * std::mem::size_of::<Value>())?;
+                        state.record_allocation();
 
-                                // SAFETY: `obj` was just returned from
-                                // `state.heap.alloc()` with exactly
-                                // `slot_count * sizeof(Value)` data bytes, so
-                                // the Value slice runs from `data_ptr` to
-                                // `data_ptr.add(slot_count)`.
-                                let data_ptr = unsafe {
-                                    (obj.as_ptr() as *mut u8).add(super::super::super::heap::OBJECT_HEADER_SIZE) as *mut Value
-                                };
-                                // Marshal each field from C buffer into heap object
-                                for field in &layout.fields {
-                                    // SAFETY: `field.offset` is provided by the
-                                    // compiler-emitted layout table; the C
-                                    // buffer is exactly the 256-byte box below
-                                    // and was just written to by the FFI call.
-                                    // The field offsets are bounded by that
-                                    // box size per the layout contract.
-                                    let c_field_ptr = unsafe { c_buf_ptr.add(field.offset as usize) };
-                                    // SAFETY: `marshal_field_from_c` reads a
-                                    // typed field from `c_field_ptr` whose
-                                    // layout matches `field.c_type`. The
-                                    // layout table is generated alongside the
-                                    // FFI signature so the pairing is
-                                    // guaranteed.
-                                    if let Some(val) = unsafe { crate::ffi::runtime::marshal_field_from_c(field.c_type, c_field_ptr) } {
-                                        let slot_idx = field.name.0 as usize;
-                                        // SAFETY: `slot_idx` is bounded by
-                                        // `max_field_idx`, and `data_ptr` has
-                                        // `slot_count = max_field_idx + 1`
-                                        // Value slots of writable storage.
-                                        unsafe { *data_ptr.add(slot_idx) = val; }
-                                    }
+                        // SAFETY: `obj` was just returned from
+                        // `state.heap.alloc()` with exactly
+                        // `slot_count * sizeof(Value)` data bytes, so
+                        // the Value slice runs from `data_ptr` to
+                        // `data_ptr.add(slot_count)`.
+                        let data_ptr = unsafe {
+                            (obj.as_ptr() as *mut u8)
+                                .add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                                as *mut Value
+                        };
+                        // Marshal each field from C buffer into heap object
+                        for field in &layout.fields {
+                            // SAFETY: `field.offset` is provided by the
+                            // compiler-emitted layout table; the C
+                            // buffer is exactly the 256-byte box below
+                            // and was just written to by the FFI call.
+                            // The field offsets are bounded by that
+                            // box size per the layout contract.
+                            let c_field_ptr = unsafe { c_buf_ptr.add(field.offset as usize) };
+                            // SAFETY: `marshal_field_from_c` reads a
+                            // typed field from `c_field_ptr` whose
+                            // layout matches `field.c_type`. The
+                            // layout table is generated alongside the
+                            // FFI signature so the pairing is
+                            // guaranteed.
+                            if let Some(val) = unsafe {
+                                crate::ffi::runtime::marshal_field_from_c(field.c_type, c_field_ptr)
+                            } {
+                                let slot_idx = field.name.0 as usize;
+                                // SAFETY: `slot_idx` is bounded by
+                                // `max_field_idx`, and `data_ptr` has
+                                // `slot_count = max_field_idx + 1`
+                                // Value slots of writable storage.
+                                unsafe {
+                                    *data_ptr.add(slot_idx) = val;
                                 }
-                                // Free the C buffer (was Box::into_raw'd [0u8; 256])
-                                // SAFETY: The FFI runtime produced `c_buf_ptr`
-                                // via `Box::into_raw` of a boxed `[0u8; 256]`.
-                                // Reconstructing the same-sized slice and
-                                // dropping it here reverses that allocation
-                                // exactly once per non-null return.
-                                unsafe { let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(c_buf_ptr, 256)); }
-                                ret_value = Value::from_ptr(obj.as_ptr() as *mut u8);
                             }
                         }
+                        // Free the C buffer (was Box::into_raw'd [0u8; 256])
+                        // SAFETY: The FFI runtime produced `c_buf_ptr`
+                        // via `Box::into_raw` of a boxed `[0u8; 256]`.
+                        // Reconstructing the same-sized slice and
+                        // dropping it here reverses that allocation
+                        // exactly once per non-null return.
+                        unsafe {
+                            let _ =
+                                Box::from_raw(std::ptr::slice_from_raw_parts_mut(c_buf_ptr, 256));
+                        }
+                        ret_value = Value::from_ptr(obj.as_ptr() as *mut u8);
+                    }
+                }
 
                 // Error protocol checking: inspect return value + errno
                 // Mirrors LLVM lowering logic for differential correctness.
@@ -1598,11 +1650,16 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                         // we verified it was a live heap object (headered).
                         // Null/mutability were just checked. The borrow does
                         // not escape this scope.
-                        let header = unsafe { &*(buf.array_obj_ptr as *const super::super::super::heap::ObjectHeader) };
+                        let header = unsafe {
+                            &*(buf.array_obj_ptr as *const super::super::super::heap::ObjectHeader)
+                        };
 
                         // For typed arrays (U16, U32, U64), copy raw bytes directly
                         // instead of converting to Values (which would corrupt the layout)
-                        if header.type_id == TypeId::U16 || header.type_id == TypeId::U32 || header.type_id == TypeId::U64 {
+                        if header.type_id == TypeId::U16
+                            || header.type_id == TypeId::U32
+                            || header.type_id == TypeId::U64
+                        {
                             let elem_size = match header.type_id {
                                 t if t == TypeId::U16 => 2usize,
                                 t if t == TypeId::U32 => 4usize,
@@ -1613,7 +1670,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                             // `OBJECT_HEADER_SIZE + buf.count * elem_size`
                             // bytes (the original allocation stored the typed
                             // elements packed after the header).
-                            let dst = unsafe { buf.array_obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) };
+                            let dst = unsafe {
+                                buf.array_obj_ptr
+                                    .add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                            };
                             // SAFETY: `buf.buffer` holds at least
                             // `total_bytes` live bytes (it was sized via the
                             // same `count * elem_size` computation on entry).
@@ -1631,13 +1691,27 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                                 // bounds.
                                 let new_val = unsafe {
                                     match buf.element_type {
-                                        0x01 => Value::from_i64(*(buf.buffer.add(i) as *const i8) as i64),
-                                        0x02 => Value::from_i64(*(buf.buffer.add(i * 2) as *const i16) as i64),
-                                        0x03 => Value::from_i64(*(buf.buffer.add(i * 4) as *const i32) as i64),
-                                        0x04 => Value::from_i64(*(buf.buffer.add(i * 8) as *const i64)),
-                                        0x05 => Value::from_f64(*(buf.buffer.add(i * 4) as *const f32) as f64),
-                                        0x06 => Value::from_f64(*(buf.buffer.add(i * 8) as *const f64)),
-                                        _ => Value::from_i64(*(buf.buffer.add(i * 8) as *const i64)),
+                                        0x01 => Value::from_i64(
+                                            *(buf.buffer.add(i) as *const i8) as i64,
+                                        ),
+                                        0x02 => Value::from_i64(
+                                            *(buf.buffer.add(i * 2) as *const i16) as i64,
+                                        ),
+                                        0x03 => Value::from_i64(
+                                            *(buf.buffer.add(i * 4) as *const i32) as i64,
+                                        ),
+                                        0x04 => {
+                                            Value::from_i64(*(buf.buffer.add(i * 8) as *const i64))
+                                        }
+                                        0x05 => Value::from_f64(
+                                            *(buf.buffer.add(i * 4) as *const f32) as f64,
+                                        ),
+                                        0x06 => {
+                                            Value::from_f64(*(buf.buffer.add(i * 8) as *const f64))
+                                        }
+                                        _ => {
+                                            Value::from_i64(*(buf.buffer.add(i * 8) as *const i64))
+                                        }
                                     }
                                 };
                                 // Write element back into array
@@ -1646,7 +1720,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                                     // SAFETY: List layout — see get_array_element
                                     // comments. `array_obj_ptr` is live and
                                     // starts with ObjectHeader + List header.
-                                    let data_ptr = unsafe { buf.array_obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) as *const Value };
+                                    let data_ptr = unsafe {
+                                        buf.array_obj_ptr
+                                            .add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                                            as *const Value
+                                    };
                                     // SAFETY: Slot 2 of the List header holds
                                     // the backing-buffer pointer.
                                     let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
@@ -1654,18 +1732,30 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                                     // with `i < buf.count <= List length`, so
                                     // the computed address stays within the
                                     // backing buffer.
-                                    unsafe { backing.add(super::super::super::heap::OBJECT_HEADER_SIZE + elem_offset) as *mut Value }
+                                    unsafe {
+                                        backing.add(
+                                            super::super::super::heap::OBJECT_HEADER_SIZE
+                                                + elem_offset,
+                                        ) as *mut Value
+                                    }
                                 } else {
                                     // SAFETY: Non-LIST arrays store Values
                                     // packed after the header; `i < buf.count`
                                     // so the offset is in bounds.
-                                    unsafe { buf.array_obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE + elem_offset) as *mut Value }
+                                    unsafe {
+                                        buf.array_obj_ptr.add(
+                                            super::super::super::heap::OBJECT_HEADER_SIZE
+                                                + elem_offset,
+                                        ) as *mut Value
+                                    }
                                 };
                                 // SAFETY: `elem_ptr` is aligned (Values have
                                 // 8-byte alignment, header + multiples of
                                 // sizeof(Value) preserve that) and points to
                                 // a writable Value slot.
-                                unsafe { *elem_ptr = new_val; }
+                                unsafe {
+                                    *elem_ptr = new_val;
+                                }
                             }
                         }
                     }
@@ -1685,14 +1775,24 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 // can allocate; unknown symbols still surface
                 // NotImplemented so real FFI work is visible.
                 let _ = source_reg_map;
-                let symbol_name = state.module.get_ffi_symbol(FfiSymbolId(symbol_idx))
+                let symbol_name = state
+                    .module
+                    .get_ffi_symbol(FfiSymbolId(symbol_idx))
                     .and_then(|s| state.module.strings.get(s.name))
                     .map(|s| s.to_string())
                     .unwrap_or_default();
                 let result = match symbol_name.as_str() {
                     "mmap" => {
-                        let len = args.get(1).copied().map(|v| v.as_integer_compatible() as usize).unwrap_or(0);
-                        let fd = args.get(4).copied().map(|v| v.as_integer_compatible()).unwrap_or(-1);
+                        let len = args
+                            .get(1)
+                            .copied()
+                            .map(|v| v.as_integer_compatible() as usize)
+                            .unwrap_or(0);
+                        let fd = args
+                            .get(4)
+                            .copied()
+                            .map(|v| v.as_integer_compatible())
+                            .unwrap_or(-1);
                         if fd != -1 || len == 0 {
                             Value::from_i64(-1)
                         } else {
@@ -1729,7 +1829,6 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         // ==============================================================
         // Time Operations (0x70-0x75)
         // ==============================================================
-
         Some(FfiSubOpcode::TimeMonotonicNanos) => {
             let dst = read_reg(state)?;
             state.set_reg(dst, Value::from_i64(monotonic_nanos_shared()));
@@ -1773,7 +1872,6 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         // ==============================================================
         // System Call Operations (0x80-0x85)
         // ==============================================================
-
         Some(FfiSubOpcode::SysGetpid) => {
             let dst = read_reg(state)?;
             let pid = std::process::id();
@@ -1790,12 +1888,19 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 // exactly one u64 via the provided pointer when the first arg is
                 // 0 (self). The Apple libc contract is well-defined.
                 #[cfg(target_os = "macos")]
-                unsafe { libc::pthread_threadid_np(0, &mut tid); }
+                unsafe {
+                    libc::pthread_threadid_np(0, &mut tid);
+                }
                 #[cfg(not(target_os = "macos"))]
                 {
                     // On other Unix, use the thread id as a hash of the thread handle
                     let id = std::thread::current().id();
-                    tid = format!("{:?}", id).chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0);
+                    tid = format!("{:?}", id)
+                        .chars()
+                        .filter(|c| c.is_ascii_digit())
+                        .collect::<String>()
+                        .parse()
+                        .unwrap_or(0);
                 }
                 tid
             };
@@ -1875,7 +1980,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 // return NULL without corrupting process state.
                 let result = unsafe {
                     windows_sys::Win32::System::Memory::VirtualAlloc(
-                        if addr == 0 { std::ptr::null() } else { addr as *const core::ffi::c_void },
+                        if addr == 0 {
+                            std::ptr::null()
+                        } else {
+                            addr as *const core::ffi::c_void
+                        },
                         len as usize,
                         alloc_type,
                         win_prot,
@@ -1893,7 +2002,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 
             #[cfg(not(any(unix, windows)))]
             {
-                let err_obj = make_oserror_variant_with_msg(state, 38, "mmap not supported on this platform")?;
+                let err_obj = make_oserror_variant_with_msg(
+                    state,
+                    38,
+                    "mmap not supported on this platform",
+                )?;
                 state.set_reg(dst, err_obj);
             }
 
@@ -1913,7 +2026,8 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 // SAFETY: `munmap` is a well-defined kernel syscall that fails
                 // with a negative result on invalid inputs. No Rust references
                 // are dereferenced; correctness is the caller's responsibility.
-                let result = unsafe { libc::munmap(addr as *mut libc::c_void, len as libc::size_t) };
+                let result =
+                    unsafe { libc::munmap(addr as *mut libc::c_void, len as libc::size_t) };
 
                 if result < 0 {
                     let errno = get_platform_errno();
@@ -1950,7 +2064,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             #[cfg(not(any(unix, windows)))]
             {
                 let _ = (addr, len);
-                let err_obj = make_oserror_variant_with_msg(state, 38, "munmap not supported on this platform")?;
+                let err_obj = make_oserror_variant_with_msg(
+                    state,
+                    38,
+                    "munmap not supported on this platform",
+                )?;
                 state.set_reg(dst, err_obj);
             }
 
@@ -1972,7 +2090,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 // SAFETY: `madvise` is a kernel syscall that validates the
                 // supplied address range and returns `-1` on invalid input.
                 let result = unsafe {
-                    libc::madvise(_addr as *mut libc::c_void, _len as libc::size_t, _advice as i32)
+                    libc::madvise(
+                        _addr as *mut libc::c_void,
+                        _len as libc::size_t,
+                        _advice as i32,
+                    )
                 };
 
                 if result < 0 {
@@ -2014,9 +2136,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                     // hard limit). `buf` is an attacker-supplied pointer — the
                     // kernel validates it and returns `-1/EFAULT` on invalid
                     // memory; this is the same contract the AOT path uses.
-                    unsafe {
-                        libc::getentropy(buf as *mut libc::c_void, len as libc::size_t)
-                    }
+                    unsafe { libc::getentropy(buf as *mut libc::c_void, len as libc::size_t) }
                 };
 
                 #[cfg(windows)]
@@ -2053,7 +2173,6 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         // ==============================================================
         // Symbol Resolution (0x00-0x02) — stubs
         // ==============================================================
-
         Some(FfiSubOpcode::LoadSymbol) => {
             // Format: dst:reg, symbol_idx:u32
             let _dst = read_reg(state)?;
@@ -2093,12 +2212,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         // FFI Calling Convention Variants (0x11-0x17)
         // Route through same code path as CallFfiC (0x10)
         // ==============================================================
-
-        Some(FfiSubOpcode::CallFfiStdcall) |
-        Some(FfiSubOpcode::CallFfiSysV64) |
-        Some(FfiSubOpcode::CallFfiFastcall) |
-        Some(FfiSubOpcode::CallFfiAarch64) |
-        Some(FfiSubOpcode::CallFfiWin64Arm64) => {
+        Some(FfiSubOpcode::CallFfiStdcall)
+        | Some(FfiSubOpcode::CallFfiSysV64)
+        | Some(FfiSubOpcode::CallFfiFastcall)
+        | Some(FfiSubOpcode::CallFfiAarch64)
+        | Some(FfiSubOpcode::CallFfiWin64Arm64) => {
             // Same operand format as CallFfiC:
             // symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
             // mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
@@ -2133,7 +2251,8 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 state.setup_callback_handler();
 
                 let ffi_runtime = state.get_or_create_ffi_runtime()?;
-                ffi_runtime.load_module_libraries(&module)
+                ffi_runtime
+                    .load_module_libraries(&module)
                     .map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
 
                 let mut ret_value = Value::nil();
@@ -2148,51 +2267,66 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                         &source_reg_map,
                         &mut ret_value,
                     )
-                }.map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
+                }
+                .map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
 
                 // If return type is a struct, convert raw C buffer to Verum heap object
                 if let Some(sym) = module.get_ffi_symbol(symbol_id)
                     && matches!(sym.signature.return_type, crate::module::CType::StructValue)
-                        && let Some(layout_idx) = sym.signature.return_layout_idx {
-                            let layout = &module.ffi_layouts[layout_idx as usize];
-                            let c_buf_ptr = ret_value.as_ptr::<u8>();
-                            if !c_buf_ptr.is_null() {
-                                let max_field_idx = layout.fields.iter()
-                                    .map(|f| f.name.0 as usize)
-                                    .max()
-                                    .unwrap_or(0);
-                                let slot_count = max_field_idx + 1;
-                                let type_id = layout.verum_type.unwrap_or(crate::types::TypeId::UNIT);
-                                let obj = state.heap.alloc(type_id, slot_count * std::mem::size_of::<Value>())?;
-                                state.record_allocation();
+                    && let Some(layout_idx) = sym.signature.return_layout_idx
+                {
+                    let layout = &module.ffi_layouts[layout_idx as usize];
+                    let c_buf_ptr = ret_value.as_ptr::<u8>();
+                    if !c_buf_ptr.is_null() {
+                        let max_field_idx = layout
+                            .fields
+                            .iter()
+                            .map(|f| f.name.0 as usize)
+                            .max()
+                            .unwrap_or(0);
+                        let slot_count = max_field_idx + 1;
+                        let type_id = layout.verum_type.unwrap_or(crate::types::TypeId::UNIT);
+                        let obj = state
+                            .heap
+                            .alloc(type_id, slot_count * std::mem::size_of::<Value>())?;
+                        state.record_allocation();
 
-                                // SAFETY: See CallFfiC struct-return branch
-                                // for the full justification — same layout
-                                // and alloc invariants apply here.
-                                let data_ptr = unsafe {
-                                    (obj.as_ptr() as *mut u8).add(super::super::super::heap::OBJECT_HEADER_SIZE) as *mut Value
-                                };
-                                for field in &layout.fields {
-                                    // SAFETY: Offsets come from the compiler
-                                    // layout table; see CallFfiC branch.
-                                    let c_field_ptr = unsafe { c_buf_ptr.add(field.offset as usize) };
-                                    // SAFETY: `field.c_type` matches the
-                                    // bytes at `c_field_ptr`; see CallFfiC.
-                                    if let Some(val) = unsafe { crate::ffi::runtime::marshal_field_from_c(field.c_type, c_field_ptr) } {
-                                        let slot_idx = field.name.0 as usize;
-                                        // SAFETY: `slot_idx <= max_field_idx`
-                                        // and `data_ptr` has `slot_count`
-                                        // Value slots; in bounds.
-                                        unsafe { *data_ptr.add(slot_idx) = val; }
-                                    }
+                        // SAFETY: See CallFfiC struct-return branch
+                        // for the full justification — same layout
+                        // and alloc invariants apply here.
+                        let data_ptr = unsafe {
+                            (obj.as_ptr() as *mut u8)
+                                .add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                                as *mut Value
+                        };
+                        for field in &layout.fields {
+                            // SAFETY: Offsets come from the compiler
+                            // layout table; see CallFfiC branch.
+                            let c_field_ptr = unsafe { c_buf_ptr.add(field.offset as usize) };
+                            // SAFETY: `field.c_type` matches the
+                            // bytes at `c_field_ptr`; see CallFfiC.
+                            if let Some(val) = unsafe {
+                                crate::ffi::runtime::marshal_field_from_c(field.c_type, c_field_ptr)
+                            } {
+                                let slot_idx = field.name.0 as usize;
+                                // SAFETY: `slot_idx <= max_field_idx`
+                                // and `data_ptr` has `slot_count`
+                                // Value slots; in bounds.
+                                unsafe {
+                                    *data_ptr.add(slot_idx) = val;
                                 }
-                                // SAFETY: Undoes the `Box::into_raw` of a
-                                // [0u8; 256] performed by the FFI runtime;
-                                // see CallFfiC for details.
-                                unsafe { let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(c_buf_ptr, 256)); }
-                                ret_value = Value::from_ptr(obj.as_ptr() as *mut u8);
                             }
                         }
+                        // SAFETY: Undoes the `Box::into_raw` of a
+                        // [0u8; 256] performed by the FFI runtime;
+                        // see CallFfiC for details.
+                        unsafe {
+                            let _ =
+                                Box::from_raw(std::ptr::slice_from_raw_parts_mut(c_buf_ptr, 256));
+                        }
+                        ret_value = Value::from_ptr(obj.as_ptr() as *mut u8);
+                    }
+                }
 
                 state.set_reg(ret_reg, ret_value);
 
@@ -2203,9 +2337,14 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 for buf in state.ffi_array_buffers.drain(..) {
                     if buf.is_mutable && !buf.buffer.is_null() && !buf.array_obj_ptr.is_null() {
                         // SAFETY: See CallFfiC writeback loop — same invariants.
-                        let header = unsafe { &*(buf.array_obj_ptr as *const super::super::super::heap::ObjectHeader) };
+                        let header = unsafe {
+                            &*(buf.array_obj_ptr as *const super::super::super::heap::ObjectHeader)
+                        };
 
-                        if header.type_id == TypeId::U16 || header.type_id == TypeId::U32 || header.type_id == TypeId::U64 {
+                        if header.type_id == TypeId::U16
+                            || header.type_id == TypeId::U32
+                            || header.type_id == TypeId::U64
+                        {
                             let elem_size = match header.type_id {
                                 t if t == TypeId::U16 => 2usize,
                                 t if t == TypeId::U32 => 4usize,
@@ -2213,7 +2352,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                             };
                             let total_bytes = buf.count.checked_mul(elem_size).unwrap_or(0);
                             // SAFETY: Same as CallFfiC typed-array writeback.
-                            let dst = unsafe { buf.array_obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) };
+                            let dst = unsafe {
+                                buf.array_obj_ptr
+                                    .add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                            };
                             // SAFETY: `buf.buffer` has `total_bytes` live bytes
                             // and `dst` has matching capacity in the heap
                             // object (disjoint allocations).
@@ -2225,29 +2367,59 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                                 // SAFETY: See CallFfiC per-element loop.
                                 let new_val = unsafe {
                                     match buf.element_type {
-                                        0x01 => Value::from_i64(*(buf.buffer.add(i) as *const i8) as i64),
-                                        0x02 => Value::from_i64(*(buf.buffer.add(i * 2) as *const i16) as i64),
-                                        0x03 => Value::from_i64(*(buf.buffer.add(i * 4) as *const i32) as i64),
-                                        0x04 => Value::from_i64(*(buf.buffer.add(i * 8) as *const i64)),
-                                        0x05 => Value::from_f64(*(buf.buffer.add(i * 4) as *const f32) as f64),
-                                        0x06 => Value::from_f64(*(buf.buffer.add(i * 8) as *const f64)),
-                                        _ => Value::from_i64(*(buf.buffer.add(i * 8) as *const i64)),
+                                        0x01 => Value::from_i64(
+                                            *(buf.buffer.add(i) as *const i8) as i64,
+                                        ),
+                                        0x02 => Value::from_i64(
+                                            *(buf.buffer.add(i * 2) as *const i16) as i64,
+                                        ),
+                                        0x03 => Value::from_i64(
+                                            *(buf.buffer.add(i * 4) as *const i32) as i64,
+                                        ),
+                                        0x04 => {
+                                            Value::from_i64(*(buf.buffer.add(i * 8) as *const i64))
+                                        }
+                                        0x05 => Value::from_f64(
+                                            *(buf.buffer.add(i * 4) as *const f32) as f64,
+                                        ),
+                                        0x06 => {
+                                            Value::from_f64(*(buf.buffer.add(i * 8) as *const f64))
+                                        }
+                                        _ => {
+                                            Value::from_i64(*(buf.buffer.add(i * 8) as *const i64))
+                                        }
                                     }
                                 };
                                 let elem_offset = i * std::mem::size_of::<Value>();
                                 let elem_ptr = if header.type_id == TypeId::LIST {
                                     // SAFETY: See CallFfiC LIST writeback for layout details.
-                                    let data_ptr = unsafe { buf.array_obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) as *const Value };
+                                    let data_ptr = unsafe {
+                                        buf.array_obj_ptr
+                                            .add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                                            as *const Value
+                                    };
                                     // SAFETY: Slot 2 holds the backing buffer pointer.
                                     let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
                                     // SAFETY: `elem_offset` is in bounds per `i < buf.count`.
-                                    unsafe { backing.add(super::super::super::heap::OBJECT_HEADER_SIZE + elem_offset) as *mut Value }
+                                    unsafe {
+                                        backing.add(
+                                            super::super::super::heap::OBJECT_HEADER_SIZE
+                                                + elem_offset,
+                                        ) as *mut Value
+                                    }
                                 } else {
                                     // SAFETY: Non-LIST arrays pack Values after header.
-                                    unsafe { buf.array_obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE + elem_offset) as *mut Value }
+                                    unsafe {
+                                        buf.array_obj_ptr.add(
+                                            super::super::super::heap::OBJECT_HEADER_SIZE
+                                                + elem_offset,
+                                        ) as *mut Value
+                                    }
                                 };
                                 // SAFETY: `elem_ptr` is aligned and writable.
-                                unsafe { *elem_ptr = new_val; }
+                                unsafe {
+                                    *elem_ptr = new_val;
+                                }
                             }
                         }
                     }
@@ -2303,7 +2475,8 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 state.setup_callback_handler();
 
                 let ffi_runtime = state.get_or_create_ffi_runtime()?;
-                ffi_runtime.load_module_libraries(&module)
+                ffi_runtime
+                    .load_module_libraries(&module)
                     .map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
 
                 let mut ret_value = Value::nil();
@@ -2316,7 +2489,8 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                         &source_reg_map,
                         &mut ret_value,
                     )
-                }.map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
+                }
+                .map_err(|e| InterpreterError::FfiRuntimeError(format!("{}", e)))?;
 
                 state.set_reg(ret_reg, ret_value);
 
@@ -2327,8 +2501,13 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 for buf in state.ffi_array_buffers.drain(..) {
                     if buf.is_mutable && !buf.buffer.is_null() && !buf.array_obj_ptr.is_null() {
                         // SAFETY: See CallFfiC writeback loop.
-                        let header = unsafe { &*(buf.array_obj_ptr as *const super::super::super::heap::ObjectHeader) };
-                        if header.type_id == TypeId::U16 || header.type_id == TypeId::U32 || header.type_id == TypeId::U64 {
+                        let header = unsafe {
+                            &*(buf.array_obj_ptr as *const super::super::super::heap::ObjectHeader)
+                        };
+                        if header.type_id == TypeId::U16
+                            || header.type_id == TypeId::U32
+                            || header.type_id == TypeId::U64
+                        {
                             let elem_size = match header.type_id {
                                 t if t == TypeId::U16 => 2usize,
                                 t if t == TypeId::U32 => 4usize,
@@ -2336,37 +2515,72 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                             };
                             let total_bytes = buf.count.checked_mul(elem_size).unwrap_or(0);
                             // SAFETY: See CallFfiC typed-array writeback.
-                            let dst = unsafe { buf.array_obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) };
+                            let dst = unsafe {
+                                buf.array_obj_ptr
+                                    .add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                            };
                             // SAFETY: Source/dest both live; total_bytes in bounds.
-                            unsafe { std::ptr::copy_nonoverlapping(buf.buffer, dst, total_bytes); }
+                            unsafe {
+                                std::ptr::copy_nonoverlapping(buf.buffer, dst, total_bytes);
+                            }
                         } else {
                             for i in 0..buf.count {
                                 // SAFETY: See CallFfiC per-element reader.
                                 let new_val = unsafe {
                                     match buf.element_type {
-                                        0x01 => Value::from_i64(*(buf.buffer.add(i) as *const i8) as i64),
-                                        0x02 => Value::from_i64(*(buf.buffer.add(i * 2) as *const i16) as i64),
-                                        0x03 => Value::from_i64(*(buf.buffer.add(i * 4) as *const i32) as i64),
-                                        0x04 => Value::from_i64(*(buf.buffer.add(i * 8) as *const i64)),
-                                        0x05 => Value::from_f64(*(buf.buffer.add(i * 4) as *const f32) as f64),
-                                        0x06 => Value::from_f64(*(buf.buffer.add(i * 8) as *const f64)),
-                                        _ => Value::from_i64(*(buf.buffer.add(i * 8) as *const i64)),
+                                        0x01 => Value::from_i64(
+                                            *(buf.buffer.add(i) as *const i8) as i64,
+                                        ),
+                                        0x02 => Value::from_i64(
+                                            *(buf.buffer.add(i * 2) as *const i16) as i64,
+                                        ),
+                                        0x03 => Value::from_i64(
+                                            *(buf.buffer.add(i * 4) as *const i32) as i64,
+                                        ),
+                                        0x04 => {
+                                            Value::from_i64(*(buf.buffer.add(i * 8) as *const i64))
+                                        }
+                                        0x05 => Value::from_f64(
+                                            *(buf.buffer.add(i * 4) as *const f32) as f64,
+                                        ),
+                                        0x06 => {
+                                            Value::from_f64(*(buf.buffer.add(i * 8) as *const f64))
+                                        }
+                                        _ => {
+                                            Value::from_i64(*(buf.buffer.add(i * 8) as *const i64))
+                                        }
                                     }
                                 };
                                 let elem_offset = i * std::mem::size_of::<Value>();
                                 let elem_ptr = if header.type_id == TypeId::LIST {
                                     // SAFETY: See CallFfiC LIST writeback.
-                                    let data_ptr = unsafe { buf.array_obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) as *const Value };
+                                    let data_ptr = unsafe {
+                                        buf.array_obj_ptr
+                                            .add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                                            as *const Value
+                                    };
                                     // SAFETY: Slot 2 = backing pointer.
                                     let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
                                     // SAFETY: Offset in bounds per `i < buf.count`.
-                                    unsafe { backing.add(super::super::super::heap::OBJECT_HEADER_SIZE + elem_offset) as *mut Value }
+                                    unsafe {
+                                        backing.add(
+                                            super::super::super::heap::OBJECT_HEADER_SIZE
+                                                + elem_offset,
+                                        ) as *mut Value
+                                    }
                                 } else {
                                     // SAFETY: Non-LIST arrays pack Values after header.
-                                    unsafe { buf.array_obj_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE + elem_offset) as *mut Value }
+                                    unsafe {
+                                        buf.array_obj_ptr.add(
+                                            super::super::super::heap::OBJECT_HEADER_SIZE
+                                                + elem_offset,
+                                        ) as *mut Value
+                                    }
                                 };
                                 // SAFETY: `elem_ptr` is aligned and writable.
-                                unsafe { *elem_ptr = new_val; }
+                                unsafe {
+                                    *elem_ptr = new_val;
+                                }
                             }
                         }
                     }
@@ -2376,7 +2590,13 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             }
             #[cfg(not(feature = "ffi"))]
             {
-                let _ = (symbol_idx, fixed_count, variadic_count, args, source_reg_map);
+                let _ = (
+                    symbol_idx,
+                    fixed_count,
+                    variadic_count,
+                    args,
+                    source_reg_map,
+                );
                 return Err(InterpreterError::NotImplemented {
                     feature: "FFI calls require the 'ffi' feature",
                     opcode: None,
@@ -2413,7 +2633,6 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         // ==============================================================
         // Marshalling (0x20-0x27) — stubs (pass values through)
         // ==============================================================
-
         Some(FfiSubOpcode::MarshalToC) | Some(FfiSubOpcode::MarshalFromC) => {
             // Format: dst:reg, src:reg, c_type:u8
             let dst = read_reg(state)?;
@@ -2477,7 +2696,6 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         // ==============================================================
         // CRealloc (0x42)
         // ==============================================================
-
         Some(FfiSubOpcode::CRealloc) => {
             // Format: dst:reg, ptr:reg, size:reg
             let dst = read_reg(state)?;
@@ -2485,10 +2703,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             let size_reg = read_reg(state)?;
             let size = state.get_reg(size_reg).as_i64() as usize;
             if size > 0 {
-                let layout = std::alloc::Layout::from_size_align(size, 8)
-                    .map_err(|_| InterpreterError::InvalidOperand {
+                let layout = std::alloc::Layout::from_size_align(size, 8).map_err(|_| {
+                    InterpreterError::InvalidOperand {
                         message: format!("invalid reallocation size: {}", size),
-                    })?;
+                    }
+                })?;
                 // SAFETY: `size > 0` is checked above and `layout` has a
                 // valid alignment, so `alloc_zeroed`'s precondition holds.
                 // A null return is tolerated by `Value::from_ptr`.
@@ -2503,7 +2722,6 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         // ==============================================================
         // FreeCallback (0x51) — no-op
         // ==============================================================
-
         Some(FfiSubOpcode::FreeCallback) => {
             // Format: trampoline:reg
             let _callback_reg = read_reg(state)?;
@@ -2514,7 +2732,6 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         // ==============================================================
         // Mach Kernel Operations (0x90-0x98) — macOS stubs
         // ==============================================================
-
         Some(FfiSubOpcode::MachVmAllocate) => {
             // Format: dst:reg, size:reg, anywhere:reg
             let dst = read_reg(state)?;
@@ -2565,9 +2782,9 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::MachSemDestroy) |
-        Some(FfiSubOpcode::MachSemSignal) |
-        Some(FfiSubOpcode::MachSemWait) => {
+        Some(FfiSubOpcode::MachSemDestroy)
+        | Some(FfiSubOpcode::MachSemSignal)
+        | Some(FfiSubOpcode::MachSemWait) => {
             // Format: dst:reg, sem:reg
             let _dst = read_reg(state)?;
             let _sem_reg = read_reg(state)?;
@@ -2635,7 +2852,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                     variant_size,
                     |data| {
                         let tag_ptr = data.as_mut_ptr() as *mut u32;
-                        unsafe { *tag_ptr = 1; *tag_ptr.add(1) = 1; }
+                        unsafe {
+                            *tag_ptr = 1;
+                            *tag_ptr.add(1) = 1;
+                        }
                     },
                 )?;
                 let err_base = err_obj.as_ptr() as *mut u8;
@@ -2671,7 +2891,11 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // layout on dealloc; callers are expected to route through
             // CbgrDealloc (which currently leaks — see below).
             let ptr = unsafe {
-                if zeroed { std::alloc::alloc_zeroed(layout) } else { std::alloc::alloc(layout) }
+                if zeroed {
+                    std::alloc::alloc_zeroed(layout)
+                } else {
+                    std::alloc::alloc(layout)
+                }
             };
             if ptr.is_null() {
                 // Model `AllocError::OutOfMemory` as returning a nil Value
@@ -2691,11 +2915,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // `let (ptr, g, e) = …` destructures each field at its
             // expected offset.
             let tuple_size = 3 * std::mem::size_of::<Value>();
-            let tuple_obj = state.heap.alloc_with_init(
-                crate::types::TypeId::TUPLE,
-                tuple_size,
-                |_data| {},
-            )?;
+            let tuple_obj =
+                state
+                    .heap
+                    .alloc_with_init(crate::types::TypeId::TUPLE, tuple_size, |_data| {})?;
             let tuple_data = tuple_obj.data_ptr() as *mut Value;
             unsafe {
                 std::ptr::write(tuple_data.add(0), Value::from_i64(ptr as i64));
@@ -2743,12 +2966,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
         }
 
         // Unimplemented sub-opcodes
-        _ => {
-            Err(InterpreterError::NotImplemented {
-                feature: "ffi_extended sub-opcode",
-                opcode: None,
-            })
-        }
+        _ => Err(InterpreterError::NotImplemented {
+            feature: "ffi_extended sub-opcode",
+            opcode: None,
+        }),
     }
 }
 
@@ -2985,13 +3206,20 @@ fn read_errno(state: &mut InterpreterState) -> i32 {
 /// Construct a Result::Err(OSError { code, message }) variant.
 /// Result::Err has tag=1, field_count=1 (the OSError).
 /// OSError is a record with fields: code: Int, message: Text.
-pub(in super::super) fn make_oserror_variant(state: &mut InterpreterState, errno: i32) -> InterpreterResult<Value> {
+pub(in super::super) fn make_oserror_variant(
+    state: &mut InterpreterState,
+    errno: i32,
+) -> InterpreterResult<Value> {
     let msg = errno_to_string(errno);
     make_oserror_variant_with_msg(state, errno, &msg)
 }
 
 /// Construct a Result::Err(OSError { code, message }) variant with custom message.
-pub(in super::super) fn make_oserror_variant_with_msg(state: &mut InterpreterState, code: i32, msg: &str) -> InterpreterResult<Value> {
+pub(in super::super) fn make_oserror_variant_with_msg(
+    state: &mut InterpreterState,
+    code: i32,
+    msg: &str,
+) -> InterpreterResult<Value> {
     use crate::types::TypeId;
 
     // Create the message string value first (before borrowing heap in alloc_with_init)
@@ -3073,7 +3301,10 @@ pub(in super::super) fn make_oserror_variant_with_msg(state: &mut InterpreterSta
 }
 
 /// Construct a Result::Ok(ptr_value) variant for mmap.
-pub(in super::super) fn make_result_ok_ptr(state: &mut InterpreterState, ptr_val: i64) -> InterpreterResult<Value> {
+pub(in super::super) fn make_result_ok_ptr(
+    state: &mut InterpreterState,
+    ptr_val: i64,
+) -> InterpreterResult<Value> {
     use crate::types::TypeId;
 
     // Result::Ok variant (tag=0, field_count=1, payload=pointer)
@@ -3102,7 +3333,9 @@ pub(in super::super) fn make_result_ok_ptr(state: &mut InterpreterState, ptr_val
 }
 
 /// Construct a Result::Ok(()) variant.
-pub(in super::super) fn make_result_ok_unit(state: &mut InterpreterState) -> InterpreterResult<Value> {
+pub(in super::super) fn make_result_ok_unit(
+    state: &mut InterpreterState,
+) -> InterpreterResult<Value> {
     use crate::types::TypeId;
 
     // Result::Ok variant (tag=0, field_count=0 for unit payload)

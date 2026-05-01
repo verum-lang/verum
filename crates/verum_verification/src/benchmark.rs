@@ -103,7 +103,13 @@ impl BenchmarkSystem {
     }
 
     pub fn all() -> [BenchmarkSystem; 5] {
-        [Self::Verum, Self::Coq, Self::Lean4, Self::Isabelle, Self::Agda]
+        [
+            Self::Verum,
+            Self::Coq,
+            Self::Lean4,
+            Self::Isabelle,
+            Self::Agda,
+        ]
     }
 }
 
@@ -404,12 +410,7 @@ impl BenchmarkRunner for MockBenchmarkRunner {
                     | BenchmarkMetric::CrossFormatExports
                     | BenchmarkMetric::TrustDiversificationCount
             ) {
-                let mut r = BenchmarkResult::new(
-                    self.system,
-                    suite.name.clone(),
-                    *metric,
-                    *value,
-                );
+                let mut r = BenchmarkResult::new(self.system, suite.name.clone(), *metric, *value);
                 if let Some(env) = &suite.repro_envelope {
                     r = r.with_envelope(env.clone());
                 }
@@ -425,13 +426,9 @@ impl BenchmarkRunner for MockBenchmarkRunner {
                         | BenchmarkMetric::PeakRssBytes
                         | BenchmarkMetric::TheoremsPerSecond
                 ) {
-                    let mut r = BenchmarkResult::new(
-                        self.system,
-                        suite.name.clone(),
-                        *metric,
-                        *value,
-                    )
-                    .with_theorem(thm.clone());
+                    let mut r =
+                        BenchmarkResult::new(self.system, suite.name.clone(), *metric, *value)
+                            .with_theorem(thm.clone());
                     if let Some(env) = &suite.repro_envelope {
                         r = r.with_envelope(env.clone());
                     }
@@ -758,8 +755,7 @@ impl ComparisonMatrix {
     /// theorems in the same suite. Suite-level metrics are
     /// untouched.
     pub fn ingest_aggregated(&mut self, results: &[BenchmarkResult]) {
-        let mut sums: BTreeMap<(BenchmarkMetric, BenchmarkSystem), (f64, usize)> =
-            BTreeMap::new();
+        let mut sums: BTreeMap<(BenchmarkMetric, BenchmarkSystem), (f64, usize)> = BTreeMap::new();
         for r in results {
             let key = (r.metric, r.system);
             let entry = sums.entry(key).or_insert((0.0, 0));
@@ -854,10 +850,7 @@ impl ComparisonMatrix {
 fn format_value(metric: BenchmarkMetric, value: f64) -> String {
     match metric {
         BenchmarkMetric::KernelLoc => format!("{} LOC", format_thousands(value as i64)),
-        BenchmarkMetric::LinesPerSecond => format!(
-            "{} LOC/s",
-            format_thousands(value as i64)
-        ),
+        BenchmarkMetric::LinesPerSecond => format!("{} LOC/s", format_thousands(value as i64)),
         BenchmarkMetric::TheoremsPerSecond => format!("{:.1} thm/s", value),
         BenchmarkMetric::PeakRssBytes => format!("{:.1} MB", value / (1024.0 * 1024.0)),
         BenchmarkMetric::ElapsedMs => format!("{:.1} ms", value),
@@ -898,7 +891,10 @@ mod tests {
         for s in BenchmarkSystem::all() {
             assert_eq!(BenchmarkSystem::from_name(s.name()), Some(s));
         }
-        assert_eq!(BenchmarkSystem::from_name("rocq"), Some(BenchmarkSystem::Coq));
+        assert_eq!(
+            BenchmarkSystem::from_name("rocq"),
+            Some(BenchmarkSystem::Coq)
+        );
         assert_eq!(
             BenchmarkSystem::from_name("mathlib"),
             Some(BenchmarkSystem::Lean4)
@@ -960,7 +956,10 @@ mod tests {
         .with_theorem("foo")
         .with_envelope("blake3-of-corpus");
         assert_eq!(r.theorem.as_ref().unwrap().as_str(), "foo");
-        assert_eq!(r.repro_envelope.as_ref().unwrap().as_str(), "blake3-of-corpus");
+        assert_eq!(
+            r.repro_envelope.as_ref().unwrap().as_str(),
+            "blake3-of-corpus"
+        );
     }
 
     #[test]
@@ -1005,9 +1004,11 @@ mod tests {
             .with(BenchmarkMetric::KernelLoc, 5000.0);
         let suite = fixture_suite().with_envelope("hash-abc");
         let results = runner.run(&suite).unwrap();
-        assert!(results.iter().all(|r| {
-            r.repro_envelope.as_ref().map(|t| t.as_str()) == Some("hash-abc")
-        }));
+        assert!(
+            results
+                .iter()
+                .all(|r| { r.repro_envelope.as_ref().map(|t| t.as_str()) == Some("hash-abc") })
+        );
     }
 
     // ----- mock_runner_for -----
@@ -1037,7 +1038,11 @@ mod tests {
                 .get(&BenchmarkMetric::KernelLoc)
                 .copied()
                 .unwrap();
-            assert!(verum_loc < other, "verum kernel must be smaller than {}", s.name());
+            assert!(
+                verum_loc < other,
+                "verum kernel must be smaller than {}",
+                s.name()
+            );
         }
     }
 
@@ -1093,7 +1098,10 @@ mod tests {
             200_000.0,
         ));
         // Lower KernelLoc wins.
-        assert_eq!(m.leader(BenchmarkMetric::KernelLoc), Some(BenchmarkSystem::Verum));
+        assert_eq!(
+            m.leader(BenchmarkMetric::KernelLoc),
+            Some(BenchmarkSystem::Verum)
+        );
     }
 
     #[test]
@@ -1180,13 +1188,13 @@ mod tests {
         // Every category called out in #83's description must be
         // representable as a metric.
         let categories: &[BenchmarkMetric] = &[
-            BenchmarkMetric::KernelLoc,                  // §1
-            BenchmarkMetric::LinesPerSecond,             // §2
-            BenchmarkMetric::PeakRssBytes,               // §3
-            BenchmarkMetric::CrossFormatExports,         // §4
-            BenchmarkMetric::TacticCoveragePercent,      // §5
-            BenchmarkMetric::TrustDiversificationCount,  // §6
-            BenchmarkMetric::LlmAcceptancePercent,       // §7
+            BenchmarkMetric::KernelLoc,                 // §1
+            BenchmarkMetric::LinesPerSecond,            // §2
+            BenchmarkMetric::PeakRssBytes,              // §3
+            BenchmarkMetric::CrossFormatExports,        // §4
+            BenchmarkMetric::TacticCoveragePercent,     // §5
+            BenchmarkMetric::TrustDiversificationCount, // §6
+            BenchmarkMetric::LlmAcceptancePercent,      // §7
         ];
         for c in categories {
             assert!(BenchmarkMetric::from_name(c.name()).is_some());
@@ -1206,7 +1214,10 @@ mod tests {
                 m.ingest(BenchmarkResult::new(s, "suite", *metric, *value));
             }
         }
-        assert_eq!(m.leader(BenchmarkMetric::KernelLoc), Some(BenchmarkSystem::Verum));
+        assert_eq!(
+            m.leader(BenchmarkMetric::KernelLoc),
+            Some(BenchmarkSystem::Verum)
+        );
         assert_eq!(
             m.leader(BenchmarkMetric::LlmAcceptancePercent),
             Some(BenchmarkSystem::Verum)
@@ -1288,12 +1299,8 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let thm_path = tmpdir.path().join("toy.txt");
         std::fs::write(&thm_path, "stub").unwrap();
-        let r = ProductionBenchmarkRunner::new(
-            BenchmarkSystem::Verum,
-            "echo",
-            tmpdir.path(),
-        )
-        .with_extension("txt");
+        let r = ProductionBenchmarkRunner::new(BenchmarkSystem::Verum, "echo", tmpdir.path())
+            .with_extension("txt");
         assert!(r.is_available());
         let suite = BenchmarkSuite::new("s").add_theorem("toy");
         let results = r.run(&suite).unwrap();
@@ -1315,11 +1322,7 @@ mod tests {
         // `false` always exits 1 — the runner must surface this as
         // a structured error rather than silently coding 0.
         let tmpdir = tempfile::tempdir().unwrap();
-        let r = ProductionBenchmarkRunner::new(
-            BenchmarkSystem::Verum,
-            "false",
-            tmpdir.path(),
-        );
+        let r = ProductionBenchmarkRunner::new(BenchmarkSystem::Verum, "false", tmpdir.path());
         if !r.is_available() {
             // `false` is missing on some build sandboxes; skip
             // gracefully rather than failing the suite.
@@ -1347,12 +1350,8 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let thm_path = tmpdir.path().join("p.txt");
         std::fs::write(&thm_path, "x").unwrap();
-        let r = ProductionBenchmarkRunner::new(
-            BenchmarkSystem::Lean4,
-            "echo",
-            tmpdir.path(),
-        )
-        .with_extension("txt");
+        let r = ProductionBenchmarkRunner::new(BenchmarkSystem::Lean4, "echo", tmpdir.path())
+            .with_extension("txt");
         let suite = BenchmarkSuite::new("acceptance").add_theorem("p");
         let results = r.run(&suite).unwrap();
         let elapsed = results

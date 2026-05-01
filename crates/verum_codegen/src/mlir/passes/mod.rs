@@ -85,13 +85,13 @@ mod refinement_propagation;
 
 pub use cbgr_elimination::{
     CbgrEliminationPass, CbgrEliminationStats, EscapeAnalysisEngine, EscapeAnalysisStats,
-    EscapeCategory, OptimizationAction, OperationId, OperationInfo, ValueId, ValueInfo,
+    EscapeCategory, OperationId, OperationInfo, OptimizationAction, ValueId, ValueInfo,
     is_cbgr_alloc, is_cbgr_check, is_cbgr_operation, may_cause_escape,
 };
 pub use context_mono::{
     CallSiteId, CallSiteInfo, ContextAnalysisEngine, ContextGetId, ContextGetInfo,
-    ContextMonoStats, ContextMonomorphizationPass, ContextResolution, ContextTypeInfo,
-    FunctionId, FunctionInfo, is_context_get, is_context_operation, is_context_provide,
+    ContextMonoStats, ContextMonomorphizationPass, ContextResolution, ContextTypeInfo, FunctionId,
+    FunctionInfo, is_context_get, is_context_operation, is_context_provide,
 };
 pub use gpu_pipeline::{GpuPassConfig, GpuPassPipeline, GpuPipelineResult, GpuPipelineStats};
 pub use llvm_lowering::LlvmLoweringPass;
@@ -570,10 +570,7 @@ impl OptimizationLevel {
     pub fn enabled_passes(&self) -> Vec<&'static str> {
         match self {
             Self::None => vec![],
-            Self::Basic => vec![
-                "canonicalize",
-                "cse",
-            ],
+            Self::Basic => vec!["canonicalize", "cse"],
             Self::Standard => vec![
                 "canonicalize",
                 "cse",
@@ -689,9 +686,21 @@ mod tests {
     #[test]
     fn test_optimization_level_passes() {
         assert!(OptimizationLevel::None.enabled_passes().is_empty());
-        assert!(OptimizationLevel::Basic.enabled_passes().contains(&"canonicalize"));
-        assert!(OptimizationLevel::Standard.enabled_passes().contains(&"cbgr-elimination"));
-        assert!(OptimizationLevel::Aggressive.enabled_passes().contains(&"inline"));
+        assert!(
+            OptimizationLevel::Basic
+                .enabled_passes()
+                .contains(&"canonicalize")
+        );
+        assert!(
+            OptimizationLevel::Standard
+                .enabled_passes()
+                .contains(&"cbgr-elimination")
+        );
+        assert!(
+            OptimizationLevel::Aggressive
+                .enabled_passes()
+                .contains(&"inline")
+        );
     }
 
     #[test]

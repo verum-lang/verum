@@ -5,7 +5,11 @@
 //! Simplified from inkwell for LLVM 21 only (no version conditionals).
 
 #![deny(missing_debug_implementations)]
-#![allow(clippy::missing_safety_doc, clippy::too_many_arguments, clippy::result_unit_err)]
+#![allow(
+    clippy::missing_safety_doc,
+    clippy::too_many_arguments,
+    clippy::result_unit_err
+)]
 // Allow unsafe operations in unsafe fn without explicit blocks (Rust 2024 compat)
 // This pattern was valid in earlier editions and is used throughout this crate
 #![allow(unsafe_op_in_unsafe_fn)]
@@ -44,15 +48,15 @@ pub mod targets;
 pub mod types;
 pub mod values;
 
+use verum_llvm_sys::LLVMInlineAsmDialect;
 use verum_llvm_sys::target_machine::LLVMCodeGenOptLevel;
 use verum_llvm_sys::{
-    LLVMAtomicOrdering, LLVMAtomicRMWBinOp, LLVMDLLStorageClass, LLVMIntPredicate, LLVMRealPredicate,
-    LLVMThreadLocalMode, LLVMVisibility,
+    LLVMAtomicOrdering, LLVMAtomicRMWBinOp, LLVMDLLStorageClass, LLVMIntPredicate,
+    LLVMRealPredicate, LLVMThreadLocalMode, LLVMVisibility,
 };
-use verum_llvm_sys::LLVMInlineAsmDialect;
 
-pub use error::Error;
 pub use context::Context as LlvmContext;
+pub use error::Error;
 use std::convert::TryFrom;
 
 /// Defines the address space in which a global will be inserted.
@@ -314,9 +318,15 @@ pub enum ThreadLocalMode {
 impl ThreadLocalMode {
     pub(crate) fn new(thread_local_mode: LLVMThreadLocalMode) -> Option<Self> {
         match thread_local_mode {
-            LLVMThreadLocalMode::LLVMGeneralDynamicTLSModel => Some(ThreadLocalMode::GeneralDynamicTLSModel),
-            LLVMThreadLocalMode::LLVMLocalDynamicTLSModel => Some(ThreadLocalMode::LocalDynamicTLSModel),
-            LLVMThreadLocalMode::LLVMInitialExecTLSModel => Some(ThreadLocalMode::InitialExecTLSModel),
+            LLVMThreadLocalMode::LLVMGeneralDynamicTLSModel => {
+                Some(ThreadLocalMode::GeneralDynamicTLSModel)
+            }
+            LLVMThreadLocalMode::LLVMLocalDynamicTLSModel => {
+                Some(ThreadLocalMode::LocalDynamicTLSModel)
+            }
+            LLVMThreadLocalMode::LLVMInitialExecTLSModel => {
+                Some(ThreadLocalMode::InitialExecTLSModel)
+            }
             LLVMThreadLocalMode::LLVMLocalExecTLSModel => Some(ThreadLocalMode::LocalExecTLSModel),
             LLVMThreadLocalMode::LLVMNotThreadLocal => None,
         }
@@ -324,7 +334,9 @@ impl ThreadLocalMode {
 
     pub(crate) fn as_llvm_mode(self) -> LLVMThreadLocalMode {
         match self {
-            ThreadLocalMode::GeneralDynamicTLSModel => LLVMThreadLocalMode::LLVMGeneralDynamicTLSModel,
+            ThreadLocalMode::GeneralDynamicTLSModel => {
+                LLVMThreadLocalMode::LLVMGeneralDynamicTLSModel
+            }
             ThreadLocalMode::LocalDynamicTLSModel => LLVMThreadLocalMode::LLVMLocalDynamicTLSModel,
             ThreadLocalMode::InitialExecTLSModel => LLVMThreadLocalMode::LLVMInitialExecTLSModel,
             ThreadLocalMode::LocalExecTLSModel => LLVMThreadLocalMode::LLVMLocalExecTLSModel,

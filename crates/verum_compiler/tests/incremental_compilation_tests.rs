@@ -27,8 +27,8 @@ use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
 use verum_ast::{FileId, Module};
-use verum_compiler::IncrementalCompiler;
 use verum_common::List;
+use verum_compiler::IncrementalCompiler;
 
 /// Helper to create a test module
 fn create_test_module(file_id: FileId) -> Module {
@@ -150,14 +150,8 @@ fn test_dependency_tracking() {
     compiler.cache_module(main_file.clone(), main_module);
 
     // Register dependencies: main -> lib -> utils
-    compiler.register_dependencies(
-        lib_file.clone(),
-        List::from(vec![utils_file.clone()]),
-    );
-    compiler.register_dependencies(
-        main_file.clone(),
-        List::from(vec![lib_file.clone()]),
-    );
+    compiler.register_dependencies(lib_file.clone(), List::from(vec![utils_file.clone()]));
+    compiler.register_dependencies(main_file.clone(), List::from(vec![lib_file.clone()]));
 
     // Test get_recompilation_set
     let changed_files = vec![utils_file.clone()];
@@ -232,10 +226,8 @@ fn test_cache_persistence() {
         compiler.cache_type_check(test_file.clone(), tc_result);
 
         // Register some dependencies
-        compiler.register_dependencies(
-            test_file.clone(),
-            List::from(vec![root_dir.join("dep.vr")]),
-        );
+        compiler
+            .register_dependencies(test_file.clone(), List::from(vec![root_dir.join("dep.vr")]));
 
         compiler.save_cache().expect("Failed to save cache");
     }

@@ -259,8 +259,10 @@ fn test_field_path_with_array_index() {
 
 #[test]
 fn test_field_path_array_aliasing() {
-    let path1 = FieldPath::named("arr".to_string().into()).with_array_index(SymbolicIndex::Constant(0));
-    let path2 = FieldPath::named("arr".to_string().into()).with_array_index(SymbolicIndex::Constant(1));
+    let path1 =
+        FieldPath::named("arr".to_string().into()).with_array_index(SymbolicIndex::Constant(0));
+    let path2 =
+        FieldPath::named("arr".to_string().into()).with_array_index(SymbolicIndex::Constant(1));
 
     // Both have array elements, so they conservatively may alias
     assert!(path1.may_alias_with_array(&path2));
@@ -505,8 +507,10 @@ fn test_extract_array_accesses_with_uses() {
         uses: vec![UseeSite {
             block: BlockId(0),
             reference: RefId(1),
-            is_mutable: false, span: None,
-        }].into(),
+            is_mutable: false,
+            span: None,
+        }]
+        .into(),
         call_sites: List::new(),
         has_await_point: false,
         is_exception_handler: false,

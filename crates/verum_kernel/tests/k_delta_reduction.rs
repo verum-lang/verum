@@ -47,12 +47,7 @@ fn register_definition_stores_body() {
         domain: Heap::new(nat_ind()),
         codomain: Heap::new(nat_ind()),
     };
-    let res = reg.register_definition(
-        Text::from("IdNat"),
-        id_lam.clone(),
-        id_ty,
-        fw(),
-    );
+    let res = reg.register_definition(Text::from("IdNat"), id_lam.clone(), id_ty, fw());
     assert!(res.is_ok());
     use verum_common::Maybe;
     match reg.get("IdNat") {

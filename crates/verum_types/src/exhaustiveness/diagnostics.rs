@@ -101,10 +101,7 @@ impl ExhaustivenessError {
     }
 
     /// Create an invalid pattern error
-    pub fn invalid_pattern(
-        reason: impl Into<Text>,
-        span: Option<verum_ast::span::Span>,
-    ) -> Self {
+    pub fn invalid_pattern(reason: impl Into<Text>, span: Option<verum_ast::span::Span>) -> Self {
         Self {
             code: ExhaustivenessErrorCode::InvalidPattern,
             message: reason.into(),

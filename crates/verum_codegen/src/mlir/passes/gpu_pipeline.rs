@@ -56,14 +56,9 @@
 use crate::mlir::error::{MlirError, Result};
 use crate::mlir::vbc_lowering::GpuTarget;
 
-use verum_mlir::{
-    Context,
-    ir::Module,
-    ir::operation::OperationLike,
-    pass::PassManager,
-};
-use verum_common::Text;
 use std::time::Instant;
+use verum_common::Text;
+use verum_mlir::{Context, ir::Module, ir::operation::OperationLike, pass::PassManager};
 
 /// Configuration for the GPU pass pipeline.
 #[derive(Debug, Clone)]
@@ -252,129 +247,192 @@ impl<'c> GpuPassPipeline<'c> {
         let mut stats = GpuPipelineStats::default();
 
         // Phase 1: Early optimizations (canonicalize, CSE)
-        self.run_phase(module, &mut stats, &mut result, "early-opts", |pm| {
-            use verum_mlir::pass::transform;
+        self.run_phase(
+            module,
+            &mut stats,
+            &mut result,
+            "early-opts",
+            |pm| {
+                use verum_mlir::pass::transform;
 
-            pm.add_pass(transform::create_canonicalizer());
-            pm.add_pass(transform::create_cse());
-        }, |s, elapsed| s.early_opts_time_us = elapsed)?;
+                pm.add_pass(transform::create_canonicalizer());
+                pm.add_pass(transform::create_cse());
+            },
+            |s, elapsed| s.early_opts_time_us = elapsed,
+        )?;
 
         // Phase 2: Tensor → Linalg conversion
-        self.run_phase(module, &mut stats, &mut result, "tensor-to-linalg", |pm| {
-            use verum_mlir::pass::conversion;
+        self.run_phase(
+            module,
+            &mut stats,
+            &mut result,
+            "tensor-to-linalg",
+            |pm| {
+                use verum_mlir::pass::conversion;
 
-            pm.add_pass(conversion::create_tensor_to_linalg());
-        }, |s, elapsed| s.tensor_to_linalg_time_us = elapsed)?;
+                pm.add_pass(conversion::create_tensor_to_linalg());
+            },
+            |s, elapsed| s.tensor_to_linalg_time_us = elapsed,
+        )?;
 
         // Phase 3: Linalg optimizations
         if self.config.optimization_level >= 1 {
-            self.run_phase(module, &mut stats, &mut result, "linalg-opts", |pm| {
-                use verum_mlir::pass::linalg;
+            self.run_phase(
+                module,
+                &mut stats,
+                &mut result,
+                "linalg-opts",
+                |pm| {
+                    use verum_mlir::pass::linalg;
 
-                pm.add_pass(linalg::create_linalg_elementwise_op_fusion_pass());
-                pm.add_pass(linalg::create_linalg_fold_unit_extent_dims_pass());
-                pm.add_pass(linalg::create_linalg_inline_scalar_operands_pass());
-            }, |s, elapsed| s.linalg_opts_time_us = elapsed)?;
+                    pm.add_pass(linalg::create_linalg_elementwise_op_fusion_pass());
+                    pm.add_pass(linalg::create_linalg_fold_unit_extent_dims_pass());
+                    pm.add_pass(linalg::create_linalg_inline_scalar_operands_pass());
+                },
+                |s, elapsed| s.linalg_opts_time_us = elapsed,
+            )?;
         }
 
         // Phase 4: Linalg → Parallel Loops
-        self.run_phase(module, &mut stats, &mut result, "linalg-to-parallel", |pm| {
-            use verum_mlir::pass::linalg;
+        self.run_phase(
+            module,
+            &mut stats,
+            &mut result,
+            "linalg-to-parallel",
+            |pm| {
+                use verum_mlir::pass::linalg;
 
-            pm.add_pass(linalg::create_convert_linalg_to_parallel_loops_pass());
-        }, |s, elapsed| {
-            // Counted in gpu_mapping_time
-            s.gpu_mapping_time_us += elapsed;
-        })?;
+                pm.add_pass(linalg::create_convert_linalg_to_parallel_loops_pass());
+            },
+            |s, elapsed| {
+                // Counted in gpu_mapping_time
+                s.gpu_mapping_time_us += elapsed;
+            },
+        )?;
 
         // Phase 5: GPU mapping (parallel loops → gpu.launch + kernel outlining)
-        self.run_phase(module, &mut stats, &mut result, "gpu-mapping", |pm| {
-            use verum_mlir::pass::gpu;
+        self.run_phase(
+            module,
+            &mut stats,
+            &mut result,
+            "gpu-mapping",
+            |pm| {
+                use verum_mlir::pass::gpu;
 
-            pm.add_pass(gpu::create_gpu_map_parallel_loops_pass());
-            pm.add_pass(gpu::create_gpu_kernel_outlining_pass());
-            pm.add_pass(gpu::create_gpu_launch_sink_index_computations_pass());
-        }, |s, elapsed| s.gpu_mapping_time_us += elapsed)?;
+                pm.add_pass(gpu::create_gpu_map_parallel_loops_pass());
+                pm.add_pass(gpu::create_gpu_kernel_outlining_pass());
+                pm.add_pass(gpu::create_gpu_launch_sink_index_computations_pass());
+            },
+            |s, elapsed| s.gpu_mapping_time_us += elapsed,
+        )?;
 
         // Phase 6: GPU optimizations
         if self.config.optimization_level >= 1 {
-            self.run_phase(module, &mut stats, &mut result, "gpu-opts", |pm| {
-                use verum_mlir::pass::gpu;
+            self.run_phase(
+                module,
+                &mut stats,
+                &mut result,
+                "gpu-opts",
+                |pm| {
+                    use verum_mlir::pass::gpu;
 
-                pm.add_pass(gpu::create_gpu_decompose_memrefs_pass());
-                pm.add_pass(gpu::create_gpu_eliminate_barriers());
+                    pm.add_pass(gpu::create_gpu_decompose_memrefs_pass());
+                    pm.add_pass(gpu::create_gpu_eliminate_barriers());
 
-                if self.config.enable_async {
-                    pm.add_pass(gpu::create_gpu_async_region_pass());
-                }
-            }, |s, elapsed| s.gpu_opts_time_us = elapsed)?;
+                    if self.config.enable_async {
+                        pm.add_pass(gpu::create_gpu_async_region_pass());
+                    }
+                },
+                |s, elapsed| s.gpu_opts_time_us = elapsed,
+            )?;
         }
 
         // Phase 7: Target-specific lowering (attach target + convert ops)
-        self.run_phase(module, &mut stats, &mut result, "target-lowering", |pm| {
-            use verum_mlir::pass::{gpu, conversion};
+        self.run_phase(
+            module,
+            &mut stats,
+            &mut result,
+            "target-lowering",
+            |pm| {
+                use verum_mlir::pass::{conversion, gpu};
 
-            match self.config.target {
-                GpuTarget::Cuda => {
-                    pm.add_pass(gpu::create_gpu_nvvm_attach_target());
-                    pm.add_pass(conversion::create_gpu_ops_to_nvvm_ops());
-                    // Honour `GpuPassConfig.enable_tensor_cores`:
-                    // tensor-core utilization is NVIDIA-specific
-                    // (mma.* PTX instructions on Volta+). The
-                    // actual mma emission depends on the kernel
-                    // being structured for tensor-core use, but
-                    // logging the configured stance here lets
-                    // downstream observers correlate kernel
-                    // performance with the policy without having
-                    // to re-read the config. Pre-fix the field
-                    // was inert: setting it had zero observable
-                    // effect on the pipeline.
-                    if self.config.enable_tensor_cores {
-                        tracing::debug!(
-                            "[gpu-pipeline] tensor-core utilization enabled \
+                match self.config.target {
+                    GpuTarget::Cuda => {
+                        pm.add_pass(gpu::create_gpu_nvvm_attach_target());
+                        pm.add_pass(conversion::create_gpu_ops_to_nvvm_ops());
+                        // Honour `GpuPassConfig.enable_tensor_cores`:
+                        // tensor-core utilization is NVIDIA-specific
+                        // (mma.* PTX instructions on Volta+). The
+                        // actual mma emission depends on the kernel
+                        // being structured for tensor-core use, but
+                        // logging the configured stance here lets
+                        // downstream observers correlate kernel
+                        // performance with the policy without having
+                        // to re-read the config. Pre-fix the field
+                        // was inert: setting it had zero observable
+                        // effect on the pipeline.
+                        if self.config.enable_tensor_cores {
+                            tracing::debug!(
+                                "[gpu-pipeline] tensor-core utilization enabled \
                              for CUDA target (mma.* PTX requires kernel \
                              structured for tensor cores)"
-                        );
+                            );
+                        }
+                    }
+                    GpuTarget::Rocm => {
+                        pm.add_pass(gpu::create_gpu_rocdl_attach_target());
+                        pm.add_pass(conversion::create_gpu_ops_to_rocdl_ops());
+                    }
+                    GpuTarget::Vulkan => {
+                        pm.add_pass(gpu::create_gpu_spirv_attach_target());
+                        pm.add_pass(conversion::create_gpu_to_spirv());
+                    }
+                    GpuTarget::Metal => {
+                        // Metal uses SPIRV as intermediate for now
+                        pm.add_pass(gpu::create_gpu_spirv_attach_target());
+                        pm.add_pass(conversion::create_gpu_to_spirv());
                     }
                 }
-                GpuTarget::Rocm => {
-                    pm.add_pass(gpu::create_gpu_rocdl_attach_target());
-                    pm.add_pass(conversion::create_gpu_ops_to_rocdl_ops());
-                }
-                GpuTarget::Vulkan => {
-                    pm.add_pass(gpu::create_gpu_spirv_attach_target());
-                    pm.add_pass(conversion::create_gpu_to_spirv());
-                }
-                GpuTarget::Metal => {
-                    // Metal uses SPIRV as intermediate for now
-                    pm.add_pass(gpu::create_gpu_spirv_attach_target());
-                    pm.add_pass(conversion::create_gpu_to_spirv());
-                }
-            }
-        }, |s, elapsed| s.target_lowering_time_us = elapsed)?;
+            },
+            |s, elapsed| s.target_lowering_time_us = elapsed,
+        )?;
 
         // Phase 8: Host code lowering (host-side GPU runtime calls → LLVM)
-        self.run_phase(module, &mut stats, &mut result, "host-lowering", |pm| {
-            use verum_mlir::pass::conversion;
+        self.run_phase(
+            module,
+            &mut stats,
+            &mut result,
+            "host-lowering",
+            |pm| {
+                use verum_mlir::pass::conversion;
 
-            pm.add_pass(conversion::create_scf_to_control_flow());
-            pm.add_pass(conversion::create_gpu_to_llvm());
-            pm.add_pass(conversion::create_lower_host_code_to_llvm());
-            pm.add_pass(conversion::create_to_llvm());
-            pm.add_pass(conversion::create_reconcile_unrealized_casts());
-        }, |s, elapsed| s.host_lowering_time_us = elapsed)?;
+                pm.add_pass(conversion::create_scf_to_control_flow());
+                pm.add_pass(conversion::create_gpu_to_llvm());
+                pm.add_pass(conversion::create_lower_host_code_to_llvm());
+                pm.add_pass(conversion::create_to_llvm());
+                pm.add_pass(conversion::create_reconcile_unrealized_casts());
+            },
+            |s, elapsed| s.host_lowering_time_us = elapsed,
+        )?;
 
         // Phase 9: GPU module → binary (PTX/HSACO/SPIR-V)
-        self.run_phase(module, &mut stats, &mut result, "gpu-binary", |pm| {
-            use verum_mlir::pass::gpu;
+        self.run_phase(
+            module,
+            &mut stats,
+            &mut result,
+            "gpu-binary",
+            |pm| {
+                use verum_mlir::pass::gpu;
 
-            pm.add_pass(gpu::create_gpu_module_to_binary_pass());
-        }, |s, elapsed| s.gpu_binary_time_us = elapsed)?;
+                pm.add_pass(gpu::create_gpu_module_to_binary_pass());
+            },
+            |s, elapsed| s.gpu_binary_time_us = elapsed,
+        )?;
 
         // Final verification
         if !module.as_operation().verify() {
             return Err(MlirError::verification(
-                "Module verification failed after GPU pass pipeline"
+                "Module verification failed after GPU pass pipeline",
             ));
         }
 
@@ -414,10 +472,9 @@ impl<'c> GpuPassPipeline<'c> {
         configure(&pm);
 
         let start = Instant::now();
-        pm.run(module)
-            .map_err(|_| MlirError::PassPipelineError {
-                message: Text::from(format!("GPU pass phase '{}' failed", phase_name)),
-            })?;
+        pm.run(module).map_err(|_| MlirError::PassPipelineError {
+            message: Text::from(format!("GPU pass phase '{}' failed", phase_name)),
+        })?;
         let elapsed = start.elapsed().as_micros() as u64;
 
         record_time(stats, elapsed);

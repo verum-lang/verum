@@ -30,8 +30,8 @@
 //! elimination via Z3 array theory proofs.
 
 use verum_ast::{Expr, ExprKind, IntLit, Literal, LiteralKind, Span};
-use verum_smt::tensor_shapes::{ShapeError, TensorShapeVerifier};
 use verum_common::List;
+use verum_smt::tensor_shapes::{ShapeError, TensorShapeVerifier};
 
 /// Helper to create integer literal expression
 fn expr_int(value: u128) -> Expr {
@@ -78,14 +78,16 @@ fn test_matmul_valid_shapes() {
 
     // Verify result dimensions
     if let ExprKind::Literal(lit) = &result_shape[0].kind
-        && let LiteralKind::Int(i) = &lit.kind {
-            assert_eq!(i.value, 2, "First dimension should be 2");
-        }
+        && let LiteralKind::Int(i) = &lit.kind
+    {
+        assert_eq!(i.value, 2, "First dimension should be 2");
+    }
 
     if let ExprKind::Literal(lit) = &result_shape[1].kind
-        && let LiteralKind::Int(i) = &lit.kind {
-            assert_eq!(i.value, 4, "Second dimension should be 4");
-        }
+        && let LiteralKind::Int(i) = &lit.kind
+    {
+        assert_eq!(i.value, 4, "Second dimension should be 4");
+    }
 
     // Check statistics
     let stats = verifier.stats();
@@ -315,14 +317,16 @@ fn test_complex_matmul_chain() {
 
     // Verify final dimensions: [2, 5]
     if let ExprKind::Literal(lit) = &final_shape[0].kind
-        && let LiteralKind::Int(i) = &lit.kind {
-            assert_eq!(i.value, 2, "First dimension should be 2");
-        }
+        && let LiteralKind::Int(i) = &lit.kind
+    {
+        assert_eq!(i.value, 2, "First dimension should be 2");
+    }
 
     if let ExprKind::Literal(lit) = &final_shape[1].kind
-        && let LiteralKind::Int(i) = &lit.kind {
-            assert_eq!(i.value, 5, "Second dimension should be 5");
-        }
+        && let LiteralKind::Int(i) = &lit.kind
+    {
+        assert_eq!(i.value, 5, "Second dimension should be 5");
+    }
 }
 
 #[test]
@@ -345,9 +349,10 @@ fn test_square_matrix_multiplication() {
     // Both dimensions should be 4
     for dim in &result_shape {
         if let ExprKind::Literal(lit) = &dim.kind
-            && let LiteralKind::Int(i) = &lit.kind {
-                assert_eq!(i.value, 4);
-            }
+            && let LiteralKind::Int(i) = &lit.kind
+        {
+            assert_eq!(i.value, 4);
+        }
     }
 }
 
@@ -370,14 +375,16 @@ fn test_vector_matrix_multiplication() {
 
     // Result should be [1, 3]
     if let ExprKind::Literal(lit) = &result_shape[0].kind
-        && let LiteralKind::Int(i) = &lit.kind {
-            assert_eq!(i.value, 1);
-        }
+        && let LiteralKind::Int(i) = &lit.kind
+    {
+        assert_eq!(i.value, 1);
+    }
 
     if let ExprKind::Literal(lit) = &result_shape[1].kind
-        && let LiteralKind::Int(i) = &lit.kind {
-            assert_eq!(i.value, 3);
-        }
+        && let LiteralKind::Int(i) = &lit.kind
+    {
+        assert_eq!(i.value, 3);
+    }
 }
 
 #[test]
@@ -553,8 +560,8 @@ fn test_reshape_with_meta_parameters() {
 
 #[test]
 fn test_bounds_elimination_simple_loop() {
-    use verum_smt::tensor_shapes::{ArrayAccess, LoopBound};
     use verum_common::ToText;
+    use verum_smt::tensor_shapes::{ArrayAccess, LoopBound};
 
     let mut verifier = TensorShapeVerifier::new();
 
@@ -588,8 +595,8 @@ fn test_bounds_elimination_simple_loop() {
 
 #[test]
 fn test_bounds_elimination_nested_loops_matmul() {
-    use verum_smt::tensor_shapes::{ArrayAccess, LoopBound};
     use verum_common::ToText;
+    use verum_smt::tensor_shapes::{ArrayAccess, LoopBound};
 
     let mut verifier = TensorShapeVerifier::new();
 
@@ -654,8 +661,8 @@ fn test_bounds_elimination_nested_loops_matmul() {
 
 #[test]
 fn test_bounds_elimination_out_of_bounds() {
-    use verum_smt::tensor_shapes::{ArrayAccess, LoopBound};
     use verum_common::ToText;
+    use verum_smt::tensor_shapes::{ArrayAccess, LoopBound};
 
     let mut verifier = TensorShapeVerifier::new();
 
@@ -688,8 +695,8 @@ fn test_bounds_elimination_out_of_bounds() {
 
 #[test]
 fn test_bounds_elimination_offset_access() {
-    use verum_smt::tensor_shapes::{ArrayAccess, LoopBound};
     use verum_common::ToText;
+    use verum_smt::tensor_shapes::{ArrayAccess, LoopBound};
 
     let mut verifier = TensorShapeVerifier::new();
 
@@ -718,8 +725,8 @@ fn test_bounds_elimination_offset_access() {
 
 #[test]
 fn test_bounds_elimination_multidimensional_access() {
-    use verum_smt::tensor_shapes::{ArrayAccess, LoopBound};
     use verum_common::ToText;
+    use verum_smt::tensor_shapes::{ArrayAccess, LoopBound};
 
     let mut verifier = TensorShapeVerifier::new();
 

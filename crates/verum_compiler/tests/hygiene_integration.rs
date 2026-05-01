@@ -14,14 +14,14 @@
 use verum_ast::{Literal, Span};
 use verum_common::{Maybe, Text};
 use verum_compiler::hygiene::{
-    BindingInfo, BindingKind, CheckResult, CheckerConfig, ExpansionConfig,
-    HygieneChecker, HygieneContext, HygieneViolation, HygienicIdent, Mark, MarkSet,
-    QuoteExpander, ScopeKind, ScopeSet, StageBinding, StageContext, SyntaxContext,
-    SyntaxContextRegistry, Token, TokenKind, TokenStream, Transparency,
+    BindingInfo, BindingKind, CheckResult, CheckerConfig, ExpansionConfig, HygieneChecker,
+    HygieneContext, HygieneViolation, HygienicIdent, Mark, MarkSet, QuoteExpander, ScopeKind,
+    ScopeSet, StageBinding, StageContext, SyntaxContext, SyntaxContextRegistry, Token, TokenKind,
+    TokenStream, Transparency,
 };
 // Use syntax_context's ExpansionInfo for SyntaxContext operations
-use verum_compiler::hygiene::syntax_context::ExpansionInfo as SyntaxExpansionInfo;
 use verum_compiler::hygiene::scope::ScopeId;
+use verum_compiler::hygiene::syntax_context::ExpansionInfo as SyntaxExpansionInfo;
 
 // ============================================================================
 // End-to-End Quote Expansion Tests
@@ -467,11 +467,12 @@ fn test_nested_group_mark_propagation() {
 
     // Mark should propagate to inner group
     if let Some(token) = outer_stream.iter().next()
-        && let TokenKind::Group(ref inner) = token.kind {
-            for inner_token in inner.iter() {
-                assert!(inner_token.marks.contains(&mark));
-            }
+        && let TokenKind::Group(ref inner) = token.kind
+    {
+        for inner_token in inner.iter() {
+            assert!(inner_token.marks.contains(&mark));
         }
+    }
 }
 
 // ============================================================================

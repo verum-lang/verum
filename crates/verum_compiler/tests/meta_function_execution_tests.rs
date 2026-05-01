@@ -28,11 +28,9 @@
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::literal::{IntLit, Literal, LiteralKind, StringLit};
 use verum_ast::{Ident, Path, Span, Type, TypeKind};
-use verum_compiler::meta::{
-    ConstValue, MetaContext, MetaError, MetaExpr, MetaPattern, MetaStmt,
-};
-use verum_compiler::meta::registry::{MetaFunction, MetaParam, MetaRegistry};
 use verum_common::{Heap, List, Text};
+use verum_compiler::meta::registry::{MetaFunction, MetaParam, MetaRegistry};
+use verum_compiler::meta::{ConstValue, MetaContext, MetaError, MetaExpr, MetaPattern, MetaStmt};
 
 /// Helper to create a simple integer literal
 fn int_lit(value: i64) -> Expr {

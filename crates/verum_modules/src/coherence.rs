@@ -622,12 +622,14 @@ impl CoherenceChecker {
         if impl1.impl_module != impl2.impl_module {
             let mod1_str = impl1.impl_module.to_string();
             let mod2_str = impl2.impl_module.to_string();
-            let is_mod1_trusted = self.trusted_crates.iter().any(|tc| {
-                mod1_str.starts_with(tc.as_str())
-            });
-            let is_mod2_trusted = self.trusted_crates.iter().any(|tc| {
-                mod2_str.starts_with(tc.as_str())
-            });
+            let is_mod1_trusted = self
+                .trusted_crates
+                .iter()
+                .any(|tc| mod1_str.starts_with(tc.as_str()));
+            let is_mod2_trusted = self
+                .trusted_crates
+                .iter()
+                .any(|tc| mod2_str.starts_with(tc.as_str()));
             if is_mod1_trusted && is_mod2_trusted {
                 return Ok(());
             }
@@ -708,10 +710,7 @@ impl CoherenceChecker {
                 for p2 in preds2 {
                     if let Some((k2, v2)) = parse_cfg_kv(p2.as_str()) {
                         // Same single-valued key with different values => mutually exclusive
-                        if k1 == k2
-                            && v1 != v2
-                            && SINGLE_VALUED_KEYS.contains(&k1)
-                        {
+                        if k1 == k2 && v1 != v2 && SINGLE_VALUED_KEYS.contains(&k1) {
                             return true;
                         }
                     }
@@ -1420,10 +1419,8 @@ fn type_kind_to_string(kind: &verum_ast::TypeKind) -> Text {
             return_type,
             ..
         } => {
-            let type_param_strs: List<String> = type_params
-                .iter()
-                .map(generic_param_to_string)
-                .collect();
+            let type_param_strs: List<String> =
+                type_params.iter().map(generic_param_to_string).collect();
             let param_strs: List<String> = params
                 .iter()
                 .map(|t| type_to_string(t).to_string())
@@ -1603,42 +1600,44 @@ fn type_kind_to_string(kind: &verum_ast::TypeKind) -> Text {
         }
 
         // Universe types: Type, Type(0), Type(1), Type(u)
-        TypeKind::Universe { level } => {
-            match level {
-                verum_common::Maybe::None => Text::from("Type"),
-                verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Concrete(n)) => {
-                    Text::from(format!("Type({})", n))
-                }
-                verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(ident)) => {
-                    Text::from(format!("Type({})", ident.name))
-                }
-                verum_common::Maybe::Some(_) => Text::from("Type"),
+        TypeKind::Universe { level } => match level {
+            verum_common::Maybe::None => Text::from("Type"),
+            verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Concrete(n)) => {
+                Text::from(format!("Type({})", n))
             }
-        }
+            verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(ident)) => {
+                Text::from(format!("Type({})", ident.name))
+            }
+            verum_common::Maybe::Some(_) => Text::from("Type"),
+        },
 
         // Meta types: meta T
-        TypeKind::Meta { inner } => {
-            Text::from(format!("meta {}", type_to_string(inner)))
-        }
+        TypeKind::Meta { inner } => Text::from(format!("meta {}", type_to_string(inner))),
 
         // Type lambdas: |x| T
         TypeKind::TypeLambda { params, body } => {
             let param_strs: List<String> = params.iter().map(|p| p.name.to_string()).collect();
-            Text::from(format!("|{}| {}", param_strs.join(", "), type_to_string(body)))
+            Text::from(format!(
+                "|{}| {}",
+                param_strs.join(", "),
+                type_to_string(body)
+            ))
         }
 
         // Path equality type: Path<A>(lhs, rhs)
-        TypeKind::PathType { carrier, lhs, rhs } => {
-            Text::from(format!("Path<{}>({:?}, {:?})", type_to_string(carrier), lhs, rhs))
-        }
+        TypeKind::PathType { carrier, lhs, rhs } => Text::from(format!(
+            "Path<{}>({:?}, {:?})",
+            type_to_string(carrier),
+            lhs,
+            rhs
+        )),
         // General dependent-type application: T<A1..>(v1, v2, ..).
-        TypeKind::DependentApp { carrier, value_args } => {
+        TypeKind::DependentApp {
+            carrier,
+            value_args,
+        } => {
             let parts: Vec<String> = value_args.iter().map(|v| format!("{:?}", v)).collect();
-            Text::from(format!(
-                "{}({})",
-                type_to_string(carrier),
-                parts.join(", ")
-            ))
+            Text::from(format!("{}({})", type_to_string(carrier), parts.join(", ")))
         }
     }
 }
@@ -1668,7 +1667,12 @@ fn generic_param_to_string(param: &verum_ast::ty::GenericParam) -> String {
                 format!("{}: {}", name.name, bounds_str.join(" + "))
             }
         }
-        GenericParamKind::HigherKinded { name, arity, bounds, .. } => {
+        GenericParamKind::HigherKinded {
+            name,
+            arity,
+            bounds,
+            ..
+        } => {
             let arity_str = "_".repeat(*arity);
             if bounds.is_empty() {
                 format!("{}<{}>", name.name, arity_str)

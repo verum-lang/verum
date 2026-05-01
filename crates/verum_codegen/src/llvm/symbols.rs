@@ -42,10 +42,10 @@ use verum_ast::attr::{
     SymbolVisibility, VisibilityAttr, WeakAttr,
 };
 use verum_common::Text;
-use verum_llvm::module::Linkage;
-use verum_llvm::values::{BasicValueEnum, FunctionValue, GlobalValue};
 use verum_llvm::AddressSpace;
 use verum_llvm::GlobalVisibility;
+use verum_llvm::module::Linkage;
+use verum_llvm::values::{BasicValueEnum, FunctionValue, GlobalValue};
 
 use super::error::Result;
 
@@ -231,8 +231,8 @@ pub fn create_alias(
     target_name: &str,
     _attrs: &SymbolAttributes,
 ) -> Result<()> {
-    use verum_llvm::values::AsValueRef;
     use verum_llvm::types::AsTypeRef;
+    use verum_llvm::values::AsValueRef;
 
     // Try to find the target as a function first, then as a global
     if let Some(target_fn) = module.get_function(target_name) {
@@ -240,7 +240,7 @@ pub fn create_alias(
         let value_ty = target_fn.get_type().as_type_ref();
         let c_name = std::ffi::CString::new(alias_name).map_err(|_| {
             super::error::LlvmLoweringError::Internal(
-                format!("Invalid alias name: {}", alias_name).into()
+                format!("Invalid alias name: {}", alias_name).into(),
             )
         })?;
         unsafe {
@@ -391,10 +391,8 @@ fn emit_global_ctor_dtor_array<'ctx>(
     // Build the entry struct type: { i32, ptr, ptr }
     let i32_type = context.i32_type();
     let ptr_type = context.ptr_type(AddressSpace::default());
-    let entry_struct_type = context.struct_type(
-        &[i32_type.into(), ptr_type.into(), ptr_type.into()],
-        false,
-    );
+    let entry_struct_type =
+        context.struct_type(&[i32_type.into(), ptr_type.into(), ptr_type.into()], false);
 
     // Build the array of constant struct entries.
     let null_ptr = ptr_type.const_null();
@@ -515,7 +513,10 @@ mod tests {
         assert!(matches!(global.get_linkage(), Linkage::Appending));
 
         // Verify the module is valid LLVM IR.
-        assert!(module.verify().is_ok(), "Module should verify after adding ctor");
+        assert!(
+            module.verify().is_ok(),
+            "Module should verify after adding ctor"
+        );
     }
 
     #[test]
@@ -531,7 +532,10 @@ mod tests {
         let global = module.get_global("llvm.global_dtors");
         assert!(global.is_some(), "llvm.global_dtors should exist");
         assert!(matches!(global.unwrap().get_linkage(), Linkage::Appending));
-        assert!(module.verify().is_ok(), "Module should verify after adding dtor");
+        assert!(
+            module.verify().is_ok(),
+            "Module should verify after adding dtor"
+        );
     }
 
     #[test]
@@ -546,11 +550,7 @@ mod tests {
         let ctor3 = module.add_function("ctor_default", fn_type, None);
 
         // Emit all at once with different priorities.
-        emit_global_ctors(
-            &module,
-            &[(ctor1, 101), (ctor2, 65535), (ctor3, 500)],
-        )
-        .unwrap();
+        emit_global_ctors(&module, &[(ctor1, 101), (ctor2, 65535), (ctor3, 500)]).unwrap();
 
         let global = module.get_global("llvm.global_ctors");
         assert!(global.is_some(), "llvm.global_ctors should exist");
@@ -596,7 +596,10 @@ mod tests {
 
         assert!(module.get_global("llvm.global_ctors").is_some());
         assert!(module.get_global("llvm.global_dtors").is_some());
-        assert!(module.verify().is_ok(), "Module should verify with both ctors and dtors");
+        assert!(
+            module.verify().is_ok(),
+            "Module should verify with both ctors and dtors"
+        );
     }
 
     #[test]
@@ -610,7 +613,10 @@ mod tests {
         // Priority 101 is the lowest user-level priority (0-100 reserved for system).
         add_global_ctor(&module, ctor, 101).unwrap();
 
-        assert!(module.verify().is_ok(), "Module should verify with priority 101");
+        assert!(
+            module.verify().is_ok(),
+            "Module should verify with priority 101"
+        );
     }
 
     #[test]

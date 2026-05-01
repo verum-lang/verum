@@ -18,10 +18,10 @@
 //! These tests verify that recursive functions terminate using ranking functions.
 //! Tests cover various patterns: simple recursion, mutual recursion, and complex cases.
 
+use verum_common::{List, Text};
 use verum_smt::fixedpoint::{
     RankingFunction, RecursiveCall, RecursiveFunction, RecursiveProgramVerifier,
 };
-use verum_common::{List, Text};
 use z3::{
     Context, Sort,
     ast::{Bool, Int},

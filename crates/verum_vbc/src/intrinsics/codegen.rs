@@ -26,7 +26,11 @@
 //! - x86: AVX2/AVX-512 via `x86.avx.*` intrinsics
 //! - ARM: NEON via `aarch64.neon.*` intrinsics
 
-use crate::instruction::{ArithSubOpcode, CbgrSubOpcode, CharSubOpcode, LogSubOpcode, MathSubOpcode, MetaReflectOp, MlSubOpcode, Opcode, Reg, RegRange, SimdSubOpcode, TensorSubOpcode, TensorExtSubOpcode, TextSubOpcode};
+use crate::instruction::{
+    ArithSubOpcode, CbgrSubOpcode, CharSubOpcode, LogSubOpcode, MathSubOpcode, MetaReflectOp,
+    MlSubOpcode, Opcode, Reg, RegRange, SimdSubOpcode, TensorExtSubOpcode, TensorSubOpcode,
+    TextSubOpcode,
+};
 
 use super::registry::{CodegenStrategy, InlineSequenceId, Intrinsic};
 
@@ -79,26 +83,20 @@ impl<'a> IntrinsicCodegen<'a> {
     /// Generate code for the intrinsic with given argument registers.
     pub fn generate(mut self, args: &[Reg]) -> IntrinsicCodegenResult {
         let result_reg = match &self.intrinsic.strategy {
-            CodegenStrategy::DirectOpcode(opcode) => {
-                self.emit_direct_opcode(*opcode, args)
-            }
+            CodegenStrategy::DirectOpcode(opcode) => self.emit_direct_opcode(*opcode, args),
             CodegenStrategy::OpcodeWithMode(opcode, mode) => {
                 self.emit_opcode_with_mode(*opcode, *mode, args)
             }
             CodegenStrategy::OpcodeWithSize(opcode, size) => {
                 self.emit_opcode_with_size(*opcode, *size, args)
             }
-            CodegenStrategy::InlineSequence(seq_id) => {
-                self.emit_inline_sequence(*seq_id, args)
-            }
+            CodegenStrategy::InlineSequence(seq_id) => self.emit_inline_sequence(*seq_id, args),
             CodegenStrategy::InlineSequenceWithWidth(seq_id, _width) => {
                 // Width is handled by the VBC expression codegen path;
                 // MLIR codegen treats these as regular inline sequences.
                 self.emit_inline_sequence(*seq_id, args)
             }
-            CodegenStrategy::CompileTimeConstant => {
-                self.emit_compile_time_constant(args)
-            }
+            CodegenStrategy::CompileTimeConstant => self.emit_compile_time_constant(args),
             CodegenStrategy::ArithExtendedOpcode(sub_op) => {
                 self.emit_arith_extended_opcode(*sub_op, args)
             }
@@ -153,10 +151,23 @@ impl<'a> IntrinsicCodegen<'a> {
         // Emit the appropriate instruction based on opcode category
         match opcode {
             // Arithmetic opcodes (2 operands)
-            Opcode::AddI | Opcode::SubI | Opcode::MulI | Opcode::DivI | Opcode::ModI |
-            Opcode::AddF | Opcode::SubF | Opcode::MulF | Opcode::DivF |
-            Opcode::Band | Opcode::Bor | Opcode::Bxor | Opcode::Shl | Opcode::Shr | Opcode::Ushr |
-            Opcode::PowI | Opcode::PowF => {
+            Opcode::AddI
+            | Opcode::SubI
+            | Opcode::MulI
+            | Opcode::DivI
+            | Opcode::ModI
+            | Opcode::AddF
+            | Opcode::SubF
+            | Opcode::MulF
+            | Opcode::DivF
+            | Opcode::Band
+            | Opcode::Bor
+            | Opcode::Bxor
+            | Opcode::Shl
+            | Opcode::Shr
+            | Opcode::Ushr
+            | Opcode::PowI
+            | Opcode::PowF => {
                 if args.len() >= 2 {
                     self.emit(IntrinsicInstruction::BinaryOp {
                         opcode,
@@ -168,8 +179,14 @@ impl<'a> IntrinsicCodegen<'a> {
             }
 
             // Unary opcodes (1 operand)
-            Opcode::NegI | Opcode::NegF | Opcode::Not | Opcode::Bnot |
-            Opcode::AbsI | Opcode::AbsF | Opcode::Inc | Opcode::Dec => {
+            Opcode::NegI
+            | Opcode::NegF
+            | Opcode::Not
+            | Opcode::Bnot
+            | Opcode::AbsI
+            | Opcode::AbsF
+            | Opcode::Inc
+            | Opcode::Dec => {
                 if !args.is_empty() {
                     self.emit(IntrinsicInstruction::UnaryOp {
                         opcode,
@@ -351,7 +368,9 @@ impl<'a> IntrinsicCodegen<'a> {
                         dst: ordering_reg,
                         value: mode as i8,
                     });
-                    self.emit(IntrinsicInstruction::AtomicFence { ordering: ordering_reg });
+                    self.emit(IntrinsicInstruction::AtomicFence {
+                        ordering: ordering_reg,
+                    });
                 }
             }
             Opcode::SyscallLinux => {
@@ -524,7 +543,9 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::MinnumF64 => self.emit_math_extended(MathSubOpcode::MinnumF64, args),
             InlineSequenceId::MaxnumF64 => self.emit_math_extended(MathSubOpcode::MaxnumF64, args),
             InlineSequenceId::FmaF64 => self.emit_math_extended(MathSubOpcode::FmaF64, args),
-            InlineSequenceId::CopysignF64 => self.emit_math_extended(MathSubOpcode::CopysignF64, args),
+            InlineSequenceId::CopysignF64 => {
+                self.emit_math_extended(MathSubOpcode::CopysignF64, args)
+            }
             InlineSequenceId::HypotF64 => self.emit_math_extended(MathSubOpcode::HypotF64, args),
             InlineSequenceId::PowF64 => self.emit_math_extended(MathSubOpcode::PowF64, args),
             InlineSequenceId::AbsF64 => self.emit_math_extended(MathSubOpcode::AbsF64, args),
@@ -551,16 +572,36 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::FromBeBytes => self.emit_from_be_bytes(args),
             // Character operations
             // Character operations - zero-cost typed dispatch via CharExtended
-            InlineSequenceId::CharIsAlphabetic => self.emit_char_extended(CharSubOpcode::IsAlphabeticUnicode, args),
-            InlineSequenceId::CharIsNumeric => self.emit_char_extended(CharSubOpcode::IsNumericUnicode, args),
-            InlineSequenceId::CharIsWhitespace => self.emit_char_extended(CharSubOpcode::IsWhitespaceUnicode, args),
-            InlineSequenceId::CharIsControl => self.emit_char_extended(CharSubOpcode::IsControlUnicode, args),
-            InlineSequenceId::CharIsUppercase => self.emit_char_extended(CharSubOpcode::IsUppercaseUnicode, args),
-            InlineSequenceId::CharIsLowercase => self.emit_char_extended(CharSubOpcode::IsLowercaseUnicode, args),
-            InlineSequenceId::CharToUppercase => self.emit_char_extended(CharSubOpcode::ToUppercaseUnicode, args),
-            InlineSequenceId::CharToLowercase => self.emit_char_extended(CharSubOpcode::ToLowercaseUnicode, args),
-            InlineSequenceId::CharEncodeUtf8 => self.emit_char_extended(CharSubOpcode::EncodeUtf8, args),
-            InlineSequenceId::CharEscapeDebug => self.emit_char_extended(CharSubOpcode::EscapeDebug, args),
+            InlineSequenceId::CharIsAlphabetic => {
+                self.emit_char_extended(CharSubOpcode::IsAlphabeticUnicode, args)
+            }
+            InlineSequenceId::CharIsNumeric => {
+                self.emit_char_extended(CharSubOpcode::IsNumericUnicode, args)
+            }
+            InlineSequenceId::CharIsWhitespace => {
+                self.emit_char_extended(CharSubOpcode::IsWhitespaceUnicode, args)
+            }
+            InlineSequenceId::CharIsControl => {
+                self.emit_char_extended(CharSubOpcode::IsControlUnicode, args)
+            }
+            InlineSequenceId::CharIsUppercase => {
+                self.emit_char_extended(CharSubOpcode::IsUppercaseUnicode, args)
+            }
+            InlineSequenceId::CharIsLowercase => {
+                self.emit_char_extended(CharSubOpcode::IsLowercaseUnicode, args)
+            }
+            InlineSequenceId::CharToUppercase => {
+                self.emit_char_extended(CharSubOpcode::ToUppercaseUnicode, args)
+            }
+            InlineSequenceId::CharToLowercase => {
+                self.emit_char_extended(CharSubOpcode::ToLowercaseUnicode, args)
+            }
+            InlineSequenceId::CharEncodeUtf8 => {
+                self.emit_char_extended(CharSubOpcode::EncodeUtf8, args)
+            }
+            InlineSequenceId::CharEscapeDebug => {
+                self.emit_char_extended(CharSubOpcode::EscapeDebug, args)
+            }
             // Float32 operations - Zero-cost MathExtended
             InlineSequenceId::SqrtF32 => self.emit_math_extended(MathSubOpcode::SqrtF32, args),
             InlineSequenceId::FloorF32 => self.emit_floor_f32(args),
@@ -595,7 +636,9 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::CbrtF32 => self.emit_math_extended(MathSubOpcode::CbrtF32, args),
             InlineSequenceId::HypotF32 => self.emit_math_extended(MathSubOpcode::HypotF32, args),
             InlineSequenceId::FmaF32 => self.emit_math_extended(MathSubOpcode::FmaF32, args),
-            InlineSequenceId::CopysignF32 => self.emit_math_extended(MathSubOpcode::CopysignF32, args),
+            InlineSequenceId::CopysignF32 => {
+                self.emit_math_extended(MathSubOpcode::CopysignF32, args)
+            }
             InlineSequenceId::PowiF32 => self.emit_math_extended(MathSubOpcode::PowF32, args), // powi uses same opcode
             InlineSequenceId::MinnumF32 => self.emit_math_extended(MathSubOpcode::MinnumF32, args),
             InlineSequenceId::MaxnumF32 => self.emit_math_extended(MathSubOpcode::MaxnumF32, args),
@@ -609,10 +652,10 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::Fptrunc => self.emit_fptrunc(args),
             InlineSequenceId::IntTrunc => self.emit_int_trunc(args),
             InlineSequenceId::Bitcast => self.emit_bitcast(args),
-            InlineSequenceId::F32ToBits |
-            InlineSequenceId::F32FromBits |
-            InlineSequenceId::F64ToBits |
-            InlineSequenceId::F64FromBits => self.emit_bitcast(args),
+            InlineSequenceId::F32ToBits
+            | InlineSequenceId::F32FromBits
+            | InlineSequenceId::F64ToBits
+            | InlineSequenceId::F64FromBits => self.emit_bitcast(args),
             // Float classification
             InlineSequenceId::IsNan => self.emit_is_nan(args),
             InlineSequenceId::IsInf => self.emit_is_inf(args),
@@ -621,24 +664,48 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::SliceLen => self.emit_slice_len(args),
             InlineSequenceId::SliceAsPtr => self.emit_slice_as_ptr(args),
             InlineSequenceId::SliceGet => self.emit_cbgr_extended(CbgrSubOpcode::SliceGet, args),
-            InlineSequenceId::SliceGetUnchecked => self.emit_cbgr_extended(CbgrSubOpcode::SliceGetUnchecked, args),
-            InlineSequenceId::SliceSubslice => self.emit_cbgr_extended(CbgrSubOpcode::SliceSubslice, args),
-            InlineSequenceId::SliceSplitAt => self.emit_cbgr_extended(CbgrSubOpcode::SliceSplitAt, args),
+            InlineSequenceId::SliceGetUnchecked => {
+                self.emit_cbgr_extended(CbgrSubOpcode::SliceGetUnchecked, args)
+            }
+            InlineSequenceId::SliceSubslice => {
+                self.emit_cbgr_extended(CbgrSubOpcode::SliceSubslice, args)
+            }
+            InlineSequenceId::SliceSplitAt => {
+                self.emit_cbgr_extended(CbgrSubOpcode::SliceSplitAt, args)
+            }
             // Text operations - zero-cost typed dispatch via TextExtended
-            InlineSequenceId::TextFromStatic => self.emit_text_extended(TextSubOpcode::FromStatic, args),
-            InlineSequenceId::Utf8DecodeChar => self.emit_char_extended(CharSubOpcode::DecodeUtf8, args),
-            InlineSequenceId::TextParseInt => self.emit_text_extended(TextSubOpcode::ParseInt, args),
-            InlineSequenceId::TextParseFloat => self.emit_text_extended(TextSubOpcode::ParseFloat, args),
+            InlineSequenceId::TextFromStatic => {
+                self.emit_text_extended(TextSubOpcode::FromStatic, args)
+            }
+            InlineSequenceId::Utf8DecodeChar => {
+                self.emit_char_extended(CharSubOpcode::DecodeUtf8, args)
+            }
+            InlineSequenceId::TextParseInt => {
+                self.emit_text_extended(TextSubOpcode::ParseInt, args)
+            }
+            InlineSequenceId::TextParseFloat => {
+                self.emit_text_extended(TextSubOpcode::ParseFloat, args)
+            }
             InlineSequenceId::IntToText => self.emit_text_extended(TextSubOpcode::IntToText, args),
-            InlineSequenceId::FloatToText => self.emit_text_extended(TextSubOpcode::FloatToText, args),
+            InlineSequenceId::FloatToText => {
+                self.emit_text_extended(TextSubOpcode::FloatToText, args)
+            }
             InlineSequenceId::TextByteLen => self.emit_text_extended(TextSubOpcode::ByteLen, args),
             // Random number generation - zero-cost typed dispatch via TensorExtSubOpcode
-            InlineSequenceId::RandomU64 => self.emit_tensor_ext_extended(TensorExtSubOpcode::RandomU64, args),
-            InlineSequenceId::RandomFloat => self.emit_tensor_ext_extended(TensorExtSubOpcode::RandomFloat, args),
+            InlineSequenceId::RandomU64 => {
+                self.emit_tensor_ext_extended(TensorExtSubOpcode::RandomU64, args)
+            }
+            InlineSequenceId::RandomFloat => {
+                self.emit_tensor_ext_extended(TensorExtSubOpcode::RandomFloat, args)
+            }
             // Unicode character category
-            InlineSequenceId::CharGeneralCategory => self.emit_char_extended(CharSubOpcode::GeneralCategory, args),
+            InlineSequenceId::CharGeneralCategory => {
+                self.emit_char_extended(CharSubOpcode::GeneralCategory, args)
+            }
             // Global allocator - zero-cost typed dispatch via TensorExtSubOpcode
-            InlineSequenceId::GlobalAllocator => self.emit_tensor_ext_extended(TensorExtSubOpcode::GlobalAllocator, args),
+            InlineSequenceId::GlobalAllocator => {
+                self.emit_tensor_ext_extended(TensorExtSubOpcode::GlobalAllocator, args)
+            }
             // Atomic exchange
             InlineSequenceId::AtomicExchange => self.emit_atomic_exchange(args),
             // Tier 0 async: return pending (false)
@@ -669,10 +736,18 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::SimdFma => self.emit_simd_extended(SimdSubOpcode::Fma, args),
             InlineSequenceId::SimdMin => self.emit_simd_extended(SimdSubOpcode::Min, args),
             InlineSequenceId::SimdMax => self.emit_simd_extended(SimdSubOpcode::Max, args),
-            InlineSequenceId::SimdReduceAdd => self.emit_simd_extended(SimdSubOpcode::ReduceAdd, args),
-            InlineSequenceId::SimdReduceMul => self.emit_simd_extended(SimdSubOpcode::ReduceMul, args),
-            InlineSequenceId::SimdReduceMin => self.emit_simd_extended(SimdSubOpcode::ReduceMin, args),
-            InlineSequenceId::SimdReduceMax => self.emit_simd_extended(SimdSubOpcode::ReduceMax, args),
+            InlineSequenceId::SimdReduceAdd => {
+                self.emit_simd_extended(SimdSubOpcode::ReduceAdd, args)
+            }
+            InlineSequenceId::SimdReduceMul => {
+                self.emit_simd_extended(SimdSubOpcode::ReduceMul, args)
+            }
+            InlineSequenceId::SimdReduceMin => {
+                self.emit_simd_extended(SimdSubOpcode::ReduceMin, args)
+            }
+            InlineSequenceId::SimdReduceMax => {
+                self.emit_simd_extended(SimdSubOpcode::ReduceMax, args)
+            }
             InlineSequenceId::SimdCmpEq => self.emit_simd_extended(SimdSubOpcode::CmpEq, args),
             InlineSequenceId::SimdCmpNe => self.emit_simd_extended(SimdSubOpcode::CmpNe, args),
             InlineSequenceId::SimdCmpLt => self.emit_simd_extended(SimdSubOpcode::CmpLt, args),
@@ -680,66 +755,142 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::SimdCmpGt => self.emit_simd_extended(SimdSubOpcode::CmpGt, args),
             InlineSequenceId::SimdCmpGe => self.emit_simd_extended(SimdSubOpcode::CmpGe, args),
             InlineSequenceId::SimdSelect => self.emit_simd_extended(SimdSubOpcode::Select, args),
-            InlineSequenceId::SimdLoadAligned => self.emit_simd_extended(SimdSubOpcode::LoadAligned, args),
-            InlineSequenceId::SimdLoadUnaligned => self.emit_simd_extended(SimdSubOpcode::LoadUnaligned, args),
-            InlineSequenceId::SimdStoreAligned => self.emit_simd_extended(SimdSubOpcode::StoreAligned, args),
-            InlineSequenceId::SimdStoreUnaligned => self.emit_simd_extended(SimdSubOpcode::StoreUnaligned, args),
-            InlineSequenceId::SimdMaskedLoad => self.emit_simd_extended(SimdSubOpcode::MaskedLoad, args),
-            InlineSequenceId::SimdMaskedStore => self.emit_simd_extended(SimdSubOpcode::MaskedStore, args),
+            InlineSequenceId::SimdLoadAligned => {
+                self.emit_simd_extended(SimdSubOpcode::LoadAligned, args)
+            }
+            InlineSequenceId::SimdLoadUnaligned => {
+                self.emit_simd_extended(SimdSubOpcode::LoadUnaligned, args)
+            }
+            InlineSequenceId::SimdStoreAligned => {
+                self.emit_simd_extended(SimdSubOpcode::StoreAligned, args)
+            }
+            InlineSequenceId::SimdStoreUnaligned => {
+                self.emit_simd_extended(SimdSubOpcode::StoreUnaligned, args)
+            }
+            InlineSequenceId::SimdMaskedLoad => {
+                self.emit_simd_extended(SimdSubOpcode::MaskedLoad, args)
+            }
+            InlineSequenceId::SimdMaskedStore => {
+                self.emit_simd_extended(SimdSubOpcode::MaskedStore, args)
+            }
             InlineSequenceId::SimdShuffle => self.emit_simd_extended(SimdSubOpcode::Shuffle, args),
             InlineSequenceId::SimdGather => self.emit_simd_extended(SimdSubOpcode::Gather, args),
             InlineSequenceId::SimdScatter => self.emit_simd_extended(SimdSubOpcode::Scatter, args),
             InlineSequenceId::SimdMaskAll => self.emit_simd_extended(SimdSubOpcode::MaskAll, args),
-            InlineSequenceId::SimdMaskNone => self.emit_simd_extended(SimdSubOpcode::MaskNone, args),
-            InlineSequenceId::SimdMaskCount => self.emit_simd_extended(SimdSubOpcode::MaskCount, args),
+            InlineSequenceId::SimdMaskNone => {
+                self.emit_simd_extended(SimdSubOpcode::MaskNone, args)
+            }
+            InlineSequenceId::SimdMaskCount => {
+                self.emit_simd_extended(SimdSubOpcode::MaskCount, args)
+            }
             InlineSequenceId::SimdMaskAny => self.emit_simd_extended(SimdSubOpcode::MaskAny, args),
-            InlineSequenceId::SimdBitwiseAnd => self.emit_simd_extended(SimdSubOpcode::BitwiseAnd, args),
-            InlineSequenceId::SimdBitwiseOr => self.emit_simd_extended(SimdSubOpcode::BitwiseOr, args),
-            InlineSequenceId::SimdBitwiseXor => self.emit_simd_extended(SimdSubOpcode::BitwiseXor, args),
-            InlineSequenceId::SimdBitwiseNot => self.emit_simd_extended(SimdSubOpcode::BitwiseNot, args),
-            InlineSequenceId::SimdShiftLeft => self.emit_simd_extended(SimdSubOpcode::ShiftLeft, args),
-            InlineSequenceId::SimdShiftRight => self.emit_simd_extended(SimdSubOpcode::ShiftRight, args),
+            InlineSequenceId::SimdBitwiseAnd => {
+                self.emit_simd_extended(SimdSubOpcode::BitwiseAnd, args)
+            }
+            InlineSequenceId::SimdBitwiseOr => {
+                self.emit_simd_extended(SimdSubOpcode::BitwiseOr, args)
+            }
+            InlineSequenceId::SimdBitwiseXor => {
+                self.emit_simd_extended(SimdSubOpcode::BitwiseXor, args)
+            }
+            InlineSequenceId::SimdBitwiseNot => {
+                self.emit_simd_extended(SimdSubOpcode::BitwiseNot, args)
+            }
+            InlineSequenceId::SimdShiftLeft => {
+                self.emit_simd_extended(SimdSubOpcode::ShiftLeft, args)
+            }
+            InlineSequenceId::SimdShiftRight => {
+                self.emit_simd_extended(SimdSubOpcode::ShiftRight, args)
+            }
             InlineSequenceId::SimdCast => self.emit_simd_extended(SimdSubOpcode::Cast, args),
 
             // Tensor operations (SSM, FFT, Linear Algebra) - zero-cost typed dispatch via TensorExtended
             InlineSequenceId::SsmScan => self.emit_tensor_extended(TensorSubOpcode::SsmScan, args),
             InlineSequenceId::MatrixExp => self.emit_tensor_extended(TensorSubOpcode::Expm, args),
-            InlineSequenceId::MatrixInverse => self.emit_tensor_extended(TensorSubOpcode::Inverse, args),
-            InlineSequenceId::ComplexPow => self.emit_tensor_extended(TensorSubOpcode::ComplexPow, args),
-            InlineSequenceId::ComplexMul => self.emit_tensor_extended(TensorSubOpcode::ComplexMul, args),
+            InlineSequenceId::MatrixInverse => {
+                self.emit_tensor_extended(TensorSubOpcode::Inverse, args)
+            }
+            InlineSequenceId::ComplexPow => {
+                self.emit_tensor_extended(TensorSubOpcode::ComplexPow, args)
+            }
+            InlineSequenceId::ComplexMul => {
+                self.emit_tensor_extended(TensorSubOpcode::ComplexMul, args)
+            }
             InlineSequenceId::Rfft => self.emit_tensor_extended(TensorSubOpcode::Rfft, args),
             InlineSequenceId::Irfft => self.emit_tensor_extended(TensorSubOpcode::Irfft, args),
             InlineSequenceId::Uniform => self.emit_tensor_extended(TensorSubOpcode::Uniform, args),
-            InlineSequenceId::IsTraining => self.emit_tensor_extended(TensorSubOpcode::IsTraining, args),
-            InlineSequenceId::Bincount => self.emit_tensor_extended(TensorSubOpcode::Bincount, args),
-            InlineSequenceId::GatherNd => self.emit_tensor_extended(TensorSubOpcode::GatherNd, args),
-            InlineSequenceId::ArangeUsize => self.emit_tensor_extended(TensorSubOpcode::ArangeUsize, args),
-            InlineSequenceId::TensorRepeat => self.emit_tensor_extended(TensorSubOpcode::Repeat, args),
+            InlineSequenceId::IsTraining => {
+                self.emit_tensor_extended(TensorSubOpcode::IsTraining, args)
+            }
+            InlineSequenceId::Bincount => {
+                self.emit_tensor_extended(TensorSubOpcode::Bincount, args)
+            }
+            InlineSequenceId::GatherNd => {
+                self.emit_tensor_extended(TensorSubOpcode::GatherNd, args)
+            }
+            InlineSequenceId::ArangeUsize => {
+                self.emit_tensor_extended(TensorSubOpcode::ArangeUsize, args)
+            }
+            InlineSequenceId::TensorRepeat => {
+                self.emit_tensor_extended(TensorSubOpcode::Repeat, args)
+            }
             InlineSequenceId::TensorTanh => self.emit_tensor_extended(TensorSubOpcode::Tanh, args),
             InlineSequenceId::TensorSum => self.emit_tensor_extended(TensorSubOpcode::SumAll, args),
-            InlineSequenceId::TensorFromArray => self.emit_tensor_extended(TensorSubOpcode::FromArray, args),
-            InlineSequenceId::RandomFloat01 => self.emit_tensor_extended(TensorSubOpcode::RandomFloat01, args),
+            InlineSequenceId::TensorFromArray => {
+                self.emit_tensor_extended(TensorSubOpcode::FromArray, args)
+            }
+            InlineSequenceId::RandomFloat01 => {
+                self.emit_tensor_extended(TensorSubOpcode::RandomFloat01, args)
+            }
 
             // Additional tensor operations - zero-cost typed dispatch via TensorExtended
-            InlineSequenceId::TensorUnsqueeze => self.emit_tensor_extended(TensorSubOpcode::Unsqueeze, args),
-            InlineSequenceId::TensorMaskedSelect => self.emit_tensor_extended(TensorSubOpcode::MaskedSelect, args),
-            InlineSequenceId::TensorLeakyRelu => self.emit_tensor_extended(TensorSubOpcode::LeakyRelu, args),
+            InlineSequenceId::TensorUnsqueeze => {
+                self.emit_tensor_extended(TensorSubOpcode::Unsqueeze, args)
+            }
+            InlineSequenceId::TensorMaskedSelect => {
+                self.emit_tensor_extended(TensorSubOpcode::MaskedSelect, args)
+            }
+            InlineSequenceId::TensorLeakyRelu => {
+                self.emit_tensor_extended(TensorSubOpcode::LeakyRelu, args)
+            }
             InlineSequenceId::TensorDiag => self.emit_tensor_extended(TensorSubOpcode::Diag, args),
             InlineSequenceId::TensorTriu => self.emit_tensor_extended(TensorSubOpcode::Triu, args),
             InlineSequenceId::TensorTril => self.emit_tensor_extended(TensorSubOpcode::Tril, args),
-            InlineSequenceId::TensorNonzero => self.emit_tensor_extended(TensorSubOpcode::Nonzero, args),
-            InlineSequenceId::TensorOneHot => self.emit_tensor_extended(TensorSubOpcode::OneHot, args),
-            InlineSequenceId::TensorSplit => self.emit_tensor_extended(TensorSubOpcode::Split, args),
-            InlineSequenceId::TensorSplitAt => self.emit_tensor_extended(TensorSubOpcode::SplitAt, args),
-            InlineSequenceId::TensorGetScalar => self.emit_tensor_extended(TensorSubOpcode::GetScalar, args),
-            InlineSequenceId::TensorSetScalar => self.emit_tensor_extended(TensorSubOpcode::SetScalar, args),
-            InlineSequenceId::TensorContiguous => self.emit_tensor_extended(TensorSubOpcode::Contiguous, args),
-            InlineSequenceId::TensorContiguousView => self.emit_tensor_ext_extended(TensorExtSubOpcode::ContiguousView, args),
-            InlineSequenceId::TensorToDevice => self.emit_tensor_extended(TensorSubOpcode::ToDevice, args),
+            InlineSequenceId::TensorNonzero => {
+                self.emit_tensor_extended(TensorSubOpcode::Nonzero, args)
+            }
+            InlineSequenceId::TensorOneHot => {
+                self.emit_tensor_extended(TensorSubOpcode::OneHot, args)
+            }
+            InlineSequenceId::TensorSplit => {
+                self.emit_tensor_extended(TensorSubOpcode::Split, args)
+            }
+            InlineSequenceId::TensorSplitAt => {
+                self.emit_tensor_extended(TensorSubOpcode::SplitAt, args)
+            }
+            InlineSequenceId::TensorGetScalar => {
+                self.emit_tensor_extended(TensorSubOpcode::GetScalar, args)
+            }
+            InlineSequenceId::TensorSetScalar => {
+                self.emit_tensor_extended(TensorSubOpcode::SetScalar, args)
+            }
+            InlineSequenceId::TensorContiguous => {
+                self.emit_tensor_extended(TensorSubOpcode::Contiguous, args)
+            }
+            InlineSequenceId::TensorContiguousView => {
+                self.emit_tensor_ext_extended(TensorExtSubOpcode::ContiguousView, args)
+            }
+            InlineSequenceId::TensorToDevice => {
+                self.emit_tensor_extended(TensorSubOpcode::ToDevice, args)
+            }
 
             // Memory allocation operations - zero-cost typed dispatch via TensorExtSubOpcode
-            InlineSequenceId::MemNewId => self.emit_tensor_ext_extended(TensorExtSubOpcode::MemNewId, args),
-            InlineSequenceId::MemAllocTensor => self.emit_tensor_ext_extended(TensorExtSubOpcode::MemAllocTensor, args),
+            InlineSequenceId::MemNewId => {
+                self.emit_tensor_ext_extended(TensorExtSubOpcode::MemNewId, args)
+            }
+            InlineSequenceId::MemAllocTensor => {
+                self.emit_tensor_ext_extended(TensorExtSubOpcode::MemAllocTensor, args)
+            }
 
             // Automatic differentiation operations - zero-cost typed dispatch via MlExtended
             // These use MlSubOpcode for proper autodiff semantics.
@@ -758,24 +909,44 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::GradEnd => self.emit_grad_end(args),
             InlineSequenceId::JvpBegin => self.emit_ml_extended(MlSubOpcode::JvpBegin, args),
             InlineSequenceId::JvpEnd => self.emit_ml_extended(MlSubOpcode::JvpEnd, args),
-            InlineSequenceId::GradZeroTangent => self.emit_ml_extended(MlSubOpcode::GradZeroTangent, args),
+            InlineSequenceId::GradZeroTangent => {
+                self.emit_ml_extended(MlSubOpcode::GradZeroTangent, args)
+            }
             InlineSequenceId::GradStop => self.emit_grad_stop(args),
             InlineSequenceId::GradCustom => self.emit_ml_extended(MlSubOpcode::GradCustom, args),
             InlineSequenceId::GradCheckpoint => self.emit_grad_checkpoint(args),
             InlineSequenceId::GradAccumulate => self.emit_grad_accumulate(args),
-            InlineSequenceId::GradRecompute => self.emit_ml_extended(MlSubOpcode::GradRecompute, args),
+            InlineSequenceId::GradRecompute => {
+                self.emit_ml_extended(MlSubOpcode::GradRecompute, args)
+            }
             InlineSequenceId::GradZero => self.emit_ml_extended(MlSubOpcode::ZeroGrad, args),
 
             // CBGR operations
             // CBGR operations - zero-cost typed dispatch via CbgrExtended
-            InlineSequenceId::CbgrNewGeneration => self.emit_cbgr_extended(CbgrSubOpcode::NewGeneration, args),
-            InlineSequenceId::CbgrInvalidate => self.emit_cbgr_extended(CbgrSubOpcode::Invalidate, args),
-            InlineSequenceId::CbgrGetGeneration => self.emit_cbgr_extended(CbgrSubOpcode::GetGeneration, args),
-            InlineSequenceId::CbgrAdvanceGeneration => self.emit_cbgr_extended(CbgrSubOpcode::AdvanceEpoch, args),
-            InlineSequenceId::CbgrGetEpochCaps => self.emit_cbgr_extended(CbgrSubOpcode::GetEpochCaps, args),
-            InlineSequenceId::CbgrBypassBegin => self.emit_cbgr_extended(CbgrSubOpcode::BypassBegin, args),
-            InlineSequenceId::CbgrBypassEnd => self.emit_cbgr_extended(CbgrSubOpcode::BypassEnd, args),
-            InlineSequenceId::CbgrGetStats => self.emit_cbgr_extended(CbgrSubOpcode::GetStats, args),
+            InlineSequenceId::CbgrNewGeneration => {
+                self.emit_cbgr_extended(CbgrSubOpcode::NewGeneration, args)
+            }
+            InlineSequenceId::CbgrInvalidate => {
+                self.emit_cbgr_extended(CbgrSubOpcode::Invalidate, args)
+            }
+            InlineSequenceId::CbgrGetGeneration => {
+                self.emit_cbgr_extended(CbgrSubOpcode::GetGeneration, args)
+            }
+            InlineSequenceId::CbgrAdvanceGeneration => {
+                self.emit_cbgr_extended(CbgrSubOpcode::AdvanceEpoch, args)
+            }
+            InlineSequenceId::CbgrGetEpochCaps => {
+                self.emit_cbgr_extended(CbgrSubOpcode::GetEpochCaps, args)
+            }
+            InlineSequenceId::CbgrBypassBegin => {
+                self.emit_cbgr_extended(CbgrSubOpcode::BypassBegin, args)
+            }
+            InlineSequenceId::CbgrBypassEnd => {
+                self.emit_cbgr_extended(CbgrSubOpcode::BypassEnd, args)
+            }
+            InlineSequenceId::CbgrGetStats => {
+                self.emit_cbgr_extended(CbgrSubOpcode::GetStats, args)
+            }
 
             // Log operations - zero-cost typed dispatch via LogExtended
             InlineSequenceId::LogInfo => self.emit_log_extended(LogSubOpcode::Info, args),
@@ -785,10 +956,18 @@ impl<'a> IntrinsicCodegen<'a> {
 
             // Regex operations - zero-cost typed dispatch via TensorExtended
             // Note: Regex operations are part of TensorSubOpcode for text processing
-            InlineSequenceId::RegexFindAll => self.emit_tensor_extended(TensorSubOpcode::RegexFindAll, args),
-            InlineSequenceId::RegexReplaceAll => self.emit_tensor_extended(TensorSubOpcode::RegexReplaceAll, args),
-            InlineSequenceId::RegexIsMatch => self.emit_tensor_extended(TensorSubOpcode::RegexIsMatch, args),
-            InlineSequenceId::RegexSplit => self.emit_tensor_extended(TensorSubOpcode::RegexSplit, args),
+            InlineSequenceId::RegexFindAll => {
+                self.emit_tensor_extended(TensorSubOpcode::RegexFindAll, args)
+            }
+            InlineSequenceId::RegexReplaceAll => {
+                self.emit_tensor_extended(TensorSubOpcode::RegexReplaceAll, args)
+            }
+            InlineSequenceId::RegexIsMatch => {
+                self.emit_tensor_extended(TensorSubOpcode::RegexIsMatch, args)
+            }
+            InlineSequenceId::RegexSplit => {
+                self.emit_tensor_extended(TensorSubOpcode::RegexSplit, args)
+            }
 
             // Type introspection operations - use direct opcodes for zero-cost dispatch
             // SizeOf and AlignOf use dedicated opcodes (0x83, 0x84)
@@ -800,7 +979,9 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::NeedsDrop => self.emit_meta_reflect(MetaReflectOp::NeedsDrop, args),
             // Additional user-facing intrinsics
             InlineSequenceId::PowF32 => self.emit_math_extended(MathSubOpcode::PowF32, args),
-            InlineSequenceId::CharIsAlphanumeric => self.emit_char_extended(CharSubOpcode::IsAlphabeticUnicode, args), // approximate with alphabetic+numeric check
+            InlineSequenceId::CharIsAlphanumeric => {
+                self.emit_char_extended(CharSubOpcode::IsAlphabeticUnicode, args)
+            } // approximate with alphabetic+numeric check
             InlineSequenceId::Rdtsc => {
                 // Read timestamp counter - emit monotonic nanos as approximation in interpreter
                 self.emit_monotonic_nanos(args)
@@ -901,7 +1082,9 @@ impl<'a> IntrinsicCodegen<'a> {
             // CBGR header access
             InlineSequenceId::GetHeaderFromPtr => {
                 // Load header from pointer (deref with offset)
-                if args.is_empty() { return None; }
+                if args.is_empty() {
+                    return None;
+                }
                 let dst = self.alloc_temp();
                 self.emit(IntrinsicInstruction::Deref { dst, ptr: args[0] });
                 Some(dst)
@@ -934,7 +1117,10 @@ impl<'a> IntrinsicCodegen<'a> {
         if args.len() >= 2 {
             // VBC type-erases to 64-bit values; element stride is always 8 bytes
             let stride = self.alloc_temp();
-            self.emit(IntrinsicInstruction::LoadI { dst: stride, value: 8 });
+            self.emit(IntrinsicInstruction::LoadI {
+                dst: stride,
+                value: 8,
+            });
             let byte_offset = self.alloc_temp();
             self.emit(IntrinsicInstruction::BinaryOp {
                 opcode: Opcode::MulI,
@@ -1912,7 +2098,11 @@ impl<'a> IntrinsicCodegen<'a> {
     /// - Interpreter: ~2ns dispatch via Rust match
     /// - AOT/LLVM: Zero-cost - direct SIMD intrinsic
     /// - MLIR: vector dialect operations
-    fn emit_simd_extended(&mut self, sub_op: crate::instruction::SimdSubOpcode, args: &[Reg]) -> Option<Reg> {
+    fn emit_simd_extended(
+        &mut self,
+        sub_op: crate::instruction::SimdSubOpcode,
+        args: &[Reg],
+    ) -> Option<Reg> {
         let result = self.alloc_temp();
         self.emit(IntrinsicInstruction::SimdExtended {
             sub_op,
@@ -1927,7 +2117,11 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emits a CharExtended instruction with the given sub-opcode and arguments.
     /// ASCII operations are inline (~2ns), Unicode uses runtime lookup.
-    fn emit_char_extended(&mut self, sub_op: crate::instruction::CharSubOpcode, args: &[Reg]) -> Option<Reg> {
+    fn emit_char_extended(
+        &mut self,
+        sub_op: crate::instruction::CharSubOpcode,
+        args: &[Reg],
+    ) -> Option<Reg> {
         let result = self.alloc_temp();
         self.emit(IntrinsicInstruction::CharExtended {
             sub_op,
@@ -1942,7 +2136,11 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emits a CbgrExtended instruction with the given sub-opcode and arguments.
     /// Provides memory safety validation with ~15ns overhead.
-    fn emit_cbgr_extended(&mut self, sub_op: crate::instruction::CbgrSubOpcode, args: &[Reg]) -> Option<Reg> {
+    fn emit_cbgr_extended(
+        &mut self,
+        sub_op: crate::instruction::CbgrSubOpcode,
+        args: &[Reg],
+    ) -> Option<Reg> {
         let result = self.alloc_temp();
         self.emit(IntrinsicInstruction::CbgrExtended {
             sub_op,
@@ -1969,7 +2167,11 @@ impl<'a> IntrinsicCodegen<'a> {
     /// emit_text_extended(TextSubOpcode::ParseInt, &[text_reg])
     /// // Emits: TextExtended { sub_op: ParseInt, dst: temp, args: [text_reg] }
     /// ```
-    fn emit_text_extended(&mut self, sub_op: crate::instruction::TextSubOpcode, args: &[Reg]) -> Option<Reg> {
+    fn emit_text_extended(
+        &mut self,
+        sub_op: crate::instruction::TextSubOpcode,
+        args: &[Reg],
+    ) -> Option<Reg> {
         let result = self.alloc_temp();
         self.emit(IntrinsicInstruction::TextExtended {
             sub_op,
@@ -1983,7 +2185,11 @@ impl<'a> IntrinsicCodegen<'a> {
     ///
 
     /// Emits a LogExtended instruction with the given sub-opcode and arguments.
-    fn emit_log_extended(&mut self, sub_op: crate::instruction::LogSubOpcode, args: &[Reg]) -> Option<Reg> {
+    fn emit_log_extended(
+        &mut self,
+        sub_op: crate::instruction::LogSubOpcode,
+        args: &[Reg],
+    ) -> Option<Reg> {
         let result = self.alloc_temp();
         self.emit(IntrinsicInstruction::LogExtended {
             sub_op,
@@ -2003,7 +2209,11 @@ impl<'a> IntrinsicCodegen<'a> {
     /// # Performance
     /// - Interpreter: ~3ns dispatch via Rust match
     /// - AOT/LLVM: linalg/tensor dialect operations
-    fn emit_tensor_extended(&mut self, sub_op: crate::instruction::TensorSubOpcode, args: &[Reg]) -> Option<Reg> {
+    fn emit_tensor_extended(
+        &mut self,
+        sub_op: crate::instruction::TensorSubOpcode,
+        args: &[Reg],
+    ) -> Option<Reg> {
         let result = self.alloc_temp();
         self.emit(IntrinsicInstruction::TensorExtended {
             sub_op,
@@ -2018,7 +2228,11 @@ impl<'a> IntrinsicCodegen<'a> {
 
     /// Emits a TensorExtSubOpcode instruction for extended tensor operations
     /// that overflow the 256 sub-opcode limit.
-    fn emit_tensor_ext_extended(&mut self, sub_op: crate::instruction::TensorExtSubOpcode, args: &[Reg]) -> Option<Reg> {
+    fn emit_tensor_ext_extended(
+        &mut self,
+        sub_op: crate::instruction::TensorExtSubOpcode,
+        args: &[Reg],
+    ) -> Option<Reg> {
         let result = self.alloc_temp();
         self.emit(IntrinsicInstruction::TensorExtExtended {
             sub_op,
@@ -2072,7 +2286,11 @@ impl<'a> IntrinsicCodegen<'a> {
     /// emit_meta_reflect(MetaReflectOp::TypeId, &[value])
     /// // Emits: MetaReflect { sub_op: TypeId, dst: temp, args: [value] }
     /// ```
-    fn emit_meta_reflect(&mut self, sub_op: crate::instruction::MetaReflectOp, args: &[Reg]) -> Option<Reg> {
+    fn emit_meta_reflect(
+        &mut self,
+        sub_op: crate::instruction::MetaReflectOp,
+        args: &[Reg],
+    ) -> Option<Reg> {
         let result = self.alloc_temp();
         self.emit(IntrinsicInstruction::MetaReflect {
             sub_op,
@@ -2695,13 +2913,14 @@ impl<'a> IntrinsicCodegen<'a> {
         };
 
         // Create saturating instruction with embedded width and signed flag
-        self.instructions.push(IntrinsicInstruction::SaturatingArith {
-            sub_op,
-            dst: dst.unwrap_or(Reg(0)),
-            args: args.to_vec(),
-            width,
-            signed,
-        });
+        self.instructions
+            .push(IntrinsicInstruction::SaturatingArith {
+                sub_op,
+                dst: dst.unwrap_or(Reg(0)),
+                args: args.to_vec(),
+                width,
+                signed,
+            });
 
         dst
     }
@@ -2763,10 +2982,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
         let dst = self.alloc_temp();
         // Emit volatile load intrinsic
-        self.emit(IntrinsicInstruction::VolatileLoad {
-            dst,
-            ptr: args[0],
-        });
+        self.emit(IntrinsicInstruction::VolatileLoad { dst, ptr: args[0] });
 
         Some(dst)
     }
@@ -2794,10 +3010,7 @@ impl<'a> IntrinsicCodegen<'a> {
 
         let dst = self.alloc_temp();
         // Emit volatile load with acquire ordering
-        self.emit(IntrinsicInstruction::VolatileLoadAcquire {
-            dst,
-            ptr: args[0],
-        });
+        self.emit(IntrinsicInstruction::VolatileLoadAcquire { dst, ptr: args[0] });
 
         Some(dst)
     }
@@ -3024,49 +3237,195 @@ pub enum TimeIntrinsicKind {
 #[allow(missing_docs)]
 pub enum IntrinsicInstruction {
     // Standard opcodes (from base Instruction)
-    BinaryOp { opcode: Opcode, dst: Reg, lhs: Reg, rhs: Reg },
-    UnaryOp { opcode: Opcode, dst: Reg, src: Reg },
-    Deref { dst: Reg, ptr: Reg },
-    DerefMut { ptr: Reg, value: Reg },
-    Ref { dst: Reg, src: Reg },
-    ChkRef { dst: Reg, src: Reg },
-    TlsGet { dst: Reg, slot: Reg },
-    TlsSet { slot: Reg, value: Reg },
-    PushContext { dst: Reg },
+    BinaryOp {
+        opcode: Opcode,
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    UnaryOp {
+        opcode: Opcode,
+        dst: Reg,
+        src: Reg,
+    },
+    Deref {
+        dst: Reg,
+        ptr: Reg,
+    },
+    DerefMut {
+        ptr: Reg,
+        value: Reg,
+    },
+    Ref {
+        dst: Reg,
+        src: Reg,
+    },
+    ChkRef {
+        dst: Reg,
+        src: Reg,
+    },
+    TlsGet {
+        dst: Reg,
+        slot: Reg,
+    },
+    TlsSet {
+        slot: Reg,
+        value: Reg,
+    },
+    PushContext {
+        dst: Reg,
+    },
     PopContext,
-    Panic { msg: Reg },
+    Panic {
+        msg: Reg,
+    },
     Unreachable,
-    Assert { cond: Reg, msg: Reg },
-    DebugPrint { value: Reg },
-    Spawn { dst: Reg, future: Reg, task_id: Reg },
-    Await { dst: Reg, future: Reg },
-    IoSubmit { dst: Reg, ops: Reg },
-    SizeOfG { dst: Reg, type_param: Option<Reg> },
-    AlignOfG { dst: Reg, type_param: Option<Reg> },
-    LoadSmallI { dst: Reg, value: i8 },
-    LoadI { dst: Reg, value: i64 },
-    Pack { dst: Reg, regs: Vec<Reg> },
-    SyscallLinux { dst: Reg, num: Reg, args: RegRange },
-    CvtFI { dst: Reg, src: Reg, mode: Reg },
-    AtomicFence { ordering: Reg },
+    Assert {
+        cond: Reg,
+        msg: Reg,
+    },
+    DebugPrint {
+        value: Reg,
+    },
+    Spawn {
+        dst: Reg,
+        future: Reg,
+        task_id: Reg,
+    },
+    Await {
+        dst: Reg,
+        future: Reg,
+    },
+    IoSubmit {
+        dst: Reg,
+        ops: Reg,
+    },
+    SizeOfG {
+        dst: Reg,
+        type_param: Option<Reg>,
+    },
+    AlignOfG {
+        dst: Reg,
+        type_param: Option<Reg>,
+    },
+    LoadSmallI {
+        dst: Reg,
+        value: i8,
+    },
+    LoadI {
+        dst: Reg,
+        value: i64,
+    },
+    Pack {
+        dst: Reg,
+        regs: Vec<Reg>,
+    },
+    SyscallLinux {
+        dst: Reg,
+        num: Reg,
+        args: RegRange,
+    },
+    CvtFI {
+        dst: Reg,
+        src: Reg,
+        mode: Reg,
+    },
+    AtomicFence {
+        ordering: Reg,
+    },
     SpinHint,
-    AtomicLoad { dst: Reg, ptr: Reg, ordering: Reg, size: u8 },
-    AtomicStore { ptr: Reg, value: Reg, ordering: Reg, size: u8 },
-    AtomicCas { old_dst: Reg, success_dst: Reg, ptr: Reg, expected: Reg, desired: Reg, success_order: Reg, failure_order: Reg, size: u8 },
-    Generic { opcode: Opcode, dst: Option<Reg>, args: Vec<Reg> },
-    GenericWithMode { opcode: Opcode, mode: u8, dst: Option<Reg>, args: Vec<Reg> },
-    GenericWithSize { opcode: Opcode, size: u8, dst: Option<Reg>, args: Vec<Reg> },
+    AtomicLoad {
+        dst: Reg,
+        ptr: Reg,
+        ordering: Reg,
+        size: u8,
+    },
+    AtomicStore {
+        ptr: Reg,
+        value: Reg,
+        ordering: Reg,
+        size: u8,
+    },
+    AtomicCas {
+        old_dst: Reg,
+        success_dst: Reg,
+        ptr: Reg,
+        expected: Reg,
+        desired: Reg,
+        success_order: Reg,
+        failure_order: Reg,
+        size: u8,
+    },
+    Generic {
+        opcode: Opcode,
+        dst: Option<Reg>,
+        args: Vec<Reg>,
+    },
+    GenericWithMode {
+        opcode: Opcode,
+        mode: u8,
+        dst: Option<Reg>,
+        args: Vec<Reg>,
+    },
+    GenericWithSize {
+        opcode: Opcode,
+        size: u8,
+        dst: Option<Reg>,
+        args: Vec<Reg>,
+    },
 
     // Intrinsic-specific instructions
-    MemIntrinsic { kind: MemIntrinsicKind, dst: Reg, src: Reg, len: Reg },
-    MemCmp { dst: Reg, lhs: Reg, rhs: Reg, len: Reg },
-    AtomicRmw { dst: Reg, op: AtomicRmwOp, ptr: Reg, value: Reg, ordering: Reg },
-    SpinlockLock { lock: Reg },
-    FutexWait { dst: Reg, addr: Reg, expected: Reg, timeout_ns: Reg },
-    FutexWake { dst: Reg, addr: Reg, count: Reg },
-    CheckedArith { result: Reg, overflow: Reg, op: CheckedArithOp, lhs: Reg, rhs: Reg },
-    BitOp { dst: Reg, op: BitOpKind, src: Reg },
-    RotateOp { dst: Reg, src: Reg, amount: Reg, direction: RotateDirection },
+    MemIntrinsic {
+        kind: MemIntrinsicKind,
+        dst: Reg,
+        src: Reg,
+        len: Reg,
+    },
+    MemCmp {
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+        len: Reg,
+    },
+    AtomicRmw {
+        dst: Reg,
+        op: AtomicRmwOp,
+        ptr: Reg,
+        value: Reg,
+        ordering: Reg,
+    },
+    SpinlockLock {
+        lock: Reg,
+    },
+    FutexWait {
+        dst: Reg,
+        addr: Reg,
+        expected: Reg,
+        timeout_ns: Reg,
+    },
+    FutexWake {
+        dst: Reg,
+        addr: Reg,
+        count: Reg,
+    },
+    CheckedArith {
+        result: Reg,
+        overflow: Reg,
+        op: CheckedArithOp,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    BitOp {
+        dst: Reg,
+        op: BitOpKind,
+        src: Reg,
+    },
+    RotateOp {
+        dst: Reg,
+        src: Reg,
+        amount: Reg,
+        direction: RotateDirection,
+    },
     /// Math Extended instruction with sub-opcode for transcendental/special math functions.
     ///
 
@@ -3087,35 +3446,90 @@ pub enum IntrinsicInstruction {
     /// // LLVM: %r0 = call double @llvm.sin.f64(double %r1)
     /// // MLIR: %r0 = math.sin %r1 : f64
     /// ```
-    MathExtended { sub_op: crate::instruction::MathSubOpcode, dst: Reg, args: Vec<Reg> },
-    TimeIntrinsic { dst: Reg, kind: TimeIntrinsicKind },
-    CompileTimeConst { dst: Reg, intrinsic_name: String },
+    MathExtended {
+        sub_op: crate::instruction::MathSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
+    TimeIntrinsic {
+        dst: Reg,
+        kind: TimeIntrinsicKind,
+    },
+    CompileTimeConst {
+        dst: Reg,
+        intrinsic_name: String,
+    },
     /// Arithmetic Extended instruction with sub-opcode for checked/overflowing/polymorphic arithmetic.
-    ArithExtended { sub_op: ArithSubOpcode, dst: Reg, args: Vec<Reg> },
+    ArithExtended {
+        sub_op: ArithSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// Type-aware wrapping arithmetic with explicit width and signedness.
-    WrappingArith { sub_op: ArithSubOpcode, dst: Reg, args: Vec<Reg>, width: u8, signed: bool },
+    WrappingArith {
+        sub_op: ArithSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+        width: u8,
+        signed: bool,
+    },
     /// Type-aware saturating arithmetic with explicit width and signedness.
-    SaturatingArith { sub_op: ArithSubOpcode, dst: Reg, args: Vec<Reg>, width: u8, signed: bool },
+    SaturatingArith {
+        sub_op: ArithSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+        width: u8,
+        signed: bool,
+    },
     /// Closure call for indirect function invocation.
-    ClosureCall { dst: Reg, closure: Reg, args: Vec<Reg> },
+    ClosureCall {
+        dst: Reg,
+        closure: Reg,
+        args: Vec<Reg>,
+    },
     /// Volatile load: read from pointer without optimization/reordering (MMIO).
-    VolatileLoad { dst: Reg, ptr: Reg },
+    VolatileLoad {
+        dst: Reg,
+        ptr: Reg,
+    },
     /// Volatile store: write to pointer without optimization/reordering (MMIO).
-    VolatileStore { ptr: Reg, value: Reg },
+    VolatileStore {
+        ptr: Reg,
+        value: Reg,
+    },
     /// Volatile load with acquire semantics (MMIO with barrier).
-    VolatileLoadAcquire { dst: Reg, ptr: Reg },
+    VolatileLoadAcquire {
+        dst: Reg,
+        ptr: Reg,
+    },
     /// Volatile store with release semantics (MMIO with barrier).
-    VolatileStoreRelease { ptr: Reg, value: Reg },
+    VolatileStoreRelease {
+        ptr: Reg,
+        value: Reg,
+    },
     /// Compiler fence: prevents compiler reordering only.
     CompilerFence,
     /// Hardware fence: prevents CPU memory reordering.
     HardwareFence,
     /// Tensor Extended instruction with sub-opcode for advanced tensor operations.
-    TensorExtended { sub_op: crate::instruction::TensorSubOpcode, dst: Reg, args: Vec<Reg> },
+    TensorExtended {
+        sub_op: crate::instruction::TensorSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// Tensor Extended instruction with sub-opcode and mode byte.
-    TensorExtendedWithMode { sub_op: crate::instruction::TensorSubOpcode, mode: u8, dst: Reg, args: Vec<Reg> },
+    TensorExtendedWithMode {
+        sub_op: crate::instruction::TensorSubOpcode,
+        mode: u8,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// GPU Extended instruction with sub-opcode for GPU operations.
-    GpuExtended { sub_op: crate::instruction::GpuSubOpcode, dst: Reg, args: Vec<Reg> },
+    GpuExtended {
+        sub_op: crate::instruction::GpuSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// SIMD Extended instruction with sub-opcode for vector operations.
     ///
 
@@ -3136,7 +3550,11 @@ pub enum IntrinsicInstruction {
     /// // LLVM: <4 x float> %r0 = fadd <4 x float> %r1, %r2
     /// // MLIR: %r0 = arith.addf %r1, %r2 : vector<4xf32>
     /// ```
-    SimdExtended { sub_op: crate::instruction::SimdSubOpcode, dst: Reg, args: Vec<Reg> },
+    SimdExtended {
+        sub_op: crate::instruction::SimdSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// Character Extended instruction with sub-opcode for character operations.
     ///
 
@@ -3149,7 +3567,11 @@ pub enum IntrinsicInstruction {
     /// CharExtended { sub_op: CharSubOpcode::IsAlphabetic, dst: r0, args: vec![r1] }
     /// // Encodes to: 0x2B 0x00 <dst> <src>
     /// ```
-    CharExtended { sub_op: crate::instruction::CharSubOpcode, dst: Reg, args: Vec<Reg> },
+    CharExtended {
+        sub_op: crate::instruction::CharSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// CBGR Extended instruction with sub-opcode for memory safety operations.
     ///
 
@@ -3162,7 +3584,11 @@ pub enum IntrinsicInstruction {
     /// CbgrExtended { sub_op: CbgrSubOpcode::Validate, dst: r0, args: vec![r1] }
     /// // Encodes to: 0x78 0x00 <dst> <ptr>
     /// ```
-    CbgrExtended { sub_op: crate::instruction::CbgrSubOpcode, dst: Reg, args: Vec<Reg> },
+    CbgrExtended {
+        sub_op: crate::instruction::CbgrSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// Log Extended instruction with sub-opcode for logging operations.
     ///
 
@@ -3174,7 +3600,11 @@ pub enum IntrinsicInstruction {
     /// LogExtended { sub_op: LogSubOpcode::Debug, dst: r0, args: vec![r1] }
     /// // Encodes to: 0xBE 0x00 <dst> <msg>
     /// ```
-    LogExtended { sub_op: crate::instruction::LogSubOpcode, dst: Reg, args: Vec<Reg> },
+    LogExtended {
+        sub_op: crate::instruction::LogSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// ML Extended instruction with sub-opcode for ML/gradient operations.
     ///
 
@@ -3187,7 +3617,11 @@ pub enum IntrinsicInstruction {
     /// MlExtended { sub_op: MlSubOpcode::JvpBegin, dst: r0, args: vec![r1, r2] }
     /// // Encodes to: 0xFD 0x66 <dst> <primals> <tangents>
     /// ```
-    MlExtended { sub_op: crate::instruction::MlSubOpcode, dst: Reg, args: Vec<Reg> },
+    MlExtended {
+        sub_op: crate::instruction::MlSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// Tensor Extended Extended instruction for operations that overflow the 256 sub-opcode limit.
     ///
 
@@ -3199,7 +3633,11 @@ pub enum IntrinsicInstruction {
     /// TensorExtExtended { sub_op: TensorExtSubOpcode::ContiguousView, dst: r0, args: vec![r1] }
     /// // Encodes to: 0xFC 0x00 0x04 <dst> <src>
     /// ```
-    TensorExtExtended { sub_op: crate::instruction::TensorExtSubOpcode, dst: Reg, args: Vec<Reg> },
+    TensorExtExtended {
+        sub_op: crate::instruction::TensorExtSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// Meta-reflection instruction for type introspection.
     ///
 
@@ -3217,7 +3655,11 @@ pub enum IntrinsicInstruction {
     /// MetaReflect { sub_op: MetaReflectOp::TypeId, dst: r0, args: vec![r1] }
     /// // Encodes to: 0xBB 0x00 <dst> <value>
     /// ```
-    MetaReflect { sub_op: crate::instruction::MetaReflectOp, dst: Reg, args: Vec<Reg> },
+    MetaReflect {
+        sub_op: crate::instruction::MetaReflectOp,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// Text Extended instruction for text parsing and conversion operations.
     ///
 
@@ -3235,23 +3677,49 @@ pub enum IntrinsicInstruction {
     /// TextExtended { sub_op: TextSubOpcode::ParseInt, dst: r0, args: vec![r1] }
     /// // Encodes to: 0x79 0x10 <dst> <text>
     /// ```
-    TextExtended { sub_op: crate::instruction::TextSubOpcode, dst: Reg, args: Vec<Reg> },
+    TextExtended {
+        sub_op: crate::instruction::TextSubOpcode,
+        dst: Reg,
+        args: Vec<Reg>,
+    },
     /// Heap memory allocation.
-    MemAlloc { dst: Reg, size: Reg, align: Reg, zeroed: bool },
+    MemAlloc {
+        dst: Reg,
+        size: Reg,
+        align: Reg,
+        zeroed: bool,
+    },
     /// Heap memory deallocation.
-    MemDealloc { ptr: Reg, size: Reg, align: Reg },
+    MemDealloc {
+        ptr: Reg,
+        size: Reg,
+        align: Reg,
+    },
     /// Heap memory reallocation.
-    MemRealloc { dst: Reg, ptr: Reg, old_size: Reg, new_size: Reg, align: Reg },
+    MemRealloc {
+        dst: Reg,
+        ptr: Reg,
+        old_size: Reg,
+        new_size: Reg,
+        align: Reg,
+    },
     /// Swap two values in place via pointers.
-    MemSwap { a: Reg, b: Reg },
+    MemSwap {
+        a: Reg,
+        b: Reg,
+    },
     /// Replace value and return old.
-    MemReplace { dst: Reg, dest: Reg, src: Reg },
+    MemReplace {
+        dst: Reg,
+        dest: Reg,
+        src: Reg,
+    },
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::INTRINSIC_REGISTRY;
+    use super::*;
 
     #[test]
     fn test_direct_opcode_codegen() {

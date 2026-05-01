@@ -308,9 +308,10 @@ fn test_fixed_value_through_equality() {
     // b should have fixed value 42 through equivalence
     let result = system.check_satisfiable();
     if let Ok(ConstraintCheckResult::Satisfiable { model }) = result
-        && let Some(&b_val) = model.get(&Text::from("b")) {
-            assert_eq!(b_val, 42, "b should equal 42 through a = b constraint");
-        }
+        && let Some(&b_val) = model.get(&Text::from("b"))
+    {
+        assert_eq!(b_val, 42, "b should equal 42 through a = b constraint");
+    }
 }
 
 #[test]

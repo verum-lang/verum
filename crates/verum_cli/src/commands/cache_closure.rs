@@ -38,8 +38,8 @@ use crate::config::Manifest;
 use crate::error::{CliError, Result};
 use std::path::PathBuf;
 use verum_verification::closure_cache::{
-    decide, CacheDecision, CacheEntry, CacheError, CachedVerdict, ClosureFingerprint,
-    FilesystemCacheStore, IncrementalCacheStore, RecheckReason,
+    CacheDecision, CacheEntry, CacheError, CachedVerdict, ClosureFingerprint, FilesystemCacheStore,
+    IncrementalCacheStore, RecheckReason, decide,
 };
 
 /// Default cache root relative to the manifest directory.
@@ -177,11 +177,23 @@ fn emit_entry_plain(e: &CacheEntry) {
     println!("Theorem      : {}", e.theorem_name.as_str());
     println!("Recorded at  : {}", e.recorded_at);
     println!("Fingerprint:");
-    println!("  kernel_version  : {}", e.fingerprint.kernel_version.as_str());
-    println!("  signature_hash  : {}", e.fingerprint.signature_hash.as_str());
+    println!(
+        "  kernel_version  : {}",
+        e.fingerprint.kernel_version.as_str()
+    );
+    println!(
+        "  signature_hash  : {}",
+        e.fingerprint.signature_hash.as_str()
+    );
     println!("  body_hash       : {}", e.fingerprint.body_hash.as_str());
-    println!("  citations_hash  : {}", e.fingerprint.citations_hash.as_str());
-    println!("  closure_hash    : {}", e.fingerprint.closure_hash().as_str());
+    println!(
+        "  citations_hash  : {}",
+        e.fingerprint.citations_hash.as_str()
+    );
+    println!(
+        "  closure_hash    : {}",
+        e.fingerprint.closure_hash().as_str()
+    );
     println!("Verdict:");
     match &e.verdict {
         CachedVerdict::Ok { elapsed_ms } => {
@@ -285,8 +297,7 @@ pub fn run_decide(
     }
     let kver = kernel_version.unwrap_or(verum_kernel::VVA_VERSION);
     let cite_refs: Vec<&str> = citations.iter().map(String::as_str).collect();
-    let fp =
-        ClosureFingerprint::compute(kver, signature.as_bytes(), body.as_bytes(), &cite_refs);
+    let fp = ClosureFingerprint::compute(kver, signature.as_bytes(), body.as_bytes(), &cite_refs);
 
     let store = open_store(root)?;
     let decision = decide(&store, theorem, &fp);
@@ -342,10 +353,7 @@ fn emit_decision_plain(d: &CacheDecision, fp: &ClosureFingerprint, theorem: &str
 fn emit_decision_json(d: &CacheDecision, fp: &ClosureFingerprint, theorem: &str) {
     let mut out = String::from("{\n");
     out.push_str("  \"schema_version\": 1,\n");
-    out.push_str(&format!(
-        "  \"theorem\": \"{}\",\n",
-        json_escape(theorem)
-    ));
+    out.push_str(&format!("  \"theorem\": \"{}\",\n", json_escape(theorem)));
     out.push_str(&format!(
         "  \"closure_hash\": \"{}\",\n",
         json_escape(fp.closure_hash().as_str())
@@ -564,16 +572,18 @@ mod tests {
             })
             .unwrap();
         // Decide with same fingerprint inputs.
-        assert!(run_decide(
-            "thm.x",
-            Some("2.6.0"),
-            "sig",
-            "body",
-            &["c1".to_string()],
-            Some(&root),
-            "json",
-        )
-        .is_ok());
+        assert!(
+            run_decide(
+                "thm.x",
+                Some("2.6.0"),
+                "sig",
+                "body",
+                &["c1".to_string()],
+                Some(&root),
+                "json",
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -594,15 +604,7 @@ mod tests {
     #[test]
     fn run_decide_rejects_empty_body() {
         let (_t, root) = fresh_root();
-        let r = run_decide(
-            "thm.x",
-            Some("2.6.0"),
-            "sig",
-            "",
-            &[],
-            Some(&root),
-            "plain",
-        );
+        let r = run_decide("thm.x", Some("2.6.0"), "sig", "", &[], Some(&root), "plain");
         assert!(matches!(r, Err(CliError::InvalidArgument(_))));
     }
 
@@ -610,15 +612,7 @@ mod tests {
     fn run_decide_kernel_version_default_uses_running_kernel() {
         let (_t, root) = fresh_root();
         // No --kernel-version flag passed → default to running kernel.
-        let r = run_decide(
-            "thm.x",
-            None,
-            "sig",
-            "body",
-            &[],
-            Some(&root),
-            "plain",
-        );
+        let r = run_decide("thm.x", None, "sig", "body", &[], Some(&root), "plain");
         assert!(r.is_ok());
     }
 

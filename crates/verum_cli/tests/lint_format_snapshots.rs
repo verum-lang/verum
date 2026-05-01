@@ -16,7 +16,7 @@
 use std::path::PathBuf;
 
 use verum_cli::commands::lint::{
-    format_issue_gha, format_issue_json, format_sarif, format_tap, LintIssue, LintLevel,
+    LintIssue, LintLevel, format_issue_gha, format_issue_json, format_sarif, format_tap,
 };
 use verum_common::Text;
 
@@ -187,7 +187,10 @@ fn gha_encodes_newlines_as_percent_zero_a() {
     };
     let line = format_issue_gha(&issue);
     assert!(line.contains("first%0Asecond"), "got: {line}");
-    assert!(!line.contains("first\nsecond"), "raw newline survived: {line}");
+    assert!(
+        !line.contains("first\nsecond"),
+        "raw newline survived: {line}"
+    );
 }
 
 // ============================================================
@@ -205,7 +208,10 @@ fn sarif_carries_version_and_schema_url() {
 fn sarif_emits_one_result_per_issue() {
     let s = format_sarif(&sample_issues());
     let result_count = s.matches("\"ruleId\":").count();
-    assert_eq!(result_count, 3, "expected 3 results, got {result_count}\n{s}");
+    assert_eq!(
+        result_count, 3,
+        "expected 3 results, got {result_count}\n{s}"
+    );
 }
 
 #[test]
@@ -249,20 +255,32 @@ fn tap_starts_with_version_and_plan() {
 #[test]
 fn tap_emits_not_ok_for_errors_and_warnings() {
     let s = format_tap(&sample_issues());
-    assert!(s.contains("not ok 1 - "), "first issue (error) should be not-ok\n{s}");
-    assert!(s.contains("not ok 2 - "), "second issue (warning) should be not-ok\n{s}");
+    assert!(
+        s.contains("not ok 1 - "),
+        "first issue (error) should be not-ok\n{s}"
+    );
+    assert!(
+        s.contains("not ok 2 - "),
+        "second issue (warning) should be not-ok\n{s}"
+    );
 }
 
 #[test]
 fn tap_emits_ok_skip_for_info() {
     let s = format_tap(&sample_issues());
-    assert!(s.contains("ok 3 - ") && s.contains("# SKIP info"), "got:\n{s}");
+    assert!(
+        s.contains("ok 3 - ") && s.contains("# SKIP info"),
+        "got:\n{s}"
+    );
 }
 
 #[test]
 fn tap_includes_yaml_diagnostic_block_on_failures() {
     let s = format_tap(&sample_issues());
     assert!(s.contains("  ---"), "missing YAML start");
-    assert!(s.contains("  rule: deprecated-syntax"), "missing rule field\n{s}");
+    assert!(
+        s.contains("  rule: deprecated-syntax"),
+        "missing rule field\n{s}"
+    );
     assert!(s.contains("  ..."), "missing YAML end");
 }

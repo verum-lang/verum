@@ -23,9 +23,9 @@
 // Each test documents the bug/issue it prevents from regressing.
 
 use verum_ast::FileId;
+use verum_common::List;
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
-use verum_common::List;
 
 // ============================================================================
 // Parser Regression Tests

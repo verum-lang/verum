@@ -185,9 +185,11 @@ mod protocol_objects {
         // Protocol must be object-safe to use as protocol object
         // Protocol object safety: protocols usable as &dyn Protocol must have methods with known vtable layout (no generic methods, Self only in receiver position)
 
-        let requirements = ["All methods must have Self: Sized or take &self, &mut self, or self",
+        let requirements = [
+            "All methods must have Self: Sized or take &self, &mut self, or self",
             "No associated types without type erasure",
-            "No higher-ranked trait bounds on Self"];
+            "No higher-ranked trait bounds on Self",
+        ];
         assert_eq!(requirements.len(), 3);
     }
 

@@ -124,52 +124,76 @@ pub use error::{MlirError, Result};
 pub use dialect::{
     VerumDialect,
     ops::{
-        CbgrAllocOp, CbgrCheckOp, CbgrDerefOp, CbgrDropOp,
-        ContextGetOp, ContextProvideOp,
-        SpawnOp, AwaitOp, SelectOp,
-        RefinementCheckOp,
-        ListNewOp, ListPushOp, ListGetOp,
+        AwaitOp, CbgrAllocOp, CbgrCheckOp, CbgrDerefOp, CbgrDropOp, ContextGetOp, ContextProvideOp,
+        ListGetOp, ListNewOp, ListPushOp, RefinementCheckOp, SelectOp, SpawnOp,
     },
     types::{
-        VerumType, RefType, RefTier,
-        ListType, MapType, SetType, TextType, MaybeType,
-        FutureType, ContextType,
+        ContextType, FutureType, ListType, MapType, MaybeType, RefTier, RefType, SetType, TextType,
+        VerumType,
     },
 };
 
 // Re-export passes (including GPU pipeline)
 pub use passes::{
-    PassPipeline, PassConfig,
-    GpuPassPipeline, GpuPassConfig, GpuPipelineResult, GpuPipelineStats,
-    CbgrEliminationPass, CbgrEliminationStats,
-    ContextMonomorphizationPass,
+    CbgrEliminationPass, CbgrEliminationStats, ContextMonomorphizationPass, GpuPassConfig,
+    GpuPassPipeline, GpuPipelineResult, GpuPipelineStats, PassConfig, PassPipeline,
     RefinementPropagationPass,
 };
 
 // Re-export JIT (Phase 4 complete implementation)
 #[cfg(feature = "jit")]
 pub use jit::{
-    // Core JIT types
-    JitEngine, JitConfig, JitStats, JitStatsSummary, JitCompiler,
-    JitArg, JitArgs, JitReturn, CompiledFunction,
-    CallbackRegistry, JitCallback,
+    Binding,
+    CacheConfig,
+    CacheEntry,
+    CacheOptions,
+    CacheStats,
+    CacheStatsSummary,
+    CallbackRegistry,
+    CompiledFunction,
+    ContentHash,
+    ContentHasher,
 
-    // Symbol resolution
-    SymbolResolver, SymbolResolverStats, SymbolInfo, SymbolMetadata,
-    SymbolCategory, FfiType,
+    DependencyTracker,
+    EvalResult,
+    FfiType,
 
-    // Incremental compilation
-    IncrementalCache, CacheConfig, CacheEntry, CacheOptions,
-    CacheStats, CacheStatsSummary, DependencyTracker,
-    ContentHash, ContentHasher,
-
-    // REPL integration
-    ReplSession, ReplConfig, SessionId, EvalResult, Binding,
-    HistoryEntry, ReplCommand, SessionStats, SessionStatsSummary,
-
+    FunctionVersion,
+    HistoryEntry,
+    HotFunction,
+    HotReloadConfig,
+    HotReloadStats,
+    HotReloadStatsSummary,
     // Hot code replacement
-    HotReloader, HotReloadConfig, HotFunction, FunctionVersion,
-    HotReloadStats, HotReloadStatsSummary, SignatureHasher,
+    HotReloader,
+    // Incremental compilation
+    IncrementalCache,
+    JitArg,
+    JitArgs,
+    JitCallback,
+
+    JitCompiler,
+    JitConfig,
+    // Core JIT types
+    JitEngine,
+    JitReturn,
+    JitStats,
+    JitStatsSummary,
+    ReplCommand,
+    ReplConfig,
+    // REPL integration
+    ReplSession,
+    SessionId,
+    SessionStats,
+    SessionStatsSummary,
+
+    SignatureHasher,
+    SymbolCategory,
+    SymbolInfo,
+    SymbolMetadata,
+    // Symbol resolution
+    SymbolResolver,
+    SymbolResolverStats,
 };
 
 // Re-export AOT
@@ -178,8 +202,7 @@ pub use aot::{AotCompiler as MlirAotCompiler, AotConfig as MlirAotConfig};
 
 // Re-export VBC → MLIR lowering (GPU path - primary API)
 pub use vbc_lowering::{
-    VbcToMlirGpuLowering, GpuLoweringConfig, GpuLoweringStats,
-    GpuTarget, VbcMlirError,
+    GpuLoweringConfig, GpuLoweringStats, GpuTarget, VbcMlirError, VbcToMlirGpuLowering,
 };
 
 // Re-export GPU binary emission

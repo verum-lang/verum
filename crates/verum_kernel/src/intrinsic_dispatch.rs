@@ -641,7 +641,11 @@ mod tests {
     fn intrinsic_value_as_bool_works_on_bool_and_decision() {
         assert_eq!(IntrinsicValue::Bool(true).as_bool(), Some(true));
         assert_eq!(
-            IntrinsicValue::Decision { holds: true, reason: "x".into() }.as_bool(),
+            IntrinsicValue::Decision {
+                holds: true,
+                reason: "x".into()
+            }
+            .as_bool(),
             Some(true)
         );
         assert_eq!(IntrinsicValue::Int(7).as_bool(), None);
@@ -667,8 +671,11 @@ mod tests {
             &[IntrinsicValue::Int(-1), IntrinsicValue::Int(0)],
         )
         .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: negative level must be rejected");
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: negative level must be rejected"
+        );
     }
 
     #[test]
@@ -678,15 +685,20 @@ mod tests {
             &[IntrinsicValue::Int(1), IntrinsicValue::Int(-5)],
         )
         .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: negative universe must be rejected");
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: negative universe must be rejected"
+        );
     }
 
     #[test]
     fn yoneda_embedding_no_args_returns_none() {
         // Bare-call without args fails dispatch (caller must thread structural data).
-        assert!(dispatch_intrinsic("kernel_yoneda_embedding", &[]).is_none(),
-            "ATTACK: no-args call must fail dispatch (no silent-true)");
+        assert!(
+            dispatch_intrinsic("kernel_yoneda_embedding", &[]).is_none(),
+            "ATTACK: no-args call must fail dispatch (no silent-true)"
+        );
     }
 
     #[test]
@@ -701,25 +713,26 @@ mod tests {
     #[test]
     fn identity_is_equivalence_holds_at_non_negative_level() {
         for n in 0..5 {
-            let r = dispatch_intrinsic(
-                "kernel_identity_is_equivalence",
-                &[IntrinsicValue::Int(n)],
-            )
-            .unwrap();
-            assert_eq!(r.as_bool(), Some(true),
-                "id_X must witness equivalence at level {}", n);
+            let r = dispatch_intrinsic("kernel_identity_is_equivalence", &[IntrinsicValue::Int(n)])
+                .unwrap();
+            assert_eq!(
+                r.as_bool(),
+                Some(true),
+                "id_X must witness equivalence at level {}",
+                n
+            );
         }
     }
 
     #[test]
     fn identity_is_equivalence_rejects_negative_level() {
-        let r = dispatch_intrinsic(
-            "kernel_identity_is_equivalence",
-            &[IntrinsicValue::Int(-1)],
-        )
-        .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: negative ordinal level must be rejected");
+        let r = dispatch_intrinsic("kernel_identity_is_equivalence", &[IntrinsicValue::Int(-1)])
+            .unwrap();
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: negative ordinal level must be rejected"
+        );
     }
 
     // ----- Kan extension preconditions -----
@@ -825,7 +838,7 @@ mod tests {
                 IntrinsicValue::Bool(true),
                 IntrinsicValue::Bool(true),
                 IntrinsicValue::Bool(true),
-                IntrinsicValue::Bool(false),  // BF4 breaks
+                IntrinsicValue::Bool(false), // BF4 breaks
                 IntrinsicValue::Bool(true),
             ],
         )
@@ -879,7 +892,7 @@ mod tests {
             "kernel_cross_format_gate",
             &[
                 IntrinsicValue::Bool(true),
-                IntrinsicValue::Bool(false),  // Lean failed
+                IntrinsicValue::Bool(false), // Lean failed
                 IntrinsicValue::Bool(true),
                 IntrinsicValue::Bool(true),
             ],
@@ -895,8 +908,11 @@ mod tests {
         // The dispatcher must reflect the runtime self-containment state.
         let r = dispatch_intrinsic("kernel_msfs_self_contained", &[]).unwrap();
         // Currently TRUE (no AxiomCited/Pending in MSFS scope).
-        assert_eq!(r.as_bool(), Some(true),
-            "kernel_msfs_self_contained must return true while MSFS roadmap is closed");
+        assert_eq!(
+            r.as_bool(),
+            Some(true),
+            "kernel_msfs_self_contained must return true while MSFS roadmap is closed"
+        );
     }
 
     #[test]
@@ -909,9 +925,12 @@ mod tests {
         // kernel_transport_coherence, kernel_prop_coherence).
         // Adding a new bridge axiom must update both the bridge
         // surface and this count.
-        assert_eq!(names.len(), 27,
+        assert_eq!(
+            names.len(),
+            27,
             "Every kernel_* axiom in core/proof/kernel_bridge.vr + \
-             core/math/hott.vr must have a dispatcher");
+             core/math/hott.vr must have a dispatcher"
+        );
         // Check uniqueness.
         let mut seen = std::collections::HashSet::new();
         for n in names {
@@ -930,8 +949,10 @@ mod tests {
     #[test]
     fn attack_whitehead_no_args_rejected() {
         // Bare call → dispatch returns None.
-        assert!(dispatch_intrinsic("kernel_whitehead_promote", &[]).is_none(),
-            "ATTACK: Whitehead with no args silently succeeds (must fail dispatch)");
+        assert!(
+            dispatch_intrinsic("kernel_whitehead_promote", &[]).is_none(),
+            "ATTACK: Whitehead with no args silently succeeds (must fail dispatch)"
+        );
     }
 
     #[test]
@@ -939,14 +960,17 @@ mod tests {
         let r = dispatch_intrinsic(
             "kernel_whitehead_promote",
             &[
-                IntrinsicValue::Int(0),       // num_levels = 0
+                IntrinsicValue::Int(0), // num_levels = 0
                 IntrinsicValue::Bool(true),
                 IntrinsicValue::Bool(true),
             ],
         )
         .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: zero levels must defeat Whitehead promotion (per HTT 1.2.4.3)");
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: zero levels must defeat Whitehead promotion (per HTT 1.2.4.3)"
+        );
     }
 
     #[test]
@@ -956,13 +980,16 @@ mod tests {
             "kernel_whitehead_promote",
             &[
                 IntrinsicValue::Int(7),
-                IntrinsicValue::Bool(false),  // some level fails
+                IntrinsicValue::Bool(false), // some level fails
                 IntrinsicValue::Bool(true),
             ],
         )
         .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: single-level π_k iso failure must defeat Whitehead");
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: single-level π_k iso failure must defeat Whitehead"
+        );
     }
 
     #[test]
@@ -972,12 +999,15 @@ mod tests {
             &[
                 IntrinsicValue::Int(3),
                 IntrinsicValue::Bool(true),
-                IntrinsicValue::Bool(false),  // certificate incomplete
+                IntrinsicValue::Bool(false), // certificate incomplete
             ],
         )
         .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: incomplete level coverage must defeat Whitehead");
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: incomplete level coverage must defeat Whitehead"
+        );
     }
 
     #[test]
@@ -986,15 +1016,18 @@ mod tests {
         let r = dispatch_intrinsic(
             "kernel_reflective_subcategory_aft",
             &[
-                IntrinsicValue::Bool(false),  // not FF
+                IntrinsicValue::Bool(false), // not FF
                 IntrinsicValue::Bool(true),
                 IntrinsicValue::Bool(true),
                 IntrinsicValue::Bool(true),
             ],
         )
         .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: non-FF inclusion must defeat reflective-subcategory AFT");
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: non-FF inclusion must defeat reflective-subcategory AFT"
+        );
     }
 
     #[test]
@@ -1004,13 +1037,16 @@ mod tests {
             &[
                 IntrinsicValue::Bool(true),
                 IntrinsicValue::Bool(true),
-                IntrinsicValue::Bool(false),  // target not presentable
+                IntrinsicValue::Bool(false), // target not presentable
                 IntrinsicValue::Bool(true),
             ],
         )
         .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: non-presentable target must defeat AFT (HTT 5.5.2.9)");
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: non-presentable target must defeat AFT (HTT 5.5.2.9)"
+        );
     }
 
     #[test]
@@ -1018,35 +1054,38 @@ mod tests {
         let r = dispatch_intrinsic(
             "kernel_truncate_to_level",
             &[
-                IntrinsicValue::Int(-1),     // negative truncation level
+                IntrinsicValue::Int(-1), // negative truncation level
                 IntrinsicValue::Int(3),
             ],
         )
         .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: negative truncation level must be rejected (HTT 5.5.6 requires k≥0)");
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: negative truncation level must be rejected (HTT 5.5.6 requires k≥0)"
+        );
     }
 
     #[test]
     fn attack_specialised_limits_negative_size_rejected() {
-        let r = dispatch_intrinsic(
-            "kernel_specialised_limits",
-            &[IntrinsicValue::Int(-3)],
-        )
-        .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: negative diagram size is undefined (must be rejected)");
+        let r =
+            dispatch_intrinsic("kernel_specialised_limits", &[IntrinsicValue::Int(-3)]).unwrap();
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: negative diagram size is undefined (must be rejected)"
+        );
     }
 
     #[test]
     fn attack_epi_mono_below_inf_1_rejected() {
-        let r = dispatch_intrinsic(
-            "kernel_epi_mono_factorisation",
-            &[IntrinsicValue::Int(0)],
-        )
-        .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: epi/mono only meaningful at level≥1 (HTT 5.2.8.4)");
+        let r =
+            dispatch_intrinsic("kernel_epi_mono_factorisation", &[IntrinsicValue::Int(0)]).unwrap();
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: epi/mono only meaningful at level≥1 (HTT 5.2.8.4)"
+        );
     }
 
     #[test]
@@ -1056,8 +1095,11 @@ mod tests {
             &[IntrinsicValue::Int(-1)],
         )
         .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: negative truncation level for factorisation system");
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: negative truncation level for factorisation system"
+        );
     }
 
     #[test]
@@ -1067,8 +1109,11 @@ mod tests {
             &[IntrinsicValue::Int(0)],
         )
         .unwrap();
-        assert_eq!(r.as_bool(), Some(false),
-            "ATTACK: straightening requires (∞,1)-base (HTT 3.2.0.1)");
+        assert_eq!(
+            r.as_bool(),
+            Some(false),
+            "ATTACK: straightening requires (∞,1)-base (HTT 3.2.0.1)"
+        );
     }
 
     #[test]
@@ -1158,7 +1203,7 @@ mod tests {
             (
                 "kernel_reflective_subcategory_aft",
                 vec![
-                    IntrinsicValue::Bool(false),  // not FF
+                    IntrinsicValue::Bool(false), // not FF
                     IntrinsicValue::Bool(true),
                     IntrinsicValue::Bool(true),
                     IntrinsicValue::Bool(true),
@@ -1172,14 +1217,8 @@ mod tests {
                     IntrinsicValue::Bool(true),
                 ],
             ),
-            (
-                "kernel_compute_colimit",
-                vec![IntrinsicValue::Int(0)],
-            ),
-            (
-                "kernel_specialised_limits",
-                vec![IntrinsicValue::Int(-1)],
-            ),
+            ("kernel_compute_colimit", vec![IntrinsicValue::Int(0)]),
+            ("kernel_specialised_limits", vec![IntrinsicValue::Int(-1)]),
             (
                 "kernel_truncate_to_level",
                 vec![IntrinsicValue::Int(-1), IntrinsicValue::Int(3)],
@@ -1197,7 +1236,7 @@ mod tests {
                 vec![
                     IntrinsicValue::Bool(true),
                     IntrinsicValue::Bool(true),
-                    IntrinsicValue::Bool(false),  // BF3 fails
+                    IntrinsicValue::Bool(false), // BF3 fails
                     IntrinsicValue::Bool(true),
                     IntrinsicValue::Bool(true),
                 ],
@@ -1205,7 +1244,7 @@ mod tests {
             (
                 "kernel_infinity_topos",
                 vec![
-                    IntrinsicValue::Bool(false),  // not presentable
+                    IntrinsicValue::Bool(false), // not presentable
                     IntrinsicValue::Bool(true),
                     IntrinsicValue::Bool(true),
                     IntrinsicValue::Bool(true),
@@ -1217,7 +1256,7 @@ mod tests {
                     IntrinsicValue::Bool(true),
                     IntrinsicValue::Bool(true),
                     IntrinsicValue::Bool(true),
-                    IntrinsicValue::Bool(false),  // dedukti fails
+                    IntrinsicValue::Bool(false), // dedukti fails
                 ],
             ),
         ];
@@ -1242,7 +1281,11 @@ mod tests {
         // holds=false — must not silently succeed. This is the
         // "fail-closed under type confusion" invariant.
         let int_attack = vec![IntrinsicValue::Int(1); 5];
-        for name in ["kernel_pronk_bicat_fractions", "kernel_reflective_subcategory_aft", "kernel_infinity_topos"] {
+        for name in [
+            "kernel_pronk_bicat_fractions",
+            "kernel_reflective_subcategory_aft",
+            "kernel_infinity_topos",
+        ] {
             let args = if name == "kernel_pronk_bicat_fractions" {
                 &int_attack[..]
             } else {
@@ -1252,10 +1295,13 @@ mod tests {
             // Either dispatch failed (None) OR returned holds=false.
             // The forbidden state is Some(Decision { holds: true, ... }).
             match r {
-                None => {} // OK — fail-closed dispatch
+                None => {}                                                // OK — fail-closed dispatch
                 Some(IntrinsicValue::Decision { holds: false, .. }) => {} // OK — fail-closed result
                 Some(IntrinsicValue::Decision { holds: true, .. }) => {
-                    panic!("ATTACK SOUNDNESS VIOLATION: {} silently succeeds on Int-where-Bool inputs", name);
+                    panic!(
+                        "ATTACK SOUNDNESS VIOLATION: {} silently succeeds on Int-where-Bool inputs",
+                        name
+                    );
                 }
                 Some(other) => {
                     panic!("ATTACK: {} returned unexpected variant {:?}", name, other);
@@ -1276,7 +1322,9 @@ mod tests {
     fn is_known_intrinsic_recognises_strict_suffix() {
         // The strict form is the refinement-typed bridge; underlying
         // dispatcher is the same.
-        assert!(is_known_intrinsic("kernel_grothendieck_construction_strict"));
+        assert!(is_known_intrinsic(
+            "kernel_grothendieck_construction_strict"
+        ));
         assert!(is_known_intrinsic("kernel_whitehead_promote_strict"));
         assert!(is_known_intrinsic("kernel_truncate_to_level_strict"));
         assert!(!is_known_intrinsic("kernel_undefined_strict"));
@@ -1284,10 +1332,7 @@ mod tests {
 
     #[test]
     fn missing_dispatchers_finds_unmatched() {
-        let missing = missing_dispatchers(&[
-            "kernel_yoneda_embedding",
-            "kernel_unknown_axiom",
-        ]);
+        let missing = missing_dispatchers(&["kernel_yoneda_embedding", "kernel_unknown_axiom"]);
         assert_eq!(missing, vec!["kernel_unknown_axiom"]);
     }
 
@@ -1308,70 +1353,79 @@ mod tests {
     fn hott_equiv_inv_coherence_witnesses_well_formed() {
         // Default (no args) → unwrap_or(true) → holds=true.
         let r = dispatch_intrinsic("kernel_equiv_inv_coherence", &[]).unwrap();
-        assert_eq!(r.as_bool(), Some(true),
+        assert_eq!(
+            r.as_bool(),
+            Some(true),
             "kernel_equiv_inv_coherence must witness HoTT §4.2.4 \
-             on well-formed input (default)");
+             on well-formed input (default)"
+        );
 
         // Explicit true → still holds.
-        let r = dispatch_intrinsic(
-            "kernel_equiv_inv_coherence",
-            &[IntrinsicValue::Bool(true)],
-        ).unwrap();
+        let r = dispatch_intrinsic("kernel_equiv_inv_coherence", &[IntrinsicValue::Bool(true)])
+            .unwrap();
         assert_eq!(r.as_bool(), Some(true));
 
         // Explicit false → kernel rejects (well_formed_input=false).
-        let r = dispatch_intrinsic(
-            "kernel_equiv_inv_coherence",
-            &[IntrinsicValue::Bool(false)],
-        ).unwrap();
+        let r = dispatch_intrinsic("kernel_equiv_inv_coherence", &[IntrinsicValue::Bool(false)])
+            .unwrap();
         assert_eq!(r.as_bool(), Some(false));
     }
 
     #[test]
     fn hott_equiv_compose_coherence_witnesses_well_formed() {
         let r = dispatch_intrinsic("kernel_equiv_compose_coherence", &[]).unwrap();
-        assert_eq!(r.as_bool(), Some(true),
-            "kernel_equiv_compose_coherence must witness HoTT §4.2.5");
+        assert_eq!(
+            r.as_bool(),
+            Some(true),
+            "kernel_equiv_compose_coherence must witness HoTT §4.2.5"
+        );
         let r = dispatch_intrinsic(
             "kernel_equiv_compose_coherence",
             &[IntrinsicValue::Bool(false)],
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(r.as_bool(), Some(false));
     }
 
     #[test]
     fn hott_contr_fiber_coherence_witnesses_well_formed() {
         let r = dispatch_intrinsic("kernel_contr_fiber_coherence", &[]).unwrap();
-        assert_eq!(r.as_bool(), Some(true),
-            "kernel_contr_fiber_coherence must witness HoTT §4.4");
+        assert_eq!(
+            r.as_bool(),
+            Some(true),
+            "kernel_contr_fiber_coherence must witness HoTT §4.4"
+        );
         let r = dispatch_intrinsic(
             "kernel_contr_fiber_coherence",
             &[IntrinsicValue::Bool(false)],
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(r.as_bool(), Some(false));
     }
 
     #[test]
     fn hott_transport_coherence_witnesses_well_formed() {
         let r = dispatch_intrinsic("kernel_transport_coherence", &[]).unwrap();
-        assert_eq!(r.as_bool(), Some(true),
-            "kernel_transport_coherence must witness HoTT §2.10");
-        let r = dispatch_intrinsic(
-            "kernel_transport_coherence",
-            &[IntrinsicValue::Bool(false)],
-        ).unwrap();
+        assert_eq!(
+            r.as_bool(),
+            Some(true),
+            "kernel_transport_coherence must witness HoTT §2.10"
+        );
+        let r = dispatch_intrinsic("kernel_transport_coherence", &[IntrinsicValue::Bool(false)])
+            .unwrap();
         assert_eq!(r.as_bool(), Some(false));
     }
 
     #[test]
     fn hott_prop_coherence_witnesses_well_formed() {
         let r = dispatch_intrinsic("kernel_prop_coherence", &[]).unwrap();
-        assert_eq!(r.as_bool(), Some(true),
-            "kernel_prop_coherence must witness HoTT §3.3");
-        let r = dispatch_intrinsic(
-            "kernel_prop_coherence",
-            &[IntrinsicValue::Bool(false)],
-        ).unwrap();
+        assert_eq!(
+            r.as_bool(),
+            Some(true),
+            "kernel_prop_coherence must witness HoTT §3.3"
+        );
+        let r =
+            dispatch_intrinsic("kernel_prop_coherence", &[IntrinsicValue::Bool(false)]).unwrap();
         assert_eq!(r.as_bool(), Some(false));
     }
 

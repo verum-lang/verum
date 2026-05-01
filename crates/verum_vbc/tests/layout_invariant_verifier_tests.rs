@@ -10,8 +10,8 @@
 use smallvec::smallvec;
 use verum_vbc::codegen::VbcCodegen;
 use verum_vbc::types::{
-    FieldDescriptor, StringId, TypeDescriptor, TypeId, TypeKind, TypeRef,
-    VariantDescriptor, VariantKind, Visibility,
+    FieldDescriptor, StringId, TypeDescriptor, TypeId, TypeKind, TypeRef, VariantDescriptor,
+    VariantKind, Visibility,
 };
 
 fn make_type_with_variants(name_idx: u32, variants: Vec<VariantDescriptor>) -> TypeDescriptor {
@@ -77,7 +77,10 @@ fn make_field(name_idx: u32) -> FieldDescriptor {
 /// the per-name string indices for use in variant descriptors.
 fn make_codegen_with_strings(names: &[&str]) -> (VbcCodegen, Vec<u32>) {
     let mut codegen = VbcCodegen::new();
-    let idxs: Vec<u32> = names.iter().map(|n| codegen.intern_string_for_test(n)).collect();
+    let idxs: Vec<u32> = names
+        .iter()
+        .map(|n| codegen.intern_string_for_test(n))
+        .collect();
     (codegen, idxs)
 }
 
@@ -85,12 +88,17 @@ fn make_codegen_with_strings(names: &[&str]) -> (VbcCodegen, Vec<u32>) {
 fn accepts_well_formed_unit_only_sum() {
     // type Color is Red | Green | Blue;
     let (mut codegen, idxs) = make_codegen_with_strings(&["Color", "Red", "Green", "Blue"]);
-    codegen.push_type_for_test(make_type_with_variants(idxs[0], vec![
-        unit_variant(0, idxs[1]),
-        unit_variant(1, idxs[2]),
-        unit_variant(2, idxs[3]),
-    ]));
-    codegen.verify_type_layout_invariants().expect("well-formed sum should pass");
+    codegen.push_type_for_test(make_type_with_variants(
+        idxs[0],
+        vec![
+            unit_variant(0, idxs[1]),
+            unit_variant(1, idxs[2]),
+            unit_variant(2, idxs[3]),
+        ],
+    ));
+    codegen
+        .verify_type_layout_invariants()
+        .expect("well-formed sum should pass");
 }
 
 #[test]
@@ -98,12 +106,17 @@ fn accepts_mixed_unit_tuple_record() {
     // type Shape is Point | Pair(Int, Int) | Box { w: Int, h: Int };
     let (mut codegen, idxs) =
         make_codegen_with_strings(&["Shape", "Point", "Pair", "Box", "w", "h"]);
-    codegen.push_type_for_test(make_type_with_variants(idxs[0], vec![
-        unit_variant(0, idxs[1]),
-        tuple_variant(1, idxs[2], 2),
-        record_variant(2, idxs[3], vec![make_field(idxs[4]), make_field(idxs[5])]),
-    ]));
-    codegen.verify_type_layout_invariants().expect("mixed sum should pass");
+    codegen.push_type_for_test(make_type_with_variants(
+        idxs[0],
+        vec![
+            unit_variant(0, idxs[1]),
+            tuple_variant(1, idxs[2], 2),
+            record_variant(2, idxs[3], vec![make_field(idxs[4]), make_field(idxs[5])]),
+        ],
+    ));
+    codegen
+        .verify_type_layout_invariants()
+        .expect("mixed sum should pass");
 }
 
 #[test]
@@ -115,8 +128,16 @@ fn rejects_unit_with_payload() {
     codegen.push_type_for_test(make_type_with_variants(idxs[0], vec![bad]));
     let err = codegen.verify_type_layout_invariants().unwrap_err();
     let s = format!("{}", err);
-    assert!(s.contains("Bad.X"), "error should name the offending variant: {}", s);
-    assert!(s.contains("Unit"), "error should mention the variant kind: {}", s);
+    assert!(
+        s.contains("Bad.X"),
+        "error should name the offending variant: {}",
+        s
+    );
+    assert!(
+        s.contains("Unit"),
+        "error should mention the variant kind: {}",
+        s
+    );
 }
 
 #[test]
@@ -137,9 +158,10 @@ fn rejects_tuple_with_zero_arity() {
 #[test]
 fn rejects_record_without_fields() {
     let (mut codegen, idxs) = make_codegen_with_strings(&["Bad", "X"]);
-    codegen.push_type_for_test(make_type_with_variants(idxs[0], vec![
-        record_variant(0, idxs[1], vec![]),
-    ]));
+    codegen.push_type_for_test(make_type_with_variants(
+        idxs[0],
+        vec![record_variant(0, idxs[1], vec![])],
+    ));
     let err = codegen.verify_type_layout_invariants().unwrap_err();
     let s = format!("{}", err);
     assert!(
@@ -152,24 +174,35 @@ fn rejects_record_without_fields() {
 #[test]
 fn rejects_duplicate_tags() {
     let (mut codegen, idxs) = make_codegen_with_strings(&["Color", "Red", "Green"]);
-    codegen.push_type_for_test(make_type_with_variants(idxs[0], vec![
-        unit_variant(0, idxs[1]),
-        unit_variant(0, idxs[2]), // duplicate tag
-    ]));
+    codegen.push_type_for_test(make_type_with_variants(
+        idxs[0],
+        vec![
+            unit_variant(0, idxs[1]),
+            unit_variant(0, idxs[2]), // duplicate tag
+        ],
+    ));
     let err = codegen.verify_type_layout_invariants().unwrap_err();
     let s = format!("{}", err);
-    assert!(s.contains("duplicate variant tag"), "error should call out the duplicate: {}", s);
+    assert!(
+        s.contains("duplicate variant tag"),
+        "error should call out the duplicate: {}",
+        s
+    );
 }
 
 #[test]
 fn rejects_out_of_range_tag() {
     // Two variants but one of them has tag=5 — beyond `0..2`.
     let (mut codegen, idxs) = make_codegen_with_strings(&["Color", "Red", "Green"]);
-    codegen.push_type_for_test(make_type_with_variants(idxs[0], vec![
-        unit_variant(0, idxs[1]),
-        unit_variant(5, idxs[2]),
-    ]));
+    codegen.push_type_for_test(make_type_with_variants(
+        idxs[0],
+        vec![unit_variant(0, idxs[1]), unit_variant(5, idxs[2])],
+    ));
     let err = codegen.verify_type_layout_invariants().unwrap_err();
     let s = format!("{}", err);
-    assert!(s.contains("outside the dense range"), "error should explain the gap: {}", s);
+    assert!(
+        s.contains("outside the dense range"),
+        "error should explain the gap: {}",
+        s
+    );
 }

@@ -122,10 +122,7 @@ enum CubicalNorm {
     },
 
     /// `λi. body` — path abstraction.
-    PathLambda {
-        dim: Text,
-        body: Box<CubicalNorm>,
-    },
+    PathLambda { dim: Text, body: Box<CubicalNorm> },
 
     /// `sym(p)` — reverses a path; `sym(refl(x)) ↦ refl(x)`.
     Sym(Box<CubicalNorm>),
@@ -338,9 +335,7 @@ impl CubicalNorm {
 fn expr_to_cubical_norm(expr: &Expr) -> CubicalNorm {
     match &expr.kind {
         // Literal values become atoms
-        ExprKind::Literal(lit) => {
-            CubicalNorm::Atom(Text::from(format!("{:?}", lit.kind)))
-        }
+        ExprKind::Literal(lit) => CubicalNorm::Atom(Text::from(format!("{:?}", lit.kind))),
 
         // Variable / path reference
         ExprKind::Path(p) => {
@@ -363,9 +358,7 @@ fn expr_to_cubical_norm(expr: &Expr) -> CubicalNorm {
         ExprKind::Call { func, args, .. } => {
             let head = func_head_name(func);
             match (head.as_deref(), args.len()) {
-                (Some("refl"), 1) => {
-                    CubicalNorm::Refl(Box::new(expr_to_cubical_norm(&args[0])))
-                }
+                (Some("refl"), 1) => CubicalNorm::Refl(Box::new(expr_to_cubical_norm(&args[0]))),
                 (Some("transport"), 2) => CubicalNorm::Transport {
                     line: Box::new(expr_to_cubical_norm(&args[0])),
                     value: Box::new(expr_to_cubical_norm(&args[1])),
@@ -374,16 +367,12 @@ fn expr_to_cubical_norm(expr: &Expr) -> CubicalNorm {
                     base: Box::new(expr_to_cubical_norm(&args[0])),
                     sides: Box::new(expr_to_cubical_norm(&args[1])),
                 },
-                (Some("sym"), 1) => {
-                    CubicalNorm::Sym(Box::new(expr_to_cubical_norm(&args[0])))
-                }
+                (Some("sym"), 1) => CubicalNorm::Sym(Box::new(expr_to_cubical_norm(&args[0]))),
                 (Some("trans"), 2) => CubicalNorm::Trans(
                     Box::new(expr_to_cubical_norm(&args[0])),
                     Box::new(expr_to_cubical_norm(&args[1])),
                 ),
-                (Some("ua"), 1) => {
-                    CubicalNorm::Ua(Box::new(expr_to_cubical_norm(&args[0])))
-                }
+                (Some("ua"), 1) => CubicalNorm::Ua(Box::new(expr_to_cubical_norm(&args[0]))),
                 (Some("path_lam"), 2) => {
                     // path_lam(dim_name_as_string, body_expr)
                     let dim_name = match &args[0].kind {
@@ -412,12 +401,15 @@ fn expr_to_cubical_norm(expr: &Expr) -> CubicalNorm {
         }
 
         // Method call: p.trans(q)
-        ExprKind::MethodCall { receiver, method, args, .. } if method.as_str() == "trans" && args.len() == 1 => {
-            CubicalNorm::Trans(
-                Box::new(expr_to_cubical_norm(receiver)),
-                Box::new(expr_to_cubical_norm(&args[0])),
-            )
-        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } if method.as_str() == "trans" && args.len() == 1 => CubicalNorm::Trans(
+            Box::new(expr_to_cubical_norm(receiver)),
+            Box::new(expr_to_cubical_norm(&args[0])),
+        ),
 
         // Index operator: used as path application syntax `path[endpoint]`
         ExprKind::Index { expr: base, index } => CubicalNorm::PathApp {
@@ -473,9 +465,7 @@ fn func_head_name(func: &Expr) -> Option<String> {
 /// The `fallback_smt` closure receives the original goal when cubical
 /// normalisation is insufficient. The closure typically calls
 /// `ProofSearchEngine::try_auto`.
-pub fn execute_cubical_tactic(
-    goal: &ProofGoal,
-) -> CubicalTacticOutcome {
+pub fn execute_cubical_tactic(goal: &ProofGoal) -> CubicalTacticOutcome {
     match &goal.goal.kind {
         ExprKind::Binary {
             op: BinOp::Eq,
@@ -517,9 +507,7 @@ pub fn execute_cubical_tactic(
 
 /// After exhausting the rewrite budget, any remaining equality is
 /// deferred to the SMT fallback.
-pub fn execute_category_simp_tactic(
-    goal: &ProofGoal,
-) -> CubicalTacticOutcome {
+pub fn execute_category_simp_tactic(goal: &ProofGoal) -> CubicalTacticOutcome {
     const MAX_REWRITES: usize = 50;
 
     match &goal.goal.kind {
@@ -557,9 +545,7 @@ pub fn execute_category_simp_tactic(
 ///
 
 /// Uses a larger rewrite budget (100 steps) before falling back to SMT.
-pub fn execute_category_law_tactic(
-    goal: &ProofGoal,
-) -> CubicalTacticOutcome {
+pub fn execute_category_law_tactic(goal: &ProofGoal) -> CubicalTacticOutcome {
     const MAX_REWRITES: usize = 100;
 
     match &goal.goal.kind {
@@ -595,9 +581,7 @@ pub fn execute_category_law_tactic(
 
 /// For goals that do not match the descent pattern, the tactic is
 /// `NotApplicable` so the proof engine can try other tactics.
-pub fn execute_descent_check_tactic(
-    goal: &ProofGoal,
-) -> CubicalTacticOutcome {
+pub fn execute_descent_check_tactic(goal: &ProofGoal) -> CubicalTacticOutcome {
     let is_descent_goal = is_descent_shaped(&goal.goal);
 
     if is_descent_goal {
@@ -626,9 +610,7 @@ pub enum CubicalTacticOutcome {
     /// The tactic made no progress; hand off to the SMT solver.
     FallbackToSmt,
     /// The tactic requires SMT with a specific domain hint enabled.
-    FallbackToSmtWithHint {
-        hint: Text,
-    },
+    FallbackToSmtWithHint { hint: Text },
     /// The goal shape is not applicable to this tactic.
     NotApplicable,
 }
@@ -663,7 +645,8 @@ pub enum ProofMethod {
 pub fn try_cubical(goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
     match execute_cubical_tactic(goal) {
         CubicalTacticOutcome::Proved { .. } => Ok(List::new()),
-        CubicalTacticOutcome::FallbackToSmt | CubicalTacticOutcome::FallbackToSmtWithHint { .. } => {
+        CubicalTacticOutcome::FallbackToSmt
+        | CubicalTacticOutcome::FallbackToSmtWithHint { .. } => {
             Err(ProofError::TacticFailed(Text::from("__smt_fallback")))
         }
         CubicalTacticOutcome::NotApplicable => Err(ProofError::TacticFailed(Text::from(
@@ -676,7 +659,8 @@ pub fn try_cubical(goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
 pub fn try_category_simp(goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
     match execute_category_simp_tactic(goal) {
         CubicalTacticOutcome::Proved { .. } => Ok(List::new()),
-        CubicalTacticOutcome::FallbackToSmt | CubicalTacticOutcome::FallbackToSmtWithHint { .. } => {
+        CubicalTacticOutcome::FallbackToSmt
+        | CubicalTacticOutcome::FallbackToSmtWithHint { .. } => {
             Err(ProofError::TacticFailed(Text::from("__smt_fallback")))
         }
         CubicalTacticOutcome::NotApplicable => Err(ProofError::TacticFailed(Text::from(
@@ -689,7 +673,8 @@ pub fn try_category_simp(goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError
 pub fn try_category_law(goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
     match execute_category_law_tactic(goal) {
         CubicalTacticOutcome::Proved { .. } => Ok(List::new()),
-        CubicalTacticOutcome::FallbackToSmt | CubicalTacticOutcome::FallbackToSmtWithHint { .. } => {
+        CubicalTacticOutcome::FallbackToSmt
+        | CubicalTacticOutcome::FallbackToSmtWithHint { .. } => {
             Err(ProofError::TacticFailed(Text::from("__smt_fallback")))
         }
         CubicalTacticOutcome::NotApplicable => Err(ProofError::TacticFailed(Text::from(
@@ -702,7 +687,8 @@ pub fn try_category_law(goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError>
 pub fn try_descent_check(goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
     match execute_descent_check_tactic(goal) {
         CubicalTacticOutcome::Proved { .. } => Ok(List::new()),
-        CubicalTacticOutcome::FallbackToSmt | CubicalTacticOutcome::FallbackToSmtWithHint { .. } => {
+        CubicalTacticOutcome::FallbackToSmt
+        | CubicalTacticOutcome::FallbackToSmtWithHint { .. } => {
             // Descent goals need the full SMT machinery with sheaf encoding.
             Err(ProofError::TacticFailed(Text::from("__smt_fallback")))
         }
@@ -783,9 +769,12 @@ fn normalise_cat(expr: &Expr, budget: usize) -> CatNorm {
         }
 
         // Method call: f.compose(g), f.then(g), f.andThen(g), etc.
-        ExprKind::MethodCall { receiver, method, args, .. }
-            if is_composition_method(method.as_str()) && args.len() == 1 =>
-        {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } if is_composition_method(method.as_str()) && args.len() == 1 => {
             let l = normalise_cat(receiver, budget - 1);
             let r = normalise_cat(&args[0], budget - 1);
             l.compose(r)
@@ -804,12 +793,20 @@ fn normalise_cat(expr: &Expr, budget: usize) -> CatNorm {
         }
 
         // Binary composition operators: f >> g or g << f
-        ExprKind::Binary { op: BinOp::Shr, left, right } => {
+        ExprKind::Binary {
+            op: BinOp::Shr,
+            left,
+            right,
+        } => {
             let l = normalise_cat(left, budget - 1);
             let r = normalise_cat(right, budget - 1);
             l.compose(r)
         }
-        ExprKind::Binary { op: BinOp::Shl, left, right } => {
+        ExprKind::Binary {
+            op: BinOp::Shl,
+            left,
+            right,
+        } => {
             // g << f means f ∘ g (reverse compose)
             let r = normalise_cat(left, budget - 1);
             let l = normalise_cat(right, budget - 1);
@@ -843,9 +840,12 @@ fn normalise_cat_with_functor(expr: &Expr, budget: usize) -> CatNorm {
                     }
                 }
                 // F(g ∘ f) ↦ F(g) ∘ F(f)
-                ExprKind::MethodCall { receiver, method, args: margs, .. }
-                    if is_composition_method(method.as_str()) && margs.len() == 1 =>
-                {
+                ExprKind::MethodCall {
+                    receiver,
+                    method,
+                    args: margs,
+                    ..
+                } if is_composition_method(method.as_str()) && margs.len() == 1 => {
                     // Build F(g) and F(f) synthetic exprs and normalise
                     let fng = make_call_expr(func.as_ref().clone(), receiver.as_ref().clone());
                     let fnf = make_call_expr(func.as_ref().clone(), margs[0].clone());
@@ -936,9 +936,11 @@ fn is_descent_shaped(expr: &Expr) -> bool {
             )
         }
         // Equality involving descent structures
-        ExprKind::Binary { op: BinOp::Eq, left, right } => {
-            is_descent_shaped(left) || is_descent_shaped(right)
-        }
+        ExprKind::Binary {
+            op: BinOp::Eq,
+            left,
+            right,
+        } => is_descent_shaped(left) || is_descent_shaped(right),
         ExprKind::Paren(inner) => is_descent_shaped(inner),
         _ => false,
     }
@@ -1016,10 +1018,7 @@ mod tests {
 
     #[test]
     fn test_transport_ua_reduces_to_fwd() {
-        let t = transport_norm(
-            CubicalNorm::Ua(Box::new(atom("my_equiv"))),
-            atom("x"),
-        );
+        let t = transport_norm(CubicalNorm::Ua(Box::new(atom("my_equiv"))), atom("x"));
         assert_eq!(
             t.whnf(),
             CubicalNorm::EquivFwd {
@@ -1092,7 +1091,10 @@ mod tests {
     fn test_try_cubical_different_atoms_falls_back() {
         let goal = make_eq_goal("x", "y");
         let result = try_cubical(&goal);
-        assert!(result.is_err(), "different atoms should produce smt fallback error");
+        assert!(
+            result.is_err(),
+            "different atoms should produce smt fallback error"
+        );
     }
 
     #[test]
@@ -1106,10 +1108,7 @@ mod tests {
     fn test_execute_cubical_not_applicable_non_eq() {
         let span = Span::dummy();
         let ident = Ident::new("foo", span);
-        let non_eq_expr = Expr::new(
-            ExprKind::Path(verum_ast::Path::from_ident(ident)),
-            span,
-        );
+        let non_eq_expr = Expr::new(ExprKind::Path(verum_ast::Path::from_ident(ident)), span);
         let goal = ProofGoal::new(non_eq_expr);
         assert!(matches!(
             execute_cubical_tactic(&goal),

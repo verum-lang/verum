@@ -77,8 +77,8 @@ fn single_whitespace_does_not_panic() {
 #[test]
 fn isolated_punctuation_does_not_panic() {
     for s in [
-        "(", ")", "[", "]", "{", "}", "<", ">", "(;", ":(", "::", ".", "..", "...",
-        "?", "@", "#", "$", "%", "^", "&", "|", "+", "-", "*", "/", "=", "!", "~",
+        "(", ")", "[", "]", "{", "}", "<", ">", "(;", ":(", "::", ".", "..", "...", "?", "@", "#",
+        "$", "%", "^", "&", "|", "+", "-", "*", "/", "=", "!", "~",
     ] {
         parse(s);
     }
@@ -147,13 +147,38 @@ fn deep_brace_chain_no_panic() {
 #[test]
 fn truncated_keywords_no_panic() {
     for s in [
-        "fn", "fn ", "fn foo", "fn foo(", "fn foo(x", "fn foo(x:", "fn foo(x: Int",
-        "fn foo(x: Int)", "fn foo(x: Int) ->",
-        "type", "type X", "type X =", "type X is",
-        "let", "let x", "let x =", "let x: Int",
-        "if", "if x", "if x {", "while", "for", "match",
-        "mount", "mount foo", "mount foo.",
-        "module", "implement", "protocol", "context", "provide", "using",
+        "fn",
+        "fn ",
+        "fn foo",
+        "fn foo(",
+        "fn foo(x",
+        "fn foo(x:",
+        "fn foo(x: Int",
+        "fn foo(x: Int)",
+        "fn foo(x: Int) ->",
+        "type",
+        "type X",
+        "type X =",
+        "type X is",
+        "let",
+        "let x",
+        "let x =",
+        "let x: Int",
+        "if",
+        "if x",
+        "if x {",
+        "while",
+        "for",
+        "match",
+        "mount",
+        "mount foo",
+        "mount foo.",
+        "module",
+        "implement",
+        "protocol",
+        "context",
+        "provide",
+        "using",
     ] {
         parse(s);
     }
@@ -250,7 +275,9 @@ fn deterministic_random_short_inputs_no_panic() {
     // (covered separately by other tests above).
     let mut state: u64 = 0xCAFEBABE_DEADBEEF;
     let mut next = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         state
     };
     for _ in 0..256 {
@@ -433,10 +460,7 @@ fn boundary_1000_function_signatures() {
     // allocation path and the signature-parsing fast path.
     let mut src = String::with_capacity(1000 * 50);
     for i in 0..1000 {
-        src.push_str(&format!(
-            "fn f{}(x: Int, y: Text) -> Int {{ x }}\n",
-            i
-        ));
+        src.push_str(&format!("fn f{}(x: Int, y: Text) -> Int {{ x }}\n", i));
     }
     parse(&src);
 }

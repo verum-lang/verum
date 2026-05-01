@@ -44,7 +44,9 @@ fn assert_parses(source: &str) {
 
 /// Helper to check that parsing fails
 fn assert_parse_fails(source: &str) {
-    if let Ok(_) = parse_expr(source) { panic!("Expected parse failure for '{}'", source) }
+    if let Ok(_) = parse_expr(source) {
+        panic!("Expected parse failure for '{}'", source)
+    }
 }
 
 // ============================================================================

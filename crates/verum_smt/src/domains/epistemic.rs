@@ -104,9 +104,7 @@ impl PartialTrace {
     }
 
     pub fn is_valid_cptp_map(&self) -> bool {
-        self.target_dim < self.source_dim
-            && self.preserves_psd
-            && self.preserves_trace
+        self.target_dim < self.source_dim && self.preserves_psd && self.preserves_trace
     }
 }
 
@@ -211,8 +209,12 @@ mod tests {
 
     #[test]
     fn test_invariants_preserved_good() {
-        let pre = EpistemicInvariant::new(2).with_psd(true).with_normalized_trace(true);
-        let post = EpistemicInvariant::new(2).with_psd(true).with_normalized_trace(true);
+        let pre = EpistemicInvariant::new(2)
+            .with_psd(true)
+            .with_normalized_trace(true);
+        let post = EpistemicInvariant::new(2)
+            .with_psd(true)
+            .with_normalized_trace(true);
         assert_eq!(
             verify_invariants_preserved(&pre, &post),
             EpistemicResult::InvariantsPreserved
@@ -221,8 +223,12 @@ mod tests {
 
     #[test]
     fn test_invariants_preserved_psd_violated() {
-        let pre = EpistemicInvariant::new(2).with_psd(true).with_normalized_trace(true);
-        let post = EpistemicInvariant::new(2).with_psd(false).with_normalized_trace(true);
+        let pre = EpistemicInvariant::new(2)
+            .with_psd(true)
+            .with_normalized_trace(true);
+        let post = EpistemicInvariant::new(2)
+            .with_psd(false)
+            .with_normalized_trace(true);
         assert_eq!(
             verify_invariants_preserved(&pre, &post),
             EpistemicResult::PsdViolated

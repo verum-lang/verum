@@ -63,21 +63,33 @@ impl StdlibArchive {
         let mut cursor = 4usize;
 
         for _ in 0..file_count {
-            if cursor + 2 > data.len() { break; }
+            if cursor + 2 > data.len() {
+                break;
+            }
             let path_len = u16::from_le_bytes([data[cursor], data[cursor + 1]]) as usize;
             cursor += 2;
 
-            if cursor + path_len > data.len() { break; }
+            if cursor + path_len > data.len() {
+                break;
+            }
             let path = String::from_utf8_lossy(&data[cursor..cursor + path_len]).to_string();
             cursor += path_len;
 
-            if cursor + 8 > data.len() { break; }
+            if cursor + 8 > data.len() {
+                break;
+            }
             let content_offset = u32::from_le_bytes([
-                data[cursor], data[cursor + 1], data[cursor + 2], data[cursor + 3],
+                data[cursor],
+                data[cursor + 1],
+                data[cursor + 2],
+                data[cursor + 3],
             ]) as usize;
             cursor += 4;
             let content_len = u32::from_le_bytes([
-                data[cursor], data[cursor + 1], data[cursor + 2], data[cursor + 3],
+                data[cursor],
+                data[cursor + 1],
+                data[cursor + 2],
+                data[cursor + 3],
             ]) as usize;
             cursor += 4;
 

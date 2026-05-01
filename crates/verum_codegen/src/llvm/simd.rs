@@ -49,11 +49,11 @@
 //! - VBC opcodes 0xC0-0xCF handle SIMD at bytecode level
 //! - LLVM lowering maps to `<N x T>` vector types and vector intrinsics
 
-use verum_llvm::values::{BasicValue, BasicValueEnum, IntValue, PointerValue, VectorValue};
-use verum_llvm::types::{BasicTypeEnum, VectorType};
+use verum_llvm::IntPredicate;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
-use verum_llvm::IntPredicate;
+use verum_llvm::types::{BasicTypeEnum, VectorType};
+use verum_llvm::values::{BasicValue, BasicValueEnum, IntValue, PointerValue, VectorValue};
 
 use super::error::{LlvmLoweringError, Result};
 
@@ -372,18 +372,10 @@ impl<'ctx> SimdLowering<'ctx> {
     /// Get the LLVM type for a SIMD element.
     fn element_type(&self, element: SimdElementKind) -> BasicTypeEnum<'ctx> {
         match element {
-            SimdElementKind::I8 | SimdElementKind::U8 => {
-                self.context.i8_type().into()
-            }
-            SimdElementKind::I16 | SimdElementKind::U16 => {
-                self.context.i16_type().into()
-            }
-            SimdElementKind::I32 | SimdElementKind::U32 => {
-                self.context.i32_type().into()
-            }
-            SimdElementKind::I64 | SimdElementKind::U64 => {
-                self.context.i64_type().into()
-            }
+            SimdElementKind::I8 | SimdElementKind::U8 => self.context.i8_type().into(),
+            SimdElementKind::I16 | SimdElementKind::U16 => self.context.i16_type().into(),
+            SimdElementKind::I32 | SimdElementKind::U32 => self.context.i32_type().into(),
+            SimdElementKind::I64 | SimdElementKind::U64 => self.context.i64_type().into(),
             SimdElementKind::F32 => self.context.f32_type().into(),
             SimdElementKind::F64 => self.context.f64_type().into(),
         }
@@ -415,7 +407,7 @@ impl<'ctx> SimdLowering<'ctx> {
             _ => {
                 return Err(LlvmLoweringError::InvalidType(
                     "Splat requires int or float scalar".into(),
-                ))
+                ));
             }
         };
 
@@ -515,63 +507,73 @@ impl<'ctx> SimdLowering<'ctx> {
             (SimdBinaryOp::Max, false) => {
                 self.build_int_minmax(lhs, rhs, false, element.is_signed(), name)?
             }
-            (SimdBinaryOp::Min, true) => {
-                self.build_float_minmax(lhs, rhs, true, name)?
-            }
-            (SimdBinaryOp::Max, true) => {
-                self.build_float_minmax(lhs, rhs, false, name)?
-            }
+            (SimdBinaryOp::Min, true) => self.build_float_minmax(lhs, rhs, true, name)?,
+            (SimdBinaryOp::Max, true) => self.build_float_minmax(lhs, rhs, false, name)?,
 
             // Saturating arithmetic via overflow detection + select.
             // add_sat(a, b) = if (a + b) overflows ? (a > 0 ? INT_MAX : INT_MIN) : a + b
             // sub_sat(a, b) = if (a - b) overflows ? (a > 0 ? INT_MAX : INT_MIN) : a - b
             (SimdBinaryOp::SaturatingAdd, false) => {
-                let sum = self.builder
+                let sum = self
+                    .builder
                     .build_int_add(lhs, rhs, &format!("{}_sum", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
                 // Signed overflow: (lhs > 0 && rhs > 0 && sum < 0) || (lhs < 0 && rhs < 0 && sum > 0)
                 let zero = lhs.get_type().const_zero();
-                let lhs_pos = self.builder
+                let lhs_pos = self
+                    .builder
                     .build_int_compare(IntPredicate::SGT, lhs, zero, &format!("{}_lp", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let rhs_pos = self.builder
+                let rhs_pos = self
+                    .builder
                     .build_int_compare(IntPredicate::SGT, rhs, zero, &format!("{}_rp", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let sum_neg = self.builder
+                let sum_neg = self
+                    .builder
                     .build_int_compare(IntPredicate::SLT, sum, zero, &format!("{}_sn", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let lhs_neg = self.builder
+                let lhs_neg = self
+                    .builder
                     .build_int_compare(IntPredicate::SLT, lhs, zero, &format!("{}_ln", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let rhs_neg = self.builder
+                let rhs_neg = self
+                    .builder
                     .build_int_compare(IntPredicate::SLT, rhs, zero, &format!("{}_rn", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let sum_pos = self.builder
+                let sum_pos = self
+                    .builder
                     .build_int_compare(IntPredicate::SGT, sum, zero, &format!("{}_sp", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let pos_overflow = self.builder
+                let pos_overflow = self
+                    .builder
                     .build_and(lhs_pos, rhs_pos, &format!("{}_pp", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let pos_overflow = self.builder
+                let pos_overflow = self
+                    .builder
                     .build_and(pos_overflow, sum_neg, &format!("{}_po", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let neg_overflow = self.builder
+                let neg_overflow = self
+                    .builder
                     .build_and(lhs_neg, rhs_neg, &format!("{}_nn", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let neg_overflow = self.builder
+                let neg_overflow = self
+                    .builder
                     .build_and(neg_overflow, sum_pos, &format!("{}_no", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let overflow = self.builder
+                let overflow = self
+                    .builder
                     .build_or(pos_overflow, neg_overflow, &format!("{}_ov", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
                 // Clamp: if positive overflow → INT_MAX (all 1s >> 1), if negative overflow → INT_MIN
                 let elem_type = lhs.get_type().get_element_type().into_int_type();
                 let max_scalar = elem_type.const_all_ones();
                 let one_scalar = elem_type.const_int(1, false);
-                let max_scalar = self.builder
+                let max_scalar = self
+                    .builder
                     .build_right_shift(max_scalar, one_scalar, false, "smax_scalar")
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let min_scalar = self.builder
+                let min_scalar = self
+                    .builder
                     .build_not(max_scalar, "smin_scalar")
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
                 let lanes = lhs.get_type().get_size();
@@ -580,7 +582,8 @@ impl<'ctx> SimdLowering<'ctx> {
                 let int_max_bv: BasicValueEnum = int_max.into();
                 let int_min_bv: BasicValueEnum = int_min.into();
                 let sum_bv: BasicValueEnum = sum.into();
-                let clamp_val = self.builder
+                let clamp_val = self
+                    .builder
                     .build_select(lhs_pos, int_max_bv, int_min_bv, &format!("{}_clamp", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
                 self.builder
@@ -589,51 +592,65 @@ impl<'ctx> SimdLowering<'ctx> {
                     .into_vector_value()
             }
             (SimdBinaryOp::SaturatingSub, false) => {
-                let diff = self.builder
+                let diff = self
+                    .builder
                     .build_int_sub(lhs, rhs, &format!("{}_diff", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
                 let zero = lhs.get_type().const_zero();
                 // Signed overflow on sub: (lhs > 0 && rhs < 0 && diff < 0) || (lhs < 0 && rhs > 0 && diff > 0)
-                let lhs_pos = self.builder
+                let lhs_pos = self
+                    .builder
                     .build_int_compare(IntPredicate::SGT, lhs, zero, &format!("{}_lp", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let rhs_neg = self.builder
+                let rhs_neg = self
+                    .builder
                     .build_int_compare(IntPredicate::SLT, rhs, zero, &format!("{}_rn", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let diff_neg = self.builder
+                let diff_neg = self
+                    .builder
                     .build_int_compare(IntPredicate::SLT, diff, zero, &format!("{}_dn", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let lhs_neg = self.builder
+                let lhs_neg = self
+                    .builder
                     .build_int_compare(IntPredicate::SLT, lhs, zero, &format!("{}_ln", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let rhs_pos = self.builder
+                let rhs_pos = self
+                    .builder
                     .build_int_compare(IntPredicate::SGT, rhs, zero, &format!("{}_rp", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let diff_pos = self.builder
+                let diff_pos = self
+                    .builder
                     .build_int_compare(IntPredicate::SGT, diff, zero, &format!("{}_dp", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let pos_overflow = self.builder
+                let pos_overflow = self
+                    .builder
                     .build_and(lhs_pos, rhs_neg, &format!("{}_pp", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let pos_overflow = self.builder
+                let pos_overflow = self
+                    .builder
                     .build_and(pos_overflow, diff_neg, &format!("{}_po", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let neg_overflow = self.builder
+                let neg_overflow = self
+                    .builder
                     .build_and(lhs_neg, rhs_pos, &format!("{}_nn", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let neg_overflow = self.builder
+                let neg_overflow = self
+                    .builder
                     .build_and(neg_overflow, diff_pos, &format!("{}_no", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let overflow = self.builder
+                let overflow = self
+                    .builder
                     .build_or(pos_overflow, neg_overflow, &format!("{}_ov", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
                 let elem_type = lhs.get_type().get_element_type().into_int_type();
                 let max_scalar = elem_type.const_all_ones();
                 let one_scalar = elem_type.const_int(1, false);
-                let max_scalar = self.builder
+                let max_scalar = self
+                    .builder
                     .build_right_shift(max_scalar, one_scalar, false, "smax_scalar")
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
-                let min_scalar = self.builder
+                let min_scalar = self
+                    .builder
                     .build_not(max_scalar, "smin_scalar")
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
                 let lanes = lhs.get_type().get_size();
@@ -642,7 +659,8 @@ impl<'ctx> SimdLowering<'ctx> {
                 let int_max_bv: BasicValueEnum = int_max.into();
                 let int_min_bv: BasicValueEnum = int_min.into();
                 let diff_bv: BasicValueEnum = diff.into();
-                let clamp_val = self.builder
+                let clamp_val = self
+                    .builder
                     .build_select(lhs_pos, int_max_bv, int_min_bv, &format!("{}_clamp", name))
                     .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
                 self.builder
@@ -653,7 +671,7 @@ impl<'ctx> SimdLowering<'ctx> {
             (SimdBinaryOp::SaturatingAdd | SimdBinaryOp::SaturatingSub, true) => {
                 return Err(LlvmLoweringError::InvalidType(
                     "Saturating arithmetic not supported for floats".into(),
-                ))
+                ));
             }
         };
 

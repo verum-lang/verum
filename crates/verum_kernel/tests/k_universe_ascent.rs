@@ -19,44 +19,47 @@ use verum_kernel::{KernelError, UniverseTier, check_universe_ascent};
 
 #[test]
 fn truncated_identity_accepted() {
-    assert!(check_universe_ascent(
-        UniverseTier::Truncated,
-        UniverseTier::Truncated,
-        "cat_baseline_identity"
-    )
-    .is_ok());
+    assert!(
+        check_universe_ascent(
+            UniverseTier::Truncated,
+            UniverseTier::Truncated,
+            "cat_baseline_identity"
+        )
+        .is_ok()
+    );
 }
 
 #[test]
 fn kappa_1_identity_accepted() {
-    assert!(check_universe_ascent(
-        UniverseTier::Kappa1,
-        UniverseTier::Kappa1,
-        "kappa_1_identity"
-    )
-    .is_ok());
+    assert!(
+        check_universe_ascent(
+            UniverseTier::Kappa1,
+            UniverseTier::Kappa1,
+            "kappa_1_identity"
+        )
+        .is_ok()
+    );
 }
 
 #[test]
 fn kappa_1_to_kappa_2_accepted() {
     // The canonical Lemma 131.L1 ascent.
-    assert!(check_universe_ascent(
-        UniverseTier::Kappa1,
-        UniverseTier::Kappa2,
-        "M_stack_ascent"
-    )
-    .is_ok());
+    assert!(
+        check_universe_ascent(UniverseTier::Kappa1, UniverseTier::Kappa2, "M_stack_ascent").is_ok()
+    );
 }
 
 #[test]
 fn kappa_2_drake_closure_accepted() {
     // Lemma 131.L3: M_stack on a κ_2 articulation stays at κ_2.
-    assert!(check_universe_ascent(
-        UniverseTier::Kappa2,
-        UniverseTier::Kappa2,
-        "drake_reflection_closure"
-    )
-    .is_ok());
+    assert!(
+        check_universe_ascent(
+            UniverseTier::Kappa2,
+            UniverseTier::Kappa2,
+            "drake_reflection_closure"
+        )
+        .is_ok()
+    );
 }
 
 #[test]

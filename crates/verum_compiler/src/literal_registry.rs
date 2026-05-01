@@ -268,11 +268,8 @@ impl LiteralRegistry {
             "json" => self.parse_json(content, span, source_file),
             "xml" => self.parse_xml(content, span, source_file),
             "yaml" | "yml" => self.parse_yaml(content, span, source_file),
-            "sql" | "sql.postgres" | "pg" | "psql"
-                  | "sql.sqlite" | "sqlite"
-                  | "sql.mysql"  | "mysql" => {
-                self.parse_sql(tag, content, span, source_file)
-            }
+            "sql" | "sql.postgres" | "pg" | "psql" | "sql.sqlite" | "sqlite" | "sql.mysql"
+            | "mysql" => self.parse_sql(tag, content, span, source_file),
             "sh" => self.parse_sh(content, span, source_file),
             _ => {
                 // Custom handler — surface inert TaggedLiteralHandler
@@ -632,8 +629,10 @@ impl LiteralRegistry {
         self.register_format(Text::from("yaml"), Text::from("YAML value"));
         self.register_format(
             Text::from("sql"),
-            Text::from("SQL with `${expr}` parameter slots — \
-                        compile-time validated against balance / quotes / comments"),
+            Text::from(
+                "SQL with `${expr}` parameter slots — \
+                        compile-time validated against balance / quotes / comments",
+            ),
         );
     }
 
@@ -734,7 +733,13 @@ impl LiteralRegistry {
 /// the number of bytes advanced.
 fn read_balanced_brace(bytes: &[u8]) -> (String, usize) {
     #[derive(PartialEq, Eq)]
-    enum S { Code, Single, Double, TripleD, TripleS }
+    enum S {
+        Code,
+        Single,
+        Double,
+        TripleD,
+        TripleS,
+    }
 
     let mut depth: i32 = 1;
     let mut out = String::new();
@@ -746,28 +751,46 @@ fn read_balanced_brace(bytes: &[u8]) -> (String, usize) {
         match state {
             S::Code => {
                 // Detect triple-quote starts (need to look ahead 2 bytes).
-                if b == b'"' && i + 2 < bytes.len()
-                    && bytes[i + 1] == b'"' && bytes[i + 2] == b'"'
+                if b == b'"' && i + 2 < bytes.len() && bytes[i + 1] == b'"' && bytes[i + 2] == b'"'
                 {
                     out.push_str("\"\"\"");
                     i += 3;
                     state = S::TripleD;
                     continue;
                 }
-                if b == b'\'' && i + 2 < bytes.len()
-                    && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\''
+                if b == b'\''
+                    && i + 2 < bytes.len()
+                    && bytes[i + 1] == b'\''
+                    && bytes[i + 2] == b'\''
                 {
                     out.push_str("'''");
                     i += 3;
                     state = S::TripleS;
                     continue;
                 }
-                if b == b'"'  { state = S::Double; out.push('"');  i += 1; continue; }
-                if b == b'\'' { state = S::Single; out.push('\''); i += 1; continue; }
-                if b == b'{'  { depth += 1; out.push('{'); i += 1; continue; }
+                if b == b'"' {
+                    state = S::Double;
+                    out.push('"');
+                    i += 1;
+                    continue;
+                }
+                if b == b'\'' {
+                    state = S::Single;
+                    out.push('\'');
+                    i += 1;
+                    continue;
+                }
+                if b == b'{' {
+                    depth += 1;
+                    out.push('{');
+                    i += 1;
+                    continue;
+                }
                 if b == b'}' {
                     depth -= 1;
-                    if depth == 0 { return (out, i + 1); }
+                    if depth == 0 {
+                        return (out, i + 1);
+                    }
                     out.push('}');
                     i += 1;
                     continue;
@@ -789,13 +812,14 @@ fn read_balanced_brace(bytes: &[u8]) -> (String, usize) {
                 i += 1;
             }
             S::Single => {
-                if b == b'\'' { state = S::Code; }
+                if b == b'\'' {
+                    state = S::Code;
+                }
                 out.push(b as char);
                 i += 1;
             }
             S::TripleD => {
-                if b == b'"' && i + 2 < bytes.len()
-                    && bytes[i + 1] == b'"' && bytes[i + 2] == b'"'
+                if b == b'"' && i + 2 < bytes.len() && bytes[i + 1] == b'"' && bytes[i + 2] == b'"'
                 {
                     out.push_str("\"\"\"");
                     i += 3;
@@ -806,8 +830,10 @@ fn read_balanced_brace(bytes: &[u8]) -> (String, usize) {
                 i += 1;
             }
             S::TripleS => {
-                if b == b'\'' && i + 2 < bytes.len()
-                    && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\''
+                if b == b'\''
+                    && i + 2 < bytes.len()
+                    && bytes[i + 1] == b'\''
+                    && bytes[i + 2] == b'\''
                 {
                     out.push_str("'''");
                     i += 3;

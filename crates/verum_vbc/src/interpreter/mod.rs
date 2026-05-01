@@ -57,36 +57,54 @@
 //! let result = interp.execute_function(FunctionId(0))?;
 //! ```
 
+pub mod autodiff;
+mod cbgr_heap;
+mod dispatch_table;
+mod error;
+pub mod gpu_simulator;
+mod heap;
+pub mod kernel;
+pub mod permission;
 mod registers;
 mod stack;
 mod state;
-mod dispatch_table;
-mod heap;
-mod cbgr_heap;
-mod error;
-pub mod permission;
 pub mod tensor;
-pub mod autodiff;
-pub mod kernel;
-pub mod gpu_simulator;
 
 pub use registers::RegisterFile;
-pub use stack::{CallStack, CallFrame};
+pub use stack::{CallFrame, CallStack};
 pub use state::{
-    InterpreterState, InterpreterConfig, ExecutionStats, CbgrStats, ContextStack, TaskQueue,
-    // Generator system: fn* functions with Yield/GenCreate/GenNext/GenHasNext opcodes
-    Generator, GeneratorId, GeneratorRegistry, GeneratorStatus, GeneratorStats,
+    CTX_TYPE_COMPUTE_DEVICE,
+    CTX_TYPE_GRADIENT_TAPE,
+    CTX_TYPE_MEMORY_POOL,
+    CTX_TYPE_PARALLEL_CONFIG,
+    CTX_TYPE_PRECISION_MODE,
+    CTX_TYPE_USER_START,
+    CbgrStats,
+    ContextStack,
     // Exception handling
-    ExceptionHandler, ExceptionHandlerStack,
+    ExceptionHandler,
+    ExceptionHandlerStack,
+    ExecutionStats,
+    FloatPrecision,
+    // Generator system: fn* functions with Yield/GenCreate/GenNext/GenHasNext opcodes
+    Generator,
+    GeneratorId,
+    GeneratorRegistry,
+    GeneratorStats,
+    GeneratorStatus,
+    InterpreterConfig,
+    InterpreterState,
     // PrecisionMode: controls floating-point precision (Float32/Float64/Float128) and rounding
-    PrecisionMode, FloatPrecision, RoundingMode,
-    CTX_TYPE_PRECISION_MODE, CTX_TYPE_COMPUTE_DEVICE, CTX_TYPE_GRADIENT_TAPE,
-    CTX_TYPE_PARALLEL_CONFIG, CTX_TYPE_MEMORY_POOL, CTX_TYPE_USER_START,
+    PrecisionMode,
+    RoundingMode,
+    TaskQueue,
 };
 // Function table dispatch (faster, ~30-50% throughput improvement)
-pub use dispatch_table::{dispatch_loop_table, dispatch_loop_table_with_entry_depth, DispatchResult};
-pub use heap::{Heap, Object, ObjectHeader, ObjectFlags, HeapStats, OBJECT_HEADER_SIZE};
-pub use cbgr_heap::{CbgrHeap, CbgrObject, CbgrHeapStats, CbgrObjectFlags, CbgrObjectRef};
+pub use cbgr_heap::{CbgrHeap, CbgrHeapStats, CbgrObject, CbgrObjectFlags, CbgrObjectRef};
+pub use dispatch_table::{
+    DispatchResult, dispatch_loop_table, dispatch_loop_table_with_entry_depth,
+};
+pub use heap::{Heap, HeapStats, OBJECT_HEADER_SIZE, Object, ObjectFlags, ObjectHeader};
 // Permission router for intrinsic gating (#12 / P3.2).
 pub use permission::{
     PermissionDecision, PermissionRouter, PermissionRouterStats, PermissionScope,
@@ -128,7 +146,10 @@ pub use permission::{
 
 /// V-LLSI architecture: only Application/Research profile modules are interpretable.
 /// Systems profile modules use VBC as intermediate IR for AOT compilation only.
-pub fn execute_table(state: &mut InterpreterState, func_id: FunctionId) -> InterpreterResult<Value> {
+pub fn execute_table(
+    state: &mut InterpreterState,
+    func_id: FunctionId,
+) -> InterpreterResult<Value> {
     use crate::instruction::Reg;
 
     // Check if module is interpretable (V-LLSI architecture check)
@@ -166,8 +187,8 @@ pub fn execute_table(state: &mut InterpreterState, func_id: FunctionId) -> Inter
     // Run table-based dispatch loop
     dispatch_table::dispatch_loop_table(state)
 }
-pub use cbgr_heap::{ObjectMeta, OBJECT_META_SIZE};
-pub use error::{InterpreterError, InterpreterResult, CbgrViolationKind};
+pub use cbgr_heap::{OBJECT_META_SIZE, ObjectMeta};
+pub use error::{CbgrViolationKind, InterpreterError, InterpreterResult};
 
 use crate::module::{FunctionId, VbcModule};
 use crate::value::Value;
@@ -408,7 +429,9 @@ impl Interpreter {
 
         // Copy arguments
         for (i, arg) in args.iter().enumerate() {
-            self.state.registers.set(frame, crate::instruction::Reg(i as u16), *arg);
+            self.state
+                .registers
+                .set(frame, crate::instruction::Reg(i as u16), *arg);
         }
 
         // Execute using table dispatch
@@ -437,7 +460,10 @@ impl Interpreter {
         let bytes = s.as_bytes();
         let len = bytes.len();
         let alloc_size = 8 + len;
-        let obj = self.state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?;
+        let obj = self
+            .state
+            .heap
+            .alloc(crate::types::TypeId(0x0001), alloc_size)?;
         self.state.record_allocation();
         let base_ptr = obj.as_ptr() as *mut u8;
         unsafe {
@@ -460,17 +486,19 @@ impl Interpreter {
         }
         // Allocate list header: [length, capacity, backing_ptr]
         let header_size = 3 * std::mem::size_of::<i64>();
-        let obj = self.state.heap.alloc(crate::types::TypeId::LIST, header_size)?;
+        let obj = self
+            .state
+            .heap
+            .alloc(crate::types::TypeId::LIST, header_size)?;
         self.state.record_allocation();
-        let data_ptr = unsafe {
-            (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut i64
-        };
+        let data_ptr =
+            unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut i64 };
         // Allocate backing array
-        let backing_layout = std::alloc::Layout::from_size_align(
-            count.max(1) * std::mem::size_of::<Value>(), 8
-        ).map_err(|_| InterpreterError::Panic {
-            message: "args list layout overflow".into(),
-        })?;
+        let backing_layout =
+            std::alloc::Layout::from_size_align(count.max(1) * std::mem::size_of::<Value>(), 8)
+                .map_err(|_| InterpreterError::Panic {
+                    message: "args list layout overflow".into(),
+                })?;
         let backing_ptr = unsafe { std::alloc::alloc_zeroed(backing_layout) };
         if backing_ptr.is_null() && count > 0 {
             return Err(InterpreterError::Panic {
@@ -515,7 +543,10 @@ impl Interpreter {
     /// # Returns
     /// The generator ID that can be used to resume the generator.
     pub fn create_generator(&mut self, func_id: FunctionId) -> InterpreterResult<GeneratorId> {
-        let func = self.state.module.get_function(func_id)
+        let func = self
+            .state
+            .module
+            .get_function(func_id)
             .ok_or(InterpreterError::FunctionNotFound(func_id))?;
 
         let reg_count = func.register_count;
@@ -542,16 +573,20 @@ impl Interpreter {
     /// - `Err(...)` - An error occurred during execution
     pub fn resume_generator(&mut self, gen_id: GeneratorId) -> InterpreterResult<Option<Value>> {
         // Check generator status
-        let (func_id, status, reg_count) = {
-            let generator = self.state.generators.get(gen_id)
-                .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+        let (func_id, status, reg_count) =
+            {
+                let generator = self.state.generators.get(gen_id).ok_or(
+                    InterpreterError::InvalidGeneratorId {
+                        generator_id: gen_id,
+                    },
+                )?;
 
-            if generator.is_completed() {
-                return Ok(None);
-            }
+                if generator.is_completed() {
+                    return Ok(None);
+                }
 
-            (generator.func_id, generator.status, generator.reg_count)
-        };
+                (generator.func_id, generator.status, generator.reg_count)
+            };
 
         // Set current generator for yield handling
         self.state.current_generator = Some(gen_id);
@@ -590,21 +625,20 @@ impl Interpreter {
         reg_count: u16,
     ) -> InterpreterResult<Value> {
         // Push frame for the generator
-        let _base = self.state.call_stack.push_frame(
-            func_id,
-            reg_count,
-            0,
-            crate::instruction::Reg(0),
-        )?;
+        let _base =
+            self.state
+                .call_stack
+                .push_frame(func_id, reg_count, 0, crate::instruction::Reg(0))?;
 
         // Allocate registers
         self.state.registers.push_frame(reg_count);
 
         // Update generator status to Running
         if let Some(gen_id) = self.state.current_generator
-            && let Some(g) = self.state.generators.get_mut(gen_id) {
-                g.status = GeneratorStatus::Running;
-            }
+            && let Some(g) = self.state.generators.get_mut(gen_id)
+        {
+            g.status = GeneratorStatus::Running;
+        }
 
         // Run dispatch loop (will return on yield or completion)
         dispatch_loop_table(&mut self.state)
@@ -613,21 +647,28 @@ impl Interpreter {
     /// Resumes a generator from its saved state.
     fn execute_generator_resume(&mut self, gen_id: GeneratorId) -> InterpreterResult<Value> {
         // Restore generator state
-        let (func_id, saved_pc, saved_reg_base, saved_registers, saved_contexts) = {
-            let generator = self.state.generators.get(gen_id)
-                .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+        let (func_id, saved_pc, saved_reg_base, saved_registers, saved_contexts) =
+            {
+                let generator = self.state.generators.get(gen_id).ok_or(
+                    InterpreterError::InvalidGeneratorId {
+                        generator_id: gen_id,
+                    },
+                )?;
 
-            (
-                generator.func_id,
-                generator.saved_pc,
-                generator.saved_reg_base,
-                generator.saved_registers.clone(),
-                generator.saved_contexts.clone(),
-            )
-        };
+                (
+                    generator.func_id,
+                    generator.saved_pc,
+                    generator.saved_reg_base,
+                    generator.saved_registers.clone(),
+                    generator.saved_contexts.clone(),
+                )
+            };
 
         // Get function info
-        let func = self.state.module.get_function(func_id)
+        let func = self
+            .state
+            .module
+            .get_function(func_id)
             .ok_or(InterpreterError::FunctionNotFound(func_id))?;
 
         // Push frame at the saved position
@@ -643,11 +684,9 @@ impl Interpreter {
 
         // Restore register values
         for (i, value) in saved_registers.iter().enumerate() {
-            self.state.registers.set(
-                saved_reg_base,
-                crate::instruction::Reg(i as u16),
-                *value,
-            );
+            self.state
+                .registers
+                .set(saved_reg_base, crate::instruction::Reg(i as u16), *value);
         }
 
         // Restore context entries
@@ -700,7 +739,9 @@ impl Interpreter {
 
     /// Returns true if a generator can produce more values.
     pub fn generator_has_next(&self, gen_id: GeneratorId) -> bool {
-        self.state.generators.get(gen_id)
+        self.state
+            .generators
+            .get(gen_id)
             .map(|g| g.can_resume())
             .unwrap_or(false)
     }

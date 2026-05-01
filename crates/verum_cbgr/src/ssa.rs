@@ -751,7 +751,11 @@ impl<'cfg> SsaBuilder<'cfg> {
                                 incoming: List::new(), // Will be filled during renaming
                             };
 
-                            self.ssa.phi_nodes.entry(y).or_insert_with(List::new).push(phi);
+                            self.ssa
+                                .phi_nodes
+                                .entry(y)
+                                .or_insert_with(List::new)
+                                .push(phi);
 
                             has_phi.insert(y);
 
@@ -795,7 +799,7 @@ impl<'cfg> SsaBuilder<'cfg> {
                     block: block_id,
                     reference: RefId(u64::from(phi.result_id)),
                     is_stack_allocated: true, // Phi results are typically stack values
-                    span: None, // Phi nodes don't have a specific source span
+                    span: None,               // Phi nodes don't have a specific source span
                 };
 
                 let value = SsaValue {

@@ -45,22 +45,22 @@
 //! 3. Generate state machine struct
 //! 4. Generate poll function with switch on state
 
+use crate::mlir::dialect::types::VerumType;
+use crate::mlir::error::{MlirError, Result};
+use verum_common::{List, Text};
 use verum_mlir::{
     Context,
+    dialect::{arith, scf},
     ir::{
         Attribute, Block, Identifier, Location, Operation, Region, Type, Value,
         attribute::{
-            ArrayAttribute, DenseI32ArrayAttribute, DenseI64ArrayAttribute,
-            IntegerAttribute, StringAttribute, TypeAttribute,
+            ArrayAttribute, DenseI32ArrayAttribute, DenseI64ArrayAttribute, IntegerAttribute,
+            StringAttribute, TypeAttribute,
         },
         operation::{OperationBuilder, OperationLike},
         r#type::IntegerType,
     },
-    dialect::{arith, scf},
 };
-use verum_common::{List, Text};
-use crate::mlir::error::{MlirError, Result};
-use crate::mlir::dialect::types::VerumType;
 
 // ============================================================================
 // Poll Result
@@ -228,7 +228,9 @@ impl AsyncStateMachineCreateOp {
             ])
             .add_results(&[sm_type])
             .build()
-            .map_err(|e| MlirError::operation("verum.async_state_machine_create", format!("{:?}", e)))
+            .map_err(|e| {
+                MlirError::operation("verum.async_state_machine_create", format!("{:?}", e))
+            })
     }
 }
 
@@ -499,10 +501,7 @@ impl AsyncPollValueOp {
 pub struct AsyncReturnPendingOp;
 
 impl AsyncReturnPendingOp {
-    pub fn build<'c>(
-        _context: &'c Context,
-        location: Location<'c>,
-    ) -> Result<Operation<'c>> {
+    pub fn build<'c>(_context: &'c Context, location: Location<'c>) -> Result<Operation<'c>> {
         OperationBuilder::new("verum.async_return_pending", location)
             .build()
             .map_err(|e| MlirError::operation("verum.async_return_pending", format!("{:?}", e)))

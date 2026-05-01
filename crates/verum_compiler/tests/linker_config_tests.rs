@@ -4,9 +4,9 @@
 //! These tests verify that linker configuration is correctly parsed from
 //! Verum.toml and applied to the compilation pipeline.
 
-use verum_compiler::{LinkerTomlConfig, ProjectConfig};
-use verum_compiler::phases::linking::{OutputKind, LTOConfig};
 use std::path::PathBuf;
+use verum_compiler::phases::linking::{LTOConfig, OutputKind};
+use verum_compiler::{LinkerTomlConfig, ProjectConfig};
 
 /// Test complete Verum.toml parsing with all sections
 #[test]
@@ -147,15 +147,16 @@ fn test_lto_options() {
     ];
 
     for (input, expected) in modes {
-        let toml_str = format!(r#"
+        let toml_str = format!(
+            r#"
 [linker]
 lto = "{}"
-"#, input);
+"#,
+            input
+        );
 
         let config: LinkerTomlConfig = toml::from_str(&toml_str).unwrap();
-        let linking_config = config
-            .to_linking_config(PathBuf::from("test"))
-            .unwrap();
+        let linking_config = config.to_linking_config(PathBuf::from("test")).unwrap();
 
         assert_eq!(linking_config.lto, expected, "Failed for input: {}", input);
     }
@@ -178,17 +179,22 @@ fn test_output_types() {
     ];
 
     for (input, expected) in types {
-        let toml_str = format!(r#"
+        let toml_str = format!(
+            r#"
 [linker]
 output = "{}"
-"#, input);
+"#,
+            input
+        );
 
         let config: LinkerTomlConfig = toml::from_str(&toml_str).unwrap();
-        let linking_config = config
-            .to_linking_config(PathBuf::from("test"))
-            .unwrap();
+        let linking_config = config.to_linking_config(PathBuf::from("test")).unwrap();
 
-        assert_eq!(linking_config.output_kind, expected, "Failed for input: {}", input);
+        assert_eq!(
+            linking_config.output_kind, expected,
+            "Failed for input: {}",
+            input
+        );
     }
 }
 
@@ -219,9 +225,7 @@ extra_flags = ["-Wl,--gc-sections", "-Wl,-dead_strip", "-fuse-ld=lld"]
 "#;
 
     let config: LinkerTomlConfig = toml::from_str(toml_str).unwrap();
-    let linking_config = config
-        .to_linking_config(PathBuf::from("test"))
-        .unwrap();
+    let linking_config = config.to_linking_config(PathBuf::from("test")).unwrap();
 
     assert_eq!(linking_config.extra_flags.len(), 3);
 }
@@ -235,9 +239,7 @@ target = "x86_64-unknown-linux-gnu"
 "#;
 
     let config: LinkerTomlConfig = toml::from_str(toml_str).unwrap();
-    let linking_config = config
-        .to_linking_config(PathBuf::from("test"))
-        .unwrap();
+    let linking_config = config.to_linking_config(PathBuf::from("test")).unwrap();
 
     assert!(linking_config.target_triple.is_some());
     assert_eq!(
@@ -255,9 +257,7 @@ target = "native"
 "#;
 
     let config: LinkerTomlConfig = toml::from_str(toml_str).unwrap();
-    let linking_config = config
-        .to_linking_config(PathBuf::from("test"))
-        .unwrap();
+    let linking_config = config.to_linking_config(PathBuf::from("test")).unwrap();
 
     assert!(linking_config.target_triple.is_none());
 }
@@ -266,9 +266,7 @@ target = "native"
 #[test]
 fn test_default_config() {
     let config = LinkerTomlConfig::default();
-    let linking_config = config
-        .to_linking_config(PathBuf::from("a.out"))
-        .unwrap();
+    let linking_config = config.to_linking_config(PathBuf::from("a.out")).unwrap();
 
     assert_eq!(linking_config.output_kind, OutputKind::Executable);
     assert_eq!(linking_config.lto, LTOConfig::Thin);

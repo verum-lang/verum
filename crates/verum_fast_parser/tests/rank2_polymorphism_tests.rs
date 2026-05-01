@@ -21,8 +21,8 @@
 
 use verum_ast::span::FileId;
 use verum_ast::ty::TypeKind;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse_module_ok(input: &str) {
     let file_id = FileId::new(0);
@@ -78,7 +78,12 @@ fn test_rank2_single_param() {
 #[test]
 fn test_rank2_two_params() {
     let kind = parse_type_str("fn<A, B>(A, B) -> A");
-    if let TypeKind::Rank2Function { type_params, params, .. } = kind {
+    if let TypeKind::Rank2Function {
+        type_params,
+        params,
+        ..
+    } = kind
+    {
         assert_eq!(type_params.len(), 2);
         assert_eq!(params.len(), 2);
     } else {
@@ -106,14 +111,14 @@ fn test_rank2_in_record_field() {
 fn test_rank2_transducer_pattern() {
     // The classic transducer type from Clojure/Haskell
     parse_module_ok(
-        "type Transducer<A, B> is { transform: fn<R>(fn(R, B) -> R) -> fn(R, A) -> R };"
+        "type Transducer<A, B> is { transform: fn<R>(fn(R, B) -> R) -> fn(R, A) -> R };",
     );
 }
 
 #[test]
 fn test_rank2_multiple_fields() {
     parse_module_ok(
-        "type Codec<A, B> is { encode: fn<R>(A, fn(B) -> R) -> R, decode: fn<R>(B, fn(A) -> R) -> R };"
+        "type Codec<A, B> is { encode: fn<R>(A, fn(B) -> R) -> R, decode: fn<R>(B, fn(A) -> R) -> R };",
     );
 }
 
@@ -128,9 +133,7 @@ fn test_rank2_as_function_param() {
 
 #[test]
 fn test_rank2_multiple_params() {
-    parse_module_ok(
-        "fn combine(f: fn<T>(T) -> T, g: fn<U>(U) -> U) -> Int { f(g(42)) }"
-    );
+    parse_module_ok("fn combine(f: fn<T>(T) -> T, g: fn<U>(U) -> U) -> Int { f(g(42)) }");
 }
 
 // ============================================================================
@@ -139,9 +142,7 @@ fn test_rank2_multiple_params() {
 
 #[test]
 fn test_rank2_with_context() {
-    parse_module_ok(
-        "type Handler is { handle: fn<R>(fn() -> R using [Logger]) -> R };"
-    );
+    parse_module_ok("type Handler is { handle: fn<R>(fn() -> R using [Logger]) -> R };");
 }
 
 // ============================================================================
@@ -175,9 +176,7 @@ fn test_rank2_type_alias() {
 
 #[test]
 fn test_rank2_in_sum_type() {
-    parse_module_ok(
-        "type Transform is Identity | Custom(fn<R>(R) -> R);"
-    );
+    parse_module_ok("type Transform is Identity | Custom(fn<R>(R) -> R);");
 }
 
 // ============================================================================
@@ -187,9 +186,7 @@ fn test_rank2_in_sum_type() {
 #[test]
 fn test_rank2_returning_rank2() {
     // A rank-2 function that returns a regular function
-    parse_module_ok(
-        "type Builder is { build: fn<R>(fn(R) -> R) -> fn(Int) -> Int };"
-    );
+    parse_module_ok("type Builder is { build: fn<R>(fn(R) -> R) -> fn(Int) -> Int };");
 }
 
 // ============================================================================
