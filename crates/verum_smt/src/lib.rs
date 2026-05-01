@@ -286,6 +286,7 @@ pub mod number_theory;
 
 // Additional modules for comprehensive test support
 pub mod interactive;
+pub mod separation_kernel_bridge; // #161 V1 — kernel↔SMT separation-logic adapter
 pub mod separation_logic;
 pub mod topology;
 
