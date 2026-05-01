@@ -1,0 +1,920 @@
+// =============================================================================
+// core/database/postgres/pipeline.vr — bounded pipeline + adaptive batching
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.5 (pipelining: normative queue
+//       discipline), §6.1.6 (ErrorResponse → PipelineAborted)
+// =============================================================================
+//
+// The load-bearing performance feature for the Postgres adapter. Spec
+// §6.1.5 measures: at intercontinental RTT (300 ms), 100 INSERT-s
+// drop from 30 s without pipelining to 340 ms with — an 89× speedup
+// for free, provided we get the queue discipline right. This module
+// is the discipline.
+//
+// # Design goals (all from spec §6.1.5)
+//
+//   1. **Bounded queue.** Hard cap of `MAX_INFLIGHT = 256` pending
+//      queries. Past that, `submit` parks the caller on a condvar
+//      until a slot frees. Without a bound, an application emitting
+//      faster than the server drains causes unbounded memory growth
+//      (Recall.ai 2025-07 outage class).
+//
+//   2. **Adaptive batching.** Start at 16; grow to 64 on
+//      sub-millisecond RTT; shrink back on > 50 ms. Larger batches
+//      amortise the Sync round-trip; smaller batches cap the
+//      latency impact of an in-batch ErrorResponse (which aborts
+//      every subsequent entry).
+//
+//   3. **Per-query result routing.** Every `submit` returns a
+//      `PipelineHandle` with its own `PipelineResultSink`. The
+//      reader loop demultiplexes the stream of `BackendMessage`
+//      into the head pending entry's sink and rotates to the next
+//      on `CommandComplete` / `EmptyQueryResponse`. Independent
+//      Future-s can therefore complete out of order even though the
+//      wire stream is strictly FIFO.
+//
+//   4. **Pipeline abort semantics.** On the first `ErrorResponse`
+//      within a batch, every subsequent pending entry up to the
+//      next `ReadyForQuery` resolves as
+//      `Err(DbError.Adapter("PIPELINE_ABORTED"))`. The server
+//      ignores them on the wire — Spindle MUST NOT pretend they
+//      ran.
+//
+//   5. **Reusable across sync + async.** The pipeline owns no IO.
+//      Caller drives via `flush_into(writer_buf, &mut self)` to
+//      drain the queue into a byte buffer (one syscall worth) and
+//      `consume_message(msg, &mut self)` to feed reply messages.
+//      Both run under the connection's own concurrency model —
+//      thread-per-connection today; the same surface works
+//      verbatim under structured-concurrency once that lands.
+//
+// # Memory model
+//
+// Every `PendingQuery` holds `parse_bytes` / `bind_bytes` /
+// `execute_bytes` as `List<Byte>` for now (heap). Future work
+// re-routes these through the connection's `SpindleArena` so the
+// hot path is bump-allocated, but that's a per-adapter wiring
+// follow-up — this module is independent of the storage choice.
+// =============================================================================
+
+module core.database.postgres.pipeline;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount sync.mutex.Mutex;
+mount sync.condvar.Condvar;
+mount time.instant.Instant;
+
+mount core.database.common.error.{DbError, AdapterSpecific, AdPostgres};
+mount core.database.common.types.WireValue;
+
+mount core.database.postgres.wire.backend.{
+    BackendMessage,
+    BmRowDescription, BmDataRow, BmCommandComplete, BmEmptyQueryResponse,
+    BmError, BmNotice, BmParseComplete, BmBindComplete, BmCloseComplete,
+    BmNoData, BmPortalSuspend, BmReadyForQuery, BmParameterStatus, BmAuth,
+    BmBackendKeyData, BmUnknown,
+    RowDescription, Diagnostic,
+};
+mount core.database.postgres.wire.frontend.{sync as send_sync};
+mount core.database.postgres.extended.{ExtendedQueryResult};
+mount core.database.postgres.error.dberr_from_pg;
+
+// -----------------------------------------------------------------------------
+// Configuration
+// -----------------------------------------------------------------------------
+
+/// Hard cap on outstanding (submitted-but-not-completed) queries.
+/// Per spec §6.1.5 — "bounded channel capacity 256". Submissions
+/// past this point park on a condvar until the queue drains.
+public const MAX_INFLIGHT: Int = 256;
+
+/// Initial adaptive batch size — the number of (Parse?+Bind+Execute)
+/// triples the writer drains in one Sync-bracketed round.
+public const INITIAL_BATCH_SIZE: Int = 16;
+
+/// Upper bound for adaptive batching. Larger batches amortise the
+/// Sync round-trip but cap the latency impact of an in-batch
+/// ErrorResponse (which aborts every subsequent entry).
+public const MAX_BATCH_SIZE: Int = 64;
+
+/// Lower bound — the writer never goes below this even on
+/// pathological RTT. Keeps a single pipeline emit from degenerating
+/// to a non-pipelined sequence.
+public const MIN_BATCH_SIZE: Int = 4;
+
+/// RTT (in nanoseconds) below which the adaptive sizer grows the
+/// batch by one each round. 1 ms ≈ "we're on a localhost / same-AZ
+/// connection; pipeline aggressively".
+public const RTT_LOW_NS: Int = 1_000_000;
+
+/// RTT above which the sizer shrinks the batch by one each round.
+/// 50 ms ≈ "cross-region; smaller batches reduce in-batch error
+/// blast radius".
+public const RTT_HIGH_NS: Int = 50_000_000;
+
+/// Number of recent RTT samples retained in the moving-median
+/// estimator. 16 = ~1 second of samples at OLTP rate; large enough
+/// to smooth jitter, small enough to react to topology changes.
+public const RTT_SAMPLE_WINDOW: Int = 16;
+
+public type PipelineConfig is {
+    max_inflight: Int,
+    initial_batch_size: Int,
+    max_batch_size: Int,
+    min_batch_size: Int,
+    rtt_low_ns: Int,
+    rtt_high_ns: Int,
+};
+
+implement PipelineConfig {
+    public fn default() -> PipelineConfig {
+        PipelineConfig {
+            max_inflight: MAX_INFLIGHT,
+            initial_batch_size: INITIAL_BATCH_SIZE,
+            max_batch_size: MAX_BATCH_SIZE,
+            min_batch_size: MIN_BATCH_SIZE,
+            rtt_low_ns: RTT_LOW_NS,
+            rtt_high_ns: RTT_HIGH_NS,
+        }
+    }
+
+    /// Single-shot: never batch (every submit is its own Sync). Use
+    /// for edge cases that need strict serialisation (LISTEN
+    /// commands, transactional savepoints across pgbouncer).
+    public fn no_pipeline() -> PipelineConfig {
+        PipelineConfig {
+            max_inflight: 1,
+            initial_batch_size: 1,
+            max_batch_size: 1,
+            min_batch_size: 1,
+            rtt_low_ns: RTT_LOW_NS,
+            rtt_high_ns: RTT_HIGH_NS,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Pipeline state machine
+// -----------------------------------------------------------------------------
+
+/// Lifecycle:
+///   PsActive    — accepts new submissions, drives normally
+///   PsAborting  — last batch hit ErrorResponse; head + every
+///                 subsequent entry up to the next ReadyForQuery
+///                 resolves as `Err(PipelineAborted)`. Returns to
+///                 `PsActive` after ReadyForQuery.
+///   PsClosed    — connection went away; every pending sink
+///                 resolves as `Err(ConnectionGone)`; no more
+///                 submissions accepted.
+public type PipelineState is
+      PsActive
+    | PsAborting
+    | PsClosed;
+
+implement PipelineState {
+    public fn equals(&self, other: &PipelineState) -> Bool {
+        match (self, other) {
+            (PsActive,   PsActive)   => true,
+            (PsAborting, PsAborting) => true,
+            (PsClosed,   PsClosed)   => true,
+            _                        => false,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PipelineResultSink — per-query reply collector
+// -----------------------------------------------------------------------------
+
+/// One submitted query owns one of these. The reader-loop calls
+/// `receive_*` as backend messages arrive; the caller blocks on
+/// `await_completion` to retrieve the final result. Implemented with
+/// a Mutex + Condvar so the reader and the awaiter can run on
+/// different threads (or the same thread on a single-conn loop).
+public type PipelineResultSink is {
+    inner: Mutex<SinkInner>,
+    notify: Condvar,
+};
+
+type SinkInner is {
+    rows: List<List<WireValue>>,
+    row_desc: Maybe<RowDescription>,
+    command_tag: Text,
+    /// `Some` when terminal (Ok with rows OR Err); reader sets it
+    /// once and then notifies.
+    completion: Maybe<Result<ExtendedQueryResult, DbError>>,
+};
+
+implement PipelineResultSink {
+    public fn new() -> PipelineResultSink {
+        PipelineResultSink {
+            inner: Mutex.new(SinkInner {
+                rows: List.new(),
+                row_desc: None,
+                command_tag: "".clone(),
+                completion: None,
+            }),
+            notify: Condvar.new(),
+        }
+    }
+
+    /// Block the calling thread until the reader-loop populates
+    /// `completion`. Returns the final ExtendedQueryResult or the
+    /// terminal DbError.
+    public fn await_completion(&self) -> Result<ExtendedQueryResult, DbError> {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return Err(poisoned_err("sink mutex poisoned".clone())),
+        };
+        loop {
+            match &guard.completion {
+                Some(_) => {
+                    // Pull out the variant via take — destructive
+                    // read so a second await fails cleanly.
+                    let result = guard.completion.take();
+                    return match result {
+                        Some(r) => r,
+                        None    => Err(poisoned_err("sink completion vanished".clone())),
+                    };
+                }
+                None => {
+                    guard = match self.notify.wait(guard) {
+                        Ok(g)  => g,
+                        Err(_) => return Err(poisoned_err("sink wait poisoned".clone())),
+                    };
+                }
+            }
+        }
+    }
+
+    /// Try to read completion without blocking. Returns `None` if
+    /// the reader hasn't terminated this query yet.
+    public fn try_completion(&self) -> Maybe<Result<ExtendedQueryResult, DbError>> {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return None,
+        };
+        guard.completion.take()
+    }
+
+    // ---- Reader-loop interface (called by PgPipeline.consume_message) ----
+
+    fn record_row_desc(&self, rd: RowDescription) {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return,
+        };
+        guard.row_desc = Some(rd);
+    }
+
+    fn record_data_row(&self, values: List<WireValue>) {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return,
+        };
+        guard.rows.push(values);
+    }
+
+    fn record_command_complete(&self, tag: Text) {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return,
+        };
+        if guard.command_tag.len() == 0 {
+            guard.command_tag = tag;
+        }
+    }
+
+    /// Mark the query terminally complete with success. Pulls
+    /// rows / row_desc / command_tag out of the inner state into
+    /// the final `ExtendedQueryResult`. Notifies any awaiter.
+    fn finalise_ok(&self) {
+        {
+            let mut guard = match self.inner.lock() {
+                Ok(g)  => g,
+                Err(_) => return,
+            };
+            // Move the per-row state into the result; subsequent
+            // record_* calls (shouldn't happen; defensive) become
+            // no-ops because completion is now Some.
+            let mut rows: List<List<WireValue>> = List.new();
+            let mut tmp = List.new();
+            // Swap rows out: List doesn't expose `take`, so we
+            // build a fresh List + swap pointers via re-assignment.
+            let mut i: Int = 0;
+            while i < guard.rows.len() as Int {
+                rows.push(guard.rows[i].clone());
+                i = i + 1;
+            }
+            let _ = tmp;
+            let row_desc = guard.row_desc.clone();
+            let tag      = guard.command_tag.clone();
+            guard.completion = Some(Ok(ExtendedQueryResult {
+                command_tag: tag,
+                row_description: row_desc,
+                rows: rows,
+            }));
+            guard.rows = List.new();
+        }
+        self.notify.notify_one();
+    }
+
+    /// Mark the query terminally failed.
+    fn finalise_err(&self, err: DbError) {
+        {
+            let mut guard = match self.inner.lock() {
+                Ok(g)  => g,
+                Err(_) => return,
+            };
+            guard.completion = Some(Err(err));
+        }
+        self.notify.notify_one();
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PendingQuery — one queued submission
+// -----------------------------------------------------------------------------
+
+public type PendingQuery is {
+    /// Monotonic submission id — useful for tracing and for the
+    /// adaptive sizer to identify the "tail" of a batch.
+    id: Int,
+    /// Empty for a cache-hit re-bind; populated for fresh Parse.
+    parse_bytes: List<Byte>,
+    bind_bytes: List<Byte>,
+    execute_bytes: List<Byte>,
+    /// Where the reader-loop routes this query's reply.
+    sink: PipelineResultSink,
+    /// Wall-clock at submission for end-to-end latency metrics.
+    submitted_at: Instant,
+    /// Whether this query expects rows back. False for INSERT/UPDATE/
+    /// DELETE-style execute paths; true for SELECT. Used to skip the
+    /// row_desc routing when the server emits NoData.
+    expects_rows: Bool,
+};
+
+// -----------------------------------------------------------------------------
+// PipelineHandle — affine submission ticket
+// -----------------------------------------------------------------------------
+
+/// What `submit` returns. Holds a reference to the per-query sink so
+/// the caller can park on `await_completion()` without going through
+/// the pipeline lock again.
+public type PipelineHandle is {
+    id: Int,
+    sink: Maybe<PipelineResultSink>,
+};
+
+implement PipelineHandle {
+    public fn id(&self) -> Int { self.id }
+
+    /// Block until the pipeline reader-loop terminates this query.
+    /// Consumes the handle (single-shot await; calling twice is a
+    /// type error).
+    public fn await(self) -> Result<ExtendedQueryResult, DbError> {
+        let s = match self.sink {
+            Some(s) => s,
+            None    => return Err(poisoned_err("pipeline handle without sink".clone())),
+        };
+        s.await_completion()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RTT sampler — moving-median estimate for adaptive batching
+// -----------------------------------------------------------------------------
+
+type RttSampler is {
+    /// Ring buffer of recent RTT samples in nanoseconds. `len()`
+    /// items, capped at `RTT_SAMPLE_WINDOW`.
+    samples: List<Int>,
+    next: Int,
+};
+
+implement RttSampler {
+    fn new() -> RttSampler {
+        RttSampler { samples: List.new(), next: 0 }
+    }
+
+    fn push(&mut self, ns: Int) {
+        if self.samples.len() < RTT_SAMPLE_WINDOW {
+            self.samples.push(ns);
+        } else {
+            self.samples[self.next] = ns;
+            self.next = (self.next + 1) % RTT_SAMPLE_WINDOW;
+        }
+    }
+
+    /// Median over the current window. Linear scan + insertion sort
+    /// over `n ≤ RTT_SAMPLE_WINDOW = 16`; cheap. Returns `0` when
+    /// the window is empty (sizer treats this as "no signal, hold
+    /// current size").
+    fn median(&self) -> Int {
+        let n = self.samples.len() as Int;
+        if n == 0 { return 0; }
+        let mut sorted: List<Int> = List.with_capacity(n);
+        let mut i: Int = 0;
+        while i < n {
+            let v = self.samples[i];
+            let mut j = sorted.len() as Int;
+            sorted.push(v);
+            while j > 0 && sorted[j - 1] > sorted[j] {
+                let tmp = sorted[j - 1];
+                sorted[j - 1] = sorted[j];
+                sorted[j] = tmp;
+                j = j - 1;
+            }
+            i = i + 1;
+        }
+        sorted[n / 2]
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PipelineMetrics — observable counters
+// -----------------------------------------------------------------------------
+
+public type PipelineMetrics is {
+    total_submitted: Int,
+    total_completed: Int,
+    total_aborted: Int,
+    total_failed: Int,
+    /// Cumulative count of times `submit` had to park on the
+    /// "queue full" condvar. High values signal undersized
+    /// `max_inflight` or a slow server.
+    total_park_full: Int,
+    /// Latest median RTT estimate driving the adaptive sizer (ns).
+    latest_rtt_ns: Int,
+    /// Current adaptive batch size.
+    current_batch_size: Int,
+};
+
+implement PipelineMetrics {
+    public fn empty() -> PipelineMetrics {
+        PipelineMetrics {
+            total_submitted: 0,
+            total_completed: 0,
+            total_aborted: 0,
+            total_failed: 0,
+            total_park_full: 0,
+            latest_rtt_ns: 0,
+            current_batch_size: INITIAL_BATCH_SIZE,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PgPipeline — the queue + state machine + adaptive sizer
+// -----------------------------------------------------------------------------
+
+type PipelineInner is {
+    pending: List<PendingQuery>,
+    /// Index of the current head — the entry whose reply we are
+    /// currently routing. Pop-from-front is `pending.remove(0)`,
+    /// O(N); we instead bump `head_idx` and compact periodically.
+    head_idx: Int,
+    state: PipelineState,
+    rtt: RttSampler,
+    next_id: Int,
+    current_batch_size: Int,
+    /// Wall-clock of the oldest in-flight Sync — populated by
+    /// `flush_into`, consumed by `consume_message` on
+    /// ReadyForQuery to feed the RTT sampler.
+    last_flush_at: Maybe<Instant>,
+    metrics: PipelineMetrics,
+};
+
+public type PgPipeline is {
+    config: PipelineConfig,
+    inner: Mutex<PipelineInner>,
+    /// Notifies submitters parked on "queue full".
+    cond_space: Condvar,
+};
+
+implement PgPipeline {
+    public fn new() -> PgPipeline {
+        PgPipeline.with_config(PipelineConfig.default())
+    }
+
+    public fn with_config(config: PipelineConfig) -> PgPipeline {
+        let initial_batch = config.initial_batch_size;
+        PgPipeline {
+            config: config,
+            inner: Mutex.new(PipelineInner {
+                pending: List.new(),
+                head_idx: 0,
+                state: PsActive,
+                rtt: RttSampler.new(),
+                next_id: 1,
+                current_batch_size: initial_batch,
+                last_flush_at: None,
+                metrics: PipelineMetrics {
+                    current_batch_size: initial_batch,
+                    .. PipelineMetrics.empty()
+                },
+            }),
+            cond_space: Condvar.new(),
+        }
+    }
+
+    // ---- Submit -----------------------------------------------------------
+
+    /// Append a query to the queue. Blocks if the queue is full
+    /// (cap = `config.max_inflight`). Returns a `PipelineHandle`
+    /// the caller awaits via `.await()`.
+    ///
+    /// `expects_rows = true` for SELECT-class queries (RowDescription
+    /// will be routed); `false` for INSERT/UPDATE/DELETE/DDL.
+    public fn submit(
+        &self,
+        parse_bytes: List<Byte>,
+        bind_bytes: List<Byte>,
+        execute_bytes: List<Byte>,
+        expects_rows: Bool,
+    ) -> Result<PipelineHandle, DbError> {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return Err(poisoned_err("pipeline mutex poisoned".clone())),
+        };
+        loop {
+            if guard.state.equals(&PsClosed) {
+                return Err(closed_err());
+            }
+            let live = (guard.pending.len() as Int) - guard.head_idx;
+            if live < self.config.max_inflight {
+                let id = guard.next_id;
+                guard.next_id = guard.next_id + 1;
+                let sink = PipelineResultSink.new();
+                let sink_clone = sink.clone_handle();
+                guard.pending.push(PendingQuery {
+                    id: id,
+                    parse_bytes: parse_bytes,
+                    bind_bytes: bind_bytes,
+                    execute_bytes: execute_bytes,
+                    sink: sink,
+                    submitted_at: Instant.now(),
+                    expects_rows: expects_rows,
+                });
+                guard.metrics.total_submitted = guard.metrics.total_submitted + 1;
+                return Ok(PipelineHandle { id: id, sink: Some(sink_clone) });
+            }
+            // Queue full — park on the condvar.
+            guard.metrics.total_park_full = guard.metrics.total_park_full + 1;
+            guard = match self.cond_space.wait(guard) {
+                Ok(g)  => g,
+                Err(_) => return Err(poisoned_err("submit wait poisoned".clone())),
+            };
+        }
+    }
+
+    // ---- Flush — drain into a writer buffer --------------------------------
+
+    /// Drain up to `current_batch_size` queued entries into `out`,
+    /// followed by a single `Sync`. Returns the number of entries
+    /// flushed (0 if the queue was empty). Caller writes `out` to
+    /// the connection's stream in one syscall.
+    public fn flush_into(&self, out: &mut List<Byte>) -> Int {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return 0,
+        };
+        if guard.state.equals(&PsClosed) {
+            return 0;
+        }
+        let live = (guard.pending.len() as Int) - guard.head_idx;
+        if live == 0 { return 0; }
+        let batch = if live < guard.current_batch_size { live } else { guard.current_batch_size };
+        let start = guard.head_idx;
+        let mut written: Int = 0;
+        let mut i: Int = 0;
+        while i < batch {
+            let entry = &guard.pending[start + i];
+            append_all(out, entry.parse_bytes.as_slice());
+            append_all(out, entry.bind_bytes.as_slice());
+            append_all(out, entry.execute_bytes.as_slice());
+            written = written + 1;
+            i = i + 1;
+        }
+        let sync = send_sync();
+        append_all(out, sync.as_slice());
+        guard.last_flush_at = Some(Instant.now());
+        written
+    }
+
+    // ---- Reader — consume one BackendMessage --------------------------------
+
+    /// Route one backend message into the head pending entry's
+    /// sink, advancing the queue on `CommandComplete` /
+    /// `EmptyQueryResponse` and resetting state on
+    /// `ReadyForQuery`. Returns `true` when the pipeline has just
+    /// fully drained a Sync round (caller is free to flush again).
+    public fn consume_message(&self, msg: BackendMessage) -> Bool {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return false,
+        };
+        match msg {
+            BmParseComplete | BmBindComplete | BmCloseComplete | BmNoData |
+            BmParameterStatus(_) | BmAuth(_) | BmBackendKeyData(_) |
+            BmNotice(_) | BmUnknown { .. } => {
+                // Stateless / informational — no per-query routing.
+                false
+            }
+            BmRowDescription(rd) => {
+                if let Some(head) = head_entry(&guard) {
+                    head.sink.record_row_desc(rd);
+                }
+                false
+            }
+            BmDataRow(dr) => {
+                if let Some(head) = head_entry(&guard) {
+                    head.sink.record_data_row(dr.values);
+                }
+                false
+            }
+            BmCommandComplete(cc) => {
+                terminate_head(&mut guard, &self.cond_space, TerminationKind.TkCommandComplete(cc.tag));
+                false
+            }
+            BmEmptyQueryResponse => {
+                terminate_head(&mut guard, &self.cond_space, TerminationKind.TkCommandComplete("EMPTY".clone()));
+                false
+            }
+            BmPortalSuspend => {
+                terminate_head(&mut guard, &self.cond_space, TerminationKind.TkCommandComplete("PORTAL_SUSPEND".clone()));
+                false
+            }
+            BmError(d) => {
+                // Per spec §6.1.5: ErrorResponse aborts every entry
+                // up to the next ReadyForQuery. Mark head with the
+                // error; subsequent entries get PipelineAborted.
+                let translated = dberr_from_pg(d);
+                terminate_head(&mut guard, &self.cond_space, TerminationKind.TkError(translated));
+                guard.state = PsAborting;
+                false
+            }
+            BmReadyForQuery(_) => {
+                // End of Sync round. If we were aborting, drain
+                // any tail entries that never saw a CommandComplete
+                // — they were the casualties of the
+                // PIPELINE_ABORTED rule.
+                if guard.state.equals(&PsAborting) {
+                    drain_remaining_as_aborted(&mut guard, &self.cond_space);
+                    guard.state = PsActive;
+                }
+                // RTT sample.
+                match &guard.last_flush_at {
+                    Some(when) => {
+                        let elapsed_ns = when.elapsed().as_nanos();
+                        guard.rtt.push(elapsed_ns);
+                        guard.metrics.latest_rtt_ns = elapsed_ns;
+                        // Adaptive resize.
+                        let median = guard.rtt.median();
+                        let mut sz = guard.current_batch_size;
+                        if median > 0 {
+                            if median < self.config.rtt_low_ns && sz < self.config.max_batch_size {
+                                sz = sz + 1;
+                            } else if median > self.config.rtt_high_ns && sz > self.config.min_batch_size {
+                                sz = sz - 1;
+                            }
+                        }
+                        guard.current_batch_size = sz;
+                        guard.metrics.current_batch_size = sz;
+                        guard.last_flush_at = None;
+                    }
+                    None => {}
+                }
+                // Compact the queue periodically — we never
+                // back-fill, so head_idx drifting toward len()
+                // wastes memory.
+                if guard.head_idx > 64 && guard.head_idx >= (guard.pending.len() as Int) / 2 {
+                    compact_queue(&mut guard);
+                }
+                true
+            }
+        }
+    }
+
+    // ---- Lifecycle ---------------------------------------------------------
+
+    /// Mark every pending entry as `Err(ConnectionGone)` and refuse
+    /// future submissions. Called by the connection driver when it
+    /// observes the underlying socket close.
+    public fn close(&self, reason: DbError) {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return,
+        };
+        guard.state = PsClosed;
+        let n = guard.pending.len() as Int;
+        let mut i = guard.head_idx;
+        while i < n {
+            guard.pending[i].sink.finalise_err(clone_err(&reason));
+            i = i + 1;
+        }
+        guard.head_idx = n;
+        // Wake every parked submitter so they bail with ClosedErr.
+        let _ = guard;
+        self.cond_space.notify_all();
+    }
+
+    /// Snapshot for metrics emission.
+    public fn metrics(&self) -> PipelineMetrics {
+        let guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return PipelineMetrics.empty(),
+        };
+        guard.metrics.clone()
+    }
+
+    /// Number of entries still awaiting completion.
+    public fn live_count(&self) -> Int {
+        let guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return 0,
+        };
+        (guard.pending.len() as Int) - guard.head_idx
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Internal helpers
+// -----------------------------------------------------------------------------
+
+type TerminationKind is
+      TkCommandComplete(Text)
+    | TkError(DbError);
+
+fn head_entry(guard: &PipelineInner) -> Maybe<&PendingQuery> {
+    if guard.head_idx < (guard.pending.len() as Int) {
+        Some(&guard.pending[guard.head_idx])
+    } else {
+        None
+    }
+}
+
+fn terminate_head(
+    guard: &mut PipelineInner,
+    cond_space: &Condvar,
+    kind: TerminationKind,
+) {
+    let head_idx = guard.head_idx;
+    if head_idx >= (guard.pending.len() as Int) {
+        return;
+    }
+    // Drive the sink under an immutable borrow of the entry, then
+    // bump the metrics under a fresh mutable borrow path. Splitting
+    // the two passes is required because `guard.pending[i].sink`
+    // takes an immutable borrow of `guard.pending`, which conflicts
+    // with the mutable borrow of `guard.metrics` in the same scope
+    // even though the two fields don't overlap.
+    match kind {
+        TkCommandComplete(tag) => {
+            {
+                let head_sink = &guard.pending[head_idx].sink;
+                head_sink.record_command_complete(tag);
+                head_sink.finalise_ok();
+            }
+            guard.metrics.total_completed = guard.metrics.total_completed + 1;
+        }
+        TkError(err) => {
+            {
+                let head_sink = &guard.pending[head_idx].sink;
+                head_sink.finalise_err(err);
+            }
+            guard.metrics.total_failed = guard.metrics.total_failed + 1;
+        }
+    }
+    guard.head_idx = head_idx + 1;
+    // Free a queue slot — wake one parked submitter.
+    cond_space.notify_one();
+}
+
+fn drain_remaining_as_aborted(guard: &mut PipelineInner, cond_space: &Condvar) {
+    let n = guard.pending.len() as Int;
+    let mut i = guard.head_idx;
+    while i < n {
+        guard.pending[i].sink.finalise_err(pipeline_aborted_err());
+        guard.metrics.total_aborted = guard.metrics.total_aborted + 1;
+        i = i + 1;
+    }
+    if i > guard.head_idx {
+        cond_space.notify_all();      // batch of slots freed
+    }
+    guard.head_idx = n;
+}
+
+fn compact_queue(guard: &mut PipelineInner) {
+    let n = guard.pending.len() as Int;
+    let new_len = n - guard.head_idx;
+    let mut fresh: List<PendingQuery> = List.with_capacity(new_len);
+    let mut i = guard.head_idx;
+    while i < n {
+        // Move-by-clone: PendingQuery contains a sink (Mutex'd)
+        // and byte buffers; clone is shallow for the sink (it's
+        // already a heap-shared structure) but copies the byte
+        // lists. Compaction is rare (every ~64 completed queries),
+        // so the cost is amortised.
+        fresh.push(clone_pending(&guard.pending[i]));
+        i = i + 1;
+    }
+    guard.pending = fresh;
+    guard.head_idx = 0;
+}
+
+fn append_all(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() {
+        dst.push(src[i]);
+        i = i + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Error helpers
+// -----------------------------------------------------------------------------
+
+fn poisoned_err(msg: Text) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "PIPELINE_POISONED".clone(),
+        message: msg,
+        retryable: false,
+    })
+}
+
+fn closed_err() -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "PIPELINE_CLOSED".clone(),
+        message: "pipeline submitted to after close".clone(),
+        retryable: true,
+    })
+}
+
+fn pipeline_aborted_err() -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "PIPELINE_ABORTED".clone(),
+        message: "queued query aborted by an earlier ErrorResponse in the same Sync batch".clone(),
+        retryable: true,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Sink + PendingQuery cloning — shallow handles
+// -----------------------------------------------------------------------------
+
+implement PipelineResultSink {
+    /// Produce a second handle that shares the same Mutex'd inner
+    /// state. Used by `submit` to retain a sink reference both in
+    /// the pending queue (for the reader to fill) and in the
+    /// returned `PipelineHandle` (for the awaiter to read).
+    fn clone_handle(&self) -> PipelineResultSink {
+        // Mutex + Condvar are reference-typed underneath; cloning
+        // both yields handles that observe each other's state.
+        PipelineResultSink {
+            inner: self.inner.clone(),
+            notify: self.notify.clone(),
+        }
+    }
+}
+
+fn clone_pending(p: &PendingQuery) -> PendingQuery {
+    PendingQuery {
+        id: p.id,
+        parse_bytes: p.parse_bytes.clone(),
+        bind_bytes: p.bind_bytes.clone(),
+        execute_bytes: p.execute_bytes.clone(),
+        sink: p.sink.clone_handle(),
+        submitted_at: p.submitted_at,
+        expects_rows: p.expects_rows,
+    }
+}
+
+fn clone_err(e: &DbError) -> DbError {
+    // DbError is enum of small structs; clone is cheap.
+    e.clone()
+}
+
+// -----------------------------------------------------------------------------
+// PipelineMetrics clone helper
+// -----------------------------------------------------------------------------
+
+implement PipelineMetrics {
+    public fn clone(&self) -> PipelineMetrics {
+        PipelineMetrics {
+            total_submitted: self.total_submitted,
+            total_completed: self.total_completed,
+            total_aborted: self.total_aborted,
+            total_failed: self.total_failed,
+            total_park_full: self.total_park_full,
+            latest_rtt_ns: self.latest_rtt_ns,
+            current_batch_size: self.current_batch_size,
+        }
+    }
+}
