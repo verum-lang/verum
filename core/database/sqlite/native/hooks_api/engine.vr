@@ -15,18 +15,18 @@ module core.database.sqlite.native.hooks_api.engine;
 mount core.*;
 mount base.{Bool, Text};
 mount core.database.sqlite.native.hooks_api.registration.{
-    Registration, HookKind,
+    HookRegistration, HookKind,
     HkCommit, HkRollback, HkUpdate, HkPreupdate, HkWal, HkAutovacuumPages,
     new_registration, is_installed,
 };
 
 public type HooksEngine is {
-    commit: Registration,
-    rollback: Registration,
-    update: Registration,
-    preupdate: Registration,
-    wal: Registration,
-    autovacuum_pages: Registration,
+    commit: HookRegistration,
+    rollback: HookRegistration,
+    update: HookRegistration,
+    preupdate: HookRegistration,
+    wal: HookRegistration,
+    autovacuum_pages: HookRegistration,
 }
 
 public fn new_engine() -> HooksEngine {
@@ -43,7 +43,7 @@ public fn new_engine() -> HooksEngine {
 implement HooksEngine {
     /// Install `reg` into the slot indicated by its kind. Returns the
     /// previous handle (0 if nothing was installed).
-    pub fn install(&mut self, reg: Registration) -> Int64 {
+    pub fn install(&mut self, reg: HookRegistration) -> Int64 {
         match &reg.kind {
             HkCommit => {
                 let prev = self.commit.handle;

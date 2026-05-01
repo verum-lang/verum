@@ -1,0 +1,163 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, hooks, l7_api, dispatcher
+// @timeout: 15000
+// @description: 8-hook dispatcher — exercises every fire_*_hook
+//               function with default decisions on the no-handler
+//               path (#144 closure).
+//
+// Spec: SQLite C API §19.5
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.hooks_api.{
+    HooksEngine, new_engine,
+    ExtendedHooksEngine, new_extended_engine,
+    ConnectionHooks, new_connection_hooks,
+    CommitDecision, CdAllow, CdAbort,
+    AuthDecision, AdAllow, AdDeny, AdIgnore,
+    BusyDecision, BdRetry, BdGiveUp,
+    ProgressDecision, PdContinue, PdInterrupt,
+    UpdateOp, UoInsert, UoUpdate, UoDelete,
+    UpdateHookCtx, PreUpdateHookCtx, AuthorizerCtx, TraceCtx,
+    TraceEvent, TeStmtPrepared, TeStmtRow, TeStmtClose, TeProfile,
+    fire_commit_hook, fire_rollback_hook,
+    fire_update_hook, fire_pre_update_hook,
+    fire_authorizer, fire_busy_handler, fire_progress_handler, fire_trace_hook,
+};
+
+// -----------------------------------------------------------------------------
+// 1. ConnectionHooks construction — both engines bundled
+// -----------------------------------------------------------------------------
+
+fn connection_hooks_new() {
+    let hooks = new_connection_hooks();
+    assert(!hooks.any_installed());
+    assert(!hooks.extended.has_authorizer());
+    assert(!hooks.extended.has_busy());
+    assert(!hooks.extended.has_progress());
+    assert(!hooks.extended.has_trace());
+}
+
+// -----------------------------------------------------------------------------
+// 2. fire_commit_hook on no-handler path returns Allow
+// -----------------------------------------------------------------------------
+
+fn commit_hook_no_handler() {
+    let engine = new_engine();
+    match fire_commit_hook(&engine) {
+        CdAllow => {},
+        CdAbort(_) => panic("expected CdAllow when no handler installed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 3. fire_rollback_hook is observational — no return value
+// -----------------------------------------------------------------------------
+
+fn rollback_hook_no_handler() {
+    let engine = new_engine();
+    fire_rollback_hook(&engine);   // returns ()
+}
+
+// -----------------------------------------------------------------------------
+// 4. fire_update_hook on no-handler path is a no-op
+// -----------------------------------------------------------------------------
+
+fn update_hook_no_handler() {
+    let engine = new_engine();
+    let ctx = UpdateHookCtx {
+        op: UoInsert,
+        db_name: "main".clone(),
+        table: "users".clone(),
+        rowid: 42_i64,
+    };
+    fire_update_hook(&engine, ctx);
+}
+
+// -----------------------------------------------------------------------------
+// 5. fire_pre_update_hook on no-handler path is a no-op
+// -----------------------------------------------------------------------------
+
+fn pre_update_hook_no_handler() {
+    let engine = new_engine();
+    let ctx = PreUpdateHookCtx {
+        op: UoUpdate,
+        db_name: "main".clone(),
+        table: "products".clone(),
+        old_rowid: 1_i64,
+        new_rowid: 1_i64,
+    };
+    fire_pre_update_hook(&engine, ctx);
+}
+
+// -----------------------------------------------------------------------------
+// 6. fire_authorizer on no-handler path returns Allow
+// -----------------------------------------------------------------------------
+
+fn authorizer_no_handler() {
+    let engine = new_extended_engine();
+    let ctx = AuthorizerCtx {
+        action: 18,             // SQLITE_INSERT
+        arg1: "users".clone(),
+        arg2: "".clone(),
+        arg3: "main".clone(),
+        arg4: "".clone(),
+    };
+    match fire_authorizer(&engine, ctx) {
+        AdAllow => {},
+        AdDeny | AdIgnore => panic("expected AdAllow on no-handler path"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 7. fire_busy_handler on no-handler path returns GiveUp
+// -----------------------------------------------------------------------------
+
+fn busy_handler_no_handler() {
+    let engine = new_extended_engine();
+    match fire_busy_handler(&engine, 0) {
+        BdGiveUp => {},
+        BdRetry(_) => panic("expected BdGiveUp on no-handler path"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 8. fire_progress_handler on no-handler path returns Continue
+// -----------------------------------------------------------------------------
+
+fn progress_handler_no_handler() {
+    let engine = new_extended_engine();
+    match fire_progress_handler(&engine, 1000) {
+        PdContinue => {},
+        PdInterrupt => panic("expected PdContinue on no-handler path"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 9. fire_trace_hook on no-handler path is a no-op
+// -----------------------------------------------------------------------------
+
+fn trace_hook_no_handler() {
+    let engine = new_extended_engine();
+    let ctx = TraceCtx {
+        event: TeStmtPrepared,
+        sql: "SELECT 1".clone(),
+        elapsed_ns: 0_i64,
+    };
+    fire_trace_hook(&engine, ctx);
+}
+
+fn main() {
+    connection_hooks_new();
+    commit_hook_no_handler();
+    rollback_hook_no_handler();
+    update_hook_no_handler();
+    pre_update_hook_no_handler();
+    authorizer_no_handler();
+    busy_handler_no_handler();
+    progress_handler_no_handler();
+    trace_hook_no_handler();
+}
