@@ -51,6 +51,7 @@ public mount .config.{
 };
 public mount .connection.{
     PgConnection, PgConnState, SimpleQueryResult,
+    PgSimpleQueryResult, PgSimpleQueryArenaResult,
     PcsConnecting, PcsAuthenticating, PcsReady, PcsBusy, PcsClosed, PcsFailed,
     connect,
     cancel_running_query_at,
@@ -73,6 +74,7 @@ public mount .error.dberr_from_pg;
 public mount .stmt_cache.{StmtCache, CacheEntry};
 public mount .extended.{
     ExtendedQueryResult, PipelineEntry, PipelineBatch, ExtendedResultBuilder,
+    ExtendedQueryArenaResult, ExtendedResultArenaBuilder,
     build_parse_bind_execute, build_bind_execute,
 };
 public mount .pipeline.{
