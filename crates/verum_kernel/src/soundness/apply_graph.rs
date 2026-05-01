@@ -468,7 +468,17 @@ fn walk_tactic(tactic: &TacticExpr, targets: &mut Vec<String>) {
                 _ => lemma,
             };
             if let Some(name) = expr_as_path_name(effective_lemma) {
-                targets.push(name);
+                // Filter built-in tactic names: source like
+                // `apply trivial;` parses as
+                // `Apply { lemma: Path(trivial) }` — the walker
+                // would otherwise treat "trivial" as a theorem
+                // reference and the apply-graph would leak an
+                // unresolved leaf for what is in fact a primitive
+                // tactic invocation.  These names are not theorems
+                // and never resolve in the symbol table.
+                if !is_builtin_tactic_name(&name) {
+                    targets.push(name);
+                }
             }
         }
         TacticExpr::Try(inner)
@@ -487,6 +497,42 @@ fn walk_tactic(tactic: &TacticExpr, targets: &mut Vec<String>) {
         // Other tactic forms don't carry an `apply lemma` payload.
         _ => {}
     }
+}
+
+/// Built-in tactic name set.  Source like `apply trivial;` parses
+/// as `Apply { lemma: Path(trivial) }` rather than `TacticExpr::Trivial`
+/// because the parser doesn't (yet) lower bare-name tactic invocations
+/// into the canonical TacticExpr variant.  The apply-graph walker
+/// filters these names so the chain doesn't leak unresolved leaves
+/// for primitive-tactic calls — they're not theorem references at
+/// the kernel level.
+///
+/// The list mirrors the canonical `TacticExpr::*` primitive variants
+/// + a small set of stdlib-built-in alias names that elaborator-time
+/// resolution treats as primitives (`refl` for Reflexivity, etc.).
+fn is_builtin_tactic_name(name: &str) -> bool {
+    matches!(
+        name,
+        "trivial"
+            | "assumption"
+            | "reflexivity"
+            | "refl"
+            | "simp"
+            | "ring"
+            | "field"
+            | "omega"
+            | "lia"
+            | "auto"
+            | "blast"
+            | "smt"
+            | "split"
+            | "left"
+            | "right"
+            | "contradiction"
+            | "ex_falso"
+            | "intro"
+            | "intros"
+    )
 }
 
 fn expr_as_path_name(e: &Expr) -> Option<String> {
@@ -802,5 +848,57 @@ mod tests {
             comp.is_l4_load_bearing(),
             "framework-cited apply chain must keep L4 load-bearing verdict",
         );
+    }
+
+    #[test]
+    fn builtin_tactic_names_are_recognised() {
+        // Filter set must include every TacticExpr primitive variant
+        // name + common stdlib aliases.  Drift in the elaborator's
+        // primitive-tactic list flips this test.
+        for name in [
+            "trivial",
+            "assumption",
+            "reflexivity",
+            "refl",
+            "simp",
+            "ring",
+            "field",
+            "omega",
+            "lia",
+            "auto",
+            "blast",
+            "smt",
+            "split",
+            "left",
+            "right",
+            "contradiction",
+            "intro",
+            "intros",
+        ] {
+            assert!(
+                is_builtin_tactic_name(name),
+                "{:?} should be recognised as a built-in tactic",
+                name,
+            );
+        }
+    }
+
+    #[test]
+    fn theorem_names_are_not_filtered() {
+        // The filter must NOT swallow legitimate theorem references.
+        for name in [
+            "church_rosser_confluence",
+            "msfs_lemma_3_4_outputs_in_s_s_global",
+            "kernel_var_strict",
+            "MaybeOk",
+            "auto_close",       // contains "auto" but isn't the tactic
+            "simplification",   // contains "simp" but isn't the tactic
+        ] {
+            assert!(
+                !is_builtin_tactic_name(name),
+                "{:?} must not be filtered as a built-in tactic — it's a real theorem reference",
+                name,
+            );
+        }
     }
 }
