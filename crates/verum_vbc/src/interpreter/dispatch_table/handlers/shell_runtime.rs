@@ -49,12 +49,11 @@
 //! with the same `Process` scope check that `ffi_extended.rs::
 //! check_ffi_permission` applies to the libSystem fork/execve path.
 
-use crate::interpreter::heap;
 use crate::interpreter::permission::{PermissionDecision, PermissionScope};
 use crate::interpreter::state::InterpreterState;
 use crate::types::{TypeId, VariantKind};
 use crate::value::Value;
-use super::super::super::error::{InterpreterError, InterpreterResult};
+use super::super::super::error::InterpreterResult;
 use super::string_helpers::{alloc_string_value, extract_string};
 
 /// Try to intercept a high-level shell-runtime call.  Returns `Some(value)`
