@@ -79,6 +79,8 @@
 //! the entire separation-logic surface is opaque-functions-only.
 
 use verum_ast::expr::{BinOp, Expr, ExprKind};
+use verum_ast::literal::{LiteralKind, StringLit};
+use verum_common::{List, Text};
 
 use super::separation_logic::SepAssertion;
 
@@ -162,12 +164,32 @@ pub fn try_recognize_sep_assertion(expr: &Expr) -> Option<SepAssertion> {
             Some(SepAssertion::Pure(prop))
         }
 
-        // `named(name, args)` is omitted from V2 — it requires
-        // resolving the user-defined predicate against the
-        // elaborator's axiom registry, which the recogniser doesn't
-        // yet have access to. Future work: wire the registry through
-        // and recognise named predicates as `SepAssertion::Pure(name)`
-        // with the args attached as a separate metadata field.
+        // `named("predicate_name", arg1, arg2, ...)` — user-defined
+        // separation predicate. First argument MUST be a string
+        // literal (the predicate name); remaining args are arbitrary
+        // expressions passed through to the predicate. Pre-elaborator
+        // approach: pattern-match on the call shape, surface the
+        // predicate as `SepAssertion::Named { name, args }`.  The
+        // SMT encoder treats it as opaque (per encode_assertion's
+        // Named arm); the recogniser surfaces structure for
+        // diagnostic / serialisation purposes.
+        ("named", n) if n >= 1 => {
+            let mut iter = args.iter();
+            let name_arg = iter.next()?;
+            let name = match &name_arg.kind {
+                ExprKind::Literal(lit) => match &lit.kind {
+                    LiteralKind::Text(StringLit::Regular(s))
+                    | LiteralKind::Text(StringLit::MultiLine(s)) => Text::from(s.as_str()),
+                    _ => return None, // first arg must be a string literal
+                },
+                _ => return None,
+            };
+            let predicate_args: List<Expr> = iter.cloned().collect();
+            Some(SepAssertion::Named {
+                name,
+                args: predicate_args,
+            })
+        }
 
         // Anything else is not a recognised separation-logic
         // constructor at this AST shape. The caller continues with
@@ -302,6 +324,18 @@ pub fn sep_assertion_to_smtlib(
             let l = expr_to_smtlib(length)?;
             Ok(format!("(sep_array_seg {} {})", b, l))
         }
+
+        SepAssertion::Named { name, args } => {
+            // User-defined predicate rendered as namespaced UF
+            // call: `(sep_named NAME arg1 arg2 ...)`.  The leading
+            // `sep_named` prefix prevents collision with user
+            // function names; CVC5 / Z3 treat it as opaque.
+            let mut parts = vec![format!("sep_named"), format!("\"{}\"", name.as_str())];
+            for arg in args.iter() {
+                parts.push(expr_to_smtlib(arg)?);
+            }
+            Ok(format!("({})", parts.join(" ")))
+        }
     }
 }
 
@@ -321,6 +355,89 @@ pub fn try_translate_sep_predicate_to_smtlib(
     let assertion = try_recognize_sep_assertion(expr)?;
     Some(sep_assertion_to_smtlib(&assertion))
 }
+
+// =============================================================================
+// CVC5 native separation-logic export
+// =============================================================================
+//
+// CVC5 ships native separation-logic theory operators (Reynolds 2002
+// + O'Hearn 2007 + CVC5 native implementation per Reynolds-Iosif-King
+// 2016).  Where Z3 requires array-theory encoding + universal
+// quantification (which is hard for SMT solvers due to the heap-array
+// quantification boundary — see Calcagno-O'Hearn-Yang 2007 §6),
+// CVC5 directly understands:
+//
+//   * `sep.emp`                — empty-heap predicate.
+//   * `(pto loc val)`          — points-to.
+//   * `(sep p q)`              — separating conjunction.
+//   * `(wand p q)`             — magic wand.
+//
+// The `(declare-heap (Loc Ref))` declaration must precede usage.
+// These operators provide the magic wand its native semantic
+// support: CVC5 directly handles the universal-frame-heap
+// quantification under the hood, no manual encoding needed.
+
+/// Render a [`SepAssertion`] using CVC5-native separation-logic
+/// operators.  Distinct from [`sep_assertion_to_smtlib`], which
+/// uses namespaced UF symbols (`sep_emp`, `sep_pt`, ...) for Z3
+/// compatibility.  CVC5-flavoured output uses CVC5's built-in
+/// theory operators directly:
+///
+/// | `SepAssertion`              | CVC5 native form              |
+/// |-----------------------------|-------------------------------|
+/// | `Emp`                       | `sep.emp`                     |
+/// | `PointsTo { loc, val }`     | `(pto <loc> <val>)`           |
+/// | `Sep { left, right }`       | `(sep <left> <right>)`        |
+/// | `Wand { left, right }`      | `(wand <left> <right>)`       |
+///
+/// Other variants fall back to the namespaced rendering since
+/// CVC5 doesn't have built-in operators for them (e.g. `lseg`,
+/// `tree`, `block`).
+///
+/// **When to use**: emit this form when the CVC5 backend is
+/// available (per `cvc5_backend::Cvc5Backend::new()` returning
+/// `Ok`).  For Z3 / portfolio dispatch, use
+/// [`sep_assertion_to_smtlib`].  The two outputs are NOT
+/// interchangeable — CVC5 native form requires a preceding
+/// `(declare-heap (Loc Ref))` SMT-LIB command.
+pub fn sep_assertion_to_cvc5_native(
+    assertion: &SepAssertion,
+) -> Result<String, crate::expr_to_smtlib::SmtTranslateError> {
+    use crate::expr_to_smtlib::expr_to_smtlib;
+
+    match assertion {
+        SepAssertion::Emp => Ok("sep.emp".to_string()),
+
+        SepAssertion::PointsTo { location, value } => {
+            let loc = expr_to_smtlib(location)?;
+            let val = expr_to_smtlib(value)?;
+            Ok(format!("(pto {} {})", loc, val))
+        }
+
+        SepAssertion::Sep { left, right } => {
+            let l = sep_assertion_to_cvc5_native(left)?;
+            let r = sep_assertion_to_cvc5_native(right)?;
+            Ok(format!("(sep {} {})", l, r))
+        }
+
+        SepAssertion::Wand { left, right } => {
+            let l = sep_assertion_to_cvc5_native(left)?;
+            let r = sep_assertion_to_cvc5_native(right)?;
+            Ok(format!("(wand {} {})", l, r))
+        }
+
+        // Variants without CVC5-native operators — fall back to
+        // the namespaced UF rendering used by the Z3 path. CVC5
+        // accepts the namespaced form too; it just doesn't get
+        // theory-level reasoning for those constructors.
+        _ => sep_assertion_to_smtlib(assertion),
+    }
+}
+
+/// SMT-LIB heap-declaration preamble required before any CVC5
+/// native separation-logic usage.  Emit once at the top of any
+/// SMT-LIB script that uses CVC5 native sep operators.
+pub const CVC5_SEP_PREAMBLE: &str = "(set-logic ALL)\n(declare-heap (Int Int))";
 
 // =============================================================================
 // Verification-goal routing — #161 V4
@@ -1252,6 +1369,81 @@ mod tests {
         assert_eq!(r, "(sep_star sep_emp (sep_star sep_emp (sep_pt a av)))");
     }
 
+    // ----- CVC5 native separation-logic rendering -----
+
+    #[test]
+    fn cvc5_native_emp_uses_sep_emp_keyword() {
+        let r = sep_assertion_to_cvc5_native(&SepAssertion::Emp).unwrap();
+        assert_eq!(r, "sep.emp");
+    }
+
+    #[test]
+    fn cvc5_native_points_to_uses_pto_keyword() {
+        let r = sep_assertion_to_cvc5_native(&SepAssertion::PointsTo {
+            location: name_path_expr("a"),
+            value: name_path_expr("av"),
+        })
+        .unwrap();
+        assert_eq!(r, "(pto a av)");
+    }
+
+    #[test]
+    fn cvc5_native_sep_uses_sep_keyword() {
+        let inner = SepAssertion::PointsTo {
+            location: name_path_expr("a"),
+            value: name_path_expr("av"),
+        };
+        let outer = SepAssertion::sep(SepAssertion::Emp, inner);
+        let r = sep_assertion_to_cvc5_native(&outer).unwrap();
+        assert_eq!(r, "(sep sep.emp (pto a av))");
+    }
+
+    #[test]
+    fn cvc5_native_wand_uses_wand_keyword() {
+        // The headline pin: CVC5 native form uses the `wand`
+        // theory operator, not the namespaced `sep_wand` UF.
+        // This is what gives CVC5 native theory-level reasoning
+        // for magic wand without the manual quantifier
+        // instantiation Z3 requires.
+        let p = SepAssertion::PointsTo {
+            location: name_path_expr("x"),
+            value: name_path_expr("v"),
+        };
+        let q = SepAssertion::PointsTo {
+            location: name_path_expr("y"),
+            value: name_path_expr("w"),
+        };
+        let wand = SepAssertion::wand(p, q);
+        let r = sep_assertion_to_cvc5_native(&wand).unwrap();
+        assert_eq!(r, "(wand (pto x v) (pto y w))");
+    }
+
+    #[test]
+    fn cvc5_native_unsupported_variants_fall_back_to_namespaced() {
+        // Variants without CVC5-native operators (block, lseg, tree,
+        // etc.) fall back to the namespaced UF rendering.  This
+        // gives CVC5 a usable encoding while preserving the
+        // architectural distinction: native operators get theory-
+        // level reasoning; UF fallbacks get opaque-symbol treatment.
+        let block = SepAssertion::Block {
+            base: name_path_expr("b"),
+            size: name_path_expr("s"),
+        };
+        let r = sep_assertion_to_cvc5_native(&block).unwrap();
+        assert_eq!(r, "(sep_block b s)");
+    }
+
+    #[test]
+    fn cvc5_preamble_declares_heap_for_int_int() {
+        // Pin: the preamble names a single canonical heap shape
+        // (Loc=Int, Ref=Int) so callers always emit the same
+        // declaration. Changing this requires audit of every
+        // CVC5 separation-logic call site.
+        assert!(CVC5_SEP_PREAMBLE.contains("declare-heap"));
+        assert!(CVC5_SEP_PREAMBLE.contains("(Int Int)"));
+        assert!(CVC5_SEP_PREAMBLE.contains("set-logic ALL"));
+    }
+
     // ----- V4 verification routing -----
 
     #[test]
@@ -1874,18 +2066,90 @@ mod tests {
         // recogniser too — the gap between "user can write the
         // predicate" and "verifier translates it" must stay closed.
         let recognised: std::collections::BTreeSet<&str> =
-            ["emp", "points_to", "sep_conj", "heap_and", "pure"]
+            ["emp", "points_to", "sep_conj", "heap_and", "pure", "named"]
                 .iter()
                 .copied()
                 .collect();
         // The set documents the canonical surface. Updating the
         // recogniser to handle a new constructor MUST also update
         // this pin so reviewers see the surface change.
-        assert_eq!(recognised.len(), 5);
+        assert_eq!(recognised.len(), 6);
         assert!(recognised.contains("emp"));
         assert!(recognised.contains("points_to"));
         assert!(recognised.contains("sep_conj"));
         assert!(recognised.contains("heap_and"));
         assert!(recognised.contains("pure"));
+        assert!(recognised.contains("named"));
+    }
+
+    // ----- named() recognition tests -----
+
+    fn text_literal_expr(value: &str) -> Expr {
+        Expr::new(
+            ExprKind::Literal(verum_ast::literal::Literal::string(
+                Text::from(value),
+                span(),
+            )),
+            span(),
+        )
+    }
+
+    #[test]
+    fn recognises_named_with_string_literal_first_arg() {
+        // named("my_predicate", x, v) → SepAssertion::Named.
+        let e = call_expr(
+            "named",
+            vec![
+                text_literal_expr("my_predicate"),
+                name_path_expr("x"),
+                name_path_expr("v"),
+            ],
+        );
+        match try_recognize_sep_assertion(&e) {
+            Some(SepAssertion::Named { name, args }) => {
+                assert_eq!(name.as_str(), "my_predicate");
+                assert_eq!(args.len(), 2);
+            }
+            other => panic!("expected Named, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn named_zero_extra_args_recognises() {
+        // named("nullary_predicate") with just the name — empty args.
+        let e = call_expr("named", vec![text_literal_expr("nullary_predicate")]);
+        match try_recognize_sep_assertion(&e) {
+            Some(SepAssertion::Named { name, args }) => {
+                assert_eq!(name.as_str(), "nullary_predicate");
+                assert_eq!(args.len(), 0);
+            }
+            other => panic!("expected Named, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn named_with_non_string_first_arg_returns_none() {
+        // named(x, y) where x is not a string literal — recogniser
+        // bails (we cannot resolve user-defined names from arbitrary
+        // expressions without elaborator integration).
+        let e = call_expr("named", vec![name_path_expr("x"), name_path_expr("y")]);
+        assert!(try_recognize_sep_assertion(&e).is_none());
+    }
+
+    #[test]
+    fn named_zero_args_returns_none() {
+        // named() with NO arguments — first arg required.
+        let e = call_expr("named", vec![]);
+        assert!(try_recognize_sep_assertion(&e).is_none());
+    }
+
+    #[test]
+    fn render_named_to_smtlib_uses_sep_named_prefix() {
+        let assertion = SepAssertion::Named {
+            name: Text::from("my_pred"),
+            args: List::from(vec![name_path_expr("x"), name_path_expr("y")]),
+        };
+        let r = sep_assertion_to_smtlib(&assertion).unwrap();
+        assert_eq!(r, "(sep_named \"my_pred\" x y)");
     }
 }

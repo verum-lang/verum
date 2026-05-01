@@ -211,6 +211,10 @@ impl KernelSepBridge {
                 name: "array_segment".to_string(),
                 args: vec![],
             },
+            SepAssertion::Named { name, .. } => HeapPredicate::Named {
+                name: name.as_str().to_string(),
+                args: vec![],
+            },
         }
     }
 }
@@ -267,7 +271,8 @@ pub fn bridge_fidelity(assertion: &SepAssertion) -> BridgeFidelity {
         | SepAssertion::ListSegment { .. }
         | SepAssertion::Tree { .. }
         | SepAssertion::Block { .. }
-        | SepAssertion::ArraySegment { .. } => BridgeFidelity::LossyButTotal,
+        | SepAssertion::ArraySegment { .. }
+        | SepAssertion::Named { .. } => BridgeFidelity::LossyButTotal,
     }
 }
 
@@ -586,6 +591,7 @@ mod tests {
                 SepAssertion::Tree { .. } => "tree",
                 SepAssertion::Block { .. } => "block",
                 SepAssertion::ArraySegment { .. } => "array_segment",
+                SepAssertion::Named { .. } => "named",
             };
             // Verify lower produces a defined value — never panics.
             let _ = KernelSepBridge::lower(p);
