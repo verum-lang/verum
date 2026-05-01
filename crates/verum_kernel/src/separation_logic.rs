@@ -451,6 +451,257 @@ fn pure_predicate_to_term(p: &HeapPredicate) -> Option<Term> {
 }
 
 // =============================================================================
+// Dispatcher — verdict surface + routing
+// =============================================================================
+
+/// The verdict the separation-logic dispatcher returns for a single
+/// [`SeparationGoal`].  Mirrors the shape of
+/// [`crate::verification_goal::VerificationGoal`]'s pure-side
+/// dispatcher: every goal terminates in a verdict, and every verdict
+/// carries enough metadata for audit-gate emission without re-running
+/// the dispatcher.
+///
+/// **Soundness invariant**: only [`SeparationVerdict::Discharged`]
+/// commits to "the goal holds in the kernel".  Every other variant
+/// either explicitly admits an IOU, rejects the goal as ill-formed,
+/// or routes to a downstream verification strategy that produces its
+/// own follow-up verdict.
+///
+/// **Audit-gate use**: the verdict's variant tag feeds
+/// [`SeparationDispatcherStats`] so `verum audit
+/// --separation-dispatch` can enumerate the per-strategy load
+/// distribution across a corpus run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SeparationVerdict {
+    /// The goal is closed by the kernel directly — no downstream
+    /// verification needed.  At dispatcher V1 only the trivial
+    /// `{ emp } _ { emp }` shape lands here.
+    Discharged,
+    /// The dispatcher cannot close the goal at this version of the
+    /// kernel; the wrapped string names the IOU.  Downstream audit
+    /// gates surface the IOU in `--soundness-iou`.
+    AdmittedWithIou(String),
+    /// The goal is structurally malformed (capability inconsistent
+    /// with the program statement, footprint mismatched against the
+    /// frame, etc.).  Wrapped string explains the violation.  This
+    /// is the only "negative" verdict — distinct from
+    /// [`SeparationVerdict::AdmittedWithIou`] which records a
+    /// well-formed goal that the dispatcher merely cannot close yet.
+    RejectIllFormed(String),
+    /// The goal's frame is non-trivial; closing it requires applying
+    /// the frame rule.  The next slice consumes this verdict and runs
+    /// the frame-rule strategy on the bare triple.
+    RoutedToFrameRule,
+    /// The command is a sequence; closing it requires Hoare-style
+    /// sequencing (`{P} c1 {Q}` + `{Q} c2 {R}` → `{P} c1; c2 {R}`).
+    /// The next slice consumes this verdict and runs the sequencing
+    /// strategy.
+    RoutedToHoareSequencing,
+    /// The pre/post pair differs from a kernel-known pattern by
+    /// pure-implication weakening; closing it requires the
+    /// rule-of-consequence strategy (`{P'} c {Q'}` ⇒ `{P} c {Q}`
+    /// when `P → P'` and `Q' → Q`).
+    RoutedToConsequenceRule,
+}
+
+impl SeparationVerdict {
+    /// Diagnostic kind tag — stable across kernel versions for
+    /// audit-gate aggregation.
+    pub fn kind_tag(&self) -> &'static str {
+        match self {
+            SeparationVerdict::Discharged => "discharged",
+            SeparationVerdict::AdmittedWithIou(_) => "admitted_with_iou",
+            SeparationVerdict::RejectIllFormed(_) => "reject_ill_formed",
+            SeparationVerdict::RoutedToFrameRule => "routed_to_frame_rule",
+            SeparationVerdict::RoutedToHoareSequencing => "routed_to_hoare_sequencing",
+            SeparationVerdict::RoutedToConsequenceRule => "routed_to_consequence_rule",
+        }
+    }
+
+    /// Whether this verdict commits to "the goal holds".  Only
+    /// `Discharged` does; the routing verdicts defer the decision
+    /// to a downstream strategy and IOUs / rejections are negative.
+    pub fn is_closed(&self) -> bool {
+        matches!(self, SeparationVerdict::Discharged)
+    }
+
+    /// Whether this verdict defers the decision to a downstream
+    /// verification strategy (frame rule / sequencing / consequence).
+    pub fn is_routed(&self) -> bool {
+        matches!(
+            self,
+            SeparationVerdict::RoutedToFrameRule
+                | SeparationVerdict::RoutedToHoareSequencing
+                | SeparationVerdict::RoutedToConsequenceRule
+        )
+    }
+}
+
+/// The load-bearing dispatcher: routes a [`SeparationGoal`] to a
+/// verification strategy and returns the resulting
+/// [`SeparationVerdict`].
+///
+/// **V1 routing rules** (in priority order — the first matching rule
+/// wins):
+///
+/// 1. **Capability mismatch** — the goal carries an IO capability
+///    (`Read` / `Write` / `Own`) but the triple is pure (both pre
+///    and post are heap-irrelevant).  A pure command cannot need
+///    heap-region access; reject as ill-formed.
+/// 2. **Trivial frame** — pre and post are both `emp` and the frame
+///    is `emp`.  Discharged unconditionally.
+/// 3. **Non-trivial frame invariant** — `frame_invariant` is not
+///    `emp`.  Route to the frame rule.
+/// 4. **Sequencing-shaped command** — `triple.command_term` is an
+///    application `App(_, _)` and the goal is non-trivial.  Route
+///    to Hoare sequencing.
+/// 5. **Differing pre/post with a non-trivial pattern** — pre and
+///    post are non-`emp` and differ.  Route to the consequence rule.
+/// 6. **Default** — admit with IOU "no rule matches — frame
+///    inference V1".
+///
+/// **What this dispatcher deliberately does NOT do (yet)**: it does
+/// not run any strategy.  It only RECOGNISES the shape of a goal and
+/// tags it for the strategy that should consume it.  The strategies
+/// themselves land in the next slice (#161 follow-up).
+///
+/// **Soundness invariant**: the dispatcher never returns
+/// [`SeparationVerdict::Discharged`] except for the one trivial case
+/// above.  Adding a new closed-form discharge requires a kernel-rule
+/// audit and a corresponding promotion of the goal's
+/// [`SeparationGoalSource`] to a kernel-recognised pattern.
+pub fn dispatch_separation_goal(goal: &SeparationGoal) -> SeparationVerdict {
+    // Rule 1: capability mismatch.  A pure triple cannot demand
+    // a non-trivial heap-region capability.
+    if goal.triple.is_pure() && goal.triple.footprint_capability != Capability::None {
+        return SeparationVerdict::RejectIllFormed(
+            "capability mismatch \u{2014} pure stmt requires no IO capability".to_string(),
+        );
+    }
+
+    // Rule 2: trivial frame — { emp } _ { emp } with empty frame.
+    if goal.triple.pre.is_emp()
+        && goal.triple.post.is_emp()
+        && goal.frame_invariant.is_emp()
+    {
+        return SeparationVerdict::Discharged;
+    }
+
+    // Rule 3: non-trivial frame invariant — route to the frame rule.
+    // The "precondition's frame is bigger than the postcondition's
+    // footprint" condition is captured here as "the goal carries a
+    // non-empty `frame_invariant`": that frame is exactly the part
+    // separate from the triple's footprint.
+    if !goal.frame_invariant.is_emp() {
+        return SeparationVerdict::RoutedToFrameRule;
+    }
+
+    // Rule 4: sequencing-shaped command — App(_, _) suggests
+    // composition.  Route to Hoare sequencing.
+    if matches!(goal.triple.command_term, Term::App(_, _)) {
+        return SeparationVerdict::RoutedToHoareSequencing;
+    }
+
+    // Rule 5: differing non-trivial pre/post — route to consequence.
+    if !goal.triple.pre.is_emp()
+        && !goal.triple.post.is_emp()
+        && goal.triple.pre != goal.triple.post
+    {
+        return SeparationVerdict::RoutedToConsequenceRule;
+    }
+
+    // Rule 6: default — admit with IOU.
+    SeparationVerdict::AdmittedWithIou(
+        "no rule matches \u{2014} frame inference V1".to_string(),
+    )
+}
+
+/// Per-verdict counters for audit-gate aggregation.  The dispatcher
+/// itself doesn't accumulate — callers thread a
+/// [`SeparationDispatcherStats`] through their corpus walk and
+/// invoke [`SeparationDispatcherStats::record`] on each verdict.
+///
+/// Used by `verum audit --separation-dispatch` (next slice) to emit
+/// a structured per-verdict load distribution.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeparationDispatcherStats {
+    /// Count of [`SeparationVerdict::Discharged`] verdicts.
+    pub discharged: usize,
+    /// Count of [`SeparationVerdict::AdmittedWithIou`] verdicts.
+    pub admitted_with_iou: usize,
+    /// Count of [`SeparationVerdict::RejectIllFormed`] verdicts.
+    pub reject_ill_formed: usize,
+    /// Count of [`SeparationVerdict::RoutedToFrameRule`] verdicts.
+    pub routed_to_frame_rule: usize,
+    /// Count of [`SeparationVerdict::RoutedToHoareSequencing`] verdicts.
+    pub routed_to_hoare_sequencing: usize,
+    /// Count of [`SeparationVerdict::RoutedToConsequenceRule`] verdicts.
+    pub routed_to_consequence_rule: usize,
+}
+
+impl SeparationDispatcherStats {
+    /// Construct a zeroed counter set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Increment the counter matching `verdict`.
+    pub fn record(&mut self, verdict: &SeparationVerdict) {
+        match verdict {
+            SeparationVerdict::Discharged => self.discharged += 1,
+            SeparationVerdict::AdmittedWithIou(_) => self.admitted_with_iou += 1,
+            SeparationVerdict::RejectIllFormed(_) => self.reject_ill_formed += 1,
+            SeparationVerdict::RoutedToFrameRule => self.routed_to_frame_rule += 1,
+            SeparationVerdict::RoutedToHoareSequencing => {
+                self.routed_to_hoare_sequencing += 1
+            }
+            SeparationVerdict::RoutedToConsequenceRule => {
+                self.routed_to_consequence_rule += 1
+            }
+        }
+    }
+
+    /// Total goals recorded across every verdict variant.
+    pub fn total(&self) -> usize {
+        self.discharged
+            + self.admitted_with_iou
+            + self.reject_ill_formed
+            + self.routed_to_frame_rule
+            + self.routed_to_hoare_sequencing
+            + self.routed_to_consequence_rule
+    }
+
+    /// Audit-gate metadata.  Suitable for direct serde-JSON emission
+    /// alongside [`SeparationGoal::audit_metadata`].
+    pub fn audit_metadata(&self) -> BTreeMap<String, String> {
+        let mut m = BTreeMap::new();
+        m.insert("discharged".to_string(), self.discharged.to_string());
+        m.insert(
+            "admitted_with_iou".to_string(),
+            self.admitted_with_iou.to_string(),
+        );
+        m.insert(
+            "reject_ill_formed".to_string(),
+            self.reject_ill_formed.to_string(),
+        );
+        m.insert(
+            "routed_to_frame_rule".to_string(),
+            self.routed_to_frame_rule.to_string(),
+        );
+        m.insert(
+            "routed_to_hoare_sequencing".to_string(),
+            self.routed_to_hoare_sequencing.to_string(),
+        );
+        m.insert(
+            "routed_to_consequence_rule".to_string(),
+            self.routed_to_consequence_rule.to_string(),
+        );
+        m.insert("total".to_string(), self.total().to_string());
+        m
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -641,5 +892,247 @@ mod tests {
         ];
         let unique: std::collections::BTreeSet<_> = tags.iter().copied().collect();
         assert_eq!(unique.len(), tags.len());
+    }
+
+    // -------------------------------------------------------------------------
+    // Dispatcher tests
+    // -------------------------------------------------------------------------
+
+    /// Helper: build a vanilla goal from raw triple parts + frame.
+    fn make_goal(
+        pre: HeapPredicate,
+        cmd: Term,
+        post: HeapPredicate,
+        cap: Capability,
+        frame: HeapPredicate,
+    ) -> SeparationGoal {
+        SeparationGoal::new(
+            HoareTriple::new(pre, cmd, post, cap),
+            frame,
+            SeparationGoalSource::StatefulFnContract {
+                fn_name: "probe".into(),
+            },
+        )
+    }
+
+    #[test]
+    fn dispatch_trivial_emp_emp_discharges() {
+        let goal = make_goal(
+            HeapPredicate::emp(),
+            Term::Universe(0),
+            HeapPredicate::emp(),
+            Capability::None,
+            HeapPredicate::emp(),
+        );
+        let verdict = dispatch_separation_goal(&goal);
+        assert_eq!(verdict, SeparationVerdict::Discharged);
+        assert!(verdict.is_closed());
+        assert!(!verdict.is_routed());
+    }
+
+    #[test]
+    fn dispatch_pure_with_capability_rejects_as_ill_formed() {
+        // Pure pre + pure post, but capability claims Write.  Pure
+        // statements cannot need heap-region access — reject.
+        let goal = make_goal(
+            HeapPredicate::emp(),
+            Term::Universe(0),
+            HeapPredicate::pure(Term::Universe(0)),
+            Capability::Write,
+            HeapPredicate::emp(),
+        );
+        match dispatch_separation_goal(&goal) {
+            SeparationVerdict::RejectIllFormed(reason) => {
+                assert!(reason.contains("capability mismatch"), "{reason}");
+                assert!(reason.contains("pure stmt"), "{reason}");
+            }
+            other => panic!("expected RejectIllFormed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_pure_with_read_capability_also_rejects() {
+        // Read is also non-None — same rejection path.
+        let goal = make_goal(
+            HeapPredicate::pure(Term::Universe(0)),
+            Term::Universe(0),
+            HeapPredicate::pure(Term::Universe(0)),
+            Capability::Read,
+            HeapPredicate::emp(),
+        );
+        assert!(matches!(
+            dispatch_separation_goal(&goal),
+            SeparationVerdict::RejectIllFormed(_)
+        ));
+    }
+
+    #[test]
+    fn dispatch_non_empty_frame_routes_to_frame_rule() {
+        // The frame_invariant carries a real heap fragment; this
+        // should route to the frame rule.
+        let goal = make_goal(
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Term::Universe(0),
+            HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
+            Capability::Write,
+            HeapPredicate::points_to(Term::Var(3), Term::Var(4)),
+        );
+        let verdict = dispatch_separation_goal(&goal);
+        assert_eq!(verdict, SeparationVerdict::RoutedToFrameRule);
+        assert!(!verdict.is_closed());
+        assert!(verdict.is_routed());
+    }
+
+    #[test]
+    fn dispatch_application_command_routes_to_sequencing() {
+        // App(_, _) command-term shape signals a sequenceable
+        // composition.  Pre/post are non-emp and capability is
+        // consistent (Write); frame is emp so we don't hit Rule 3.
+        let goal = make_goal(
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Term::app(Term::Var(0), Term::Var(1)),
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Capability::Write,
+            HeapPredicate::emp(),
+        );
+        let verdict = dispatch_separation_goal(&goal);
+        assert_eq!(verdict, SeparationVerdict::RoutedToHoareSequencing);
+    }
+
+    #[test]
+    fn dispatch_differing_pre_post_routes_to_consequence() {
+        // Non-emp + differing pre/post + non-App command + emp
+        // frame ⇒ consequence rule.
+        let goal = make_goal(
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Term::Universe(0),
+            HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
+            Capability::Write,
+            HeapPredicate::emp(),
+        );
+        assert_eq!(
+            dispatch_separation_goal(&goal),
+            SeparationVerdict::RoutedToConsequenceRule,
+        );
+    }
+
+    #[test]
+    fn dispatch_default_admits_with_iou() {
+        // Heap-shaped pre with emp post.  Not trivial (post is emp
+        // but pre isn't), no frame, no App command, capability ok.
+        // This is the residual case — admit with IOU.
+        let goal = make_goal(
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Term::Universe(0),
+            HeapPredicate::emp(),
+            Capability::Own,
+            HeapPredicate::emp(),
+        );
+        match dispatch_separation_goal(&goal) {
+            SeparationVerdict::AdmittedWithIou(reason) => {
+                assert!(reason.contains("frame inference V1"), "{reason}");
+            }
+            other => panic!("expected AdmittedWithIou, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_capability_mismatch_takes_priority_over_trivial_discharge() {
+        // emp pre + emp post should normally discharge — BUT a
+        // non-None capability with pure pre/post is ill-formed; the
+        // capability-mismatch rule fires FIRST and rejects.
+        let goal = make_goal(
+            HeapPredicate::emp(),
+            Term::Universe(0),
+            HeapPredicate::emp(),
+            Capability::Read,
+            HeapPredicate::emp(),
+        );
+        assert!(matches!(
+            dispatch_separation_goal(&goal),
+            SeparationVerdict::RejectIllFormed(_)
+        ));
+    }
+
+    #[test]
+    fn dispatch_pure_emp_emp_with_no_capability_discharges() {
+        // Sanity: the trivial discharge path still works when all
+        // three of pre / post / frame are emp AND capability is None.
+        let goal = make_goal(
+            HeapPredicate::emp(),
+            Term::Var(0),
+            HeapPredicate::emp(),
+            Capability::None,
+            HeapPredicate::emp(),
+        );
+        assert_eq!(
+            dispatch_separation_goal(&goal),
+            SeparationVerdict::Discharged,
+        );
+    }
+
+    #[test]
+    fn verdict_kind_tags_are_distinct_and_stable() {
+        let tags = [
+            SeparationVerdict::Discharged.kind_tag(),
+            SeparationVerdict::AdmittedWithIou("x".into()).kind_tag(),
+            SeparationVerdict::RejectIllFormed("y".into()).kind_tag(),
+            SeparationVerdict::RoutedToFrameRule.kind_tag(),
+            SeparationVerdict::RoutedToHoareSequencing.kind_tag(),
+            SeparationVerdict::RoutedToConsequenceRule.kind_tag(),
+        ];
+        let unique: std::collections::BTreeSet<_> = tags.iter().copied().collect();
+        assert_eq!(unique.len(), tags.len(), "verdict tags must be distinct");
+        // Stability — these strings feed audit-gate JSON.
+        assert!(tags.contains(&"discharged"));
+        assert!(tags.contains(&"admitted_with_iou"));
+        assert!(tags.contains(&"reject_ill_formed"));
+        assert!(tags.contains(&"routed_to_frame_rule"));
+        assert!(tags.contains(&"routed_to_hoare_sequencing"));
+        assert!(tags.contains(&"routed_to_consequence_rule"));
+    }
+
+    #[test]
+    fn dispatcher_stats_record_each_variant() {
+        let mut stats = SeparationDispatcherStats::new();
+        stats.record(&SeparationVerdict::Discharged);
+        stats.record(&SeparationVerdict::Discharged);
+        stats.record(&SeparationVerdict::AdmittedWithIou("foo".into()));
+        stats.record(&SeparationVerdict::RejectIllFormed("bar".into()));
+        stats.record(&SeparationVerdict::RoutedToFrameRule);
+        stats.record(&SeparationVerdict::RoutedToHoareSequencing);
+        stats.record(&SeparationVerdict::RoutedToConsequenceRule);
+        assert_eq!(stats.discharged, 2);
+        assert_eq!(stats.admitted_with_iou, 1);
+        assert_eq!(stats.reject_ill_formed, 1);
+        assert_eq!(stats.routed_to_frame_rule, 1);
+        assert_eq!(stats.routed_to_hoare_sequencing, 1);
+        assert_eq!(stats.routed_to_consequence_rule, 1);
+        assert_eq!(stats.total(), 7);
+        let m = stats.audit_metadata();
+        assert_eq!(m.get("discharged").map(String::as_str), Some("2"));
+        assert_eq!(m.get("total").map(String::as_str), Some("7"));
+    }
+
+    #[test]
+    fn dispatcher_stats_serde_round_trip() {
+        let mut stats = SeparationDispatcherStats::new();
+        stats.record(&SeparationVerdict::Discharged);
+        stats.record(&SeparationVerdict::RoutedToFrameRule);
+        let json = serde_json::to_string(&stats).unwrap();
+        let restored: SeparationDispatcherStats = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, stats);
+    }
+
+    #[test]
+    fn verdict_serde_round_trip_preserves_payload() {
+        let v = SeparationVerdict::AdmittedWithIou("frame inference V1".into());
+        let json = serde_json::to_string(&v).unwrap();
+        let restored: SeparationVerdict = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, v);
+        let v2 = SeparationVerdict::RoutedToFrameRule;
+        let json2 = serde_json::to_string(&v2).unwrap();
+        let restored2: SeparationVerdict = serde_json::from_str(&json2).unwrap();
+        assert_eq!(restored2, v2);
     }
 }
