@@ -47,9 +47,10 @@
 use serde::{Deserialize, Serialize};
 
 use super::expr_translate::{
-    AgdaExprRenderer, AgdaTypeRenderer, CoqExprRenderer, CoqTypeRenderer, ExprRenderer,
-    IsabelleExprRenderer, IsabelleTypeRenderer, LeanExprRenderer, LeanTypeRenderer,
-    TranslatedExpr, TranslatedType, TypeRenderer,
+    AgdaExprRenderer, AgdaTypeRenderer, CoqExprRenderer, CoqTypeRenderer,
+    DeduktiExprRenderer, DeduktiTypeRenderer, ExprRenderer, IsabelleExprRenderer,
+    IsabelleTypeRenderer, LeanExprRenderer, LeanTypeRenderer, TranslatedExpr,
+    TranslatedType, TypeRenderer,
 };
 
 /// One theorem parameter — name + per-backend type text (#141).
@@ -188,6 +189,7 @@ impl TheoremSpec {
             Box::new(LeanExprRenderer::new()) as Box<dyn ExprRenderer>,
             Box::new(AgdaExprRenderer::new()) as Box<dyn ExprRenderer>,
             Box::new(IsabelleExprRenderer::new()) as Box<dyn ExprRenderer>,
+            Box::new(DeduktiExprRenderer::new()) as Box<dyn ExprRenderer>,
         ] {
             match renderer.render(proposition) {
                 TranslatedExpr::Translated { text } => {
@@ -225,6 +227,7 @@ impl TheoremSpec {
                 Box::new(LeanTypeRenderer::new()) as Box<dyn TypeRenderer>,
                 Box::new(AgdaTypeRenderer::new()) as Box<dyn TypeRenderer>,
                 Box::new(IsabelleTypeRenderer::new()) as Box<dyn TypeRenderer>,
+                Box::new(DeduktiTypeRenderer::new()) as Box<dyn TypeRenderer>,
             ] {
                 if let TranslatedType::Translated { text } = renderer.render(ty) {
                     per_backend_type_text.insert(renderer.id().to_string(), text);
@@ -267,14 +270,16 @@ impl TheoremSpec {
     /// any future site that builds specs directly.
     pub fn with_translated_proof_body(mut self, body: &verum_ast::decl::ProofBody) -> Self {
         use super::proof_body_translate::{
-            AgdaProofBodyRenderer, CoqProofBodyRenderer, IsabelleProofBodyRenderer,
-            LeanProofBodyRenderer, ProofBodyRenderer, TranslatedProofBody,
+            AgdaProofBodyRenderer, CoqProofBodyRenderer, DeduktiProofBodyRenderer,
+            IsabelleProofBodyRenderer, LeanProofBodyRenderer, ProofBodyRenderer,
+            TranslatedProofBody,
         };
         for renderer in [
             Box::new(CoqProofBodyRenderer::new()) as Box<dyn ProofBodyRenderer>,
             Box::new(LeanProofBodyRenderer::new()) as Box<dyn ProofBodyRenderer>,
             Box::new(AgdaProofBodyRenderer::new()) as Box<dyn ProofBodyRenderer>,
             Box::new(IsabelleProofBodyRenderer::new()) as Box<dyn ProofBodyRenderer>,
+            Box::new(DeduktiProofBodyRenderer::new()) as Box<dyn ProofBodyRenderer>,
         ] {
             if let TranslatedProofBody::Translated { text } = renderer.render(body) {
                 self.per_backend_proof_tactic
@@ -668,6 +673,7 @@ pub fn all_corpus_backends() -> Vec<Box<dyn CorpusBackend>> {
         Box::new(LeanCorpusBackend::new()),
         Box::new(AgdaCorpusBackend::new()),
         Box::new(IsabelleCorpusBackend::new()),
+        Box::new(DeduktiCorpusBackend::new()),
     ]
 }
 
@@ -786,6 +792,124 @@ impl CorpusBackend for AgdaCorpusBackend {
 /// `{-` / `-}` aren't relevant for line comments.
 fn sanitise_for_agda_line_comment(text: &str) -> String {
     text.replace('\n', " ").replace('\r', " ")
+}
+
+// =============================================================================
+// DeduktiCorpusBackend (#156 — fifth backend, closes the matrix)
+// =============================================================================
+
+/// Dedukti backend for corpus theorems.  Emits per-theorem `.dk`
+/// files using the λΠ-modulo declaration syntax: `name : type.`
+/// for axioms, `def name : type := body.` for definitions / proven
+/// theorems with a translation.
+///
+/// **Architectural significance**: Dedukti is a **logical
+/// framework** — it embeds many proof systems uniformly via
+/// rewriting.  Adding it to the cross-format gate provides a
+/// meta-validation layer: artefacts emitted from the four upstream
+/// backends (Coq + Lean + Agda + Isabelle) all admit
+/// Dedukti-translation pipelines (Coq via Coqine, Agda via
+/// agda2dedukti, Lean via the Lean-to-Dedukti exporter), so
+/// emitting directly to Dedukti complements the upstream
+/// translations with a Verum-side independent path.
+pub struct DeduktiCorpusBackend;
+
+impl DeduktiCorpusBackend {
+    /// Construct a fresh backend.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for DeduktiCorpusBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CorpusBackend for DeduktiCorpusBackend {
+    fn id(&self) -> &'static str {
+        "dedukti"
+    }
+
+    fn extension(&self) -> &'static str {
+        "dk"
+    }
+
+    fn render_theorem(&self, spec: &TheoremSpec) -> RenderedTheorem {
+        let filename = format!("{}.dk", spec.name);
+        let signature = compute_provenance_signature(spec, "dedukti");
+        let mut content = String::new();
+        // Provenance signature header.  Dedukti uses `(; ... ;)`
+        // for block comments; line-by-line on `(;` is the cleanest
+        // emission shape.
+        content.push_str(&format!("(; verum_signature: {} ;)\n", signature));
+        content.push_str(&format!(
+            "(; Auto-generated by verum_kernel::soundness::corpus_export::DeduktiCorpusBackend ;)\n\
+             (; Source module: {} ;)\n",
+            spec.module_path,
+        ));
+        if let Some(strat) = &spec.declared_strategy {
+            content.push_str(&format!("(; @verify({}) ;)\n", strat));
+        }
+        content.push('\n');
+        content.push_str(&format!(
+            "(; Proposition (Verum source): {} ;)\n",
+            sanitise_for_dedukti_comment(&spec.proposition_text),
+        ));
+
+        let dk_type: &str = spec
+            .per_backend_proposition
+            .get("dedukti")
+            .map(|s| s.as_str())
+            .unwrap_or("Type");
+        let dk_generics = render_generics_for_backend(spec, "dedukti");
+        let dk_params = render_params_for_backend(spec, "dedukti");
+
+        if spec.has_proof_body {
+            // Translated proof — `def name : type := body.` form.
+            // Dedukti's `def` keyword introduces a definitional
+            // equality for the symbol, which is the cleanest match
+            // for "this theorem has a constructive proof".
+            match spec.per_backend_proof_tactic.get("dedukti") {
+                Some(tactic) if !tactic.trim().is_empty() => {
+                    content.push_str(&format!(
+                        "def {}{}{} : {} := {}.\n",
+                        spec.name,
+                        dk_generics,
+                        dk_params,
+                        dk_type,
+                        tactic.trim(),
+                    ));
+                }
+                _ => {
+                    // Untranslated proof body — emit as a constant
+                    // declaration (equivalent to `Admitted.`/`sorry`
+                    // / `postulate` in upstream backends).
+                    content.push_str(&format!(
+                        "{}{}{} : {}.\n",
+                        spec.name, dk_generics, dk_params, dk_type,
+                    ));
+                }
+            }
+        } else {
+            // Pure axiom — bare declaration.
+            content.push_str(&format!(
+                "{}{}{} : {}.\n",
+                spec.name, dk_generics, dk_params, dk_type,
+            ));
+        }
+        RenderedTheorem { filename, content }
+    }
+}
+
+/// Sanitise text for embedding in a Dedukti `(; ... ;)` block
+/// comment.  Replaces `;)` with `; )` to prevent the comment from
+/// terminating prematurely, and `(;` with `( ;` to prevent
+/// accidentally opening a nested block (Dedukti comments don't
+/// nest in older parsers).
+fn sanitise_for_dedukti_comment(text: &str) -> String {
+    text.replace(";)", "; )").replace("(;", "( ;")
 }
 
 // =============================================================================
@@ -1131,14 +1255,72 @@ mod tests {
     }
 
     #[test]
-    fn all_corpus_backends_returns_four_known_backends() {
+    fn all_corpus_backends_returns_five_known_backends() {
+        // Closes #156 declared backend matrix:
+        //   Coq + Lean (CIC) + Agda (MLTT) + Isabelle (HOL) +
+        //   Dedukti (λΠ-modulo, logical framework).
         let backends = all_corpus_backends();
         let ids: Vec<&str> = backends.iter().map(|b| b.id()).collect();
-        assert_eq!(ids.len(), 4);
-        assert!(ids.contains(&"coq"));
-        assert!(ids.contains(&"lean"));
-        assert!(ids.contains(&"agda"));
-        assert!(ids.contains(&"isabelle"));
+        assert_eq!(ids.len(), 5);
+        for required in ["coq", "lean", "agda", "isabelle", "dedukti"] {
+            assert!(
+                ids.contains(&required),
+                "default registry must include `{}`",
+                required,
+            );
+        }
+    }
+
+    #[test]
+    fn dedukti_backend_emits_bare_declaration_for_axioms() {
+        let backend = DeduktiCorpusBackend::new();
+        let r = backend.render_theorem(&spec_axiom("ax_thm", "Type"));
+        assert_eq!(r.filename, "ax_thm.dk");
+        assert!(
+            r.content.contains("ax_thm"),
+            "axiom must be emitted by name",
+        );
+        assert!(r.content.contains(" : "));
+        // Dedukti uses `(; ;)` block comments.
+        assert!(r.content.contains("(; verum_signature:"));
+        assert!(!r.content.contains("(*"));
+    }
+
+    #[test]
+    fn dedukti_backend_emits_def_for_translated_proof() {
+        let backend = DeduktiCorpusBackend::new();
+        let mut spec = spec_proven("backed_thm", "P");
+        spec.per_backend_proof_tactic
+            .insert("dedukti".to_string(), "lemma_x".to_string());
+        let r = backend.render_theorem(&spec);
+        assert!(
+            r.content.contains("def backed_thm"),
+            "Dedukti uses `def` for proven theorems with body; got:\n{}",
+            r.content,
+        );
+        assert!(r.content.contains(":= lemma_x."));
+    }
+
+    #[test]
+    fn dedukti_backend_falls_back_to_declaration_without_translation() {
+        let backend = DeduktiCorpusBackend::new();
+        let r = backend.render_theorem(&spec_proven("bare_thm", "P"));
+        // No translation → emits as bare declaration (axiom form).
+        assert!(!r.content.contains("def "));
+        assert!(r.content.contains("bare_thm "));
+    }
+
+    #[test]
+    fn dedukti_signature_is_distinct_from_other_backends() {
+        let spec = spec_axiom("thm", "P");
+        let coq = compute_provenance_signature(&spec, "coq");
+        let lean = compute_provenance_signature(&spec, "lean");
+        let agda = compute_provenance_signature(&spec, "agda");
+        let isa = compute_provenance_signature(&spec, "isabelle");
+        let dk = compute_provenance_signature(&spec, "dedukti");
+        for other in [&coq, &lean, &agda, &isa] {
+            assert_ne!(*other, dk);
+        }
     }
 
     #[test]

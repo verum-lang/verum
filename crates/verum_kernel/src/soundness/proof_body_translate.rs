@@ -49,8 +49,8 @@ use verum_ast::ty::PathSegment;
 use verum_common::Maybe;
 
 use super::expr_translate::{
-    AgdaExprRenderer, CoqExprRenderer, ExprRenderer, IsabelleExprRenderer,
-    LeanExprRenderer, TranslatedExpr,
+    AgdaExprRenderer, CoqExprRenderer, DeduktiExprRenderer, ExprRenderer,
+    IsabelleExprRenderer, LeanExprRenderer, TranslatedExpr,
 };
 
 // =============================================================================
@@ -470,6 +470,82 @@ fn render_single_apply_agda(body: &ProofBody) -> TranslatedProofBody {
     }
     TranslatedProofBody::Fallback {
         reason: "Agda: no tactic system; only Term and single-apply translate in V0".to_string(),
+    }
+}
+
+// =============================================================================
+// DeduktiProofBodyRenderer (#156 — fifth backend)
+// =============================================================================
+
+/// Dedukti backend.  Dedukti is a logical framework — it has no
+/// tactic system whatsoever, so the V0 surface is term-mode only.
+/// Any proof body that doesn't reduce to a single term falls back
+/// to the postulate (axiom-declaration) form at the corpus-emission
+/// layer.
+///
+/// **Coverage** (V0):
+///   * `ProofBody::Term(expr)` → `<expr>` (same as Lean / Agda).
+///   * Single-apply (Tactic + Structured) → bare lemma name as
+///     a term (Dedukti's β-reduction supplies any implicit args).
+///   * Primitive tactics — fall back; Dedukti has no built-in
+///     tactic vocabulary.
+pub struct DeduktiProofBodyRenderer;
+
+impl DeduktiProofBodyRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for DeduktiProofBodyRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProofBodyRenderer for DeduktiProofBodyRenderer {
+    fn id(&self) -> &'static str {
+        "dedukti"
+    }
+
+    fn render(&self, body: &ProofBody) -> TranslatedProofBody {
+        match body.kind() {
+            ProofBodyKind::Term => render_term_dedukti(body),
+            ProofBodyKind::Tactic | ProofBodyKind::Structured => {
+                render_single_apply_dedukti(body)
+            }
+            other => TranslatedProofBody::Fallback {
+                reason: format!(
+                    "Dedukti translator: proof-body kind {:?} not yet covered (Dedukti has no tactic system; V0 covers Term + single-apply only)",
+                    other,
+                ),
+            },
+        }
+    }
+}
+
+fn render_term_dedukti(body: &ProofBody) -> TranslatedProofBody {
+    let expr = match body {
+        ProofBody::Term(e) => e.as_ref(),
+        _ => unreachable!("called from kind() == Term arm"),
+    };
+    match DeduktiExprRenderer::new().render(expr) {
+        TranslatedExpr::Translated { text } => TranslatedProofBody::Translated { text },
+        TranslatedExpr::Fallback { reason, .. } => TranslatedProofBody::Fallback {
+            reason: format!("Dedukti term-mode: expr renderer fallback — {}", reason),
+        },
+    }
+}
+
+fn render_single_apply_dedukti(body: &ProofBody) -> TranslatedProofBody {
+    if let Some((name, _args)) = classify_single_apply(body) {
+        return TranslatedProofBody::Translated {
+            text: name.to_string(),
+        };
+    }
+    TranslatedProofBody::Fallback {
+        reason: "Dedukti: no tactic system; only Term and single-apply translate in V0".to_string(),
     }
 }
 
@@ -1261,6 +1337,43 @@ mod tests {
         let body = apply_body_via_call("lemma_x", vec![name_path_expr("p")]);
         let r = IsabelleProofBodyRenderer::new().render(&body);
         assert_eq!(r.text(), Some("by (rule lemma_x)"));
+    }
+
+    // -------------------------------------------------------------
+    // Dedukti translator (#156 — fifth backend)
+    // -------------------------------------------------------------
+
+    #[test]
+    fn dedukti_renders_apply_as_bare_term() {
+        let body = apply_body("backbone_full", vec![]);
+        let r = DeduktiProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("backbone_full"));
+    }
+
+    #[test]
+    fn dedukti_renders_term_body_passthrough() {
+        let body = term_body("h_x");
+        let r = DeduktiProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("h_x"));
+    }
+
+    #[test]
+    fn dedukti_falls_back_on_primitive_tactic() {
+        let body = primitive_body(TacticExpr::Auto {
+            with_hints: List::new(),
+        });
+        let r = DeduktiProofBodyRenderer::new().render(&body);
+        assert!(
+            matches!(r, TranslatedProofBody::Fallback { .. }),
+            "Dedukti has no tactic system — primitive tactics fall back",
+        );
+    }
+
+    #[test]
+    fn dedukti_renders_call_shape_apply() {
+        let body = apply_body_via_call("lemma_x", vec![name_path_expr("p")]);
+        let r = DeduktiProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("lemma_x"));
     }
 
     #[test]
