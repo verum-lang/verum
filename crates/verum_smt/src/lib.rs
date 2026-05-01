@@ -288,6 +288,7 @@ pub mod number_theory;
 pub mod interactive;
 pub mod separation_kernel_bridge; // #161 V1 — kernel↔SMT separation-logic adapter
 pub mod separation_logic;
+pub mod separation_recognizer; // #161 V2 — AST → SepAssertion recogniser
 pub mod topology;
 
 // GPU kernel verification (extension for parallel computing)
