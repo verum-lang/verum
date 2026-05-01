@@ -935,6 +935,318 @@ fn generic_arg_to_lean_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
     }
 }
 
+// -----------------------------------------------------------------------------
+// AgdaExprRenderer (#156 — multi-kernel cross-validation, third backend)
+// -----------------------------------------------------------------------------
+
+/// Agda backend for proposition translation.  Agda is foundationally
+/// distinct from Coq + Lean: it lives in pure MLTT (no UIP, no
+/// classical extensions), so the cross-format gate gains a
+/// MLTT-side independent re-check the moment this backend lands.
+///
+/// Surface conventions:
+///
+///   * Universe: `Set` (Agda's term for `Type`/`Prop`).
+///   * Equality: `_≡_` (propositional equality from
+///     `Relation.Binary.PropositionalEquality`).
+///   * Logic: `_∧_` / `_∨_` / `→` / `_⇔_` (Agda stdlib).
+///   * Negation: `¬_`.
+///   * Numbers: literals dispatch via `BUILTIN NATURAL` for `Nat` /
+///     stdlib `Integer` for `Int`.
+///   * Booleans: `Bool` with `true`/`false` constructors (lowercase).
+pub struct AgdaExprRenderer;
+
+impl AgdaExprRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for AgdaExprRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ExprRenderer for AgdaExprRenderer {
+    fn id(&self) -> &'static str {
+        "agda"
+    }
+
+    fn render(&self, expr: &Expr) -> TranslatedExpr {
+        match render_expr_agda(expr) {
+            Some(text) => TranslatedExpr::Translated { text },
+            None => TranslatedExpr::Fallback {
+                reason: classify_unrenderable(expr).to_string(),
+                original: verum_ast::pretty::format_expr(expr).to_string(),
+            },
+        }
+    }
+}
+
+fn render_expr_agda(expr: &Expr) -> Option<String> {
+    match &expr.kind {
+        ExprKind::Literal(lit) => render_literal_agda(&lit.kind),
+        ExprKind::Path(path) => path.as_ident().map(|i| i.as_str().to_string()),
+        ExprKind::Paren(inner) => render_expr_agda(inner).map(|t| format!("({})", t)),
+        ExprKind::Unary { op, expr: inner } => {
+            let inner_text = render_expr_agda(inner)?;
+            match op {
+                UnOp::Not => Some(format!("¬ {}", parens_if_complex(&inner_text))),
+                UnOp::Neg => Some(format!("- {}", parens_if_complex(&inner_text))),
+                _ => None,
+            }
+        }
+        ExprKind::Binary { op, left, right } => {
+            let l = render_expr_agda(left)?;
+            let r = render_expr_agda(right)?;
+            // Agda uses `_op_` underscore form when defining; in
+            // expressions it's bare `op` between args.
+            let agda_op = match op {
+                BinOp::Eq => Some("≡"),
+                BinOp::Ne => Some("≢"),
+                BinOp::Lt => Some("<"),
+                BinOp::Le => Some("≤"),
+                BinOp::Gt => Some(">"),
+                BinOp::Ge => Some("≥"),
+                BinOp::And => Some("∧"),
+                BinOp::Or => Some("∨"),
+                // `→` doubles as function arrow and implication —
+                // valid in Agda's expression grammar.
+                BinOp::Imply => Some("→"),
+                BinOp::Iff => Some("⇔"),
+                BinOp::Add => Some("+"),
+                BinOp::Sub => Some("-"),
+                BinOp::Mul => Some("*"),
+                BinOp::Div => Some("/"),
+                // Agda has no built-in `mod`; stdlib provides `_mod_`
+                // but the convention is `_%_` for primitive modulo
+                // and `_mod_` for proper modular arithmetic.  Use the
+                // primitive form for closer Coq/Lean parity.
+                BinOp::Rem => Some("%"),
+                _ => None,
+            }?;
+            Some(format!(
+                "({} {} {})",
+                parens_if_complex(&l),
+                agda_op,
+                parens_if_complex(&r)
+            ))
+        }
+        ExprKind::Call { func, args, .. } => {
+            // Agda uses left-associative juxtaposition for
+            // application — same shape as Lean.
+            let head = render_expr_agda(func)?;
+            let mut out = head;
+            for a in args.iter() {
+                let arg_text = render_expr_agda(a)?;
+                out.push(' ');
+                out.push_str(&parens_if_complex(&arg_text));
+            }
+            Some(out)
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            // Agda has no method-call dot-notation; fall back to
+            // `method receiver args...` so the proposition
+            // type-checks structurally.
+            let receiver_text = render_expr_agda(receiver)?;
+            let mut out = format!(
+                "{} {}",
+                method.as_str(),
+                parens_if_complex(&receiver_text),
+            );
+            for a in args.iter() {
+                let arg_text = render_expr_agda(a)?;
+                out.push(' ');
+                out.push_str(&parens_if_complex(&arg_text));
+            }
+            Some(out)
+        }
+        ExprKind::Field { expr: inner, field } => {
+            // `obj.field` → `field obj` (record projection in Agda).
+            let receiver_text = render_expr_agda(inner)?;
+            Some(format!(
+                "{} {}",
+                field.as_str(),
+                parens_if_complex(&receiver_text),
+            ))
+        }
+        ExprKind::Forall { bindings, body } => {
+            // `∀ x → body` — Agda's universal quantifier.
+            let body_text = render_expr_agda(body)?;
+            let names: Vec<String> = bindings
+                .iter()
+                .filter_map(quantifier_binding_name)
+                .collect();
+            if names.is_empty() {
+                return None;
+            }
+            Some(format!("(∀ {} → {})", names.join(" "), body_text))
+        }
+        ExprKind::Exists { bindings, body } => {
+            // `∃ λ x → body` — stdlib existential from
+            // `Data.Product` / `Relation.Unary`.
+            let body_text = render_expr_agda(body)?;
+            let names: Vec<String> = bindings
+                .iter()
+                .filter_map(quantifier_binding_name)
+                .collect();
+            if names.is_empty() {
+                return None;
+            }
+            Some(format!("(∃ λ {} → {})", names.join(" "), body_text))
+        }
+        _ => None,
+    }
+}
+
+fn render_literal_agda(kind: &LiteralKind) -> Option<String> {
+    match kind {
+        LiteralKind::Int(int_lit) => Some(int_lit.value.to_string()),
+        // Agda stdlib `Data.Bool` uses lowercase constructors.
+        LiteralKind::Bool(true) => Some("true".to_string()),
+        LiteralKind::Bool(false) => Some("false".to_string()),
+        LiteralKind::Text(s) => match s {
+            StringLit::Regular(t) | StringLit::MultiLine(t) => {
+                Some(format!("\"{}\"", t.as_str().replace('"', "\\\"")))
+            }
+        },
+        LiteralKind::Float(f) => Some(f.value.to_string()),
+        _ => None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// AgdaTypeRenderer
+// -----------------------------------------------------------------------------
+
+/// Agda type backend.  Mirrors Coq/Lean type renderers but emits
+/// MLTT-flavoured syntax: `Set` for the universe, `_≡_` for equality
+/// types, stdlib aliases (`ℕ` for naturals, `String`, `Bool`), and
+/// `Σ` for dependent products.
+pub struct AgdaTypeRenderer;
+
+impl AgdaTypeRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for AgdaTypeRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TypeRenderer for AgdaTypeRenderer {
+    fn id(&self) -> &'static str {
+        "agda"
+    }
+
+    fn render(&self, ty: &Type) -> TranslatedType {
+        match render_type_agda(ty) {
+            Some(text) => TranslatedType::Translated { text },
+            None => TranslatedType::Fallback {
+                reason: classify_unrenderable_type(ty).to_string(),
+                original: format!("{:?}", ty.kind),
+            },
+        }
+    }
+}
+
+fn render_type_agda(ty: &Type) -> Option<String> {
+    match &ty.kind {
+        // Agda stdlib: `Data.Unit.⊤`.  Use the unicode form so the
+        // output matches mainstream Agda style.
+        TypeKind::Unit => Some("⊤".to_string()),
+        TypeKind::Bool => Some("Bool".to_string()),
+        TypeKind::Int => Some("ℤ".to_string()),
+        TypeKind::Float => Some("Float".to_string()),
+        TypeKind::Char => Some("Char".to_string()),
+        TypeKind::Text => Some("String".to_string()),
+        TypeKind::Path(path) => path.as_ident().map(|i| match i.as_str() {
+            "Int" => "ℤ".to_string(),
+            "Bool" => "Bool".to_string(),
+            "Float" => "Float".to_string(),
+            "Text" => "String".to_string(),
+            "Char" => "Char".to_string(),
+            "Unit" => "⊤".to_string(),
+            "Nat" => "ℕ".to_string(),
+            other => other.to_string(),
+        }),
+        TypeKind::Tuple(elems) => {
+            let parts: Vec<String> = elems
+                .iter()
+                .map(render_type_agda)
+                .collect::<Option<Vec<_>>>()?;
+            if parts.is_empty() {
+                Some("⊤".to_string())
+            } else if parts.len() == 1 {
+                Some(parts.into_iter().next().unwrap())
+            } else {
+                // Agda product type: `T1 × T2 × ...` from
+                // `Data.Product`.
+                Some(format!("({})", parts.join(" × ")))
+            }
+        }
+        TypeKind::Slice(inner) | TypeKind::Array { element: inner, .. } => {
+            // Agda stdlib lists: `List T`.
+            let t = render_type_agda(inner)?;
+            Some(format!("(List {})", t))
+        }
+        TypeKind::Generic { base, args, .. } => {
+            let base_text = render_type_agda(base)?;
+            let mapped_base = match base_text.as_str() {
+                "List" => "List",
+                "Maybe" | "Option" => "Maybe",
+                "Result" => "Either",
+                other => other,
+            }
+            .to_string();
+            let arg_parts: Vec<String> = args
+                .iter()
+                .filter_map(generic_arg_to_agda_text)
+                .collect();
+            if arg_parts.is_empty() {
+                Some(mapped_base)
+            } else {
+                Some(format!("({} {})", mapped_base, arg_parts.join(" ")))
+            }
+        }
+        TypeKind::Reference { inner, .. }
+        | TypeKind::CheckedReference { inner, .. }
+        | TypeKind::UnsafeReference { inner, .. } => render_type_agda(inner),
+        TypeKind::Refined { base, predicate } => {
+            // `T{predicate}` → Agda Σ-type
+            // `Σ[ binder ∈ T ] (predicate binder)`.  Standard
+            // dependent-pair form from `Data.Product`.
+            let base_text = render_type_agda(base)?;
+            let pred_text = render_expr_agda(&predicate.expr)?;
+            let binder = match &predicate.binding {
+                verum_common::Maybe::Some(i) => i.as_str().to_string(),
+                verum_common::Maybe::None => "it".to_string(),
+            };
+            Some(format!("(Σ[ {} ∈ {} ] {})", binder, base_text, pred_text))
+        }
+        _ => None,
+    }
+}
+
+fn generic_arg_to_agda_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
+    use verum_ast::ty::GenericArg;
+    match arg {
+        GenericArg::Type(t) => render_type_agda(t),
+        _ => Some("_".to_string()),
+    }
+}
+
 /// Diagnostic classifier for unrenderable type shapes.
 fn classify_unrenderable_type(ty: &Type) -> &'static str {
     match &ty.kind {
