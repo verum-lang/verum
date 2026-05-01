@@ -609,6 +609,99 @@ pub fn is_foreign_framework_target(name: &str) -> bool {
 }
 
 // =============================================================================
+// Workspace builder — populate an ApplyGraph from a slice of Modules.
+// =============================================================================
+
+/// Classify a declaration whose name and `@framework`-bearing
+/// attribute lists are already extracted.
+///
+/// Order:
+///  1. `kernel_*` prefix → [`SymbolEntry::KernelBridge`]
+///  2. Either attribute list carries a `@framework(...)` attribute →
+///     [`SymbolEntry::FrameworkAxiom`]
+///  3. Otherwise → [`SymbolEntry::PlaceholderAxiom`]
+///
+/// Mirrors the audit-gate's classifier so compile-time and audit-time
+/// graphs agree on every leaf classification.
+pub fn classify_axiom_entry_for_attrs(
+    name: &str,
+    decl_attrs: &verum_common::List<verum_ast::attr::Attribute>,
+    item_attrs: &verum_common::List<verum_ast::attr::Attribute>,
+) -> SymbolEntry {
+    if name.starts_with("kernel_") {
+        return SymbolEntry::KernelBridge;
+    }
+    let has_framework = decl_attrs.iter().any(|a| a.is_named("framework"))
+        || item_attrs.iter().any(|a| a.is_named("framework"));
+    if has_framework {
+        SymbolEntry::FrameworkAxiom
+    } else {
+        SymbolEntry::PlaceholderAxiom
+    }
+}
+
+/// Build an [`ApplyGraph`] from a slice of parsed modules. Walks every
+/// theorem / lemma / corollary / axiom declaration and inserts the
+/// classified [`SymbolEntry`] keyed on the bare declaration name.
+///
+/// **What this enables for the compiler.** The audit gate at
+/// `verum audit --apply-graph` builds an identical graph from
+/// `discover_vr_files` — but that walker re-parses the workspace
+/// from disk. The compiler already has parsed ASTs in
+/// `Session::modules`, so feeding those modules to this builder
+/// gets the same graph at zero re-parse cost.
+///
+/// **Use-site (#188 / #318).** When a kernel-bridge discharge fails
+/// at compile time, the verification phase consults this graph to
+/// enumerate the downstream theorems that transitively depend on the
+/// failing axiom — turning a single-line dispatcher rejection into a
+/// dependency-aware diagnostic.
+///
+/// Repeated names across modules collapse last-write-wins. That's
+/// intentional: a corpus that re-declares a name (axiom in one file,
+/// theorem promotion in another) records the most-recent classification.
+pub fn build_apply_graph_from_modules(modules: &[&verum_ast::Module]) -> ApplyGraph {
+    let mut graph = ApplyGraph::new();
+    for module in modules {
+        for item in &module.items {
+            match &item.kind {
+                verum_ast::decl::ItemKind::Theorem(d)
+                | verum_ast::decl::ItemKind::Lemma(d)
+                | verum_ast::decl::ItemKind::Corollary(d) => {
+                    let name = d.name.name.as_str().to_string();
+                    if let verum_common::Maybe::Some(body) = &d.proof {
+                        let apply_targets = extract_apply_targets(body);
+                        graph.insert(name, SymbolEntry::Theorem { apply_targets });
+                    } else {
+                        graph.insert(
+                            name,
+                            classify_axiom_entry_for_attrs(
+                                d.name.name.as_str(),
+                                &d.attributes,
+                                &item.attributes,
+                            ),
+                        );
+                    }
+                }
+                verum_ast::decl::ItemKind::Axiom(a) => {
+                    let name = a.name.name.as_str().to_string();
+                    graph.insert(
+                        name,
+                        classify_axiom_entry_for_attrs(
+                            a.name.name.as_str(),
+                            &a.attributes,
+                            &item.attributes,
+                        ),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+    graph
+}
+
+// =============================================================================
 // AST helpers — extract apply-target names from a proof body.
 // =============================================================================
 
@@ -1411,5 +1504,79 @@ mod tests {
             "source path must appear in rendered note; got: {}",
             note,
         );
+    }
+
+    // -------------------------------------------------------------
+    // build_apply_graph_from_modules — workspace builder (#188 / #318)
+    // -------------------------------------------------------------
+
+    /// Helper: synthesise a single-axiom module for the
+    /// build-from-modules tests below.
+    fn axiom_module(
+        name: &str,
+        attrs: Vec<verum_ast::attr::Attribute>,
+    ) -> verum_ast::Module {
+        use verum_ast::Span;
+        use verum_ast::decl::{AxiomDecl, Item, ItemKind};
+        use verum_ast::expr::{Expr, ExprKind};
+        use verum_ast::span::FileId;
+        use verum_ast::ty::Ident;
+        use verum_common::{Heap, List};
+
+        let prop = Expr::new(
+            ExprKind::Literal(verum_ast::Literal::bool(true, Span::dummy())),
+            Span::dummy(),
+        );
+        let mut axiom = AxiomDecl::new(Ident::new(name, Span::dummy()), prop, Span::dummy());
+        axiom.attributes = List::from(attrs);
+        let item = Item::new(ItemKind::Axiom(axiom), Span::dummy());
+        verum_ast::Module::new(List::from(vec![item]), FileId::new(0), Span::dummy())
+    }
+
+    #[test]
+    fn build_from_modules_classifies_kernel_axiom_correctly() {
+        let module = axiom_module("kernel_grothendieck_construction_strict", vec![]);
+        let graph = build_apply_graph_from_modules(&[&module]);
+        match graph.get("kernel_grothendieck_construction_strict") {
+            Some(SymbolEntry::KernelBridge) => {}
+            other => panic!("kernel-prefixed axiom must be KernelBridge, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn build_from_modules_classifies_framework_axiom_correctly() {
+        use verum_ast::Span;
+        use verum_ast::attr::Attribute;
+
+        // Axiom with a `@framework(...)` attribute → FrameworkAxiom.
+        let framework_attr = Attribute::simple(
+            verum_common::Text::from("framework"),
+            Span::dummy(),
+        );
+        let module = axiom_module("lurie_htt_5_1_4", vec![framework_attr]);
+        let graph = build_apply_graph_from_modules(&[&module]);
+        assert!(
+            matches!(graph.get("lurie_htt_5_1_4"), Some(SymbolEntry::FrameworkAxiom)),
+            "axiom with @framework attribute must classify as FrameworkAxiom",
+        );
+    }
+
+    #[test]
+    fn build_from_modules_classifies_placeholder_axiom_correctly() {
+        let module = axiom_module("internal_helper_axiom", vec![]);
+        let graph = build_apply_graph_from_modules(&[&module]);
+        assert!(
+            matches!(
+                graph.get("internal_helper_axiom"),
+                Some(SymbolEntry::PlaceholderAxiom),
+            ),
+            "plain axiom must classify as PlaceholderAxiom (the L4 placeholder leaf class)",
+        );
+    }
+
+    #[test]
+    fn build_from_modules_handles_empty_input() {
+        let graph = build_apply_graph_from_modules(&[]);
+        assert!(graph.entries.is_empty());
     }
 }

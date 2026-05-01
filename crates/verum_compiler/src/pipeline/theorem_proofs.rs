@@ -34,7 +34,7 @@ impl<'s> CompilationPipeline<'s> {
     pub(super) fn verify_theorem_proofs(&self, module: &Module) -> Result<()> {
         use crate::phases::proof_verification::{
             ProofVerificationResult, build_refinement_alias_map, register_module_lemmas,
-            verify_proof_body_with_aliases,
+            verify_proof_body_with_aliases_and_graph,
         };
         use verum_smt::proof_search::{HintsDatabase, ProofSearchEngine};
 
@@ -147,6 +147,15 @@ impl<'s> CompilationPipeline<'s> {
         };
         let smt_ctx = SmtContext::with_config(smt_config);
 
+        // #188 / #318 — pre-build the workspace ApplyGraph so any
+        // kernel-bridge discharge failure can list downstream theorems
+        // that transitively depend on the failing axiom. The graph is
+        // built once per `verify_theorem_proofs` call from the current
+        // module's items, plus optional sibling modules cached in the
+        // session. Performance: O(N + E) AST walk; sub-millisecond on
+        // a 50-theorem corpus, and only the failure path consumes it.
+        let apply_graph = build_apply_graph_for_session(self, module);
+
         for item in &module.items {
             let (thm, kind_name) = match &item.kind {
                 verum_ast::ItemKind::Theorem(t) => (t, "theorem"),
@@ -214,11 +223,12 @@ impl<'s> CompilationPipeline<'s> {
                     // The verify closure: runs the actual SMT engine
                     // and projects its verdict onto CachedVerdict.
                     let verify_start = Instant::now();
-                    match verify_proof_body_with_aliases(
+                    match verify_proof_body_with_aliases_and_graph(
                         &mut proof_engine,
                         &smt_ctx,
                         thm,
                         &alias_map,
+                        Some(&apply_graph),
                     ) {
                         ProofVerificationResult::Verified(cert) => {
                             let elapsed = verify_start.elapsed().as_millis() as u64;
@@ -275,11 +285,12 @@ impl<'s> CompilationPipeline<'s> {
                 }
                 None => {
                     // No cache configured — run the engine directly.
-                    match verify_proof_body_with_aliases(
+                    match verify_proof_body_with_aliases_and_graph(
                         &mut proof_engine,
                         &smt_ctx,
                         thm,
                         &alias_map,
+                        Some(&apply_graph),
                     ) {
                         ProofVerificationResult::Verified(cert) => {
                             verified_count += 1;
@@ -341,4 +352,40 @@ impl<'s> CompilationPipeline<'s> {
 
         Ok(())
     }
+}
+
+/// Build a workspace-wide [`ApplyGraph`](verum_kernel::soundness::apply_graph::ApplyGraph)
+/// for the current verification run. Walks the current module plus
+/// every other module already cached in the [`Session`] so the graph
+/// covers the full corpus visible to this compilation.
+///
+/// **Why per-call rebuild** (#188 / #318): the graph is small (< 1000
+/// edges on the MSFS corpus, sub-millisecond construction) and its
+/// only consumer is the bridge-discharge failure path. Per-call
+/// rebuild keeps the API zero-state — no cache invalidation, no
+/// stale data when the session adds modules between calls.
+///
+/// **Single-module fallback**: when the session hasn't cached any
+/// other modules (single-file `verum check`), the graph contains
+/// only the current module's symbols. The dependent-theorems lookup
+/// silently returns an empty list in that case — the dispatcher
+/// reason still surfaces via `e.reason`, so the diagnostic
+/// degrades gracefully.
+fn build_apply_graph_for_session<'s>(
+    pipeline: &CompilationPipeline<'s>,
+    current_module: &Module,
+) -> verum_kernel::soundness::apply_graph::ApplyGraph {
+    use verum_kernel::soundness::apply_graph::build_apply_graph_from_modules;
+
+    // Collect cached sibling modules from the session, plus the
+    // current module that's not yet cached (compilation pipeline
+    // caches AFTER verification runs).
+    let cached: Vec<verum_common::Shared<Module>> = pipeline
+        .session
+        .iter_cached_modules()
+        .into_iter()
+        .collect();
+    let mut module_refs: Vec<&Module> = cached.iter().map(|m| m.as_ref()).collect();
+    module_refs.push(current_module);
+    build_apply_graph_from_modules(&module_refs)
 }
