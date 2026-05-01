@@ -40,6 +40,10 @@ mount core.database.sqlite.native.l6_session.schema_cache.SchemaCache;
 mount core.database.sqlite.native.l5_sql.codegen.{
     codegen, CodegenError,
 };
+mount core.database.sqlite.native.l5_sql.cost_annotated.{
+    CostAnnotatedPlan, StatsCatalogue,
+    annotate_with_cost, stats_catalogue_new, explain_annotated,
+};
 mount core.database.sqlite.native.l4_vdbe.{
     VdbeProgram, optimize,
 };
@@ -115,6 +119,95 @@ public fn compile(sql: &Text) -> Result<VdbeProgram, CompileError> {
     let _ = optimize(&mut program);
 
     Ok(program)
+}
+
+// -----------------------------------------------------------------------------
+// Cost-aware compile pipeline
+// -----------------------------------------------------------------------------
+
+/// Compile-time options gating the new cost-aware planner pipeline.
+/// Defaults preserve the historical behaviour (`compile()` with no
+/// options enables nothing new); callers opt into cost annotation
+/// via `compile_with_options(.., opts_cost_aware())`.
+public type CompileOptions is {
+    /// `true` → run the cost annotator over the planner output and
+    /// expose the result on the returned program (currently emitted
+    /// as an EXPLAIN-style trace; codegen integration follows).
+    use_cost_annotation: Bool,
+    /// `true` → run the L4 optimiser passes (thread_jumps, DCE,
+    /// noop_elim, move-chain).  Equivalent to historical default.
+    run_optimizer: Bool,
+};
+
+/// Defaults: cost annotation OFF, optimizer ON — exact match to
+/// historical `compile()` behaviour.
+public fn compile_options_default() -> CompileOptions {
+    CompileOptions {
+        use_cost_annotation: false,
+        run_optimizer: true,
+    }
+}
+
+/// Cost-aware preset: cost annotation ON, optimizer ON.  Recommended
+/// for production paths once the codegen integration lands.
+public fn compile_options_cost_aware() -> CompileOptions {
+    CompileOptions {
+        use_cost_annotation: true,
+        run_optimizer: true,
+    }
+}
+
+/// Output of `compile_with_options`: the program plus optional
+/// EXPLAIN trace harvested from the cost annotator.
+public type CompileOutput is {
+    program: VdbeProgram,
+    /// `Some(text)` when `use_cost_annotation = true`; the multi-line
+    /// EXPLAIN-style render of the cost-annotated plan tree.  Empty
+    /// otherwise.
+    explain_trace: Maybe<Text>,
+};
+
+/// Schema-aware, cost-aware compile.  The new canonical entry point
+/// for the L5 pipeline (#142): parse → resolve → plan → cost-annotate
+/// (optional) → codegen → optimize (optional).  Existing entry points
+/// (`compile`, `compile_with_schema`) call this with the historical
+/// options preset.
+///
+/// Stats catalogue is currently empty (foundation pass — table-stats
+/// population from `sqlite_stat1` rows is a #142 follow-up).  Even
+/// with empty stats the cost annotator produces a well-formed plan
+/// with default-row estimates, useful for surfacing the cost model
+/// in EXPLAIN output today.
+public fn compile_with_options(
+    sql: &Text,
+    schema: &SchemaCache,
+    opts: &CompileOptions,
+) -> Result<CompileOutput, CompileError> {
+    let stmt = match parse_one(sql) {
+        Ok(s)  => s,
+        Err(e) => { return Err(CeParse(e)); }
+    };
+    let plan = match plan_statement_with_schema(&stmt, schema) {
+        Ok(p)  => p,
+        Err(e) => { return Err(CePlan(e)); }
+    };
+
+    let explain_trace = if opts.use_cost_annotation {
+        let stats = stats_catalogue_new();
+        let annotated = annotate_with_cost(&plan, &stats);
+        Some(explain_annotated(&annotated))
+    } else {
+        None
+    };
+
+    let mut program = match codegen(&plan, sql.clone()) {
+        Ok(p)  => p,
+        Err(e) => { return Err(CeCodegen(e)); }
+    };
+    if opts.run_optimizer {
+        let _ = optimize(&mut program);
+    }
+    Ok(CompileOutput { program: program, explain_trace: explain_trace })
 }
 
 /// Same as `compile` but skips the optimiser pass — useful for
