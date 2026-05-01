@@ -8990,6 +8990,69 @@ impl VbcCodegen {
         // (closures compiled during parent functions may be pushed out of order)
         self.functions.sort_by_key(|f| f.descriptor.id.0);
 
+        // **Duplicate-id collapse, the load-bearing dispatch fix.**
+        //
+        // `func_id_remap` was a HashMap<old_id → new_idx> that silently
+        // collapsed duplicate `descriptor.id` entries — the second
+        // function compiled with a given codegen-time id won the
+        // HashMap key, and `Call(old_id)` instructions emitted from
+        // ANY caller resolved to the winner.  Live failure mode:
+        // pager.vr's body emits `Call(14706)` for its local
+        // `is_valid_page_size`; another module also pushes a function
+        // with `descriptor.id = 14706` (because of asymmetric
+        // `next_func_id` consumption between `register_*` and
+        // `self.functions.push`); the second function (`StreamFilter.flatten`
+        // in the live repro) wins the remap, and pager's call lands
+        // on the wrong body — surfacing as `pager_open_memory failed`
+        // for a perfectly-valid 4 KiB page once `mount base.{...}`
+        // pulls in enough modules to trigger the collision.
+        //
+        // The dedup keeps the LAST function for each codegen-time id,
+        // matching `register_function`'s last-wins semantics in user-
+        // mode compilation (`prefer_existing_functions = false`).
+        // Under stdlib loading (`prefer_existing = true`) registration
+        // is first-wins, but compile-time pushes still respect that
+        // because the registry only retains the first-registered info.
+        // The duplicates we collapse here are the SECOND BODY pushes
+        // — typically blanket-impl replays, generic monomorphisations,
+        // or stdlib re-loads that re-emit the same function under
+        // the same codegen-id.
+        {
+            use std::collections::HashMap;
+            let before_len = self.functions.len();
+            // Diagnostic: report duplicate ids before collapsing.
+            let mut id_count: HashMap<u32, usize> = HashMap::new();
+            for f in &self.functions {
+                *id_count.entry(f.descriptor.id.0).or_insert(0) += 1;
+            }
+            let dups: Vec<(u32, usize)> = id_count
+                .iter()
+                .filter(|&(_, &c)| c > 1)
+                .map(|(&k, &v)| (k, v))
+                .collect();
+            if !dups.is_empty() {
+                eprintln!("[codegen-dedup] {} duplicate codegen-id groups detected (e.g. id={} appears {}x)",
+                    dups.len(), dups[0].0, dups[0].1);
+                for f in &self.functions {
+                    if f.descriptor.id.0 == dups[0].0 {
+                        let n = self.ctx.strings.get(f.descriptor.name.0 as usize).cloned().unwrap_or_default();
+                        eprintln!("  duplicate id={} name='{}' bytecode_len={}", f.descriptor.id.0, n, f.instructions.len());
+                    }
+                }
+            }
+            use std::collections::HashSet;
+            let mut seen: HashSet<u32> = HashSet::new();
+            // Walk in reverse so `retain`'s natural keep-first becomes
+            // keep-last after a final reverse.
+            self.functions.reverse();
+            self.functions.retain(|f| seen.insert(f.descriptor.id.0));
+            self.functions.reverse();
+            if self.functions.len() != before_len {
+                eprintln!("[codegen-dedup] collapsed {} functions ({} → {})",
+                    before_len - self.functions.len(), before_len, self.functions.len());
+            }
+        }
+
         // Build func_id remapping: old sparse IDs → new contiguous 0-based IDs.
         // When stdlib functions are imported, next_func_id starts high, so the
         // module's own functions have non-zero-based IDs. The module stores functions

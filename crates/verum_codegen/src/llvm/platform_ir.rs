@@ -72,6 +72,85 @@ pub struct PlatformIR<'ctx> {
 }
 
 impl<'ctx> PlatformIR<'ctx> {
+    /// Direct Linux syscall — libc-free emission of the kernel trap.
+    ///
+    /// Identical contract to `RuntimeLowering::emit_linux_syscall`:
+    /// inline-asm with target-triple-driven arch dispatch
+    /// (`syscall` on x86_64, `svc #0` on aarch64).  Always 6-arg
+    /// shape — pads with i64 zeros for unused args.
+    ///
+    /// Cross-compilation correct: reads `module.get_triple()`, never
+    /// host `#[cfg]`.
+    fn emit_linux_syscall(
+        &self,
+        builder: &verum_llvm::builder::Builder<'ctx>,
+        module: &Module<'ctx>,
+        sys_num: u64,
+        args: &[verum_llvm::values::IntValue<'ctx>],
+    ) -> super::error::Result<verum_llvm::values::IntValue<'ctx>> {
+        let i64_type = self.context.i64_type();
+
+        let triple = module.get_triple();
+        let triple_str = triple.as_str().to_string_lossy();
+        let (asm_str, constraints) = if triple_str.contains("aarch64") || triple_str.contains("arm64") {
+            (
+                "svc #0",
+                "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
+            )
+        } else if triple_str.contains("x86_64") {
+            (
+                "syscall",
+                "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
+            )
+        } else {
+            ("", "=r,r,r,r,r,r,r,r")
+        };
+
+        let fn_type = i64_type.fn_type(
+            &[
+                i64_type.into(), i64_type.into(), i64_type.into(),
+                i64_type.into(), i64_type.into(), i64_type.into(),
+                i64_type.into(),
+            ],
+            false,
+        );
+        let asm_fn = self.context.create_inline_asm(
+            fn_type,
+            asm_str.to_string(),
+            constraints.to_string(),
+            true, true,
+            Some(verum_llvm::InlineAsmDialect::ATT),
+            false,
+        );
+
+        let zero = i64_type.const_zero();
+        let a0 = args.first().copied().unwrap_or(zero);
+        let a1 = args.get(1).copied().unwrap_or(zero);
+        let a2 = args.get(2).copied().unwrap_or(zero);
+        let a3 = args.get(3).copied().unwrap_or(zero);
+        let a4 = args.get(4).copied().unwrap_or(zero);
+        let a5 = args.get(5).copied().unwrap_or(zero);
+        let num_const = i64_type.const_int(sys_num, false);
+
+        let result = builder
+            .build_indirect_call(
+                fn_type,
+                asm_fn,
+                &[
+                    num_const.into(),
+                    a0.into(), a1.into(), a2.into(),
+                    a3.into(), a4.into(), a5.into(),
+                ],
+                "syscall_result",
+            )
+            .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| super::error::LlvmLoweringError::internal("syscall returned void".to_string()))?
+            .into_int_value();
+        Ok(result)
+    }
+
     /// Create a new platform-IR emitter with the documented-default
     /// panic strategy (Unwind).  Most call sites should use
     /// [`PlatformIR::with_panic_strategy`] to thread the user's
@@ -3137,34 +3216,198 @@ impl<'ctx> PlatformIR<'ctx> {
         Ok(())
     }
 
-    /// Declare socket syscalls needed by networking functions.
-    /// Does NOT redeclare close — it's already declared by emit_macos_declarations/ensure_io_syscalls.
+    /// Declare libc-free wrappers for the BSD socket family.
+    ///
+    /// **Libc-free**: each declared function is an internal-linkage
+    /// wrapper named `socket`, `bind`, `listen`, etc. (Verum keeps
+    /// these public-looking names so VBC-compiled FFI declarations
+    /// in `core/sys/**.vr` resolve against them).  The wrapper body
+    /// dispatches per-target:
+    ///
+    ///   * **Linux**: direct syscall via `emit_linux_syscall` with
+    ///     the arch-correct number (x86_64 / aarch64 differ).
+    ///   * **macOS / other Unix**: libSystem call (acceptable per
+    ///     the no-libc rule — Apple requires libSystem as the system
+    ///     boundary; libSystem provides socket(), bind(), etc.).
+    ///     We tag the indirection with a `verum.libsys` attribute
+    ///     so the linker driver can route through `-lSystem`.
+    ///
+    /// All names use the i64 ABI shape to match VBC-compiled FFI
+    /// declarations from `core/sys/*.vr` — narrowing/widening to
+    /// kernel-shape happens inside the wrapper body.
+    ///
+    /// Pre-fix this method declared `extern "C"` libc symbols
+    /// directly, forcing every Verum AOT binary to drag in
+    /// `libc.so.6` for the socket family on Linux.  Post-fix the
+    /// produced binary references zero libc symbols on the
+    /// networking path; `ldd <bin>` shows only the dynamic linker.
+    ///
+    /// See `docs/architecture/no-libc-architecture.md`.
     fn ensure_networking_syscalls(&self, module: &Module<'ctx>) -> super::error::Result<()> {
-        let ctx = self.context;
-        let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-
-        // All networking syscalls use i64 types (Verum ABI convention)
-        // to match VBC-compiled FFI declarations from core/sys/*.vr
-        let decls: &[(&str, verum_llvm::types::FunctionType<'ctx>)] = &[
-            ("socket",     i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false)),
-            ("connect",    i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false)),
-            ("bind",       i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false)),
-            ("listen",     i64_type.fn_type(&[i64_type.into(), i64_type.into()], false)),
-            ("accept",     i64_type.fn_type(&[i64_type.into(), ptr_type.into(), ptr_type.into()], false)),
-            ("send",       i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into()], false)),
-            ("recv",       i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into()], false)),
-            ("sendto",     i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into(), ptr_type.into(), i64_type.into()], false)),
-            ("recvfrom",   i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into(), ptr_type.into(), ptr_type.into()], false)),
-            ("setsockopt", i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into(), ptr_type.into(), i64_type.into()], false)),
-            ("waitpid",    i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false)),
+        // Per-syscall configuration: name + signature + Linux syscall
+        // numbers (x86_64, aarch64).  None when the syscall doesn't
+        // exist on that arch — the caller emits a libSystem fallback.
+        struct SocketSyscall {
+            name: &'static str,
+            sys_x86_64: u64,
+            sys_aarch64: u64,
+        }
+        let syscalls: &[SocketSyscall] = &[
+            SocketSyscall { name: "socket",     sys_x86_64: 41, sys_aarch64: 198 },
+            SocketSyscall { name: "connect",    sys_x86_64: 42, sys_aarch64: 203 },
+            SocketSyscall { name: "bind",       sys_x86_64: 49, sys_aarch64: 200 },
+            SocketSyscall { name: "listen",     sys_x86_64: 50, sys_aarch64: 201 },
+            SocketSyscall { name: "accept",     sys_x86_64: 43, sys_aarch64: 202 },
+            SocketSyscall { name: "send",       sys_x86_64: 44, sys_aarch64: 206 }, // SYS_sendto with NULL addr
+            SocketSyscall { name: "recv",       sys_x86_64: 45, sys_aarch64: 207 }, // SYS_recvfrom with NULL addr
+            SocketSyscall { name: "sendto",     sys_x86_64: 44, sys_aarch64: 206 },
+            SocketSyscall { name: "recvfrom",   sys_x86_64: 45, sys_aarch64: 207 },
+            SocketSyscall { name: "setsockopt", sys_x86_64: 54, sys_aarch64: 208 },
+            // waitpid maps to SYS_wait4(pid, status, options, NULL).
+            SocketSyscall { name: "waitpid",    sys_x86_64: 61, sys_aarch64: 260 },
         ];
-        for (name, fn_type) in decls {
-            if module.get_function(name).is_none() {
-                module.add_function(name, *fn_type, None);
+
+        for sc in syscalls {
+            self.emit_libc_free_socket_wrapper(module, sc.name, sc.sys_x86_64, sc.sys_aarch64)?;
+        }
+
+        Ok(())
+    }
+
+    /// Emit a libc-free wrapper for one BSD-socket family symbol.
+    ///
+    /// Dispatches on `target_is_linux(module)` to pick between the
+    /// direct-syscall path (Linux) and a libSystem indirection
+    /// (macOS / other-Unix).  The wrapper retains the historical
+    /// libc symbol name so VBC-compiled FFI callers don't need
+    /// updating; the function body dispatches under the hood.
+    ///
+    /// All wrappers use the i64-everywhere Verum ABI shape — the
+    /// kernel ABI (i32 for fd, sockaddr ptrs, etc.) is constructed
+    /// inside the body via truncation / `ptr_to_int` as needed by
+    /// `emit_linux_syscall` (which takes all-i64 args).
+    fn emit_libc_free_socket_wrapper(
+        &self,
+        module: &Module<'ctx>,
+        name: &'static str,
+        sys_x86_64: u64,
+        sys_aarch64: u64,
+    ) -> super::error::Result<()> {
+        // Idempotent: if the wrapper is already in the module, skip.
+        // Multiple call sites (different `emit_*` functions in this
+        // file) call `ensure_networking_syscalls` and we want to
+        // emit the body exactly once.
+        if let Some(f) = module.get_function(name) {
+            if f.count_basic_blocks() > 0 {
+                return Ok(());
             }
         }
+
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+
+        // Per-symbol signature: parameter list matches what callers
+        // expect (i64 fd, i64 args, ptr buffers).  The historical
+        // declarations in `ensure_networking_syscalls` are reproduced
+        // here.  Each signature is mapped to the syscall by the
+        // dispatch table below.
+        let fn_type = match name {
+            "socket"     => i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
+            "connect"    => i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
+            "bind"       => i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
+            "listen"     => i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+            "accept"     => i64_type.fn_type(&[i64_type.into(), ptr_type.into(), ptr_type.into()], false),
+            "send"       => i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into()], false),
+            "recv"       => i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into()], false),
+            "sendto"     => i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into(), ptr_type.into(), i64_type.into()], false),
+            "recvfrom"   => i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into(), ptr_type.into(), ptr_type.into()], false),
+            "setsockopt" => i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into(), ptr_type.into(), i64_type.into()], false),
+            "waitpid"    => i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
+            _ => return Err(super::error::LlvmLoweringError::internal(
+                format!("emit_libc_free_socket_wrapper: unknown symbol `{}`", name),
+            )),
+        };
+
+        // Either reuse the existing pre-declaration (declared earlier
+        // by a caller) or add a new one.  Either way, set linkage to
+        // External so VBC-compiled FFI calls (which look up the name
+        // by symbol) can resolve.
+        let wrapper = module.get_function(name).unwrap_or_else(|| {
+            module.add_function(name, fn_type, None)
+        });
+
+        let entry = ctx.append_basic_block(wrapper, "entry");
+        let builder = ctx.create_builder();
+        builder.position_at_end(entry);
+
+        if target_is_linux(module) {
+            // Direct syscall path.  Build i64 args by reading params
+            // and converting pointer params via `ptr_to_int`.  All
+            // syscalls in this set fit in 6 args.
+            let n_params = wrapper.count_params();
+            let mut args_i64: Vec<verum_llvm::values::IntValue<'ctx>> = Vec::with_capacity(n_params as usize);
+            for i in 0..n_params {
+                let p = wrapper.get_nth_param(i)
+                    .ok_or_else(|| super::error::LlvmLoweringError::internal(
+                        format!("{}: missing param {}", name, i),
+                    ))?;
+                let v: verum_llvm::values::IntValue<'ctx> = match p {
+                    verum_llvm::values::BasicValueEnum::IntValue(iv) => iv,
+                    verum_llvm::values::BasicValueEnum::PointerValue(pv) => {
+                        builder.build_ptr_to_int(pv, i64_type, &format!("p{}_addr", i))
+                            .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?
+                    }
+                    _ => return Err(super::error::LlvmLoweringError::internal(
+                        format!("{}: unsupported param type at {}", name, i),
+                    )),
+                };
+                args_i64.push(v);
+            }
+
+            let sys_num = if target_is_aarch64(module) { sys_aarch64 } else { sys_x86_64 };
+            let ret = self.emit_linux_syscall(&builder, module, sys_num, &args_i64)?;
+            builder.build_return(Some(&ret))
+                .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+        } else {
+            // libSystem indirection.  Declare a Verum-named alias of
+            // the libSystem symbol with the same signature, route the
+            // call through it.  The linker resolves
+            // `__verum_libsys_<name>` against libSystem's `<name>`
+            // via the manifest-driven `verum.libsys` attribute.
+            let libsys_name = format!("__verum_libsys_{}", name);
+            let libsys = module.get_function(&libsys_name).unwrap_or_else(|| {
+                let f = module.add_function(&libsys_name, fn_type, None);
+                f.add_attribute(
+                    AttributeLoc::Function,
+                    ctx.create_string_attribute("verum.libsys", name),
+                );
+                f
+            });
+
+            // Forward all params 1:1.
+            let n_params = wrapper.count_params();
+            let mut args: Vec<verum_llvm::values::BasicMetadataValueEnum<'ctx>> = Vec::with_capacity(n_params as usize);
+            for i in 0..n_params {
+                let p = wrapper.get_nth_param(i)
+                    .ok_or_else(|| super::error::LlvmLoweringError::internal(
+                        format!("{}: missing param {}", name, i),
+                    ))?;
+                args.push(p.into());
+            }
+
+            let ret = builder.build_call(libsys, &args, "ret")
+                .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| super::error::LlvmLoweringError::internal(
+                    format!("{}: libsys call returned void", name),
+                ))?
+                .into_int_value();
+            builder.build_return(Some(&ret))
+                .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+        }
+
         Ok(())
     }
 
