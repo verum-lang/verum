@@ -1617,6 +1617,16 @@ enum Commands {
         #[clap(long = "manifest-coverage")]
         manifest_coverage: bool,
 
+        /// MLS-coverage audit (#296): walk the project's .vr files
+        /// counting classified functions, classified parameters,
+        /// `@declassify` boundaries, and sink-context consumers
+        /// (Logger / FS / Network / etc.). Emits JSON to
+        /// `target/audit-reports/mls-coverage.json`. Useful for
+        /// security-review dashboards and CI gates that track
+        /// classification growth in regulated-environment codebases.
+        #[clap(long = "mls-coverage")]
+        mls_coverage: bool,
+
         /// Proof-honesty audit (M0.G): walk every public theorem /
         /// axiom in the project and classify each by proof-body shape
         /// — `axiom-placeholder` / `theorem-no-proof-body` /
@@ -3765,6 +3775,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_discharged_axioms,
             verify_ladder,
             manifest_coverage,
+            mls_coverage,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -3855,6 +3866,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_verify_ladder(output_format)
             } else if manifest_coverage {
                 commands::audit::audit_manifest_coverage(output_format)
+            } else if mls_coverage {
+                commands::audit::audit_mls_coverage(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,
