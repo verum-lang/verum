@@ -1,0 +1,129 @@
+module core.database.sqlite.native.l7_api.capability;
+
+// =============================================================================
+// l7_api/capability.vr — Capability marker types + protocol bounds
+// =============================================================================
+// Layer: 7
+// Spec: sqlite-native.md §4.8 ("Connection<Read>, Connection<Write>,
+//        Connection<Admin> — capability at the type level")
+//
+// Pre-fix: `Connection` is a single concrete type with a runtime
+// `mode: ConnectionMode` field, and L7 dispatch calls `ensure_writable
+// /ensure_admin` runtime guards.  Every accidental
+// `readonly.execute(INSERT ...)` is a runtime SQLITE_READONLY rather
+// than the compile-time error §4.8 promised.
+//
+// Post-fix: capabilities are TYPE-LEVEL via phantom-type marker
+// types (ReadCap / WriteCap / AdminCap) and protocol bounds
+// (CanRead / CanWrite / CanDdl).  Methods that mutate require
+// `C: CanWrite`; DDL methods require `C: CanDdl`.  Misuse fails to
+// compile — no runtime check is performed.
+//
+// Capability hierarchy (informal lattice):
+//
+//   AdminCap   ───► implements CanRead, CanWrite, CanDdl
+//   WriteCap   ───► implements CanRead, CanWrite
+//   ReadCap    ───► implements CanRead
+//
+// The protocol functions return `Bool` for documentation / runtime
+// tests — they're never called on the hot path.  Compile-time bounds
+// do all the work.
+// =============================================================================
+
+mount core.*;
+mount base.Text;
+
+// -----------------------------------------------------------------------------
+// Marker types — zero-sized; carry capability at the type level
+// -----------------------------------------------------------------------------
+
+/// Read-only capability.  Connections opened read-only carry this
+/// marker; the type-checker rejects mutating method calls.
+public type ReadCap is ();
+
+/// Read + write capability.  Permits INSERT / UPDATE / DELETE but
+/// NOT DDL (CREATE / DROP / ALTER / VACUUM).
+public type WriteCap is ();
+
+/// Read + write + DDL capability.  Permits everything including
+/// schema mutation, VACUUM, writable_schema PRAGMA.
+public type AdminCap is ();
+
+// -----------------------------------------------------------------------------
+// Protocol bounds — constrain generic implements / functions
+// -----------------------------------------------------------------------------
+
+/// Capability hierarchy participant.  Every cap implements this so
+/// `Connection<C: Capability>` can be the catch-all bound for
+/// methods available regardless of mode (introspection, schema
+/// generation, BEGIN read-only transactions, …).
+public type Capability is protocol {
+    fn capability_name() -> Text;
+}
+
+/// Capability that permits read access.  Trivially implemented by
+/// all three marker types.  Methods needing read access (every
+/// method, since write+DDL imply read) bound on this.
+public type CanRead is protocol {
+    fn cap_can_read() -> Bool;
+}
+
+/// Capability that permits write access (INSERT / UPDATE / DELETE).
+/// Implemented by `WriteCap` and `AdminCap`.
+public type CanWrite is protocol {
+    fn cap_can_write() -> Bool;
+}
+
+/// Capability that permits DDL (CREATE / DROP / ALTER / VACUUM /
+/// writable_schema).  Implemented by `AdminCap` only.
+public type CanDdl is protocol {
+    fn cap_can_ddl() -> Bool;
+}
+
+// -----------------------------------------------------------------------------
+// ReadCap implementations — read only
+// -----------------------------------------------------------------------------
+
+implement Capability for ReadCap {
+    fn capability_name() -> Text { "read".clone() }
+}
+
+implement CanRead for ReadCap {
+    fn cap_can_read() -> Bool { true }
+}
+
+// -----------------------------------------------------------------------------
+// WriteCap implementations — read + write
+// -----------------------------------------------------------------------------
+
+implement Capability for WriteCap {
+    fn capability_name() -> Text { "write".clone() }
+}
+
+implement CanRead for WriteCap {
+    fn cap_can_read() -> Bool { true }
+}
+
+implement CanWrite for WriteCap {
+    fn cap_can_write() -> Bool { true }
+}
+
+// -----------------------------------------------------------------------------
+// AdminCap implementations — read + write + DDL
+// -----------------------------------------------------------------------------
+
+implement Capability for AdminCap {
+    fn capability_name() -> Text { "admin".clone() }
+}
+
+implement CanRead for AdminCap {
+    fn cap_can_read() -> Bool { true }
+}
+
+implement CanWrite for AdminCap {
+    fn cap_can_write() -> Bool { true }
+}
+
+implement CanDdl for AdminCap {
+    fn cap_can_ddl() -> Bool { true }
+}

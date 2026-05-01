@@ -13,6 +13,8 @@ public module backup;
 public module hooks;
 public module pragma_api;
 public module blob;
+public module capability;
+public module typed_connection;
 
 public mount .database.{
     Database, SqliteApiDbError,
@@ -53,4 +55,17 @@ public mount .pragma_api.{
 
 public mount .blob.{
     blob_open, blob_bytes, blob_read, blob_write, blob_reopen, blob_close,
+};
+
+public mount .capability.{
+    ReadCap, WriteCap, AdminCap,
+    Capability, CanRead, CanWrite, CanDdl,
+};
+
+public mount .typed_connection.{
+    TypedConnection,
+    open_readonly as open_typed_readonly,
+    open_readwrite as open_typed_readwrite,
+    open_admin as open_typed_admin,
+    open_memory_readonly, open_memory_readwrite, open_memory_admin,
 };
