@@ -13191,7 +13191,14 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .or_internal("missing param 1")?
             .into_int_value();
         // malloc(len + 1), memcpy, null-terminate
-        let memcpy_fn = module.get_function("memcpy").or_missing_fn("memcpy")?;
+        let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
+            // Auto-declare libc memcpy. Same architectural caveat as
+            // strlen/malloc — tracked under no-libc invariant follow-up.
+            let i64_ty = context.i64_type();
+            let ptr_ty = context.ptr_type(AddressSpace::default());
+            let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
+            module.add_function("memcpy", fn_ty, None)
+        });
         let alloc_size = builder
             .build_int_add(len, i64_type.const_int(1, false), "alloc_size")
             .or_llvm_err()?;
@@ -13287,7 +13294,14 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .build_int_add(total, i64_type.const_int(1, false), "alloc_size")
             .or_llvm_err()?;
 
-        let memcpy_fn = module.get_function("memcpy").or_missing_fn("memcpy")?;
+        let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
+            // Auto-declare libc memcpy. Same architectural caveat as
+            // strlen/malloc — tracked under no-libc invariant follow-up.
+            let i64_ty = context.i64_type();
+            let ptr_ty = context.ptr_type(AddressSpace::default());
+            let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
+            module.add_function("memcpy", fn_ty, None)
+        });
         let buf = checked_malloc(context, &builder, module, alloc_size, "buf")?;
         // memcpy(buf, a_ptr, a_len)
         builder
@@ -13618,7 +13632,14 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let copy_bytes = builder
             .build_int_mul(len, i64_type.const_int(8, false), "copy_bytes")
             .or_llvm_err()?;
-        let memcpy_fn = module.get_function("memcpy").or_missing_fn("memcpy")?;
+        let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
+            // Auto-declare libc memcpy. Same architectural caveat as
+            // strlen/malloc — tracked under no-libc invariant follow-up.
+            let i64_ty = context.i64_type();
+            let ptr_ty = context.ptr_type(AddressSpace::default());
+            let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
+            module.add_function("memcpy", fn_ty, None)
+        });
         builder
             .build_call(
                 memcpy_fn,
@@ -14629,7 +14650,14 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let copy_bytes = builder
             .build_int_mul(src_len, i64_type.const_int(8, false), "copy_bytes")
             .or_llvm_err()?;
-        let memcpy_fn = module.get_function("memcpy").or_missing_fn("memcpy")?;
+        let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
+            // Auto-declare libc memcpy. Same architectural caveat as
+            // strlen/malloc — tracked under no-libc invariant follow-up.
+            let i64_ty = context.i64_type();
+            let ptr_ty = context.ptr_type(AddressSpace::default());
+            let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
+            module.add_function("memcpy", fn_ty, None)
+        });
         builder
             .build_call(
                 memcpy_fn,
